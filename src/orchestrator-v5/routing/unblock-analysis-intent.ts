@@ -58,35 +58,67 @@ export type UnblockAnalysisIntentResult =
   | { readonly matched: false; readonly reason: UnblockAnalysisUnmatchedReason };
 
 /**
- * A reference to the analysis/admission itself. `analysable`/`analyzable` are
- * included because "get the model ready to analyse" is a real harvested phrase.
+ * A reference to the analysis/admission itself.
  */
 const ANALYSIS_REFERENCE =
   /\b(analys(?:is|e|es|ed|ing|able)|analyz(?:e|es|ed|ing|able)|run\s+the\s+model)\b/i;
 
 /**
- * An impediment: something is preventing admission, or the user asks for it to
- * be repaired. Every alternative below appears in the harvested corpus.
+ * An impediment, as a STANDALONE term. Every alternative is either harvested
+ * from real messages or a direct synonym of one.
+ *
+ * ⛔ THE BARE NOUNS `issue|problem|error` WERE REMOVED. An independent review
+ * measured them claiming 12 of 15 adversarial edit/result phrasings, including
+ * "Walk me through the analysis and the issue tree." — a pinned control plus
+ * three words. A noun that names trouble somewhere is not evidence that the
+ * trouble is admission.
+ *
+ * ⚠ `ready to analys…` SITS OUTSIDE THE ALTERNATION'S TRAILING `\b`, and that
+ * is not cosmetic: a word boundary cannot follow `analys` when the next
+ * character is `e`, so "get the model ready to analyse" — a harvested phrase,
+ * and the one the header cites to justify the `analysable` alternative —
+ * silently never matched. The suite caught it; reading the regex did not.
  */
 const IMPEDIMENT_SIGNAL =
-  /\b(stopping|blocking|blocked|unblock|not\s+ready|needs?\s+configuration|no\s+effect\s+values|what(?:'|’)?s?\s+(?:is\s+)?(?:missing|wrong)|what\s+exactly\s+is\s+(?:missing|blocking)|fix|resolve|issue|problem|error)\b|\b(?:can(?:'|’)?t|cannot|can\s+not|won(?:'|’)?t|unable\s+to|not\s+able\s+to)\b[^.!?]{0,24}\brun\b/i;
+  /\b(stopping|blocking|blocked|unblock|preventing|holding\s+up|stuck|not\s+ready|needs?\s+configuration|no\s+effect\s+values|missing\s+effect|greyed\s+out|disabled|unavailable|failing)\b|\bready\s+to\s+analys\w*|\bbefore\s+(?:you|we|i)\s+can\s+run\b|\bwhat(?:'|\u2019)?s?\s+(?:is\s+)?(?:missing|wrong|blocking|stopping)\b|\b(?:can(?:'|\u2019)?t|cannot|can\s+not|won(?:'|\u2019)?t|unable\s+to|not\s+able\s+to)\b[^.!?]{0,24}\brun\b/i;
 
 /**
- * The user has authorised the product to supply reasonable estimates.
+ * `fix`/`resolve` only count when they are ABOUT the analysis. Proximity in
+ * either direction, because both orders occur in the corpus ("fix this so the
+ * analysis can run", "the analysis says it can't run … to fix it").
+ */
+const REPAIR_VERB_NEAR_ANALYSIS =
+  /\b(?:fix|resolve|unblock)\b[^.!?]{0,60}\b(?:analys|analyz|run)/i;
+const ANALYSIS_NEAR_REPAIR_VERB =
+  /\b(?:analys|analyz|run)\w*\b[^.!?]{0,60}\b(?:fix|resolve|unblock)\b/i;
+
+/**
+ * The user has authorised the product to supply values it chose.
  *
- * ⚠ NARROW ON PURPOSE. This does not license inventing numbers by itself — it
- * records that the user asked for it, which a later bounded-repair step may
- * consume. "Just put good assumptions in and make those updates immediately"
- * is the harvested phrase; "what is blocking the analysis?" is not.
+ * ⛔ IT FAILS CLOSED ON ANY PROHIBITION. A review found the earlier version
+ * firing on messages that explicitly REFUSE the licence — "don't make any
+ * assumptions", "Never use estimates", "Ask me before you add any
+ * assumptions". A flag that may later permit the product to invent numbers
+ * must never be set by a sentence forbidding exactly that. No real message in
+ * the harvested corpus prohibits assumptions, so this is a guard against a
+ * measured-possible case rather than an observed one — which is the right
+ * direction for this particular flag.
+ */
+const REPAIR_PROHIBITION =
+  /\b(?:don(?:'|\u2019)?t|do\s+not|never|without|no)\b[^.!?]{0,30}\b(?:assum\w*|estimat\w*|guess\w*|invent\w*|made?\s+up)\b|\bask\s+me\s+(?:first|before)\b|\bbefore\s+you\s+(?:add|make|use)\b/i;
+
+/**
+ * Explicit permission to choose values. Harvested phrasings: "put good
+ * assumptions in", "using sensible estimates from my brief", "using your best
+ * judgement from the brief", "fill in the missing effect values", "You choose
+ * … Go ahead".
  *
- * ⚠ IT DELIBERATELY REFUSES "How do I fix this so the analysis can run?" — a
- * real harvested message. That asks HOW; it does not hand the product
- * permission to choose numbers. An earlier draft matched it via a generic
- * `fix .. this` clause, which is precisely the over-reach this flag must not
- * make, since a later step may read it as licence to supply estimates.
+ * ⚠ `apply them` / `make the updates` were REMOVED. A review observed that
+ * neither grants a numeric licence — they authorise applying something already
+ * agreed, which is a different permission.
  */
 const REPAIR_AUTHORISATION =
-  /\b(?:put|use|add|fill\s+in|write\s+in|make)\b[^.!?]{0,40}\b(?:assumption|assumptions|estimate|estimates)\b|\bmake\s+(?:those|these|the)\s+updates\b|\bapply\s+(?:it|them|whatever)\b|\brestructure\s+whatever\b/i;
+  /\b(?:put|use|using|add|fill\s+in|write\s+in|make|set|choose|pick)\b[^.!?]{0,40}\b(?:assumption|assumptions|estimate|estimates|best\s+judge?ment)\b|\b(?:sensible|reasonable|good|best)\s+(?:assumption|assumptions|estimate|estimates|judge?ment)\b|\bgo\s+ahead\b|\byou\s+choose\b|\byourself\b/i;
 
 export function detectUnblockAnalysisIntent(
   message: unknown,
@@ -98,8 +130,14 @@ export function detectUnblockAnalysisIntent(
   if (!ANALYSIS_REFERENCE.test(text)) {
     return { matched: false, reason: 'no_analysis_reference' };
   }
-  if (!IMPEDIMENT_SIGNAL.test(text)) {
+  const impeded =
+    IMPEDIMENT_SIGNAL.test(text)
+    || REPAIR_VERB_NEAR_ANALYSIS.test(text)
+    || ANALYSIS_NEAR_REPAIR_VERB.test(text);
+  if (!impeded) {
     return { matched: false, reason: 'no_impediment_signal' };
   }
-  return { matched: true, authorises_repair: REPAIR_AUTHORISATION.test(text) };
+  const authorises =
+    !REPAIR_PROHIBITION.test(text) && REPAIR_AUTHORISATION.test(text);
+  return { matched: true, authorises_repair: authorises };
 }
