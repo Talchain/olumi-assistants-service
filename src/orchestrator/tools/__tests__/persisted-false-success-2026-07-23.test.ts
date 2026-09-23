@@ -192,7 +192,8 @@ describe('persisted false success 2026-07-23 — "Change the monthly cashflow fa
     // The remaining siblings the op never mentioned are still preserved.
     expect(observed.source).toBe('user_override');
     expect(observed.factor_type).toBe('cost');
-    expect(observed.extractionType).toBe('inferred');
+    // A user-authored value withdraws the producer's extraction marker (23 Sep witness; #1740).
+    expect('extractionType' in observed).toBe(false);
     expect(observed.uncertainty_drivers).toEqual(['Not provided']);
   });
 
