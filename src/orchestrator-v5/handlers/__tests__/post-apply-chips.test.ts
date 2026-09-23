@@ -44,3 +44,59 @@ describe('buildPostApplyChips', () => {
     expect(chips.some((c) => c.action_type === 'run_analysis')).toBe(false);
   });
 });
+
+/**
+ * ⛔⛔ CEE MUST NOT EMIT A RUN CHIP THE CLIENT WILL FILTER, NOR WITHHOLD ONE IT
+ * WOULD HAVE RENDERED.
+ *
+ * `run_analysis` is in the client's `READINESS_GATED_ACTIONS`, so every chip
+ * this module emits is re-judged by the UI against
+ * `admitsRunAffordance(status, may_run) = status === 'ready' || may_run === true`
+ * (`DecisionGuideAI` staging, `canvas/hooks/useAnalysisReady.ts:74-79`).
+ *
+ * Two gates on one question is this estate's signature defect, and here it
+ * spans a repo boundary, where it is hardest to see. If CEE were the LOOSER of
+ * the two it would emit a chip the UI silently drops — a fix that is green in
+ * CI and invisible to the user. If CEE were STRICTER it would withhold a chip
+ * the client would happily have shown.
+ *
+ * ⚠ THIS ALSO PINS HOW THIS PR COMPOSES WITH THE `may_run` PRODUCER FIX.
+ * Without it the post-apply payload carries no `may_run`, so BOTH sides fall
+ * back to `status` and agree; with it, both admit on `may_run` and agree. The
+ * two changes are independent and correct in either order — which is a
+ * property worth pinning rather than a coincidence worth trusting.
+ */
+describe('cross-repo parity: what CEE emits is what the client renders', () => {
+  /** The deployed UI predicate, transcribed from DGAI staging. */
+  const admitsRunAffordance = (status: string, mayRun: boolean | undefined): boolean =>
+    status === 'ready' || mayRun === true;
+
+  const OPT = [{ option_id: 'o1', label: 'A', status: 'needs_user_mapping', interventions: {} }];
+
+  const CASES: ReadonlyArray<readonly [string, { status: string; may_run?: boolean; options: unknown[] }]> = [
+    ['no may_run producer, ready', { status: 'ready', options: [] }],
+    ['no may_run producer, not ready', { status: 'needs_user_mapping', options: OPT }],
+    ['may_run present, admissible', { status: 'needs_user_mapping', may_run: true, options: OPT }],
+    ['may_run present, refused', { status: 'needs_user_mapping', may_run: false, options: OPT }],
+    ['may_run present, ready but refused', { status: 'ready', may_run: false, options: [] }],
+  ];
+
+  it.each(CASES)('%s — CEE emission and UI rendering agree', (_name, readiness) => {
+    const chips = buildPostApplyChips(readiness as never);
+    const ceeEmitsRun = chips.some((c) => c.action_type === 'run_analysis');
+    const uiRendersRun = admitsRunAffordance(readiness.status, readiness.may_run);
+    expect(
+      ceeEmitsRun,
+      ceeEmitsRun
+        ? 'CEE emitted a run chip the client will filter — green here, invisible to the user'
+        : 'CEE withheld a run chip the client would have rendered',
+    ).toBe(uiRendersRun);
+  });
+
+  it('⛔ and whatever is emitted fits the window the client actually renders', () => {
+    for (const [, readiness] of CASES) {
+      // `SuggestedChips.tsx:335` — polished.filter(isChipRenderable).slice(0, 3)
+      expect(buildPostApplyChips(readiness as never).length).toBeLessThanOrEqual(3);
+    }
+  });
+});
