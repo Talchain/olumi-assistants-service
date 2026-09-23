@@ -139,3 +139,24 @@ describe('the route states what was saved', () => {
     expect(body._diagnostic_trace.write_claims_removed).toBe(1);
   });
 });
+
+/* ── Panel N7: what compaction left out is stated by the server, as ideas to add back ── */
+describe('a compact build names what it left out', () => {
+  const built = (extra: Record<string, unknown>) =>
+    narrateWriteOutcome('Here is your model.', [{ name: 'build_model_from_brief' }], [{ ok: true, mutated: true, model_version: { version_number: 1 }, ...extra }]);
+
+  it('RED: the status line lists the left-out items and offers to add them back', () => {
+    const n = built({ left_out_to_stay_compact: [{ kind: 'factor', label: 'Team morale' }, { kind: 'risk', label: 'Key-person dependency' }] });
+    expect(n.status).toBe('The model was saved as version 1. To keep it readable, I left out: Team morale; Key-person dependency. Ask me to add any of them back.');
+  });
+
+  it('a long list is capped at five, with the remainder counted', () => {
+    const items = Array.from({ length: 8 }, (_, i) => ({ kind: 'factor', label: `Factor ${i + 1}` }));
+    expect(built({ left_out_to_stay_compact: items }).status).toMatch(/I left out: Factor 1; Factor 2; Factor 3; Factor 4; Factor 5; and 3 more\. Ask me/);
+  });
+
+  it('CONTRAST: nothing left out → the save line alone', () => {
+    expect(built({}).status).toBe('The model was saved as version 1.');
+    expect(built({ left_out_to_stay_compact: [] }).status).toBe('The model was saved as version 1.');
+  });
+});

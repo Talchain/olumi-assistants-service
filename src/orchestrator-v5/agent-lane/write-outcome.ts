@@ -92,13 +92,31 @@ function partsLine(r: ToolResult): string | null {
   return bits.join(' ');
 }
 
+/**
+ * ⭐ COMPACTION MUST NOT QUIETLY SHRINK THE THINKING (Paul, 23 Sep: "Olumi pushes
+ * beyond the current model … surfaces missing factors and perspectives").
+ * `build_model_from_brief` keeps the first model readable (#1710) and returns what
+ * a compact retry left out; until now only the Agent was told, so a model that
+ * skipped it dropped the disclosure silently (Panel N7). The server states it, as
+ * ideas the user can bring back — never as deletions they must discover.
+ */
+const LEFT_OUT_SHOWN = 5;
+function leftOutLine(r: ToolResult): string {
+  const items = Array.isArray(r.left_out_to_stay_compact) ? (r.left_out_to_stay_compact as { label?: unknown }[]) : [];
+  const labels = items.map((i) => String(i.label ?? '').trim()).filter((l) => l !== '');
+  if (labels.length === 0) return '';
+  const shown = labels.slice(0, LEFT_OUT_SHOWN).join('; ');
+  const more = labels.length > LEFT_OUT_SHOWN ? `; and ${labels.length - LEFT_OUT_SHOWN} more` : '';
+  return ` To keep it readable, I left out: ${shown}${more}. Ask me to add any of them back.`;
+}
+
 /** One authoritative line per write the turn attempted. */
 function statusLine(name: string, r: ToolResult): string {
   if (name === 'build_model_from_brief') {
     const v = (r.model_version as { version_number?: unknown } | undefined)?.version_number;
     const vs = typeof v === 'number' ? ` (version ${v})` : '';
     if (r.ok === true && r.replayed === true) return `This model had already been built${vs}; nothing was built twice.`;
-    if (r.ok === true && r.mutated === true) return `The model was saved${typeof v === 'number' ? ` as version ${v}` : ''}.`;
+    if (r.ok === true && r.mutated === true) return `The model was saved${typeof v === 'number' ? ` as version ${v}` : ''}.${leftOutLine(r)}`;
     return `The model was not built: ${REFUSAL_WORDS[String(r.refusal)] ?? `it was refused (${String(r.refusal ?? 'unknown')})`}.`;
   }
   const perPart = partsLine(r);
