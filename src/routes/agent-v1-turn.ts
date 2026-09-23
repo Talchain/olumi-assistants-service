@@ -234,6 +234,22 @@ const AGENT_INSTRUCTIONS = [
 ].join(' ');
 
 /**
+ * The freshness verdict for `analysis_ready`, read off the scenario's own composed
+ * `analysis_state` (the inverse of `composeRunState` for the two verdicts that
+ * claim something). Anything else — never run, running, refused, degraded — is left
+ * unstamped, exactly as before, so the UI keeps its honest "cannot confirm". A
+ * verdict CEE already set is never overwritten.
+ */
+export function withReadbackFreshness(analysisReady: unknown, analysisState: unknown): unknown {
+  if (typeof analysisReady !== 'object' || analysisReady === null) return analysisReady;
+  if ((analysisReady as { freshness?: unknown }).freshness !== undefined) return analysisReady;
+  const kind = (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
+  if (kind === 'complete_current') return { ...analysisReady, freshness: 'fresh', freshness_reason: 'agent_readback_complete_current' };
+  if (kind === 'complete_stale') return { ...analysisReady, freshness: 'stale', freshness_reason: 'agent_readback_complete_stale' };
+  return analysisReady;
+}
+
+/**
  * Read the persisted state back for the response: `graph_hash`, readiness and
  * the `draft_graph` the canvas draws. Shared by a live turn and a replay, so a
  * replayed answer is shown against the SAME current state a fresh one would be.
@@ -314,6 +330,16 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
           // Readiness is a disclosure, never a gate on the user's answer.
         }
       }
+      /**
+       * ⛔ THE UI CLEARS "MODEL CHANGED" ONLY ON AN EXPLICIT `analysis_ready.freshness`
+       * (Panel's served witness, #63 5800618648). A mutate-then-run Agent turn carried
+       * `analysis_state.run_state.kind: complete_current` and still read "The model has
+       * changed since this analysis ran", because the graph read's readiness carries no
+       * freshness and only route-v2's finaliser stamps one (`attachComputedAt`). So the
+       * verdict is stamped here — from the SAME emitted `analysis_state` the result
+       * block is bound to, never from the fact that a tool ran.
+       */
+      analysisReady = withReadbackFreshness(analysisReady, analysisState);
       // Only when it actually has content: an empty graph must not overwrite
       // whatever the client already has hydrated.
       /**
