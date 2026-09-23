@@ -170,13 +170,15 @@ export async function findConstructionVersion(
     const versions = Array.isArray(r.json.versions) ? (r.json.versions as Array<Record<string, unknown>>) : [];
     const hit = versions.find((v) => (v.creation as { source_turn_id?: unknown } | undefined)?.source_turn_id === turnId);
     if (hit !== undefined) {
-      const creation = hit.creation as { kind?: unknown; mutation_id?: unknown };
+      const creation = hit.creation as { kind?: unknown; mutation_id?: unknown; source_turn_id?: unknown };
       return {
         version_id: String(hit.version_id),
         version_number: Number(hit.sequence),
         mutation_id: typeof creation.mutation_id === 'string' ? creation.mutation_id : null,
         creation_kind: String(creation.kind),
-        source_turn_id: turnId,
+        // The id the ROW carries, not the one we searched for: equal under a
+        // correct match, and under any drift the returned object must not mask it.
+        source_turn_id: String(creation.source_turn_id),
       };
     }
     cursor = typeof r.json.next_cursor === 'string' ? r.json.next_cursor : undefined;

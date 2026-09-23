@@ -118,12 +118,34 @@ export function createProposal(content: ProposalContent): StructuredProposal {
   return { ...content, proposal_id: computeProposalId(content) };
 }
 
+/**
+ * ⭐ WHAT A SAVED CHANGE BECAME — the compact, user-meaningful half of a
+ * `model_version_receipt`.
+ *
+ * Deliberately NOT the whole receipt: the receipt carries the entire committed
+ * `graph`, and a tool result is JSON-stringified straight back into the model's
+ * context on every hop. These four fields are what identifies the version and
+ * what a retry must be able to hand back unchanged.
+ */
+export interface ReceiptSummary {
+  /** The version number the user would see ("version 7"). */
+  readonly version: number;
+  readonly version_id: string;
+  readonly mutation_id: string;
+  readonly source_turn_id: string | null;
+}
+
 export type AuthorisationDecision =
   | { readonly status: 'execute'; readonly proposal: StructuredProposal }
   /** The model moved since the proposal was made. */
   | { readonly status: 'superseded'; readonly expected: string; readonly actual: string }
   /** Applied already under this identity — return the original outcome. */
-  | { readonly status: 'already_applied'; readonly proposal: StructuredProposal }
+  /**
+   * Applied already under this identity. Carries the ORIGINAL receipts, so a
+   * retry recovers what the first authorisation produced instead of only being
+   * told that something happened once.
+   */
+  | { readonly status: 'already_applied'; readonly proposal: StructuredProposal; readonly receipts: readonly ReceiptSummary[] }
   | { readonly status: 'unknown_proposal' }
   /** The authorising subject is not the proposal's subject. */
   | { readonly status: 'not_authorised' }
@@ -142,7 +164,8 @@ export const MAX_PROPOSALS = 200;
 
 export class ProposalStore {
   private readonly items = new Map<string, StructuredProposal>();
-  private readonly applied = new Set<string>();
+  /** Applied proposals, with the receipts their writes produced (empty when none was minted). */
+  private readonly applied = new Map<string, readonly ReceiptSummary[]>();
   private order: string[] = [];
 
   put(p: StructuredProposal): StructuredProposal {
@@ -159,8 +182,8 @@ export class ProposalStore {
     return this.items.get(id);
   }
 
-  markApplied(id: string): void {
-    this.applied.add(id);
+  markApplied(id: string, receipts: readonly ReceiptSummary[] = []): void {
+    this.applied.set(id, receipts);
   }
 
   /**
@@ -178,7 +201,9 @@ export class ProposalStore {
     // in-memory mutation into a refusal rather than an unnoticed swap.
     const { proposal_id: _ignored, ...content } = p;
     if (computeProposalId(content) !== p.proposal_id) return { status: 'integrity_failed' };
-    if (this.applied.has(p.proposal_id)) return { status: 'already_applied', proposal: p };
+    if (this.applied.has(p.proposal_id)) {
+      return { status: 'already_applied', proposal: p, receipts: this.applied.get(p.proposal_id) ?? [] };
+    }
     if (p.base_graph_identity_hash !== req.current_graph_identity_hash) {
       return {
         status: 'superseded',

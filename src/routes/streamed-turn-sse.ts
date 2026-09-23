@@ -180,6 +180,8 @@ export interface StagedTurnStreamOptions {
   readonly featureVersion: string;
   /** Route path, for telemetry only. */
   readonly endpoint: string;
+  /** Optional explicit comparison target; absent keeps deployment default. */
+  readonly internalTarget?: "/orchestrate/v2/turn" | "/agent/v1/turn";
   /**
    * Additional raw response headers (e.g. the browser proxy's own CORS set).
    * Applied over the derived Fastify headers, under the SSE transport headers.
@@ -195,6 +197,7 @@ export interface StagedTurnStreamOptions {
  */
 export async function streamTurnAsStagedSse(opts: StagedTurnStreamOptions): Promise<void> {
   const { app, reply, requestId, internalHeaders, payload, featureVersion, endpoint } = opts;
+  const internalTarget = opts.internalTarget ?? STREAMED_TURN_INTERNAL_TARGET;
   const start = Date.now();
 
   // ── Frame writer ──────────────────────────────────────────────────────────
@@ -291,7 +294,7 @@ export async function streamTurnAsStagedSse(opts: StagedTurnStreamOptions): Prom
     const injectPromise = runWithStageStream(onStage, async () =>
       await app.inject({
         method: "POST",
-        url: STREAMED_TURN_INTERNAL_TARGET,
+        url: internalTarget,
         headers: internalHeaders,
         payload,
       }),
