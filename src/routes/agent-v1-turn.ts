@@ -48,6 +48,7 @@ import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { narrateWriteOutcome, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
+import { approvalChipsFor } from '../orchestrator-v5/agent-lane/approval-chips.js';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
@@ -765,6 +766,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       assistant_text: withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, owed), narration.status)),
       stage: 'frame',
       answerKind: 'substantive',
+      // One click approves the ONE proposal just offered — the same words as typing "yes".
+      suggested_actions: approvalChipsFor(result.tool_calls),
     });
     const finalised = finaliseV5Response(composed, { scenarioId });
 

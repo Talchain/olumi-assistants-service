@@ -45,7 +45,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     name: 'propose_model_change',
     description:
       'Propose ONE change to the model. This does NOT change anything: it records an exact ' +
-      'proposal and returns its id, which you must show the user before asking them to approve. ' +
+      'proposal and returns its id, which you keep for authorise_change: show the user what it changes, never the id, before asking them to approve. ' +
       'Use the labels exactly as get_canonical_state returned them.',
     parameters: obj({
       from_label: { type: 'string' },
@@ -89,7 +89,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     description:
       'Propose starting values for factors that have none, so the model can be reasoned about ' +
       'instead of sitting blank. This does NOT change anything: it records an exact proposal and ' +
-      'returns its id, which you must show the user before asking them to approve. Each value is ' +
+      'returns its id, which you keep for authorise_change: show the user the values, never the id, before asking them to approve. Each value is ' +
       'the user\u2019s assumption to adopt or correct, NEVER a measurement \u2014 say so. Propose only ' +
       'factors the model actually has, using the labels get_canonical_state returned.',
     parameters: obj({
@@ -112,8 +112,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Propose the level an option sets a factor to \u2014 what the option actually DOES. An option ' +
       'that names a factor without saying what it sets it to blocks the comparison for EVERY option, ' +
       'not just itself. Give the value in the factor\u2019s own units, as the user would say it ' +
-      '(\u00a354, not 0.27). This changes nothing: it records an exact proposal and returns its id to ' +
-      'show the user first. Propose only what the user\u2019s words support; if an option\u2019s level is ' +
+      '(\u00a354, not 0.27). This changes nothing: it records an exact proposal and returns its id for ' +
+      'authorise_change; show the user what it sets first, never the id. Propose only what the user\u2019s words support; if an option\u2019s level is ' +
       'not stated, offer one as an assumption and say so, exactly as with propose_assumptions.',
     parameters: obj({
       interventions: {
