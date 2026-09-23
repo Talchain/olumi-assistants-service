@@ -22,21 +22,26 @@
  * still read `status`.
  *
  * ═══════════════════════════════════════════════════════════════════════════
- * ⭐ MEASURED, 23 Sep 2026 — this is a capability unlock, not a tidy-up.
+ * ⭐ MEASURED — and the first number I published was a sampling artefact.
  *
- * Driving the real producer (`buildCanonicalAnalysisReadyFromGraph`) over 400
- * real persisted user models from `scenarios.graph`:
+ * I measured 400 rows ordered by `updated_at DESC` and reported 27.0%.
+ * Independent review re-derived it over the FULL population — all 15,255 rows
+ * with a non-null `graph`, ordered by `id`, `threw: 0`:
  *
- *   244  status=ready             may_run=true    ← offered today
- *    78  status=needs_user_input  may_run=true    ← ADMISSIBLE, NOT OFFERED
- *    30  status=needs_user_mapping may_run=true   ← ADMISSIBLE, NOT OFFERED
- *    23  status=needs_user_mapping may_run=false
- *    13  status=needs_user_input  may_run=false
- *    12  status=blocked           may_run=false
+ *   gained the affordance: 3,168 (20.77%)
+ *   lost it:               0
  *
- * **108 of 400 (27.0%) of real models can run the analysis right now and are
- * not offered it.** 0 models lose the affordance under this predicate, so the
- * change is strictly an unlock.
+ * The 27.0% was recency bias: `needs_user_input | may_run:false` is 1,962 in
+ * the corpus against 13 in my slice. **20.77% is the number.** The
+ * no-regression half survives at population scale, which is the half the
+ * design rests on.
+ *
+ * ⚠ AND THE "BOTH DIVERGENT CELLS ARE EMPTY" CLAIM WAS FALSE.
+ * `(status: 'ready', may_run: false)` is NOT empty — there are 11 such models.
+ * They are admitted here by the `status` disjunct, exactly as the deployed UI
+ * admits them, so the BEHAVIOUR is right; it was my evidence for it that was
+ * wrong. A cell being rare is not a cell being empty, and parity with the
+ * terminal consumer — not a frequency count — is what makes this correct.
  *
  * ⛔ ONE SPELLING, DELIBERATELY. The helper's own note records that two
  * spellings of one shape is this estate's signature defect ("three

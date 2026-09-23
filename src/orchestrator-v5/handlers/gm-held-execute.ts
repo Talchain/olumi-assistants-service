@@ -373,8 +373,29 @@ export function buildGmHeldAppliedChips(
     | undefined,
 ): Array<{ id: string; label: string; message: string; action_type?: 'run_analysis' }> {
   // Gated on ADMISSION, never on `status` — see `run-affordance-gate.ts`.
-  if (isRunAffordanceAdmitted(readiness)) return [{ ...GM_HELD_APPLIED_RERUN_CHIP }];
+  //
+  // ⛔⛔ ADDITIVE, NOT EITHER/OR — and the first draft of this got it wrong.
+  // Returning the run chip ALONE silently withdrew the ROADMAP 2.11
+  // anti-stranding recovery chip: a `needs_user_mapping` model lost
+  // `chip_prompt_map_option_to_factor`, and at population scale every model
+  // this widening admits (3,168 of 15,255) has a non-null recovery chip. So
+  // "nothing that rendered before stops rendering" would have been FALSE on
+  // this surface, which is an either/or one.
+  //
+  // ⭐ AND OFFERING BOTH IS THE PRODUCT ANSWER, not a compromise. The model is
+  // runnable AND improvable; which of those the team does next is their
+  // judgement, not ours. Withdrawing the repair to advertise the run would be
+  // Olumi deciding.
+  //
+  // When the model is fully ready `buildReadinessRecoveryChip` returns null
+  // (`recovery.kind === 'run'`), so the long-standing ready case still emits
+  // exactly the one rerun chip it always did.
   const recovery = buildReadinessRecoveryChip(readiness);
+  if (isRunAffordanceAdmitted(readiness)) {
+    return recovery
+      ? [{ ...GM_HELD_APPLIED_RERUN_CHIP }, recovery]
+      : [{ ...GM_HELD_APPLIED_RERUN_CHIP }];
+  }
   return recovery ? [recovery] : [];
 }
 
