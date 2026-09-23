@@ -81,6 +81,17 @@ describe('the agent route actually uses it', () => {
     expect(ROUTE).toContain('readBackState');
   });
 
+  it('⛔⛔ BOTH sources of analysis_ready are stamped — the tool one WINS', () => {
+    // The composition defect this pins: `analysisFromTool` takes precedence over
+    // the readback, so stamping only inside `readBackState` lands the field on
+    // the LOSING branch. On exactly the turns where the Agent ran an analysis —
+    // where staleness matters most — the UI would still have had one side of
+    // the comparison. An inner branch under an outer gate.
+    const send = ROUTE.slice(ROUTE.indexOf('analysisFromTool?.analysis_ready !== undefined'));
+    const branch = send.slice(0, send.indexOf('draft_graph'));
+    expect(branch).toContain('withCurrentGraphHash(analysisFromTool.analysis_ready, graphHash)');
+  });
+
   it('⛔ readBackState stamps before it returns', () => {
     const body = ROUTE.slice(ROUTE.indexOf('async function readBackState'), ROUTE.indexOf('return { graphHash, analysisReady, draftGraph };'));
     expect(body).toContain('withCurrentGraphHash(analysisReady, graphHash)');
