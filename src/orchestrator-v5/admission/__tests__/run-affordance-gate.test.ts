@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { isRunAffordanceAdmitted } from '../run-affordance-gate.js';
 
 describe('isRunAffordanceAdmitted', () => {
-  it('⭐ ADMITS an admissible model that is not yet "ready" — the 27% case', () => {
+  it('⭐ ADMITS an admissible model that is not yet "ready" — the 20.77% case', () => {
     expect(isRunAffordanceAdmitted({ status: 'needs_user_input', may_run: true })).toBe(true);
     expect(isRunAffordanceAdmitted({ status: 'needs_user_mapping', may_run: true })).toBe(true);
   });

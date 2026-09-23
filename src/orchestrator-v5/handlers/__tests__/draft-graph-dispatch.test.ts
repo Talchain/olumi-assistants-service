@@ -1213,13 +1213,16 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
    *    `may_run` — same value) and NEVER on `status`."
    *
    * MEASURED, 23 Sep, by driving the real producer
-   * (`buildCanonicalAnalysisReadyFromGraph`) over 400 real persisted user
-   * models: 244 are `status: 'ready'`, and a further **108 (27.0%) carry
-   * `may_run: true` with a non-ready status** — those users can run the
-   * analysis right now and are not offered the chip. 0 models would be newly
-   * hidden by the corrected gate, so this is an unlock with no regression.
+   * (`buildCanonicalAnalysisReadyFromGraph`) over the FULL population of
+   * 15,255 rows with a non-null graph: **3,168 (20.77%) carry `may_run: true`
+   * under a non-ready status** — those users can run the analysis right now
+   * and are not offered the chip.
+   *
+   * ⚠ An earlier revision of this comment said 27.0%, from 400 rows ordered by
+   * `updated_at DESC`. That was recency bias: `needs_user_input|may_run:false`
+   * is 1,962 in the corpus against 13 in that slice.
    */
-  it('⭐ offers Run when the model is ADMISSIBLE but not yet "ready" (27% of real models)', async () => {
+  it('⭐ offers Run when the model is ADMISSIBLE but not yet "ready" (20.77% of real models)', async () => {
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
       .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
     const admissible = {
