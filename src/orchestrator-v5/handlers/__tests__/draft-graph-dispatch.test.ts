@@ -1251,6 +1251,77 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
    * the client still renders. An earlier draft of this test asserted the
    * opposite and pinned a cross-repo divergence.
    */
+  /**
+   * ⛔⛔ THE WIDENING MUST NOT COST THE USER THEIR REPAIR CHIP, AND THE CHIP
+   * MUST BE SOMEWHERE THE CLIENT ACTUALLY RENDERS.
+   *
+   * Independent review measured this exact regression on this harness, same
+   * input (`needs_user_mapping`, `may_run: true`):
+   *   BASE: ["chip_prompt_configure_option"]
+   *   HEAD: ["chip_action_run_analysis", "chip_prompt_review_model", …]
+   * The repair simply vanished, and all four of my new specs passed because
+   * none of them asserted it survived. This is that missing assertion.
+   *
+   * ⚠ AND POSITION IS PART OF THE CLAIM. `SuggestedChips.tsx:335` renders
+   * `polished.filter(isChipRenderable).slice(0, 3)`, so a recovery chip
+   * appended FOURTH is invisible — green here and dark for the user. The
+   * index bound is therefore asserted, not just membership.
+   */
+  it('⭐ an admissible-but-not-ready model KEEPS its recovery chip, inside the rendered first three', async () => {
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+    const admissible = {
+      ...MINIMAL_ANALYSIS_READY,
+      status: 'needs_user_mapping',
+      may_run: true,
+      options: [
+        { option_id: 'opt_launch_now', label: 'Launch now', status: 'needs_user_mapping', interventions: {} },
+        { option_id: 'opt_delay', label: 'Delay 6mo', status: 'needs_user_mapping', interventions: {} },
+      ],
+    } as unknown as typeof MINIMAL_ANALYSIS_READY;
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      makeDraftResult(MINIMAL_GRAPH, admissible) as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-chip-keeps-recovery',
+      request: STUB_REQUEST,
+    });
+
+    const ids = result.response.suggested_actions.map((a) => a.id);
+    expect(ids[0], 'the newly available act leads').toBe('chip_action_run_analysis');
+    const recoveryIdx = ids.findIndex((id) => id.startsWith('chip_prompt_') && id !== 'chip_prompt_review_model' && id !== 'chip_prompt_assumptions');
+    expect(recoveryIdx, 'the recovery chip must still be emitted').toBeGreaterThan(-1);
+    expect(recoveryIdx, 'and must fall inside the three the client renders').toBeLessThan(3);
+  });
+
+  /**
+   * CONTROL, and it is the one that stops this being over-applied: a FULLY
+   * READY model has no recovery to offer (`buildReadinessRecoveryChip` returns
+   * null on `kind: 'run'`), so the long-standing three-chip pattern is emitted
+   * byte-for-byte as before.
+   */
+  it('CONTROL: a fully ready model still emits exactly the three original chips', async () => {
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY) as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-chip-ready-unchanged',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.suggested_actions.map((a) => a.id)).toEqual([
+      'chip_action_run_analysis',
+      'chip_prompt_review_model',
+      'chip_prompt_assumptions',
+    ]);
+  });
+
   it('CONTROL: may_run === false withholds Run when the status does not admit either', async () => {
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
       .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
