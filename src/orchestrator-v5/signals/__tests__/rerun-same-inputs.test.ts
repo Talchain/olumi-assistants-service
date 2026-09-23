@@ -20,6 +20,16 @@
  * `same_inputs`: two NON-NULL equal `graph_hash_at_run` ⇒ "cannot use this pair
  * to show the effect of an update"). The coaching re-run sentence never asked it.
  *
+ * ## ⚠ ROUND 2 (Codex CHANGES_REQUIRED 5796590960): NO STRONGER THAN THE HASH
+ *
+ * Round 1 framed this with the routing gate's "These two analyses used the same
+ * analytical inputs". Equal `graph_hash_at_run` does not prove that: labels are
+ * outside the hash, yet `run-analysis.ts` derives PLoT's `goal_direction` from
+ * the goal LABEL, so a goal rename can change what the engine is asked while the
+ * hash stays equal. The sentence now says only that the recorded structure and
+ * values matched, so the pair cannot show what the change did — and it no
+ * longer suggests the edit went unsaved.
+ *
  * ## The rule pinned here
  *
  * Two NON-NULL equal `graph_hash_at_run` on the compared pair ⇒ no attribution
@@ -33,11 +43,10 @@ import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
-import {
-  SAME_INPUTS_LEAD_TEXT,
-  SAME_INPUTS_OFFER_TEXT,
-} from '../../routing/run-comparison-gate.js';
-import { detectCoachingSignal } from '../coaching-signals.js';
+import { SAME_INPUTS_LEAD_TEXT } from '../../routing/run-comparison-gate.js';
+import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
+import { applyTerminologyRewrite } from '../../compose/terminology-rewrite.js';
+import { detectCoachingSignal, RERUN_SAME_RECORDED_MODEL_TEXT } from '../coaching-signals.js';
 
 const N = 10_000;
 
@@ -155,9 +164,10 @@ describe('a re-run on the SAME analysis inputs attributes nothing to the change'
     });
     expect(text).not.toContain('held both before and after');
     expect(text).not.toContain('Since you');
-    // The routing gate's own framing, by IDENTITY — not a paraphrase.
-    expect(text.startsWith(SAME_INPUTS_LEAD_TEXT)).toBe(true);
-    expect(text.endsWith(SAME_INPUTS_OFFER_TEXT)).toBe(true);
+    // The narrow framing, by IDENTITY — and NOT the gate's stronger claim.
+    expect(text.startsWith(RERUN_SAME_RECORDED_MODEL_TEXT)).toBe(true);
+    expect(text).not.toContain(SAME_INPUTS_LEAD_TEXT);
+    expect(text).not.toMatch(/same analytical inputs|saved/i);
     // The observation itself survives: the leader is still reported.
     expect(text).toContain('Offshore still leads');
   });
@@ -170,7 +180,7 @@ describe('a re-run on the SAME analysis inputs attributes nothing to the change'
     });
     expect(text).not.toContain('Since your recent changes');
     expect(text).not.toContain('held both before and after');
-    expect(text.startsWith(SAME_INPUTS_LEAD_TEXT)).toBe(true);
+    expect(text.startsWith(RERUN_SAME_RECORDED_MODEL_TEXT)).toBe(true);
   });
 
   it('RED-FIRST — a moved margin on equal hashes is not attributed to the change', () => {
@@ -180,7 +190,48 @@ describe('a re-run on the SAME analysis inputs attributes nothing to the change'
       currentHash: 'hash-same',
     });
     expect(text).not.toContain('Since you');
-    expect(text.startsWith(SAME_INPUTS_LEAD_TEXT)).toBe(true);
+    expect(text.startsWith(RERUN_SAME_RECORDED_MODEL_TEXT)).toBe(true);
+  });
+
+  /**
+   * ⭐ CODEX'S COUNTEREXAMPLE, THROUGH THE REAL PRODUCER. A goal rename is an
+   * `edit_graph` fact; the goal LABEL is outside `graph_hash_at_run`, so the two
+   * hashes stay equal while the goal direction PLoT receives can change. The
+   * sentence must neither claim identical analytical inputs nor attribute the
+   * result to (or deny the effect of) the rename.
+   */
+  it('RED-FIRST — a goal rename on equal hashes: no "same analytical inputs", no attribution', () => {
+    const goalRename = {
+      fact_type: 'edit_graph',
+      fact_version: 1,
+      noop: false,
+      result: {
+        edit_kind: 'rename',
+        status: 'applied',
+        operations_count: 1,
+        affected_entities: [{ kind: 'goal', label: 'Reduce customer churn' }],
+        graph_hash_before: 'hash-same',
+        graph_hash_after: 'hash-same',
+        safe_summary: 'Renamed the goal.',
+      },
+    } as unknown as HandlerFact;
+    const text = rerunText({
+      priorFacts: [goalRename, priorRunFact(OFFSHORE_LEADS, 'hash-same')],
+      currentEnv: OFFSHORE_LEADS,
+      currentHash: 'hash-same',
+    });
+    expect(text).not.toMatch(/same analytical inputs/i);
+    expect(text).not.toContain('held both before and after');
+    expect(text).not.toContain('Since you');
+    expect(text).not.toContain('Reduce customer churn');
+    expect(text.startsWith(RERUN_SAME_RECORDED_MODEL_TEXT)).toBe(true);
+  });
+
+  it('the new sentence survives the real terminology guard unchanged and carries no forbidden phrase', () => {
+    const rewritten = applyTerminologyRewrite(RERUN_SAME_RECORDED_MODEL_TEXT);
+    expect(rewritten.text).toBe(RERUN_SAME_RECORDED_MODEL_TEXT);
+    expect(rewritten.applied).toEqual([]);
+    expect(findForbiddenPhraseHit(RERUN_SAME_RECORDED_MODEL_TEXT)).toBeNull();
   });
 });
 
