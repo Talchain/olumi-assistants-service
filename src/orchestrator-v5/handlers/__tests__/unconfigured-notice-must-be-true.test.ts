@@ -122,7 +122,7 @@ describe('an option blocked for another reason is still named', () => {
       { label: 'Two Developers', reason: 'A proposed effect still needs a supported mapping' },
     ]);
     const notice = buildBlockedOptionsNotice(blocked);
-    expect(notice).toContain("'Two Developers' still blocks the analysis");
+    expect(notice).toContain("'Two Developers' isn't settled yet");
     expect(notice).toContain('A proposed effect still needs a supported mapping');
     // ⛔ and it must NOT resurrect the false cause.
     expect(notice).not.toMatch(/effect values/i);
@@ -130,7 +130,7 @@ describe('an option blocked for another reason is still named', () => {
 
   it("invents no cause when the projection carries none", () => {
     const notice = buildBlockedOptionsNotice([{ label: 'X' }]);
-    expect(notice).toBe("Note: 'X' still blocks the analysis.");
+    expect(notice).toBe("Note: 'X' isn't settled yet.");
   });
 
   it('the applied receipt carries the true notice end to end', () => {
@@ -140,7 +140,7 @@ describe('an option blocked for another reason is still named', () => {
       deriveBlockedConfiguredOptions(readiness),
     );
     expect(text).toContain('Confirmed:');
-    expect(text).toContain("'Two Developers' still blocks the analysis");
+    expect(text).toContain("'Two Developers' isn't settled yet");
     // The measured misdirection must be gone from the whole receipt.
     expect(text).not.toMatch(/does not have effect values/i);
   });
@@ -186,12 +186,76 @@ describe('every blocked option is named, not counted', () => {
 
   it('a bare count with no names is never emitted', () => {
     const notice = buildBlockedOptionsNotice(two) as string;
-    expect(notice).not.toMatch(/^Note: 2 options still block the analysis\.$/);
+    expect(notice).not.toMatch(/^\d+ options aren't settled yet:?$/);
   });
 
   it('names an option even when its reason is absent', () => {
     const notice = buildBlockedOptionsNotice([{ label: 'A' }, { label: 'B' }]) as string;
-    expect(notice).toContain("'A'");
-    expect(notice).toContain("'B'");
+    expect(notice).toContain('A');
+    expect(notice).toContain('B');
+  });
+});
+
+/**
+ * ⛔ ASK THE QUESTION, DO NOT REPORT THE DIAGNOSIS.
+ *
+ * An independent audit found this notice reaching PAST `user_questions` — the
+ * producer's own answerable prose, already on the same payload — to interpolate
+ * `status_reason`, which the schema documents as a DEBUGGING field.
+ *
+ * Measured on real persisted graphs, the two fields differ completely:
+ *   status_reason  : "A proposed effect still needs a supported mapping"
+ *                    (identical boilerplate on every option)
+ *   user_questions : "How does 9-day Fortnight change Coordination and Handover
+ *                     Risk?" / "What value should «factor» be set to for option
+ *                     «option»?"
+ *
+ * Olumi's job is to surface the judgement the team has not yet made. Only the
+ * question does that; the diagnosis asks them to decode our internals.
+ */
+describe('the notice asks the payload\u2019s own question', () => {
+  const withQuestion = {
+    options: [
+      {
+        option_id: 'o1', label: '9-day Fortnight', status: 'needs_user_mapping',
+        interventions: { f: 0.5 },
+        status_reason: 'A proposed effect still needs a supported mapping',
+        user_questions: ['How does 9-day Fortnight change Coordination and Handover Risk?'],
+      },
+    ],
+  };
+
+  it('prefers user_questions over the debugging field', () => {
+    const [b] = deriveBlockedConfiguredOptions(withQuestion);
+    expect(b.reason).toBe('How does 9-day Fortnight change Coordination and Handover Risk?');
+    expect(b.is_question).toBe(true);
+    const notice = buildBlockedOptionsNotice([b]) as string;
+    expect(notice).toContain('How does 9-day Fortnight change Coordination and Handover Risk');
+    // ⛔ the debugging diagnosis must not reach the user
+    expect(notice).not.toContain('supported mapping');
+  });
+
+  it('CONTROL: falls back to status_reason only when no question exists', () => {
+    const [b] = deriveBlockedConfiguredOptions({
+      options: [{ option_id: 'o1', label: 'X', status: 'needs_encoding',
+                  interventions: { f: 1 }, status_reason: 'some diagnosis' }],
+    });
+    expect(b.reason).toBe('some diagnosis');
+    expect(b.is_question).toBeUndefined();
+  });
+
+  it('an empty user_questions array does not mask the fallback', () => {
+    const [b] = deriveBlockedConfiguredOptions({
+      options: [{ option_id: 'o1', label: 'X', status: 'needs_encoding',
+                  interventions: { f: 1 }, user_questions: ['   '], status_reason: 'some diagnosis' }],
+    });
+    expect(b.reason).toBe('some diagnosis');
+  });
+
+  it('the notice never frames the option as blocking a machine', () => {
+    const [b] = deriveBlockedConfiguredOptions(withQuestion);
+    const notice = buildBlockedOptionsNotice([b]) as string;
+    expect(notice).not.toMatch(/block(s|ing)? the analysis/i);
+    expect(notice).toMatch(/isn't settled yet/i);
   });
 });
