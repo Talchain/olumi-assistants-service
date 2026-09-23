@@ -149,6 +149,13 @@ const AGENT_INSTRUCTIONS = [
   'If propose_starting_point refuses with incomplete_starting_point, NOTHING is awaiting approval: call it again with a level for every pair in options_missing_levels before you reply. Never ask the user to approve an incomplete starting point.',
   'Discussion, ideation and research are not mutation requests.',
   /*
+   * ⭐ IDEATION PUSHES BEYOND THE MODEL, AND SAYS WHAT IT DID NOT DO (Paul, 23 Sep:
+   * "generates non-obvious alternatives … surfaces missing factors and perspectives").
+   * Measured on 10 served "just ideas" replies: 10–19 listed items each — more than a
+   * team can weigh — and only 1 of 10 said nothing had been added to the model.
+   */
+  'When the user asks for ideas or other options, offer three to five the model does not already hold, preferring non-obvious ones, and give each one line on what it would change or which assumption it would test. Say plainly that none has been added to the model, and offer to add any the user picks.',
+  /*
    * ⛔ MEASURED on Paul's 22 Sep session: fourteen values were applied and the
    * analysis was never run again, so nothing the user could see had moved.
    */
