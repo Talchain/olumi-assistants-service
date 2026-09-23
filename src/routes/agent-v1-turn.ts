@@ -46,7 +46,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-
 import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
-import { assessCanonicalAnalysisReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
@@ -240,7 +240,8 @@ const AGENT_INSTRUCTIONS = [
  * the `draft_graph` the canvas draws. Shared by a live turn and a replay, so a
  * replayed answer is shown against the SAME current state a fresh one would be.
  */
-async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown }> {
+/** @internal Exported for testing. */
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -302,16 +303,41 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
        * (`turn 1: analysis_ready.options=0, expected >= 2`), which is how
        * the gap surfaced.
        *
-       * `assessCanonicalAnalysisReadiness` is the ONE readiness authority
-       * named in CLAUDE.md and it is a pure function of the graph — no LLM,
-       * no network, no second orchestrator turn — so this costs a function
+       * The canonical readiness builder is a pure function of the graph — no
+       * LLM, no network, no second orchestrator turn — so this costs a function
        * call, not twenty seconds. The graph read's own `analysis_ready`
        * still wins when it has one, because that reflects a real run.
+       *
+       * ⛔⛔ IT MUST BE THE BUILDER, NOT THE BARE ASSESSMENT — this is the
+       * WHOLE readiness payload for this lane.
+       *
+       * This read `assessCanonicalAnalysisReadiness(...).analysisReady`, which
+       * does NOT compute `may_run`; only
+       * `canonicalAnalysisReadyFrom(resolveRunAdmission(g), g)` — i.e.
+       * `buildCanonicalAnalysisReadyFromGraph` — does. And
+       * `/assist/v1/scenarios/:id/graph` never sends `analysis_ready` at all
+       * (its 200 carries `graph_hash`, `layout_present`, `not_modelled` …), so
+       * the branch above is ALWAYS taken: every readiness payload an Agent-lane
+       * user receives came from here.
+       *
+       * The consequence is not subtle. The client gates the Run affordance on
+       * `admitsRunAffordance(status, may_run) = status === 'ready' || may_run
+       * === true`. With `may_run` absent it falls back to the stricter `status`
+       * term — and measured over the full population of 15,255 persisted models,
+       * 3,168 (20.77%) are `may_run: true` under a NON-ready status. (An
+       * earlier revision said 27.0% from a 400-row `updated_at DESC` slice;
+       * that was recency bias.) Those users can run the
+       * analysis and are never offered it, on the very turn this fallback was
+       * added to serve: straight after a 60-90 s construction.
+       *
+       * ⚠ NOT A SECOND ASSESSMENT. `resolveRunAdmission` exposes the assessment
+       * it derived from, precisely so a caller needing both does not run the
+       * assessor twice.
        */
       if (analysisReady === undefined && after.json.graph !== undefined) {
         try {
-          const assessed = assessCanonicalAnalysisReadiness(after.json.graph);
-          if (assessed.analysisReady !== undefined) analysisReady = assessed.analysisReady;
+          const canonical = buildCanonicalAnalysisReadyFromGraph(after.json.graph);
+          if (canonical !== undefined) analysisReady = canonical;
         } catch {
           // Readiness is a disclosure, never a gate on the user's answer.
         }
