@@ -44,3 +44,98 @@ export function withDisclosures(assistantText: string, owed: readonly string[]):
   const body = assistantText.trimEnd();
   return body.length === 0 ? owed.join('\n\n') : `${body}\n\n${owed.join('\n\n')}`;
 }
+
+/**
+ * ⭐⭐ A VALUE THE USER APPROVED, STORED AS SOMETHING ELSE — SAID IN PROSE.
+ *
+ * ⛔ WHY PROSE AND NOT A BLOCK. This was first built as a `coaching` block with
+ * `coaching_kind: 'calibration_prompt'`. Measured end to end against the UI at
+ * `origin/staging`, that carrier CANNOT REACH THE USER on a normal turn:
+ *   · `messageComposition.ts:110` sets `MAX_POINTS = 3`; `v5_coaching` is an
+ *     unpinned point candidate (`:134-161`), so only the first three phase-3
+ *     cards render in composed order and the rest are demoted to `detail`;
+ *   · `InlineBlocks.tsx:609` renders `detail` only when `detailExpanded`, which
+ *     starts `false` (`:235`) — a demoted block is NOT IN THE DOM;
+ *   · and the contract reserves the 200+ `priority_rank` band for calibration
+ *     prompts (`phase3Pacing.ts:96-97`), i.e. LAST. Independently reproduced on
+ *     two real committed `/proxy/v5/turn` captures: `probe2154` put its two
+ *     calibration prompts at composed positions 14 and 15 of 15, and
+ *     `seeded-w2d` put its one at 9 of 9 — behind a collapsed "Show N more"
+ *     both times. The UI's own docblock says the same thing in general:
+ *     "Real turns carry 9-17 point candidates against MAX_POINTS, so 6-14 are
+ *     demoted on every analysis turn" (`InlineBlocks.tsx:420-422`).
+ *
+ * `assistant_text` has no such budget: it is always rendered. This is the same
+ * channel, and the same reasoning, as `PLACEHOLDER_STRENGTH_DISCLOSURE` above —
+ * the user is TOLD when the model holds a number they did not give, and it does
+ * not depend on the model electing to mention it.
+ *
+ * ⚠ The structured twin survives on `_agent.state_facts`, so a surface can still
+ * reconcile mechanically. Prose is readable; structure is reliable.
+ */
+
+/** Prose budget for one disclosure paragraph, so the turn with the MOST to
+ *  disclose still discloses. A named remainder beats a wall of text, and beats
+ *  silently dropping entries. */
+export const VALUE_CHANGE_DISCLOSURE_MAX_CHARS = 420;
+
+function within(
+  items: readonly string[],
+  build: (shown: readonly string[], hidden: number) => string,
+): string {
+  for (let n = items.length; n > 0; n -= 1) {
+    const body = build(items.slice(0, n), items.length - n);
+    if (body.length <= VALUE_CHANGE_DISCLOSURE_MAX_CHARS) return body;
+  }
+  return build([], items.length);
+}
+
+function andMore(hidden: number): string {
+  return hidden === 0 ? '' : ` …and ${hidden} more.`;
+}
+
+/**
+ * The disclosures owed for values this product changed or scales it chose.
+ * Empty when nothing was changed — a disclosure on every turn is noise, and
+ * noise is how a real one gets missed.
+ */
+export function valueChangeDisclosures(facts: {
+  readonly rescaled: readonly {
+    readonly option?: string;
+    readonly factor: string;
+    readonly requested: number | null;
+    readonly recorded: number | null;
+  }[];
+  readonly ranges_added: readonly { readonly factor: string; readonly range: number }[];
+} | null | undefined): readonly string[] {
+  if (facts === null || facts === undefined) return [];
+  const owed: string[] = [];
+
+  const rescaled = (facts.rescaled ?? []).map((r) => {
+    const where = typeof r.option === 'string' && r.option !== '' ? `${r.factor} for ${r.option}` : r.factor;
+    // `null` is "the producer stated no figure" — never printed as a number.
+    const req = r.requested === null ? 'the value you approved' : String(r.requested);
+    const rec = r.recorded === null ? 'a different value' : String(r.recorded);
+    return `${where} (you approved ${req}, stored as ${rec})`;
+  });
+  if (rescaled.length > 0) {
+    owed.push(
+      within(rescaled, (shown, hidden) =>
+        'Note: the model did not store some values exactly as you approved them — ' +
+        `${shown.join('; ')}.${andMore(hidden)} ` +
+        'Those stored figures are the ones it will compute with. Tell me if any is wrong and I will change it.'),
+    );
+  }
+
+  const ranges = (facts.ranges_added ?? []).map((r) => `${r.factor} (0 to ${r.range})`);
+  if (ranges.length > 0) {
+    owed.push(
+      within(ranges, (shown, hidden) =>
+        'Note: the analysis needed a range for some factors and Olumi chose one so it could run — ' +
+        `${shown.join('; ')}.${andMore(hidden)} ` +
+        'Those ranges are not yours. Tell me the right ones and I will replace them.'),
+    );
+  }
+
+  return owed;
+}

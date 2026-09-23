@@ -48,7 +48,8 @@ import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
 import { assessCanonicalAnalysisReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
-import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
+import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
+import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { narrateWriteOutcome, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { approvalChipsFor } from '../orchestrator-v5/agent-lane/approval-chips.js';
@@ -894,7 +895,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ OLUMI OWES THE DISCLOSURE, NOT THE AGENT. When a write had to carry a
     // placeholder strength the user never gave, the user is told — whether or
     // not the model chose to mention it.
-    const owed = disclosuresFor(result.tool_results);
+    /**
+     * ⭐ THE SERVER STATES WHAT IT CHANGED, rather than asking the model to.
+     *
+     * A value the person APPROVED can be stored differently, and a factor's
+     * range can be chosen BY THE PRODUCT so the analysis can run at all. Both
+     * were told only to the model, carried on `must_disclose_rescaling` — a
+     * field that occurs at exactly ONE site in the tree, the one that sets it.
+     * Nothing read it and nothing verified it, so whether the person was told
+     * depended on the model electing to say so.
+     *
+     * This does not replace that obligation; the model should still say it in
+     * its own words. It removes the DEPENDENCE on it.
+     */
+    const stateFacts = collectTurnStateFacts(result.tool_results);
+    const owed = [
+      ...disclosuresFor(result.tool_results),
+      ...valueChangeDisclosures(stateFacts),
+    ];
     /**
      * ⛔ WHAT WAS SAVED IS STATED BY OLUMI, FROM THE TOOL RESULTS (RC #63
      * 5788648244). A model-authored "Saved…" survived here on a turn that wrote
@@ -1041,6 +1059,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * empty list is reported honestly rather than filled in.
          */
         receipts: collectTurnReceipts(result.tool_results),
+        /**
+         * The structured twin of the prose disclosure above. Prose is readable;
+         * structure is reliable. Omitted entirely when nothing changed, so its
+         * presence is itself the signal.
+         */
+        ...(stateFacts.rescaled.length > 0 || stateFacts.ranges_added.length > 0
+          ? { state_facts: stateFacts }
+          : {}),
       },
       /**
        * ⭐ EVERY GENERATIVE ATTEMPT THIS TURN MADE, off the provider policy's ledger
