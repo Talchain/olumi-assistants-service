@@ -220,59 +220,98 @@ describe('\u26d4 a retry that LOSES user material is never adopted, even if smal
   });
 });
 
-describe('⭐ a compact retry keeps the USER’S objective: reworded goals are adopted, a changed objective is refused', () => {
+describe('⭐ the compact retry may not choose a goal: it returns the user’s exact goal, or it is refused', () => {
   /**
-   * MEASURED on served staging `785185b7` (refusal probe, 2 of 12 hiring draws): the
-   * retry fixed the size and kept both user options but reworded the goal
-   * ("delivery velocity" → "velocity"); the label-keyed check discarded it and the
-   * user got no model. Independent review (5802902264): the repair must not make ANY
-   * goal equivalent — a retry that picks a different objective must not pass.
+   * MEASURED on served staging `785185b7` (2 of 12 hiring draws): the retry fixed the
+   * size but reworded the goal, the label-keyed check discarded it, and the user got
+   * no model. Independent review (5802902264, 5803023774): inferring that two goals
+   * are "the same" afterwards is unsafe (a different objective, "defect rate" vs
+   * "defect escape rate", or a goal orphaned from its links). So the retry's schema
+   * PINS the first model's goal; the identity check is unchanged.
    */
-  const withGoal = (extra: number, goal: Partial<{ metric: string; operator: string; value: number; unit: string }>) => {
-    const c = candidate(extra) as unknown as { goal: Record<string, unknown> };
+  type Req = { instructions: string; schema: { properties?: { goal?: { properties?: Record<string, { enum?: unknown[] }> } } } };
+  const withGoal = (extra: number, goal: Partial<{ metric: string; operator: string; value: number; unit: string }>, goalLinks = false) => {
+    const c = candidate(extra) as unknown as { goal: Record<string, unknown> & { metric: string }; links: { from: string; to: string }[]; outcomes: { label: string }[] };
     c.goal = { ...c.goal, ...goal };
+    if (goalLinks) {
+      // Causal paths end at the goal metric's EXACT label (BUILD_INSTRUCTIONS' own rule).
+      c.outcomes = [];
+      c.links = c.links.map((l) => (l.to === 'Velocity' ? { ...l, to: c.goal.metric } : l));
+    }
     return c;
   };
-  function capturing() {
-    const registered: { graph?: { nodes?: { kind?: string; label?: string }[] } }[] = [];
+  function recording(...payloads: unknown[]) {
+    const reqs: Req[] = [];
+    const fn = vi.fn(async (req: Req) => { reqs.push(req); return { text: JSON.stringify(payloads[Math.min(reqs.length - 1, payloads.length - 1)]) }; }) as unknown as CallStructuredModel;
+    const registered: { graph?: { nodes?: { id: string; kind?: string; label?: string }[]; edges?: { from: string; to: string }[] } }[] = [];
     const d: InternalDispatch = async (path, body) => {
       if (path.endsWith('/graph/register')) registered.push(body as never);
       return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
     };
-    return { d, registered };
+    return { fn, d, reqs, registered };
   }
+  const reaches = (g: { nodes?: { id: string; kind?: string }[]; edges?: { from: string; to: string }[] }, from: string, to: string) => {
+    const out = new Map<string, string[]>();
+    for (const e of g.edges ?? []) out.set(e.from, [...(out.get(e.from) ?? []), e.to]);
+    const seen = new Set([from]); const q = [from];
+    while (q.length) { const n = q.shift()!; if (n === to) return true; for (const m of out.get(n) ?? []) if (!seen.has(m)) { seen.add(m); q.push(m); } }
+    return false;
+  };
+  const FIRST = { metric: 'Delivery velocity' };
 
-  it('RED: a retry that only rewords the goal is adopted, registered once, and keeps the user’s ORIGINAL objective', async () => {
-    const s = structuredSequence(withGoal(14, { metric: 'Delivery velocity' }), withGoal(2, { metric: 'Velocity' }));
-    const dp = capturing();
-    const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
-    expect(s.calls).toHaveLength(2);
-    expect(out.ok, JSON.stringify(out).slice(0, 300)).toBe(true);
-    expect(dp.registered).toHaveLength(1);
-    const goal = (dp.registered[0]!.graph?.nodes ?? []).find((n) => n.kind === 'goal');
-    expect(goal?.label, 'the user’s own objective wording, not the retry’s').toBe('Delivery velocity');
+  it('RED: the retry request PINS the first model’s goal in its schema', async () => {
+    const r = recording(withGoal(14, FIRST, true), withGoal(2, FIRST, true));
+    await buildModelFromBrief(SCENARIO, BRIEF, r.d, r.fn);
+    expect(r.reqs).toHaveLength(2);
+    const pinned = r.reqs[1]!.schema.properties?.goal?.properties;
+    expect(pinned?.metric?.enum).toEqual(['Delivery velocity']);
+    expect(pinned?.operator?.enum).toEqual(['>=']);
+    expect(pinned?.value?.enum).toEqual([20]);
+    expect(pinned?.unit?.enum).toEqual(['points']);
+    expect(r.reqs[0]!.schema.properties?.goal?.properties?.metric?.enum, 'the FIRST call chooses its goal freely').toBeUndefined();
   });
 
-  it('CONTRAST: a smaller retry that CHANGES the objective (velocity → churn) is refused, never silently adopted', async () => {
-    const s = structuredSequence(
-      withGoal(14, { metric: 'Delivery velocity' }),
-      withGoal(2, { metric: 'Monthly churn', operator: '<=', value: 4, unit: '%' }),
-    );
-    const dp = capturing();
-    const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
+  it('a retry that returns the pinned goal is adopted once, and BOTH user options still reach that goal in the graph handed to register', async () => {
+    const r = recording(withGoal(14, FIRST, true), withGoal(2, FIRST, true));
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, r.d, r.fn);
+    expect(out.ok, JSON.stringify(out).slice(0, 300)).toBe(true);
+    expect(r.registered).toHaveLength(1);
+    const g = r.registered[0]!.graph!;
+    const goal = (g.nodes ?? []).find((n) => n.kind === 'goal');
+    expect(goal?.label).toBe('Delivery velocity');
+    const options = (g.nodes ?? []).filter((n) => n.kind === 'option');
+    expect(options).toHaveLength(2);
+    for (const o of options) expect(reaches(g, o.id, goal!.id), `${o.id} reaches the goal`).toBe(true);
+  });
+
+  it('IDENTITY CONTROL: a retry that rewords the goal anyway (with a same-named outcome) is refused, never adopted with a detached goal', async () => {
+    const r = recording(withGoal(14, FIRST, true), withGoal(2, { metric: 'Velocity' }));
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, r.d, r.fn);
     expect(out.ok).toBe(false);
     expect(out['refusal']).toBe('model_too_large');
-    expect(dp.registered).toHaveLength(0);
+    expect(r.registered).toHaveLength(0);
+  });
+
+  it('NEGATIVE: equal numeric fields but a materially different contained-name metric ("defect rate" → "defect escape rate") is refused', async () => {
+    const r = recording(withGoal(14, { metric: 'Defect rate' }, true), withGoal(2, { metric: 'Defect escape rate' }, true));
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, r.d, r.fn);
+    expect(out.ok).toBe(false);
+    expect(r.registered).toHaveLength(0);
+  });
+
+  it('NEGATIVE: a smaller retry that CHANGES the objective (velocity → churn) is refused', async () => {
+    const r = recording(withGoal(14, FIRST, true), withGoal(2, { metric: 'Monthly churn', operator: '<=', value: 4, unit: '%' }, true));
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, r.d, r.fn);
+    expect(out.ok).toBe(false);
+    expect(r.registered).toHaveLength(0);
   });
 
   it('CONTRAST: a retry that drops one of the user’s OPTIONS is still refused', async () => {
-    const dropped = withGoal(2, { metric: 'Velocity' }) as unknown as { options: unknown[] };
+    const dropped = withGoal(2, FIRST, true) as unknown as { options: unknown[] };
     dropped.options = dropped.options.slice(0, 1);
-    const s = structuredSequence(withGoal(14, { metric: 'Delivery velocity' }), dropped);
-    const dp = capturing();
-    const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
+    const r = recording(withGoal(14, FIRST, true), dropped);
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, r.d, r.fn);
     expect(out.ok).toBe(false);
-    expect(out['refusal']).toBe('model_too_large');
-    expect(dp.registered).toHaveLength(0);
+    expect(r.registered).toHaveLength(0);
   });
 });

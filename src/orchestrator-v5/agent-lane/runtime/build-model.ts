@@ -249,52 +249,34 @@ export async function findConstructionVersion(
   return null;
 }
 
-const goalWords = (m: unknown): string[] =>
-  String(m ?? '').toLowerCase().split(/[^a-z0-9%£$€]+/).filter((w) => w.length > 0);
-
 /**
- * ⛔ THE COMPACT RETRY IS A COMPACTION, NOT A NEW DECISION — it may not change the
- * user's objective (independent review of #1775, 5802902264).
+ * The retry's contract, with the user's OWN goal fixed as structured input
+ * (independent review of #1775, 5802902264 then 5803023774).
  *
- * MEASURED on served `785185b7` (2 of 12 hiring draws): the retry fixed the size and
- * kept the user's options, but reworded the goal ("delivery velocity" → "velocity"),
- * so the label-keyed identity check discarded a valid model and the user got none.
- * Keying the goal on its kind alone (the first repair) was WRONG: a retry can pick a
- * different objective from a multi-metric brief and still pass.
- *
- * So the ORIGINAL goal is carried into the retry — its wording, target and
- * provenance — only when the retry's goal is the SAME objective: the same operator,
- * value, unit and horizon, and one metric's words contained in the other's. The
- * retry's references to its goal (by label) are rebound to the original label,
- * unless that label also names another entity (then nothing is rebound). Any other
- * goal is left exactly as the retry stated it, so the identity check still refuses
- * a changed objective.
+ * MEASURED on served `785185b7` (2 of 12 hiring draws): the compact retry fixed the
+ * size and kept the user's options but reworded the goal ("delivery velocity" →
+ * "velocity"); the label-keyed identity check then discarded a valid model and the
+ * user got none. The repair is NOT to decide afterwards that two goals are
+ * equivalent — cardinality and shared words both proved unsafe (a different
+ * objective, or "defect rate" vs "defect escape rate", would pass). The retry is a
+ * COMPACTION: it may not choose a goal at all. Every goal field is pinned to the
+ * first model's value, so strict structured output must return that exact goal and
+ * the model links to it by its exact label; the unchanged identity check still
+ * refuses anything else.
  */
-export function carryOriginalGoal(retry: CandidateModel, first: CandidateModel): CandidateModel {
-  const a = first.goal, b = retry.goal;
-  if (a === undefined || b === undefined) return retry;
-  const aw = goalWords(a.metric), bw = goalWords(b.metric);
-  const contained = (x: string[], y: string[]) => x.length > 0 && x.every((w) => y.includes(w));
-  const sameObjective =
-    a.operator === b.operator && a.value === b.value &&
-    String(a.unit ?? '').trim().toLowerCase() === String(b.unit ?? '').trim().toLowerCase() &&
-    (a.horizon_months ?? null) === (b.horizon_months ?? null) &&
-    (contained(aw, bw) || contained(bw, aw));
-  if (!sameObjective) return retry;
-  const norm = (l: unknown) => goalWords(l).join(' ');
-  const from = norm(b.metric);
-  const others = [
-    ...retry.options.map((o) => o.label), ...retry.factors.map((f) => f.label),
-    ...retry.risks.map((r) => r.label), ...retry.outcomes.map((o) => o.label),
-  ].map(norm);
-  const rebind = others.includes(from)
-    ? (l: string) => l
-    : (l: string) => (norm(l) === from ? a.metric : l);
-  return {
-    ...retry,
-    goal: a,
-    links: retry.links.map((l) => ({ ...l, from: rebind(l.from), to: rebind(l.to) })),
+export function retrySchemaPinningGoal(goal: CandidateModel['goal']): Record<string, unknown> {
+  const schema = buildCandidateSchema();
+  const goalSchema = (schema['properties'] as Record<string, Record<string, unknown>>)['goal'];
+  if (goalSchema === undefined) return schema;
+  goalSchema['properties'] = {
+    metric: { type: 'string', enum: [goal.metric] },
+    operator: { type: 'string', enum: [goal.operator] },
+    value: { type: 'number', enum: [goal.value] },
+    unit: { type: 'string', enum: [goal.unit] },
+    horizon_months: goal.horizon_months === null ? { type: 'null' } : { type: 'integer', enum: [goal.horizon_months] },
+    provenance: { type: 'string', enum: [goal.provenance] },
   };
+  return schema;
 }
 
 export async function buildModelFromBrief(
@@ -362,10 +344,10 @@ export async function buildModelFromBrief(
         input: brief,
         max_output_tokens: budget.max_output_tokens,
         reasoning_effort: budget.reasoning_effort,
-        schema: buildCandidateSchema(),
+        schema: retrySchemaPinningGoal(candidate.goal),
       });
       if (retry.text.length > 0) {
-        const retryCandidate = carryOriginalGoal(JSON.parse(retry.text) as CandidateModel, candidate);
+        const retryCandidate = JSON.parse(retry.text) as CandidateModel;
         const retryAdmitted = admitCandidateModel(retryCandidate, {});
         const retrySize = assessConstructionSize(retryAdmitted);
         // ⚠ ADOPT ONLY WHAT IS ACTUALLY SMALLER, on BOTH dimensions. A retry that
