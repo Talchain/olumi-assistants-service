@@ -166,8 +166,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     description:
       'Ask Olumi\u2019s deterministic method gate which structured reasoning technique the LATEST analysis of this model '
       + 'calls for (for example considering the opposite, a devil\u2019s-advocate challenge, a pre-mortem or a sensitivity check), '
-      + 'and why. Read-only; it changes nothing. For a science-grounded protocol it also returns the published steps and '
-      + 'their evidence strength. It returns no method when none applies \u2014 then do not invent one.',
+      + 'and why, and which analysis it read (graph_hash_at_run, computed_at). Read-only; it changes nothing. For a '
+      + 'science-grounded protocol it also returns its evidence strength, expected outputs and closing questions (for the end of '
+      + 'the exercise, never its opening). It returns no method when none applies \u2014 then do not invent one.',
     parameters: obj({ reason: { type: 'string', description: 'Why you are asking now.' } }, ['reason']),
   },
 ];

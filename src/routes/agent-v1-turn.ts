@@ -209,7 +209,14 @@ const AGENT_INSTRUCTIONS = [
    * release test, #63 5792626729). The method comes from Olumi's deterministic gate
    * over the analysis, never from the model's own choice of technique.
    */
-  'After an analysis has run, or when the user is converging on an option, call get_applicable_method. If it returns a method, say in one or two sentences why it applies to THIS model (use its reason, naming what it points at), then guide the user through its FIRST step as a question for them to answer \u2014 do not run the whole exercise at once, and never present it as a conclusion. Cite the evidence strength when a protocol is returned. If it returns no method, do not invent a technique.',
+  /*
+   * ⛔ OPEN WITH THE EXERCISE, NEVER WITH ITS CLOSING QUESTION (#1731 review B3).
+   * The protocol questions the tool can return are the ones that survive the
+   * leader-naming filter, and for both DSK protocols that is the LAST step ("…or
+   * does the recommendation still hold?"). Opening with it hands the user a verdict
+   * to endorse instead of an exercise that helps them inspect the model.
+   */
+  'After an analysis has run, or when the user is converging on an option, call get_applicable_method. If it returns a method, say in one or two sentences why it applies to THIS model (use its reason, naming what it points at). Then open the exercise with ONE question of your own for the user to answer, drawn from the exercise its reason describes \u2014 do not run the whole exercise at once, and never present it as a conclusion. Use its closing_questions only at the end, once the user has worked through the exercise, adapting their wording so that you never ask the user to endorse a recommendation or confirm that one still holds. Cite the evidence strength when a protocol is returned. If it returns no method, do not invent a technique.',
   'British English. Concise but substantive.',
 ].join(' ');
 
@@ -717,7 +724,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     };
     const capabilities = createAgentCapabilities(countingDispatch, proposals, callStructured, mode, (payload) => {
       analysisFromTool = payload;
-    }, typeof store.readNewestAnalysisFactFor === 'function' ? (sid) => store.readNewestAnalysisFactFor!(sid) : undefined);
+    }, typeof store.readScenarioRunAnalysisFactsFor === 'function' ? (sid, limit) => store.readScenarioRunAnalysisFactsFor!(sid, limit) : undefined);
     const history = histories.get(sessionId);
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
 

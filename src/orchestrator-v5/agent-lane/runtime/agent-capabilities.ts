@@ -15,7 +15,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { applicableMethod, type ReadNewestAnalysisFact } from './applicable-method.js';
+import { applicableMethod, type ReadScenarioRunAnalysisFacts } from './applicable-method.js';
 
 /**
  * The durable operation identity for authorising a proposal.
@@ -205,11 +205,13 @@ export function createAgentCapabilities(
    */
   onAnalysis?: (payload: { analysis_ready?: unknown; blocks?: unknown[] }) => void,
   /**
-   * The store's newest persisted `run_analysis` fact for the scenario, which the
-   * method gate reads (`applicable-method.ts`). Injected so this module keeps no
-   * store of its own; absent → the tool refuses rather than guessing.
+   * The store's scenario-scoped `run_analysis` fact page
+   * (`SessionStore.readScenarioRunAnalysisFactsFor`), which the method gate reads
+   * (`applicable-method.ts`): the newest fact is the analysis, the rest its lens
+   * history. Injected so this module keeps no store of its own; absent → the tool
+   * refuses rather than guessing.
    */
-  readNewestAnalysisFact?: ReadNewestAnalysisFact,
+  readScenarioRunAnalysisFacts?: ReadScenarioRunAnalysisFacts,
 ): AgentCapabilities {
   const readOnly = mode === 'preview';
   const refuseReadOnly = (): ToolResult => ({
@@ -533,7 +535,7 @@ export function createAgentCapabilities(
   };
 
   const caps: AgentCapabilities = {
-    getApplicableMethod: (ctx) => applicableMethod(readNewestAnalysisFact, ctx.scenario_id),
+    getApplicableMethod: (ctx) => applicableMethod(readScenarioRunAnalysisFacts, ctx.scenario_id),
 
     async getCanonicalState(ctx: AgentToolContext): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id);
