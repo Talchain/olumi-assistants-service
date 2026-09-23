@@ -183,3 +183,25 @@ so registrations were bypassing the fence that stops a superseded turn clobberin
 3. **Only then** suspect the carrier itself.
 
 **Evidence as of 03:25Z, on the build BEFORE the fence change** (`c94208cb`): signed-in **7 registrations → 7 versions**; guest **10 → 0**. I have a waiter on the `e8cf4c68` deploy to re-verify that ratio against the build that actually serves it — because a fence change on the write path is exactly the kind of thing that turns a passing invariant into a failing one, and the pre-change numbers would not show it.
+
+---
+
+## 10. ⛔ The P0 is UNVERIFIED on the build that now serves — and I cannot close that gap
+
+`e8cf4c68f150` went **live at 03:23:35Z**, carrying #1706's turn-fence change on the registration path.
+
+**Registration turns on that build: 0.** So the post-fence signed-in ratio is **0 of 0**, which is indistinguishable from success and proves nothing. I am not reporting it as holding.
+
+| build | signed-in registrations | versions created | status |
+|---|---|---|---|
+| `c94208cb` (previous) | 7 | **7** | verified |
+| **`e8cf4c68` (SERVING NOW)** | **0** | — | **VACUOUS — unverified** |
+
+**Why I cannot close it myself:** a version is only minted for a signed-in owner (the RPC gates on `v_user_id IS NOT NULL`), and a service-key harness is refused with `scenario_requires_authenticated_owner`. There is no path from here to a signed-in registration without a browser session. Nothing has organically hit the route since 03:23 either.
+
+**So your first test IS the verification of the current build.** Concretely:
+
+- **If a receipt appears** — the P0 holds across the fence change, and that is the journey witness this has been missing all night.
+- **If it does not** — work section 9's order: signed in? fenced? only then the carrier. The fence is the *new* variable here and the first thing I would suspect after authentication.
+
+⭐ **Stated plainly because the temptation ran the other way:** it would have been easy to write "P0 still holds on the new build" on the strength of an empty result set. Every absence claim tonight needed a non-vacuity control, and this one fails it. **Verified on the previous build, unverified on this one.**
