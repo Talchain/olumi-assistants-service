@@ -187,6 +187,18 @@ export class ProposalStore {
   }
 
   /**
+   * Remove a proposal that was only ever a BUILDING BLOCK of another one — the
+   * two halves a starting point is composed from, or a compound's part that
+   * refused. Left in the store they would be listed as awaiting approval, and
+   * "if there is exactly one, authorise THAT proposal_id" would pick the wrong
+   * object. Never called on a proposal the user was shown.
+   */
+  discard(id: string): void {
+    this.items.delete(id);
+    this.order = this.order.filter((x) => x !== id);
+  }
+
+  /**
    * Decide whether this authorisation may execute. Returns the STORED proposal —
    * a caller that regenerates the mutation instead of applying `decision.proposal`
    * has defeated the whole mechanism.

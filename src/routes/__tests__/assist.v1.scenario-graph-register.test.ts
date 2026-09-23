@@ -86,6 +86,8 @@ import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES } from "../../config/graphCaps.js";
 import { resolveCeeRateLimit } from "../../cee/config/limits.js";
 import { RATE_BUCKET_REGISTRY } from "../../cee/config/limits.js";
 import { checkPersistedGraphInvariants } from "../../orchestrator-v5/persisted-graph-invariants.js";
+import { currentTurnFenceSlot, TurnFenceRejectedError } from "../../orchestrator-v5/session/turn-fence.js";
+import { registrationTurnId } from "../../orchestrator-v5/graph-registration/registration-identity.js";
 
 
 
@@ -1132,5 +1134,164 @@ describe("register — a replay-stable construction identity", () => {
     const res = await post(app, SID, { graph: IMPORTED, operation_id: "not-a-uuid" });
     expect(res.statusCode).toBe(422);
     expect(append).not.toHaveBeenCalled();
+  });
+});
+
+
+/**
+ * ⛔ A REGISTRATION IS A GRAPH WRITE, SO IT TAKES A PLACE IN THE TURN FENCE.
+ *
+ * Measured on deployed staging (22 Sep 23:22:42Z / 23:42:15Z, scenario
+ * 450acd25): both registrations logged level-50 `v5.turn_fence.no_ingress_fence`
+ * and wrote UNFENCED. The store reads the fence from the request's async
+ * context, so the assertion that matters is what the store SEES at the moment
+ * of the write — not that some fence function was called somewhere.
+ */
+describe("register — the write is ordered by the turn fence", () => {
+  const SID = "3d9c2f1e-7b4a-4c8e-9f0d-1a2b3c4d5e6f";
+  const OP = "5b1e9c7a-2d4f-4a6b-8c0e-9f1a2b3c4d5e";
+  const claimTurnFence = vi.fn();
+  beforeEach(() => {
+    (store as Record<string, unknown>).claimTurnFence = claimTurnFence;
+    claimTurnFence.mockReset();
+    claimTurnFence.mockImplementation(async (scenarioId: string, turnId: string) => ({ scenarioId, turnId, generation: 41 }));
+  });
+
+  it("RED: the store sees an ADMITTED fence handle for THIS registration's own identity", async () => {
+    const seen: Array<ReturnType<typeof currentTurnFenceSlot>> = [];
+    append.mockImplementation(async () => { seen.push(currentTurnFenceSlot()); return { id: "turn-1" }; });
+    const app = await buildApp();
+    const res = await post(app, SID, { graph: IMPORTED, operation_id: OP });
+    expect(res.statusCode).toBe(200);
+    const expectedTurn = registrationTurnId(SID, OP);
+    expect(append.mock.calls[0][0].turn_id).toBe(expectedTurn);
+    expect(seen).toHaveLength(1);
+    expect(seen[0], "the write reached the store with no fence slot — UNFENCED").toBeDefined();
+    expect(seen[0]!.scenarioId).toBe(SID);
+    expect(seen[0]!.turnId).toBe(expectedTurn);
+    expect(seen[0]!.handle?.generation).toBe(41);
+    // Claimed once, for the same identity, BEFORE the write.
+    expect(claimTurnFence).toHaveBeenCalledTimes(1);
+    expect(claimTurnFence).toHaveBeenCalledWith(SID, expectedTurn);
+    expect(claimTurnFence.mock.invocationCallOrder[0]).toBeLessThan(append.mock.invocationCallOrder[0]);
+    await app.close();
+  });
+
+  it("a request the route REFUSES never claims a generation — refusals stay fence-neutral", async () => {
+    const app = await buildApp();
+    const res = await post(app, SID, { graph: IMPORTED, operation_id: "not-a-uuid" });
+    expect(res.statusCode).toBe(422);
+    expect(claimTurnFence).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it.each([
+    ["superseded", 409, "TURN_SUPERSEDED"],
+    ["stopped", 409, "TURN_STOPPED"],
+  ] as const)("a %s write answers %i %s, never 200", async (verdict, status, code) => {
+    append.mockRejectedValue(new TurnFenceRejectedError("refused", { verdict, generation: 41, maxGeneration: 42 } as never));
+    const app = await buildApp();
+    const res = await post(app, SID, { graph: IMPORTED, operation_id: OP });
+    expect(res.statusCode).toBe(status);
+    expect(res.json().details?.code).toBe(code);
+    await app.close();
+  });
+
+  it("RED: a structurally INVALID registration is refused BEFORE it claims — zero claims, zero appends", async () => {
+    // Independent review of #1706: the claim ran before the invariant check, so
+    // an ingress-valid duplicate-id import advanced the generation and could
+    // supersede a valid in-flight turn while writing nothing.
+    const DUP: WireGraph = { ...IMPORTED, nodes: [...IMPORTED.nodes, { ...IMPORTED.nodes[0]!, label: "a second node re-using an existing id" }] };
+    const app = await buildApp();
+    const res = await post(app, SID, { graph: DUP, operation_id: OP });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.code).toBe("GRAPH_INVARIANT_VIOLATION");
+    expect(claimTurnFence).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("CONTRAST: the same request with a VALID graph does claim, once", async () => {
+    const app = await buildApp();
+    const res = await post(app, SID, { graph: IMPORTED, operation_id: OP });
+    expect(res.statusCode).toBe(200);
+    expect(claimTurnFence).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it("a fence we could not claim or read is OUR outage — a retryable 503, never a conflict", async () => {
+    append.mockRejectedValue(new TurnFenceRejectedError("refused", { verdict: "unavailable", generation: null, maxGeneration: null } as never));
+    const app = await buildApp();
+    const res = await post(app, SID, { graph: IMPORTED, operation_id: OP });
+    expect(res.statusCode).toBe(503);
+    await app.close();
+  });
+});
+
+/**
+ * ⛔ A CALLER'S EXPECTATION IS CHECKED BEFORE ANY WRITE (#1712 review).
+ *
+ * `factor_value_edit` carries no base on the wire, so the Agent's one-approval
+ * path writes its values through THIS route with `expected_graph_hash` = the
+ * model the user approved. The load-bearing assertions are the ABSENCE of a
+ * write on a moved model and byte-identical behaviour for callers that send
+ * nothing (the UI import).
+ */
+describe("register — an optional caller expectation makes the write conditional", () => {
+  const current = () => computeExpectedGraphCasHashes(SERVER_PRE_IMPORT).expectedGraphAnalysisHash!;
+
+  it("POSITIVE CONTROL: the base the route reads has a non-null analysis hash, so the cases below are not vacuous", () => {
+    expect(typeof current()).toBe("string");
+    expect(current().length).toBeGreaterThan(0);
+  });
+
+  it("RED: a STALE expectation is refused 409 GRAPH_STALE — no fence claim, and NOTHING reaches the atomic writer", async () => {
+    const claim = vi.fn(async (scenarioId: string, turnId: string) => ({ scenarioId, turnId, generation: 7 }));
+    (store as Record<string, unknown>).claimTurnFence = claim;
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_hash: "not-the-current-hash" });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().details.code).toBe("GRAPH_STALE");
+    expect(res.json().details.current_graph_hash).toBe(current());
+    // A refused expectation must not advance the scenario's order (#1706's rule).
+    expect(claim).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("a MATCHING expectation writes, and reports the analysis hash of the bytes it stored", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_hash: current() });
+    expect(res.statusCode).toBe(200);
+    const stored = writtenGraph();
+    expect(res.json().graph_hash).toBe(computeExpectedGraphCasHashes(stored).expectedGraphAnalysisHash);
+    await app.close();
+  });
+
+  it("CONTRAST: with NO expectation the route writes exactly as before", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED });
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it("a malformed expectation is refused before any database work", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_hash: "" });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.code).toBe("EXPECTED_GRAPH_HASH_INVALID");
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("a base that cannot be read cannot adjudicate an expectation: 503, never an unconditional write", async () => {
+    loadGraph.mockRejectedValue(new Error("db blip"));
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_hash: current() });
+    expect(res.statusCode).toBe(503);
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
   });
 });

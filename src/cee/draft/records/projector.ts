@@ -1127,7 +1127,7 @@ const CLAIM_KIND_TO_NODE_KIND: Readonly<Record<string, ProjectedNode["kind"] | n
  * inferred current value does not attest a user baseline, establish a constraint
  * frame, or make that quantity convertible by downstream analysis.
  */
-const LEVEL_BEARING_CLAIM_NODE_KINDS: ReadonlySet<ProjectedNode["kind"]> = new Set([
+export const LEVEL_BEARING_CLAIM_NODE_KINDS: ReadonlySet<ProjectedNode["kind"]> = new Set([
   "factor",
   "risk",
   "outcome",

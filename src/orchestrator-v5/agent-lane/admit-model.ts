@@ -140,6 +140,11 @@ export interface AdmittedNode {
    * `tsconfig.build.json` — which excludes tests — reported clean.
    */
   observed_state?: { value: number; unit?: string; source?: string; raw_value?: number; cap?: number; declared_scale?: string };
+  /**
+   * `cee-v3.ts` `scale_frame`: the divisor this factor's levels are stated
+   * on, for a factor with no baseline. The declared carrier; see the write site.
+   */
+  scale_frame?: number;
   goal_threshold?: number;
   /** `cee-v3.ts:210`. A threshold with no unit is not a threshold. */
   goal_threshold_unit?: string;
@@ -425,12 +430,28 @@ export function admitCandidateModel(
           : {}),
         // ⭐ THE FRAME TRAVELS WITH THE NODE, not only with the baseline. A
         // factor with no value today still needs its range, because the value
-        // a user adopts LATER is normalised against it — and no system event
-        // can set a cap afterwards (measured: `factor_value_edit` accepts a
-        // `{value, raw_value}` pair, returns 200, and stores `raw === value`).
+        // a user adopts LATER is normalised against it, and so is every level
+        // an option sets on it (the interventions below divide by this same
+        // lookup).
+        //
+        // ⛔ IT MUST BE THE DECLARED CARRIER, `scale_frame`. This used to write
+        // a node-level `cap`. `NodeV3` does not declare one, so every parse
+        // strips it, and the edit seam parses first. MEASURED on staging
+        // 29ffda8a (Paul's session, 450acd25): the option's level sat on the
+        // construction range, the user's later "5 FTE" found no frame, and the
+        // adoption path derived a SECOND range (0 to 10) from the figure. Two
+        // frames for one factor, and "hire two developers" read as shrinking
+        // the team. `scale_frame` is what the draft's pass 3d writes on a
+        // framed factor with no baseline (`records/projector.ts`), and what
+        // the value writer reads (`normalise-factor-value.ts`, "FRAMED").
+        //
+        // Written only when there is NO baseline. A baselined factor carries
+        // its frame inside `observed_state` (above), and a second carrier
+        // there could disagree with an unframed pair.
         ...((): Record<string, number> => {
+          if (f.baseline_known && typeof f.baseline_value === 'number') return {};
           const c = capFor(f.label) ?? f.plausible_max;
-          return typeof c === 'number' && c > 1 ? { cap: c } : {};
+          return typeof c === 'number' && Number.isFinite(c) && c > 1 ? { scale_frame: c } : {};
         })(),
       },
     })),

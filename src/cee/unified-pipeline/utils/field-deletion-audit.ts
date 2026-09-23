@@ -51,6 +51,10 @@ export interface PreviousFieldState {
   previous_unit?: string;
   /** The cap the value was normalised against, when present. */
   previous_cap?: number;
+  /** The user's own declaration of what their number meant, when present. */
+  previous_declared_scale?: unknown;
+  /** JSON-safe descriptor of `previous_value` — NaN/Infinity/undefined survive here. */
+  previous_value_repr?: string;
   /**
    * The provenance the node carried BEFORE the mutation relabelled it.
    * ⚠ Read as a record of what the pipeline claimed, never as proof the user
@@ -66,6 +70,8 @@ export interface PreviousFieldState {
 }
 
 export interface FieldDeletionEvent extends PreviousFieldState {
+  /** Node kind, so a log line cannot misname what it dropped. */
+  node_kind?: unknown;
   /** Pipeline stage that performed the deletion */
   stage: string;
   /** Node ID on which the field was deleted */
@@ -89,6 +95,7 @@ export type FieldDeletionReason =
   | 'EXTERNAL_HAS_DATA'
   | 'OBSERVABLE_EXTRA_DATA'
   | 'CATEGORY_OVERRIDE_STRIP'
+  | 'OBSERVED_STATE_NOT_NUMERIC'
   | 'TELEMETRY_CAP_REACHED';
 
 /**
@@ -102,6 +109,7 @@ export const FIELD_DELETION_REASON_DESCRIPTIONS: Record<FieldDeletionReason, str
   EXTERNAL_HAS_DATA: 'Prohibited field removed from external factor',
   OBSERVABLE_EXTRA_DATA: 'Extra controllable-only field removed from observable factor',
   CATEGORY_OVERRIDE_STRIP: 'Controllable-only field stripped during STRP category override',
+  OBSERVED_STATE_NOT_NUMERIC: 'Level-bearing observed_state removed: value absent, or not a finite number (unparseable, or an infinite magnitude nothing can use)',
   TELEMETRY_CAP_REACHED: 'Per-stage field deletion telemetry cap reached; remaining events truncated',
 };
 
@@ -132,6 +140,8 @@ export function fieldDeletion(
   if (previous.previous_raw_value !== undefined) event.previous_raw_value = previous.previous_raw_value;
   if (previous.previous_unit !== undefined) event.previous_unit = previous.previous_unit;
   if (previous.previous_cap !== undefined) event.previous_cap = previous.previous_cap;
+  if (previous.previous_declared_scale !== undefined) event.previous_declared_scale = previous.previous_declared_scale;
+  if (previous.previous_value_repr !== undefined) event.previous_value_repr = previous.previous_value_repr;
   if (previous.previous_provenance !== undefined) event.previous_provenance = previous.previous_provenance;
   if ("stated_item_id" in previous) event.stated_item_id = previous.stated_item_id ?? null;
   return event;
