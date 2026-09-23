@@ -91,6 +91,7 @@ import { runLateStrp } from "./late-strp.js";
 import { runEdgeRestoration } from "./edge-restoration.js";
 import { runConnectivity } from "./connectivity.js";
 import { runStructuralParse } from "./structural-parse.js";
+import { runObservedStateNumerics } from "./observed-state-numerics.js";
 import { applyDeterministicEnforcement } from "./graph-enforcement.js";
 
 /**
@@ -169,6 +170,12 @@ export async function runStageRepair(ctx: StageContext): Promise<void> {
   // topology errors (e.g. INVALID_EDGE_TYPE from surviving option shortcuts).
   applyDeterministicEnforcement(ctx);
   if (ctx.earlyReturn) return;
+
+  // Substep 9c: observed_state numeric normalisation.
+  // MUST precede the structural parse: this is the only pass that can see
+  // observed_state at all (graph-validator is blind to it), so it is the
+  // last chance to repair before the Zod net, which has no repair branch.
+  runObservedStateNumerics(ctx);
 
   // Substep 10: Structural parse (Zod safety net)
   runStructuralParse(ctx);
