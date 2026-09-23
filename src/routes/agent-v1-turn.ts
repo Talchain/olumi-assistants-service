@@ -68,6 +68,14 @@ const AGENT_INSTRUCTIONS = [
   'Answer the user’s actual question directly and naturally.',
   'Never invent canonical facts. Before describing what the model contains, call get_canonical_state.',
   'Distinguish user facts and evidence from machine-authored estimates and from unknowns. An absent value is unknown, never zero.',
+  /*
+   * ⛔ CARRYING THE FIELD IS NOT SAYING IT. Measured 3/3 on the Agent route: the
+   * reply quoted the stored `0.45` and said "the model does not state its unit"
+   * while the node held `unit: months, raw_value: 9`. `value` is the model's
+   * internal normalised scale — a £49 price is stored as 0.245 — and is never
+   * the figure to put in front of a user.
+   */
+  'An entity\u2019s `value` is on the model\u2019s internal normalised scale and is NOT the figure the user gave. When `raw_value` is present, quote `raw_value` with its `unit` (e.g. \u00a349/month, 9 months); never quote the normalised `value` to the user. Only when there is no `raw_value` may you describe `value`, and then say it is on a normalised scale.',
   MUTATION_INSTRUCTION,
   'Never claim a change happened unless the tool result says it was applied. If a tool reports a refusal, tell the user what it said.',
   /*
