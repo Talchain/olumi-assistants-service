@@ -28,6 +28,8 @@ import {
 } from '../config/model-assignment.js';
 import { requiresMaxCompletionTokens } from '../adapters/llm/openai.js';
 import { getDefaultModelForTask, isValidCeeTask } from '../config/model-routing.js';
+import { OPERATION_TO_TASK_ID } from '../prompts/operations.js';
+import { getSystemPromptSnapshot } from '../adapters/llm/prompt-loader.js';
 import { checkModelAvailability, getModelErrorSummary, recordModelError, fetchOpenAIModels, getAnthropicModels } from '../services/model-availability.js';
 import { verifyAdminKey } from '../middleware/admin-auth.js';
 import { ADMIN_LLM_TIMEOUT_MS, ADMIN_REASONING_TIMEOUT_MS, ADMIN_REASONING_HIGH_TIMEOUT_MS } from '../config/timeouts.js';
@@ -198,6 +200,25 @@ interface TestPromptLLMResponse {
     content_hash: string;
     content_preview: string;
     content_length: number;
+    /**
+     * Which lookup supplied the bytes this result ran against.
+     *
+     * `store_version` — the requested `version` was found in the prompt store and
+     * tested, which is the version-pinned question this harness was built for.
+     *
+     * `live_resolver` — the store held no record for `id`, so the RUNTIME
+     * resolver (`getSystemPromptSnapshot`, the same path every live call site
+     * uses) supplied what is live NOW. In that case `version` above echoes the
+     * REQUEST and `live_prompt_version` is the authority.
+     *
+     * ⚠ Present so a bake-off result can never be mistaken for the other
+     * question. Before the fallback existed, asking for a PMS-served prompt like
+     * `draft_graph` simply 404'd, which is why no model comparison existed for
+     * the call that dominates a turn.
+     */
+    resolved_via: 'store_version' | 'live_resolver';
+    live_prompt_version?: string;
+    live_prompt_source?: string;
   };
 
   llm?: {
@@ -1127,24 +1148,107 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
 
       // Load prompt definition
       const prompt = await store.get(prompt_id);
-      if (!prompt) {
+
+      /**
+       * ⭐ THE HARNESS COULD NOT TEST THE PROMPTS THE PRODUCT ACTUALLY RUNS, and
+       * that made model selection unmeasurable.
+       *
+       * This route is the only instrument for comparing models on a real prompt:
+       * it holds `prompt_id` + `version` constant and varies `model` /
+       * `reasoning_effort` / `seed`, which is what de-confounds a bake-off. But
+       * it resolved prompts through the store's raw CRUD (`store.get`), while
+       * every runtime call site resolves through the PMS-backed RESOLVER
+       * (`getSystemPromptSnapshot`, e.g. unified-pipeline/stages/parse.ts:195 and
+       * validation-pipeline/validate-graph.ts:137).
+       *
+       * Measured consequence, on deployed staging:
+       *   POST /admin/v1/test-prompt-llm {"prompt_id":"draft_graph","version":202}
+       *     -> 404 {"error":"not_found","message":"Prompt 'draft_graph' not found"}
+       *   GET  /admin/prompts/status
+       *     -> {"key":"draft_graph","source":"pms","version":"202","disposition":"live"}
+       *
+       * The status route can see it because IT uses the resolver. So the one call
+       * that dominates a turn had never been compared against an alternative —
+       * not because nobody tried, but because the tool 404s on it.
+       *
+       * ⚠ THE FALLBACK IS NOT A SILENT EQUIVALENCE. A store hit tests a SPECIFIC
+       * VERSION; the resolver returns whatever is LIVE NOW. Those are different
+       * questions, so the response says which one it answered (`resolved_via`)
+       * and reports the live version it actually used. A bake-off result that
+       * could not say which bytes it ran would be worthless.
+       */
+      let compiledContent: string;
+      let resolvedVia: 'store_version' | 'live_resolver';
+      let liveVersion: string | undefined;
+      let liveSource: string | undefined;
+
+      if (prompt) {
+        // Find specific version
+        const versionData = prompt.versions.find((v) => v.version === version);
+        if (!versionData) {
+          return reply.status(404).send({
+            error: 'not_found',
+            message: `Version ${version} not found for prompt '${prompt_id}'`,
+          });
+        }
+        // Compile prompt content (interpolate variables if any)
+        compiledContent = interpolatePrompt(versionData.content, {});
+        resolvedVia = 'store_version';
+        // ⛔ GATED ON THE RESOLVER'S OWN CAPABILITY, NOT ON `isValidCeeTask`.
+        // THOSE ARE DIFFERENT SETS, and conflating them was this PR's first
+        // wrong boundary (caught in review, source-derived):
+        // `model-routing.ts` admits `explain_diff` and `routing` as CEE tasks,
+        // but neither appears in `prompts/operations.ts` — and
+        // `getSystemPromptSnapshot` THROWS on an unmapped operation
+        // (`prompt-loader.ts:660-663`, "Unknown LLM operation"). So the old
+        // gate sent those two into the catch-all and the route answered **500**.
+        //
+        // ⚠ The condition below is the resolver's own, imported rather than
+        // mirrored: `OPERATION_TO_TASK_ID[operation]` is the exact lookup
+        // `getSystemPromptSnapshot` performs before it throws. A hand-kept list
+        // here would drift the moment an operation is added.
+      } else if (OPERATION_TO_TASK_ID[prompt_id] !== undefined) {
+        const snapshot = await getSystemPromptSnapshot(prompt_id);
+        if (!snapshot?.content) {
+          return reply.status(404).send({
+            error: 'not_found',
+            // Names BOTH attempts, so an operator is not left guessing which
+            // lookup failed — the original message claimed the prompt did not
+            // exist when it demonstrably did.
+            message: `Prompt '${prompt_id}' not found in the store, and the runtime resolver returned no content for it`,
+          });
+        }
+        compiledContent = snapshot.content;
+        liveVersion = snapshot.meta?.prompt_version;
+        liveSource = snapshot.meta?.source;
+        resolvedVia = 'live_resolver';
+      } else if (isValidCeeTask(prompt_id)) {
+        // ⭐ A REAL CEE TASK THIS INSTRUMENT CANNOT TEST — say so, in 4xx,
+        // BEFORE any provider call. Never 500, and never a fabricated default:
+        // an instrument that promises a broader resolvable surface than it
+        // implements produces evidence that cannot name its own bytes, and this
+        // harness has already cost a lane once that way.
+        //
+        // ⛔ DO NOT "fix" this by aliasing the missing operations. `routing`'s
+        // runtime loader goes through the `orchestrator` PMS alias with a
+        // routing-specific default and a size guard (`estate.ts:85-107`), so
+        // generic bytes would answer a DIFFERENT question while looking right.
+        return reply.status(422).send({
+          error: 'unsupported_operation',
+          message:
+            `Prompt '${prompt_id}' is a valid CEE task but has no prompt-operation mapping, ` +
+            `so this harness cannot resolve the bytes its runtime actually uses. ` +
+            `Supported operations: ${Object.keys(OPERATION_TO_TASK_ID).sort().join(', ')}`,
+        });
+      } else {
         return reply.status(404).send({
           error: 'not_found',
+          // Unchanged behaviour for a genuinely unknown id: not in the store and
+          // not a known CEE task, so there is nothing to resolve.
           message: `Prompt '${prompt_id}' not found`,
         });
       }
 
-      // Find specific version
-      const versionData = prompt.versions.find((v) => v.version === version);
-      if (!versionData) {
-        return reply.status(404).send({
-          error: 'not_found',
-          message: `Version ${version} not found for prompt '${prompt_id}'`,
-        });
-      }
-
-      // Compile prompt content (interpolate variables if any)
-      const compiledContent = interpolatePrompt(versionData.content, {});
       const contentHash = createHash('sha256').update(compiledContent).digest('hex');
 
       // Determine model to use
@@ -1153,7 +1257,7 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       // callLLMWithPrompt(), matching the live router contract.
       let model = modelOverride;
       // Check prompt's per-prompt model configuration
-      if (!model && prompt.modelConfig) {
+      if (!model && prompt?.modelConfig) {
         // Use environment-specific model based on prompt status
         const env = prompt.status === 'production' ? 'production' : 'staging';
         const promptModel = prompt.modelConfig[env];
@@ -1162,9 +1266,13 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
+      // On the live-resolver path there is no store record, so the task id IS
+      // the prompt id — that is precisely why the resolver could find it.
+      const effectiveTaskId = prompt?.taskId ?? prompt_id;
+
       // Fall back to task defaults if no prompt-specific model
-      if (!model && prompt.taskId && isValidCeeTask(prompt.taskId)) {
-        model = getDefaultModelForTask(prompt.taskId);
+      if (!model && effectiveTaskId && isValidCeeTask(effectiveTaskId)) {
+        model = getDefaultModelForTask(effectiveTaskId);
       }
 
       if (!model) {
@@ -1269,7 +1377,7 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       // `divergences` therefore means "none established for this composition",
       // never "this run is faithful" — which is exactly what `notice` says.
       const harnessDivergences: string[] = [];
-      if (prompt.taskId === 'draft_graph' && llmResult.provider === 'anthropic') {
+      if (effectiveTaskId === 'draft_graph' && llmResult.provider === 'anthropic') {
         harnessDivergences.push(DRAFT_GRAPH_DIVERGENCE);
       }
 
@@ -1295,6 +1403,20 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
           content_hash: contentHash,
           content_preview: compiledContent.substring(0, 500) + (compiledContent.length > 500 ? '...' : ''),
           content_length: compiledContent.length,
+          // ⚠ WHICH BYTES THIS RESULT ACTUALLY RAN, on the wire rather than in a
+          // PR description. `store_version` means the requested `version` was
+          // found in the store and tested. `live_resolver` means the store had no
+          // record and the RUNTIME resolver supplied whatever is live now — so
+          // the `version` echoed above was the REQUEST, not necessarily what ran,
+          // and `live_prompt_version` is the authority.
+          //
+          // This harness has already cost a lane once by letting a result be read
+          // as something it was not — the fidelity notice above exists for the
+          // same reason. A bake-off that cannot say which bytes it ran is not
+          // evidence, so this rides every response instead of a doc.
+          resolved_via: resolvedVia,
+          ...(liveVersion ? { live_prompt_version: liveVersion } : {}),
+          ...(liveSource ? { live_prompt_source: liveSource } : {}),
         },
         llm: {
           model: llmResult.model,
