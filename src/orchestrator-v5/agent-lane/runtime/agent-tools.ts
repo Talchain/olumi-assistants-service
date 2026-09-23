@@ -107,6 +107,32 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function',
+    name: 'propose_new_option',
+    description:
+      'Add an option the user has just asked for, when the model does NOT already have it. '
+      + 'This does NOT change anything: it records an exact proposal and returns its id, which you keep for '
+      + 'authorise_change: show the user the option and what it will be linked to, never the id, before asking them to approve. '
+      + 'Name the factors it would change, using the labels get_canonical_state returned — an option linked to nothing '
+      + 'cannot be compared and blocks the comparison for every other option. '
+      + 'It adds the option and its links ONLY; say what it does to each factor afterwards with propose_option_interventions.',
+    parameters: obj({
+      label: { type: 'string', description: 'The option in the user\u2019s own words.' },
+      acts_on: {
+        type: 'array',
+        description: 'The factors this option would change, and which way. At least one.',
+        items: obj({
+          factor_label: { type: 'string' },
+          direction: {
+            type: 'string', enum: ['positive', 'negative'],
+            description: 'Whether this option pushes the factor up or down. State it; never guess it for the user.',
+          },
+        }, ['factor_label', 'direction']),
+      },
+      rationale: { type: 'string', description: 'Why this option is worth comparing, in the user\u2019s terms.' },
+    }, ['label', 'acts_on', 'rationale']),
+  },
+  {
+    type: 'function',
     name: 'propose_option_interventions',
     description:
       'Propose the level an option sets a factor to \u2014 what the option actually DOES. An option ' +
@@ -178,7 +204,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'authorise_change'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'authorise_change'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -204,6 +230,9 @@ export interface AgentCapabilities {
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
     assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
+  }): Promise<ToolResult>;
+  proposeNewOption(ctx: AgentToolContext, args: {
+    label: string; acts_on: { factor_label: string; direction: 'positive' | 'negative' }[]; rationale: string;
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
     interventions: readonly { option_label: string; factor_label: string; value: number; basis: string }[];
@@ -247,6 +276,8 @@ export async function dispatchTool(
       return caps.buildModelFromBrief(ctx, args as never);
     case 'propose_assumptions':
       return caps.proposeAssumptions(ctx, args as never);
+    case 'propose_new_option':
+      return caps.proposeNewOption(ctx, args as never);
     case 'propose_option_interventions':
       return caps.proposeOptionInterventions(ctx, args as never);
     case 'propose_starting_point':
