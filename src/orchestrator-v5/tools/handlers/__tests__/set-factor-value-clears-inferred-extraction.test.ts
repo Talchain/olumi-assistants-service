@@ -26,13 +26,14 @@
  * `ObservedStateV3.extractionType` is `z.enum(["explicit","inferred","range",
  * "observed"])`. No member means "the user typed it in the product": every
  * member describes how the PIPELINE read the BRIEF, and `explicit`/`observed`
- * are read as BRIEF-backed by `nodeProvenanceDisplay` (→ `from_brief`),
- * `classifyFactorValueTier` (→ `explicit`, so `mayClaimFromBrief` true) and
- * `compactGraph` (→ `from_brief`). Stamping one would trade "Olumi inferred
- * your number" for "your number came from your brief" — a different untruth.
+ * are read as BRIEF-backed by `nodeProvenanceDisplay` (→ `from_brief`) and
+ * `classifyFactorValueTier` (→ `explicit`, so `mayClaimFromBrief` true), neither
+ * of which consults `source`. Stamping one would trade "Olumi inferred your
+ * number" for "your number came from your brief" — a different untruth.
  * Absence is the shape the UI's own `USER_VALUE_STAMP` (`{ source:
- * 'user_override' }`) already writes, and every authorship reader in CEE
- * consults `observed_state.source` FIRST, so absence cannot demote the value.
+ * 'user_override' }`) already writes, and CEE's authorship authorities
+ * (`structureProvenance`, `compactGraph`) consult `observed_state.source` FIRST,
+ * so absence cannot demote the value.
  *
  * ── RUNS THE REAL CHAIN ───────────────────────────────────────────────────
  * `applyFactorValueEdit` is called for real: validator → `set_factor_value` →
