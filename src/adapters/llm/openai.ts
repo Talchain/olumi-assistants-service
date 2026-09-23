@@ -1326,7 +1326,16 @@ export class OpenAIAdapter implements LLMAdapter {
 
     try {
       const apiClient = getClient();
-      const modelParams = buildModelParams(this.model, temperature, { maxTokens });
+      // `reasoningEffort` is threaded from the caller so a call site can choose
+      // it. Omitting it keeps `buildModelParams`' existing `?? "medium"` default
+      // (:181), so every existing caller stays byte-identical — the only change
+      // is that a caller CAN now say otherwise, which none of the six sites
+      // could before. Ignored for non-reasoning models by the
+      // `isReasoningModel` branch, exactly as `thinking` is Anthropic-only.
+      const modelParams = buildModelParams(this.model, temperature, {
+        maxTokens,
+        reasoningEffort: args.reasoningEffort,
+      });
 
       const response = await withRetry(
         async () =>

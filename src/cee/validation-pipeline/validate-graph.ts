@@ -174,6 +174,50 @@ export async function callValidateGraph(
       userMessage,
       maxTokens,
       responseFormat: 'json_object',
+      // ⭐ THIS CALL IS ENTIRELY OUTPUT-TOKEN-BOUND, AND ITS OUTPUT IS MOSTLY
+      // REASONING — so effort is the only knob that moves it.
+      //
+      // Measured on 795 joined pass2_call_start/pass2_call_complete pairs,
+      // 19–23 Sep, o4-mini 800/800: output_tokens p50 4,241 at a completion
+      // throughput of p50 153.5 tok/s = 27.6s, against a measured p50 latency of
+      // 28.0s. Everything else — network, the 2,609-token prefill, any prompt
+      // cache — is under 2% of the call. Input-side optimisation cannot help it.
+      //
+      // Reasoning is ≥90% of those output tokens, by THIS FILE'S OWN banked
+      // measurement (see the header, :36-95): at `max_completion_tokens` 4,096
+      // the same call "returned empty content in 30,092 ms with the request
+      // otherwise successful" — the cap was exhausted during reasoning before
+      // any content was emitted — while the sibling call at 16,384 consumed
+      // 4,560 completion tokens. So ≥4,096 of ~4,560 tokens were reasoning.
+      //
+      // WHAT IT COSTS TODAY. Pass 2 is fired at `unified-pipeline/index.ts:1220`
+      // and awaited at `:1481`, so it runs CONCURRENTLY with the coaching pass
+      // and the code states its own charge as `max(0, PASS2 - COACHING)`. It
+      // EXCEEDS coaching on 552/612 = 90.2% of turns, and the residual wait it
+      // adds is p50 7,209ms / p90 16,864ms — 13.2% of a 52.7s turn.
+      //
+      // ⭐ AND IT ALREADY COSTS CAPABILITY, WHICH IS THE STRONGER ARGUMENT:
+      // 24 of 800 turns (3.0%) carry `validation_pipeline_abandoned_after_ms`
+      // and shipped the draft with NO contested-edge metadata at all, because
+      // the 25s attach deadline expired first. A faster pass does not just save
+      // seconds — it converts those turns from "no metadata" to "metadata".
+      //
+      // ⚠ THE TRADE, STATED RATHER THAN HIDDEN: this is a REVIEW call, so less
+      // reasoning may detect fewer contested edges. I could not bake that off —
+      // the estate's harness (`POST /admin/v1/test-prompt-llm`) cannot resolve
+      // the live PMS prompts, so no model/effort comparison is available yet.
+      // Two things make 'low' the right default anyway: the value it replaces is
+      // NOT a measured choice (it is `buildModelParams`' `?? "medium"` fallback,
+      // which no call site could ever override), and this output is an advisory
+      // enrichment — the turn ships without it on timeout by design, so the
+      // failure mode of too little reasoning is the one the pipeline already
+      // tolerates 3% of the time.
+      //
+      // MEASURABLE IMMEDIATELY, no new telemetry needed: `pass2_call_complete`
+      // (:183-186) already logs `latency_ms`, `input_tokens` and output tokens,
+      // and the n=795 baseline above is already captured. If latency does not
+      // fall or abandonments do not, revert this one word.
+      reasoningEffort: 'low',
     },
     { ...callOpts, timeoutMs: callOpts.timeoutMs ?? VALIDATION_PIPELINE_TIMEOUT_MS },
   );

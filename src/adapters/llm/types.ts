@@ -336,6 +336,23 @@ export interface ChatArgs {
   temperature?: number;
   /** Maximum tokens to generate (default: 4096) */
   maxTokens?: number;
+  /**
+   * OpenAI reasoning models only (`isReasoningModel`) — non-OpenAI adapters and
+   * non-reasoning models ignore it, exactly as `thinking` is Anthropic-only.
+   *
+   * ⛔ WHY THIS FIELD HAD TO BE ADDED RATHER THAN JUST SET. `buildModelParams`
+   * has accepted `reasoningEffort` since it was written, defaults it to
+   * `"medium"` (`openai.ts:181`) and applies it at `openai.ts:196` — but NONE of
+   * its six call sites ever passed one (`:492, :957, :1083, :1329, :1469`). So
+   * the knob was fully built and unreachable: every reasoning-model call in
+   * production shipped the default, and no caller could say otherwise. There was
+   * no flag to flip and no config to set; the parameter simply had no route from
+   * a caller to the adapter.
+   *
+   * ⚠ `"medium"` was never a measured choice either — it is the `??` fallback.
+   * Treat it as the unexamined default it is, not as a tuned value.
+   */
+  reasoningEffort?: 'low' | 'medium' | 'high';
   /** When 'json_object', instructs the provider to return valid JSON only.
    *  OpenAI: sets response_format. Anthropic: no-op (prompt must enforce). */
   responseFormat?: 'json_object';
