@@ -11,6 +11,7 @@ import {
   OUTSIDE_VIEW_TRIGGER_ID,
   OUTSIDE_VIEW_CLAIM_ID,
   assessOutsideViewEligibility,
+  dskStageForProductStage,
   quantityFraming,
   type OutsideViewInputs,
 } from '../outside-view-eligibility.js';
@@ -180,15 +181,43 @@ describe('unprecedented is only ever the user’s own claim, never inferred', ()
   });
 });
 
-describe('stage applicability is exact-token, from the bundle', () => {
-  it.each(['frame', 'evaluate'])('applies at %s', (stage) => {
+describe('stage applicability crosses the two vocabularies', () => {
+  // DSK-P-002 applies at ['frame','evaluate']. The PRODUCT has no 'evaluate' —
+  // it says 'analyse'. Passing the product stage straight in made half this
+  // protocol's applicability permanently unreachable.
+  it.each(['frame', 'analyse'])('applies at the PRODUCT stage %s', (stage) => {
     expect(assessOutsideViewEligibility(inputs({ stage })).eligibility).toBe('eligible');
   });
-  it.each(['ideate', 'decide', 'optimise', 'analyse', ''])('does not apply at %s', (stage) => {
+  it.each(['decide', 'review', 'ideate', 'optimise', ''])('does not apply at %s', (stage) => {
     const v = assessOutsideViewEligibility(inputs({ stage }));
     expect(v.eligibility).toBe('not_applicable');
     if (v.eligibility !== 'not_applicable') return;
     expect(v.reason).toBe('stage_not_applicable');
+  });
+  it('still accepts the DSK spelling directly, so a DSK-stage caller works too', () => {
+    expect(assessOutsideViewEligibility(inputs({ stage: 'evaluate' })).eligibility).toBe('eligible');
+  });
+});
+
+describe('\u2b50 the stage map is TOTAL over the product enum and lands in DSK space', () => {
+  it('every product Stage member maps to a real DECISION_STAGES member', async () => {
+    const boundary = await import('@talchain/schemas/boundary');
+    const stageEnum = (boundary as Record<string, unknown>)['Stage'] as
+      | { readonly options?: readonly string[]; readonly _def?: { values?: readonly string[] } }
+      | undefined;
+    const productStages = stageEnum?.options ?? stageEnum?._def?.values ?? [];
+    expect(productStages.length).toBeGreaterThan(0); // non-vacuity
+    const { DECISION_STAGES } = await import('../../../dsk/types.js');
+    for (const p of productStages) {
+      const mapped = dskStageForProductStage(p);
+      expect(DECISION_STAGES as readonly string[], `product stage ${p} -> ${mapped}`).toContain(mapped);
+    }
+  });
+
+  it('an UNKNOWN stage fails closed — it matches nothing rather than defaulting', () => {
+    expect(dskStageForProductStage('not_a_stage')).toBe('not_a_stage');
+    const v = assessOutsideViewEligibility(inputs({ stage: 'not_a_stage' }));
+    expect(v.eligibility).toBe('not_applicable');
   });
 });
 

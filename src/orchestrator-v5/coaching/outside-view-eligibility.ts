@@ -153,6 +153,48 @@ export function quantityFraming(text: string): QuantityFraming {
   };
 }
 
+/**
+ * ⭐⭐ THE TWO STAGE VOCABULARIES ARE DIFFERENT, AND THE OVERLAP IS ONLY HALF.
+ *
+ * Measured: the product's wire `Stage` (schemas `boundary`) is
+ * `['frame','analyse','decide','review']`. The DSK bundle's `DecisionStage`
+ * (`src/dsk/types.ts:8-13`) is `['frame','ideate','evaluate','decide','optimise']`.
+ * They share only `frame` and `decide`.
+ *
+ * DSK-P-002's `stage_applicability` is `['frame','evaluate']` — and `evaluate` is
+ * NOT a product stage. So passing a product stage straight into an exact-token
+ * applicability check silently makes HALF of this protocol's declared
+ * applicability unreachable: it can only ever match `frame`, and every analysis
+ * turn reads as not-applicable for a reason that is really a vocabulary mismatch.
+ * That is a declared threshold nothing mounts, and it is invisible in a green
+ * suite because the refusal looks like a correct refusal.
+ *
+ * ⚠ A PRIVATE TWIN OF THIS MAPPING ALREADY EXISTS, unexported, at
+ * `handlers/edit-graph-dispatch.ts` (`mapStageToDecisionStage`), and
+ * `coaching/typed-intent-directive.ts:117-131` documents choosing exact-token
+ * matching precisely BECAUSE it is not exported. The values here are identical to
+ * that twin, deliberately, and the accompanying spec pins this map's keys against
+ * the product enum and its values against `DECISION_STAGES` — both DERIVED from
+ * their own authorities — so the two cannot drift apart in silence.
+ */
+const PRODUCT_TO_DSK_STAGE: Readonly<Record<string, string>> = {
+  frame: 'frame',
+  analyse: 'evaluate',
+  decide: 'decide',
+  review: 'optimise',
+};
+
+/**
+ * The DSK stage a product stage stands for.
+ *
+ * ⛔ FAILS CLOSED on an unknown stage: an unmapped product stage returns the
+ * input unchanged, so it matches nothing rather than defaulting to an applicable
+ * stage. A new product stage therefore costs the offer, never a wrong offer.
+ */
+export function dskStageForProductStage(stage: string): string {
+  return PRODUCT_TO_DSK_STAGE[stage] ?? stage;
+}
+
 export type OutsideViewNotApplicableReason =
   | 'protocol_unavailable'
   | 'stage_not_applicable'
@@ -256,7 +298,8 @@ export function assessOutsideViewEligibility(input: OutsideViewInputs): OutsideV
   if (input.userStatesNoComparableCases) return na('user_states_no_comparable_cases');
 
   // 3. Applicability, exact-token against the bundle's own stage list.
-  if (!(protocol.stage_applicability ?? []).includes(input.stage as never)) {
+  const dskStage = dskStageForProductStage(input.stage);
+  if (!(protocol.stage_applicability ?? []).includes(dskStage as never)) {
     return na('stage_not_applicable');
   }
 
