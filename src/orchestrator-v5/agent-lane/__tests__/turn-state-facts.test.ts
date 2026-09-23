@@ -42,18 +42,28 @@ describe('what the server itself observed about this turn', () => {
     expect(collectTurnStateFacts(undefined)).toEqual({ rescaled: [], ranges_added: [] });
   });
 
-  it('⛔ drops an entry that cannot name WHICH option and factor it concerns', () => {
+  it('⛔ drops an entry that cannot name WHICH FACTOR it concerns', () => {
     // A rescaling the user cannot locate is not a disclosure, and a half-one is
     // worse than none because it looks like an answer.
+    //
+    // ⛔ CORRECTED. This used to require an `option` too, and asserted that a
+    // `{ factor }`-only entry was DROPPED. That was backwards: the sole producer
+    // of `rescaled_by_the_model` (`agent-capabilities.ts:1202`, feeding the emit
+    // at `:1292`) carries NO option, so the old rule dropped 100% of real
+    // entries and this very assertion was pinning the feature shut. `factor`
+    // alone names the change; an option-less entry is the NORMAL case.
     const out = collectTurnStateFacts([{
       rescaled_by_the_model: [
-        { factor: 'F', requested: 1, recorded: 2 },      // no option
-        { option: 'O', requested: 1, recorded: 2 },      // no factor
+        { factor: 'F', requested: 1, recorded: 2 },      // the PRODUCER's shape — kept
+        { option: 'O', requested: 1, recorded: 2 },      // no factor — unnameable, dropped
         null, 'nope', 7,
         RESCALED,
       ],
     }]);
-    expect(out.rescaled).toEqual([RESCALED]);
+    expect(out.rescaled).toEqual([
+      { factor: 'F', requested: 1, recorded: 2 },
+      RESCALED,
+    ]);
   });
 
   it('⛔ drops a range that could not be a denominator', () => {
@@ -120,5 +130,65 @@ describe('the agent route surfaces them, and only when there is something to say
     // conditional is what keeps its presence meaningful.
     const sidecar = ROUTE.slice(ROUTE.lastIndexOf('_agent: {'));
     expect(sidecar).toContain('stateFacts.rescaled.length > 0 || stateFacts.ranges_added.length > 0');
+  });
+});
+
+/**
+ * ⛔⛔⛔ THE FIXTURE ABOVE INVENTED A FIELD THE WIRE DOES NOT CARRY, so the whole
+ * rescale disclosure was DEAD and every assertion about it was green.
+ *
+ * PROVEN AT THE SOURCE, not argued. `rescaled_by_the_model` is emitted at exactly
+ * ONE site — `agent-capabilities.ts:1292` — and that return is fed by
+ * `const landed = applied.filter(...)` at `:1208`, which is fed by the
+ * `applied.push({...})` at `:1202`:
+ *
+ *     applied.push({ factor, requested, recorded })   // <- NO `option`
+ *
+ * The other push, at `:1111`, DOES carry `option` — but it feeds the block ending
+ * at `:1130`, which never emits `rescaled_by_the_model`. So the collector's
+ * `typeof e.option !== 'string' -> continue` dropped **100% of real entries**.
+ *
+ * `option` is not merely missing, it is SEMANTICALLY ABSENT on that path: a
+ * factor-value edit changes a factor, not one option's intervention. Requiring it
+ * was my error, not the producer's.
+ *
+ * This is my own doctrine's trap: a self-authored fixture is not evidence about
+ * the wire. These cases use the producer's shape.
+ */
+describe('the PRODUCER shape — a factor-value rescale carries no option', () => {
+  const PRODUCER_RESCALE = { factor: 'Monthly churn rate', requested: 3.5, recorded: 0.035 };
+
+  it('⛔ a rescale with NO option is collected, not dropped', () => {
+    const out = collectTurnStateFacts([{ rescaled_by_the_model: [PRODUCER_RESCALE] }]);
+    expect(out.rescaled, 'the sole producer emits no `option` — dropping it kills the feature').toHaveLength(1);
+    expect(out.rescaled[0]!.factor).toBe('Monthly churn rate');
+    expect(out.rescaled[0]!.requested).toBe(3.5);
+    expect(out.rescaled[0]!.recorded).toBe(0.035);
+  });
+
+  it('CONTRAST: an entry with an option still keeps it (the :1111 shape)', () => {
+    const out = collectTurnStateFacts([
+      { rescaled_by_the_model: [{ option: 'Two Developers', factor: 'Velocity', requested: 7, recorded: 0.7 }] },
+    ]);
+    expect(out.rescaled).toHaveLength(1);
+    expect(out.rescaled[0]!.option).toBe('Two Developers');
+  });
+
+  it('an entry with NO factor is still dropped — a nameless change cannot be disclosed', () => {
+    expect(collectTurnStateFacts([{ rescaled_by_the_model: [{ requested: 1, recorded: 2 }] }]).rescaled).toHaveLength(0);
+  });
+
+  it('de-dupes option-less entries by factor, and does not collapse two factors', () => {
+    const out = collectTurnStateFacts([
+      { rescaled_by_the_model: [PRODUCER_RESCALE, PRODUCER_RESCALE, { factor: 'Pro subscribers', requested: 2, recorded: 0.2 }] },
+    ]);
+    expect(out.rescaled.map((r) => r.factor)).toEqual(['Monthly churn rate', 'Pro subscribers']);
+  });
+
+  it("the producer's NaN sentinel becomes null, not NaN", () => {
+    const out = collectTurnStateFacts([
+      { rescaled_by_the_model: [{ factor: 'Churn', requested: Number.NaN, recorded: 0.04 }] },
+    ]);
+    expect(out.rescaled[0]!.requested, 'NaN is not a number a user can be shown').toBeNull();
   });
 });

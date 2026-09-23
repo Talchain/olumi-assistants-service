@@ -70,7 +70,17 @@ function rescaledCopy(facts: TurnStateFacts): { title: string; body: string } | 
   // from is not something a person can check or correct.
   const named = facts.rescaled
     .filter((r) => r.requested !== null && r.recorded !== null)
-    .map((r) => `${r.factor} for ${r.option} (you approved ${r.requested}, stored as ${r.recorded})`);
+    // ⛔⛔ `option` IS USUALLY ABSENT, and this interpolated it unconditionally.
+    // The sole producer of `rescaled_by_the_model` (`agent-capabilities.ts:1202`,
+    // feeding the emit at `:1292`) carries no option, so the real shape rendered
+    // "Monthly churn rate for undefined (you approved 3.5, stored as 0.035)".
+    // Showing a user the literal word "undefined" in a disclosure about their own
+    // number is worse than the silence this block replaced. The factor alone
+    // names the change on that path; the option is added only when it exists.
+    .map((r) => {
+      const where = typeof r.option === 'string' && r.option !== '' ? `${r.factor} for ${r.option}` : r.factor;
+      return `${where} (you approved ${r.requested}, stored as ${r.recorded})`;
+    });
   const unnamed = facts.rescaled.length - named.length;
   if (named.length > 0) {
     parts.push(`Some values were stored differently from the figures you approved: ${named.join('; ')}.`);

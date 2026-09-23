@@ -186,3 +186,43 @@ describe('a raw internal id must never reach the card', () => {
     expect(buildValueChangeBlocks(facts({ ranges_added: [{ factor: 'Active Subscribers', range: 500 }] }), AT)).toHaveLength(1);
   });
 });
+
+/**
+ * ⛔⛔ THE OPTION-LESS RESCALE IS THE NORMAL CASE, and the copy rendered
+ * `undefined` into it.
+ *
+ * The sole producer of `rescaled_by_the_model` (`agent-capabilities.ts:1202`,
+ * feeding the emit at `:1292`) carries NO `option`. The card body interpolated
+ * `${r.option}` unconditionally, so the real shape produced:
+ *
+ *     "Monthly churn rate for undefined (you approved 3.5, stored as 0.035)"
+ *
+ * Showing a user the literal word "undefined" in a disclosure about their own
+ * number is worse than the silence it replaced.
+ */
+describe('the disclosure names the factor alone when there is no option', () => {
+  const noOption = { factor: 'Monthly churn rate', requested: 3.5, recorded: 0.035 };
+
+  it('⛔ never renders the word "undefined"', () => {
+    const blocks = buildValueChangeBlocks(facts({ rescaled: [noOption] }), AT);
+    const text = JSON.stringify(blocks);
+    expect(blocks.length, 'precondition: a block IS produced for the real shape').toBeGreaterThan(0);
+    expect(text).not.toContain('undefined');
+    expect(text).not.toContain(' for undefined');
+  });
+
+  it('names the factor, the approved value and the stored value', () => {
+    const text = JSON.stringify(buildValueChangeBlocks(facts({ rescaled: [noOption] }), AT));
+    expect(text).toContain('Monthly churn rate');
+    expect(text).toContain('3.5');
+    expect(text).toContain('0.035');
+  });
+
+  it('CONTRAST: when an option IS present it is still named', () => {
+    const text = JSON.stringify(
+      buildValueChangeBlocks(facts({ rescaled: [{ option: 'Two Developers', factor: 'Velocity', requested: 7, recorded: 0.7 }] }), AT),
+    );
+    expect(text).toContain('Two Developers');
+    expect(text).toContain('Velocity');
+  });
+})

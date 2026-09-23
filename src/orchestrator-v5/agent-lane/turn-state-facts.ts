@@ -40,9 +40,17 @@
  * every node label), so this is no new exposure.
  */
 
-/** One approved value that was stored differently. */
+/**
+ * One approved value that was stored differently.
+ *
+ * ⚠ `option` IS OPTIONAL and usually ABSENT. The sole producer of
+ * `rescaled_by_the_model` is the factor-value path
+ * (`agent-capabilities.ts:1202`), which changes a factor rather than one option's
+ * intervention and so emits no option. Typing it as required is what made the
+ * collector drop every real entry.
+ */
 export interface RescaledValue {
-  readonly option: string;
+  readonly option?: string;
   readonly factor: string;
   readonly requested: number | null;
   readonly recorded: number | null;
@@ -67,7 +75,11 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function numberOrNull(value: unknown): number | null {
-  return typeof value === 'number' ? value : null;
+  // ⛔ `Number.NaN` IS the producer's sentinel for "no requested figure"
+  // (`agent-capabilities.ts:1204`: `typeof req === 'number' ? req : Number.NaN`),
+  // and `typeof NaN === 'number'`. Passing it through put `NaN` where a user
+  // would be shown a number. Finiteness, not typeof, is the question.
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 /**
@@ -92,12 +104,26 @@ export function collectTurnStateFacts(toolResults: readonly unknown[] | undefine
     for (const entry of Array.isArray(r.rescaled_by_the_model) ? r.rescaled_by_the_model : []) {
       const e = asRecord(entry);
       if (e === null) continue;
-      if (typeof e.option !== 'string' || typeof e.factor !== 'string') continue;
-      const key = `${e.option}\u0000${e.factor}`;
+      // ⛔⛔ `option` IS OPTIONAL, AND REQUIRING IT KILLED THIS FEATURE.
+      //
+      // Proven at the source: `rescaled_by_the_model` is emitted at exactly ONE
+      // site, `agent-capabilities.ts:1292`, fed by `const landed` at `:1208`,
+      // fed by the `applied.push({ factor, requested, recorded })` at `:1202` —
+      // which carries NO `option`. The other push (`:1111`) does carry one, but
+      // it feeds the block ending `:1130`, which never emits this key. So the
+      // old `typeof e.option !== 'string' -> continue` dropped **100% of real
+      // entries** and the disclosure could never fire.
+      //
+      // It is SEMANTICALLY absent there, not merely missing: a factor-value edit
+      // changes a factor, not one option's intervention. `factor` alone names the
+      // change, so `factor` is what is required.
+      if (typeof e.factor !== 'string' || e.factor === '') continue;
+      const option = typeof e.option === 'string' && e.option !== '' ? e.option : undefined;
+      const key = `${option ?? ''}\u0000${e.factor}`;
       if (seenRescaled.has(key)) continue;
       seenRescaled.add(key);
       rescaled.push({
-        option: e.option,
+        ...(option === undefined ? {} : { option }),
         factor: e.factor,
         requested: numberOrNull(e.requested),
         recorded: numberOrNull(e.recorded),
