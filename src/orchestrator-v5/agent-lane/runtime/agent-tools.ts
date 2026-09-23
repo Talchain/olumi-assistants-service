@@ -91,7 +91,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'instead of sitting blank. This does NOT change anything: it records an exact proposal and ' +
       'returns its id, which you keep for authorise_change: show the user the values, never the id, before asking them to approve. Each value is ' +
       'the user\u2019s assumption to adopt or correct, NEVER a measurement \u2014 say so. Propose only ' +
-      'factors the model actually has, using the labels get_canonical_state returned.',
+      'factors the model actually has, using the labels get_canonical_state returned. ' +
+      'A factor that already holds a value is left alone UNLESS you set `revise: true` on it, which ' +
+      'you may do ONLY when the user has just asked for that factor to be changed and named the ' +
+      'number themselves. Never set it to replace someone\u2019s figure with one of your own.',
     parameters: obj({
       assumptions: {
         type: 'array',
@@ -101,6 +104,13 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           value: { type: 'number' },
           unit: { type: 'string' },
           basis: { type: 'string', description: 'Why this is a reasonable starting point, in the user\u2019s terms.' },
+          revise: {
+            type: 'boolean',
+            description:
+              'Set true ONLY when the user has just asked for this factor to be changed and gave the ' +
+              'number. It permits replacing a value that is already there; the approval will show the ' +
+              'user both the current value and the new one. Omit it in every other case.',
+          },
         }, ['factor_label', 'value', 'unit', 'basis']),
       },
     }, ['assumptions']),
