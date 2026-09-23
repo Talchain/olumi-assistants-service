@@ -168,24 +168,57 @@ pool it into a `reasoning_effort` comparison.
 
 ---
 
-## 6. BANKED STATE — nothing of mine is unpushed
+## 6. BANKED STATE — corrected after a wider re-check
 
-Census at write time: **7 git trees in volatile `/private/tmp`, all clean** — zero
-uncommitted files, and **every local branch contained in a remote ref** (checked
-per-ref with `git branch -r --contains`, not just the current branch).
+⚠ **My first census was scoped wrong and I am recording that, because the wrong
+number is the dangerous one.** I reported "7 git trees in /private/tmp, all
+clean". That was only **my own session directory**, searched to `-maxdepth 4`,
+checking `refs/heads` containment but **not** the detached `HEAD` itself, **not**
+stashes, and **not** worktrees.
 
-⚠ **Everything under `/private/tmp/claude-502/...` is volatile and will be gone.**
-What matters is banked:
+**The real figure for `/private/tmp` is 94 git dirs + 34 worktrees.**
+
+### My own 7 trees — verified properly, and genuinely safe
+
+Re-audited with the gaps closed (detached `HEAD` containment, `git stash list`,
+worktree pointer files, and tags checked for remote reachability rather than
+merely counted):
+
+| tree | HEAD | on a remote ref |
+|---|---|---|
+| `cee-p0` | `work1701` @ `5421b067f64b` | `origin/feat/deterministic-request-assembly` |
+| `cee-effort-…` | detached @ `ccc5f94293d0` | `origin/fix/pass2-reasoning-effort-low` |
+| `cee-explaindiff` | `feat/openai-explain-diff` @ `497d74715bc6` | `origin/feat/openai-explain-diff` |
+| `cee-plan-…` | detached @ `cc7b26cbe168` | `origin/staging` |
+| `ui-1907-…` | detached @ `10136c997527` | `origin/fix/inspector-extraction-label-honesty` |
+| `ui-fa84d226…` ×2 | detached @ `fa84d226ee07` | `origin/canvas/applied-receipt-acknowledges` |
+
+**All seven: `dirty=0`, `stashes=0`, zero unpushed branches, zero tags I
+created.** Every HEAD — including all four detached ones — is contained in a
+remote ref. ⇒ **nothing of mine exists only on this machine.**
+
+### ⛔ 39 OTHER trees DO carry work that exists only in volatile /private/tmp
+
+**Not mine. I did not touch, push or modify any of them** — other sessions may
+still be live in them, and publishing another lane's WIP could be destructive.
+Full inventory saved at `~/olumi-bank-20260923/OTHER-LANES-AT-RISK.txt`.
+Largest: a DGAI clone with **16 stashes and 116 unpushed branches**, visible
+three times because two worktrees share it; and a `schemas` clone with **237
+uncommitted files**. ⚠ Deleting a parent clone destroys its worktrees.
+
+### Where my work lives
+
 - both code branches → pushed (`fix/pass2-reasoning-effort-low`, `feat/openai-explain-diff`)
-- the bake-off driver → `Docs/openai-bakeoff/run-bakeoff.py` on `docs/morning-brief-20260923`
-- this file → same branch
-- all findings → `Talchain/olumi-programme-docs#63` and the three PRs
-- afternoon analysis → `Docs/MORNING-BRIEF-2026-09-23.md` §14 on this branch
-
-⚠ Other lanes' trees were deliberately **not** inspected or touched. This census
-covers **my** session only and is not a statement about the estate.
-
----
+- bake-off driver → `Docs/openai-bakeoff/run-bakeoff.py` on this branch
+- this file + `Docs/MORNING-BRIEF-2026-09-23.md` §14 → this branch
+- every finding → `Talchain/olumi-programme-docs#63` and the three PRs
+- raw evidence → `~/olumi-bank-20260923/openai-lane/` (non-volatile):
+  `unified_timings.ndjson` (n=800, the pipeline decomposition),
+  **`pass2_complete.ndjson` (the n=795 evidence behind #1755 item 1 — nearly
+  missed on the first pass)**, `pipe.ndjson`, `verify-p2-stages.ndjson`
+- `NOT-BANKED-AND-WHY.txt` records what I dropped **on purpose** (API dumps that
+  would go stale, copies of files already in git, drafts already posted) so a
+  future pass does not mistake a decision for an oversight.
 
 ## 7. MISTAKES TO KEEP CORRECTED
 
