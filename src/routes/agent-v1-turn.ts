@@ -31,6 +31,7 @@ import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
+import { withCurrentGraphHash } from '../orchestrator-v5/agent-lane/analysis-freshness-stamp.js';
 import { HistoryStore } from '../orchestrator-v5/agent-lane/history-store.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
@@ -306,6 +307,12 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
     // A readback failure must not lose the user's answer. The turn still
     // returns; the client simply does not learn the new revision this time.
   }
+
+  // ⭐ ONE AUTHORITATIVE STATE: `graphHash` and `analysisReady` come from the
+  // SAME dispatch above, so the stamp cannot describe a different model. See
+  // the helper's header for why `graph_hash_at_run` is never set here.
+  analysisReady = withCurrentGraphHash(analysisReady, graphHash);
+
   return { graphHash, analysisReady, draftGraph };
 }
 
