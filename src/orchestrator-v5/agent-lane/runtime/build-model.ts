@@ -36,6 +36,14 @@
 import { createHash } from 'node:crypto';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
+import {
+  COMPACT_LIMITS,
+  assessConstructionSize,
+  retryInstruction,
+  keepsEveryUserStatedIdentity,
+  nodeIdentity,
+  type ConstructionSizeVerdict,
+} from '../construction-size-gate.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { budgetFor } from '../model-budgets.js';
 import type { ToolResult } from './agent-tools.js';
@@ -57,6 +65,25 @@ export function buildCandidateSchema(): Record<string, unknown> {
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
       value: { type: 'number' }, unit: { type: 'string' }, provenance,
     }, ['metric', 'operator', 'value', 'unit', 'provenance']) },
+    /**
+     * ⛔ NO `maxItems` ON ANYTHING THAT CAN HOLD USER MATERIAL. Removed after an
+     * exact-head review found the contract it broke.
+     *
+     * A cap of 6 options against a brief naming seven creates an IMPOSSIBLE
+     * contract: preserve every explicit option AND emit at most six. The model can
+     * only satisfy the schema by OMITTING what the user said — and the
+     * post-admission size gate cannot detect what never arrived. A pre-gate cap is
+     * therefore strictly more dangerous than the ≤12/≤20 admitted-model gate,
+     * which sees the real graph and refuses out loud instead of silently shrinking.
+     *
+     * ⚠ The test that appeared to cover this proved nothing: it mocked
+     * `callStructured` with a 14-option payload the real schema would have
+     * REFUSED. A self-authored fixture standing in for the wire.
+     *
+     * If a cap is ever reinstated it needs a real-schema discriminator showing
+     * explicit overflow REFUSES rather than disappears. `construction-user-material-protected.test.ts`
+     * pins the absence so it cannot come back without one.
+     */
     options: { type: 'array', items: obj({
       label: { type: 'string', description: 'A NAME, not a sentence. Keep it under 33 characters where you can.' },
       provenance,
@@ -77,9 +104,13 @@ export function buildCandidateSchema(): Record<string, unknown> {
     }, ['label', 'role', 'baseline_known', 'baseline_value', 'unit', 'provenance', 'plausible_max']) },
     risks: { type: 'array', items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
     outcomes: { type: 'array', items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
-    links: { type: 'array', items: obj({
+    links: { type: 'array', description:
+      'Causal links, stated as hypotheses. Every factor you keep needs at least one link FROM it toward the goal metric (directly, or via a kept outcome that links to the goal).',
+      items: obj({
       from: { type: 'string' }, to: { type: 'string' },
-      direction: { type: 'string', enum: ['positive', 'negative', 'unknown'] }, provenance,
+      direction: { type: 'string', enum: ['positive', 'negative', 'unknown'], description:
+        'The direction read from the brief or from causal reasoning you can state in one line. "unknown" only when you genuinely cannot say \u2014 then ask which way it runs in `unknowns`; an unknown link is withheld and is not a path.' },
+      provenance,
     }, ['from', 'to', 'direction', 'provenance']) },
     unknowns: { type: 'array', items: { type: 'string' } },
   }, ['goal', 'constraints', 'options', 'factors', 'risks', 'outcomes', 'links', 'unknowns']);
@@ -91,12 +122,43 @@ export const BUILD_INSTRUCTIONS = [
   'For each option fill `interventions` with the factor levels it sets \u2014 record a level the brief states with provenance "explicit", and never guess one it does not give.',
   'EVERY OPTION MUST SAY WHAT IT DOES. An option with no `interventions` AND no `changes` is inert: it can never be compared with another option, whatever values are supplied later, and the whole decision becomes unanswerable. If the brief does not say what an option changes, still name the factors it ACTS ON in `changes` \u2014 that is a structural claim, not a numeric one. '
   + 'EVERY option must also list, in `changes`, the factors it acts on WITHOUT a stated level. An option that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping.',
-  'Then widen: add the options, factors, risks, outcomes and causal mechanisms that materially improve strategic reasoning, including alternatives beyond the user’s initial frame.',
+  // ⛔ THE EXPLOSION CLAUSE, REPLACED. This previously read: "Then widen: add the
+  // options, factors, risks, outcomes and causal mechanisms that materially improve
+  // strategic reasoning, including alternatives beyond the user's initial frame."
+  // Turn one was INSTRUCTED to widen, and because two further rules below require
+  // every risk and factor to be wired through to the goal, each widened node also
+  // acquired a chain — which is how Paul's first turn reached 26 nodes / 57 edges
+  // from one sentence. The node count and the edge count had one root cause.
+  //
+  // Strategic additions are not abandoned; they move to `unknowns` and to later
+  // proposals, where the user can accept them one at a time.
+  //
+  // ⭐ THE ENVELOPE, NOT A MINIMUM (Release Control, 23 Sep). "Decision-critical"
+  // alone was read as "as few as possible": measured on served 553254d, Paul's
+  // hiring brief came back as 6 nodes — decision, goal, 2 options, 2 factors — and
+  // no factor linked on to the goal, so the analysis refused. The shape below is
+  // the stated envelope; the node and link ceilings are the size gate's own.
+  'KEEP THE FIRST MODEL DECISION-CRITICAL, NOT COMPREHENSIVE \u2014 BUT NOT THIN. The shape to aim for is this envelope: one goal; '
+  + 'EVERY option the user stated, never dropped or merged, and normally 3 to 5 options in total \u2014 when the user states fewer than 3, add carrying on as now if they did not state it, then the strongest alternative the question itself points to (such as a partial, phased or smaller version of a stated option), each marked "ai_proposed"; '
+  + 'roughly 4 to 8 factors that actually move the goal \u2014 besides any factor an option sets directly, name the MECHANISMS through which those changes reach the goal, never an option merely restated as a quantity; '
+  + 'and up to 4 to 6 outcomes and risks between them, only where they materially change the reasoning (the outcome the factors act through, the risk that could reverse the answer). '
+  + 'A model below this envelope cannot carry the reasoning; a model above it buries it. Do NOT widen beyond it on this turn: no speculative options, secondary factors, or decorative risks and outcomes. '
+  + 'Anything you judge material but that does not meet that bar belongs in `unknowns` as a question, NOT as a node \u2014 it can become a proposal later. '
+  + `Stay within ${COMPACT_LIMITS.maxNodes} nodes and ${COMPACT_LIMITS.maxEdges} links in total, counting one link from the decision to each option. Correct, connected items beat a comprehensive map: an oversized first model is refused before it reaches the canvas.`,
   'Mark provenance honestly on EVERY item: "explicit" only for what the user stated, "inferred" for what you read out of the brief, "ai_proposed" for anything you added beyond it.',
   'THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like "X Improvement" for a goal called "X change", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all.',
-  'EVERY RISK AND EVERY FACTOR MUST BE WIRED IN. A node with no link, or with links that dead-end before the goal, is not merely decorative \u2014 it stops the ENTIRE model being analysed. Give every risk a link to what it threatens, and every factor a chain of links that ends at the goal metric. Measured on a real model: 8 of 20 nodes were unreachable, all five risks among them, and the analysis refused outright.',
+  // ⛔ THE LINK CONTRACT (#63 ruling 5793252993). There is NO default-positive
+  // factor->goal repair in admission, by ruling: a sign nobody stated would be a
+  // fabricated belief. So the drafter itself must state every link toward the
+  // goal as a HYPOTHESIS with a direction, or say it cannot and ask. The measured
+  // failure it answers: served 553254d, option->factor links only, goal orphaned.
+  'EVERY RISK AND EVERY FACTOR MUST BE WIRED IN. A node with no link, or with links that dead-end before the goal, is not merely decorative \u2014 it stops the ENTIRE model being analysed. Measured on a real model: 8 of 20 nodes were unreachable, all five risks among them, and the analysis refused outright. '
+  + 'EVERY FACTOR YOU KEEP NEEDS ITS OWN LINK TOWARD THE GOAL in `links`: straight to the goal metric (its EXACT label), or to a kept outcome that itself links to the goal metric. An option naming a factor in `changes` connects the option TO the factor; it does NOT connect the factor to anything, so a factor that only receives links from options dead-ends. Measured on a real first model: two factors, both fed only by options, neither linked on, the goal orphaned and the analysis refused. Give every risk a link to what it threatens.',
+  'EACH LINK IS A CAUSAL HYPOTHESIS, AND ITS DIRECTION MUST BE STATED, NOT DEFAULTED. Take the direction from the brief where it says so; otherwise from the causal reasoning you could state in one line ("more delivery capacity raises velocity"; "a higher price raises churn"; "higher churn lowers recurring revenue"). '
+  + 'Such a link is Olumi\'s hypothesis, not the user\'s claim: provenance "inferred" when it is read out of the brief, "ai_proposed" when it is your own reasoning, and "explicit" ONLY when the user stated that relationship. '
+  + 'WHICH option is better is the question the analysis answers \u2014 it is never a reason to mark a factor\'s link to the goal "unknown": more capacity raises velocity whichever option supplies it. '
+  + 'Only when you genuinely cannot say which way a link runs, set its direction to "unknown" AND add a question to `unknowns` asking the user which way it runs. An "unknown" link is withheld from the model and never counts as a path, so every option must still reach the goal through links whose direction you can state.',
   'GIVE EVERY FACTOR A `plausible_max`. IT IS REQUIRED AND NEVER NULL, for every factor, whether or not it has a baseline today. A number above 1 with no range beside it CANNOT BE ANALYSED \u2014 the engine has nothing to read it against, Olumi refuses the WHOLE analysis rather than guess, and NO LATER EDIT CAN SUPPLY THE RANGE: the only remedy is rebuilding the model. The range is a SCALE, not a forecast: 100 for a percentage or a score out of 100, exactly 1 for something already between 0 and 1, and a round number comfortably above anything realistic for a count, an amount or a price. Measured twice on real models.',
-  'Where a causal direction is genuinely unknown, say "unknown" rather than guessing a sign.',
   'Labels are NAMES, not sentences.',
   'Output only the schema.',
 ].join(' ');
@@ -214,7 +276,100 @@ export async function buildModelFromBrief(
     return { ok: false, mutated: false, refusal: 'construction_failed', detail: String(err).slice(0, 200) };
   }
 
-  const admitted = admitCandidateModel(candidate, {});
+  let admitted = admitCandidateModel(candidate, {});
+
+  /**
+   * ⭐ THE COMPACT FIRST-MODEL GATE — one bounded retry, then an honest refusal.
+   *
+   * Measured on Paul's exact first turn: 26 nodes / 57 edges from one sentence.
+   * The size is judged on the ADMITTED graph, never the candidate, because
+   * admission is what decides which items become nodes at all — a cap read off
+   * the raw candidate would measure a different object from the one registered
+   * and would disagree with the canvas the user sees.
+   *
+   * ⛔ NOTHING HERE TRUNCATES. The gate returns counts, not a model (its verdict
+   * carries no array at all, pinned by its own spec), so "use the gate's output"
+   * cannot quietly become "persist the smaller graph". Oversize is answered by
+   * asking the model again under a tighter instruction, or by refusing out loud.
+   *
+   * ⭐⭐ AND THE CAP NEVER OVERRIDES THE USER. When the brief's OWN stated
+   * material alone exceeds the limit, the model is ADMITTED and the fact is
+   * reported: a user with thirteen options has thirteen options, and a size
+   * target that deleted one would be the wrong way round.
+   */
+  let size: ConstructionSizeVerdict = assessConstructionSize(admitted);
+  let sizeRetried = false;
+  // ⛔ NEVER SILENTLY. What an adopted retry shed from the first draft, and the
+  // questions it parked in `unknowns`, travel with the result so the Agent can say
+  // them — otherwise an option the model mislabelled as its own vanishes unseen.
+  let leftOut: { kind: string; label: string }[] = [];
+  if (!size.within && !size.user_material_exceeds_limit) {
+    sizeRetried = true;
+    try {
+      const retry = await callStructured({
+        model: budget.model,
+        // The delta is APPENDED, so every rule the first pass obeyed still holds —
+        // provenance, wiring, plausible_max, no invented numbers.
+        instructions: `${BUILD_INSTRUCTIONS} ${retryInstruction(size)}`,
+        input: brief,
+        max_output_tokens: budget.max_output_tokens,
+        reasoning_effort: budget.reasoning_effort,
+        schema: buildCandidateSchema(),
+      });
+      if (retry.text.length > 0) {
+        const retryCandidate = JSON.parse(retry.text) as CandidateModel;
+        const retryAdmitted = admitCandidateModel(retryCandidate, {});
+        const retrySize = assessConstructionSize(retryAdmitted);
+        // ⚠ ADOPT ONLY WHAT IS ACTUALLY SMALLER, on BOTH dimensions. A retry that
+        // trades 4 nodes for 11 links is not a compaction, and taking it on faith
+        // would let a second model call make the problem worse.
+        // ⭐⭐ AND IT MUST NOT HAVE COST THE USER ANYTHING. Smaller is not
+        // sufficient: a retry that sheds two widened factors while also dropping a
+        // relationship the user stated is a worse model, and the size numbers alone
+        // cannot tell the difference. So the brief-stated counts must not regress —
+        // that is what makes "the cap never overrides the user" true of RETRIES and
+        // not merely of the refusal path.
+        // ⛔ BY IDENTITY, NOT COUNT (independent review at 78b07e8b): every option,
+        // fact and relationship the user stated must still be there by name.
+        const keepsUserMaterial = keepsEveryUserStatedIdentity(size, retrySize);
+        if (
+          retrySize.nodes <= size.nodes &&
+          retrySize.edges <= size.edges &&
+          keepsUserMaterial
+        ) {
+          const kept = new Set(retryAdmitted.nodes.map(nodeIdentity));
+          leftOut = admitted.nodes
+            .filter((n) => !kept.has(nodeIdentity(n)))
+            .map((n) => ({ kind: String(n.kind), label: String((n as { description?: unknown }).description ?? n.label) }));
+          candidate = retryCandidate;
+          admitted = retryAdmitted;
+          size = retrySize;
+        }
+      }
+    } catch {
+      // A failed retry costs the retry, never the turn: the refusal below reports
+      // the FIRST model's real counts rather than inventing a reason.
+    }
+  }
+
+  if (!size.within && !size.user_material_exceeds_limit) {
+    return {
+      ok: false,
+      mutated: false,
+      refusal: 'model_too_large',
+      detail: size.detail,
+      nodes: size.nodes,
+      edges: size.edges,
+      limits: size.limits,
+      by_kind: size.by_kind,
+      // What was added beyond the brief — the honest shed target, reported so the
+      // refusal cannot read as "your decision was too complicated".
+      added_beyond_brief: size.sheddable_nodes,
+      from_your_brief: size.brief_stated_nodes,
+      retried: sizeRetried,
+    };
+  }
+
   /**
    * ⭐ THE USER'S STATED LIMITS TRAVEL WITH THE GRAPH.
    *
@@ -230,6 +385,9 @@ export async function buildModelFromBrief(
    * produces an enforceable constraint rather than a sentence the model merely
    * mentioned.
    */
+  const parked = (candidate as { unknowns?: unknown }).unknowns;
+  const openQuestions = Array.isArray(parked) ? parked.filter((q): q is string => typeof q === 'string' && q.trim() !== '') : [];
+
   const graph = {
     nodes: admitted.nodes,
     edges: admitted.edges,
@@ -284,6 +442,14 @@ export async function buildModelFromBrief(
     ...(replayed ? { replayed: true } : {}),
     nodes: admitted.nodes.length,
     edges: admitted.edges.length,
+    // The compact verdict travels with the success, so a caller never has to
+    // re-derive it — and `size_retried` makes the second model call visible
+    // rather than hidden inside a latency number.
+    within_compact_limits: size.within,
+    size_retried: sizeRetried,
+    ...(size.user_material_exceeds_limit
+      ? { admitted_over_limit_because: 'your own stated options and facts exceed the compact limit' }
+      : {}),
     options: admitted.nodes.filter((n) => n.kind === 'option').length,
     // What the projection could not carry — the Agent is expected to say this.
     withheld: admitted.withheld.map((w) => ({ from: w.from, to: w.to, reason: w.reason })),
@@ -297,11 +463,18 @@ export async function buildModelFromBrief(
     // Carried WITH the graph (GraphV3 declares `goal_constraints`), verified
     // surviving registration on deployed staging.
     goal_constraints_carried: admitted.goal_constraints.length,
+    ...(leftOut.length > 0 ? { left_out_to_stay_compact: leftOut } : {}),
+    // ⭐ EVERY build, not only a retry: the compact instruction parks Olumi's own
+    // strategic additions in `unknowns`, and on the common path (a first pass already
+    // within budget — 3 of 3 live benchmark runs) nothing else ever showed them.
+    ...(openQuestions.length > 0 ? { open_questions: openQuestions } : {}),
     not_represented: [
       admitted.withheld.length > 0
         ? `${admitted.withheld.length} relationship(s) were left out because nobody has stated which way they run.`
         : undefined,
-      undefined,
+      leftOut.length > 0
+        ? `${leftOut.length} item(s) from the first draft were left out to keep the model compact: ${leftOut.map((x) => x.label).join('; ')}.`
+        : undefined,
     ].filter((s): s is string => s !== undefined),
   };
 }
