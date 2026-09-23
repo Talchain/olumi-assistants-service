@@ -100,11 +100,18 @@ describe('the agent route surfaces them, and only when there is something to say
     expect(ROUTE.lastIndexOf('_agent: {')).toBeGreaterThan(-1);
   });
 
-  it('⛔ the _agent sidecar reports them', () => {
+  it('⛔ the facts are COLLECTED from the tool results', () => {
     // A helper that is never called is green everywhere — the exact failure
     // independent review caught on my redraw mount.
+    expect(ROUTE).toContain('collectTurnStateFacts(result.tool_results)');
+  });
+
+  it('⛔ the _agent sidecar reports them', () => {
+    // ⚠ The call is HOISTED now, because the same facts also feed the
+    // user-facing disclosure block. The sidecar consumes the hoisted value, so
+    // this pins the consumption rather than the call site.
     const sidecar = ROUTE.slice(ROUTE.lastIndexOf('_agent: {'));
-    expect(sidecar).toContain('collectTurnStateFacts(result.tool_results)');
+    expect(sidecar).toContain('state_facts: stateFacts');
   });
 
   it('⛔ the key is OMITTED when there is nothing to disclose', () => {
@@ -112,6 +119,6 @@ describe('the agent route surfaces them, and only when there is something to say
     // which is true — but it also trains a consumer to ignore the field. The
     // conditional is what keeps its presence meaningful.
     const sidecar = ROUTE.slice(ROUTE.lastIndexOf('_agent: {'));
-    expect(sidecar).toContain('facts.rescaled.length > 0 || facts.ranges_added.length > 0');
+    expect(sidecar).toContain('stateFacts.rescaled.length > 0 || stateFacts.ranges_added.length > 0');
   });
 });
