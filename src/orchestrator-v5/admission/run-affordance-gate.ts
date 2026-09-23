@@ -55,18 +55,31 @@ export interface RunAffordanceReadiness {
 /**
  * Whether the Run/Rerun affordance may be offered for this readiness payload.
  *
- * ⚠ ABSENCE IS NOT "NO". `may_run` is optional so pre-`may_run` producers still
- * validate, and the contract is explicit that absence means an older producer.
- * Falling back to the previous `status === 'ready'` rule leaves those paths
- * byte-identical rather than silently withdrawing an affordance they had.
+ * ⭐⭐ THIS IS THE DEPLOYED UI PREDICATE, CHARACTER FOR CHARACTER. The client
+ * already widened its own filter in UI #809 and it is live on staging today
+ * (`canvas/hooks/useAnalysisReady.ts`):
  *
- * ⚠ `may_run !== false`, NOT `may_run === true`. The contract names that exact
- * comparison, and the two differ on a malformed/non-boolean value: the estate's
- * polarity for this field is to carry, not to withhold.
+ *     export function admitsRunAffordance(analysisStatus, mayRun) {
+ *       return analysisStatus === 'ready' || mayRun === true
+ *     }
+ *
+ * So the UI has been waiting for chips CEE never emitted. Writing a DIFFERENT
+ * predicate on the producing side would recreate this estate's signature defect
+ * — one question, two gates — across a repo boundary, where it is hardest to
+ * see. Two cells actually disagreed under the first draft of this function
+ * (`may_run !== false`): `(ready, false)`, where the UI renders and CEE would
+ * have withheld — a REGRESSION — and `(not-ready, malformed)`, where CEE would
+ * have emitted a chip the UI drops. Both cells are empty across 400 real models,
+ * which is exactly why a measurement alone would have let the divergence ship.
+ *
+ * ⚠ A DISJUNCTION, SO NOTHING THAT RENDERS TODAY STOPS RENDERING. That is a
+ * property of the shape, not a fact about the current data.
+ *
+ * ⚠ ABSENCE IS NOT "NO". `may_run` is optional so pre-`may_run` producers still
+ * validate; `status === 'ready'` alone still admits them, byte-identically to
+ * the behaviour before this predicate existed.
  */
 export function isRunAffordanceAdmitted(readiness: RunAffordanceReadiness | undefined | null): boolean {
   if (readiness === undefined || readiness === null || typeof readiness !== 'object') return false;
-  const mayRun = readiness.may_run;
-  if (mayRun === undefined) return readiness.status === 'ready';
-  return mayRun !== false;
+  return readiness.status === 'ready' || readiness.may_run === true;
 }

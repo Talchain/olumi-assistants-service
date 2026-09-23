@@ -11,25 +11,31 @@ describe('isRunAffordanceAdmitted', () => {
     expect(isRunAffordanceAdmitted({ status: 'needs_user_mapping', may_run: true })).toBe(true);
   });
 
-  it('WITHHOLDS when the run path itself refuses, whatever the status says', () => {
-    expect(isRunAffordanceAdmitted({ status: 'ready', may_run: false })).toBe(false);
+  it('WITHHOLDS when neither term admits', () => {
     expect(isRunAffordanceAdmitted({ status: 'blocked', may_run: false })).toBe(false);
+    expect(isRunAffordanceAdmitted({ status: 'needs_user_mapping', may_run: false })).toBe(false);
   });
 
-  it('ABSENCE means an older producer, never "no" — falls back to status', () => {
+  it('ABSENCE means an older producer, never "no" — status alone still admits', () => {
     expect(isRunAffordanceAdmitted({ status: 'ready' })).toBe(true);
     expect(isRunAffordanceAdmitted({ status: 'needs_user_input' })).toBe(false);
   });
 
   /**
-   * ⛔ THE CONTRACT NAMES `may_run !== false`, NOT `may_run === true`. The two
-   * differ only on a malformed value, and the estate's polarity for this field
-   * is to CARRY rather than withhold. Binding this pins the difference so a
-   * "tidy-up" to `=== true` turns RED.
+   * ⛔ PARITY WITH THE DEPLOYED UI, WHICH IS THE TERMINAL CONSUMER.
+   * `admitsRunAffordance` on UI staging is
+   * `analysisStatus === 'ready' || mayRun === true`. These two cells are where
+   * a plausible alternative (`may_run !== false`) DIVERGES from it — one a
+   * regression, one a chip the UI would silently drop. Both are empty across
+   * 400 real models, so only a parity test catches them.
    */
-  it('a malformed may_run carries rather than withholds', () => {
-    expect(isRunAffordanceAdmitted({ status: 'needs_user_input', may_run: 'yes' as unknown })).toBe(true);
-    expect(isRunAffordanceAdmitted({ status: 'needs_user_input', may_run: null as unknown })).toBe(true);
+  it('(ready, may_run:false) still admits — the UI renders it, so CEE must emit it', () => {
+    expect(isRunAffordanceAdmitted({ status: 'ready', may_run: false })).toBe(true);
+  });
+
+  it('a malformed may_run does not widen the gate', () => {
+    expect(isRunAffordanceAdmitted({ status: 'needs_user_input', may_run: 'yes' as unknown })).toBe(false);
+    expect(isRunAffordanceAdmitted({ status: 'needs_user_input', may_run: null as unknown })).toBe(false);
   });
 
   it('a missing payload is never an invitation', () => {

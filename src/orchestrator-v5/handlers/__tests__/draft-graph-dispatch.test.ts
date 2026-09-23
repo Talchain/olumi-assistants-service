@@ -1243,12 +1243,20 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
     });
   });
 
-  it('CONTROL: may_run === false withholds Run however the status reads', async () => {
+  /**
+   * ⚠ THE CONTROL IS A NON-READY STATUS, NOT `(ready, may_run:false)`.
+   * The gate mirrors the DEPLOYED UI predicate
+   * (`analysisStatus === 'ready' || mayRun === true`), which is a disjunction,
+   * so `ready` alone still admits — and it must, or CEE would withhold a chip
+   * the client still renders. An earlier draft of this test asserted the
+   * opposite and pinned a cross-repo divergence.
+   */
+  it('CONTROL: may_run === false withholds Run when the status does not admit either', async () => {
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
       .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
     const refused = {
       ...MINIMAL_ANALYSIS_READY,
-      status: 'ready',
+      status: 'needs_user_mapping',
       may_run: false,
     } as unknown as typeof MINIMAL_ANALYSIS_READY;
     (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
