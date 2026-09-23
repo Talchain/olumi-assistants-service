@@ -174,3 +174,106 @@ describe('the banked live candidate is admitted whole and analysable in structur
     expect(paths.filter((p) => p.endsWith('/graph/register'))).toHaveLength(1);
   });
 });
+
+/**
+ * ⛔ DE-DUPLICATION MUST NOT STRIP THE USER'S AUTHORSHIP (Panel review 5793954535, B2).
+ *
+ * The live drafter restates 4 of 4 options' `changes` as `links`, and "Hire a Tech
+ * Lead" -> "Tech leads hired" / "Hire Two Developers" -> "Developers hired" are
+ * restated `explicit`. Dropping the restatement dropped its `brief_extraction`
+ * stamp with it, so `brief_stated_keys.edges` was EMPTY and #1710's identity check
+ * (`keepsEveryUserStatedIdentity`) had nothing to compare: a retry that moved the
+ * user's "two developers" onto "Tech leads hired" was adopted and registered.
+ * Staging (no de-dup) refuses that same retry. The kept structural edge now
+ * inherits the user's authorship — and ONLY the user's.
+ */
+describe('⛔ the kept option -> factor edge carries the user’s authorship of a dropped restatement', () => {
+  const PADDING = 16;
+  const withWidening = (c: CandidateModel): CandidateModel => {
+    const extra = Array.from({ length: PADDING }, (_, i) => `Widened factor ${i}`);
+    const raw = c as unknown as { factors: unknown[]; links: unknown[] };
+    return {
+      ...c,
+      factors: [...raw.factors, ...extra.map((label) => ({ label, role: 'observable', baseline_known: false, baseline_value: null, unit: null, provenance: 'ai_proposed', plausible_max: 100 }))],
+      links: [...raw.links, ...extra.map((from) => ({ from, to: 'Velocity', direction: 'positive', provenance: 'ai_proposed' }))],
+    } as unknown as CandidateModel;
+  };
+  /** The reviewer's P8 retry: same user nodes, but "Hire Two Developers" now sets "Tech leads hired". */
+  const movedOntoTechLeads = (): CandidateModel => {
+    const c = JSON.parse(JSON.stringify(BANKED)) as {
+      options: { label: string; interventions: { factor_label: string }[] }[];
+      links: { from: string; to: string }[];
+    };
+    for (const o of c.options) if (o.label === 'Hire Two Developers') for (const iv of o.interventions) iv.factor_label = 'Tech leads hired';
+    for (const l of c.links) if (l.from === 'Hire Two Developers' && l.to === 'Developers hired') l.to = 'Tech leads hired';
+    return c as unknown as CandidateModel;
+  };
+  const source = (a: ReturnType<typeof admitCandidateModel>, from: string, to: string) =>
+    a.edges.find((e) => e.from === from && e.to === to)?.provenance?.source;
+  function sequence(...payloads: readonly unknown[]) {
+    const calls: string[] = [];
+    const fn = vi.fn(async (req: { instructions: string }) => {
+      const idx = calls.length;
+      calls.push(req.instructions);
+      return { text: JSON.stringify(payloads[Math.min(idx, payloads.length - 1)]) };
+    }) as unknown as CallStructuredModel;
+    return { fn, calls };
+  }
+  function dispatcher() {
+    const paths: string[] = [];
+    const d: InternalDispatch = async (path) => {
+      paths.push(path);
+      return { status: 200, json: { registered: true } };
+    };
+    return { d, registered: () => paths.filter((p) => p.endsWith('/graph/register')).length };
+  }
+
+  it('an EXPLICIT restatement’s authorship moves onto the kept edge; an ai_proposed one confers none', () => {
+    const a = admitCandidateModel(BANKED, {});
+    expect(source(a, 'hire_two_developers', 'developers_hired')).toBe('brief_extraction');
+    expect(source(a, 'hire_a_tech_lead', 'tech_leads_hired')).toBe('brief_extraction');
+    // CONTRAST, same admission: an `ai_proposed` restatement, and a structural
+    // edge with no restatement at all, stay Olumi's.
+    expect(source(a, 'pilot_developer_hire', 'developers_hired')).toBe('cee_hypothesis');
+    expect(source(a, 'maintain_current_staffing', 'existing_team_continuity')).toBe('cee_hypothesis');
+    expect(source(a, 'hire_two_developers', 'onboarding_workload')).toBe('cee_hypothesis');
+    expect(assessConstructionSize(a).brief_stated_keys.edges).toEqual([
+      'option:hire a tech lead->factor:tech leads hired:positive',
+      'option:hire two developers->factor:developers hired:positive',
+    ]);
+  });
+
+  it('RED: a retry that moves "Hire Two Developers" onto "Tech leads hired" is REFUSED — 0 writes', async () => {
+    const first = withWidening(BANKED);
+    const retry = movedOntoTechLeads();
+    // Vacuity guards, computed by the real gate: the first draft is oversized and
+    // not user-exempt; the retry is smaller on both dimensions and keeps every
+    // user-stated NODE — so only the relationship identity can refuse it.
+    const s1 = assessConstructionSize(admitCandidateModel(first, {}));
+    const s2 = assessConstructionSize(admitCandidateModel(retry, {}));
+    expect(s1.within).toBe(false);
+    expect(s1.user_material_exceeds_limit).toBe(false);
+    expect(s2.nodes).toBeLessThanOrEqual(s1.nodes);
+    expect(s2.edges).toBeLessThanOrEqual(s1.edges);
+    expect(s2.brief_stated_keys.nodes).toEqual(s1.brief_stated_keys.nodes);
+    expect(source(admitCandidateModel(retry, {}), 'hire_two_developers', 'tech_leads_hired')).toBe('brief_extraction');
+
+    const s = sequence(first, retry);
+    const dp = dispatcher();
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
+    expect(s.calls).toHaveLength(2);
+    expect(out.ok, JSON.stringify(out).slice(0, 300)).toBe(false);
+    expect(out.refusal).toBe('model_too_large');
+    expect(dp.registered()).toBe(0);
+  });
+
+  it('CONTRAST: an identity-preserving retry (the banked draw itself) IS adopted — 1 write', async () => {
+    const s = sequence(withWidening(BANKED), BANKED);
+    const dp = dispatcher();
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
+    expect(s.calls).toHaveLength(2);
+    expect(out.ok, JSON.stringify(out).slice(0, 300)).toBe(true);
+    expect(out['size_retried']).toBe(true);
+    expect(dp.registered()).toBe(1);
+  });
+});
