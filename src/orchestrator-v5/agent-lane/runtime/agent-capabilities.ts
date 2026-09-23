@@ -84,12 +84,86 @@ export type InternalDispatch = (path: string, body: unknown) => Promise<{ status
 
 interface GraphRead {
   readonly graph_hash: string;
-  readonly nodes: { id: string; kind: string; label: string; description?: string; observed_state?: Record<string, unknown>; interventions?: Record<string, unknown>; changes?: unknown }[];
+  /**
+   * Declared, not cast. `readGraph` passes the persisted node through verbatim,
+   * so these are the carriers the stored graph really holds — counted across
+   * every stored graph on 22 Sep 2026: `provenance` 209,115, `display_value`
+   * 34,107, `scale_frame` 5,803. Naming them here is what lets the projection
+   * read them without an `as` that would hide a later rename.
+   */
+  readonly nodes: {
+    id: string;
+    kind: string;
+    label: string;
+    description?: string;
+    display_value?: unknown;
+    scale_frame?: unknown;
+    provenance?: unknown;
+    observed_state?: Record<string, unknown>;
+    interventions?: Record<string, unknown>;
+    changes?: unknown;
+  }[];
   readonly edges: { from: string; to: string }[];
   readonly analysis_state: unknown;
 }
 
 const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$/, '').trim();
+
+/**
+ * ⭐ ONE PROJECTION of a persisted node into what the Agent is shown — used by
+ * EVERY tool that hands the Agent entities.
+ *
+ * ⛔ It used to live inline in `get_canonical_state` while `build_model_from_brief`
+ * kept its own `{label, kind, value}` list. An independent review ran both on the
+ * same stored node — `{value: 0.45, raw_value: 9, unit: 'months', cap: 20}` — and
+ * only one carried the figure. The route tells the Agent to answer from the BUILD
+ * result, so the first reply every user sees quoted a normalised 0.45 and said the
+ * unit was unknown. Two field lists will always drift; one cannot.
+ */
+export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unknown> {
+          // The carriers the persisted graph already holds. Reading them is not
+          // enrichment — every one is a field the estate stores, and withholding
+          // them made the Agent reconstruct from the prompt what canonical state
+          // already knew.
+          const os = (n.observed_state ?? {}) as Record<string, unknown>;
+          const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+          const str = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
+          // Value provenance is a DIFFERENT fact from entity provenance: who put
+          // this NUMBER here, versus where the entity came from. Collapsing them
+          // is how a system-read figure inherits a user's authority.
+          const valueProvenance = {
+            ...(str(os.source) ? { source: os.source } : {}),
+            ...(str(os.extractionType) ? { extraction_type: os.extractionType } : {}),
+          };
+          return {
+            // ⭐ THE ID. Without it the only way to act on an entity was a fuzzy
+            // label match, which collides and cannot address two entities that
+            // read alike.
+            id: n.id,
+            label: n.label,
+            ...(n.description !== undefined ? { full_label: n.description } : {}),
+            kind: n.kind,
+            // A value only when one is actually stored. Absence is reported as
+            // unknown rather than as a zero.
+            value: num(os.value) ? os.value : null,
+            // ⚠ EVERY FIELD BELOW IS OMITTED WHEN ABSENT, never nulled. A null
+            // here reads to a model as a stated fact ("there is no unit") rather
+            // than as silence, and the Agent would repeat it.
+            ...(num(os.raw_value) ? { raw_value: os.raw_value } : {}),
+            ...(str(n.display_value) ? { display_value: n.display_value } : {}),
+            ...(str(os.unit) ? { unit: os.unit } : {}),
+            // The scale carriers. A bare amount with none of these is not just
+            // under-described, it is unanalysable downstream — the Agent needs to
+            // see that to explain it.
+            ...(num(os.cap) ? { cap: os.cap } : {}),
+            ...(str(os.declared_scale) ? { declared_scale: os.declared_scale } : {}),
+            ...(n.scale_frame === undefined ? {} : { scale_frame: n.scale_frame }),
+            ...(Object.keys(valueProvenance).length === 0
+              ? {}
+              : { value_provenance: valueProvenance }),
+            ...(n.provenance === undefined ? {} : { provenance: n.provenance }),
+          };
+        }
 
 export function createAgentCapabilities(
   dispatch: InternalDispatch,
@@ -148,14 +222,7 @@ export function createAgentCapabilities(
         mutated: false,
         graph_revision: g.graph_hash,
         empty: g.nodes.length === 0,
-        entities: g.nodes.map((n) => ({
-          label: n.label,
-          ...(n.description !== undefined ? { full_label: n.description } : {}),
-          kind: n.kind,
-          // A value only when one is actually stored. Absence is reported as
-          // unknown rather than as a zero.
-          value: typeof n.observed_state?.value === 'number' ? n.observed_state.value : null,
-        })),
+        entities: g.nodes.map(projectEntity),
         existing_links: g.edges.map((e) => `${e.from} -> ${e.to}`),
         // Derived by traversal of the persisted graph — facts, not estimates,
         // and the Agent may state them to the user as facts. Without these it
@@ -905,11 +972,8 @@ export function createAgentCapabilities(
         ...built,
         confirmed_entities: after.nodes.length,
         graph_revision: after.graph_hash,
-        entities: after.nodes.map((n) => ({
-          label: n.label,
-          kind: n.kind,
-          value: typeof n.observed_state?.value === 'number' ? n.observed_state.value : null,
-        })),
+        // The SAME projection get_canonical_state uses — see projectEntity.
+        entities: after.nodes.map(projectEntity),
         structure: structuralFacts(after.nodes, after.edges),
       };
     },
