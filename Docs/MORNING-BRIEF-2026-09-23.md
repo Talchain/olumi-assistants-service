@@ -75,6 +75,52 @@ lowering a shared staging timeout minutes before a manual test is not a call I s
 
 ---
 
+## 0b. ⛔ WHEN YOU OPEN THE INSPECTOR, DO NOT BELIEVE "Estimated by Olumi"
+
+**A factor carrying NO NUMBER AT ALL is labelled "Estimated by Olumi."** Olumi claims an estimate it
+never made, over nothing. This is shipped, user-visible, on two **deployed and unflagged** panels.
+
+```
+FactorControllablePanel.tsx:612   FactorExternalPanel.tsx:304
+  behind InspectorModal.tsx:17  const USE_INSPECTOR_V2 = true   (a module literal, no env flag)
+  label from inspectorStrings.ts:201   if (!source) return 'Estimated by Olumi'
+  honest sibling, same file :182       if (!source) return 'No evidence yet'
+```
+
+`source = obs?.source` is undefined whenever `schema-v3.ts:456` never built an `observed_state` — so
+the absent case falls into the "Estimated" arm. On `FactorControllablePanel` the honest line is itself
+gated (`:802` `{source && (`), **so the false claim renders alone.**
+
+⚠ **This is a direct violation of the doctrine's third bullet** — "where Olumi cannot support a claim
+without guessing, it surfaces the limitation rather than manufacturing certainty". **The fix is one
+line**: return the `'No evidence yet'` its own sibling already returns. It is in the UI repo, so I have
+not taken it — say the word and I will.
+
+**Related, and it is the render half of the same problem:** #1698 correctly separated *value*
+provenance from *entity* provenance ("Collapsing them is how a system-read figure inherits a user's
+authority"), but `value_provenance` has **0 readers in the UI** — contrast controls from the very same
+projection: `observed_state` **260**, `raw_value` **217**, `display_value` **145**. So that distinction
+reaches the model and dies at the render. Carried on the wire is not shown to a user.
+
+## 0c. ⭐ The coaching you'll read is honest — but it points at nothing in your model
+
+Confirmed by adversarial verification (this one held, unlike three other drift claims that were
+refuted). The coaching pass's **honesty** rules are genuinely doctrine-aligned on the live wire: it
+recommends no option (**0 hits across 6 blocks**), quotes your brief for every bias claim, and refuses
+to guess a strength off a projection it deliberately stripped.
+
+**The gap is where it lands.** `strengthen_items` — its main output, the "here is how to strengthen
+your decision" list — **carries a pointer into the model in 0 of 24 cases.** Contrast control *inside
+the same object*: `bias_signals` carry one **15 of 15**.
+
+So the doctrine's last bullet — "AI and the canvas behave as one reasoning partner: **pointing INTO the
+model**, focusing attention, explaining why something matters" — holds for bias signals and fails for
+the strengthen list. You will read good advice that you cannot click through to the node it concerns.
+**The fix mirrors what already works 12 lines away in the same file**, invents nothing, and touches
+none of the prompt's honesty rules.
+
+---
+
 ## 1. Test this first — the P0 your manual test failed on is fixed
 
 Brief: `Should I hire a Tech lead or two developers to increase velocity?`
