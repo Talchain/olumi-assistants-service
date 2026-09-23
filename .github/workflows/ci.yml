@@ -1,8 +1,32 @@
 name: CI
 
+# ⛔ PUSH FIRES ONLY ON PROTECTED/DEPLOYMENT BRANCHES.
+#
+# Release Control HOLD on the first version of this PR (#1717): normalising
+# push + pull_request into ONE concurrency group means whichever event starts
+# second cancels the other — and the two runs are NOT equivalent evidence. The
+# pull_request run is evaluated in PR/merge-ref context, the push run in
+# branch-head context. If the push run wins the race and cancels the PR run, the
+# gate may be left unsatisfied.
+#
+# That risk is REAL, not theoretical: a `cancelled` required check leaves
+# mergeStateStatus BLOCKED. Measured on #1698 at 0364182ccb — required
+# "Lint, TypeCheck, Unit Tests" = COMPLETED/CANCELLED, PR state BLOCKED.
+#
+# ⭐ AND HISTORY CANNOT DISCHARGE IT. I searched 40 recent PRs for a head SHA
+# carrying BOTH a success and a cancelled instance of the required check — the
+# exact natural experiment. It does not exist (only success+success,
+# cancelled+cancelled and failure+cancelled). So the reviewer is right that only
+# a live experiment could license cross-event cancellation.
+#
+# So this takes the reviewer's safer design instead of running that experiment:
+# separate the TRIGGERS rather than cancelling across events. A PR gets exactly
+# one run because only `pull_request` fires for feature work; `push` fires only
+# for protected/deployment branches, where #1713's non-cancellation invariant
+# already protects the deploy gate. No cross-event race exists to reason about.
 on:
   push:
-    branches: [main, staging, feat/**]
+    branches: [main, staging]
   pull_request:
     branches: [main, staging]
 
