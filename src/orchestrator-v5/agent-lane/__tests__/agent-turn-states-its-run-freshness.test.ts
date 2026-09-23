@@ -39,11 +39,15 @@ const GRAPH_A = {
   edges: [{ from: 'f', to: 'g', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' }],
   goal_constraints: CONSTRAINTS,
 };
-const GRAPH_B = { ...GRAPH_A, nodes: [...GRAPH_A.nodes, { id: 'f2', kind: 'factor', label: 'Churn' }] };
+/** The served pricing graph (c4a6cce): 3 options, so the canonical assessor produces the
+ *  `analysis_ready` the real readback relies on. */
+const SERVED_PRICING_GRAPH = { ...(JSON.parse(readFileSync(new URL('./fixtures/served-pricing-graph-c4a6cce.json', import.meta.url), 'utf8')) as Record<string, unknown>) };
+const SERVED_PRICING_GRAPH_CHANGED = { ...SERVED_PRICING_GRAPH, nodes: [...(SERVED_PRICING_GRAPH.nodes as unknown[]), { id: 'f_new', kind: 'factor', label: 'A new factor' }] };
 
 let currentGraph: unknown = GRAPH_A;
 let runFact: unknown = null;
 let graphReadFails = false;
+let readReturnsReady = false;
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async () => null),
@@ -96,15 +100,17 @@ describe('the Agent turn states its run’s freshness where the UI reads it', ()
     app.post('/assist/v1/scenarios/:id/graph', async (_req, reply) => {
       if (graphReadFails) return reply.code(500).send({ error: 'unavailable' });
       const read = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: currentGraph, requestId: 'test' });
-      // The served read route returns `analysis_ready` WITHOUT `freshness` (witnessed
-      // on the wire, #63 5800618648); the harness graph is too small to assess one.
-      return { graph: currentGraph, graph_hash: hashOf(currentGraph), analysis_ready: { status: 'ready', options: [], blockers: [] }, ...read };
+      // ⚠ The REAL read route returns NO `analysis_ready`
+      // (`assist.v1.scenario-graph.ts`), so the agent's readiness comes from the
+      // canonical assessor fallback. A stubbed `analysis_ready` here hid that path
+      // (OpenAI Connected N1 on #1766: stamping BEFORE the fallback survived).
+      return { graph: currentGraph, graph_hash: hashOf(currentGraph), ...(readReturnsReady ? { analysis_ready: { status: 'ready', options: [], blockers: [] } } : {}), ...read };
     });
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { currentGraph = GRAPH_A; runFact = null; graphReadFails = false; afterRun = null; });
+  beforeEach(() => { currentGraph = SERVED_PRICING_GRAPH; runFact = null; graphReadFails = false; readReturnsReady = false; afterRun = null; });
 
   const runThenAnswer = () => {
     callModelOutputs = [
@@ -120,16 +126,33 @@ describe('the Agent turn states its run’s freshness where the UI reads it', ()
     const r = await runThenAnswer();
     expect(r.statusCode).toBe(200);
     expect((r.json().analysis_state as State).run_state?.kind, 'precondition').toBe('complete_current');
-    const ready = r.json().analysis_ready as Ready;
+    const ready = r.json().analysis_ready as Ready & { options?: unknown[] };
+    expect(ready.options?.length, 'precondition: readiness came from the assessor over the served graph').toBeGreaterThan(0);
     expect(ready.freshness).toBe('fresh');
     expect(ready.freshness_reason).toBe('agent_readback_run_state_current');
   });
 
+  it('RED: the fresh verdict carries its ATTESTATION — graph_hash_at_run === current_graph_hash === the turn graph_hash, so a RELOAD can confirm it', async () => {
+    const r = await runThenAnswer();
+    const ready = r.json().analysis_ready as Ready & { graph_hash_at_run?: string; current_graph_hash?: string; computed_at?: string };
+    const turnHash = r.json().graph_hash as string;
+    expect(typeof turnHash === 'string' && turnHash.length > 0, 'precondition: the turn carries graph_hash').toBe(true);
+    expect(ready.graph_hash_at_run).toBe(turnHash);
+    expect(ready.current_graph_hash).toBe(turnHash);
+    expect(ready.computed_at).toBe((r.json().analysis_state as { run_state?: { computed_at?: string } }).run_state?.computed_at);
+  });
+
   it('CONTRAST: the graph CHANGES before readback — never "fresh"', async () => {
-    afterRun = () => { currentGraph = GRAPH_B; };
+    afterRun = () => { currentGraph = SERVED_PRICING_GRAPH_CHANGED; };
     const r = await runThenAnswer();
     expect((r.json().analysis_state as State).run_state?.kind).not.toBe('complete_current');
     expect((r.json().analysis_ready as Ready | undefined)?.freshness).not.toBe('fresh');
+  });
+
+  it('the read route’s own analysis_ready (no freshness) is stamped too', async () => {
+    readReturnsReady = true;
+    const r = await runThenAnswer();
+    expect((r.json().analysis_ready as Ready).freshness).toBe('fresh');
   });
 
   it('CONTRAST: an unavailable readback manufactures no verdict', async () => {
@@ -149,6 +172,21 @@ describe('withRunStateFreshness — restates CEE’s own verdict, never invents 
       expect(withRunStateFreshness(ready, { run_state: { kind } })).toBe(ready);
     }
     expect(withRunStateFreshness(ready, undefined)).toBe(ready);
+  });
+
+  it('attests ONLY when the run’s own hash equals the current one — a mismatch or an absent hash stamps no hashes', async () => {
+    const { withRunStateFreshness } = await import('../analysis-ready-freshness.js');
+    const state = { run_state: { kind: 'complete_current', computed_at: '2026-09-23T20:13:05.494Z' } };
+    const same = withRunStateFreshness({ status: 'ready' }, state, { graphHash: 'h1', analysisResult: { computed_against_hash: 'h1' } }) as Record<string, unknown>;
+    expect(same).toMatchObject({ freshness: 'fresh', graph_hash_at_run: 'h1', current_graph_hash: 'h1', computed_at: '2026-09-23T20:13:05.494Z' });
+    const differ = withRunStateFreshness({ status: 'ready' }, state, { graphHash: 'h2', analysisResult: { computed_against_hash: 'h1' } }) as Record<string, unknown>;
+    expect(differ.freshness).toBe('fresh');
+    expect(differ).not.toHaveProperty('graph_hash_at_run');
+    expect(differ).not.toHaveProperty('current_graph_hash');
+    const absent = withRunStateFreshness({ status: 'ready' }, state, { graphHash: 'h1', analysisResult: null }) as Record<string, unknown>;
+    expect(absent).not.toHaveProperty('graph_hash_at_run');
+    const stale = withRunStateFreshness({ status: 'ready' }, { run_state: { kind: 'complete_stale', computed_at: 'x' } }, { graphHash: 'h1', analysisResult: { computed_against_hash: 'h1' } }) as Record<string, unknown>;
+    expect(stale).not.toHaveProperty('graph_hash_at_run');
   });
 
   it('never overwrites a verdict the producer already set', async () => {
