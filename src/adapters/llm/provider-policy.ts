@@ -97,6 +97,16 @@ export function assertProviderAllowed(
   throw new ForbiddenProviderError(provider, policy.route, site);
 }
 
+/**
+ * Whether the current request may use `provider` — for a caller deciding NOT TO
+ * START optional work (a background enricher) rather than attempt it and be
+ * refused. Records nothing: no attempt is made. Outside a policy, always true.
+ */
+export function isProviderAllowed(provider: LlmProvider): boolean {
+  const policy = store.getStore();
+  return policy === undefined || policy.allowed.has(provider);
+}
+
 /** The current request's ledger, or `[]` outside a policy. A copy — the wire must not alias it. */
 export function recordedProviderCalls(): GenerativeCall[] {
   return [...(store.getStore()?.calls ?? [])];
