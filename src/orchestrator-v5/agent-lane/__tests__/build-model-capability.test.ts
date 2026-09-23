@@ -193,6 +193,10 @@ describe('the construction budget is the measured one', () => {
     // widening budget IS at or below it \u2014 so the roles are not interchangeable.
     expect(seen[0].max!).toBeGreaterThan(3404);
     expect(budgetFor(seen[0].model!, 'widening').max_output_tokens).toBeLessThan(3404);
+    // ⭐ OpenAI Technical Architecture ruling (#63 5798194848): construction runs at
+    // MEDIUM reasoning effort. Bound at the CALL, not only the table, so a builder that
+    // ignored the budget would fail here too.
+    expect(seen[0].effort).toBe('medium');
   });
 });
 

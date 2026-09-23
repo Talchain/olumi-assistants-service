@@ -56,9 +56,19 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
     model: 'gpt-5.6-terra',
     role: 'whole',
     max_output_tokens: 6000,
-    reasoning_effort: 'high',
+    reasoning_effort: 'medium',
     evidence:
-      'Measured 22 Sep on the live API against the real buildCandidateSchema(), at a 6000 ceiling: ' +
+      'EFFORT: MEDIUM per OpenAI Technical Architecture ruling (#63 5798194848), measured 23 Sep ' +
+      'through the real buildModelFromBrief + admission on the compact builder (#1736): median ' +
+      '40\u201344 s at medium vs 62\u201370 s at high on both canonical briefs, 0/8 structurally ' +
+      'blocked at medium (#63 5797881172). Held-out fidelity (3 other briefs, n=2 + a warehouse ' +
+      'n=3 recheck, output/paul-test-20260923/construction-witness/raw/fidelity-*.jsonl): medium ' +
+      '6/6 built vs high 5/6 (one model_too_large refusal); options and structure intact at both; ' +
+      'a stated budget cap reached goal_constraints 3/4 at high vs 2/5 at medium on the warehouse ' +
+      'brief and 100% at both elsewhere \u2014 stochastic at BOTH efforts, not a medium regression ' +
+      '(a construction-contract gap, not an effort one). High is the fallback on a material ' +
+      'fidelity regression. ' +
+      'BUDGET: measured 22 Sep on the live API against the real buildCandidateSchema(), at a 6000 ceiling: ' +
       'status "completed", in 838 / out 3404 incl. 2070 reasoning, 54.4 s. It returned 4 options, ' +
       '11 factors, 6 risks, 6 outcomes, 18 links (5 of them direction "unknown", i.e. withheld ' +
       'rather than guessed), 1 constraint and 4 interventions. ' +
