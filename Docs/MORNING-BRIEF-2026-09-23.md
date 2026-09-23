@@ -51,7 +51,7 @@ streams, then the analysis runs in the same request.
 
 | leg | n | median | min–max | what it is |
 |---|---|---|---|---|
-| `parse_ms` | 14 | **~23s** | 19.9–28.5 | one **o4-mini** provider call |
+| `parse_ms` | 14 | **~23s** | 19.9–28.5 | one draft model call — **`claude-sonnet-4-6`**, measured |
 | `coaching_pass_ms` | 10 | **~20.8s** | 17.3–23.6 | one **claude-sonnet-4-6** call, NESTED in validation |
 | **draft turn total** | 14 | **~48s** | 24.0–80.8 | 24–34s when coaching is skipped |
 | **PLoT `/v2/run`** | 9 | **22.3s** | **19.3–42.1** | the only genuine non-LLM work |
@@ -120,9 +120,41 @@ everything else on the path totals **~200ms**.
 ⭐ **That makes the lever a single number: the draft model call.** `parse_llm_ms` is p50 **21,224ms**
 and it is **the provider's own reported latency** (`index.ts:942` — `timings.parse_llm_ms =
 ctx.llmMeta.provider_latency_ms`), not a wall-clock measurement that might be hiding our own work.
-**91% of time-to-first-graph is one o4-mini call, and ~200ms of it is ours.** Nothing in CEE's
+**91% of time-to-first-graph is ONE draft model call, and ~200ms of it is ours.** Nothing in CEE's
 pipeline, tool layer or request assembly can move it — only the call itself: model choice, output
 size, or streaming the graph as it generates.
+
+### ⛔ Correction: the draft is NOT o4-mini — and the env var does not tell you the model
+
+I wrote "one o4-mini call" above. **Wrong.** I took it from a log line
+`calling OpenAI for chat completion model=o4-mini` that shares a timestamp with
+`cee.validation_pipeline.pass2_call_start model=o4-mini` — **it is Pass 2, not the draft.** The
+parse call happens ~22s before the log window I had open, so I never actually saw it.
+
+Measured instead, `model.resolution` on staging, **59/59 events**:
+
+```
+task = "draft_graph"   resolved_model = "claude-sonnet-4-6"
+provider = "anthropic" resolution_source = "store_model_config"
+```
+
+⚠⚠ **And the env var disagrees with reality.** `CEE_MODEL_DRAFT_GRAPH = claude-sonnet-5` on both
+staging and production, but the wire resolves **`claude-sonnet-4-6`** — the prompt store's
+`modelConfig` **overrides the env var**, and `resolution_source` is the only field that tells you.
+Anyone tuning the draft model by env var alone would be changing nothing.
+
+**What the 21.2s is NOT:** extended thinking. `CEE_DRAFT_GRAPH_THINKING = false` on staging **and**
+production, so `parse.ts:425` never attaches a `thinking` block. And `reasoning_effort` appears
+**only** in `src/routes/admin.testing.ts` — it is not on the production path at all. So this is
+**plain generation**, which leaves **output token volume** as the named knob
+(`CEE_MAX_TOKENS_DRAFT`, else `getAffordableDraftTokens(DRAFT_LLM_TIMEOUT_MS)`).
+
+⚠ Registry drift worth someone's attention: `claude-sonnet-4-6` is declared
+`averageLatencyMs: 2000`, `maxTokens: 8192`, `extendedThinking: false`. **Measured draft provider
+latency p50 is 21,224ms — 10.6× the declared figure**, and `config/timeouts.ts` builds budget
+ladders on registry latencies. (My earlier "3.5× overstatement" line compared o4-mini's registry
+entry against the draft's measured latency — two different models. Withdrawn; this is the right
+comparison.)
 
 ⚠ I have NOT re-measured the frames directly — `GRAPH_READY` is an SSE frame, not a log event, so it
 does not appear in the log timeline I used. The ~23.4s is a **sum of measured stages on the
