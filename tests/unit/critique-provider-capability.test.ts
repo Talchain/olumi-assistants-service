@@ -51,11 +51,31 @@ describe('critique_graph is capability-open to OpenAI because the adapter implem
     expect(entry.provider).toBe('anthropic');
   });
 
-  it('⛔ CONTRAST CONTROL — explain_diff stays closed to openai, because its adapter still throws', () => {
-    // Without this the suite would pass on a map that had simply been opened to
-    // everything. The asymmetry is the evidence that the map tracks adapters.
-    expect(ROUTER_TASK_PROVIDER_CAPABILITIES.explain_diff).not.toContain('openai');
-    expect(ROUTER_TASK_PROVIDER_CAPABILITIES.explain_diff).toContain('anthropic');
+  it('⛔ THE MAP IS NOW FULLY PERMISSIVE — recorded, because it means this map no longer enforces anything', () => {
+    // This slot held the contrast control: "explain_diff stays closed to
+    // openai", which was the evidence that the map tracked the adapters rather
+    // than having been opened to everything. #1764 implemented explainDiff and
+    // opened it, so the asymmetry is gone and the honest thing is to SAY SO
+    // rather than find a new vehicle for a claim that is no longer true.
+    //
+    // ⚠ The consequence, which a reader of this file needs: the provider union
+    // is exactly these three, and BOTH entries now list all three. Therefore
+    // `requireTaskModelAssignmentCapability` cannot reject any resolution, and
+    // MODEL_PROVIDER_MISMATCH is unreachable via this map. That is the correct
+    // end state — the exclusions were workarounds for missing adapters, never
+    // policy — but it means this map is now DOCUMENTATION, not a gate.
+    const union = ['anthropic', 'openai', 'fixtures'];
+    for (const [task, providers] of Object.entries(ROUTER_TASK_PROVIDER_CAPABILITIES)) {
+      expect([...providers].sort(), `${task} is expected to be fully open`).toEqual([...union].sort());
+    }
+    // ⛔ AND THIS IS THE GUARD THAT REPLACES THE LOST ASYMMETRY: the moment
+    // anyone adds a THIRD entry, this REDs and forces them to state which
+    // adapters actually implement it — which is the discipline the old contrast
+    // control was really enforcing.
+    expect(Object.keys(ROUTER_TASK_PROVIDER_CAPABILITIES).sort()).toEqual([
+      'critique_graph',
+      'explain_diff',
+    ]);
   });
 });
 
