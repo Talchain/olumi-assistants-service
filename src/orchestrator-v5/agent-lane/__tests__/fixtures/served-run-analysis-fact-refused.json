@@ -1,0 +1,14 @@
+{
+ "result": {
+  "summary": "Analysis attempt was refused before computation.",
+  "enrichment": {
+   "analysis_status": "refused",
+   "refusal_reason_code": "orphan_node"
+  },
+  "computed_at": "2026-09-23T09:51:32.658Z",
+  "scenario_id": "d99f3ca9-c74e-4a46-aca4-1f4f3a51493d",
+  "leading_option_id": null
+ },
+ "fact_type": "run_analysis",
+ "fact_version": 1
+}
