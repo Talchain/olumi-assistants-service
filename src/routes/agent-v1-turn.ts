@@ -46,6 +46,7 @@ import { assessCanonicalAnalysisReadiness } from '../orchestrator/tools/analysis
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
+import { narrateWriteOutcome, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
@@ -636,8 +637,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // placeholder strength the user never gave, the user is told — whether or
     // not the model chose to mention it.
     const owed = disclosuresFor(result.tool_results);
+    /**
+     * ⛔ WHAT WAS SAVED IS STATED BY OLUMI, FROM THE TOOL RESULTS (RC #63
+     * 5788648244). A model-authored "Saved…" survived here on a turn that wrote
+     * nothing, because this route returned the model's words verbatim. The
+     * status line is composed from the authoritative results; an unsupported
+     * write claim is removed when nothing landed. See `write-outcome.ts`.
+     */
+    const narration = narrateWriteOutcome(text, result.tool_calls, result.tool_results);
     const composed = composeDirectAnswerResponse({
-      assistant_text: withDisclosures(text, owed),
+      assistant_text: withWriteOutcome(withDisclosures(narration.text, owed), narration.status),
       stage: 'frame',
       answerKind: 'substantive',
     });
@@ -745,6 +754,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         hops: result.hops,
         stopped_reason: result.stopped_reason,
         tools_called: result.tool_calls.map((c) => c.name),
+        write_claims_removed: narration.stripped.length,
       },
       _agent: {
         session_id: sessionId,
