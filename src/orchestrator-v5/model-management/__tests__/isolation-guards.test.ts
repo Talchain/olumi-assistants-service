@@ -225,6 +225,22 @@ const SANCTIONED_INBOUND_CALL_SITES = new Set(
     '../context/canonical-label-transition.ts', // pure pair validation, no writes
     '../../collab/store.ts',
     '../../routes/assist.v1.scenario-versions.ts',
+    // AGENT RECEIPT SLICE (2026-09-22, CEE #1702): the SEVENTH sanctioned call
+    // site, added deliberately in its own reviewed slice as the note above
+    // requires. `agent-capabilities.ts` is a BOUNDED READ-ONLY RECEIPT consumer
+    // of exactly the kind `build-turn-context.ts` already is: it calls ONE pure
+    // parser, `modelVersionMutationReceiptFromResponse`, on the turn response
+    // `commitDirectAnswer` already produced — no service, no write, no flag read,
+    // no identity computed.
+    //
+    // Why this consumer must exist rather than parse the receipt itself:
+    // measured signed-in on staging 9c16e8cd, the Agent's authorised write
+    // minted a version and the Agent threw the receipt away (0 non-test readers
+    // in the lane, 6 elsewhere), so it could not say "saved as version N" and a
+    // retry could not hand back the original. Re-deriving the receipt shape by
+    // hand would be the twin-of-the-contract defect this module's allowlists
+    // exist to prevent. One parser, one more read-only call site, is the shape.
+    '../agent-lane/runtime/agent-capabilities.ts',
   ].map((s) => resolve(moduleDir, s)),
 );
 
