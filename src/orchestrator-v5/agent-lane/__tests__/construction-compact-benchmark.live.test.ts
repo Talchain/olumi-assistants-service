@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { assessConstructionSize } from '../construction-size-gate.js';
+import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { BUILD_INSTRUCTIONS, buildCandidateSchema } from '../runtime/build-model.js';
 import { budgetFor } from '../model-budgets.js';
 
@@ -139,9 +140,28 @@ function measure(text: string) {
   const c = candidate as unknown as Record<string, unknown[]>;
   const lost = explicitMeaningLost(candidate, admitted);
   const reach = goalReachability(admitted);
+  /**
+   * ⭐⭐ THE DECISIVE COLUMN. A compact model that cannot be analysed is WORSE
+   * than a large one that can. Measured against the estate's own readiness
+   * authority (`assessCanonicalAnalysisReadiness`) on the SAME graph object
+   * `buildModelFromBrief` registers — nodes, edges and goal_constraints.
+   */
+  const graphForReadiness = {
+    nodes: admitted.nodes,
+    edges: admitted.edges,
+    ...(admitted.goal_constraints.length > 0 ? { goal_constraints: admitted.goal_constraints } : {}),
+  };
+  const readiness = assessCanonicalAnalysisReadiness(graphForReadiness);
   return {
     lost,
     reach,
+    readiness: {
+      safeToAnalyse: readiness.safeToAnalyse,
+      status: readiness.analysisReady?.status ?? '(none)',
+      blocking: readiness.blockingIssues.length,
+      codes: [...new Set(readiness.blockingIssues.map((i) => i.code))].slice(0, 6),
+      issues: readiness.issues.length,
+    },
     size,
     options: size.by_kind['option'] ?? 0,
     unknowns: (c['unknowns'] ?? []).length,
@@ -208,6 +228,14 @@ describe.skipIf(!live)('LIVE — served vs compact on Paul’s exact brief', () 
       cells.push(['candidate links', String(ma.candidateCounts.links), String(mb.candidateCounts.links)]);
       // ⭐ The safety column. Anything here means compacting cost the user their
       // own stated material, which outranks the size target.
+      cells.push(['**readiness status**', ma.readiness.status, mb.readiness.status]);
+      cells.push(['**safe to analyse**', String(ma.readiness.safeToAnalyse), String(mb.readiness.safeToAnalyse)]);
+      cells.push([
+        'blocking issues',
+        `${ma.readiness.blocking} ${ma.readiness.codes.join(',') || ''}`.trim(),
+        `${mb.readiness.blocking} ${mb.readiness.codes.join(',') || ''}`.trim(),
+      ]);
+      cells.push(['total issues', String(ma.readiness.issues), String(mb.readiness.issues)]);
       cells.push([
         '**options reaching the goal**',
         `${ma.reach.options_reaching}/${ma.reach.options_total}`,
