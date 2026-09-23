@@ -161,3 +161,25 @@ CEE_DIAGNOSTIC_TRACE_ENABLED  = true     <- the gate is a disjunction
 **Contrast control, so the absence claim is sound:** `agent_lane.route_mounted` appears once on staging while `agent_lane.turn_timings` is absent — which is exactly right, because #1701 is not merged yet. The probe sees the emission when it exists.
 
 **What this buys:** the ~40s unexplained portion of construction becomes a measured split rather than an inference, which is what would settle whether it is provider time or our own pipeline — the one question my whole latency argument tonight rests on.
+
+---
+
+## 9. ⚠ A turn-fence change landed on the registration path at 03:21 — what to do if your test shows no receipt
+
+**#1706 — `fix(registration): a graph registration takes its place in the turn fence`** merged and deployed as `e8cf4c68f150` (build started 03:21:39Z). That is Release Control's P0 item 2: the estate was logging
+
+```
+V5 turn fence — a GRAPH WRITE reached the store with no ingress fence handle; it is proceeding UNFENCED
+```
+
+so registrations were bypassing the fence that stops a superseded turn clobbering a newer one. Correct fix, and it belongs on that path.
+
+**But it lands directly on top of the receipt work**, and the fence's job is to **refuse** writes it judges superseded. A refused registration writes no graph, and no graph means no version — which would present exactly like the P0 regressing.
+
+**So if your test shows no receipt, check in this order:**
+
+1. **Were you signed in?** Guests never get a version (section 1). This is by far the likeliest explanation.
+2. **Did the registration get fenced?** Look for a `graph_write_refused` / `superseded` fence log on your scenario. If the fence refused it, the receipt is *correctly* absent and the bug is the fence being too eager, not the carrier.
+3. **Only then** suspect the carrier itself.
+
+**Evidence as of 03:25Z, on the build BEFORE the fence change** (`c94208cb`): signed-in **7 registrations → 7 versions**; guest **10 → 0**. I have a waiter on the `e8cf4c68` deploy to re-verify that ratio against the build that actually serves it — because a fence change on the write path is exactly the kind of thing that turns a passing invariant into a failing one, and the pre-change numbers would not show it.
