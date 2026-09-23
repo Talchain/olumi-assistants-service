@@ -1,0 +1,749 @@
+{
+ "nodes": [
+  {
+   "id": "147d4f19",
+   "kind": "decision",
+   "label": "Question",
+   "provenance": "ai_inferred",
+   "label_placeholder": true
+  },
+  {
+   "id": "29936010",
+   "kind": "option",
+   "label": "Status Quo (Keep \u00a349 Price)",
+   "interventions": {
+    "6d9a37f3": {
+     "value": 0.49,
+     "raw_value": 49,
+     "unit": "\u00a3/month",
+     "source": "cee_hypothesis",
+     "target_match": {
+      "node_id": "6d9a37f3",
+      "match_type": "exact_id",
+      "confidence": "high"
+     },
+     "value_confidence": "low",
+     "reasoning": "Olumi estimate via edge 4df5f9bf; this option\u2192factor effect is not bound to a stated option record"
+    }
+   },
+   "is_baseline": true,
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "6d9a37f3",
+   "kind": "factor",
+   "label": "Pro Plan Monthly Price",
+   "observed_state": {
+    "value": 0.49,
+    "unit": "\u00a3/month",
+    "source": "cee_inference",
+    "raw_value": 49,
+    "extractionType": "inferred",
+    "factor_type": "other",
+    "uncertainty_drivers": [],
+    "declared_scale": "unit_interval"
+   },
+   "category": "controllable",
+   "scale_frame": 100,
+   "display_value": "49 \u00a3/month",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "7a0c6ecf",
+   "kind": "risk",
+   "label": "Churn Spike from Price Rise",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "9219a61e",
+   "kind": "option",
+   "label": "Gradual Step Increase to \u00a354 then \u00a359",
+   "interventions": {
+    "6d9a37f3": {
+     "value": 0.56,
+     "raw_value": 56,
+     "unit": "\u00a3/month",
+     "source": "cee_hypothesis",
+     "target_match": {
+      "node_id": "6d9a37f3",
+      "match_type": "exact_id",
+      "confidence": "high"
+     },
+     "value_confidence": "low",
+     "reasoning": "Olumi estimate via edge a6f10b53; this option\u2192factor effect is not bound to a stated option record"
+    }
+   },
+   "is_baseline": false,
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "94fa174b",
+   "kind": "outcome",
+   "label": "Monthly Recurring Revenue",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "ab78e513",
+   "kind": "factor",
+   "label": "Monthly Churn Rate",
+   "category": "external",
+   "prior": {
+    "distribution": "uniform",
+    "range_min": 0,
+    "range_max": 0.13
+   },
+   "extractionType": "inferred",
+   "display_value": "0% to 13%",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "b1f50492",
+   "kind": "option",
+   "label": "Raise It to \u00a359",
+   "interventions": {
+    "6d9a37f3": {
+     "value": 0.59,
+     "raw_value": 59,
+     "unit": "\u00a3/month",
+     "source": "cee_hypothesis",
+     "target_match": {
+      "node_id": "6d9a37f3",
+      "match_type": "exact_id",
+      "confidence": "high"
+     },
+     "value_confidence": "low",
+     "reasoning": "Olumi estimate via edge c2d3b64e; no stated figure is cited for this option\u2192factor effect"
+    }
+   },
+   "provenance": "from_brief",
+   "source_quote": "raise it to \u00a359",
+   "label_authored": true
+  },
+  {
+   "id": "c7f5229d",
+   "kind": "factor",
+   "label": "Subscriber Count",
+   "category": "external",
+   "scale_frame": 500,
+   "prior": {
+    "distribution": "uniform",
+    "range_min": 0.34,
+    "range_max": 1
+   },
+   "extractionType": "inferred",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "f17e9736",
+   "kind": "goal",
+   "label": "Reach \u00a320k MRR Within 12 Months",
+   "goal_threshold": 0.8,
+   "goal_threshold_raw": 20000,
+   "goal_threshold_unit": "\u00a3",
+   "goal_threshold_cap": 25000,
+   "goal_threshold_cap_provenance": "target_derived_headroom",
+   "goal_threshold_frame": "level",
+   "provenance": "from_brief",
+   "source_quote": "reach \u00a320k MRR within 12 months",
+   "label_authored": true
+  }
+ ],
+ "edges": [
+  {
+   "from": "147d4f19",
+   "to": "29936010",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Decision-to-option scaffold minted by the projector"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default"
+  },
+  {
+   "from": "147d4f19",
+   "to": "9219a61e",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Decision-to-option scaffold minted by the projector"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default"
+  },
+  {
+   "from": "147d4f19",
+   "to": "b1f50492",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Decision-to-option scaffold minted by the projector"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default"
+  },
+  {
+   "from": "29936010",
+   "to": "6d9a37f3",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  },
+  {
+   "from": "6d9a37f3",
+   "to": "94fa174b",
+   "strength": {
+    "mean": 0.4453124999999999,
+    "std": 0.10687499999999994
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0.4453124999999999,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.5,
+     "strength_std": 0.05,
+     "exists_probability": 0.99,
+     "reasoning": "MRR is mechanically proportional to price if subscriber count is held constant.",
+     "basis": "structural_inference",
+     "needs_user_input": false,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.5046874999999998,
+     "strength_std": 0.05,
+     "exists_probability": 0.99
+    },
+    "bias_correction": {
+     "strength_mean_offset": 0.004687499999999845,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 1,
+    "distance_to_goal": 1,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "7a0c6ecf",
+   "to": "f17e9736",
+   "strength": {
+    "mean": -0.45,
+    "std": 0.10799999999999998
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "negative",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": -0.45,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": -0.3,
+     "strength_std": 0.15,
+     "exists_probability": 0.7,
+     "reasoning": "A price\u2010driven churn spike likely reduces the probability of hitting the revenue goal but exact magnitude is uncertain.",
+     "basis": "weak_guess",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": -0.29531250000000014,
+     "strength_std": 0.15,
+     "exists_probability": 0.7
+    },
+    "bias_correction": {
+     "strength_mean_offset": 0.004687499999999845,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0.6666666666666666,
+    "distance_to_goal": 0,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "9219a61e",
+   "to": "6d9a37f3",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  },
+  {
+   "from": "9219a61e",
+   "to": "7a0c6ecf",
+   "strength": {
+    "mean": 0.35,
+    "std": 0.08399999999999998
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "contested",
+    "contested_reasons": [
+     "sign_flip"
+    ],
+    "pass1": {
+     "strength_mean": 0.35,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": -0.3,
+     "strength_std": 0.15,
+     "exists_probability": 0.9,
+     "reasoning": "A gradual step increase tends to mitigate churn spikes compared to a single large jump.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": -0.29531250000000014,
+     "strength_std": 0.15,
+     "exists_probability": 0.9
+    },
+    "bias_correction": {
+     "strength_mean_offset": 0.004687499999999845,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 1,
+    "distance_to_goal": 1,
+    "sign_unstable": true,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "94fa174b",
+   "to": "f17e9736",
+   "strength": {
+    "mean": 0.9,
+    "std": 0.21599999999999997
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0.9,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.7,
+     "strength_std": 0.1,
+     "exists_probability": 0.9,
+     "reasoning": "Higher MRR at any point increases the likelihood of reaching the 12-month target.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.7046874999999998,
+     "strength_std": 0.1,
+     "exists_probability": 0.9
+    },
+    "bias_correction": {
+     "strength_mean_offset": 0.004687499999999845,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0.6666666666666666,
+    "distance_to_goal": 0,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "ab78e513",
+   "to": "c7f5229d",
+   "strength": {
+    "mean": -0.6,
+    "std": 0.144
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "negative",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": -0.6,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": -0.8,
+     "strength_std": 0.15,
+     "exists_probability": 0.9,
+     "reasoning": "Higher churn directly reduces subscriber count absent offsetting new sign-ups.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": -0.7953125000000002,
+     "strength_std": 0.15,
+     "exists_probability": 0.9
+    },
+    "bias_correction": {
+     "strength_mean_offset": 0.004687499999999845,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0.6666666666666666,
+    "distance_to_goal": 2,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "b1f50492",
+   "to": "6d9a37f3",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  },
+  {
+   "from": "b1f50492",
+   "to": "7a0c6ecf",
+   "strength": {
+    "mean": 0.65,
+    "std": 0.15599999999999997
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0.65,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.7,
+     "strength_std": 0.1,
+     "exists_probability": 0.9,
+     "reasoning": "A straight jump to \u00a359 is likely to cause a strong churn spike.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.7046874999999998,
+     "strength_std": 0.1,
+     "exists_probability": 0.9
+    },
+    "bias_correction": {
+     "strength_mean_offset": 0.004687499999999845,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0.6666666666666666,
+    "distance_to_goal": 1,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "c7f5229d",
+   "to": "94fa174b",
+   "strength": {
+    "mean": 0.5046874999999998,
+    "std": 0.12112499999999994
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0.5046874999999998,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.5,
+     "strength_std": 0.05,
+     "exists_probability": 0.99,
+     "reasoning": "MRR scales proportionally with subscriber count when price is fixed.",
+     "basis": "structural_inference",
+     "needs_user_input": false,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.5046874999999998,
+     "strength_std": 0.05,
+     "exists_probability": 0.99
+    },
+    "bias_correction": {
+     "strength_mean_offset": 0.004687499999999845,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 1,
+    "distance_to_goal": 1,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  }
+ ],
+ "goal_node_id": "f17e9736",
+ "analysis_ready": {
+  "status": "needs_user_mapping",
+  "options": [
+   {
+    "id": "29936010",
+    "label": "Status Quo (Keep \u00a349 Price)",
+    "status": "ready",
+    "status_reason": "1 intervention(s) ready for analysis",
+    "interventions": {
+     "6d9a37f3": {
+      "value": 0.49,
+      "source": "cee_hypothesis",
+      "display_value": "49 \u00a3/month"
+     }
+    },
+    "extraction_metadata": {
+     "source": "cee_hypothesis",
+     "confidence": "low",
+     "reasoning": "Olumi estimate via edge 4df5f9bf; this option\u2192factor effect is not bound to a stated option record"
+    },
+    "raw_interventions": {
+     "6d9a37f3": 49
+    },
+    "is_baseline": true,
+    "intervention_details": {
+     "6d9a37f3": {
+      "display_value": "49 \u00a3/month",
+      "normalised_value": 0.49,
+      "raw_value": 49,
+      "unit": "\u00a3/month"
+     }
+    }
+   },
+   {
+    "id": "9219a61e",
+    "label": "Gradual Step Increase to \u00a354 then \u00a359",
+    "status": "needs_user_mapping",
+    "status_reason": "A proposed effect still needs a supported mapping",
+    "interventions": {
+     "6d9a37f3": {
+      "value": 0.56,
+      "source": "cee_hypothesis",
+      "display_value": "56 \u00a3/month"
+     }
+    },
+    "extraction_metadata": {
+     "source": "cee_hypothesis",
+     "confidence": "low",
+     "reasoning": "Olumi estimate via edge a6f10b53; this option\u2192factor effect is not bound to a stated option record"
+    },
+    "unresolved_targets": [
+     "7a0c6ecf"
+    ],
+    "user_questions": [
+     "How does Gradual Step Increase to \u00a354 then \u00a359 change Churn Spike from Price Rise? The proposed relationship is retained, but its mechanism and value still need clarification."
+    ],
+    "raw_interventions": {
+     "6d9a37f3": 56
+    },
+    "intervention_details": {
+     "6d9a37f3": {
+      "display_value": "56 \u00a3/month",
+      "normalised_value": 0.56,
+      "raw_value": 56,
+      "unit": "\u00a3/month"
+     }
+    }
+   },
+   {
+    "id": "b1f50492",
+    "label": "Raise It to \u00a359",
+    "status": "needs_user_mapping",
+    "status_reason": "A proposed effect still needs a supported mapping",
+    "interventions": {
+     "6d9a37f3": {
+      "value": 0.59,
+      "source": "cee_hypothesis",
+      "display_value": "59 \u00a3/month"
+     }
+    },
+    "extraction_metadata": {
+     "source": "cee_hypothesis",
+     "confidence": "low",
+     "reasoning": "Olumi estimate via edge c2d3b64e; no stated figure is cited for this option\u2192factor effect"
+    },
+    "unresolved_targets": [
+     "7a0c6ecf"
+    ],
+    "user_questions": [
+     "How does Raise It to \u00a359 change Churn Spike from Price Rise? The proposed relationship is retained, but its mechanism and value still need clarification."
+    ],
+    "raw_interventions": {
+     "6d9a37f3": 59
+    },
+    "intervention_details": {
+     "6d9a37f3": {
+      "display_value": "59 \u00a3/month",
+      "normalised_value": 0.59,
+      "raw_value": 59,
+      "unit": "\u00a3/month"
+     }
+    }
+   }
+  ]
+ }
+}
