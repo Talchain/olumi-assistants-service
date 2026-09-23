@@ -1,0 +1,336 @@
+{
+  "edges": [
+    {
+      "to": "opt_3",
+      "from": "nd_1",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "opt_4",
+      "from": "nd_1",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "opt_5",
+      "from": "nd_1",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "fac_6",
+      "from": "opt_3",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "fac_7",
+      "from": "opt_4",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "fac_8",
+      "from": "opt_5",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+    },
+    {
+      "to": "out_13",
+      "from": "fac_6",
+      "strength": {
+        "std": 0.125,
+        "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "out_14",
+      "from": "fac_7",
+      "strength": {
+        "std": 0.125,
+        "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "fac_9",
+      "from": "fac_8",
+      "strength": {
+        "std": 0.125,
+        "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "out_15",
+      "from": "fac_9",
+      "strength": {
+        "std": 0.125,
+        "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "out_15",
+      "from": "out_13",
+      "strength": {
+        "std": 0.125,
+        "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "out_15",
+      "from": "out_14",
+      "strength": {
+        "std": 0.125,
+        "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "out_15",
+      "from": "rsk_10",
+      "strength": {
+        "std": 0.125,
+        "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "out_15",
+      "from": "rsk_11",
+      "strength": {
+        "std": 0.125,
+        "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "fac_9",
+      "from": "rsk_12",
+      "strength": {
+        "std": 0.125,
+        "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+    },
+    {
+      "to": "goal_2",
+      "from": "out_15",
+      "strength": {
+        "std": 0.125,
+        "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+    }
+  ],
+  "nodes": [
+    {
+      "id": "nd_1",
+      "kind": "decision",
+      "label": "Decision 1",
+      "provenance": "ai_inferred",
+      "description": ""
+    },
+    {
+      "id": "goal_2",
+      "kind": "goal",
+      "label": "Goal 1",
+      "provenance": "ai_inferred",
+      "goal_threshold_raw": 0,
+      "goal_threshold_unit": "%",
+      "goal_threshold_frame": "level"
+    },
+    {
+      "id": "opt_3",
+      "kind": "option",
+      "label": "Option 1",
+      "provenance": "from_brief",
+      "interventions": {
+        "fac_6": {
+          "value": 0.1
+        }
+      }
+    },
+    {
+      "id": "opt_4",
+      "kind": "option",
+      "label": "Option 2",
+      "provenance": "from_brief",
+      "interventions": {
+        "fac_7": {
+          "value": 0.1
+        }
+      }
+    },
+    {
+      "id": "opt_5",
+      "kind": "option",
+      "label": "Option 3",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_6",
+      "cap": 10,
+      "kind": "factor",
+      "label": "Factor 1",
+      "category": "controllable",
+      "provenance": "from_brief"
+    },
+    {
+      "id": "fac_7",
+      "cap": 20,
+      "kind": "factor",
+      "label": "Factor 2",
+      "category": "controllable",
+      "provenance": "from_brief"
+    },
+    {
+      "id": "fac_8",
+      "cap": 100,
+      "kind": "factor",
+      "label": "Factor 3",
+      "category": "controllable",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_9",
+      "cap": 100,
+      "kind": "factor",
+      "label": "Factor 4",
+      "category": "observable",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "rsk_10",
+      "kind": "risk",
+      "label": "Risk 1",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "rsk_11",
+      "kind": "risk",
+      "label": "Risk 2",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "rsk_12",
+      "kind": "risk",
+      "label": "Risk 3",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "out_13",
+      "kind": "outcome",
+      "label": "Outcome 1",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "out_14",
+      "kind": "outcome",
+      "label": "Outcome 2",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "out_15",
+      "kind": "outcome",
+      "label": "Outcome 3",
+      "provenance": "ai_inferred"
+    }
+  ]
+}
