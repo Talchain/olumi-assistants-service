@@ -46,7 +46,7 @@ describe('an empty scenario is read back without a false failure', () => {
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
 
-  const failures = () => warn.mock.calls.filter((c) => (c[0] as { event?: string } | undefined)?.event === 'agent_lane.state_readback_failed');
+  const failures = () => warn.mock.calls.filter((c: unknown[]) => (c[0] as { event?: string } | undefined)?.event === 'agent_lane.state_readback_failed');
 
   it('RED: graph: null (no model yet) answers 200 and logs NO readback failure', async () => {
     warn.mockClear();
