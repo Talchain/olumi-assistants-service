@@ -126,6 +126,15 @@ const keyLabel = (l: unknown): string => String(l ?? '').toLowerCase().replace(/
  */
 export const nodeIdentity = (n: unknown): string => {
   const r = n as { kind?: unknown; label?: unknown; description?: unknown };
+  /**
+   * ⛔ A MODEL HAS EXACTLY ONE GOAL AND ONE DECISION, so their identity is the
+   * kind, not the wording. MEASURED on served staging `785185b7` (2 of 12 hiring
+   * draws): the compact retry fixed the size and kept both of the user's options,
+   * but reworded the goal ("delivery velocity" → "velocity"). Keyed on the label,
+   * that read as a lost user-stated node, the valid retry was discarded, and the
+   * user got no model at all (`model_too_large`).
+   */
+  if (typeof r.kind === 'string' && STRUCTURAL_KINDS.has(r.kind)) return `${r.kind}:`;
   return `${String(r.kind ?? '')}:${keyLabel(r.description ?? r.label)}`;
 };
 

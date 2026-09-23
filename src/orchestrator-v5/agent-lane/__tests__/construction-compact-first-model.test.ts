@@ -219,3 +219,40 @@ describe('\u26d4 a retry that LOSES user material is never adopted, even if smal
     expect(registered(dp.paths)).toBe(0);
   });
 });
+
+describe('⭐ a retry that only REWORDS the goal is the same decision, and is adopted', () => {
+  /**
+   * MEASURED on served staging `785185b7` (refusal probe, 2 of 12 hiring draws): the
+   * first model came back at 31 links, the compact retry fixed the size and kept both
+   * of the user's options, and the retry's goal read "velocity" where the first read
+   * "delivery velocity". The goal was keyed on its exact label, so the retry "lost" a
+   * user-stated identity and the build was refused `model_too_large`. The user got no
+   * model at all. A model has exactly ONE goal (built from `goal.metric`), so a
+   * reworded goal is the same goal.
+   */
+  const withGoal = (extra: number, metric: string) => {
+    const c = candidate(extra) as unknown as { goal: { metric: string } };
+    c.goal = { ...c.goal, metric };
+    return c;
+  };
+
+  it('RED: adopts the compact retry and registers it once', async () => {
+    const s = structuredSequence(withGoal(14, 'Delivery velocity'), withGoal(2, 'Velocity'));
+    const dp = dispatcher();
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
+    expect(s.calls).toHaveLength(2);
+    expect(out.ok, JSON.stringify(out).slice(0, 300)).toBe(true);
+    expect(registered(dp.paths)).toBe(1);
+  });
+
+  it('CONTRAST: a retry that drops one of the user’s OPTIONS is still refused', async () => {
+    const dropped = withGoal(2, 'Velocity') as unknown as { options: unknown[] };
+    dropped.options = dropped.options.slice(0, 1);
+    const s = structuredSequence(withGoal(14, 'Delivery velocity'), dropped);
+    const dp = dispatcher();
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
+    expect(out.ok).toBe(false);
+    expect(out['refusal']).toBe('model_too_large');
+    expect(registered(dp.paths)).toBe(0);
+  });
+});
