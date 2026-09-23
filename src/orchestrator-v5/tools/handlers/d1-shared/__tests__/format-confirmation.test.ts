@@ -301,18 +301,14 @@ describe('formatEdgeAdjustment — no false band transition', () => {
     expect(text).toMatch(/direction is now negative/);
   });
 
-  it('CONTROL: a direction flip with NO sign change is still reported', () => {
-    // ⚠ THIS CONTROL WAS BLIND ONCE, AND THE MUTANT KIT CAUGHT IT. The first
-    // version used afterMean -0.5, but `describeBandWithDirection` already
-    // decorates a negative mean as "moderate (negative)", so the bands differed
-    // anyway and dropping the `!directionFlipped` conjunct changed nothing —
-    // the mutant SURVIVED.
-    //
-    // The discriminating case is a flip WITHOUT a sign change, which is exactly
-    // why the explicit direction fields exist: a zero or positive mean carries
-    // no direction of its own. Both means are positive and in one band here, so
-    // ONLY `!directionFlipped` prevents the reversal being swallowed.
-    const text = formatEdgeAdjustment({
+  it('the joined sentence carries no doubled punctuation', () => {
+    // ⚠ THIS REPLACES A DUPLICATE. The test that stood here was byte-identical
+    // in INPUT to the one above (0.4 → 0.5, positive → negative) with a
+    // strictly weaker assertion set — a reviewer correctly called it a control
+    // that controlled nothing, and it left a mutant alive: dropping the
+    // `.replace(/\.$/, '')` yields "…still moderate., but the direction is now
+    // negative." and nothing went red. This asserts the joint itself.
+    const flipped = formatEdgeAdjustment({
       fromLabel: 'a',
       toLabel: 'b',
       beforeMean: 0.4,
@@ -320,12 +316,20 @@ describe('formatEdgeAdjustment — no false band transition', () => {
       beforeDirection: 'positive',
       afterDirection: 'negative',
     });
-    // ⚠ THIS ASSERTION WAS UPDATED, AND THE REASON MATTERS. It used to read
-    // `not.toContain('still moderate')`, which was written when the same-band
-    // branch EXCLUDED direction flips. The requirement was never that wording —
-    // it is that a reversal must not be swallowed. The branch now handles the
-    // flip itself and says so explicitly, so the requirement is asserted
-    // directly instead of through a proxy for the old implementation.
-    expect(text).toMatch(/direction is now negative/i);
+    expect(flipped).not.toMatch(/\.,/);
+    expect(flipped).not.toMatch(/\.\s*\./);
+    expect(flipped).toMatch(/still moderate, but the direction is now negative\.$/);
+
+    // The near-zero clause joins the same way, and its noun differs.
+    const nearZero = formatEdgeAdjustment({
+      fromLabel: 'a',
+      toLabel: 'b',
+      beforeMean: 0.01,
+      afterMean: 0.02,
+      beforeDirection: 'positive',
+      afterDirection: 'negative',
+    });
+    expect(nearZero).not.toMatch(/\.,/);
+    expect(nearZero).toMatch(/no material influence, but the direction is now negative\.$/);
   });
 });
