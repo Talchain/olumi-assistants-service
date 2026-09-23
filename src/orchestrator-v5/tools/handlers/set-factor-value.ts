@@ -96,6 +96,61 @@ import { log } from '../../../utils/telemetry.js';
 // foamy-bee UI handoff brief bans `recommended`, `winner`, `winning`
 // from user-facing copy; the noun form `recommendation` is treated
 // in scope by the same rule).
+
+/**
+ * Map an `observed_state.source` literal onto the node-level provenance enum.
+ *
+ * ⛔ EVERY ROW IS THE ESTATE'S OWN ANNOTATION OF ITS WRITER, not a preference.
+ * `schemas/__tests__/observed-state-source-derivation.test.ts:85-96` names the
+ * writer of each literal; this table is that list, read off:
+ *
+ *   user_override     CEE set_factor_value / chat edits      -> a human
+ *   user_confirmed    UI "confirm as is"                     -> a human
+ *   user              UI Model-tab factor-value edit         -> a human
+ *   user_edited       UI OutputsDock transition bridge       -> a human
+ *   user_assumption   UI "mark as assumption"                -> a human
+ *   user_calibration  UI inspector calibration               -> a human
+ *   panel_elicited    CEE's verified panel apply             -> a human
+ *   brief_extraction  CEE brief extraction                   -> the brief
+ *   explicit          extraction-type sibling (stated)       -> the brief
+ *   cee_inference     CEE's own inference writer             -> the machine
+ *   inferred          model-estimate sibling                 -> the machine
+ *   cee_repair        CEE repair writer                      -> the machine
+ *
+ * ⚠ AN UNKNOWN LITERAL FALLS TO `ai_inferred`, NOT `user_set`. The failure a
+ * new source can cause must be under-claiming authorship, never over-claiming
+ * it; the accompanying suite pins this table exhaustive against the contract's
+ * own literal list so a new member cannot arrive unmapped and unnoticed.
+ *
+ * ⚠ DEFAULTS TO `user_set` ON ABSENCE, DELIBERATELY. `appliedProvenance` is
+ * undefined for an ordinary user edit — it means "not applied from a panel
+ * round", never "not a user" — so treating absence as machine-authored would
+ * strip authorship from the common path.
+ */
+const NODE_PROVENANCE_BY_SOURCE: Readonly<
+  Record<string, 'user_set' | 'from_brief' | 'ai_inferred'>
+> = Object.freeze({
+  user_override: 'user_set',
+  user_confirmed: 'user_set',
+  user: 'user_set',
+  user_edited: 'user_set',
+  user_assumption: 'user_set',
+  user_calibration: 'user_set',
+  panel_elicited: 'user_set',
+  brief_extraction: 'from_brief',
+  explicit: 'from_brief',
+  cee_inference: 'ai_inferred',
+  inferred: 'ai_inferred',
+  cee_repair: 'ai_inferred',
+});
+
+export function nodeProvenanceFromSource(
+  source: string | undefined,
+): 'user_set' | 'from_brief' | 'ai_inferred' {
+  if (source === undefined) return 'user_set';
+  return NODE_PROVENANCE_BY_SOURCE[source] ?? 'ai_inferred';
+}
+
 export const STALENESS_NARRATIVE =
   ' This makes the last analysis stale. Re-run analysis to see how this affects the results.';
 
@@ -700,9 +755,36 @@ export function createSetFactorValueHandler(): HandlerFn {
         delete (node as { display_value?: string }).display_value;
       }
 
-      // Stamp provenance so downstream consumers know the value was
-      // user-set (NodeV3.provenance enum supports 'user_set' directly).
-      node.provenance = 'user_set';
+      // ⭐ AUTHORSHIP IS REPORTED, NOT ASSUMED — and this line used to assume.
+      //
+      // It was `node.provenance = 'user_set'` UNCONDITIONALLY, while the very
+      // same mutation stamps `observed_state.source` from `appliedProvenance`
+      // sixty lines above (`appliedProvenance?.source ?? USER_EDIT_SOURCE`).
+      // Two authorities on one question, and the node-level one — the one trust
+      // surfaces read — could not be told the truth by any caller.
+      //
+      // ⛔ MEASURED ON DEPLOYED STAGING, 23 Sep, scenario `450acd25`: an agent
+      // filled FOURTEEN factors in twenty-one seconds and every one persisted as
+      // `provenance: 'user_set'`. Eight were exactly the midpoint (`0.5`, raw
+      // `50`) and one set `Tech Lead headcount = 0` inside a decision about
+      // whether to hire a Tech Lead. The user stated none of them. That is the
+      // standing ruling inverted — "factors without a defensible value are NOT
+      // given invented quantitative values simply so analysis can consume them"
+      // — with the machine's guesses wearing the user's name, which is the shape
+      // PR #853 was reverted for 54 minutes after merge.
+      //
+      // ⚠ WHAT THIS DOES NOT DO. It does not detect an agent. It cannot: the
+      // internal dispatch carries only the assist key and the caller's own
+      // token, so a handler has no lane marker. An earlier attempt to infer it
+      // from an empty `user_message` was REFUTED by its control — 335 of 672
+      // `set_factor_value` turns in 30 days have one, because chip-click and
+      // panel edits do too, so that test would have stripped authorship from
+      // real user edits. This reports what the caller declares and nothing more.
+      //
+      // Absent `appliedProvenance` still yields `'user_set'`, byte-identical to
+      // before, so every existing caller is unchanged; a caller that declares a
+      // non-user source now gets an honest node stamp instead of a false one.
+      node.provenance = nodeProvenanceFromSource(appliedProvenance?.source);
 
       // 1.16 item A2 — preserve option-intervention absolutes across the
       // cap change. Runs inside the mutation clone so the rewritten
