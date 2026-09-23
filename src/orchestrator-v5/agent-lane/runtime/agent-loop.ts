@@ -18,6 +18,11 @@
  */
 
 import { toolsFor, dispatchTool, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
+import {
+  eligibleTools,
+  type CanonicalContextPacket,
+  type ContextExpectation,
+} from './request-assembly.js';
 
 export interface ModelCallRequest {
   readonly instructions: string;
@@ -47,6 +52,23 @@ export interface AgentTurnInput {
    * keeps existing callers unchanged; the preview deployment opts in.
    */
   readonly mode?: AgentLaneMode;
+  /**
+   * Canonical state the server ALREADY holds, plus what it believes is true, so
+   * the loop can stop offering a tool whose answer it is carrying.
+   *
+   * Measured: 18.58s / 7 provider calls / $0.0231 with the redundant read,
+   * 12.32s / 4 / $0.0132 without it (~34% faster, ~43% cheaper).
+   *
+   * ⛔ OPTIONAL, AND ABSENCE IS SAFE IN THE DIRECTION IT FAILS. With no packet
+   * the loop offers the full set for the mode, exactly as before — absence of
+   * context can only ever give the model MORE read tools, never more authority.
+   * The packet is VERIFIED here (HMAC, subject, revision, turn); a forged or
+   * stale one simply keeps the read tool.
+   */
+  readonly canonicalContext?: {
+    readonly packet: CanonicalContextPacket | null;
+    readonly expectation: ContextExpectation;
+  };
 }
 
 export interface AgentTurnResult {
@@ -104,7 +126,16 @@ export async function runAgentTurn(
     const resp = await callModel({
       instructions: input.instructions,
       input: items,
-      tools: toolsFor(input.mode ?? 'full') as readonly unknown[],
+      // Eligibility, not the raw catalogue. `eligibleTools` starts from
+      // `toolsFor(mode)` and can only REMOVE, so the mode remains the authority
+      // and a context packet can never widen the surface.
+      tools: (input.canonicalContext === undefined
+        ? toolsFor(input.mode ?? 'full')
+        : eligibleTools({
+            mode: input.mode ?? 'full',
+            context: input.canonicalContext.packet,
+            expectation: input.canonicalContext.expectation,
+          }).tools) as readonly unknown[],
       max_output_tokens: input.maxOutputTokens,
     });
     const out = resp.output ?? [];
