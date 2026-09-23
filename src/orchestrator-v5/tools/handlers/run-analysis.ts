@@ -75,7 +75,10 @@ import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.j
 
 import { getHandlerBudgetMs } from '../../budgets.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { collectInterventionControlledFactorIds } from '../../context/intervention-controlled-drivers.js';
+import {
+  collectFactorIdsSetByEveryOption,
+  collectInterventionControlledFactorIds,
+} from '../../context/intervention-controlled-drivers.js';
 import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import type {
   HandlerFn,
@@ -1889,6 +1892,21 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       interventionControlledFactorIds: collectInterventionControlledFactorIds(
         snapshot.rawPersistedGraph ?? { options: snapshot.options },
       ),
+      // P2: the INTERSECTION (factors EVERY option sets). Lets the headline
+      // tell a vacuous "no single factor would change the order" (nothing
+      // could, by construction) from a real finding.
+      //
+      // ⚠ Over the WIRE population (`finalWireOptions`, §3.3), NOT the
+      // persisted graph. The question is "could any option PLoT compared read
+      // the swept value?", so only the options PLoT received, with the
+      // intervention keys PLoT received, may answer it. The persisted graph
+      // differs in both directions: a placeholder the gate EXCLUDED (§2.55)
+      // would empty the intersection and keep a vacuous claim; a status quo
+      // the gate HELD carries interventions only on the wire. The union above
+      // stays persisted-graph-wide on purpose (a safety backstop over-fires).
+      factorIdsSetByEveryOption: collectFactorIdsSetByEveryOption({
+        options: finalWireOptions,
+      }),
       // The named-driver half. Derived from the SAME records the disclosure
       // sentence below is built from, so the sentence and the suppression can
       // never disagree about which factors are unset.
