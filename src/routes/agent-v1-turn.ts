@@ -111,6 +111,9 @@ const MUTATION_INSTRUCTION =
     ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
     : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link, propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
 
+/** Marks a board edit in the Agent's history: the user's own change, already applied — never a request to the Agent. */
+export const BOARD_EDIT_PREFIX = '(Board edit \u2014 the user changed this directly on the canvas and Olumi has already applied it; it is not a request to you.)';
+
 const AGENT_INSTRUCTIONS = [
   'You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user.',
   'Answer the user’s actual question directly and naturally.',
@@ -223,6 +226,7 @@ const AGENT_INSTRUCTIONS = [
    * ordering is sensitive to, and let the user change it and see how much it matters.
    */
   'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one; say which option leads in this model and how firmly. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding.',
+  'History entries that begin \u201c(Board edit\u201d are changes the user made directly on the canvas. When the user asks about \u201cmy change\u201d, start from the most recent board edit, and read the current state before explaining what it did.',
   'British English. Concise but substantive.',
 ].join(' ');
 
@@ -510,6 +514,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const forwarded = await dispatchFor(
         typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
       )('/orchestrate/v2/turn', body);
+      /**
+       * ⛔ THE AGENT MUST KNOW WHAT THE USER CHANGED ON THE BOARD. Measured on served
+       * cc7b26c: after a canvas edit (Tech lead hires 0 → 1), "Re-run the analysis.
+       * How much did my change matter?" was answered about the EARLIER approved
+       * baseline — the forwarded edit never entered the Agent's history, and it did
+       * not re-read state. The product's own narration of the edit (the handler's
+       * truthful text, e.g. "Updated Tech lead hires from 0 hires to 1 hire.") is
+       * appended to this session's history, marked as a board edit — not as
+       * something the user asked the Agent to do.
+       */
+      const narration = typeof forwarded.json.assistant_text === 'string' ? forwarded.json.assistant_text.trim() : '';
+      if (forwarded.status === 200 && kind === 'system_event' && narration.length > 0) {
+        histories.set(sessionId, [
+          ...histories.get(sessionId),
+          { role: 'user', content: [{ type: 'input_text', text: `${BOARD_EDIT_PREFIX} ${narration}` }] },
+        ]);
+      }
       return reply.code(forwarded.status).send({
         ...forwarded.json,
         // Underscore sidecar: egress is `.strict()`. Says plainly that this
