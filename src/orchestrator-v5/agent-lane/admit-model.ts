@@ -22,6 +22,7 @@ import {
   resolveGoalThresholdCapWithProvenance,
 } from '../../utils/goal-threshold-cap.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
+import type { InterventionV3T } from '../../schemas/cee-v3.js';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import {
@@ -116,6 +117,30 @@ export interface WidenerAdditions {
   readonly proposed_links?: readonly CandidateLink[];
 }
 
+/**
+ * ⛔ A CONSTRUCTED LEVEL STATES WHERE ITS NUMBER CAME FROM, OR IT CAN NEVER BE REVISED.
+ *
+ * MEASURED on served staging (scenario A of the acceptance witness): these
+ * cells were written as a bare `{ value }`, and the option-intervention writer
+ * (`prepareOptionInterventionEdit`) refuses to overwrite an existing entry
+ * with no `source` — `invalid_existing_intervention`. So a starting point that
+ * REVISED a level the brief stated came back `partially_applied`: the user
+ * approved it and the level did not move. The writer's rule is right (an entry
+ * with no stated origin cannot be replaced with user authority without erasing
+ * what it was), so the fix is here, at the producer.
+ *
+ * The claim is the same one `framedObservedState` makes for a baseline:
+ * `explicit` means the brief stated it (`brief_extraction`), anything else is
+ * Olumi's hypothesis (`cee_hypothesis`). `user_specified` is EXCLUDED from the
+ * type on purpose: a machine-derived level never claims user authority, and
+ * only the writer, on a user's approved change, mints that stamp.
+ */
+export type ConstructedLevelSource = Exclude<InterventionV3T['source'], 'user_specified'>;
+export interface ConstructedLevel { value: number; source: ConstructedLevelSource }
+
+const levelSourceFor = (provenance: string): ConstructedLevelSource =>
+  provenance === 'explicit' ? 'brief_extraction' : 'cee_hypothesis';
+
 export interface AdmittedNode {
   /** The full text, when the label had to be shortened to stay editable. */
   description?: string;
@@ -127,7 +152,7 @@ export interface AdmittedNode {
    * object, which is `edit_graph`'s canonical edit location, would not survive
    * persistence from here. `extractNumericIntervention` reads both.
    */
-  interventions?: Record<string, { value: number }>;
+  interventions?: Record<string, ConstructedLevel>;
   id: string;
   kind: CandidateNodeKind;
   label: string;
@@ -609,7 +634,7 @@ export function admitCandidateModel(
   // An intervention names a factor by LABEL. Resolving it to a node id is an
   // exact match only: attaching "what this option changes" to a guessed factor
   // would put the user's own number on the wrong quantity.
-  const interventionsByOption = new Map<string, Record<string, { value: number }>>();
+  const interventionsByOption = new Map<string, Record<string, ConstructedLevel>>();
   /**
    * ⛔ AN OPTION'S LEVEL MUST BE ON THE SAME SCALE AS THE FACTOR'S BASELINE.
    *
@@ -666,7 +691,7 @@ export function admitCandidateModel(
       }
       actsOn.add(factorId);
     }
-    const bundle: Record<string, { value: number }> = {};
+    const bundle: Record<string, ConstructedLevel> = {};
     for (const iv of o.interventions ?? []) {
       const factorId = ids.get(iv.factor_label);
       if (factorId === undefined) {
@@ -686,7 +711,7 @@ export function admitCandidateModel(
       // outside it is left exactly as stated and the mismatch is recorded —
       // silently clamping a user's number would be the worse failure.
       if (cap !== undefined && iv.value >= 0 && iv.value <= cap) {
-        bundle[factorId] = { value: iv.value / cap };
+        bundle[factorId] = { value: iv.value / cap, source: levelSourceFor(iv.provenance) };
       } else {
         if (cap !== undefined) {
           loss.push({
@@ -700,7 +725,7 @@ export function admitCandidateModel(
             severity: 'warn',
           } as RepairEntry);
         }
-        bundle[factorId] = { value: iv.value };
+        bundle[factorId] = { value: iv.value, source: levelSourceFor(iv.provenance) };
       }
       actsOn.add(factorId);
     }
