@@ -356,6 +356,22 @@ describe('dispatchDeterministicChipClick — run_analysis regression', () => {
     }));
   });
 
+  it('RED: the OpenAI Agent\u2019s run_analysis skips the legacy decision_review BEFORE any provider call — the analysis still runs', async () => {
+    // Served c4a6cce (#63 5793628948): on the OpenAI route, decision_review cost
+    // ~14 s of every analysis turn and emitted review cards with no provider
+    // attribution. The Agent explains the canonical analysis itself.
+    const { AGENT_RUN_ANALYSIS_CHIP_ID } = await import('../chip-click-dispatch.js');
+    const payload = makeMessagePayload({
+      scenario_id: SCENARIO_ID, turn_id: TURN_ID, stage: 'analyse', message: 'Run it.',
+      turn_class: 'decide', source: 'chip_click',
+      chip: { id: AGENT_RUN_ANALYSIS_CHIP_ID, action_type: 'run_analysis' },
+    });
+    const out = await dispatchDeterministicChipClick('run_analysis', { payload, requestId: 'req-agent-run' });
+    expect(out.outcome).toBe('ok');
+    expect(runAnalysisHandlerMock, 'the canonical analysis still runs').toHaveBeenCalledTimes(1);
+    expect(enrichRunAnalysisMock, 'the generative review is never invoked').not.toHaveBeenCalled();
+  });
+
   it('run_analysis chip-click continues to dispatch with no behavioural change for the existing path', async () => {
     const out = await dispatchDeterministicChipClick('run_analysis', {
       payload: payloadFor('run_analysis'),

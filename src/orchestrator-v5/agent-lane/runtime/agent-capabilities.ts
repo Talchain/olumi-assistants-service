@@ -15,6 +15,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
+import { AGENT_RUN_ANALYSIS_CHIP_ID } from '../../handlers/agent-chip-ids.js';
 
 /**
  * The durable operation identity for authorising a proposal.
@@ -1465,7 +1466,7 @@ export function createAgentCapabilities(
         turn_class: 'decide',
         source: 'chip_click',
         message: args.reason,
-        chip: { id: 'agent-run-analysis', action_type: 'run_analysis' },
+        chip: { id: AGENT_RUN_ANALYSIS_CHIP_ID, action_type: 'run_analysis' },
       });
       const ready = (r.json.analysis_ready ?? {}) as Record<string, unknown>;
       const blocks = (r.json.blocks as { type: string }[] | undefined) ?? [];
