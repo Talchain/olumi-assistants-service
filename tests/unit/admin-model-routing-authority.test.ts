@@ -97,15 +97,31 @@ describe('admin runtime model-routing authority', () => {
     );
     expect(EXECUTABLE_RUNTIME_TASKS).toContain('clarify_brief');
     expect(EXECUTABLE_RUNTIME_TASKS).toContain('explain_diff');
-    // critique_graph gained 'openai' when OpenAIAdapter.critiqueGraph was
-    // implemented — the map records which providers IMPLEMENT a task, and the
-    // throwing stub that justified its exclusion is gone. explain_diff keeps
-    // its exclusion because OpenAIAdapter.explainDiff still throws, and that
-    // ASYMMETRY is what proves the map tracks the adapters rather than being
-    // opened to everything.
+    // ⭐⭐ BOTH ENTRIES ARE NOW OPEN, AND THAT CHANGES WHAT THIS MAP IS.
+    //
+    // `critique_graph` gained 'openai' with #1771 and `explain_diff` with
+    // #1764. Each was excluded for the same recorded reason — "OpenAI exposes
+    // compatibility stubs that throw before making a call" — and both stubs are
+    // now implementations.
+    //
+    // ⛔ THE HONEST CONSEQUENCE, STATED RATHER THAN LEFT TO BE FOUND: the map
+    // now lists every provider for every entry it has, so
+    // `requireTaskModelAssignmentCapability` CANNOT REJECT ANYTHING. The
+    // provider union is exactly ['anthropic','openai','fixtures'] and both rows
+    // carry all three. The map is, as of these two PRs, inert — it documents a
+    // fact rather than enforcing a constraint.
+    //
+    // That is the correct end state (the exclusions were workarounds for
+    // missing adapters, not policy), but it means the ASYMMETRY that used to
+    // prove this map tracked the adapters is gone. Two things replace it, and
+    // neither depends on an entry being closed:
+    //   · the MODEL_DISABLED guard below — registry `enabled: false`, a
+    //     DIFFERENT mechanism, which is now the live fail-closed path; and
+    //   · this deep-equal, which REDs the moment anyone adds a third entry,
+    //     forcing them to state which adapters actually implement it.
     expect(ROUTER_TASK_PROVIDER_CAPABILITIES).toEqual({
       critique_graph: ['anthropic', 'openai', 'fixtures'],
-      explain_diff: ['anthropic', 'fixtures'],
+      explain_diff: ['anthropic', 'openai', 'fixtures'],
     });
   });
 

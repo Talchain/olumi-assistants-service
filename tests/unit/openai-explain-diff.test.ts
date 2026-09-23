@@ -206,6 +206,49 @@ describe('the capability map now states a fact', () => {
   });
 });
 
+/**
+ * ⛔⛔ THE DISCRIMINATOR THAT SURVIVES BOTH TASKS BEING OPEN.
+ *
+ * Every existing capability test proves the map "tracks reality" through an
+ * ASYMMETRY: one task listed a provider, another did not. Opening
+ * `explain_diff` here — and `critique_graph` in #1755 — **removes the last
+ * closed entry**, so that asymmetry stops existing and those tests stop
+ * discriminating. Deleting them would leave the map unguarded, which is how it
+ * came to carry an untrue entry in the first place.
+ *
+ * This is the replacement: the guard CHAIN must still reject an unserviceable
+ * model even when no provider constraint applies. `test-disabled-model` is
+ * registered with `enabled: false`, so `resolveModelAssignment` throws
+ * `MODEL_DISABLED` before any adapter is constructed. If that ever stopped
+ * firing, an unserviceable pin would reach a provider — which is the real risk
+ * the capability map exists to prevent, stated without needing a closed task.
+ */
+describe('the model guard still fires when no provider constraint applies', () => {
+  it('⛔ a registered-but-DISABLED model is rejected before adapter construction', async () => {
+    const { resolveModelAssignment } = await import('../../src/config/model-assignment.js');
+    let caught: unknown;
+    try {
+      resolveModelAssignment('test-disabled-model');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught, 'a disabled model must not resolve').toBeDefined();
+    expect((caught as { code?: string }).code).toBe('MODEL_DISABLED');
+    // Bound by IDENTITY: the error must name the model, so a guard firing for
+    // some other reason cannot satisfy this.
+    expect(String((caught as Error).message)).toContain('test-disabled-model');
+  });
+
+  it('POSITIVE CONTROL — an ENABLED model resolves cleanly through the same call', async () => {
+    // Without this the test above would pass if resolveModelAssignment threw
+    // for everything, e.g. after a registry-loading regression.
+    const { resolveModelAssignment } = await import('../../src/config/model-assignment.js');
+    const ok = resolveModelAssignment('gpt-4o');
+    expect(ok.provider).toBe('openai');
+    expect(ok.model).toBe('gpt-4o');
+  });
+});
+
 describe('clampRationaleWhy does not cut mid-word', () => {
   it('leaves a short string byte-identical', () => {
     expect(clampRationaleWhy('Short and true.')).toBe('Short and true.');
