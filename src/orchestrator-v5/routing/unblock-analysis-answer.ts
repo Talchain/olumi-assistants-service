@@ -124,10 +124,27 @@ export function buildUnblockAnalysisAnswer(
   // `human_input_required` means exactly that: no estimate the product could
   // supply would resolve it, so promising to "put good assumptions in" there
   // would be a promise it cannot keep.
+  // ⛔ THE TAIL MUST NOT PRESCRIBE A REMEDY. It was the one sentence here not
+  // derived from the payload, and it was wrong on the commonest blocked shape.
+  // Measured on a real captured graph (`scenario-graph-base-capture.json`)
+  // through `buildCanonicalAnalysisReadyFromGraph`: 10 issues — ORPHAN_NODE ×5,
+  // OPTION_NO_FACTOR_EDGES ×2, OPTION_NOT_LINKED_TO_DECISION ×2, NO_PATH_TO_GOAL
+  // — every one `human_input_required`. The old tail answered "**This one**
+  // needs your answer … tell me **the mechanism** and I will write it in":
+  // singular for ten items, and a MAPPING remedy for issues that are not
+  // mapping obligations (their own messages say "Add at least one factor edge",
+  // "Link the decision to it"). That is a second opinion about what is wrong —
+  // exactly what this module's header forbids, and what its compose-site
+  // register entry claims it does not do.
+  //
+  // It now says only what the payload supports: that nothing was changed, and
+  // whether the outstanding items can be estimated or need the user. The
+  // REMEDY is already in each issue's own quoted message above.
   const allNeedHuman = blocking.every((i) => i.repairability === 'human_input_required');
+  const those = blocking.length === 1 ? 'That one needs' : 'Those need';
   const tail = input.authorises_repair
     ? allNeedHuman
-      ? ' I have not changed anything yet. This one needs your answer rather than an assumption from me — tell me the mechanism and I will write it in.'
+      ? ` I have not changed anything yet. ${those} your input rather than an assumption from me.`
       : ' I have not changed anything yet. Tell me to go ahead and I will fill in the parts that can be estimated, and come back to you for the rest.'
     : '';
 

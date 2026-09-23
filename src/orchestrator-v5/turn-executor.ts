@@ -9713,7 +9713,10 @@ export async function runTurnExecutor(
         );
         if (unblockIntent.matched) {
           const unblockAnswer = buildUnblockAnalysisAnswer(
-            analysisReadyForTurn as never,
+            // No cast: the cast erased the only compile-time guard against a
+            // payload shape this answer would describe wrongly, and typecheck
+            // passes without it.
+            analysisReadyForTurn,
             { authorises_repair: unblockIntent.authorises_repair },
           );
           const unblockResponse = composeAnswer({

@@ -63,7 +63,12 @@ describe("Paul's blocked journey — the answer he should have received", () => 
     const { assistant_text } = buildUnblockAnalysisAnswer(readiness, { authorises_repair: true });
     expect(assistant_text).toContain('I have not changed anything yet');
     // repairability is human_input_required — an estimate cannot resolve it.
-    expect(assistant_text).toContain('needs your answer');
+    // ⚠ Wording updated: the tail used to add "tell me the mechanism and I will
+    // write it in", which PRESCRIBED a mapping remedy. On a real multi-issue
+    // capture none of the issues was a mapping obligation, so that sentence was
+    // a second opinion about what is wrong. It now states only what the payload
+    // supports; the remedy stays in each issue's own quoted message.
+    expect(assistant_text).toContain('needs your input');
     expect(assistant_text).not.toMatch(/\bI (?:have )?(?:updated|adjusted|applied|set)\b/i);
   });
 
@@ -182,5 +187,71 @@ describe('a payload that says it is blocked is never called ready', () => {
     );
     expect(r.assistant_text).toContain('- third thing\nI have not changed anything yet');
     expect(r.assistant_text).not.toContain('- third thing I have not changed');
+  });
+});
+
+/**
+ * ⛔ THE TAIL MUST NOT PRESCRIBE A REMEDY — regression on a REAL captured graph.
+ *
+ * A reviewer fed `src/routes/__tests__/__fixtures__/scenario-graph-base-capture.json`
+ * (a capture already in this repo, not a fixture of mine) through the SAME
+ * producer the executor uses. The payload comes back blocked with MANY issues —
+ * ORPHAN_NODE, OPTION_NO_FACTOR_EDGES, OPTION_NOT_LINKED_TO_DECISION,
+ * NO_PATH_TO_GOAL — every one `human_input_required`, and none of them a
+ * mapping obligation.
+ *
+ * The old tail answered: *"**This one** needs your answer rather than an
+ * assumption from me — **tell me the mechanism** and I will write it in."*
+ * Singular for many, and a MAPPING remedy for issues whose own messages say
+ * "Add at least one factor edge" and "Link the decision to it". That is a
+ * second opinion about what is wrong — precisely what this module's header
+ * forbids and what its compose-site register entry claims it does not do.
+ *
+ * The golden regression above could not catch it: it covers the single
+ * `OPTION_NEEDS_MAPPING` case, the one shape where that wording is true.
+ */
+describe('the repair tail on a real multi-issue capture', () => {
+  const capture = JSON.parse(
+    readFileSync('src/routes/__tests__/__fixtures__/scenario-graph-base-capture.json', 'utf-8'),
+  ) as { graph: unknown };
+  const readiness = buildCanonicalAnalysisReadyFromGraph(capture.graph as never) as never;
+
+  it('the capture really does produce MANY human-input issues', () => {
+    const r = readiness as { status?: string; readiness_issues?: readonly { repairability?: string }[] };
+    expect(r.status).not.toBe('ready');
+    expect((r.readiness_issues ?? []).length).toBeGreaterThan(1);
+    expect((r.readiness_issues ?? []).every((i) => i.repairability === 'human_input_required')).toBe(true);
+  });
+
+  it('does NOT say "This one" when many things block', () => {
+    const { assistant_text } = buildUnblockAnalysisAnswer(readiness, { authorises_repair: true });
+    expect(assistant_text).not.toMatch(/This one needs/i);
+    expect(assistant_text).toMatch(/Those need your input/i);
+  });
+
+  it('⛔ prescribes NO remedy of its own', () => {
+    const { assistant_text } = buildUnblockAnalysisAnswer(readiness, { authorises_repair: true });
+    // The remedy belongs to each issue's own quoted message, never to this tail.
+    expect(assistant_text).not.toMatch(/tell me the mechanism/i);
+    expect(assistant_text).not.toMatch(/I will write it in/i);
+  });
+
+  it('still lists every blocking issue, in the payload\u2019s own words', () => {
+    const r = readiness as { readiness_issues?: readonly { message?: string }[] };
+    const { assistant_text } = buildUnblockAnalysisAnswer(readiness, { authorises_repair: true });
+    for (const issue of r.readiness_issues ?? []) {
+      if (typeof issue.message === 'string' && issue.message.length > 0) {
+        expect(assistant_text).toContain(issue.message);
+      }
+    }
+    expect(assistant_text).toContain('I have not changed anything yet');
+  });
+
+  it('CONTROL: the singular wording is still used for exactly one issue', () => {
+    const { assistant_text } = buildUnblockAnalysisAnswer(
+      { status: 'needs_user_mapping', readiness_issues: [{ code: 'A', message: 'one thing', repairability: 'human_input_required' }] },
+      { authorises_repair: true },
+    );
+    expect(assistant_text).toMatch(/That one needs your input/i);
   });
 });
