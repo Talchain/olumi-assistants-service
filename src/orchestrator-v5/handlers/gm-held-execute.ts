@@ -386,10 +386,23 @@ export function buildBlockedOptionsNotice(
   // repair would not unblock anything. That reinstates exactly the condition
   // this notice exists to remove: the user is told something is wrong and sent
   // to the wrong place. Every blocked option is named, with its own reason.
+  // ⛔ THE LABEL IS QUOTED, AND THAT IS NOT DECORATION.
+  //
+  // Unquoted, the multi-entry notice is genuinely ambiguous, because the
+  // separators it uses are characters real labels and reasons contain. With a
+  // label "Phase 1 — pilot" and a reason "… ; then train", the join renders:
+  //
+  //   2 options aren't settled yet: Phase 1 — pilot; Hire; then train.
+  //
+  // which reads as THREE items, and the user cannot tell which option the
+  // product is talking about. The single-entry branch below has always quoted
+  // (`'${one.label}' isn't settled yet`); the multi-entry branch was added
+  // without it, so the one place the ambiguity can actually arise is the one
+  // place that lacked the fence.
   const sentence = (b: BlockedConfiguredOption): string =>
     typeof b.reason === 'string' && b.reason.length > 0
-      ? `${b.label} — ${b.reason.replace(/\.$/, '')}`
-      : `${b.label}`;
+      ? `'${b.label}' — ${b.reason.replace(/\.$/, '')}`
+      : `'${b.label}'`;
 
   // ⚠ FRAME: an unsettled option is a gap in the team's thinking, not a gate.
   // Where the payload gives an answerable question, LEAD with it -- the question
