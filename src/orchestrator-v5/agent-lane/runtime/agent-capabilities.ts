@@ -78,6 +78,8 @@ import { structuralFacts } from '../structural-facts.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, findConstructionVersion, type CallStructuredModel } from './build-model.js';
+import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
+import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 
 /** One internal dispatch, so every path is the product's own. */
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
@@ -87,6 +89,8 @@ interface GraphRead {
   readonly nodes: { id: string; kind: string; label: string; description?: string; observed_state?: Record<string, unknown>; interventions?: Record<string, unknown>; changes?: unknown; scale_frame?: unknown }[];
   readonly edges: { from: string; to: string }[];
   readonly analysis_state: unknown;
+  /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
+  readonly raw: Record<string, unknown>;
 }
 
 const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$/, '').trim();
@@ -136,70 +140,250 @@ export function createAgentCapabilities(
       nodes: (g.nodes as GraphRead['nodes']) ?? [],
       edges: (g.edges as GraphRead['edges']) ?? [],
       analysis_state: r.json.analysis_state,
+      raw: g,
     };
   };
 
   /**
-   * ⛔ ONE APPROVAL MUST BE ABLE TO APPLY A WHOLE STARTING POINT.
+   * ⛔ ONE APPROVAL MUST BE ABLE TO APPLY A WHOLE STARTING POINT — AND ONLY ONTO
+   * THE MODEL THE USER APPROVED.
    *
-   * Every proposal is bound to the model revision it was made against, and
-   * `ProposalStore.authorise` refuses one whose base is no longer current. So
-   * two proposals offered together — starting values AND option levels — could
-   * never both be applied from one "yes": applying the first moves the
-   * revision, and the second is `superseded` by our OWN write. Measured on the
-   * replay of Paul's journey (output/paul-test-20260923/repro): the user said
-   * "make those updates immediately", and the model still could not become
-   * analysable in one step.
+   * Every proposal is bound to the model revision it was made against, so two
+   * proposals offered together (starting values AND option levels) could never
+   * both be applied from one "yes": applying the first superseded the second.
+   * A compound proposal fixes that — and the first version of it (#1712 @
+   * 3674539 / ecb45282) re-read the graph before each part and re-bound the
+   * part to whatever it found. Independent review measured the consequence: an
+   * UNRELATED edit between the approval and a write was absorbed, the approved
+   * levels landed on a model the user never saw (a level shown as 7 FTE stored
+   * as 70 after a re-frame), and the result said "applied".
    *
-   * A compound proposal is applied PART BY PART through the existing
-   * single-kind paths, in a fixed order (values first — an option level is read
-   * against the factor's frame). Each part carries the approved operations
-   * VERBATIM; only its base is re-bound to the revision our own previous part
-   * produced. Nothing is regenerated. The parent is marked applied only when
-   * every part landed; otherwise the result says exactly which part did not.
+   * So the expected revision is CARRIED, never re-read-and-adopted:
+   *   1. It starts at the parent-approved base — the exact read `authoriseChange`
+   *      just authorised against, handed in here, not a second read.
+   *   2. VALUES are applied IN MEMORY with the product's own
+   *      `applyFactorValueEdit` (the inspector path's validator + handler +
+   *      merge, unchanged), then written as ONE registration carrying
+   *      `expected_graph_hash` = that base. `factor_value_edit` has no base on
+   *      the wire (0.55, `.strict()`), so this is what makes the value write
+   *      CONDITIONAL: the route refuses a moved model with nothing written, and
+   *      the atomic RPC's CAS closes its own read→write window.
+   *   3. The revision advances ONLY to the hash that registration reports for
+   *      the bytes IT stored, and then to each CAS-gated
+   *      `option_intervention_edit`'s own reported hash.
+   *   4. Anything else stops the compound truthfully: `not_applied` with zero
+   *      writes, or `partially_applied` naming exactly what landed.
+   * The approved operations are applied verbatim. Nothing is regenerated.
    */
   const COMPOUND_ORDER = ['set_factor_value', 'set_option_intervention'] as const;
-  const applyCompound = async (ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal): Promise<ToolResult> => {
+  const frameOf = (n: GraphRead['nodes'][number] | undefined): number | null => {
+    const os = (n?.observed_state ?? {}) as { cap?: unknown };
+    if (typeof os.cap === 'number' && os.cap > 0) return os.cap;
+    if (typeof n?.scale_frame === 'number' && n.scale_frame > 0) return n.scale_frame;
+    return null;
+  };
+  const applyCompound = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0],
+    parent: StructuredProposal,
+    approvedRead: GraphRead,
+  ): Promise<ToolResult> => {
     const unsupported = parent.operations.filter((o) => !(COMPOUND_ORDER as readonly string[]).includes(o.op));
     if (unsupported.length > 0) {
       return { ok: false, mutated: false, refusal: 'unsupported_compound', detail: `This proposal mixes changes that cannot be applied together: ${[...new Set(unsupported.map((o) => o.op))].join(', ')}.` };
     }
-    const { proposal_id: _parentId, ...content } = parent;
-    const parts: ToolResult[] = [];
-    const expected = COMPOUND_ORDER.filter((k) => parent.operations.some((o) => o.op === k));
-    for (const kind of expected) {
-      const now = await readGraph(ctx.scenario_id);
-      if (now === null) return { ok: false, mutated: parts.some((p) => p.mutated === true), refusal: 'not_found', parts };
-      const child = createProposal({
-        ...content,
-        base_graph_identity_hash: now.graph_hash,
-        operations: parent.operations.filter((o) => o.op === kind),
-        public_label: `${parent.public_label} [${kind === 'set_factor_value' ? 'values' : 'option levels'}]`,
-      });
-      proposals.put(child);
-      const r = await caps.authoriseChange(ctx, { proposal_id: child.proposal_id });
-      // ⚠ A single-kind path answers `ok: true` when SOME of its writes landed
-      // and lists the rest under `failures` — complete means every one landed.
-      const complete = r.ok === true && !(Array.isArray(r.failures) && r.failures.length > 0);
-      if (!complete) proposals.discard(child.proposal_id);
-      parts.push({ part: kind === 'set_factor_value' ? 'values' : 'option_levels', ...r, ok: complete });
-      if (!complete) break;
+    const notApplied = (reason: string, detail: string, extra: Record<string, unknown> = {}): ToolResult => ({
+      ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id,
+      refusal: 'not_applied', reason, detail, parts: [], receipts: [], ...extra,
+    });
+    // (1) The carried revision starts at what the user approved.
+    if (approvedRead.graph_hash !== parent.base_graph_identity_hash) {
+      return notApplied('model_changed_since_approval', 'The model changed after this was approved, so nothing was written. Read it again and propose afresh.');
     }
-    const all = parts.length === expected.length && parts.every((p) => p.ok === true);
-    const receipts = parts.flatMap((p) => (Array.isArray(p.receipts) ? (p.receipts as ReceiptSummary[]) : []));
+    const valueOps = parent.operations.filter((o) => o.op === 'set_factor_value');
+    const levelOps = parent.operations.filter((o) => o.op === 'set_option_intervention');
+
+    // (2) Values, in memory, through the product's own inspector path.
+    let working: unknown = approvedRead.raw;
+    for (let i = 0; i < valueOps.length; i += 1) {
+      const o = valueOps[i];
+      const v = (o.value ?? {}) as { value?: number; unit?: string };
+      if (typeof v.value !== 'number') return notApplied('no_value_on_proposal', `No value was stored on the proposal for ${o.path}. Nothing was written.`);
+      const event = {
+        kind: 'factor_value_edit' as const,
+        target_id: o.path,
+        value: v.value,
+        ...(v.unit !== undefined && v.unit !== '' ? { unit: v.unit } : {}),
+      };
+      const res = await applyFactorValueEdit({
+        payload: {
+          kind: 'system_event',
+          turn_id: authorisationTurnId(`${parent.proposal_id}#value${i}`),
+          scenario_id: ctx.scenario_id,
+          stage: 'frame',
+          event,
+        } as never,
+        event: event as never,
+        requestId: ctx.request_id,
+        persistedGraph: working,
+        priorFacts: [],
+      });
+      if (res.kind !== 'mutated') {
+        const label = approvedRead.nodes.find((n) => n.id === o.path)?.label ?? o.path;
+        return notApplied('value_refused', `The value for ${label} could not be recorded (${res.reason}), so nothing was written.`, { refused_factor: label });
+      }
+      working = res.mutatedGraph;
+    }
+    let workingNodes = ((working as { nodes?: GraphRead['nodes'] }).nodes ?? []).map((n) => ({ ...n }));
+    // A value that landed as a bare amount above 1 gets a range from its own
+    // figure — the same step the single-kind path takes after its write, done
+    // here BEFORE the one write so it is part of what is conditional.
+    const framed: { factor: string; value: number; range: number }[] = [];
+    workingNodes = workingNodes.map((n) => {
+      if (!valueOps.some((o) => o.path === n.id)) return n;
+      if (typeof n.scale_frame === 'number' && n.scale_frame > 1) return n;
+      const os = (n.observed_state ?? {}) as { value?: unknown; raw_value?: unknown; cap?: unknown };
+      if (!(typeof os.value === 'number' && Math.abs(os.value) > 1 && typeof os.cap !== 'number')) return n;
+      const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+      const range = defaultFrameFor(raw);
+      if (range <= 1) return n;
+      framed.push({ factor: n.label, value: raw, range });
+      return { ...n, observed_state: { ...os, value: raw / range, raw_value: raw, cap: range, declared_scale: 'unit_interval' } };
+    });
+    // ⛔ A LEVEL IS A NUMBER ON ITS FACTOR'S FRAME. If this approval's own
+    // values would give a level's factor a DIFFERENT frame from the one the
+    // level was normalised against, the level would silently mean something
+    // else (1.0 of 0-10 is 10, not the 1 the user was shown). Refuse first.
+    const byIdAfterValues = new Map(workingNodes.map((n) => [n.id, n]));
+    for (const o of levelOps) {
+      const factorId = o.path.split('::')[1];
+      const lv = (o.value ?? {}) as { cap?: number | null; derived_frame?: number | null };
+      const levelFrame = typeof lv.cap === 'number' && lv.cap > 0 ? lv.cap : null;
+      const factorFrame = frameOf(byIdAfterValues.get(factorId));
+      if (factorFrame !== null && levelFrame !== null && factorFrame !== levelFrame) {
+        return notApplied('level_frame_changed_by_values', `A level for ${byIdAfterValues.get(factorId)?.label ?? factorId} was proposed on a range this approval's own values would change. Nothing was written — propose again.`);
+      }
+      if (factorFrame !== null && levelFrame === null) {
+        return notApplied('level_frame_changed_by_values', `A level for ${byIdAfterValues.get(factorId)?.label ?? factorId} was proposed before it had a range that this approval would give it. Nothing was written — propose again.`);
+      }
+    }
+    // Derived level frames on factors that hold a value and still have no
+    // range — the same attachment the single-kind level path makes.
+    workingNodes = workingNodes.map((n) => {
+      const op = levelOps.find((o) => o.path.split('::')[1] === n.id && typeof ((o.value ?? {}) as { derived_frame?: unknown }).derived_frame === 'number');
+      if (op === undefined || frameOf(n) !== null) return n;
+      const range = ((op.value ?? {}) as { derived_frame: number }).derived_frame;
+      const os = (n.observed_state ?? {}) as { value?: number; raw_value?: number };
+      const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+      if (typeof raw !== 'number' || range <= 1) return n;
+      framed.push({ factor: n.label, value: raw, range });
+      return { ...n, observed_state: { ...os, value: raw / range, raw_value: raw, cap: range, declared_scale: 'unit_interval' } };
+    });
+
+    // ONE conditional write for every value (and any range they need).
+    const receipts: ReceiptSummary[] = [];
+    let valuesLanded = false;
+    let carried = parent.base_graph_identity_hash;
+    if (valueOps.length > 0 || framed.length > 0) {
+      const operationId = authorisationTurnId(`${parent.proposal_id}#values`);
+      const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+        graph: { ...(working as Record<string, unknown>), nodes: workingNodes },
+        expected_graph_hash: carried,
+        operation_id: operationId,
+      });
+      if (reg.status !== 200) {
+        const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
+        return notApplied(
+          code === 'GRAPH_STALE' ? 'model_changed_since_approval' : 'values_not_written',
+          code === 'GRAPH_STALE'
+            ? 'The model changed after this was approved, so nothing was written. Read it again and propose afresh.'
+            : `The values could not be saved (http ${reg.status}). Nothing was written.`,
+        );
+      }
+      valuesLanded = true;
+      const mv = reg.json.model_version as { version_number?: unknown; version_id?: unknown; mutation_id?: unknown } | undefined;
+      if (mv !== undefined && typeof mv.version_id === 'string') {
+        receipts.push({
+          version: Number(mv.version_number), version_id: mv.version_id,
+          mutation_id: typeof mv.mutation_id === 'string' ? mv.mutation_id : '',
+          source_turn_id: registrationTurnId(ctx.scenario_id, operationId),
+        } as ReceiptSummary);
+      }
+      const next = reg.json.graph_hash;
+      if (typeof next !== 'string' || next.length === 0) {
+        // No authoritative revision for our own write: we cannot prove the next
+        // CAS base, so no level is written on a guess.
+        return {
+          ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id,
+          refusal: levelOps.length > 0 ? 'partially_applied' : 'not_applied',
+          detail: 'The values were saved; the option levels were not written because the saved revision could not be confirmed.',
+          parts: [{ part: 'values', ok: true, recorded_count: valueOps.length, requested_count: valueOps.length }, ...(levelOps.length > 0 ? [{ part: 'option_levels', ok: false, recorded_count: 0, requested_count: levelOps.length }] : [])],
+          receipts,
+        };
+      }
+      carried = next;
+    }
+
+    // (3) Levels, each CAS-gated on the revision our OWN previous write produced.
+    let levelsRecorded = 0;
+    let levelStop: string | null = null;
+    for (let i = 0; i < levelOps.length; i += 1) {
+      const o = levelOps[i];
+      const [optionId, factorId] = o.path.split('::');
+      const v = ((o.value ?? {}) as { normalised?: number }).normalised;
+      if (typeof v !== 'number') { levelStop = `no level was stored on the proposal for ${o.path}`; break; }
+      const r = await dispatch('/orchestrate/v2/turn', {
+        kind: 'system_event',
+        turn_id: authorisationTurnId(`${parent.proposal_id}#level${i}`),
+        scenario_id: ctx.scenario_id,
+        stage: 'frame',
+        event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: carried },
+      });
+      if (r.status !== 200) { levelStop = `the level for ${o.path} was refused (http ${r.status})`; break; }
+      const rc = receiptSummaryOf(r.json);
+      if (rc.summary !== null) receipts.push(rc.summary);
+      const next = r.json.graph_hash;
+      if (typeof next === 'string' && next.length > 0) {
+        carried = next;
+        levelsRecorded += 1;
+        continue;
+      }
+      // A 200 with no revision committed nothing. It is either a verified no-op
+      // (the model already holds exactly this level) or a refusal. A read tells
+      // them apart — it VERIFIES, it never adopts: a revision other than the
+      // carried one means someone else changed the model, and we stop.
+      const check = await readGraph(ctx.scenario_id);
+      const held = check?.nodes.find((n) => n.id === optionId)?.interventions?.[factorId] as { value?: unknown } | number | undefined;
+      const heldValue = typeof held === 'number' ? held : (held as { value?: unknown } | undefined)?.value;
+      if (check === null || check.graph_hash !== carried) { levelStop = 'the model changed while the option levels were being recorded'; break; }
+      if (heldValue !== v) { levelStop = `the level for ${o.path} was not recorded`; break; }
+      levelsRecorded += 1;
+    }
+
+    const all = levelStop === null && levelsRecorded === levelOps.length;
     if (all) proposals.markApplied(parent.proposal_id, receipts);
+    const parts = [
+      ...(valueOps.length > 0 ? [{ part: 'values', ok: valuesLanded, recorded_count: valuesLanded ? valueOps.length : 0, requested_count: valueOps.length }] : []),
+      ...(levelOps.length > 0 ? [{ part: 'option_levels', ok: levelStop === null, recorded_count: levelsRecorded, requested_count: levelOps.length }] : []),
+    ];
     return {
       ok: all,
-      mutated: parts.some((p) => p.mutated === true),
+      mutated: valuesLanded || levelsRecorded > 0,
       applied: all,
       proposal_id: parent.proposal_id,
       parts,
       receipts,
+      revision_before: parent.base_graph_identity_hash,
+      revision_after: carried,
+      ...(framed.length > 0 ? { ranges_added_for_analysis: framed } : {}),
       ...(all
-        ? {}
+        ? {
+            not_represented:
+              'These values and levels are the user\u2019s adopted assumptions, not measurements, and the model records no mark ' +
+              'distinguishing the two \u2014 say so when you describe what changed.',
+          }
         : {
-            refusal: parts.some((p) => p.ok === true) ? 'partially_applied' : 'not_applied',
-            detail: 'Tell the user exactly which part was recorded and which was not, and why.',
+            refusal: valuesLanded || levelsRecorded > 0 ? 'partially_applied' : 'not_applied',
+            detail: `${levelStop ?? 'Not every change was recorded'}. Tell the user exactly which part was recorded and which was not.`,
           }),
     };
   };
@@ -622,7 +806,7 @@ export function createAgentCapabilities(
       const ops = decision.proposal.operations;
 
       // A starting point mixes kinds; each single-kind path below handles one.
-      if (new Set(ops.map((o) => o.op)).size > 1) return applyCompound(ctx, decision.proposal);
+      if (new Set(ops.map((o) => o.op)).size > 1) return applyCompound(ctx, decision.proposal, before);
 
       if (ops[0]?.op === 'set_option_intervention') {
         /**

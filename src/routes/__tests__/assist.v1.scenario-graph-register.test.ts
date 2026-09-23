@@ -1228,3 +1228,70 @@ describe("register — the write is ordered by the turn fence", () => {
     await app.close();
   });
 });
+
+/**
+ * ⛔ A CALLER'S EXPECTATION IS CHECKED BEFORE ANY WRITE (#1712 review).
+ *
+ * `factor_value_edit` carries no base on the wire, so the Agent's one-approval
+ * path writes its values through THIS route with `expected_graph_hash` = the
+ * model the user approved. The load-bearing assertions are the ABSENCE of a
+ * write on a moved model and byte-identical behaviour for callers that send
+ * nothing (the UI import).
+ */
+describe("register — an optional caller expectation makes the write conditional", () => {
+  const current = () => computeExpectedGraphCasHashes(SERVER_PRE_IMPORT).expectedGraphAnalysisHash!;
+
+  it("POSITIVE CONTROL: the base the route reads has a non-null analysis hash, so the cases below are not vacuous", () => {
+    expect(typeof current()).toBe("string");
+    expect(current().length).toBeGreaterThan(0);
+  });
+
+  it("RED: a STALE expectation is refused 409 GRAPH_STALE — no fence claim, and NOTHING reaches the atomic writer", async () => {
+    const claim = vi.fn(async (scenarioId: string, turnId: string) => ({ scenarioId, turnId, generation: 7 }));
+    (store as Record<string, unknown>).claimTurnFence = claim;
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_hash: "not-the-current-hash" });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().details.code).toBe("GRAPH_STALE");
+    expect(res.json().details.current_graph_hash).toBe(current());
+    // A refused expectation must not advance the scenario's order (#1706's rule).
+    expect(claim).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("a MATCHING expectation writes, and reports the analysis hash of the bytes it stored", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_hash: current() });
+    expect(res.statusCode).toBe(200);
+    const stored = writtenGraph();
+    expect(res.json().graph_hash).toBe(computeExpectedGraphCasHashes(stored).expectedGraphAnalysisHash);
+    await app.close();
+  });
+
+  it("CONTRAST: with NO expectation the route writes exactly as before", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED });
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it("a malformed expectation is refused before any database work", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_hash: "" });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.code).toBe("EXPECTED_GRAPH_HASH_INVALID");
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("a base that cannot be read cannot adjudicate an expectation: 503, never an unconditional write", async () => {
+    loadGraph.mockRejectedValue(new Error("db blip"));
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_hash: current() });
+    expect(res.statusCode).toBe(503);
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+});

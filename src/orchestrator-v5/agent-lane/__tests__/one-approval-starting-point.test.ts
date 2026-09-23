@@ -1,18 +1,24 @@
 /**
- * ⛔ ONE APPROVAL MUST BE ABLE TO MAKE THE MODEL COMPARABLE.
+ * ⛔ ONE APPROVAL MUST BE ABLE TO MAKE THE MODEL COMPARABLE — AND ONLY THE
+ * MODEL THE USER APPROVED.
  *
  * Every proposal is bound to the revision it was made against. Offered
  * separately, starting values and option levels could never both be applied
- * from one "yes": applying the first moved the revision, and the second was
- * refused as superseded by OUR OWN write. Measured on the replay of Paul's
- * 22 Sep journey (output/paul-test-20260923/repro): the user asked for the
- * updates "immediately" and the model still could not become analysable in one
- * step.
+ * from one "yes": applying the first superseded the second. Measured on the
+ * replay of Paul's 22 Sep journey (output/paul-test-20260923/repro).
  *
- * The fake product applies both system events the way the product does —
- * `factor_value_edit` moves the revision, `option_intervention_edit` is
- * CAS-gated on `base_graph_hash` — so a part applied against a stale base is
- * refused here exactly as on the wire.
+ * ⛔ AND THE FIRST COMPOUND WAS WRONG IN THE OTHER DIRECTION. Independent review
+ * of #1712 (CHANGES_REQUIRED at 3674539 and ecb45282): it re-read the graph
+ * before each part and re-bound to whatever it found, so an UNRELATED edit
+ * after the approval was absorbed and the approved levels landed on a model
+ * the user never saw, reported as applied. The controls (A) and (B) below are
+ * the reviewer's; (P) is the own-write chain that must stay green.
+ *
+ * The fake product models the two conditional primitives the compound now
+ * rests on: `/graph/register` honouring `expected_graph_hash` (409 GRAPH_STALE
+ * on a moved model, nothing written) and CAS-gated `option_intervention_edit`.
+ * Values are applied by the REAL `applyFactorValueEdit` inside the capability,
+ * so the fixture is a GraphV3-valid model.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -26,28 +32,50 @@ const ctx = { scenario_id: SCENARIO, authenticated_user_id: USER, request_id: 'r
 
 type Node = {
   id: string; kind: string; label: string;
+  category?: string;
   observed_state?: Record<string, unknown>;
+  scale_frame?: number;
   interventions?: Record<string, unknown> | null;
 };
 
 const BASE: Node[] = [
   { id: 'velocity', kind: 'goal', label: 'Velocity' },
-  { id: 'team_size', kind: 'factor', label: 'Team size', observed_state: { value: 0.5, raw_value: 5, cap: 10, unit: 'FTE' } },
-  { id: 'coordination_load', kind: 'factor', label: 'Coordination load' },
-  { id: 'hire_two', kind: 'option', label: 'Hire Two Developers', interventions: null },
-  { id: 'hire_lead', kind: 'option', label: 'Hire a Tech Lead', interventions: null },
+  { id: 'team_size', kind: 'factor', label: 'Team size', category: 'controllable', observed_state: { value: 0.5, raw_value: 5, cap: 10, unit: 'FTE' } },
+  // No value yet, and the range construction stores for it (#1708).
+  { id: 'coordination_load', kind: 'factor', label: 'Coordination load', category: 'observable', scale_frame: 100 },
+  { id: 'hire_two', kind: 'option', label: 'Hire Two Developers' },
+  { id: 'hire_lead', kind: 'option', label: 'Hire a Tech Lead' },
 ];
 
-function fakeProduct(opts: { failOn?: string[] } = {}) {
-  const posted: { kind: string; target: string; base?: string; at_rev: number }[] = [];
-  let nodes: Node[] = BASE.map((n) => ({ ...n, observed_state: n.observed_state ? { ...n.observed_state } : undefined }));
+type Posted = { kind: string; target: string; base?: string; at_rev: number };
+
+function fakeProduct(opts: {
+  failOn?: string[];
+  /** An unrelated actor edits the model at this moment. */
+  foreignEditAfterReads?: number;
+  foreignEditAfterRegister?: boolean;
+} = {}) {
+  const posted: Posted[] = [];
+  let nodes: Node[] = BASE.map((n) => ({ ...n, ...(n.observed_state ? { observed_state: { ...n.observed_state } } : {}) }));
   let rev = 0;
+  let reads = 0;
+  const foreign = () => {
+    // Another actor re-frames Team size from 0-10 to 0-100.
+    nodes = nodes.map((n) => (n.id === 'team_size' ? { ...n, observed_state: { value: 0.05, raw_value: 5, cap: 100, unit: 'FTE' } } : n));
+    rev += 1;
+  };
   const d: InternalDispatch = async (path, body) => {
     const b = (body ?? {}) as Record<string, unknown>;
     if (path.endsWith('/graph/register')) {
+      posted.push({ kind: 'register', target: 'graph', base: typeof b.expected_graph_hash === 'string' ? b.expected_graph_hash : undefined, at_rev: rev });
+      if (typeof b.expected_graph_hash === 'string' && b.expected_graph_hash !== `h${rev}`) {
+        return { status: 409, json: { details: { code: 'GRAPH_STALE' } } };
+      }
       nodes = (b as { graph: { nodes: Node[] } }).graph.nodes;
       rev += 1;
-      return { status: 200, json: {} };
+      const reported = `h${rev}`;
+      if (opts.foreignEditAfterRegister === true) foreign();
+      return { status: 200, json: { registered: true, graph_hash: reported } };
     }
     if (path === '/orchestrate/v2/turn' && b.kind === 'system_event') {
       const ev = b.event as Record<string, unknown>;
@@ -57,7 +85,7 @@ function fakeProduct(opts: { failOn?: string[] } = {}) {
         if (opts.failOn?.includes(target) === true) return { status: 422, json: {} };
         nodes = nodes.map((n) => (n.id === target ? { ...n, observed_state: { ...n.observed_state, value: ev.value as number } } : n));
         rev += 1;
-        return { status: 200, json: { assistant_text: 'Updated.' } };
+        return { status: 200, json: { assistant_text: 'Updated.', graph_hash: `h${rev}` } };
       }
       if (ev.kind === 'option_intervention_edit') {
         const target = `${String(ev.option_id)}::${String(ev.factor_id)}`;
@@ -67,13 +95,17 @@ function fakeProduct(opts: { failOn?: string[] } = {}) {
         nodes = nodes.map((n) => (n.id === ev.option_id
           ? { ...n, interventions: { ...(n.interventions ?? {}), [String(ev.factor_id)]: { value: ev.value } } } : n));
         rev += 1;
-        return { status: 200, json: { assistant_text: 'Recorded.' } };
+        return { status: 200, json: { assistant_text: 'Recorded.', graph_hash: `h${rev}` } };
       }
       return { status: 400, json: {} };
     }
-    return { status: 200, json: { graph: { nodes, edges: [] }, graph_hash: `h${rev}` } };
+    // The graph read.
+    reads += 1;
+    const out = { status: 200, json: { graph: { nodes, edges: [] }, graph_hash: `h${rev}` } };
+    if (opts.foreignEditAfterReads !== undefined && reads === opts.foreignEditAfterReads) foreign();
+    return out;
   };
-  return { d, posted, read: () => nodes, rev: () => rev };
+  return { d, posted, read: () => nodes, rev: () => rev, reads: () => reads };
 }
 
 const ASSUMPTIONS = [{ factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team with one lead' }];
@@ -81,6 +113,20 @@ const LEVELS = [
   { option_label: 'Hire Two Developers', factor_label: 'Team size', value: 7, basis: 'five today plus two hires' },
   { option_label: 'Hire a Tech Lead', factor_label: 'Team size', value: 6, basis: 'five today plus one hire' },
 ];
+
+/** Propose on a clean model, THEN arm the foreign edit relative to the authorisation. */
+async function proposed(opts: Parameters<typeof fakeProduct>[0] = {}) {
+  const p = fakeProduct();
+  const store = new ProposalStore();
+  const caps = createAgentCapabilities(p.d, store);
+  const r = await caps.proposeStartingPoint(ctx, { assumptions: ASSUMPTIONS, option_levels: LEVELS });
+  expect(r.ok, JSON.stringify(r)).toBe(true);
+  // Re-wire the same product state behind a fresh dispatcher carrying the fault.
+  const q = fakeProduct(opts);
+  // Carry nothing over: the proposal was made against h0 on an identical model.
+  const caps2 = createAgentCapabilities(q.d, store);
+  return { p: q, store, caps: caps2, id: String(r.proposal_id) };
+}
 
 describe('the dead end this closes — two proposals, one approval', () => {
   it('CHARACTERISATION: the second of two separate proposals is refused after the first applies', async () => {
@@ -110,49 +156,81 @@ describe('propose_starting_point', () => {
     expect(waiting.map((w) => w.proposal_id)).toEqual([r.proposal_id]);
     const kinds = new Set(store.get(String(r.proposal_id))!.operations.map((o) => o.op));
     expect([...kinds].sort()).toEqual(['set_factor_value', 'set_option_intervention']);
-    // What the user is shown quotes THEIR numbers.
     expect(String(r.public_label)).toMatch(/Coordination load = 40/);
     expect(String(r.public_label)).toMatch(/Hire Two Developers sets Team size to 7/);
   });
 
-  it('RED: ONE approval applies the values AND every level, in that order, against the current base each time', async () => {
-    const p = fakeProduct();
-    const store = new ProposalStore();
-    const caps = createAgentCapabilities(p.d, store);
-    const r = await caps.proposeStartingPoint(ctx, { assumptions: ASSUMPTIONS, option_levels: LEVELS });
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+  it('(P) RED-first: ONE approval = ONE conditional values write, then each level CAS-gated on OUR previous write', async () => {
+    const { p, store, caps, id } = await proposed();
+    const applied = await caps.authoriseChange(ctx, { proposal_id: id });
     expect(applied.ok, JSON.stringify(applied)).toBe(true);
     expect(applied.applied).toBe(true);
     expect(applied.mutated).toBe(true);
-    // Values first, then levels — and every level carried the base it was applied on.
-    expect(p.posted.map((x) => x.kind)).toEqual(['factor_value_edit', 'option_intervention_edit', 'option_intervention_edit']);
-    for (const x of p.posted.filter((y) => y.kind === 'option_intervention_edit')) expect(x.base).toBe(`h${x.at_rev}`);
-    // Read back from the product, by identity.
+    // Values as ONE registration bound to the approved base, then the levels.
+    expect(p.posted.map((x) => x.kind)).toEqual(['register', 'option_intervention_edit', 'option_intervention_edit']);
+    expect(p.posted[0].base).toBe('h0');
+    // Each level carries the revision our own preceding write reported.
+    expect(p.posted.slice(1).map((x) => x.base)).toEqual(['h1', 'h2']);
+    // No value went through the non-conditional event.
+    expect(p.posted.some((x) => x.kind === 'factor_value_edit')).toBe(false);
     const byId = Object.fromEntries(p.read().map((n) => [n.id, n]));
-    expect(byId.coordination_load.observed_state?.value).toBeDefined();
+    // The value was normalised by the product's own path against the stored range.
+    expect(byId.coordination_load.observed_state?.value).toBeCloseTo(0.4, 6);
+    expect(byId.coordination_load.observed_state?.raw_value).toBe(40);
     expect(Object.keys(byId.hire_two.interventions ?? {})).toEqual(['team_size']);
     expect(Object.keys(byId.hire_lead.interventions ?? {})).toEqual(['team_size']);
-    // The approved object is now applied; nothing is left waiting.
     expect(store.outstanding(SCENARIO, USER)).toEqual([]);
-    const again = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    const again = await caps.authoriseChange(ctx, { proposal_id: id });
     expect(again.already_applied).toBe(true);
     expect(p.posted).toHaveLength(3);
   });
 
-  it('a part that refuses is reported as PARTIAL, and never listed as a second thing to approve', async () => {
-    const p = fakeProduct({ failOn: ['hire_lead::team_size'] });
-    const store = new ProposalStore();
-    const caps = createAgentCapabilities(p.d, store);
-    const r = await caps.proposeStartingPoint(ctx, { assumptions: ASSUMPTIONS, option_levels: LEVELS });
-    const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+  it('(A) an UNRELATED edit after the approval, before the first write → ZERO writes, not_applied', async () => {
+    // Read 1 is authoriseChange's own authorisation read; the foreign edit lands right after it.
+    const { p, store, caps, id } = await proposed({ foreignEditAfterReads: 1 });
+    const out = await caps.authoriseChange(ctx, { proposal_id: id });
+    expect(out.ok).toBe(false);
+    expect(out.applied).toBe(false);
+    expect(out.mutated).toBe(false);
+    expect(out.refusal).toBe('not_applied');
+    // The single conditional write was attempted on the APPROVED base and refused; nothing else was sent.
+    expect(p.posted.map((x) => [x.kind, x.base])).toEqual([['register', 'h0']]);
+    expect(p.posted.some((x) => x.kind === 'option_intervention_edit')).toBe(false);
+    // The model holds only the foreign change.
+    const byId = Object.fromEntries(p.read().map((n) => [n.id, n]));
+    expect(byId.coordination_load.observed_state).toBeUndefined();
+    expect(store.outstanding(SCENARIO, USER).map((w) => w.proposal_id)).toEqual([id]);
+  });
+
+  it('(B) an UNRELATED edit after the values, before the levels → values landed, ZERO level writes, partially_applied', async () => {
+    const { p, store, caps, id } = await proposed({ foreignEditAfterRegister: true });
+    const out = await caps.authoriseChange(ctx, { proposal_id: id });
     expect(out.ok).toBe(false);
     expect(out.applied).toBe(false);
     expect(out.mutated).toBe(true);
     expect(out.refusal).toBe('partially_applied');
-    const parts = out.parts as { part: string; ok: boolean }[];
-    expect(parts.map((x) => [x.part, x.ok === true])).toEqual([['values', true], ['option_levels', false]]);
-    // Only the object the user was shown can appear as awaiting approval.
-    expect(store.outstanding(SCENARIO, USER).map((w) => w.proposal_id)).toEqual([r.proposal_id]);
+    const parts = out.parts as { part: string; ok: boolean; recorded_count: number }[];
+    expect(parts.map((x) => [x.part, x.ok, x.recorded_count])).toEqual([['values', true, 1], ['option_levels', false, 0]]);
+    // The first level was sent on OUR revision (h1), found the model moved (h2), and was refused — no level landed.
+    const levels = p.posted.filter((x) => x.kind === 'option_intervention_edit');
+    expect(levels.map((x) => x.base)).toEqual(['h1']);
+    const byId = Object.fromEntries(p.read().map((n) => [n.id, n]));
+    expect(byId.hire_two.interventions ?? undefined).toBeUndefined();
+    expect(byId.hire_lead.interventions ?? undefined).toBeUndefined();
+    // Never listed as done; only the object the user was shown can await approval.
+    expect(store.outstanding(SCENARIO, USER).map((w) => w.proposal_id)).toEqual([id]);
+  });
+
+  it('a level that refuses is reported as PARTIAL, and never listed as a second thing to approve', async () => {
+    // Levels apply in id order (hire_lead, then hire_two); the SECOND refuses.
+    const { p, store, caps, id } = await proposed({ failOn: ['hire_two::team_size'] });
+    const out = await caps.authoriseChange(ctx, { proposal_id: id });
+    expect(out.ok).toBe(false);
+    expect(out.refusal).toBe('partially_applied');
+    const parts = out.parts as { part: string; ok: boolean; recorded_count: number }[];
+    expect(parts.map((x) => [x.part, x.ok, x.recorded_count])).toEqual([['values', true, 1], ['option_levels', false, 1]]);
+    expect(p.posted.filter((x) => x.kind === 'option_intervention_edit')).toHaveLength(2);
+    expect(store.outstanding(SCENARIO, USER).map((w) => w.proposal_id)).toEqual([id]);
   });
 
   it('CONTRAST: with only one kind it is an ordinary single proposal', async () => {
