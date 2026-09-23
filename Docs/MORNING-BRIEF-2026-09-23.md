@@ -4,10 +4,11 @@ Written for a manual test first thing. **Served build: `c94208cbf000c199fee34922
 
 ---
 
-> **Served build when I wrote this: `e8cf4c68f150` (deployed 03:23:35Z).** The staging tip has
-> since moved to `e38feb4c23e3` — *"fix(cee): stop the first brief 500ing on an unparseable factor
-> observe"*, another lane's merge, **not yet deployed**. That one is directly relevant to your test:
-> if your first brief 500s, check whether the deploy has landed before reporting it.
+> **Served build: `e38feb4c23e3`, deployed 04:05:14Z — and it now EQUALS the staging tip.**
+> That deploy carries another lane's *"fix(cee): stop the first brief 500ing on an unparseable
+> factor observe"*, which is directly relevant to your test. An earlier version of this banner said
+> that fix was **not** deployed; it landed at 04:05:14Z, so **that caveat no longer applies** — if
+> your first brief 500s, it is not this known one.
 
 ## 1. Test this first — the P0 your manual test failed on is fixed
 
@@ -319,7 +320,31 @@ so registrations were bypassing the fence that stops a superseded turn clobberin
 
 ---
 
-## 10. ⛔ The P0 is UNVERIFIED on the build that now serves — and I cannot close that gap
+## 10. ✅ RESOLVED — the P0 IS now witnessed on the build that serves
+
+**This section previously read "UNVERIFIED on the build that now serves — and I cannot close that
+gap". It is closed.** Not by me: by ordinary signed-in traffic once the new build went live.
+
+Measured on `v5_conversation_turns` for the window since the current build went live
+(`e38feb4c23e3`, 04:05:14Z):
+
+| build | signed-in turns | `model_version_created` |
+|---|---|---|
+| **`e38feb4c23e3` (serving now)** | **68** | **41** |
+| `e8cf4c68f150` (previous) — contrast control | 12 | 10 |
+
+Against **0 of 959** before the fix. So construction receipts are minting on the build you will be
+testing, and the ladder rung for the P0 moves from DEPLOYED to **WIRE-WITNESSED on the serving
+build**.
+
+⚠ Read the 41 correctly: it is a **count of turns that minted a receipt**, not a success rate. Only
+construction/registration turns mint versions, so 41-of-68 is not "27 failures" — the denominator
+includes signed-in turns that were never supposed to mint one. The claim this supports is "receipts
+are being minted on the serving build", nothing stronger.
+
+**The original text of this section follows, for provenance.**
+
+### (superseded) ⛔ The P0 is UNVERIFIED on the build that now serves
 
 `e8cf4c68f150` went **live at 03:23:35Z**, carrying #1706's turn-fence change on the registration path.
 
