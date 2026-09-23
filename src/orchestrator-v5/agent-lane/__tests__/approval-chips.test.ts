@@ -10,7 +10,7 @@ describe('approval chips', () => {
   it('one proposal offered, nothing authorised → an approve chip and an amend chip', () => {
     const chips = approvalChipsFor([{ name: 'propose_starting_point', ok: true, proposal_id: 'prop_1' }]);
     expect(chips.map((c) => [c.label, c.message])).toEqual([
-      ['Use these starting values', 'Yes, use those.'],
+      ['Use as starting assumptions', 'Yes, use those.'],
       ['Change something first', 'Before you apply it, I want to change some of it.'],
     ]);
     // A chip without an action_type is plain text on the Agent route.

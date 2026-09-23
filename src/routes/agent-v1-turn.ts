@@ -195,6 +195,15 @@ const AGENT_INSTRUCTIONS = [
    * be compared with one that does.
    */
   'get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model \u2014 do not wait for the analysis to refuse \u2014 ask what that option would actually change, and record the answer with propose_option_interventions.',
+  /*
+   * ⛔ ANALYSIS IS MODEL-RELATIVE, NEVER A RECOMMENDATION (Paul, 23 Sep: "Olumi is a
+   * reasoning-enhancement system, not an answer or decision engine"). Measured on
+   * served replies: all 20 analysis replies carried a caveat, but 8 of 20 still
+   * framed the result in "winner" / "best option" terms — often to deny one, yet
+   * the vocabulary itself casts the finding as picking an answer. The useful move is the one the science supports: point at what the
+   * ordering is sensitive to, and let the user change it and see how much it matters.
+   */
+  'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one; say which option leads in this model and how firmly. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding.',
   'British English. Concise but substantive.',
 ].join(' ');
 

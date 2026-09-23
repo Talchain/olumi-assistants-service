@@ -8,7 +8,7 @@
  * A chip here is ordinary text: the UI sends its `message` on the same Agent
  * route (DecisionGuideAI `buildPayload.ts:199-221` at served `fa84d226`), and a
  * chip without an `action_type` always renders (`SuggestedChips.tsx:256`). So
- * clicking "Use these starting values" is EXACTLY the user typing "Yes, use
+ * clicking "Use as starting assumptions" is EXACTLY the user typing "Yes, use
  * those." — the consent path is unchanged, and the Agent still resolves it
  * against `awaiting_your_approval` and calls `authorise_change`.
  *
@@ -19,9 +19,9 @@
 import type { SuggestedAction } from '../compose/types.js';
 
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
-  propose_starting_point: { label: 'Use these starting values', message: 'Yes, use those.' },
-  propose_assumptions: { label: 'Use these starting values', message: 'Yes, use those.' },
-  propose_option_interventions: { label: 'Use these option levels', message: 'Yes, use those.' },
+  propose_starting_point: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
+  propose_assumptions: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
+  propose_option_interventions: { label: 'Use as starting option levels', message: 'Yes, use those.' },
   propose_model_change: { label: 'Make this change', message: 'Yes, make that change.' },
 };
 
