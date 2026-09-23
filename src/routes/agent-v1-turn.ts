@@ -306,9 +306,44 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
         draftGraph = { node_count: nodes.length, edge_count: edges.length, nodes, edges };
       }
     }
-  } catch {
-    // A readback failure must not lose the user's answer. The turn still
-    // returns; the client simply does not learn the new revision this time.
+  } catch (err) {
+    /**
+     * ⭐⭐ THE FAIL-OPEN IS RIGHT AND IT WAS SILENT — which converted a
+     * measurable problem into an unmeasurable one.
+     *
+     * A readback failure must not lose the user's answer, so returning the turn
+     * is correct and unchanged. But when it happens the client does not learn
+     * the new revision, and **that has a user-visible consequence nobody could
+     * count**: `lastServerGraphHash` in the canvas store is fed by exactly two
+     * wire emitters — the top-level `graph_hash` and
+     * `analysis_ready.current_graph_hash` — and BOTH are omitted on this path.
+     * Null means *"CEE has not stamped one this session"*, and the store's own
+     * comment says a delete then **stands down from the wire** rather than
+     * asserting a base it does not hold.
+     *
+     * So the user's delete gesture silently stops applying, and until now there
+     * was no log line, no event, and no way to know how often. The estate's own
+     * draft-quality doctrine names this exact shape: *"a repair pass whose
+     * fail-open is silent converts a measurable problem into an unmeasurable
+     * one."*
+     *
+     * ⛔ NOTHING ABOUT THE BEHAVIOUR CHANGES. This adds one warn on a path that
+     * already swallowed. It does not refuse the turn, does not retry, and does
+     * not synthesise a revision — a hash this code could not read is one it must
+     * not assert.
+     */
+    log.warn(
+      {
+        event: 'agent_lane.state_readback_failed',
+        scenario_id: scenarioId,
+        err: String(err),
+        // Which emitters the client will be missing, stated rather than implied,
+        // so the consequence is legible without reading the canvas store.
+        graph_hash_emitted: graphHash !== undefined,
+        analysis_ready_emitted: analysisReady !== undefined,
+      },
+      'agent-lane: could not read the current model back — the client will not learn this turn\u2019s revision, so a delete gesture stands down',
+    );
   }
   return { graphHash, analysisReady, draftGraph };
 }
