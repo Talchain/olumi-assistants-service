@@ -69,6 +69,12 @@ import {
   applyIntakeToLeaderPermission,
 } from '../../../orchestrator/context/intake-option-reconciliation.js';
 import { buildIntakeOptionDisclosure } from '../../coaching/intake-option-disclosure.js';
+// D-ask-1 extended to CEE-inferred FACTOR values: the analysis says whose
+// numbers it ran on. See inferred-value-disclosure.ts for the measurement.
+import {
+  buildInferredValueDisclosure,
+  deriveInferredValues,
+} from '../../coaching/inferred-value-disclosure.js';
 import { composeObjectiveContradictionDisclosure } from '../../coaching/objective-contradiction.js';
 import type { PLoTClient, V2RunError } from '../../../orchestrator/plot-client.js';
 import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.js';
@@ -2158,7 +2164,24 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     const separabilityDisclosure = buildSeparabilityDisclosure(
       headlineDescriptor.separability_withhold,
     );
-    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${separabilityDisclosure}`;
+    // D-ask-1 (2.11) applied to CEE-INFERRED FACTOR values. Measured on staging
+    // 23 Sep (scenario `e243debd`): the brief stated no numbers, the product
+    // supplied all four factor values, and the result named a leading option
+    // without ever saying a single number was ours. The ratified ruling —
+    // "the analysis result must never present [our] numbers as user-provided" —
+    // was plumbed for scaffolded OPTIONS and silent on inferred FACTORS.
+    //
+    // ⚠ POSITION IS LOAD-BEARING: it rides immediately after the participation
+    // disclosure because that is its slot in `TAIL_PATTERN`. The egress
+    // allowlist matches the tail in order, so appending it elsewhere would make
+    // the whole summary fail the grammar and collapse to the locked template.
+    //
+    // Read from the graph the analysis actually RAN on, so the sentence can
+    // never describe a different model than the result it rides on.
+    const inferredValueDisclosure = buildInferredValueDisclosure(
+      deriveInferredValues(graphForAnalysis),
+    );
+    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases

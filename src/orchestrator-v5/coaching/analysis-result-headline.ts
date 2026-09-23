@@ -81,6 +81,17 @@ import {
   SCAFFOLD_ANY_DISCLOSURE_RE_SRC,
   SCAFFOLD_DISCLOSURE_MAX_CHARS,
 } from './scaffold-disclosure.js';
+// D-ask-1 (2.11) applied to the population it did not cover: CEE-INFERRED
+// FACTOR values. Same claim-safety ruling — "the analysis result must never
+// present [our] numbers as user-provided" — and the same three pieces of
+// plumbing every suffix family needs: a published grammar (below, in
+// TAIL_PATTERN and the registry), a length budget, and a build-time survival
+// probe in its own suite. Without them the disclosure is silently replaced by
+// the locked template and the user is told nothing.
+import {
+  INFERRED_VALUE_DISCLOSURE_RE_SRC,
+  INFERRED_VALUE_DISCLOSURE_MAX_CHARS,
+} from './inferred-value-disclosure.js';
 // T1 (constraint applied then never evaluated): the gap disclosure is the
 // SECOND suffix that may ride on a run_analysis summary, and it needs exactly
 // the same three pieces of plumbing as the scaffold one — a published grammar
@@ -396,7 +407,14 @@ export const MAX_ASSISTANT_TEXT_CHARS =
   // It can co-occur with every other suffix, though: a run can be unseparable
   // AND scaffolded AND carrying an unevaluated constraint. Same rule as its six
   // siblings: budgeted from the builder's own worst case, never hand-estimated.
-  SEPARABILITY_DISCLOSURE_MAX_CHARS;
+  SEPARABILITY_DISCLOSURE_MAX_CHARS
+  +
+  // D-ask-1 applied to CEE-INFERRED FACTOR values: this suffix rides after
+  // every other tail and can co-occur with all of them — a scaffolded run
+  // with an unevaluated constraint may ALSO be running on values the product
+  // supplied. Budgeted from the builder's own worst case, never
+  // hand-estimated, so an honest disclosure cannot be dropped on length.
+  INFERRED_VALUE_DISCLOSURE_MAX_CHARS;
 
 /**
  * Minimum win_probability for the leading option before the headline may emit a
@@ -2283,7 +2301,7 @@ const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${
 // intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}`
 // in the run_analysis handler.
-const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?(?:${ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC})?`;
+const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?(?:${ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC})?(?:${INFERRED_VALUE_DISCLOSURE_RE_SRC})?`;
 
 /** One disclosure family admitted on the locked-template (withheld) branch. */
 export interface TemplateSuffixDisclosureGrammar {
@@ -2406,6 +2424,11 @@ export const TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS: readonly TemplateSuffixDisclos
   // gate did NOT fire (`separability_withhold` is non-null only where
   // `computeHeadline` returned `text: null`), so admitting it there would admit
   // a sentence the handler can never emit.
+  // ⚠ ORDER IS ASSERTED AGAINST THE HANDLER. This rides after the
+  // participation disclosure and before separability, exactly as
+  // run-analysis.ts composes it; the registry-order drift guard fails if the
+  // two disagree, which is how a suffix silently stops being admitted.
+  { name: 'INFERRED_VALUE_DISCLOSURE_RE_SRC', source: INFERRED_VALUE_DISCLOSURE_RE_SRC },
   { name: 'SEPARABILITY_DISCLOSURE_RE_SRC', source: SEPARABILITY_DISCLOSURE_RE_SRC },
 ];
 
