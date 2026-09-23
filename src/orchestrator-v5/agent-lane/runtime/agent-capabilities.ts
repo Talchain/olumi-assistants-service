@@ -1035,11 +1035,42 @@ export function createAgentCapabilities(
             return { ...n, observed_state: { ...os, value: raw / range, raw_value: raw, cap: range, declared_scale: 'unit_interval' } };
           });
           if (framedHere.length > 0) {
+            /**
+             * ⛔⛔ CAS-GATED, AND IT WAS NOT. This write asserts
+             * `edges: before.edges` — the WHOLE edge set as it was at the read
+             * on entry to this capability — so without an expected hash it does
+             * not merely lose a node change: any edge written in between is
+             * silently restored to its old value, the user is told nothing, and
+             * the Agent reports the frame as attached.
+             *
+             * ⚠ THE PROPOSAL CHECK IS NOT THE WRITE CHECK, and it is tempting to
+             * think it covers this. `proposals.authorise` is bound to
+             * `before.graph_hash`, but that is an in-memory comparison against a
+             * hash THIS process read; the register call is the only thing that
+             * can refuse ATOMICALLY at the row. Between them another writer can
+             * land.
+             *
+             * The values write below already does this (`expected_graph_hash:
+             * carried`), which is what made the omission a gap rather than a
+             * design. Same shape, same honest refusal.
+             *
+             * ⚠ SENT ONLY WHEN NON-EMPTY: the route rejects an empty string
+             * outright (`EXPECTED_GRAPH_HASH_INVALID`), and `readGraph` coerces
+             * a missing hash to `''`. Omitting it there preserves today's
+             * behaviour rather than turning a degraded read into a hard failure.
+             */
             const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
               graph: { nodes: patched, edges: before.edges },
+              ...(before.graph_hash !== '' ? { expected_graph_hash: before.graph_hash } : {}),
             });
             if (reg.status !== 200) {
-              failures.push({ path: 'scale_frame', detail: `could not attach a range: http ${reg.status}` });
+              const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
+              failures.push({
+                path: 'scale_frame',
+                detail: code === 'GRAPH_STALE'
+                  ? 'the model changed while this was being prepared, so no range was attached and nothing was written — read it again and propose afresh'
+                  : `could not attach a range: http ${reg.status}`,
+              });
               framedHere.length = 0;
             }
           }
