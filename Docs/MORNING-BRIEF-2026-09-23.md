@@ -24,6 +24,57 @@ Written for a manual test first thing. **Do not trust any build SHA in this file
 > lane's *"stop the first brief 500ing on an unparseable factor observe"* — so a first-brief 500 is
 > **not** that known bug) → `1e5b05b92395` (my #1717, 04:37Z) → `0f2f3b87ebb4` and counting.
 
+## 0. ⭐ TEST IT NOW — the journey WORKS. 13 of 13 briefs returned a real graph.
+
+**Measured this morning, not hoped.** 13 brief→draft runs, **13 of 13 HTTP 200** with a real graph
+(12–16 nodes, 17–40 edges). **3 of 3 on the build live right now** (`e0fd1c99716098602ea6fad9a11b994ee0592cc3`,
+which equals the staging tip and `/healthz`). **Zero `draft_graph_error`, zero 5xx, zero non-200.**
+The 22 Sep signature — 60% failure, 3 of 5 dying at ~30s — **did not reproduce once.**
+
+### Read these three things before you start, or you will misdiagnose what you see
+
+| what you'll see | what it means |
+|---|---|
+| **nothing for ~25–30s**, then a graph appears | **correct.** `GRAPH_READY` streams at **25.1 / 26.7 / 28.8s** measured. A graph arriving while the reply is still composing is the design, not a half-failure. |
+| the turn keeps going after the graph | **correct.** Ladder: `DRAFTING` 0.2–0.4s → `GRAPH_READY` ~25–29s → `COACHING_READY` ~48–52s → `COMPLETE` **55–59s**. |
+| **total 46–84s** (median ~58s) | **normal.** Nothing failed inside **84.1s** across 13 runs. **Wait the full 90s before calling anything broken.** |
+| "Run analysis" won't proceed | **not a crash** — `analysis_ready.status = needs_user_mapping`, which hit **3 of 13 (23%)**. Start a fresh brief rather than concluding analysis is broken. |
+
+**Concurrency is not the cause of the latency** — two deliberately uncontended sequential runs took
+53.3s and 62.6s, inside the same range as the 3-way parallel waves.
+
+### ⚠ ONE THING TO ASK FOR BEFORE YOU TEST: freeze merges to `staging`
+
+**The live build moved 4 times in 13 minutes this morning** (`264059ee` 08:55 → `c6dc7bd8` 09:01 →
+`e883d23f` 09:03 → `e0fd1c99` 09:08). A deploy landing mid-turn restarts the process and **will look
+to you exactly like an intermittent failure.** Either ask the lanes to hold merges while you test, or
+record the `/healthz` build with each result — otherwise your findings are uninterpretable.
+
+### ⛔ The one real defect found: a client/server TIMEOUT INVERSION (latent, ~1.5× headroom)
+
+| | value |
+|---|---|
+| UI client `TURN_WAIT_MS` | **130,000ms** |
+| deployed CEE `BROWSER_PROXY_TIMEOUT_MS` | **170,000ms** |
+| deployed CEE `ROUTE_TIMEOUT_MS` | 180,000ms |
+
+The UI's own `getTimeoutMs.ts` docblock states the invariant **"the client must never stop waiting
+before the server's own deadline"**, and derived its 130s from CEE's *default* of 125,000. **The
+deployed Render env overrides that default to 170,000 — so the invariant the file exists to enforce
+is violated in the live configuration.**
+
+Consequence, per that same docblock: **CEE does not abandon a turn when the browser stops listening.
+It runs to completion and COMMITS it** — and the client has no route to collect it. So the user is
+told their message failed while the reply exists server-side.
+
+**Not observed firing** (worst run 84.1s against a 130s client wait), so it is not this morning's
+blocker — but it destroys a completed reply, unseen, on any unusually slow turn. **One-constant fix,
+and it belongs to whoever owns the UI constant:** raise `TURN_WAIT_MS` above the deployed 170,000ms,
+or bring `BROWSER_PROXY_TIMEOUT_MS` back under the client's 130,000ms. I have not changed either —
+lowering a shared staging timeout minutes before a manual test is not a call I should make alone.
+
+---
+
 ## 1. Test this first — the P0 your manual test failed on is fixed
 
 Brief: `Should I hire a Tech lead or two developers to increase velocity?`
