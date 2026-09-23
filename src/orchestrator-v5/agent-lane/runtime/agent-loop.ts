@@ -18,6 +18,8 @@
  */
 
 import { toolsFor, dispatchTool, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
+import { config } from '../../../config/index.js';
+import { log } from '../../../utils/telemetry.js';
 import {
   eligibleTools,
   type CanonicalContextPacket,
@@ -164,6 +166,38 @@ export async function runAgentTurn(
   let toolProviderMs = 0;
   let providerCalls = 0;
   let toolCallCount = 0;
+  /**
+   * ⛔ A MEASUREMENT NOBODY CAN SEE IS NOT A MEASUREMENT.
+   *
+   * `TurnTiming` was returned on the result and read by nobody — a repo-wide
+   * sweep found 23 `.timing` hits, all of them the estate's pre-existing
+   * `timingDebugEnabled` system, and zero reading `result.timing`. Same inert
+   * failure as a helper no caller reaches. Contrast control: the sibling
+   * `.tool_calls` has 6 non-test readers, so the probe was not blind.
+   *
+   * The natural consumer is the route, which is inside another lane's lease, so
+   * the loop logs it here instead — gated on the estate's OWN timing flags, so
+   * it is default-OFF and consistent with every other timing surface
+   * (`cee.unified_pipeline.stage_timings`, `v5.run_analysis.timings`).
+   *
+   * `log.info` rather than `emit()` deliberately: `emit()` literals are frozen
+   * against the `TelemetryEvents` enum by the telemetry-validation workflow and
+   * this needs no new enum member. The estate already logs
+   * `agent_lane.route_mounted` exactly this way.
+   */
+  const emitTiming = (t: TurnTiming): void => {
+    if (!config.cee.timingDebugEnabled && !config.features.diagnosticTraceEnabled) return;
+    log.info(
+      {
+        event: 'agent_lane.turn_timings',
+        scenario_id: input.ctx.scenario_id,
+        request_id: input.ctx.request_id,
+        ...t,
+      },
+      'Agent lane — where this turn spent its wall time',
+    );
+  };
+
   const timingAt = (hopsTaken: number): TurnTiming => {
     const total = Math.max(0, now() - startedAt);
     return {
@@ -231,7 +265,7 @@ export async function runAgentTurn(
         mutated,
         hops: hop,
         stopped_reason: 'answered',
-        timing: timingAt(hop),
+        timing: ((t) => { emitTiming(t); return t; })(timingAt(hop)),
       };
     }
 
@@ -303,6 +337,6 @@ export async function runAgentTurn(
     mutated,
     hops: maxHops,
     stopped_reason: 'hop_limit',
-    timing: timingAt(maxHops),
+    timing: ((t) => { emitTiming(t); return t; })(timingAt(maxHops)),
   };
 }
