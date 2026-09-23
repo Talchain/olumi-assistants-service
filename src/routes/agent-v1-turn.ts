@@ -47,6 +47,8 @@ import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-bi
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { narrateWriteOutcome, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
+import { approvalChipsFor } from '../orchestrator-v5/agent-lane/approval-chips.js';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
@@ -95,7 +97,7 @@ const sessions = new SessionBindingRegistry();
 const MUTATION_INSTRUCTION =
   config.proxy.agentLanePreview === true
     ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
-    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link, propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once \u2014 show the user exactly what it returned, and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
+    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link, propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
 
 const AGENT_INSTRUCTIONS = [
   'You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user.',
@@ -124,7 +126,7 @@ const AGENT_INSTRUCTIONS = [
    * "has been proposed but not approved or applied". The user believes the
    * model changed; it did not.
    */
-  'When the user approves, agrees, or says yes, that is an instruction to call authorise_change. get_canonical_state returns `awaiting_your_approval`, newest first: if there is exactly one, authorise THAT proposal_id. If there is more than one, name them and ask which \u2014 in the same turn. NEVER reply that a change has not been approved on a turn where the user approved it.',
+  'When the user approves, agrees, or says yes, that is an instruction to call authorise_change. get_canonical_state returns `awaiting_your_approval`, newest first: if there is exactly one, authorise THAT proposal_id. If there is more than one, describe each by what it changes (never by its id) and ask which \u2014 in the same turn. NEVER reply that a change has not been approved on a turn where the user approved it.',
   'If get_canonical_state reports the model is empty, call build_model_from_brief with the user\u2019s own words before answering about the model.',
   'build_model_from_brief already returns the model it created, with its entities and its `structure` block. Do NOT call get_canonical_state again afterwards \u2014 answer from what it returned.',
   /*
@@ -193,6 +195,15 @@ const AGENT_INSTRUCTIONS = [
    * be compared with one that does.
    */
   'get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model \u2014 do not wait for the analysis to refuse \u2014 ask what that option would actually change, and record the answer with propose_option_interventions.',
+  /*
+   * ⛔ ANALYSIS IS MODEL-RELATIVE, NEVER A RECOMMENDATION (Paul, 23 Sep: "Olumi is a
+   * reasoning-enhancement system, not an answer or decision engine"). Measured on
+   * served replies: all 20 analysis replies carried a caveat, but 8 of 20 still
+   * framed the result in "winner" / "best option" terms — often to deny one, yet
+   * the vocabulary itself casts the finding as picking an answer. The useful move is the one the science supports: point at what the
+   * ordering is sensitive to, and let the user change it and see how much it matters.
+   */
+  'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one; say which option leads in this model and how firmly. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding.',
   'British English. Concise but substantive.',
 ].join(' ');
 
@@ -758,9 +769,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     const narration = narrateWriteOutcome(text, result.tool_calls, result.tool_results);
     const composed = composeDirectAnswerResponse({
-      assistant_text: withWriteOutcome(withDisclosures(narration.text, owed), narration.status),
+      // ⛔ A proposal id is a binding for authorise_change, never text a user reads or
+      // types (display-ids.ts). Applied here, before the answer row is written, so a
+      // replay returns exactly what the user first saw.
+      assistant_text: withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, owed), narration.status)),
       stage: 'frame',
       answerKind: 'substantive',
+      // One click approves the ONE proposal just offered — the same words as typing "yes".
+      suggested_actions: approvalChipsFor(result.tool_calls),
     });
     const finalised = finaliseV5Response(composed, { scenarioId });
 
