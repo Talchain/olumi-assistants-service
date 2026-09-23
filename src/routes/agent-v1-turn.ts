@@ -23,9 +23,12 @@
  * seam, deliberately.
  */
 
+import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
+import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
+import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { HistoryStore } from '../orchestrator-v5/agent-lane/history-store.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
@@ -43,8 +46,39 @@ import { assessCanonicalAnalysisReadiness } from '../orchestrator/tools/analysis
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
+import { narrateWriteOutcome, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
+
+/**
+ * ⛔ A TURN'S IDENTITY IS CLAIMED BEFORE IT RUNS — independent review of #1720
+ * at f616bc2a (CHANGES_REQUIRED): a preflight READ of "has this turn
+ * committed?" let two concurrent identical requests both see "no row" and both
+ * call the provider and the tools; and a turn whose final row failed to persist
+ * was re-run by its retry. So the identity is now CLAIMED in the durable turn
+ * table (unique on (scenario_id, turn_id)) before any provider or tool call:
+ *   · the CLAIM row carries `<turn_id>:claim` and no messages (history readers
+ *     exclude it before their LIMIT — see `SupabaseSessionStore.readRecent`);
+ *   · the ANSWER row carries the client's `turn_id` with the user and final text.
+ * Only the request that CREATED the claim runs. Any other sees the claim, never
+ * runs, and waits for the answer (replaying it) or says the outcome is unknown.
+ * A claim without an answer is never read as permission to run again.
+ */
+export const claimTurnIdOf = (turnId: string): string => `${turnId}:claim`;
+/**
+ * ⛔ THE CLAIM MUST DECIDE OWNERSHIP ON THE PRODUCTION STORE — independent review
+ * of #1720 at cb4e9d35: a non-graph write goes to `append_turn_atomic_v2`, which
+ * does `ON CONFLICT DO NOTHING` and returns the EXISTING id with no error, so the
+ * store never reports "someone else created this" for a claim. The claim row
+ * therefore carries a per-request NONCE in its hash; the row is written once by
+ * whichever insert wins and never updated, so reading it back says, exactly,
+ * whether THIS request created it.
+ */
+const CLAIM_NONCE = '#claim:';
+const claimHashFor = (requestHash: string, nonce: string): string => `${requestHash}${CLAIM_NONCE}${nonce}`;
+const requestHashOfClaim = (claimHash: string): string => claimHash.split(CLAIM_NONCE)[0] ?? '';
+/** How long a request that did not win the claim waits for the winner's answer. */
+export const AGENT_TURN_CLAIM_WAIT = { totalMs: 150_000, everyMs: 1_000 };
 
 /** The conversation of record stays Olumi's; this is a per-process cache. */
 const histories = new HistoryStore();
@@ -161,6 +195,103 @@ const AGENT_INSTRUCTIONS = [
   'get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model \u2014 do not wait for the analysis to refuse \u2014 ask what that option would actually change, and record the answer with propose_option_interventions.',
   'British English. Concise but substantive.',
 ].join(' ');
+
+/**
+ * Read the persisted state back for the response: `graph_hash`, readiness and
+ * the `draft_graph` the canvas draws. Shared by a live turn and a replay, so a
+ * replayed answer is shown against the SAME current state a fresh one would be.
+ */
+async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown }> {
+  let graphHash: string | undefined;
+  let analysisReady: unknown;
+  /**
+   * ⛔ THE CANVAS RENDERS FROM `draft_graph`, NOT FROM `graph_hash`.
+   *
+   * Measured from a real session's debug bundle: the Agent built the model
+   * (`build_model_from_brief ok=true mutated=true`, `graph_hash`
+   * d22f3fb712f84550), the turn returned 200 with 2,313 characters of good
+   * prose — and the board stayed EMPTY. `canvas_node_count: 0`,
+   * `full_graph` options/factors/edges all 0, and the envelope's own
+   * `analysis_state.run_state.cause` was literally `no_graph_this_turn`.
+   *
+   * I had added `graph_hash` and `analysis_ready` and stopped there, assuming
+   * a revision token was enough to make the client refetch. It is not: on a
+   * turn that DRAFTS, CEE returns the graph itself, and the UI draws that.
+   * A brand-new scenario has nothing hydrated to fall back on, so the user
+   * gets a perfect answer about a model they cannot see — the failure mode
+   * where nothing errors and everything looks broken.
+   */
+  let draftGraph: unknown;
+  try {
+    const after = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
+    if (after.status === 200) {
+      graphHash = typeof after.json.graph_hash === 'string' ? after.json.graph_hash : undefined;
+      analysisReady = after.json.analysis_ready;
+      /**
+       * ⭐ READINESS FROM THE MOMENT THE MODEL EXISTS, not from the moment
+       * someone runs an analysis.
+       *
+       * ⛔ MEASURED on the real browser transport: after a 60-90 s
+       * construction turn the response carried `draft_graph` and NO
+       * `analysis_ready`, so the readiness panel was empty at exactly the
+       * point a user has just built a model and wants to know what it still
+       * needs. The estate's own live-journey gate asserts the same thing
+       * (`turn 1: analysis_ready.options=0, expected >= 2`), which is how
+       * the gap surfaced.
+       *
+       * `assessCanonicalAnalysisReadiness` is the ONE readiness authority
+       * named in CLAUDE.md and it is a pure function of the graph — no LLM,
+       * no network, no second orchestrator turn — so this costs a function
+       * call, not twenty seconds. The graph read's own `analysis_ready`
+       * still wins when it has one, because that reflects a real run.
+       */
+      if (analysisReady === undefined && after.json.graph !== undefined) {
+        try {
+          const assessed = assessCanonicalAnalysisReadiness(after.json.graph);
+          if (assessed.analysisReady !== undefined) analysisReady = assessed.analysisReady;
+        } catch {
+          // Readiness is a disclosure, never a gate on the user's answer.
+        }
+      }
+      // Only when it actually has content: an empty graph must not overwrite
+      // whatever the client already has hydrated.
+      /**
+       * ⛔ `draft_graph` IS NOT THE GRAPH — it is a summary that CARRIES the
+       * graph, and `OlumiResponseSchema` requires ALL FOUR of `node_count`,
+       * `edge_count`, `nodes`, `edges`. I first sent `{nodes, edges}` alone.
+       * The envelope then failed validation, the UI discarded the WHOLE
+       * response, and the user was told "the server did not reply in time"
+       * after waiting 93 seconds for an answer that had in fact arrived,
+       * complete, with HTTP 200. A shape error here does not degrade the
+       * turn; it deletes it.
+       */
+      const g = after.json.graph as { nodes?: unknown[]; edges?: unknown[] } | undefined;
+      if (g !== undefined && Array.isArray(g.nodes) && g.nodes.length > 0) {
+        const nodes = g.nodes;
+        const edges = Array.isArray(g.edges) ? g.edges : [];
+        draftGraph = { node_count: nodes.length, edge_count: edges.length, nodes, edges };
+      }
+    }
+  } catch {
+    // A readback failure must not lose the user's answer. The turn still
+    // returns; the client simply does not learn the new revision this time.
+  }
+  return { graphHash, analysisReady, draftGraph };
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * What makes two Agent turns "the same request": the scenario, WHO is asking,
+ * and the message itself (trimmed). Stored as the turn row's `request_hash`, so
+ * an exact retry replays and a reused id carrying a different message refuses.
+ */
+export function agentTurnRequestHash(scenarioId: string, userId: string | null, message: string): string {
+  const digest = createHash('sha256')
+    .update(JSON.stringify({ v: 1, scenario_id: scenarioId, subject: userId, message: message.trim() }))
+    .digest('hex');
+  return `agent_turn:${digest}`;
+}
 
 export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
   if (config.proxy.agentLaneEnabled !== true) return;
@@ -282,6 +413,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
   }, (call, err) => log.warn({ err, call }, 'agent-lane transport failure, retrying once'));
 
   app.post('/agent/v1/turn', async (req: FastifyRequest, reply: FastifyReply) => {
+    const startedAt = Date.now();
     const body = (req.body ?? {}) as Record<string, unknown>;
     const scenarioId = typeof body.scenario_id === 'string' ? body.scenario_id : '';
     const message = typeof body.message === 'string' ? body.message : '';
@@ -368,6 +500,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
 
     /**
+     * ⛔ THE WHOLE AGENT TURN IS ONE OPERATION, AND ITS IDENTITY IS THE CLIENT'S
+     * `turn_id` — Release Control, 23 Sep (#63 5788656586): this route read no
+     * `turn_id` at all, ran the model, then advanced the in-process history. An
+     * exact lost-response retry was therefore a FRESH execution against a history
+     * the first attempt had already moved on — it took a different next action
+     * and could write where the first had only proposed. The durable turn table
+     * (`v5_conversation_turns`, unique on `(scenario_id, turn_id)`) is the
+     * authority used below; there is no in-memory replay map. Absent → exactly
+     * today's behaviour.
+     */
+    const turnId = typeof body.turn_id === 'string' && body.turn_id.length > 0 ? body.turn_id : undefined;
+    if (turnId !== undefined && !UUID_PATTERN.test(turnId)) {
+      return reply.code(422).send({ error: 'BAD_INPUT', detail: '`turn_id` must be a UUID when supplied.' });
+    }
+
+    /**
      * Bound from the request, never from the Agent.
      *
      * ⛔ `req.effectiveUserId` DOES NOT EXIST. It is not a Fastify decorator:
@@ -418,8 +566,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * cannot answer, the turn is refused rather than run against an
      * unverifiable scenario.
      */
+    const store = getSessionStore();
     try {
-      const store = getSessionStore();
       const owner = await store.ensureScenarioExists(scenarioId, userId);
       if (scenarioAccessDecision(owner.user_id, userId) !== 'allow') {
         return reply.code(404).send({ error: 'NOT_FOUND', detail: 'No readable conversation for that scenario.' });
@@ -432,6 +580,106 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const dispatch = dispatchFor(
       typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
     );
+
+    const requestHash = agentTurnRequestHash(scenarioId, userId, message);
+    /** The response a replay returns: the ORIGINAL words, on today's state, with no model call. */
+    const replayed = async (prior: CommittedTurnRecord) => {
+      const composedReplay = composeDirectAnswerResponse({
+        assistant_text: prior.assistant_message ?? 'That request was already completed.',
+        stage: 'frame',
+        answerKind: 'substantive',
+      });
+      const state = await readBackState(dispatch, scenarioId);
+      return {
+        ...finaliseV5Response(composedReplay, { scenarioId }),
+        ...(state.graphHash !== undefined ? { graph_hash: state.graphHash } : {}),
+        ...(state.analysisReady !== undefined ? { analysis_ready: state.analysisReady } : {}),
+        ...(state.draftGraph !== undefined ? { draft_graph: state.draftGraph } : {}),
+        _diagnostic_trace: { exit_path: 'agent_lane_v1', agent_mode: mode, hops: 0, stopped_reason: 'replayed', tools_called: [], replayed: true },
+        _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0, stopped_reason: 'replayed', replayed: true, turn_id: turnId },
+      };
+    };
+    // Set only when THIS request owns the turn — used to release it if nothing ran.
+    let claimHash: string | undefined;
+    if (turnId !== undefined && typeof store.readCommittedTurn === 'function') {
+      const readAnswer = (): Promise<CommittedTurnRecord | null> => store.readCommittedTurn!(scenarioId, turnId);
+      let prior: CommittedTurnRecord | null;
+      try {
+        prior = await readAnswer();
+      } catch (err) {
+        // Unknown is not absent: running the model now could repeat a turn that
+        // already wrote. Nothing is run.
+        log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: prior-turn read failed — refusing rather than re-running');
+        return reply.code(503).send({ error: 'TURN_STATE_UNVERIFIABLE', detail: 'Could not check whether this turn already ran. Nothing was run — please try again.' });
+      }
+      if (prior !== null) {
+        if (prior.request_hash !== requestHash) {
+          return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. Nothing was run or changed.' });
+        }
+        return reply.code(200).send(await replayed(prior));
+      }
+      // CLAIM the identity before any provider or tool call. No graph rides on
+      // it, so it takes no fence and no CAS; it goes through the shared floor
+      // like every turn row (C8). Ownership is decided by READING IT BACK.
+      const claimTurnId = claimTurnIdOf(turnId);
+      claimHash = claimHashFor(requestHash, randomUUID());
+      let owner: CommittedTurnRecord | null;
+      try {
+        await appendCheckedGraphWrite({
+          store,
+          writesGraph: false,
+          source: 'agent_turn_claim',
+          write: {
+            scenario_id: scenarioId,
+            turn_id: claimTurnId,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: claimHash,
+            response_emitted: false,
+            llm_calls_used: 0,
+            duration_ms: 0,
+            handler_facts: [],
+          },
+        });
+        owner = await store.readCommittedTurn(scenarioId, claimTurnId);
+      } catch (err) {
+        log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: turn claim failed — refusing rather than running unclaimed');
+        return reply.code(503).send({ error: 'TURN_STATE_UNVERIFIABLE', detail: 'Could not reserve this turn. Nothing was run — please try again.' });
+      }
+      if (owner === null) {
+        return reply.code(503).send({ error: 'TURN_STATE_UNVERIFIABLE', detail: 'Could not confirm this turn was reserved. Nothing was run — please try again.' });
+      }
+      const claim = {
+        won: owner.request_hash === claimHash,
+        sameRequest: requestHashOfClaim(owner.request_hash) === requestHash,
+      };
+      if (!claim.won && !claim.sameRequest) {
+        return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. Nothing was run or changed.' });
+      }
+      if (!claim.won) {
+        // Another request owns this turn: in flight now, or it ran and its answer
+        // was never recorded. It is NEVER run again here. Wait for its answer.
+        const deadline = Date.now() + AGENT_TURN_CLAIM_WAIT.totalMs;
+        for (;;) {
+          let answer: CommittedTurnRecord | null = null;
+          try { answer = await readAnswer(); } catch { answer = null; }
+          if (answer !== null) {
+            if (answer.request_hash !== requestHash) {
+              return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. Nothing was run or changed.' });
+            }
+            return reply.code(200).send(await replayed(answer));
+          }
+          if (Date.now() >= deadline) break;
+          await new Promise((r) => setTimeout(r, AGENT_TURN_CLAIM_WAIT.everyMs));
+        }
+        log.warn({ scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: turn claimed but no answer recorded — outcome unknown, not re-run');
+        return reply.code(409).send({
+          error: 'TURN_OUTCOME_UNKNOWN',
+          detail: 'This message is already being handled, or an earlier attempt ran and its reply was not recorded. Nothing was run again — reload to see the current model.',
+        });
+      }
+      // This request created the claim: it alone runs the turn.
+    }
     /**
      * ⛔ THE UI RENDERS THE ANALYSIS FROM `blocks` AND `analysis_ready`, NOT
      * FROM THE PROSE. Measured on the real browser transport at `2fd8cbba`:
@@ -443,7 +691,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * the carrier was missing.
      */
     let analysisFromTool: { analysis_ready?: unknown; blocks?: unknown[] } | undefined;
-    const capabilities = createAgentCapabilities(dispatch, proposals, callStructured, mode, (payload) => {
+    // Counts every call that could WRITE, so a failed turn knows whether it is
+    // safe to release its claim (nothing sent) or must leave it (outcome unknown).
+    let writesDispatched = 0;
+    const countingDispatch: typeof dispatch = async (path, body) => {
+      if (path.endsWith('/graph/register') || path === '/orchestrate/v2/turn') writesDispatched += 1;
+      return dispatch(path, body);
+    };
+    const capabilities = createAgentCapabilities(countingDispatch, proposals, callStructured, mode, (payload) => {
       analysisFromTool = payload;
     });
     const history = histories.get(sessionId);
@@ -465,7 +720,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       );
     } catch (err) {
       log.error({ err: String(err), scenario_id: scenarioId }, 'agent-lane turn failed');
-      return reply.code(502).send({ error: 'UPSTREAM_ERROR', detail: String(err).slice(0, 300) });
+      // Nothing was sent that could write: release the claim, so a retry of the
+      // SAME turn_id can run. If anything was sent, the claim stands — the
+      // outcome is unknown and the turn is never run twice.
+      let released = false;
+      if (turnId !== undefined && claimHash !== undefined && writesDispatched === 0 && typeof store.releaseTurnClaim === 'function') {
+        try { await store.releaseTurnClaim(scenarioId, claimTurnIdOf(turnId), claimHash); released = true; }
+        catch (e) { log.warn({ err: String(e), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: claim release failed'); }
+      }
+      return reply.code(502).send({
+        error: 'UPSTREAM_ERROR', detail: String(err).slice(0, 300),
+        ...(turnId !== undefined ? { retry_safe: released } : {}),
+      });
     }
 
     histories.set(sessionId, [...result.items]);
@@ -483,8 +749,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // placeholder strength the user never gave, the user is told — whether or
     // not the model chose to mention it.
     const owed = disclosuresFor(result.tool_results);
+    /**
+     * ⛔ WHAT WAS SAVED IS STATED BY OLUMI, FROM THE TOOL RESULTS (RC #63
+     * 5788648244). A model-authored "Saved…" survived here on a turn that wrote
+     * nothing, because this route returned the model's words verbatim. The
+     * status line is composed from the authoritative results; an unsupported
+     * write claim is removed when nothing landed. See `write-outcome.ts`.
+     */
+    const narration = narrateWriteOutcome(text, result.tool_calls, result.tool_results);
     const composed = composeDirectAnswerResponse({
-      assistant_text: withDisclosures(text, owed),
+      assistant_text: withWriteOutcome(withDisclosures(narration.text, owed), narration.status),
       stage: 'frame',
       answerKind: 'substantive',
     });
@@ -503,80 +777,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * Read back from the persisted graph, not from what a tool returned: the
      * hash the client caches must be the hash the product would serve it.
      */
-    let graphHash: string | undefined;
-    let analysisReady: unknown;
-    /**
-     * ⛔ THE CANVAS RENDERS FROM `draft_graph`, NOT FROM `graph_hash`.
-     *
-     * Measured from a real session's debug bundle: the Agent built the model
-     * (`build_model_from_brief ok=true mutated=true`, `graph_hash`
-     * d22f3fb712f84550), the turn returned 200 with 2,313 characters of good
-     * prose — and the board stayed EMPTY. `canvas_node_count: 0`,
-     * `full_graph` options/factors/edges all 0, and the envelope's own
-     * `analysis_state.run_state.cause` was literally `no_graph_this_turn`.
-     *
-     * I had added `graph_hash` and `analysis_ready` and stopped there, assuming
-     * a revision token was enough to make the client refetch. It is not: on a
-     * turn that DRAFTS, CEE returns the graph itself, and the UI draws that.
-     * A brand-new scenario has nothing hydrated to fall back on, so the user
-     * gets a perfect answer about a model they cannot see — the failure mode
-     * where nothing errors and everything looks broken.
-     */
-    let draftGraph: unknown;
-    try {
-      const after = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
-      if (after.status === 200) {
-        graphHash = typeof after.json.graph_hash === 'string' ? after.json.graph_hash : undefined;
-        analysisReady = after.json.analysis_ready;
-        /**
-         * ⭐ READINESS FROM THE MOMENT THE MODEL EXISTS, not from the moment
-         * someone runs an analysis.
-         *
-         * ⛔ MEASURED on the real browser transport: after a 60-90 s
-         * construction turn the response carried `draft_graph` and NO
-         * `analysis_ready`, so the readiness panel was empty at exactly the
-         * point a user has just built a model and wants to know what it still
-         * needs. The estate's own live-journey gate asserts the same thing
-         * (`turn 1: analysis_ready.options=0, expected >= 2`), which is how
-         * the gap surfaced.
-         *
-         * `assessCanonicalAnalysisReadiness` is the ONE readiness authority
-         * named in CLAUDE.md and it is a pure function of the graph — no LLM,
-         * no network, no second orchestrator turn — so this costs a function
-         * call, not twenty seconds. The graph read's own `analysis_ready`
-         * still wins when it has one, because that reflects a real run.
-         */
-        if (analysisReady === undefined && after.json.graph !== undefined) {
-          try {
-            const assessed = assessCanonicalAnalysisReadiness(after.json.graph);
-            if (assessed.analysisReady !== undefined) analysisReady = assessed.analysisReady;
-          } catch {
-            // Readiness is a disclosure, never a gate on the user's answer.
-          }
-        }
-        // Only when it actually has content: an empty graph must not overwrite
-        // whatever the client already has hydrated.
-        /**
-         * ⛔ `draft_graph` IS NOT THE GRAPH — it is a summary that CARRIES the
-         * graph, and `OlumiResponseSchema` requires ALL FOUR of `node_count`,
-         * `edge_count`, `nodes`, `edges`. I first sent `{nodes, edges}` alone.
-         * The envelope then failed validation, the UI discarded the WHOLE
-         * response, and the user was told "the server did not reply in time"
-         * after waiting 93 seconds for an answer that had in fact arrived,
-         * complete, with HTTP 200. A shape error here does not degrade the
-         * turn; it deletes it.
-         */
-        const g = after.json.graph as { nodes?: unknown[]; edges?: unknown[] } | undefined;
-        if (g !== undefined && Array.isArray(g.nodes) && g.nodes.length > 0) {
-          const nodes = g.nodes;
-          const edges = Array.isArray(g.edges) ? g.edges : [];
-          draftGraph = { node_count: nodes.length, edge_count: edges.length, nodes, edges };
-        }
-      }
-    } catch {
-      // A readback failure must not lose the user's answer. The turn still
-      // returns; the client simply does not learn the new revision this time.
-    }
+    const { graphHash, analysisReady, draftGraph } = await readBackState(dispatch, scenarioId);
 
     // The analysis the tool actually ran wins over the graph readback, which
     // carries only the persisted state and never the run's own options.
@@ -584,6 +785,60 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const existingBlocks = Array.isArray((finalised as { blocks?: unknown[] }).blocks)
       ? (finalised as { blocks: unknown[] }).blocks
       : [];
+
+    /**
+     * ⭐ PERSIST THE TURN BEFORE ANSWERING — the row a lost-response retry is
+     * replayed from. No graph rides on it (the Agent's writes carry their own
+     * identities), so it takes no fence and no CAS. Stored text is the FINAL
+     * text returned, disclosures included, so a replay is word-for-word.
+     */
+    let durability: 'recorded' | 'not_recorded' | 'no_turn_id' = 'no_turn_id';
+    if (turnId !== undefined) {
+      try {
+        // Through the SHARED persistence floor, like every turn row: the one
+        // `store.append` stays inside it (C8). No graph rides on this row.
+        const outcome = await appendCheckedGraphWrite({
+          store,
+          writesGraph: false,
+          source: 'agent_turn',
+          write: {
+          scenario_id: scenarioId,
+          // The ANSWER row, under the client's own turn_id; the claim
+          // (`<turn_id>:claim`) was taken before the run.
+          turn_id: turnId,
+          // DB CHECK: (turn_class = 'handler') = (handler_id IS NOT NULL) —
+          // the graph-register precedent for a turn with no handler.
+          turn_class: 'direct_answer',
+          handler_id: null,
+          request_hash: requestHash,
+          response_emitted: true,
+          llm_calls_used: result.hops + 1,
+          duration_ms: Date.now() - startedAt,
+          handler_facts: [],
+          userMessage: message,
+          assistantMessage: String((finalised as { assistant_text?: unknown }).assistant_text ?? text),
+          },
+        });
+        if (outcome.priorTurnConflict === true) {
+          // A concurrent request with the SAME id and a DIFFERENT message won the
+          // row. This answer is not the recorded one; say so rather than return it.
+          log.warn({ scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: turn id taken by a different concurrent message');
+          return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. This reply was not recorded.' });
+        }
+        if (outcome.replayedPriorTurn === true && typeof store.readCommittedTurn === 'function') {
+          // An identical concurrent request committed first: ITS answer is the
+          // record, so it is the one returned.
+          const first = await store.readCommittedTurn(scenarioId, turnId);
+          if (first !== null) return reply.code(200).send(await replayed(first));
+        }
+        durability = 'recorded';
+      } catch (err) {
+        // The answer is real and the writes already happened; hiding it would be
+        // worse. It is returned, flagged as not durable, and logged loudly.
+        log.error({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: answer could not be recorded — the claim stands, so a retry reports an unknown outcome and never re-runs');
+        durability = 'not_recorded';
+      }
+    }
 
     return reply.code(200).send({
       ...finalised,
@@ -613,6 +868,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         hops: result.hops,
         stopped_reason: result.stopped_reason,
         tools_called: result.tool_calls.map((c) => c.name),
+        write_claims_removed: narration.stripped.length,
       },
       _agent: {
         session_id: sessionId,
@@ -621,6 +877,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         mutated: result.mutated,
         hops: result.hops,
         stopped_reason: result.stopped_reason,
+        ...(turnId !== undefined ? { turn_id: turnId, durability } : {}),
       },
     });
   });

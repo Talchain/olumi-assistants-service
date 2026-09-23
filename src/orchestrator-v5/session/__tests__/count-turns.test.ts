@@ -60,6 +60,10 @@ function makeClient(result: {
           filters[`eq:${col}`] = val;
           return chain;
         },
+        not: (col: string, op: string, val: unknown) => {
+          filters[`not:${col}:${op}`] = val;
+          return chain;
+        },
         order: (col: string, opts: unknown) => {
           filters[`order:${col}`] = opts;
           return chain;
@@ -99,6 +103,8 @@ describe('SupabaseSessionStore.countTurns', () => {
     // Scope at the bytes: the service-role client bypasses RLS, so this filter
     // is the only thing between the read and every other scenario's turns.
     expect(call.filters['eq:scenario_id']).toBe(SCENARIO);
+    // Turn-claim markers (`<turn_id>:claim`) are not conversation turns (#1720).
+    expect(call.filters['not:turn_id:like']).toBe('%:claim');
     // No LIMIT — a limited count would count the limit.
     expect(call.filters.limit).toBeUndefined();
   });

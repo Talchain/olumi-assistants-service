@@ -260,6 +260,15 @@ export interface SessionTurnWrite {
   readonly modelVersion?: AtomicCommittedModelVersionWrite;
 }
 
+/** What {@link SessionStore.readCommittedTurn} returns — the durable facts a replay is answered from. */
+export interface CommittedTurnRecord {
+  readonly id: string;
+  readonly request_hash: string;
+  readonly assistant_message: string | null;
+  readonly user_message: string | null;
+  readonly llm_calls_used: number;
+}
+
 export interface SessionStore {
   append(write: SessionTurnWrite): Promise<SessionAppendOutcome>;
   // V5 Conversation Context Reliability: returns the content-bearing superset
@@ -449,6 +458,26 @@ export interface SessionStore {
    * thrown at it. Optional for the same reason as {@link claimTurnFence}.
    */
   committedTurnRowId?(scenarioId: string, turnId: string): Promise<string | null>;
+  /**
+   * The committed row for `(scenarioId, turnId)` WITH what a replay needs: the
+   * request hash that decides "same request vs a reused id", and the assistant
+   * text the user was actually given. For callers that answer a lost-response
+   * retry from the durable record instead of re-executing (the OpenAI Agent
+   * route — its whole turn is one operation).
+   *
+   * Returns `null` on a clean no-row read. ⛔ THROWS on a failed read, unlike
+   * {@link committedTurnRowId}: here "unknown" must not be read as "absent",
+   * because the caller would then re-execute a turn that may already have run.
+   * Optional so existing test doubles need not implement it.
+   */
+  readCommittedTurn?(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null>;
+  /**
+   * Remove THIS request's own turn claim (`<turn_id>:claim`, matched by the
+   * claim's nonce-bearing hash) after a turn failed before anything was sent
+   * that could write — so a retry of the same turn_id may run. Never removes a
+   * claim another request owns (the hash differs), and never an answer row.
+   */
+  releaseTurnClaim?(scenarioId: string, claimTurnId: string, claimHash: string): Promise<void>;
   /**
    * V5 TURN FENCE / ROADMAP 2.171 — is the scenario in the POST-EXPLICIT-STOP
    * state? True iff the NEWEST `v5_turn_fence` row for the scenario, excluding

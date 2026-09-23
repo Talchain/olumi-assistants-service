@@ -40,6 +40,7 @@ import {
   SessionReadError,
   StateCommitFailedError,
   type AtomicCommittedModelVersionReceipt,
+  type CommittedTurnRecord,
   type GraphWriteFailureDisclosure,
   type PendingActionReadOptions,
   type SessionAppendOutcome,
@@ -232,6 +233,18 @@ function identityHashPrefix(hash: string | null | undefined): string | null {
     ? hash.slice(0, GRAPH_CAS_HASH_PREFIX_LENGTH)
     : null;
 }
+
+/**
+ * ⛔ TURN-CLAIM MARKERS ARE NOT CONVERSATION. The Agent route claims a turn's
+ * identity with a `<turn_id>:claim` row before it runs (see agent-v1-turn.ts).
+ * Every HISTORY reader excludes those rows BEFORE its LIMIT / count / "most
+ * recent" decision — otherwise each Agent turn would take two history slots and
+ * a stranded claim would read as a blank prior turn. Exact-id readers
+ * (`readCommittedTurn`, `committedTurnRowId`) still see them: that is the
+ * replay reader the claim exists for.
+ */
+export const TURN_CLAIM_SUFFIX = ':claim';
+const NOT_A_CLAIM_PATTERN = `%${TURN_CLAIM_SUFFIX}`;
 
 export class SupabaseSessionStore implements SessionStore {
   /**
@@ -1550,6 +1563,39 @@ export class SupabaseSessionStore implements SessionStore {
    * Only the return shape differs at the seam (`string | null` here,
    * re-wrapped as `{ id } | null` for the existing caller).
    */
+  async readCommittedTurn(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null> {
+    const { data, error } = await this.client
+      .from('v5_conversation_turns')
+      .select('id, request_hash, assistant_message, user_message, llm_calls_used')
+      .eq('scenario_id', scenarioId)
+      .eq('turn_id', turnId)
+      .limit(1);
+    // A failed read is an UNKNOWN and is thrown, never folded into "no row":
+    // the caller would otherwise re-execute a turn that may already have run.
+    if (error) throw new Error(`readCommittedTurn failed: ${error.message ?? String(error)}`);
+    const row = ((data as Array<Record<string, unknown>> | null) ?? [])[0];
+    if (!row || typeof row.id !== 'string') return null;
+    return {
+      id: row.id,
+      request_hash: String(row.request_hash ?? ''),
+      assistant_message: typeof row.assistant_message === 'string' ? row.assistant_message : null,
+      user_message: typeof row.user_message === 'string' ? row.user_message : null,
+      llm_calls_used: typeof row.llm_calls_used === 'number' ? row.llm_calls_used : 0,
+    };
+  }
+
+  async releaseTurnClaim(scenarioId: string, claimTurnId: string, claimHash: string): Promise<void> {
+    // Only a CLAIM marker, only this request's own (the hash carries its nonce).
+    if (!claimTurnId.endsWith(TURN_CLAIM_SUFFIX)) throw new Error('releaseTurnClaim: not a claim marker');
+    const { error } = await this.client
+      .from('v5_conversation_turns')
+      .delete()
+      .eq('scenario_id', scenarioId)
+      .eq('turn_id', claimTurnId)
+      .eq('request_hash', claimHash);
+    if (error) throw new Error(`releaseTurnClaim failed: ${error.message}`);
+  }
+
   async committedTurnRowId(scenarioId: string, turnId: string): Promise<string | null> {
     try {
       const { data, error } = await this.client
@@ -1772,6 +1818,7 @@ export class SupabaseSessionStore implements SessionStore {
       .from('v5_conversation_turns')
       .select(V5_CONVERSATION_TURN_COLUMNS)
       .eq('scenario_id', scenarioId)
+      .not('turn_id', 'like', NOT_A_CLAIM_PATTERN)
       .order('created_at', { ascending: false })
       // Deterministic tiebreak: two turns can share a `created_at` (same-ms
       // commits, or fixtures with identical timestamps). Without a secondary
@@ -1839,7 +1886,8 @@ export class SupabaseSessionStore implements SessionStore {
     const { count, error } = await this.client
       .from('v5_conversation_turns')
       .select('turn_id', { count: 'exact', head: true })
-      .eq('scenario_id', scenarioId);
+      .eq('scenario_id', scenarioId)
+      .not('turn_id', 'like', NOT_A_CLAIM_PATTERN);
     if (error) {
       throw new SessionReadError(`countTurns(${scenarioId}) failed: ${errMsg(error)}`, {
         cause: error,
@@ -2410,6 +2458,7 @@ export class SupabaseSessionStore implements SessionStore {
       .from('v5_conversation_turns')
       .select('id, pending_actions')
       .eq('scenario_id', scenarioId)
+      .not('turn_id', 'like', NOT_A_CLAIM_PATTERN)
       .order('created_at', { ascending: false })
       .limit(1);
     if (error) {
@@ -2498,6 +2547,7 @@ export class SupabaseSessionStore implements SessionStore {
       .from('v5_conversation_turns')
       .select('id')
       .eq('scenario_id', scenarioId)
+      .not('turn_id', 'like', NOT_A_CLAIM_PATTERN)
       .limit(1);
     if (error) {
       throw new SessionReadError(

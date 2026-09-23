@@ -143,8 +143,13 @@ describe('C8 — the `scenarios.graph` writer population is EXACTLY these call s
     const callers = filesMatching(/(?<!function\s)\bappendCheckedGraphWrite\s*\(/).filter(
       (p) => p !== 'orchestrator-v5/persist-graph-write.ts',
     );
+    // The OpenAI Agent route persists its conversational turn row — NO graph,
+    // `writesGraph: false` — through the same floor, so a lost-response retry
+    // can be replayed from it (#63 5788656586). It takes the floor rather than
+    // `store.append` so the one append stays inside the floor.
     expect(callers).toEqual([
       'orchestrator-v5/commit.ts',
+      'routes/agent-v1-turn.ts',
       'routes/assist.v1.scenario-graph-register.ts',
     ]);
   });
@@ -212,6 +217,7 @@ describe('C8 — the `scenarios.graph` writer population is EXACTLY these call s
     expect([...writers].sort()).toEqual([
       'orchestrator-v5/commit.ts',
       'orchestrator-v5/persist-graph-write.ts',
+      'routes/agent-v1-turn.ts',
       'routes/assist.v1.scenario-graph-register.ts',
       'routes/assist.v1.scenario-versions.ts',
     ]);
