@@ -366,7 +366,37 @@ are being minted on the serving build", nothing stronger.
 
 ---
 
-## 11. #1717 was RE-CUT overnight — an existing guard caught it, and the result is strictly better
+## 11. ✅ #1717 IS MERGED — re-cut after an existing guard caught it, then independently approved
+
+**Merged `2026-09-23T04:37:28Z`. Staging moved `e38feb4c23e3` → `1e5b05b92395`** (confirmed by both
+`gh api` and `git ls-remote`), and Render began deploying it at 04:37:30Z.
+
+**It merged on an independent exact-head verdict, not a self-merge.** Judgement recorded before the
+fact: five shared `.github/workflows/*.yml` files are explicitly NOT-LOW-RISK, so self-merge was not
+available regardless of how mechanical the diff looked. The approval is comment `5789112205`,
+`REVIEWED_HEAD: c50e7ba31f7fd2825ee07be8136efeadf0184682`, and `premerge-check.sh` exited 0 at that
+head with `approve-discriminate` returning `APPROVE` — and `NOT` for both the superseded head and my
+own review request, so there was no self-approval path.
+
+⭐ **The reviewer independently derived the one thing I asked to be checked on.** I had restored
+`ci.yml` with `git checkout origin/staging --`, which takes the *whole file*, and flagged that this
+would silently drop #1713's concurrency stanza if it had been added on this branch. They verified
+the blob: `db32d75590952495ad887c4120f2da8a4546fa5e`, byte-identical to staging. I then derived the
+same SHA myself. The three-dot diff touches **only** the four narrowed workflows — `ci.yml` is not
+in it.
+
+| | before the re-cut | as merged |
+|---|---|---|
+| `feat/**` push, no PR | lost its required check | **keeps it — that trade is gone** |
+| PR stacked on a feature branch | lost **the required check**, silently | loses only four advisory/contract workflows |
+| queue relief | yes | **retained** — `contract-schemas` had been firing on every push to every branch |
+
+**⚠ The rule that still applies, in the reviewer's own words:** *"the narrower four workflows will
+not run on PRs based on a feature branch, so such stacked work must be retargeted to staging for
+those checks; absence of a check is not evidence of success."* On this estate silence has repeatedly
+been read as green — **base PRs on `staging`.**
+
+### (original assessment, pre-merge)
 
 The version described in the earlier draft of this section (`25bf0e91…`, narrowing `push` to
 `[main, staging]` on all five workflows) **failed its required check** and was never merged.
