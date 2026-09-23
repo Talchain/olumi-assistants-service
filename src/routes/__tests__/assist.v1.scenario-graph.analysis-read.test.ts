@@ -204,7 +204,7 @@ const BASE_CAPTURE_PATH = join(
  * edit was refused; it is derived beside `graph_identity_hash` from the same
  * bytes, and is NOT that hash — different projection, different question.
  */
-const NEW_KEYS = ["analysis_state", "analysis_result", "graph_hash"] as const;
+const NEW_KEYS = ["analysis_state", "analysis_result", "graph_hash", "analysis_admission"] as const;
 
 /**
  * Additions made INSIDE a pre-existing key since the base capture — declared
