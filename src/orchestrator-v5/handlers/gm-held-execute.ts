@@ -270,7 +270,10 @@ export function deriveUnconfiguredOptionLabels(
     // `399c2814`, 23:38:00). "Two Developers" was `needs_user_mapping` because
     // ONE EDGE lacked a mechanism — readiness named it exactly:
     // `OPTION_NEEDS_MAPPING`, "How does Two Developers change Coordination
-    // Overhead Risk?". It already carried effect values on two factors, and the
+    // Overhead Risk?". (⚠ Quoted verbatim from that session and kept so; the
+    // ask itself was repaired on 23 Sep as unanswerable. The copy changed, the
+    // record of what he was shown did not.) It already carried effect values on
+    // two factors, and the
     // product had said so itself twenty minutes earlier. The notice told the
     // user it had none and to "configure the Two Developers option"; he did,
     // twice, and analysis stayed blocked on the edge nobody named. That is the
