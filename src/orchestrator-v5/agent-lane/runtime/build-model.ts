@@ -62,11 +62,26 @@ export function buildCandidateSchema(): Record<string, unknown> {
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
       value: { type: 'number' }, unit: { type: 'string' }, provenance,
     }, ['metric', 'operator', 'value', 'unit', 'provenance']) },
-    // Bounded AT GENERATION as well as at admission. The array caps are
-    // deliberately looser than the total-model limit: admission merges and drops
-    // items, so a per-array cap tight enough to guarantee the total would refuse
-    // models that admit perfectly well. The total check is the authority.
-    options: { type: 'array', maxItems: 6, items: obj({
+    /**
+     * ⛔ NO `maxItems` ON ANYTHING THAT CAN HOLD USER MATERIAL. Removed after an
+     * exact-head review found the contract it broke.
+     *
+     * A cap of 6 options against a brief naming seven creates an IMPOSSIBLE
+     * contract: preserve every explicit option AND emit at most six. The model can
+     * only satisfy the schema by OMITTING what the user said — and the
+     * post-admission size gate cannot detect what never arrived. A pre-gate cap is
+     * therefore strictly more dangerous than the ≤12/≤20 admitted-model gate,
+     * which sees the real graph and refuses out loud instead of silently shrinking.
+     *
+     * ⚠ The test that appeared to cover this proved nothing: it mocked
+     * `callStructured` with a 14-option payload the real schema would have
+     * REFUSED. A self-authored fixture standing in for the wire.
+     *
+     * If a cap is ever reinstated it needs a real-schema discriminator showing
+     * explicit overflow REFUSES rather than disappears. `construction-user-material-protected.test.ts`
+     * pins the absence so it cannot come back without one.
+     */
+    options: { type: 'array', items: obj({
       label: { type: 'string', description: 'A NAME, not a sentence. Keep it under 33 characters where you can.' },
       provenance,
       changes: { type: 'array', description:
@@ -77,16 +92,16 @@ export function buildCandidateSchema(): Record<string, unknown> {
         items: obj({ factor_label: { type: 'string' }, value: { type: 'number' }, unit: { type: 'string' }, provenance },
           ['factor_label', 'value', 'unit', 'provenance']) },
     }, ['label', 'provenance', 'changes', 'interventions']) },
-    factors: { type: 'array', maxItems: 8, items: obj({
+    factors: { type: 'array', items: obj({
       label: { type: 'string' }, role: { type: 'string', enum: ['controllable', 'observable', 'external'] },
       baseline_known: { type: 'boolean' }, baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }] },
       unit: { anyOf: [{ type: 'string' }, { type: 'null' }] }, provenance,
       plausible_max: { type: 'number',
         description: 'REQUIRED, and NEVER null. The top of the range this factor could plausibly take, in its own unit \u2014 the SCALE it is read against, not a prediction. A percentage or a score out of 100: 100. A count, an amount or a price: a round number comfortably above anything realistic (a \u00a349 price might use 200; 300 subscribers might use 2000). Something ALREADY between 0 and 1: exactly 1. Every factor gets one, with or without a baseline today \u2014 a value adopted later is read against this same range.' },
     }, ['label', 'role', 'baseline_known', 'baseline_value', 'unit', 'provenance', 'plausible_max']) },
-    risks: { type: 'array', maxItems: 4, items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
-    outcomes: { type: 'array', maxItems: 4, items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
-    links: { type: 'array', maxItems: 20, items: obj({
+    risks: { type: 'array', items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
+    outcomes: { type: 'array', items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
+    links: { type: 'array', items: obj({
       from: { type: 'string' }, to: { type: 'string' },
       direction: { type: 'string', enum: ['positive', 'negative', 'unknown'] }, provenance,
     }, ['from', 'to', 'direction', 'provenance']) },
@@ -279,7 +294,20 @@ export async function buildModelFromBrief(
         // ⚠ ADOPT ONLY WHAT IS ACTUALLY SMALLER, on BOTH dimensions. A retry that
         // trades 4 nodes for 11 links is not a compaction, and taking it on faith
         // would let a second model call make the problem worse.
-        if (retrySize.nodes <= size.nodes && retrySize.edges <= size.edges) {
+        // ⭐⭐ AND IT MUST NOT HAVE COST THE USER ANYTHING. Smaller is not
+        // sufficient: a retry that sheds two widened factors while also dropping a
+        // relationship the user stated is a worse model, and the size numbers alone
+        // cannot tell the difference. So the brief-stated counts must not regress —
+        // that is what makes "the cap never overrides the user" true of RETRIES and
+        // not merely of the refusal path.
+        const keepsUserMaterial =
+          retrySize.brief_stated_nodes >= size.brief_stated_nodes &&
+          retrySize.brief_stated_edges >= size.brief_stated_edges;
+        if (
+          retrySize.nodes <= size.nodes &&
+          retrySize.edges <= size.edges &&
+          keepsUserMaterial
+        ) {
           candidate = retryCandidate;
           admitted = retryAdmitted;
           size = retrySize;

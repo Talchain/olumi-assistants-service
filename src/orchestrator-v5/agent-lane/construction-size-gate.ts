@@ -59,17 +59,35 @@ export interface ConstructionSizeVerdict {
   readonly by_provenance: Readonly<Record<InferenceClass, number>>;
   /** The floor: nodes the user themselves stated. Never a shed target. */
   readonly brief_stated_nodes: number;
+  /**
+   * RELATIONSHIPS the user themselves stated, counted by the only honest marker
+   * available: `provenance.source === 'brief_extraction'`, which is what an
+   * `explicit` candidate link becomes at admission
+   * (`admit-candidate.ts::provenanceSourceFor`).
+   *
+   * ⛔ ADDED AFTER AN EXACT-HEAD REVIEW. The exemption below read node counts
+   * ONLY, so an explicit brief that sits inside 12 nodes while stating more than
+   * 20 relationships fell into the retry/refusal path — and the stated contract
+   * covers the user's FACTS AND RELATIONSHIPS, not only their nodes.
+   */
+  readonly brief_stated_edges: number;
   /** Widened nodes — the only legitimate thing a retry should shed. */
   readonly sheddable_nodes: number;
   /**
-   * TRUE when the user's own stated material alone exceeds `maxNodes`, so the
-   * cap cannot be met without deleting what they said. The caller must ADMIT,
-   * not refuse: their model is their model.
+   * TRUE when the user's own stated material alone exceeds a limit — on EITHER
+   * dimension — so the cap cannot be met without deleting what they said. The
+   * caller must ADMIT, not refuse: their model is their model.
    */
   readonly user_material_exceeds_limit: boolean;
   /** One sentence a user could be shown. Empty when within budget. */
   readonly detail: string;
 }
+
+/** An admitted edge the user themselves stated. */
+const isBriefStatedEdge = (e: unknown): boolean =>
+  typeof e === 'object' &&
+  e !== null &&
+  (e as { provenance?: { source?: unknown } }).provenance?.source === 'brief_extraction';
 
 const EMPTY_PROVENANCE: Readonly<Record<InferenceClass, number>> = {
   brief_stated: 0,
@@ -110,13 +128,15 @@ export function assessConstructionSize(
   }
 
   const brief_stated_nodes = by_provenance.brief_stated;
+  const brief_stated_edges = admitted.edges.filter(isBriefStatedEdge).length;
   const sheddable_nodes = by_provenance.model_proposed;
   const within = nodes <= limits.maxNodes && edges <= limits.maxEdges;
   const over_by = {
     nodes: Math.max(0, nodes - limits.maxNodes),
     edges: Math.max(0, edges - limits.maxEdges),
   };
-  const user_material_exceeds_limit = brief_stated_nodes > limits.maxNodes;
+  const user_material_exceeds_limit =
+    brief_stated_nodes > limits.maxNodes || brief_stated_edges > limits.maxEdges;
 
   const parts: string[] = [];
   if (over_by.nodes > 0) parts.push(`${nodes} nodes (limit ${limits.maxNodes})`);
@@ -137,6 +157,7 @@ export function assessConstructionSize(
     by_kind,
     by_provenance,
     brief_stated_nodes,
+    brief_stated_edges,
     sheddable_nodes,
     user_material_exceeds_limit,
     detail,
@@ -155,7 +176,7 @@ export function retryInstruction(v: ConstructionSizeVerdict): string {
   return [
     `Your previous model was too large: ${v.nodes} nodes and ${v.edges} links.`,
     `The limit is ${v.limits.maxNodes} nodes and ${v.limits.maxEdges} links.`,
-    'Keep EVERY option, factor, figure, constraint and horizon the brief states — those are not negotiable and must not be dropped or merged.',
+    'Keep EVERY option, factor, figure, constraint, horizon AND STATED RELATIONSHIP the brief gives — those are not negotiable and must not be dropped or merged.',
     'Remove what you ADDED beyond the brief: speculative options, secondary factors, risks and outcomes that are not decision-critical for this question.',
     'Anything you judge material but cannot fit belongs in `unknowns` as a question, NOT as a node.',
     'Do not invent a number, an effect or a baseline to make the smaller model analysable.',

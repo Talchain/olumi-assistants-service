@@ -181,3 +181,41 @@ describe('⭐ the cap never overrides the user', () => {
     expect(s.calls).toHaveLength(1);
   });
 });
+
+describe('\u26d4 a retry that LOSES user material is never adopted, even if smaller', () => {
+  /**
+   * Smaller is not sufficient. A retry that sheds two widened factors while also
+   * dropping a relationship the user stated is a WORSE model, and the size numbers
+   * alone cannot tell the difference — which is why the adoption check compares the
+   * brief-stated counts too.
+   */
+  const userLinked = () => {
+    const c = candidate(14) as unknown as Record<string, unknown>;
+    // Mark the option->factor links as the user's own.
+    c['links'] = [
+      { from: 'Delivery capacity', to: 'Velocity', direction: 'positive', provenance: 'explicit' },
+      { from: 'Secondary factor 0', to: 'Velocity', direction: 'positive', provenance: 'explicit' },
+    ];
+    return c;
+  };
+  const stripped = () => {
+    const c = candidate(2) as unknown as Record<string, unknown>;
+    // Compact AND missing one of the user's stated relationships.
+    c['links'] = [
+      { from: 'Delivery capacity', to: 'Velocity', direction: 'positive', provenance: 'explicit' },
+    ];
+    return c;
+  };
+
+  it('refuses rather than adopting a retry that dropped a user-stated relationship', async () => {
+    const s = structuredSequence(userLinked(), stripped());
+    const dp = dispatcher();
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
+    // The retry WAS smaller on both dimensions, so a size-only check would have
+    // taken it. It must not have been written.
+    expect(s.calls).toHaveLength(2);
+    expect(out.ok).toBe(false);
+    expect(out['refusal']).toBe('model_too_large');
+    expect(registered(dp.paths)).toBe(0);
+  });
+});
