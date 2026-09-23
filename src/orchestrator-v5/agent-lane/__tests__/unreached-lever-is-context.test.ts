@@ -70,6 +70,61 @@ describe('a factor no option changes is held as context', () => {
     expect(out.treated_as_context).toEqual(['Release readiness']);
   });
 
+  it('RED (review of c222fc67): a factor DOWNSTREAM of an intervention target is reached — with or without the intervention', () => {
+    // option → A → B → goal; C is genuinely disconnected (the control).
+    const base = [
+      { id: 'o1', kind: 'option', label: 'Option 1' },
+      { id: 'a', kind: 'factor', label: 'A', category: 'controllable' },
+      { id: 'b', kind: 'factor', label: 'B', category: 'controllable' },
+      { id: 'c', kind: 'factor', label: 'C', category: 'controllable' },
+      { id: 'g', kind: 'goal', label: 'Goal' },
+    ];
+    const edges = [{ from: 'o1', to: 'a' }, { from: 'a', to: 'b' }, { from: 'b', to: 'g' }, { from: 'c', to: 'g' }];
+    const withIntervention = base.map((n) => (n.id === 'o1' ? { ...n, interventions: { a: { value: 1 } } } : n));
+    expect(demoteUnreachedLevers(base, edges).demoted).toEqual(['C']);
+    expect(demoteUnreachedLevers(withIntervention, edges).demoted).toEqual(['C']);
+    // And an intervention with NO edge still reaches its target and everything downstream.
+    const interventionOnly = withIntervention;
+    expect(demoteUnreachedLevers(interventionOnly, edges.filter((e) => e.from !== 'o1')).demoted).toEqual(['C']);
+  });
+
+  it('RED (review of c222fc67, registration payload + narration): a factor downstream of an intervention target stays a lever', async () => {
+    const candidate = {
+      goal: { metric: 'Monthly recurring revenue', operator: '>=', value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit' },
+      constraints: [], risks: [], outcomes: [], unknowns: [],
+      options: [
+        { label: 'Raise to £59', provenance: 'explicit', changes: ['Pro plan price'], interventions: [{ factor_label: 'Pro plan price', value: 59, unit: 'GBP', provenance: 'explicit' }] },
+        { label: 'Hold £49', provenance: 'explicit', changes: ['Pro plan price'], interventions: [{ factor_label: 'Pro plan price', value: 49, unit: 'GBP', provenance: 'explicit' }] },
+      ],
+      factors: [
+        { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', plausible_max: 200, provenance: 'explicit' },
+        { label: 'Perceived value', role: 'controllable', baseline_known: false, baseline_value: null, unit: 'points', plausible_max: 100, provenance: 'ai_proposed' },
+        { label: 'Release readiness', role: 'controllable', baseline_known: false, baseline_value: null, unit: 'points', plausible_max: 100, provenance: 'ai_proposed' },
+      ],
+      links: [
+        { from: 'Pro plan price', to: 'Perceived value', direction: 'negative', provenance: 'inferred' },
+        { from: 'Perceived value', to: 'Monthly recurring revenue', direction: 'positive', provenance: 'inferred' },
+        { from: 'Pro plan price', to: 'Monthly recurring revenue', direction: 'positive', provenance: 'inferred' },
+        { from: 'Release readiness', to: 'Monthly recurring revenue', direction: 'positive', provenance: 'inferred' },
+      ],
+    };
+    let registered: { nodes: { label: string; category?: string }[] } | null = null;
+    const call = (async () => ({ text: JSON.stringify(candidate) })) as unknown as CallStructuredModel;
+    const d: InternalDispatch = async (path, body) => {
+      if (path.endsWith('/graph/register')) { registered = (body as { graph: typeof registered }).graph; return { status: 200, json: { model_version: { version_number: 1 } } }; }
+      return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
+    };
+    const out = await buildModelFromBrief('33333333-3333-4333-8333-333333333333', 'Should we raise the Pro plan price from £49 to £59?', d, call) as Record<string, unknown>;
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    const cat = (label: string) => registered!.nodes.find((n) => n.label === label)?.category;
+    expect(cat('Perceived value'), 'downstream of the intervention target: a lever').toBe('controllable');
+    expect(cat('Release readiness'), 'genuinely disconnected: context').toBe('external');
+    expect(out.treated_as_context).toEqual(['Release readiness']);
+    const n = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [out as never]);
+    expect(n.status).toContain('No option changes Release readiness');
+    expect(n.status).not.toContain('Perceived value');
+  });
+
   it('CONTRAST: nothing demoted → no sentence', () => {
     const n = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [{ ok: true, mutated: true, model_version: { version_number: 1 } }]);
     expect(n.status).toBe('The model was saved as version 1.');

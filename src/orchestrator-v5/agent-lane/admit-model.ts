@@ -365,18 +365,21 @@ export function demoteUnreachedLevers<N extends { id: string; kind?: string; lab
 ): { nodes: N[]; demoted: string[] } {
   const next = new Map<string, string[]>();
   for (const e of edges) next.set(e.from, [...(next.get(e.from) ?? []), e.to]);
+  // ⛔ REACHED AND EXPANDED ARE SEPARATE (independent review of c222fc67): a
+  // target named by an option's `interventions` is a ROOT to expand, not merely a
+  // node to mark — pre-marking it skipped its downstream factors, so for
+  // option → A → B an intervention on A relabelled a reachable B as context.
   const reached = new Set<string>();
-  const stack: string[] = [];
+  const queue: string[] = [];
   for (const n of nodes) {
     if (n.kind !== 'option') continue;
-    for (const f of Object.keys(n.interventions ?? {})) reached.add(f);
-    stack.push(...(next.get(n.id) ?? []));
+    queue.push(...Object.keys(n.interventions ?? {}), ...(next.get(n.id) ?? []));
   }
-  while (stack.length > 0) {
-    const x = stack.pop()!;
+  while (queue.length > 0) {
+    const x = queue.pop()!;
     if (reached.has(x)) continue;
     reached.add(x);
-    stack.push(...(next.get(x) ?? []));
+    queue.push(...(next.get(x) ?? []));
   }
   const demoted: string[] = [];
   const out = nodes.map((n) => {
