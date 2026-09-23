@@ -62,6 +62,14 @@ const REFUSAL_WORDS: Record<string, string> = {
   model_changed_while_proposing: 'the model changed while it was being put together',
   model_already_exists: 'a model already exists for this decision',
   read_only_preview: 'this preview cannot change the model',
+  // ⛔ A REFUSED BUILD, IN WORDS WITH A NEXT STEP (served `785185b7`, scenario
+  // `03b93536`): the user read "it was refused (model_too_large)" — a code, no
+  // reason, nothing to do next. Every refusal `runtime/build-model.ts` returns.
+  model_too_large: 'it came back larger than a first model can be, even after one attempt to make it more compact — ask me to build it again, or tell me which options and factors matter most',
+  no_structured_output: 'the model builder returned nothing usable this time — ask me to try again',
+  construction_failed: 'the model builder did not answer this time — ask me to try again',
+  admitted_graph_invalid: 'what came back did not form a valid model, so nothing was saved — ask me to try again',
+  registration_refused: 'it could not be saved to this decision — ask me to try again',
 };
 
 const PART_NAMES: Record<string, string> = { values: 'starting values', option_levels: 'option levels' };
