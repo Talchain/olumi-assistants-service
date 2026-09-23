@@ -131,12 +131,41 @@ describe("LLM Router - Failover Configuration", () => {
     expect(adapter.name).toBe("fixtures-failover");
   });
 
-  // Repointed from critique_graph to explain_diff: critique_graph now
-  // implements OpenAI, so OpenAI is no longer filtered out of its chain and the
-  // test would assert a filter that correctly no longer happens. explain_diff's
-  // adapter still throws, so it is the live example of a filtered provider.
-  it("filters unsupported task providers before constructing the failover chain", () => {
+  /**
+   * ⛔⛔ THIS TEST'S ORIGINAL SUBJECT NO LONGER EXISTS, AND PRETENDING OTHERWISE
+   * WOULD BE THE DISHONEST FIX.
+   *
+   * It asserted that a provider with no adapter for the task is filtered OUT of
+   * the failover chain. It was written against `critique_graph`, repointed to
+   * `explain_diff` when #1771 opened critique, and now BOTH are open: the
+   * capability map's two entries each list all three providers, so nothing is
+   * filtered for any task. Repointing a third time is impossible — there is no
+   * closed entry left.
+   *
+   * ⚠ Rather than delete it, it now asserts the behaviour that REMAINS and that
+   * a regression would still break: the chain is built in the REQUESTED ORDER,
+   * every requested provider appears, and the FIRST one wins. That is the part
+   * callers actually depend on. The filter is documented as inert instead of
+   * being faked.
+   */
+  it("builds the chain in requested order, and today filters nothing out", () => {
     vi.stubEnv("LLM_FAILOVER_PROVIDERS", "openai,anthropic,fixtures");
+
+    const { adapter, resolution } = getAdapterWithResolution("explain_diff");
+
+    // openai is FIRST in the request and is now task-capable, so it wins.
+    expect(adapter.name).toBe("openai-failover");
+    expect(resolution).toMatchObject({
+      provider: "openai",
+      resolution_source: "llm_model_fallback",
+    });
+  });
+
+  it("⛔ REORDERING THE REQUEST REORDERS THE CHAIN — the discriminating pair", () => {
+    // Without this, the assertion above would pass on an implementation that
+    // always chose openai, or that ignored the env var entirely. The two tests
+    // differ ONLY in the order of the same three providers.
+    vi.stubEnv("LLM_FAILOVER_PROVIDERS", "anthropic,openai,fixtures");
 
     const { adapter, resolution } = getAdapterWithResolution("explain_diff");
 
@@ -147,20 +176,23 @@ describe("LLM Router - Failover Configuration", () => {
     });
   });
 
-  it("does not pretend one task-capable member is an active failover chain", () => {
-    vi.stubEnv("LLM_FAILOVER_PROVIDERS", "openai,anthropic");
+  it("does not pretend a single member is an active failover chain", () => {
+    // ⚠ VEHICLE CHANGED, PROPERTY IDENTICAL. This used to reach the
+    // "fewer than two usable members" state by CAPABILITY FILTERING — only
+    // anthropic could serve the task. With both map entries now open, no task
+    // filters, so that route to the state is gone. The router has a second,
+    // still-live route to exactly the same state: `resolveFailoverAttempt`
+    // returns `active: false` when fewer than two providers are REQUESTED
+    // (router-resolution.ts:157-164). So the list is one provider long.
+    //
+    // The property under test is unchanged and is the one that matters: when a
+    // chain cannot be formed, the router must fall through to the task default
+    // and must NOT label the adapter "*-failover" or the source
+    // "llm_model_fallback" — a caller reading provenance would otherwise be
+    // told a failover happened when none did.
+    vi.stubEnv("LLM_FAILOVER_PROVIDERS", "anthropic");
     vi.stubEnv("LLM_PROVIDER", "openai");
 
-    // Only ONE listed provider (anthropic) can serve explain_diff, so the chain
-    // must not activate: a plain "anthropic" adapter from the task default,
-    // never a "*-failover" adapter and never resolution_source
-    // "llm_model_fallback".
-    //
-    // ⚠ REPOINTED from critique_graph. That task now implements BOTH listed
-    // providers, so two capable members remain and the chain legitimately DOES
-    // activate for it — the old assertion was testing a filter that correctly
-    // stopped happening. explain_diff still has exactly one capable member
-    // among "openai,anthropic", which is the condition this test is about.
     const { adapter, resolution } = getAdapterWithResolution("explain_diff");
 
     expect(adapter.name).toBe("anthropic");

@@ -24,6 +24,12 @@ import { buildCritiqueUserContent } from "./critique-prompt.js";
 import { resolveDraftMaxTokens, isDraftTruncated, buildFailedCallLlmMeta } from "./draft-budget.js";
 import { wrapUntrusted } from "./untrusted-envelope.js";
 import {
+  buildExplainDiffUserContent,
+  EXPLAIN_DIFF_SYSTEM,
+  EXPLAIN_DIFF_MAX_TOKENS,
+} from "./explain-diff-prompt.js";
+
+import {
   getSystemPrompt,
   getSystemPromptMeta,
   getSystemPromptSnapshot,
@@ -1426,10 +1432,91 @@ export class OpenAIAdapter implements LLMAdapter {
     };
   }
 
-  async explainDiff(_args: import("./types.js").ExplainDiffArgs, _opts: CallOpts): Promise<import("./types.js").ExplainDiffResult> {
-    // OpenAI provider does not yet support explainDiff
-    // Switch to LLM_PROVIDER=anthropic to use this feature
-    throw new Error("openai_explain_diff_not_supported: ExplainDiff endpoint requires LLM_PROVIDER=anthropic (OpenAI implementation pending)");
+  /**
+   * ⭐ THE LAST TASK-LEVEL BLOCKER TO AN OPENAI-ONLY CEE.
+   *
+   * `ROUTER_TASK_PROVIDER_CAPABILITIES` is a DENY-LIST of two, not an
+   * allow-list: `requireTaskModelAssignmentCapability` returns the assignment
+   * unchanged for any task absent from it. So every other task already permits
+   * OpenAI, and `explain_diff` was closed solely because THIS method threw
+   * `openai_explain_diff_not_supported`.
+   *
+   * Reachability, measured rather than assumed: the task is reached only by
+   * `POST /assist/explain-diff` (`assist.explain-diff.ts` -> `getAdapter('explain_diff')`),
+   * it is NOT dispatched from the orchestrator or the v5 turn path, and its UI
+   * caller `ExplainDiffButton` IS mounted (via `src/v5/blocks/V5GraphPatchBlock.tsx`,
+   * no feature flag). With the stub in place an OpenAI-only deployment renders
+   * that panel's honest `explain-diff-unavailable` message instead of rationales.
+   *
+   * ⚠ THREE CONTRACTS OF THE CALLING ROUTE ARE LOAD-BEARING HERE, and each one
+   * turns a model quirk into a user-visible 500 if it is not honoured:
+   *   1. The route sorts with `a.target.localeCompare(b.target)`, so every
+   *      rationale MUST carry a STRING `target` or the route throws a TypeError.
+   *   2. `ExplainDiffOutput` (`schemas/assist.ts:717`) caps `why` at 280 chars
+   *      and requires `.min(1)` rationales.
+   *   3. The route maps any error whose message contains `_not_supported` to a
+   *      capability 400. None of the errors below use that substring, so a
+   *      genuine malformed reply is reported as the failure it is.
+   */
+  async explainDiff(
+    args: import("./types.js").ExplainDiffArgs,
+    opts: CallOpts,
+  ): Promise<import("./types.js").ExplainDiffResult> {
+    const result = await this.chat(
+      {
+        system: EXPLAIN_DIFF_SYSTEM,
+        userMessage: buildExplainDiffUserContent(args),
+        maxTokens: EXPLAIN_DIFF_MAX_TOKENS,
+        responseFormat: "json_object",
+      },
+      opts,
+    );
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(result.content);
+    } catch {
+      // Fails CLOSED. A silently-empty explanation would be indistinguishable
+      // from "this change needed no explaining", and the route has already
+      // rejected an empty patch with 400, so there IS something to explain.
+      throw new Error(
+        `openai_explain_diff_unparseable: model returned non-JSON content (${result.content.length} chars)`,
+      );
+    }
+
+    const rationales = (parsed as { rationales?: unknown }).rationales;
+    if (!Array.isArray(rationales)) {
+      throw new Error(
+        "openai_explain_diff_malformed: reply carried no `rationales` array",
+      );
+    }
+
+    const cleaned: Array<{ target: string; why: string; provenance_source?: string }> = [];
+    for (const r of rationales) {
+      if (typeof r !== "object" || r === null) continue;
+      const row = r as Record<string, unknown>;
+      // Contract 1: a non-string target would crash the route's sort. Dropped
+      // rather than coerced — a fabricated id would attach an explanation to
+      // the wrong element, which is worse than omitting it.
+      if (typeof row.target !== "string" || row.target.length === 0) continue;
+      if (typeof row.why !== "string" || row.why.length === 0) continue;
+      cleaned.push({
+        target: row.target,
+        why: clampRationaleWhy(row.why),
+        ...(typeof row.provenance_source === "string"
+          ? { provenance_source: row.provenance_source }
+          : {}),
+      });
+    }
+
+    if (cleaned.length === 0) {
+      // Contract 2: `.min(1)` would otherwise surface as an opaque zod 500.
+      throw new Error(
+        `openai_explain_diff_empty: ${rationales.length} entries returned, none well-formed`,
+      );
+    }
+
+    return { rationales: cleaned, usage: result.usage };
   }
 
   async chat(args: ChatArgs, opts: CallOpts): Promise<ChatResult> {
@@ -1842,3 +1929,30 @@ export class OpenAIAdapter implements LLMAdapter {
  * convention rather than widening the module's public surface.
  */
 export { openAiUsage as __test_only_openAiUsage };
+
+/**
+ * Clamp a rationale's `why` to the 280-character ceiling `ExplainDiffOutput`
+ * enforces (`schemas/assist.ts:720`), WITHOUT cutting mid-word.
+ *
+ * ⛔ WHY THE WORD BOUNDARY IS NOT A NICETY. A hard 280-char slice produces a
+ * fragment, and a complete-but-shortened sentence is strictly better for a
+ * reader than a sentence that stops mid-word — this estate has already shipped
+ * a 146-character string into a 100-character budget and had a reader see
+ * "...nothing on record confirm". The ellipsis makes the shortening visible
+ * rather than passing a truncated claim off as the whole explanation.
+ *
+ * ⚠ Clamped, NOT dropped. Dropping an over-long rationale would silently hide a
+ * change that was made, which is the failure this whole surface exists to
+ * prevent.
+ */
+export function clampRationaleWhy(why: string): string {
+  const LIMIT = 280;
+  if (why.length <= LIMIT) return why;
+  const room = LIMIT - 1; // leave one char for the ellipsis
+  const slice = why.slice(0, room);
+  const lastSpace = slice.lastIndexOf(" ");
+  // Only honour the word boundary when it does not throw most of the sentence
+  // away; a 280-char run with no space at all still has to be cut somewhere.
+  const body = lastSpace > room * 0.6 ? slice.slice(0, lastSpace) : slice;
+  return `${body.trimEnd()}\u2026`;
+}
