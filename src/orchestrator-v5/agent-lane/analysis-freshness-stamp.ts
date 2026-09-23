@@ -26,10 +26,28 @@
  * this code does not have, and a wrong freshness verdict is worse than an absent
  * one.
  *
- * ⚠ ADDITIVE, AND IT NEVER OVERWRITES. The payload is `.passthrough()`, so an
- * added field survives; an existing `current_graph_hash` is left exactly as it
- * arrived, because a value the producer set is better evidence than one stamped
- * by a reader.
+ * ⚠ IT OVERWRITES, AND THAT IS THE POINT — the earlier version did not, and that
+ * made this WORSE than the gap it closed.
+ *
+ * `analysisFromTool` comes from `/orchestrate/v2/turn` (`agent-capabilities.ts:1454`,
+ * surfaced at `:1470`), and that finaliser already stamps the field
+ * (`compose/analysis-ready-emit.ts:202-203`). So a never-overwrite guard fired on
+ * every real turn and preserved the hash AS AT THE MOMENT THE ANALYSIS RAN. When
+ * the Agent then wrote in the same turn, the response carried
+ * `graph_hash_at_run === current_graph_hash` while the model had moved — and the
+ * comparison `schemas/analysis-ready.ts:567-571` instructs the UI to make then
+ * reports FRESH over a changed model. `analysis-ready-emit.ts` names that harm:
+ * *"`fresh` -> clears the local-edits dirty overlay, so the strip claims 'Analysis
+ * reflects the current model' over edits CEE has never seen."*
+ *
+ * ⭐ WHICH AUTHORITY OWNS WHICH FIELD. `graph_hash_at_run` is "when the run
+ * happened" — only the run can say it, and it is still NEVER written here.
+ * `current_graph_hash` is "on THIS turn", and at response time the ROUTE is the
+ * authority: it read the graph after every write this turn made. The tool's value
+ * is a `graph_hash_at_run` wearing the other field's name.
+ *
+ * Returned BY IDENTITY when the value already equals the route's, so an unmoved
+ * model allocates nothing and cannot be made to look stale.
  */
 export function withCurrentGraphHash(analysisReady: unknown, graphHash: string | undefined): unknown {
   if (graphHash === undefined || graphHash === '') return analysisReady;
@@ -37,6 +55,6 @@ export function withCurrentGraphHash(analysisReady: unknown, graphHash: string |
     return analysisReady;
   }
   const rec = analysisReady as Record<string, unknown>;
-  if (rec.current_graph_hash !== undefined) return analysisReady;
+  if (rec.current_graph_hash === graphHash) return analysisReady;
   return { ...rec, current_graph_hash: graphHash };
 }

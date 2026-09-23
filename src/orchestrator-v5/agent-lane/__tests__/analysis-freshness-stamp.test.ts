@@ -17,11 +17,27 @@ describe('stamping which model the readiness describes', () => {
     expect(out.status).toBe('ready');   // nothing else disturbed
   });
 
-  it('⛔ NEVER overwrites one the producer already set', () => {
-    // A value the run stated is better evidence than one stamped by a reader.
+  /**
+   * ⛔ CORRECTED — this asserted the opposite, and was pinning the defect shut.
+   *
+   * The old comment read "a value the run stated is better evidence than one
+   * stamped by a reader". That reasoning is right about `graph_hash_at_run` and
+   * WRONG about `current_graph_hash`: the producer's value is the hash as at the
+   * RUN, and the route's is the hash as at THIS TURN, after every write. Keeping
+   * the producer's made `graph_hash_at_run === current_graph_hash` on a turn that
+   * moved the model, so the UI's own comparison reported FRESH over changed state.
+   *
+   * See the module docblock. The route is the authority on "current".
+   */
+  it('⭐ OVERWRITES a producer value that is no longer this turn\u2019s current', () => {
     const given = { status: 'ready', current_graph_hash: 'from-the-run' };
     const out = withCurrentGraphHash(given, 'from-this-read') as Record<string, unknown>;
-    expect(out.current_graph_hash).toBe('from-the-run');
+    expect(out.current_graph_hash).toBe('from-this-read');
+  });
+
+  it('returns BY IDENTITY when the producer already agrees, so an unmoved model allocates nothing', () => {
+    const given = { status: 'ready', current_graph_hash: 'same-hash' };
+    expect(withCurrentGraphHash(given, 'same-hash')).toBe(given);
   });
 
   it('⛔ NEVER invents graph_hash_at_run — only the run can state that', () => {
@@ -97,3 +113,64 @@ describe('the agent route actually uses it', () => {
     expect(body).toContain('withCurrentGraphHash(analysisReady, graphHash)');
   });
 });
+
+/**
+ * ⛔⛔⛔ THE NEVER-OVERWRITE GUARD MADE THIS WORSE THAN THE GAP IT REPLACED.
+ *
+ * `analysisFromTool` has exactly one producer: `agent-capabilities.ts:1470`
+ * `onAnalysis?.({ analysis_ready: r.json.analysis_ready, ... })`, where `r` is the
+ * response of `dispatch('/orchestrate/v2/turn', ...)` at `:1454` — the CONVENTIONAL
+ * route. That finaliser ALREADY stamps the field: `compose/analysis-ready-emit.ts:202-203`
+ * sets `out.current_graph_hash` whenever the freshness derivation supplies one.
+ *
+ * So on every real tool-branch turn the guard fired and returned the payload
+ * untouched — and the value it preserved is the hash AT THE TIME THE ANALYSIS RAN.
+ * If the Agent then writes in the same turn (run the analysis, then apply the
+ * change — an ordinary Agent flow), the response carries:
+ *
+ *     graph_hash: H2                      (post-write, from readBackState)
+ *     analysis_ready.graph_hash_at_run: H1
+ *     analysis_ready.current_graph_hash: H1   <- stale, guard preserved it
+ *
+ * The UI performs the comparison `schemas/analysis-ready.ts:567-571` instructs —
+ * H1 === H1 — and reports the analysis FRESH over a model that moved in that very
+ * turn. `analysis-ready-emit.ts` documents that harm itself: "`fresh` -> clears the
+ * local-edits dirty overlay, so the strip claims 'Analysis reflects the current
+ * model' over edits CEE has never seen."
+ *
+ * ⭐ THE CONTRACT, CORRECTED. `graph_hash_at_run` is "when the run happened" and
+ * only the run can say it — still never written here. `current_graph_hash` is "on
+ * THIS turn", and at response time the ROUTE is the authority on that: it read the
+ * graph after every write. The tool's value is a `graph_hash_at_run` wearing the
+ * other field's name, so preserving it was preserving the wrong thing.
+ */
+describe('the route is the authority on what CURRENT means', () => {
+  it('⛔ overwrites a stale current_graph_hash from the tool payload', () => {
+    const fromTool = { status: 'ready', graph_hash_at_run: 'H1', current_graph_hash: 'H1' };
+    const out = withCurrentGraphHash(fromTool, 'H2') as Record<string, unknown>;
+    expect(out.current_graph_hash, 'the route read the graph AFTER the write — that is this turn’s current').toBe('H2');
+    expect(out.graph_hash_at_run, 'only the run can say when it ran — never rewritten here').toBe('H1');
+  });
+
+  it('⭐ so a moved model is now DETECTABLE by the comparison the schema instructs', () => {
+    const out = withCurrentGraphHash(
+      { status: 'ready', graph_hash_at_run: 'H1', current_graph_hash: 'H1' },
+      'H2',
+    ) as Record<string, unknown>;
+    expect(out.graph_hash_at_run).not.toBe(out.current_graph_hash);
+  });
+
+  it('CONTRAST: an UNMOVED model still compares equal, so this does not fake staleness', () => {
+    const out = withCurrentGraphHash(
+      { status: 'ready', graph_hash_at_run: 'H1', current_graph_hash: 'H1' },
+      'H1',
+    ) as Record<string, unknown>;
+    expect(out.graph_hash_at_run).toBe(out.current_graph_hash);
+  });
+
+  it('still fails open by identity when there is no hash to stamp', () => {
+    const given = { status: 'ready', current_graph_hash: 'H1' };
+    expect(withCurrentGraphHash(given, undefined)).toBe(given);
+    expect(withCurrentGraphHash(given, '')).toBe(given);
+  });
+})
