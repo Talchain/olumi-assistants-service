@@ -5,10 +5,12 @@ import { join } from 'node:path';
 import { _resetConfigCache } from '../../src/config/index.js';
 import {
   EXECUTABLE_RUNTIME_TASKS,
+  requireTaskModelAssignmentCapability,
   ROUTER_TASK_PROVIDER_CAPABILITIES,
   RUNTIME_AI_TASK_AUTHORITY,
   TASK_MODEL_DEFAULTS,
 } from '../../src/config/model-routing.js';
+import { resolveModelAssignment } from '../../src/config/model-assignment.js';
 import { resolveTaskRouting } from '../../src/routes/admin.models.js';
 import {
   buildStartupTaskModels,
@@ -147,28 +149,86 @@ describe('admin runtime model-routing authority', () => {
       critique_graph: 'claude-sonnet-4-6',
     });
 
+    // ⭐ INVERTED BY THIS PR, AND IT IS THE HEADLINE. An OpenAI model on
+    // CEE_MODEL_CRITIQUE used to die at resolution with MODEL_PROVIDER_MISMATCH
+    // — the env var existed and COULD NOT BE USED, so an OpenAI-only
+    // deployment had no way to run the challenger at all.
+    // OpenAIAdapter.critiqueGraph is now implemented, the capability map
+    // records that, and the override resolves. Revert the map entry and this
+    // REDs.
     process.env.CEE_MODEL_CRITIQUE = 'gpt-4o';
     _resetConfigCache();
 
     expect(resolveTaskRouting('critique_graph')).toMatchObject({
       model: 'gpt-4o',
       provider: 'openai',
-      availability: 'configuration_error',
+      availability: 'registry_enabled',
       source: 'env_override',
       source_key: 'CEE_MODEL_CRITIQUE',
-      configuration_error: { code: 'MODEL_PROVIDER_MISMATCH' },
     });
     expect(
       buildStartupTaskModels(resolveModelRoutingSnapshot()),
-    ).not.toHaveProperty('critique_graph');
+    ).toHaveProperty('critique_graph', 'gpt-4o');
+  });
+
+  /**
+   * ⛔ THE FAIL-CLOSED WITNESS IS NOT DELETED, IT IS REPOINTED.
+   *
+   * The assertion above was this file's only witness that the capability gate
+   * FAILS CLOSED, and opening critique_graph consumed it. Deleting it would
+   * leave the gate unguarded — which is how the map came to carry an untrue
+   * entry in the first place. So the gate is asserted directly, on the task
+   * that is still closed, bound by IDENTITY (the task name in the message and
+   * the error code), never by a value another object could satisfy.
+   *
+   * ⚠ Driven through the exported gate rather than an env var because
+   * `explain_diff` has NO CEE_MODEL_* key at all — it is one of three tasks
+   * with no env override, which is a finding of this lane in its own right and
+   * the reason an env-driven vehicle is not available here.
+   */
+  it('⛔ the capability gate still fails closed for a task whose adapter throws', () => {
+    const openai = resolveModelAssignment('gpt-4o');
+    expect(openai.provider, 'positive control: the fixture really is OpenAI').toBe('openai');
+
+    let caught: { code?: string; model?: string } | undefined;
+    try {
+      requireTaskModelAssignmentCapability('explain_diff', openai);
+    } catch (error) {
+      caught = error as { code?: string; model?: string };
+    }
+    expect(caught, 'the gate must throw for a provider that does not implement the task').toBeDefined();
+    expect(caught?.code).toBe('MODEL_PROVIDER_MISMATCH');
+    expect(caught?.model, 'identity binding — the exact model bytes are reported back').toBe('gpt-4o');
+  });
+
+  it('POSITIVE CONTROL — the identical gate PASSES a capable provider, so it is not rejecting everything', () => {
+    const anthropic = resolveModelAssignment(TASK_MODEL_DEFAULTS.explain_diff);
+    expect(anthropic.provider).toBe('anthropic');
+    expect(requireTaskModelAssignmentCapability('explain_diff', anthropic)).toBe(anthropic);
+    // ...and the newly-opened task admits OpenAI through the very same call.
+    expect(
+      requireTaskModelAssignmentCapability('critique_graph', resolveModelAssignment('gpt-4o'))
+        .provider,
+    ).toBe('openai');
   });
 
   it('gives failover precedence and reports only task-capable members in order', () => {
+    // ⚠ VEHICLE CHANGED from critique_graph to explain_diff: critique_graph now
+    // ACCEPTS openai and so can no longer demonstrate the filter. explain_diff
+    // is the surviving closed entry.
+    //
+    // ⭐ AND THE OLD TEST CARRIED A RED HERRING THAT THIS REMOVES. It also set
+    // CEE_MODEL_CRITIQUE=gpt-4o, implying the env override provoked the
+    // failover. It did not. `resolveRouterResolution` computes the failover
+    // attempt FIRST and returns it whenever two or more providers are
+    // task-capable (router-resolution.ts:216-227), BEFORE any env override or
+    // task default is consulted. That env line was inert; this is a pure
+    // capability filter, and saying so is the difference between a test that
+    // documents the precedence and one that misstates it.
     process.env.LLM_FAILOVER_PROVIDERS = 'openai,anthropic,fixtures';
-    process.env.CEE_MODEL_CRITIQUE = 'gpt-4o';
     _resetConfigCache();
 
-    expect(resolveTaskRouting('critique_graph')).toMatchObject({
+    expect(resolveTaskRouting('explain_diff')).toMatchObject({
       model: PROVIDER_DEFAULT_MODELS.anthropic,
       provider: 'anthropic',
       availability: 'registry_enabled',
@@ -188,8 +248,30 @@ describe('admin runtime model-routing authority', () => {
       ],
     });
     expect(buildStartupTaskModels(resolveModelRoutingSnapshot())).toMatchObject({
-      critique_graph: PROVIDER_DEFAULT_MODELS.anthropic,
+      explain_diff: PROVIDER_DEFAULT_MODELS.anthropic,
     });
+  });
+
+  it('POSITIVE CONTROL — the identical failover request keeps OpenAI FIRST for the task that implements it', () => {
+    // Without this, the filter assertion above would pass on a chain builder
+    // that dropped openai unconditionally, or on a capability map opened to
+    // nothing. The two tasks differ ONLY in their map entry, so the pair is a
+    // discriminating mutant: flip either entry and exactly one of them REDs.
+    process.env.LLM_FAILOVER_PROVIDERS = 'openai,anthropic,fixtures';
+    _resetConfigCache();
+
+    const routing = resolveTaskRouting('critique_graph');
+    expect(routing).toMatchObject({
+      source: 'failover',
+      source_key: 'LLM_FAILOVER_PROVIDERS',
+      provider: 'openai',
+      model: PROVIDER_DEFAULT_MODELS.openai,
+    });
+    expect(routing.failover_chain?.map((member) => member.provider)).toEqual([
+      'openai',
+      'anthropic',
+      'fixtures',
+    ]);
   });
 
   // Vehicle changed from explain_diff to clarify_brief. providers.json is
