@@ -136,3 +136,28 @@ The premerge guard also blocked a merge I was confident in, for two reasons that
 - **#1698** — I stood down; three REVIEW_REQUESTs existed for one head and duplicated owners is how tonight's #1691 waste happened. Another lane drives it at `83c1ae6d`.
 - **`reasoning_effort` A/B** — Model Generation's call (section 3).
 - **`run_analysis` ~44s** — unassigned (section 4).
+
+---
+
+## 8. The ~40s will measure itself once #1701 lands — no env change needed
+
+My timing instrumentation (`agent_lane.turn_timings`: `provider_ms` / `tool_ms` / `overhead_ms` / `tool_provider_ms` / call counts) is gated on the estate's own timing flags:
+
+```ts
+if (!config.cee.timingDebugEnabled && !config.features.diagnosticTraceEnabled) return;
+```
+
+Measured in the served Render env just now (125 vars, fully paginated):
+
+```
+V5_TIMING_DEBUG               = false
+CEE_DIAGNOSTIC_TRACE_ENABLED  = true     <- the gate is a disjunction
+```
+
+**So the second disjunct is already true on staging.** The moment #1701 merges, real provider-versus-overhead numbers start flowing into the logs with no env change and no default-ON decision.
+
+⚠ **Correcting myself:** in #1701's review request I asked the reviewer whether this should be default-ON, *"because otherwise the ~40s stays unmeasured until someone sets `V5_TIMING_DEBUG=true`"*. That question rested on a false premise — I had not checked the served env before asking it. Withdrawn.
+
+**Contrast control, so the absence claim is sound:** `agent_lane.route_mounted` appears once on staging while `agent_lane.turn_timings` is absent — which is exactly right, because #1701 is not merged yet. The probe sees the emission when it exists.
+
+**What this buys:** the ~40s unexplained portion of construction becomes a measured split rather than an inference, which is what would settle whether it is provider time or our own pipeline — the one question my whole latency argument tonight rests on.
