@@ -410,6 +410,35 @@ not run on PRs based on a feature branch, so such stacked work must be retargete
 those checks; absence of a check is not evidence of success."* On this estate silence has repeatedly
 been read as green — **base PRs on `staging`.**
 
+### ⚠ But I over-claimed the benefit — the queue relief is REBASE-GATED
+
+I wrote that this "relieves duplicate workflow load". **For branches that already exist it changes
+nothing.** I measured the outcome rather than the merge, across 300 workflow runs (02:06→04:45Z):
+
+```
+Contract schemas, push events, FEATURE branches:  32 before the merge  ->  5 AFTER it
+Graph Evaluator,  push events, FEATURE branches:   5 before            ->  2 AFTER
+```
+
+**Mechanism:** for a `push` event GitHub uses the workflow file **from the pushed ref**, not from the
+default branch — so a branch created before the merge still carries the old trigger. Verified
+per-ref on `contract-schemas.yml`:
+
+| ref | `on:` form |
+|---|---|
+| `staging` | **narrowed** — `push: [main, staging]` |
+| `docs/morning-brief-20260923` | `on: ['push','pull_request']` — old, every push |
+| `feat/unblock-analysis-wiring` | `on: ['push','pull_request']` — old |
+| `feat/deterministic-request-assembly` | `on: ['push','pull_request']` — old |
+
+That last one is **my own #1701 branch**, so my own PR is still generating the load I set out to
+remove — two of the five post-merge feature-branch runs are mine. **Nothing to do here on your
+side; the fix is for each lane to rebase onto `staging`, and I have posted that to #63.**
+
+⭐ **Positive control, so this is not reported as inert:** `Contract schemas` and `Test Skip Guard`
+both ran and **succeeded** on the staging push itself, so the narrowing did not disable them where
+they should fire.
+
 ### (original assessment, pre-merge)
 
 The version described in the earlier draft of this section (`25bf0e91…`, narrowing `push` to
