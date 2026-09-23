@@ -23,6 +23,7 @@
  * seam, deliberately.
  */
 
+import { withRunStateFreshness } from '../orchestrator-v5/agent-lane/analysis-ready-freshness.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
@@ -314,6 +315,12 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
           // Readiness is a disclosure, never a gate on the user's answer.
         }
       }
+      // ⭐ State the run's freshness where the UI reads it (#63 5800618648): the
+      // read route's `analysis_ready` carries no `freshness`, so a turn that
+      // wrote and then ran left the UI saying "Model changed" over its own run.
+      // Restates `run_state` from this SAME readback, after the
+      // readiness fallback above so an assessed `analysis_ready` is stamped too — see the helper.
+      analysisReady = withRunStateFreshness(analysisReady, analysisState);
       // Only when it actually has content: an empty graph must not overwrite
       // whatever the client already has hydrated.
       /**
