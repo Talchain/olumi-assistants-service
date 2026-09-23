@@ -1,6 +1,6 @@
 # Morning brief — 23 Sep 2026, overnight session
 
-Written for a manual test first thing. **Served build: `bf86ce4aeeeca73d456e9b1cd5b88d56a554919f`, live 02:08:05Z.**
+Written for a manual test first thing. **Served build: `c94208cbf000c199fee34922a483ad277d7d63be`, live 03:02:43Z.** Five deploys overnight: `bdad785a` (#1713) → `bf86ce4a` (#1691) → `66b810dd` (#1705) → `da14f03b` (#1707) → `c94208cb` (#1708).
 
 ---
 
