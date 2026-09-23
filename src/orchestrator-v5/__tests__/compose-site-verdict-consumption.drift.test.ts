@@ -1829,7 +1829,12 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // headline, else a locked template", and this tail can only ever ride the
     // locked-template arm.
     expect(RUN_ANALYSIS).toContain(
-      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${separabilityDisclosure}`;',
+      // D-ask-1 (2.11) applied to CEE-inferred FACTOR values adds an EIGHTH slot,
+      // appended after the participation disclosure — the position its grammar
+      // occupies in TAIL_PATTERN and in the egress registry. The `gated` stance
+      // is unaffected: the new suffix names no option and asserts no leader.
+      // Re-pinned exactly, not loosened, so a future reordering stays visible.
+      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}`;',
     );
     expect(RUN_ANALYSIS).toContain('assistant_text: summary,');
     // ONE verdict, TWO consumers — the property that makes this `gated` rather
