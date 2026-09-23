@@ -242,13 +242,64 @@ unified-pipeline event does NOT cover — is in §2; the table below is the disp
 | `coaching_pass_ms`, nested in validation | **20.9s** (39% of turn) | **Conventional AI Coaching** |
 | `parse_llm_ms` | **21.2s** (40% of turn) | **Model Generation / OpenAI path** |
 | 25,000ms validation abandonment cap — fires 29/1200 (2.4%) and **those turns still complete** | — | shared / Release Control |
-| `repair_fired` **0 of 1,200** (`REPAIR_SKIPPED` in the logs; `repair_ms` p50 109ms, so it runs and declines) | — | Model Generation |
+| ~~`repair_fired` 0 of 1,200~~ **RETRACTED — see the correction below** | — | close, do not schedule |
 
 ⭐ **The cheapest evidence that speed is available:** a hard 25s abandonment cap on the validation
 pipeline **already exists and already fires on 2.4% of turns, and those turns still return a usable
 result.** Separately, 179 turns carry no coaching pass at all and complete in **p50 24.0s vs 55.1s**.
 ⚠ That second figure is correlational — I have not shown those 179 are the same work minus coaching.
 The abandonment cap is the sound evidence; the 179 are a strong prior.
+
+## 4b. ⛔ RETRACTING my `repair_fired` finding — I read a field name as its meaning, for the third time
+
+I reported that "the deterministic repair stage **runs every turn and declines every time** — a
+ran-and-declined `false`, not a never-reached NULL". **Wrong.** `repair_fired` has exactly **one
+writer** in all of `src/`:
+
+```
+src/cee/unified-pipeline/index.ts:938   timings.repair_fired = llmRepair.triggered;
+src/orchestrator-v5/telemetry/turn-timings.ts:264   repair_fired?: boolean;   (declaration only)
+```
+
+It tracks the **LLM repair limb**, removed deliberately in three stages (ROADMAP 2.731, 2.740a, 2.763
+which deleted `LLMAdapter.repairGraph`). So `false` on every turn means **that limb does not exist** —
+not that a guard weighed a repair and declined. The `repair_ms` p50 of 109ms I measured belongs to the
+**deterministic** repair stage, a different thing I conflated with it.
+
+⚠ **Why this one had teeth:** my framing invited someone to enable a "dark capability". The repo
+forbids exactly that — *"Do NOT wire one"*. **Priority 4 should be closed as not-applicable, not
+scheduled** (`unified-pipeline/index.ts:1108-1114`, `prompts/defaults.ts:2425-2445`).
+
+## 4c. ⚠⚠ Full mode is ALREADY LIVE on staging — a briefed priority has its premise inverted
+
+The brief I was given says *"close deterministic human consent **before enabling** Full mode"*. It is
+already enabled. Render API, fully paginated (125 vars, fabricated key name absent as control):
+
+```
+AGENT_LANE_ENABLED = true      AGENT_LANE_PREVIEW = false      PROXY_V5_TARGET = orchestrator
+```
+
+`agent-v1-turn.ts:172` resolves that to **`mode = 'full'`**, and the route is mounted — witnessed with
+the discriminator this estate requires, since a 401 or bare 404 proves nothing when auth precedes
+routing:
+
+| probe (both WITH the assist key) | result |
+|---|---|
+| `POST /agent/v1/turn` | **422** `BAD_INPUT: scenario_id and message are required` — its own handler |
+| `POST /agent/v1/turn-fabricated-xyz` | **404** Route not found |
+
+**So the writable tool surface is reachable on staging today.** ⭐ What bounds it:
+`PROXY_V5_TARGET=orchestrator`, so **the UI does not reach the lane** — only a direct POST does. This
+is a premise correction for sequencing, **not** a live user-facing hazard, and not mine to re-decide.
+
+**And consent is not absent.** `ProposalStore.authorise()` refuses on `unknown_proposal`,
+`not_authorised` (scenario *and* subject), `integrity_failed` (content re-hashed to its id),
+`already_applied`, and `superseded` (base revision moved); `authoriseChange` applies the **stored**
+operations — *"Nothing is regenerated here."* I proved that boundary load-bearing with three
+discriminating mutants. The residual is that nothing structurally stops a model authorising in the
+same turn it proposed — and **the obvious guard for that is refuted**, because `agent-v1-turn.ts:93`
+deliberately tells the model to authorise the `proposal_id` returned earlier in the *same* turn. That
+fix needs the user's utterance carried to the decision site, in files I cannot edit without a lease.
 
 ## 5. What landed overnight
 
