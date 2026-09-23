@@ -31,6 +31,7 @@ import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
+import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { HistoryStore, historyFromDurableTurns, needsDurableSeed } from '../orchestrator-v5/agent-lane/history-store.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
@@ -983,6 +984,25 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         hops: result.hops,
         stopped_reason: result.stopped_reason,
         ...(turnId !== undefined ? { turn_id: turnId, durability } : {}),
+        /**
+         * ⭐ THE SERVER STATES WHAT IT DID, rather than asking the model to.
+         *
+         * A value the user APPROVED can be stored differently, and a factor's
+         * range can be chosen BY THE PRODUCT so the analysis can run at all.
+         * Both were told only to the model, carried on
+         * `must_disclose_rescaling` — a field that occurs at exactly ONE site in
+         * the tree, the one that sets it. Nothing read it and nothing verified
+         * it, so whether the person was told depended on the model electing to
+         * say so.
+         *
+         * This does not replace that obligation; the model should still say it
+         * in its own words. Two channels for one fact is right here because they
+         * fail differently: prose is readable, structure is reliable.
+         */
+        ...(() => {
+          const facts = collectTurnStateFacts(result.tool_results);
+          return facts.rescaled.length > 0 || facts.ranges_added.length > 0 ? { state_facts: facts } : {};
+        })(),
       },
     });
   });
