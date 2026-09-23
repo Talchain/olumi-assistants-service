@@ -51,9 +51,48 @@ const TITLE_MAX = 80;
  * MOST to disclose (a changed value AND a chosen scale) was the one that
  * silently shipped nothing. Found by probing the builder rather than reading it.
  *
- * Splitting removes the truncation risk entirely, and each card is separately
- * actionable: "check this figure" and "check this scale" are different asks.
+ * Splitting makes each card separately actionable: "check this figure" and "check
+ * this scale" are different asks.
+ *
+ * ⛔ IT DOES NOT REMOVE THE TRUNCATION RISK, AND THIS USED TO CLAIM IT DID.
+ * The body was still unbounded: `truncate` is applied to the TITLE only, the raw
+ * body went to `gateCoachingCardBody`, and that REJECTS over
+ * `CARD_BODY_MAX_CHARS` — so the whole block was dropped again. Measured: FOUR
+ * ranges, an ordinary first-model turn where the product picks a scale for every
+ * bare amount, produced ZERO blocks. Same defect, one layer in.
+ *
+ * The enumeration is now bounded and the remainder COUNTED, because the rule this
+ * module already states has to hold for an entry dropped for LENGTH too:
+ * *"NEVER SILENTLY DROPPED. An entry whose numbers could not be read is still a
+ * change the user should know happened."*
  */
+
+/**
+ * The gate's own body cap, mirrored. `CARD_BODY_MAX_CHARS` is module-private in
+ * `coaching/copy-quality-gate.ts:432`, so this is pinned BEHAVIOURALLY against the
+ * real gate in `__tests__` rather than trusted from this line — a second authority
+ * on a shared cap is how these drift.
+ */
+const BODY_MAX = 300;
+
+/**
+ * List as many items as fit, then say how many were left — never silently fewer.
+ *
+ * Iterative rather than arithmetic: the prefix, joiner and remainder clause all
+ * cost characters, and computing that budget by hand is a sum that goes wrong the
+ * first time any of the three copy strings changes.
+ */
+function enumerateWithinBudget(
+  items: readonly string[],
+  build: (listed: readonly string[], remainder: number) => string,
+): string {
+  for (let n = items.length; n > 0; n -= 1) {
+    const body = build(items.slice(0, n), items.length - n);
+    if (body.length <= BODY_MAX) return body;
+  }
+  // Even one item overflows: say only the count, which still beats silence.
+  return build([], items.length);
+}
 
 /** Trim at a word boundary — a disclosure cut mid-word reads as a bug. */
 function truncate(text: string, max: number): string {
@@ -83,7 +122,16 @@ function rescaledCopy(facts: TurnStateFacts): { title: string; body: string } | 
     });
   const unnamed = facts.rescaled.length - named.length;
   if (named.length > 0) {
-    parts.push(`Some values were stored differently from the figures you approved: ${named.join('; ')}.`);
+    // Bounded for the same reason as the scale card: an over-long body is REJECTED
+    // by the gate, so the turn with the most to disclose disclosed nothing.
+    parts.push(
+      enumerateWithinBudget(named, (listed, remainder) => {
+        const head = listed.length > 0
+          ? `Some values were stored differently from the figures you approved: ${listed.join('; ')}.`
+          : 'Some values were stored differently from the figures you approved.';
+        return remainder > 0 ? `${head} ${remainder} more were stored differently too.` : head;
+      }),
+    );
   }
   // ⛔ NEVER SILENTLY DROPPED. An entry whose numbers could not be read is still
   // a change the user should know happened.
@@ -99,12 +147,20 @@ function rescaledCopy(facts: TurnStateFacts): { title: string; body: string } | 
 
 function rangeCopy(facts: TurnStateFacts): { title: string; body: string } | null {
   if (facts.ranges_added.length === 0) return null;
-  const ranges = facts.ranges_added.map((r) => `${r.factor} (0 to ${r.range})`).join('; ');
+  const items = facts.ranges_added.map((r) => `${r.factor} (0 to ${r.range})`);
+  const body = enumerateWithinBudget(items, (listed, remainder) => {
+    const named = listed.length > 0 ? `: ${listed.join('; ')}` : '';
+    const more = remainder > 0
+      ? ` ${listed.length > 0 ? 'and ' : ''}${remainder} more had one chosen too.`
+      : '';
+    return (
+      `A scale was taken from your own figures so the analysis could run at all${named}.${more} ` +
+      'That is a unit of measurement rather than a forecast or a limit, and it is the product\u2019s choice, not yours \u2014 correct it if it is wrong.'
+    );
+  });
   return {
     title: truncate('A scale was chosen for you', TITLE_MAX),
-    body:
-      `A scale was taken from your own figures so the analysis could run at all: ${ranges}. ` +
-      'That is a unit of measurement rather than a forecast or a limit, and it is the product\u2019s choice, not yours \u2014 correct it if it is wrong.',
+    body,
   };
 }
 

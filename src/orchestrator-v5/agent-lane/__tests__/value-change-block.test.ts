@@ -226,3 +226,76 @@ describe('the disclosure names the factor alone when there is no option', () => 
     expect(text).toContain('Velocity');
   });
 })
+
+/**
+ * ⛔⛔ SPLITTING BY CONCERN REDUCED THE OVERFLOW BUT NEVER BOUNDED IT.
+ *
+ * The docblock says the combined card was rejected at ~380 chars against
+ * `CARD_BODY_MAX_CHARS = 300`, "meaning the turn with the MOST to disclose
+ * disclosed NOTHING", and that one block per concern fixes it. It does not: the
+ * BODY is still unbounded. `truncate` is applied to the TITLE only (`:95`, `:104`),
+ * the raw body goes to `gateCoachingCardBody`, which REJECTS over 300
+ * (`coaching/copy-quality-gate.ts:439`), and `:133` then drops the whole block.
+ *
+ * So a single concern with several factors — an ordinary first-model turn, where
+ * the product picks a scale for every bare amount — still silently discloses
+ * nothing. Same defect, one layer in.
+ *
+ * The module's own rule is the fix: "⛔ NEVER SILENTLY DROPPED. An entry whose
+ * numbers could not be read is still a change the user should know happened."
+ * That has to hold for an entry dropped for LENGTH too.
+ */
+describe('a concern with many entries still discloses something', () => {
+  const manyRanges = [
+    { factor: 'Monthly recurring revenue per enterprise account', range: 100000 },
+    { factor: 'Active subscribers on the professional tier', range: 5000 },
+    { factor: 'Support tickets raised per calendar month', range: 1200 },
+    { factor: 'Average contract value for new business', range: 48000 },
+  ];
+
+  it('⛔ emits a block rather than nothing when the enumeration would overflow', () => {
+    const blocks = buildValueChangeBlocks(facts({ ranges_added: manyRanges }), AT);
+    expect(blocks.length, 'the turn with the MOST to disclose must not disclose the LEAST').toBeGreaterThan(0);
+  });
+
+  it('the body stays within the gate, and says how many it could not name', () => {
+    const [block] = buildValueChangeBlocks(facts({ ranges_added: manyRanges }), AT);
+    const body = String((block as unknown as { body?: unknown }).body ?? '');
+    expect(body.length, 'must be inside CARD_BODY_MAX_CHARS or the gate drops it').toBeLessThanOrEqual(300);
+    expect(body, 'a remainder must be counted, never dropped in silence').toMatch(/\b\d+ (more|further)\b/);
+  });
+
+  it('CONTRAST: a short enumeration is still listed in full, with no remainder clause', () => {
+    const [block] = buildValueChangeBlocks(facts({ ranges_added: [manyRanges[0]!] }), AT);
+    const body = String((block as unknown as { body?: unknown }).body ?? '');
+    expect(body).toContain('Monthly recurring revenue per enterprise account');
+    expect(body).not.toMatch(/\b\d+ (more|further)\b/);
+  });
+})
+
+/**
+ * ⭐ BODY_MAX is pinned against the REAL gate, not asserted from a comment.
+ * `CARD_BODY_MAX_CHARS` is module-private in `coaching/copy-quality-gate.ts`, so a
+ * mirrored constant is a second authority on a shared cap — exactly how these
+ * drift. This measures the gate's actual behaviour instead.
+ */
+describe('the mirrored body cap agrees with the gate that enforces it', () => {
+  it('a body at the cap is accepted and one char over is rejected', async () => {
+    const { gateCoachingCardBody } = await import('../../coaching/copy-quality-gate.js');
+    const words = (n: number) => Array.from({ length: n }, () => 'value').join(' ');
+    let atCap = words(80).slice(0, 300);
+    atCap = atCap.slice(0, atCap.lastIndexOf(' '));
+    expect(gateCoachingCardBody(atCap).accept, 'a body inside the cap is accepted').toBe(true);
+    const over = `${words(80).slice(0, 301)}`;
+    expect(gateCoachingCardBody(over).accept, 'one over the cap is rejected — so 300 is the real bound').toBe(false);
+  });
+
+  it('every emitted body is within the cap the gate enforces', () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ factor: `Some quite long factor label number ${i}`, range: 1000 + i }));
+    const blocks = buildValueChangeBlocks(facts({ ranges_added: many, rescaled: [RESCALED] }), AT);
+    expect(blocks.length).toBeGreaterThan(0);
+    for (const b of blocks) {
+      expect(String((b as unknown as { body?: unknown }).body ?? '').length).toBeLessThanOrEqual(300);
+    }
+  });
+})
