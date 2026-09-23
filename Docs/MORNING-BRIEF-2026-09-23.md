@@ -95,9 +95,15 @@ The estate's own staged-frame measurements (`cee2-live-latency.md`, 3 runs, per 
 | `COACHING_READY` | 59.2s | coaching arrives as its OWN later frame |
 | `COMPLETE` | 60.9s | terminal payload (worst run 63,957ms) |
 
-**~87s is the request's wall clock. Time-to-first-graph is ~36s, and coaching is already off that
-critical path.** Which relocates the lever: **the thing to attack is `parse` (~23s, one o4-mini
-call), because that is what `GRAPH_READY` actually waits for.** Coaching is not on it.
+**~87s is the request's wall clock; time-to-first-graph is far shorter, and coaching is already
+off that critical path.** Which relocates the lever onto **`parse` — one draft model call,
+`claude-sonnet-4-6`, p50 21,224ms of provider latency** — because that is what `GRAPH_READY`
+actually waits for. Coaching is not on it, and neither is `decision_review`.
+
+⚠ The "~36s" in the table above is the estate's **July-era** figure. The two sections below
+supersede it in both respects: the current derived value is **~23.4s** (stage sum), and the
+model is **`claude-sonnet-4-6`**, not o4-mini. Both corrections were made after that table
+was written — read them before quoting this one.
 
 ### ⭐ And the 35.8s above is STALE — derived from current data, first graph is ~23s
 
