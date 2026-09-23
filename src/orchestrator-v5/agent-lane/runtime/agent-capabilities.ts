@@ -1158,9 +1158,12 @@ export function createAgentCapabilities(
          * ⚠ REPRESENTATION LOSS, RECORDED. `FactorValueEditEvent` is `.strict()`
          * and carries `{kind, target_id, value, raw_value?, unit?, field?,
          * applied_from?}` — there is NO provenance field on it, and the handler
-         * stamps `source: 'user_explicit'` because it was built for the
-         * inspector. That stamp is right about WHO set the value (the user
-         * authorised this exact set) and silent about WHAT IT RESTS ON. The
+         * stamps `observed_state.source` with `USER_EDIT_SOURCE`
+         * (`canonicalise-value-ops.ts`) because it was built for the inspector.
+         * (`user_explicit` is only the source of the proposal PARAMETER
+         * `factor-value-edit.ts` builds, not the stored stamp.) That stamp is
+         * right about WHO set the value (the user authorised this exact set)
+         * and silent about WHAT IT RESTS ON. The
          * basis therefore survives only in the proposal and in what the Agent
          * says, so the result below tells it to say it.
          */

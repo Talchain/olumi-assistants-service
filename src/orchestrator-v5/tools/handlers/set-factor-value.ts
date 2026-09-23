@@ -675,6 +675,32 @@ export function createSetFactorValueHandler(): HandlerFn {
         delete (merged as { elicited_from?: unknown }).elicited_from;
       }
 
+      // ⭐⭐ THE SAME SPREAD CARRIES THE PRODUCER'S `extractionType`, AND IT MUST
+      // GO ON EVERY BRANCH — the user's own number AND a verified panel apply.
+      //
+      // WITNESSED (served `e0fd1c9` + UI `fa84d226`, 23 Sep 2026): a user set a
+      // factor 0 → 0.3 and this write stored `{ source: 'user_override',
+      // extractionType: 'inferred' }`. On reload the UI's est. predicate
+      // (`obs?.extractionType === 'inferred' || d?.extractionType ===
+      // 'inferred'`) decided, and the card told the user their typed number
+      // was "filled in for you" while the inspector said "Set by you".
+      //
+      // `extractionType` answers HOW THE PIPELINE READ THE BRIEF; its four
+      // members (`explicit | inferred | range | observed`) cannot say "typed in
+      // the product" or "a colleague's answer". Re-authoring it is worse than
+      // clearing it: `explicit`/`observed` are read as BRIEF-BACKED by
+      // `nodeProvenanceDisplay` and `classifyFactorValueTier`/`mayClaimFromBrief`
+      // (neither consults `source`), so a stamp would swap "Olumi inferred it"
+      // for "it came from your brief". Absent is the UI's own
+      // `USER_VALUE_STAMP` shape, and the CEE authorship readers
+      // (`structureProvenance`, `compactGraph`) consult `source` FIRST, so
+      // clearing cannot demote the value. Not in the analysis hash
+      // (`graph-hash.ts` projects `observed_state.{value,baseline,cap}` only).
+      //
+      // `delete`, for the reason given for `elicited_from` above. The NODE-LEVEL
+      // spelling is withdrawn below, beside `provenance`.
+      delete (merged as { extractionType?: unknown }).extractionType;
+
       node.observed_state = merged;
 
       // V5 D1 golden-path closure (A3.1 Task 3): recompute display_value
@@ -703,6 +729,12 @@ export function createSetFactorValueHandler(): HandlerFn {
       // Stamp provenance so downstream consumers know the value was
       // user-set (NodeV3.provenance enum supports 'user_set' directly).
       node.provenance = 'user_set';
+      // The second carrier of the same producer claim. Repair stages promote
+      // `extractionType` to the node (`NodeV3.extractionType`), and both the UI
+      // predicate (`d?.extractionType`) and `readFactorValueView` (observed_state
+      // → node → data) read it — so clearing only `observed_state` would leave
+      // the node-level spelling to decide. See the block above.
+      delete (node as { extractionType?: unknown }).extractionType;
 
       // 1.16 item A2 — preserve option-intervention absolutes across the
       // cap change. Runs inside the mutation clone so the rewritten
