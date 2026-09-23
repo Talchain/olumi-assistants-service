@@ -650,3 +650,97 @@ silence has repeatedly been misread as green.
 ⚠ One thing to check me on: I restored `ci.yml` with `git checkout origin/staging --`, so the
 **whole file** is staging's, not just its `on:` block. #1713's concurrency stanza is asserted intact
 by a YAML check in the commit, but that is the failure mode if it ever looks wrong.
+
+---
+
+# 14. AFTERNOON UPDATE — 23 Sep, ~17:15
+
+## What you can test right now: nothing new
+
+Nothing has been deployed since this morning. `cee-staging` is live on `bb6e0112f8fd`,
+which is other lanes' work, not mine. **Both of my PRs are queued on CI with no reviewer
+yet**, and merging is the deploy (`cee-staging` `autoDeploy=yes`).
+
+| PR | head | state |
+|---|---|---|
+| CEE #1755 | `ccc5f94293d0` | required `Lint, TypeCheck, Unit Tests` **queued**; 0 reviews |
+| UI #1907 | `10136c997527` | required `Full Test Suite` (4 shards) + `TypeScript + Lint` **queued**; 0 reviews |
+
+The estate CI queue has drained from 100 to ~37 over the afternoon, so this is throughput,
+not a stuck gate. `Graph Evaluator (advisory)` is red on #1755 — advisory, known-red estate-wide,
+not required, not mine.
+
+**The moment #1755 merges,** the `draft_graph` model bake-off runs immediately — the driver is
+written and validated end-to-end against live staging (see §14.3).
+
+## 14.1 ⭐ The pipeline decomposition — "deterministic fast paths" is NOT a speed lever
+
+n=800 `cee.unified_pipeline.stage_timings`, 774 distinct request ids.
+
+| stage | p50 ms | class |
+|---|---:|---|
+| `parse_ms` | 23,128 | LLM |
+| `validation_pipeline_ms` | **28,356** | LLM |
+| `coaching_pass_ms` | 20,680 | LLM |
+| **all 6 deterministic stages** | **240** | **0.45% of the turn** |
+| `total_ms` | 52,741 | |
+
+Per-row model test: `parse → (coaching ∥ validation)` leaves a −918 ms residual; fully-serial
+leaves +19,052 ms. So coaching and validation **already overlap**, and there is no hidden serial
+stage to find.
+
+**Consequences.** 99.5% of a turn is three LLM calls, so adding deterministic tooling cannot make
+the PoC fast — I am retiring that item rather than spending a lane on 0.45%. **Validation is the
+binding stage**, which is what the Pass-2 `reasoning_effort: 'low'` change targets — but the prize
+is **bounded at ~7.7 s**, after which coaching becomes binding. Parse is the larger half (23.1 s,
+of which only 313 ms is non-LLM) and nothing in flight touches it; its only lever is a faster
+draft model, i.e. the bake-off.
+
+## 14.2 ⭐ CEE can already run OpenAI-only — one task blocks a complete one
+
+`ROUTER_TASK_PROVIDER_CAPABILITIES` has only **two** entries, and
+`requireTaskModelAssignmentCapability` returns unchanged for any task not in it. It is a deny-list
+of two, not an allow-list. After #1755 the only task closed to OpenAI is **`explain_diff`**.
+
+Reachability measured end to end: it is reached only by `POST /assist/explain-diff` (off the turn
+pipeline), its UI caller `ExplainDiffButton` **is** mounted via `V5GraphPatchBlock` with no flag,
+and it degrades to an honest `explain-diff-unavailable` message. **So on an OpenAI-only deployment
+the journey works and one explanation affordance goes dark.** Queued as the next PR after #1755,
+because it touches two files #1755 already changes.
+
+⚠ **And a correction to my own PR text:** 8 of 19 task defaults are *already* OpenAI models —
+including **`validate_graph: o4-mini`**, which is Pass 2. So item 1 of #1755 affects the **current**
+Conventional deployment, not only an OpenAI-only one. Still additive (an omitted effort yields the
+pre-existing `"medium"`, pinned by a contrast control), but I flagged it on the PR because the
+brief's constraint is "Conventional stays untouched" and my text implied it did not apply.
+
+## 14.3 The bake-off instrument is built and de-risked
+
+`draft_graph` across `gpt-5.2` (low/medium/high), `o4-mini` (low/medium/high), `gpt-5-mini`
+(non-reasoning, reported as a separate class) against the incumbent `claude-sonnet-5` as contrast
+control. Fixed brief (SHA-256 recorded), fixed seed, fixed cap.
+
+Gates, each proven rather than asserted: a **preflight gate** that exits without writing a report
+if the fix is not deployed (positive control run today — it fired correctly); separate exit codes
+for *route moved* vs *fix undeployed*, using the measured 404-shape discriminator; **non-vacuity
+per draw**; `request_id` recorded per draw; served SHA taken from the Render deploy with
+`status == "live"` and asserted to length 40, before and after the run.
+
+⛔ **Scope limit, built into the driver:** the harness discloses its own divergence from production
+in `harness_fidelity.divergences`. The bake-off therefore licenses a **relative ranking between
+arms on one instrument** — never an absolute production latency or quality figure.
+
+## 14.4 Things I got wrong today and corrected
+
+- Claimed "12/12 prompt ids 404" without showing the 404 was the **handler's** and not the
+  **route's**. Now discriminated (the handler names the prompt; Fastify's carries `statusCode`).
+  The claim held; the control was missing.
+- Said the fix makes 12 ids reachable. The status route registers only **9**; 4 of my 12 are not
+  registered at all and may still 404, correctly. `draft_graph` — the only one the bake-off needs —
+  is registered, `version 202`, live.
+- Read `401` on `/version.json` as "needs a key". With a valid key it is a route-level **404** —
+  CEE has **no** version endpoint. A 401 never proved a route existed.
+- Pushed to a branch literally named `HEAD` (detached clone). Caught by verifying the remote, not
+  the local tree; branch deleted, push redone to `fix/pass2-reasoning-effort-low`.
+- Nearly expanded #1907 onto a "sibling defect" inferred from a **stale spec docblock** — the
+  string is not in `FactorNode.tsx` at all.
