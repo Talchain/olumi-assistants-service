@@ -30,7 +30,10 @@ describe('the decision — order of guards, and every skip is its own diagnosis'
   it('a VIOLATING draw is redrawn when it can be afforded', () => {
     const d = decideGrammarRedraw({ first: ok(DIRTY_8), elapsedMs: AFFORDABLE_MS, redraw: async () => ok(CLEAN) });
     expect(d.redraw).toBe(true);
-    if (d.redraw) expect(d.facts.violations).toHaveLength(8);
+    if (d.redraw) {
+      expect(d.facts.edgeGrammar.violations).toHaveLength(8);
+      expect(d.facts.totalViolations).toBe(8);   // no analysis_ready in this fixture
+    }
   });
 
   it('a FAILED draft is the other authority’s question and is never touched', () => {

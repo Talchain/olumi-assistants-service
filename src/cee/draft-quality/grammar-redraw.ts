@@ -49,12 +49,12 @@ import {
 import { log } from '../../utils/telemetry.js';
 import type { UnifiedPipelineResult } from '../unified-pipeline/types.js';
 import {
-  buildEdgeGrammarDirective,
-  readEdgeGrammarFacts,
-  secondDrawIsCleaner,
-  violatesEdgeGrammar,
-  type EdgeGrammarFacts,
-} from './edge-grammar.js';
+  buildDraftStructureDirective,
+  readDraftStructureFacts,
+  secondDrawIsStructurallyCleaner,
+  violatesDraftStructure,
+  type DraftStructureFacts,
+} from './draft-structure.js';
 import type { DraftAttemptSource } from './types.js';
 
 /** Why no second draw was spent. Each value is a DIFFERENT diagnosis, and
@@ -68,8 +68,8 @@ export type GrammarRedrawSkipReason =
   | 'budget_unaffordable';
 
 export type GrammarRedrawDecision =
-  | { readonly redraw: true; readonly facts: EdgeGrammarFacts; readonly retryBudgetMs: number }
-  | { readonly redraw: false; readonly reason: GrammarRedrawSkipReason; readonly facts: EdgeGrammarFacts | null };
+  | { readonly redraw: true; readonly facts: DraftStructureFacts; readonly retryBudgetMs: number }
+  | { readonly redraw: false; readonly reason: GrammarRedrawSkipReason; readonly facts: DraftStructureFacts | null };
 
 /**
  * ⭐ WHY THIS RETURNS `drawSpent` AND NOT JUST THE RESULT.
@@ -95,12 +95,6 @@ export interface GrammarRedrawInput {
   readonly redraw?: (directive: string) => Promise<UnifiedPipelineResult>;
 }
 
-function graphFrom(body: unknown): unknown {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
-  const rec = body as Record<string, unknown>;
-  return rec.graph ?? rec;
-}
-
 /**
  * ⭐ THE WHOLE DECISION, PURE AND SEPARATELY TESTABLE.
  *
@@ -114,9 +108,13 @@ export function decideGrammarRedraw(
 ): GrammarRedrawDecision {
   if (input.first.statusCode !== 200) return { redraw: false, reason: 'draft_failed', facts: null };
 
-  const facts = readEdgeGrammarFacts(graphFrom(input.first.body));
+  // ⚠ THE WHOLE BODY, NOT THE GRAPH. One of the two defects lives in
+  // `analysis_ready`, a DERIVED payload — a reader handed only the graph is
+  // structurally incapable of seeing it, which is exactly how it went unnoticed
+  // until the eighth draw.
+  const facts = readDraftStructureFacts(input.first.body);
   if (!facts.readable) return { redraw: false, reason: 'graph_unreadable', facts };
-  if (!violatesEdgeGrammar(facts)) return { redraw: false, reason: 'grammar_clean', facts };
+  if (!violatesDraftStructure(facts)) return { redraw: false, reason: 'grammar_clean', facts };
 
   if ((input.attemptSource ?? 'first') !== 'first') {
     return { redraw: false, reason: 'redraw_already_spent', facts };
@@ -168,8 +166,15 @@ async function runGrammarRedraw(input: GrammarRedrawInput): Promise<GrammarRedra
       event: 'cee.draft.edge_grammar',
       request_id: input.requestId,
       readable: decision.facts?.readable ?? false,
-      violation_count: decision.facts?.violations.length ?? null,
-      options_affected: decision.facts?.optionsAffected ?? null,
+      violation_count: decision.facts?.totalViolations ?? null,
+      // Broken out, because "the drafter wired an option to a risk" and "the
+      // drafter targeted something that is not a node" are different diagnoses
+      // about the same producer, and one number cannot tell them apart.
+      edge_violations: decision.facts?.edgeGrammar.violations.length ?? null,
+      unresolvable_targets: decision.facts?.unresolvableTargets.length ?? null,
+      options_affected: decision.facts
+        ? decision.facts.edgeGrammar.optionsAffected + decision.facts.optionsWithUnresolvableTarget
+        : null,
       attempt_source: input.attemptSource ?? 'first',
       redraw: decision.redraw,
       skip_reason: decision.redraw ? null : decision.reason,
@@ -182,7 +187,7 @@ async function runGrammarRedraw(input: GrammarRedrawInput): Promise<GrammarRedra
   /* c8 ignore next */
   if (!input.redraw) return { result: input.first, drawSpent: false };
 
-  const second = await input.redraw(buildEdgeGrammarDirective(decision.facts));
+  const second = await input.redraw(buildDraftStructureDirective(decision.facts));
 
   // ⛔ A REDRAW MUST NEVER TURN A SUCCESSFUL DRAFT INTO A FAILURE. The first
   // draw is a shippable model; the second is a gamble taken on the user's
@@ -195,15 +200,15 @@ async function runGrammarRedraw(input: GrammarRedrawInput): Promise<GrammarRedra
     return { result: input.first, drawSpent: true };
   }
 
-  const secondFacts = readEdgeGrammarFacts(graphFrom(second.body));
-  const shipSecond = secondDrawIsCleaner(decision.facts, secondFacts);
+  const secondFacts = readDraftStructureFacts(second.body);
+  const shipSecond = secondDrawIsStructurallyCleaner(decision.facts, secondFacts);
 
   log.info(
     {
       event: 'cee.draft.edge_grammar_redraw',
       request_id: input.requestId,
-      first_violations: decision.facts.violations.length,
-      second_violations: secondFacts.readable ? secondFacts.violations.length : null,
+      first_violations: decision.facts.totalViolations,
+      second_violations: secondFacts.readable ? secondFacts.totalViolations : null,
       second_readable: secondFacts.readable,
       shipped: shipSecond ? 'second' : 'first',
       // `second_outcome` separates "the drafter could not do better" from "the
