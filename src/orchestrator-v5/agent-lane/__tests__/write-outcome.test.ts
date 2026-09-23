@@ -155,6 +155,11 @@ describe('a compact build names what it left out', () => {
     expect(built({ left_out_to_stay_compact: items }).status).toMatch(/I left out: Factor 1; Factor 2; Factor 3; Factor 4; Factor 5; and 3 more\. Ask me/);
   });
 
+  it('RED: the questions the build parked are stated as what the model does not answer yet', () => {
+    const n = built({ open_questions: ['Is the bottleneck coordination or capacity?', 'What does onboarding cost the team?'] });
+    expect(n.status).toBe('The model was saved as version 1. Questions this model does not answer yet: Is the bottleneck coordination or capacity; What does onboarding cost the team.');
+  });
+
   it('CONTRAST: nothing left out → the save line alone', () => {
     expect(built({}).status).toBe('The model was saved as version 1.');
     expect(built({ left_out_to_stay_compact: [] }).status).toBe('The model was saved as version 1.');
