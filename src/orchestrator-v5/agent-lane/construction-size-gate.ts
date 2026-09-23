@@ -79,8 +79,42 @@ export interface ConstructionSizeVerdict {
    * caller must ADMIT, not refuse: their model is their model.
    */
   readonly user_material_exceeds_limit: boolean;
+  /**
+   * ⛔ THE FLOOR A RETRY CANNOT GO BELOW — the user's stated material plus the
+   * structural scaffolding every model needs (goal and decision nodes), and the
+   * links whose BOTH ends are floor nodes. Release Control's binding item on #1710: if
+   * the user's material PLUS required scaffolding alone exceeds 12/20, the model
+   * is admitted unchanged and reported oversized — never refused, truncated or
+   * retried.
+   */
+  readonly floor_nodes: number;
+  readonly floor_edges: number;
+  /**
+   * IDENTITIES of what the user stated, not counts — independent review of #1710
+   * at 78b07e8b: a retry with the same brief-stated COUNTS but a swapped option
+   * or relationship was adopted. Keyed on kind + normalised label (admission
+   * re-slugs ids between passes; a label is what the user said).
+   */
+  readonly brief_stated_keys: { readonly nodes: readonly string[]; readonly edges: readonly string[] };
   /** One sentence a user could be shown. Empty when within budget. */
   readonly detail: string;
+}
+
+/** Nodes every model carries whatever the brief: the question and what it is judged against. */
+const STRUCTURAL_KINDS = new Set(['goal', 'decision']);
+
+/** A label as an identity: case, spacing and trailing punctuation do not make a different thing. */
+const keyLabel = (l: unknown): string => String(l ?? '').toLowerCase().replace(/\s+/g, ' ').replace(/[.…]+$/, '').trim();
+
+/**
+ * TRUE only when every user-stated node AND relationship of `before` is still
+ * present in `after`, by identity. Counts are not enough: a same-count swap is a
+ * different decision.
+ */
+export function keepsEveryUserStatedIdentity(before: ConstructionSizeVerdict, after: ConstructionSizeVerdict): boolean {
+  const n = new Set(after.brief_stated_keys.nodes);
+  const e = new Set(after.brief_stated_keys.edges);
+  return before.brief_stated_keys.nodes.every((k) => n.has(k)) && before.brief_stated_keys.edges.every((k) => e.has(k));
 }
 
 /** An admitted edge the user themselves stated. */
@@ -135,8 +169,36 @@ export function assessConstructionSize(
     nodes: Math.max(0, nodes - limits.maxNodes),
     edges: Math.max(0, edges - limits.maxEdges),
   };
-  const user_material_exceeds_limit =
-    brief_stated_nodes > limits.maxNodes || brief_stated_edges > limits.maxEdges;
+  // The floor is the user's stated material plus the STRUCTURAL scaffolding every
+  // model needs (its goal and decision nodes) — not whatever the builder chose to
+  // label "inferred", which on Paul's real first turn would have exempted the
+  // widening itself from the cap. Links count only when BOTH ends are floor nodes.
+  const endpoint = (e: unknown, k: 'from' | 'to'): string => String((e as Record<string, unknown>)[k] ?? '');
+  const nodeIds = new Set(admitted.nodes.map((n) => n.id));
+  const floorIds = new Set(
+    admitted.nodes
+      .filter((n) => admitted.inference_classes[n.id] === 'brief_stated' || STRUCTURAL_KINDS.has(String((n as { kind?: unknown }).kind ?? '')))
+      .map((n) => n.id),
+  );
+  // A relationship the user STATED is user material, and so are the two things it
+  // relates — whatever class admission gave those nodes.
+  for (const e of admitted.edges.filter(isBriefStatedEdge)) {
+    for (const id of [endpoint(e, 'from'), endpoint(e, 'to')]) if (nodeIds.has(id)) floorIds.add(id);
+  }
+  const floor_nodes = floorIds.size;
+  const floor_edges = admitted.edges.filter((e) => isBriefStatedEdge(e) || (floorIds.has(endpoint(e, 'from')) && floorIds.has(endpoint(e, 'to')))).length;
+  const user_material_exceeds_limit = floor_nodes > limits.maxNodes || floor_edges > limits.maxEdges;
+  const labelOf = new Map(admitted.nodes.map((n) => [n.id, keyLabel((n as { label?: unknown }).label)]));
+  const brief_stated_keys = {
+    nodes: admitted.nodes
+      .filter((n) => admitted.inference_classes[n.id] === 'brief_stated')
+      .map((n) => `${String((n as { kind?: unknown }).kind ?? '')}:${keyLabel((n as { label?: unknown }).label)}`)
+      .sort(),
+    edges: admitted.edges
+      .filter(isBriefStatedEdge)
+      .map((e) => `${labelOf.get(endpoint(e, 'from')) ?? endpoint(e, 'from')}->${labelOf.get(endpoint(e, 'to')) ?? endpoint(e, 'to')}`)
+      .sort(),
+  };
 
   const parts: string[] = [];
   if (over_by.nodes > 0) parts.push(`${nodes} nodes (limit ${limits.maxNodes})`);
@@ -160,6 +222,9 @@ export function assessConstructionSize(
     brief_stated_edges,
     sheddable_nodes,
     user_material_exceeds_limit,
+    floor_nodes,
+    floor_edges,
+    brief_stated_keys,
     detail,
   };
 }

@@ -39,6 +39,7 @@ import { registrationTurnId } from '../../graph-registration/registration-identi
 import {
   assessConstructionSize,
   retryInstruction,
+  keepsEveryUserStatedIdentity,
   type ConstructionSizeVerdict,
 } from '../construction-size-gate.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
@@ -300,9 +301,9 @@ export async function buildModelFromBrief(
         // cannot tell the difference. So the brief-stated counts must not regress —
         // that is what makes "the cap never overrides the user" true of RETRIES and
         // not merely of the refusal path.
-        const keepsUserMaterial =
-          retrySize.brief_stated_nodes >= size.brief_stated_nodes &&
-          retrySize.brief_stated_edges >= size.brief_stated_edges;
+        // ⛔ BY IDENTITY, NOT COUNT (independent review at 78b07e8b): every option,
+        // fact and relationship the user stated must still be there by name.
+        const keepsUserMaterial = keepsEveryUserStatedIdentity(size, retrySize);
         if (
           retrySize.nodes <= size.nodes &&
           retrySize.edges <= size.edges &&

@@ -151,8 +151,8 @@ describe('⛔ the gate is STRUCTURALLY incapable of truncating', () => {
     // No caller can mistake this for a smaller graph: there is no nodes or edges
     // ARRAY on the verdict at all, so "use the gate's output" cannot silently
     // become "persist the truncated model".
-    expect(Array.isArray((v as Record<string, unknown>)['nodes'])).toBe(false);
-    expect((v as Record<string, unknown>)['admitted']).toBeUndefined();
+    expect(Array.isArray((v as unknown as Record<string, unknown>)['nodes'])).toBe(false);
+    expect((v as unknown as Record<string, unknown>)['admitted']).toBeUndefined();
     const arrayValued = Object.entries(v).filter(([, val]) => Array.isArray(val));
     expect(arrayValued).toEqual([]);
   });
