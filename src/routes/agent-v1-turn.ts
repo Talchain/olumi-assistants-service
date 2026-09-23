@@ -290,8 +290,10 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
        * The consequence is not subtle. The client gates the Run affordance on
        * `admitsRunAffordance(status, may_run) = status === 'ready' || may_run
        * === true`. With `may_run` absent it falls back to the stricter `status`
-       * term — and measured over 400 real persisted models, 108 (27.0%) are
-       * `may_run: true` under a NON-ready status. Those users can run the
+       * term — and measured over the full population of 15,255 persisted models,
+       * 3,168 (20.77%) are `may_run: true` under a NON-ready status. (An
+       * earlier revision said 27.0% from a 400-row `updated_at DESC` slice;
+       * that was recency bias.) Those users can run the
        * analysis and are never offered it, on the very turn this fallback was
        * added to serve: straight after a 60-90 s construction.
        *
