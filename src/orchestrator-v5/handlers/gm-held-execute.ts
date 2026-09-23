@@ -39,6 +39,7 @@
  * All user-facing wording in this file: provisional_doctrine_v0.
  */
 
+import { isRunAffordanceAdmitted } from '../admission/run-affordance-gate.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { applyPatchOperations } from '../../orchestrator/patch-applier.js';
 import {
@@ -366,11 +367,13 @@ export function buildGmHeldAppliedChips(
   readiness:
     | {
         readonly status?: string;
+        readonly may_run?: boolean;
         readonly options: ReadonlyArray<GmReadinessOption>;
       }
     | undefined,
 ): Array<{ id: string; label: string; message: string; action_type?: 'run_analysis' }> {
-  if (readiness?.status === 'ready') return [{ ...GM_HELD_APPLIED_RERUN_CHIP }];
+  // Gated on ADMISSION, never on `status` — see `run-affordance-gate.ts`.
+  if (isRunAffordanceAdmitted(readiness)) return [{ ...GM_HELD_APPLIED_RERUN_CHIP }];
   const recovery = buildReadinessRecoveryChip(readiness);
   return recovery ? [recovery] : [];
 }

@@ -1197,6 +1197,112 @@ describe('dispatchDraftGraph — post-draft chips (V5 review)', () => {
     expect(result.response.suggested_actions[0].label).toBe('Review model gaps');
   });
 
+  /**
+   * ⛔⛔ THE RUN AFFORDANCE IS GATED ON THE WRONG FIELD.
+   *
+   * `AnalysisReadyPayload.may_run`'s own contract (`schemas/analysis-ready.ts`)
+   * says, in terms:
+   *
+   *   "`status` is the STRICTER 'is this model ready as it stands?'. `may_run`
+   *    is `resolveRunAdmission(...).willProceed` ... A turn can be
+   *    `needs_user_input` and admissible at the same time; that is the
+   *    readiness loop's payoff turn, and a consumer reading only `status`
+   *    HIDES THE RUN AFFORDANCE THE TURN HAS JUST OFFERED."
+   *
+   *   "Consumers ... gate the Run affordance on `structurally_analysable` (or
+   *    `may_run` — same value) and NEVER on `status`."
+   *
+   * MEASURED, 23 Sep, by driving the real producer
+   * (`buildCanonicalAnalysisReadyFromGraph`) over 400 real persisted user
+   * models: 244 are `status: 'ready'`, and a further **108 (27.0%) carry
+   * `may_run: true` with a non-ready status** — those users can run the
+   * analysis right now and are not offered the chip. 0 models would be newly
+   * hidden by the corrected gate, so this is an unlock with no regression.
+   */
+  it('⭐ offers Run when the model is ADMISSIBLE but not yet "ready" (27% of real models)', async () => {
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+    const admissible = {
+      ...MINIMAL_ANALYSIS_READY,
+      status: 'needs_user_input',
+      may_run: true,
+    } as unknown as typeof MINIMAL_ANALYSIS_READY;
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      makeDraftResult(MINIMAL_GRAPH, admissible) as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-chip-may-run',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.suggested_actions[0]).toMatchObject({
+      id: 'chip_action_run_analysis',
+      action_type: 'run_analysis',
+    });
+  });
+
+  it('CONTROL: may_run === false withholds Run however the status reads', async () => {
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+    const refused = {
+      ...MINIMAL_ANALYSIS_READY,
+      status: 'ready',
+      may_run: false,
+    } as unknown as typeof MINIMAL_ANALYSIS_READY;
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      makeDraftResult(MINIMAL_GRAPH, refused) as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-chip-may-run-false',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.suggested_actions.map((a) => a.id)).not.toContain('chip_action_run_analysis');
+  });
+
+  /**
+   * ⚠ ABSENCE MEANS AN OLDER PRODUCER, NEVER "NO" — the contract says so
+   * explicitly. These two pin the fall-back in BOTH directions, so a change
+   * that simply swapped one field for the other would break the second.
+   */
+  it('ABSENT may_run falls back to status — ready still offers Run', async () => {
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      makeDraftResult(MINIMAL_GRAPH, MINIMAL_ANALYSIS_READY) as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-chip-absent-ready',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.suggested_actions[0]).toMatchObject({ id: 'chip_action_run_analysis' });
+  });
+
+  it('ABSENT may_run falls back to status — non-ready still withholds Run', async () => {
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult(true) as Awaited<ReturnType<typeof commitDirectAnswer>>);
+    const older = { ...MINIMAL_ANALYSIS_READY, status: 'needs_user_input' } as unknown as typeof MINIMAL_ANALYSIS_READY;
+    delete (older as Record<string, unknown>).may_run;
+    (handleDraftGraph as MockedFunction<typeof handleDraftGraph>).mockResolvedValue(
+      makeDraftResult(MINIMAL_GRAPH, older) as Awaited<ReturnType<typeof handleDraftGraph>>,
+    );
+
+    const result = await dispatchDraftGraph({
+      payload: makePayload(),
+      requestId: 'req-chip-absent-unready',
+      request: STUB_REQUEST,
+    });
+
+    expect(result.response.suggested_actions.map((a) => a.id)).not.toContain('chip_action_run_analysis');
+  });
+
   it('emits NO chips when graph persistence failed (route returns 500 anyway)', async () => {
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
       .mockRejectedValue(new Error('StateCommitFailedError'));

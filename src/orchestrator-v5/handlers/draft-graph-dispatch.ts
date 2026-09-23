@@ -56,6 +56,7 @@
  * scenarios.graph column.
  */
 
+import { isRunAffordanceAdmitted } from '../admission/run-affordance-gate.js';
 import type { FastifyRequest } from 'fastify';
 
 import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
@@ -544,11 +545,30 @@ function buildPostDraftChips(params: {
   readonly graph: GraphV3T | null;
 }): readonly SuggestedAction[] {
   if (!params.graphPersisted) return [];
-  const readyStatus =
+  const field =
     typeof params.analysisReadyField === 'object' && params.analysisReadyField !== null
-      ? (params.analysisReadyField as { status?: unknown }).status
+      ? (params.analysisReadyField as { status?: unknown; may_run?: unknown })
       : undefined;
-  if (readyStatus === 'ready') {
+  // ⭐⭐ THE RUN AFFORDANCE IS GATED ON ADMISSION, NEVER ON `status`.
+  //
+  // `AnalysisReadyPayload.may_run`'s contract (`schemas/analysis-ready.ts`)
+  // states it outright: `status` is the stricter "is this model ready as it
+  // stands?", `may_run` is `resolveRunAdmission(...).willProceed` — the run
+  // path's own answer to "will the analysis proceed if asked, right now?" —
+  // and "a turn can be `needs_user_input` and admissible at the same time;
+  // that is the readiness loop's payoff turn, and a consumer reading only
+  // `status` hides the Run affordance the turn has just offered."
+  //
+  // MEASURED, 23 Sep, by driving the real producer over 400 real persisted
+  // user models: 244 are `status: 'ready'`, and a FURTHER 108 (27.0%) carry
+  // `may_run: true` under a non-ready status. Those users could run the
+  // analysis and were not offered it. 0 models lose the chip under this gate.
+  //
+  // ⚠ ABSENCE IS NOT "NO". The field is optional so pre-`may_run` producers
+  // still validate, and the contract says absence means an older producer.
+  // Falling back to the previous `status` rule keeps those paths byte-identical
+  // rather than silently withdrawing the chip from them.
+  if (isRunAffordanceAdmitted(field)) {
     // Three-chip post-draft coaching pattern: a primary action chip
     // (Run analysis, the only handler-dispatchable entry) followed by
     // two conversational chips. Conversational chips carry a `message`
