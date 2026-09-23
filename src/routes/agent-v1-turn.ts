@@ -31,7 +31,7 @@ import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
-import { HistoryStore } from '../orchestrator-v5/agent-lane/history-store.js';
+import { HistoryStore, historyFromDurableTurns, needsDurableSeed } from '../orchestrator-v5/agent-lane/history-store.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
 import { log } from '../utils/telemetry.js';
@@ -752,6 +752,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const capabilities = createAgentCapabilities(countingDispatch, proposals, callStructured, mode, (payload) => {
       analysisFromTool = payload;
     });
+    // A session whose in-process history holds no user message (a restart, a
+    // deploy, an eviction — or only a board-edit note appended since) is seeded
+    // from the durable conversation, ahead of whatever is already held — see
+    // `historyFromDurableTurns`. A failed read degrades to no history; it never
+    // fails the turn.
+    const held = histories.get(sessionId);
+    if (needsDurableSeed(held) && typeof store.readRecent === 'function') {
+      try {
+        const durable = historyFromDurableTurns(await store.readRecent(scenarioId));
+        if (durable.length > 0) histories.set(sessionId, [...durable, ...held]);
+      } catch (err) {
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: durable conversation could not be read — continuing without it');
+      }
+    }
     const history = histories.get(sessionId);
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
 
