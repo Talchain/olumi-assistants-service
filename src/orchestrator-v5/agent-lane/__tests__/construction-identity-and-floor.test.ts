@@ -117,7 +117,103 @@ describe('⛔ a retry is adopted only if every user-stated identity survives', (
   });
 });
 
+describe('⛔ identity is the FULL stated text and the stated direction (Panel pre-review 5791588889)', () => {
+  it('RED (B1): two options that share a 33-character prefix are two identities — a retry dropping one is not adopted', async () => {
+    const london = 'Hire a senior engineer in London office';
+    const berlin = 'Hire a senior engineer in Berlin office';
+    const first = candidate({ extraFactors: 15, options: [london, berlin] });
+    const retry = candidate({ extraFactors: 2, options: [london] });
+    const s1 = sizeOf(first); const s2 = sizeOf(retry);
+    // Vacuity guards: both labels are truncated by admission to the SAME label,
+    // so a label-keyed identity cannot tell them apart.
+    const labels = admitCandidateModel(first as unknown as CandidateModel, {}).nodes.filter((n) => n.kind === 'option').map((n) => n.label);
+    expect(new Set(labels).size).toBe(1);
+    expect(s1.within).toBe(false);
+    expect(s1.user_material_exceeds_limit).toBe(false);
+    expect(s2.nodes).toBeLessThan(s1.nodes);
+
+    const s = structuredSequence(first, retry);
+    const dp = dispatcher();
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
+    expect(s.calls).toHaveLength(2);
+    expect(out.ok).toBe(false);
+    expect(out.refusal).toBe('model_too_large');
+    expect(registered(dp.paths)).toBe(0);
+  });
+
+  it('RED (B2): a retry that FLIPS the sign of a stated relationship is not adopted', async () => {
+    const first = candidate({ extraFactors: 15, explicitLinks: [['Secondary factor 0', 'Velocity']] });
+    const retry = candidate({ extraFactors: 2, explicitLinks: [['Secondary factor 0', 'Velocity']] });
+    for (const l of (retry.links as { from: string; to: string; direction: string; provenance: string }[])) {
+      if (l.from === 'Secondary factor 0' && l.provenance === 'explicit') l.direction = 'negative';
+    }
+    const s1 = sizeOf(first); const s2 = sizeOf(retry);
+    expect(s1.within).toBe(false);
+    expect(s1.user_material_exceeds_limit).toBe(false);
+    expect(s2.nodes).toBeLessThan(s1.nodes);
+    // Vacuity guard: the flip survives admission onto the registered edge.
+    const dir = (c: unknown) => admitCandidateModel(c as CandidateModel, {}).edges
+      .filter((e) => (e as { provenance?: { source?: string } }).provenance?.source === 'brief_extraction')
+      .map((e) => (e as { effect_direction?: string }).effect_direction);
+    expect(dir(first)).toContain('positive');
+    expect(dir(retry)).toContain('negative');
+
+    const s = structuredSequence(first, retry);
+    const dp = dispatcher();
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
+    expect(out.ok).toBe(false);
+    expect(out.refusal).toBe('model_too_large');
+    expect(registered(dp.paths)).toBe(0);
+  });
+
+  it('RED (B3): an ADOPTED retry names what it left out — nothing vanishes silently', async () => {
+    const first = candidate({ extraFactors: 15 });
+    const retry = candidate({ extraFactors: 2 });
+    (retry as { unknowns: string[] }).unknowns = ['Does team morale matter here?'];
+    const s = structuredSequence(first, retry);
+    const dp = dispatcher();
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn) as Record<string, unknown>;
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(registered(dp.paths)).toBe(1);
+    const left = out.left_out_to_stay_compact as { kind: string; label: string }[] | undefined;
+    expect(left?.map((x) => x.label).sort()).toEqual(Array.from({ length: 13 }, (_, i) => `Secondary factor ${i + 2}`).sort());
+    expect(out.open_questions).toEqual(['Does team morale matter here?']);
+    expect((out.not_represented as string[]).join(' ')).toMatch(/13 item\(s\) from the first draft were left out/);
+  });
+
+  it('CONTRAST: a first model within the limit reports nothing left out', async () => {
+    const s = structuredSequence(candidate({ extraFactors: 2 }));
+    const dp = dispatcher();
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn) as Record<string, unknown>;
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(s.calls).toHaveLength(1);
+    expect(out.left_out_to_stay_compact).toBeUndefined();
+  });
+});
+
 describe('⛔ the cap never overrides the user’s material plus its required scaffolding', () => {
+  it('RED (N4): what the BUILDER inferred is not user material — it never exempts a model from the cap', async () => {
+    // Paul's real first turn: most nodes arrive classed builder-inferred. Were that
+    // class in the floor, the widening itself would be exempt and nothing retried.
+    const c = candidate({ extraFactors: 0 });
+    (c.factors as unknown[]).push(...Array.from({ length: 14 }, (_, i) => factor(`Inferred factor ${i}`, 'inferred')));
+    (c.links as unknown[]).push(...Array.from({ length: 14 }, (_, i) => link(`Inferred factor ${i}`, 'Velocity')));
+    const admitted = admitCandidateModel(c as unknown as CandidateModel, {});
+    const inferred = admitted.nodes.filter((n) => admitted.inference_classes[n.id] === 'builder_inferred').length;
+    expect(inferred, 'vacuity: the builder-inferred nodes alone exceed the node limit').toBeGreaterThan(12);
+    const v = assessConstructionSize(admitted);
+    expect(v.within).toBe(false);
+    expect(v.user_material_exceeds_limit).toBe(false);
+    expect(v.floor_nodes).toBeLessThanOrEqual(12);
+
+    const s = structuredSequence(c, c);
+    const dp = dispatcher();
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn);
+    expect(s.calls, 'the oversized model is retried, not exempted').toHaveLength(2);
+    expect(out.ok).toBe(false);
+    expect(out.refusal).toBe('model_too_large');
+  });
+
   it('RED: user-stated material ≤ 12 but material + scaffolding > 12 → ADMITTED unchanged, no retry, reported oversized', async () => {
     const elevenOptions = Array.from({ length: 11 }, (_, i) => `User option ${i + 1}`);
     const c = candidate({ extraFactors: 0, options: elevenOptions });

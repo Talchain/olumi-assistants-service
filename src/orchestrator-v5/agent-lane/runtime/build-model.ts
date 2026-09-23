@@ -40,6 +40,7 @@ import {
   assessConstructionSize,
   retryInstruction,
   keepsEveryUserStatedIdentity,
+  nodeIdentity,
   type ConstructionSizeVerdict,
 } from '../construction-size-gate.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
@@ -275,6 +276,11 @@ export async function buildModelFromBrief(
    */
   let size: ConstructionSizeVerdict = assessConstructionSize(admitted);
   let sizeRetried = false;
+  // ⛔ NEVER SILENTLY. What an adopted retry shed from the first draft, and the
+  // questions it parked in `unknowns`, travel with the result so the Agent can say
+  // them — otherwise an option the model mislabelled as its own vanishes unseen.
+  let leftOut: { kind: string; label: string }[] = [];
+  let openQuestions: string[] = [];
   if (!size.within && !size.user_material_exceeds_limit) {
     sizeRetried = true;
     try {
@@ -309,6 +315,12 @@ export async function buildModelFromBrief(
           retrySize.edges <= size.edges &&
           keepsUserMaterial
         ) {
+          const kept = new Set(retryAdmitted.nodes.map(nodeIdentity));
+          leftOut = admitted.nodes
+            .filter((n) => !kept.has(nodeIdentity(n)))
+            .map((n) => ({ kind: String(n.kind), label: String((n as { description?: unknown }).description ?? n.label) }));
+          const parked = (retryCandidate as { unknowns?: unknown }).unknowns;
+          openQuestions = Array.isArray(parked) ? parked.filter((q): q is string => typeof q === 'string' && q.trim() !== '') : [];
           candidate = retryCandidate;
           admitted = retryAdmitted;
           size = retrySize;
@@ -427,11 +439,15 @@ export async function buildModelFromBrief(
     // Carried WITH the graph (GraphV3 declares `goal_constraints`), verified
     // surviving registration on deployed staging.
     goal_constraints_carried: admitted.goal_constraints.length,
+    ...(leftOut.length > 0 ? { left_out_to_stay_compact: leftOut } : {}),
+    ...(openQuestions.length > 0 ? { open_questions: openQuestions } : {}),
     not_represented: [
       admitted.withheld.length > 0
         ? `${admitted.withheld.length} relationship(s) were left out because nobody has stated which way they run.`
         : undefined,
-      undefined,
+      leftOut.length > 0
+        ? `${leftOut.length} item(s) from the first draft were left out to keep the model compact: ${leftOut.map((x) => x.label).join('; ')}.`
+        : undefined,
     ].filter((s): s is string => s !== undefined),
   };
 }

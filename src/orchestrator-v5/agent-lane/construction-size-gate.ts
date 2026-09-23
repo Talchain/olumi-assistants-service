@@ -107,6 +107,18 @@ const STRUCTURAL_KINDS = new Set(['goal', 'decision']);
 const keyLabel = (l: unknown): string => String(l ?? '').toLowerCase().replace(/\s+/g, ' ').replace(/[.…]+$/, '').trim();
 
 /**
+ * ⛔ THE IDENTITY IS WHAT THE USER SAID, NOT THE DISPLAY LABEL. Admission cuts
+ * every label over 33 characters to a word boundary and keeps the full text on
+ * `description` (`admit-model.ts`), so two options that share a prefix — "…in
+ * London office" and "…in Berlin office" — have the SAME label. Keyed on the
+ * label they are one identity, and a retry that drops one of them passes.
+ */
+export const nodeIdentity = (n: unknown): string => {
+  const r = n as { kind?: unknown; label?: unknown; description?: unknown };
+  return `${String(r.kind ?? '')}:${keyLabel(r.description ?? r.label)}`;
+};
+
+/**
  * TRUE only when every user-stated node AND relationship of `before` is still
  * present in `after`, by identity. Counts are not enough: a same-count swap is a
  * different decision.
@@ -188,15 +200,17 @@ export function assessConstructionSize(
   const floor_nodes = floorIds.size;
   const floor_edges = admitted.edges.filter((e) => isBriefStatedEdge(e) || (floorIds.has(endpoint(e, 'from')) && floorIds.has(endpoint(e, 'to')))).length;
   const user_material_exceeds_limit = floor_nodes > limits.maxNodes || floor_edges > limits.maxEdges;
-  const labelOf = new Map(admitted.nodes.map((n) => [n.id, keyLabel((n as { label?: unknown }).label)]));
+  const identityOf = new Map(admitted.nodes.map((n) => [n.id, nodeIdentity(n)]));
   const brief_stated_keys = {
     nodes: admitted.nodes
       .filter((n) => admitted.inference_classes[n.id] === 'brief_stated')
-      .map((n) => `${String((n as { kind?: unknown }).kind ?? '')}:${keyLabel((n as { label?: unknown }).label)}`)
+      .map(nodeIdentity)
       .sort(),
+    // ⛔ THE STATED DIRECTION IS PART OF THE RELATIONSHIP. "X increases Y" and
+    // "X decreases Y" join the same two things and are opposite claims.
     edges: admitted.edges
       .filter(isBriefStatedEdge)
-      .map((e) => `${labelOf.get(endpoint(e, 'from')) ?? endpoint(e, 'from')}->${labelOf.get(endpoint(e, 'to')) ?? endpoint(e, 'to')}`)
+      .map((e) => `${identityOf.get(endpoint(e, 'from')) ?? endpoint(e, 'from')}->${identityOf.get(endpoint(e, 'to')) ?? endpoint(e, 'to')}:${String((e as { effect_direction?: unknown }).effect_direction ?? '')}`)
       .sort(),
   };
 
