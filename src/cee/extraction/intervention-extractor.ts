@@ -1419,10 +1419,35 @@ export function extractInterventionsForOption(
         `What value should "${raw.target_text}" be set to for this option?`
       );
     } else {
-      // Not matched
+      // ⛔⛔ NOT MATCHED — AND THE OLD QUESTION WAS UNANSWERABLE, because it
+      // quoted a token THIS FUNCTION invented as though the user had named it.
+      //
+      // It read: `Which factor does "${raw.target_text}" correspond to in the
+      // decision model?` Measured on a real staging draw, `target_text` was
+      // "49", so the product asked the user:
+      //
+      //     Which factor does "49" correspond to in the decision model?
+      //
+      // …while a factor called Pro Plan Price sat in the same graph. The person
+      // cannot answer that. "49" is not a thing they named — it is a number
+      // this path read out of the option's own label, and it is only reached at
+      // all when the drafter supplied NO intervention (the early return at the
+      // top of this function), so `target_text` here is ALWAYS our own reading.
+      //
+      // Two changes, and both are the charter's "explicit about what it
+      // inferred… open to correction":
+      //   · SAY WHERE THE TOKEN CAME FROM, so a reading of ours is never
+      //     mistaken for something the user set. The token is kept, not hidden:
+      //     seeing what we misread is how they know what to correct.
+      //   · ASK THE QUESTION THEY CAN ACTUALLY ANSWER — which factor this
+      //     OPTION changes. They know that; they do not know what our token
+      //     was supposed to mean.
+      //
+      // ⚠ It stays a refusal. Nothing here guesses a factor, and the option is
+      // still `needs_user_mapping` — the ask is repaired, not removed.
       unresolvedTargets.push(raw.target_text);
       userQuestions.push(
-        `Which factor does "${raw.target_text}" correspond to in the decision model?`
+        `We read "${raw.target_text}" from this option's own wording but could not tie it to a factor in the model. Which factor does this option change?`
       );
     }
   }

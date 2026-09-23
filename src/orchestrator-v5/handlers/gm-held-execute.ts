@@ -222,7 +222,27 @@ export interface GmReadinessOption {
    * behaviour exactly.
    */
   readonly interventions?: Readonly<Record<string, unknown>>;
-  /** The canonical readiness projection's own words for why this option is not ready. */
+  /**
+   * ⭐ THE QUESTION THE USER CAN ACTUALLY ANSWER — prefer this over
+   * `status_reason` in anything a user reads.
+   *
+   * Authored by `nameMappingNeed` (`cee/transforms/option-status.ts`) and
+   * projected at `analysis-ready-helper.ts:570`. Measured on real persisted
+   * graphs, the difference is the whole point:
+   *   status_reason  : "A proposed effect still needs a supported mapping"
+   *                    — identical boilerplate on every option, untranslatable
+   *   user_questions : "How does 9-day Fortnight change Coordination and
+   *                     Handover Risk?" / "What value should «factor» be set to
+   *                     for option «option»?" — specific, and answerable in a
+   *                     sentence.
+   */
+  readonly user_questions?: readonly string[];
+  /**
+   * Why the projection says this option is not ready.
+   *
+   * ⚠ THE SCHEMA CALLS THIS A DEBUGGING FIELD. It is a diagnosis for us, not
+   * prose for a user — it is only used here when no `user_questions` exist.
+   */
   readonly status_reason?: string;
 }
 
@@ -288,6 +308,8 @@ export function deriveUnconfiguredOptionLabels(
 export interface BlockedConfiguredOption {
   readonly label: string;
   readonly reason?: string;
+  /** True when `reason` is an answerable question rather than a diagnosis. */
+  readonly is_question?: boolean;
 }
 
 /**
@@ -303,12 +325,28 @@ export function deriveBlockedConfiguredOptions(
   if (!readiness) return [];
   return readiness.options
     .filter((o) => o.status !== 'ready' && provablyHasEffectValues(o))
-    .map((o) => ({
-      label: typeof o.label === 'string' ? o.label.trim() : '',
-      ...(typeof o.status_reason === 'string' && o.status_reason.trim().length > 0
-        ? { reason: o.status_reason.trim() }
-        : {}),
-    }))
+    .map((o) => {
+      // ⭐ ASK THE QUESTION, DO NOT REPORT THE DIAGNOSIS.
+      // `user_questions` is the producer's own answerable prose and is already
+      // on this payload; `status_reason` is documented as a debugging field.
+      // Reaching past the first for the second handed the user
+      // "A proposed effect still needs a supported mapping" when the payload
+      // held "How does X change Y?". Olumi's job is to surface the judgement the
+      // team has not yet made -- which only the question does.
+      const question = (o.user_questions ?? [])
+        .map((q) => (typeof q === 'string' ? q.trim() : ''))
+        .find((q) => q.length > 0);
+      const fallback =
+        typeof o.status_reason === 'string' && o.status_reason.trim().length > 0
+          ? o.status_reason.trim()
+          : undefined;
+      const reason = question ?? fallback;
+      return {
+        label: typeof o.label === 'string' ? o.label.trim() : '',
+        ...(reason === undefined ? {} : { reason }),
+        ...(question === undefined ? {} : { is_question: true }),
+      };
+    })
     .filter((o) => o.label.length > 0 && !/^(?:opt|fac|out|risk|goal|dec)_[a-z0-9_]+$/i.test(o.label));
 }
 
@@ -320,6 +358,22 @@ export function deriveBlockedConfiguredOptions(
  * how the previous notice came to tell a user an option had no effect values
  * when it had two.
  */
+/**
+ * End a user-facing fragment with a full stop unless it already ends in its own
+ * terminal punctuation.
+ *
+ * ⛔ WHY NOT A BARE `+ '.'`. The lead form carries a QUESTION from
+ * `user_questions`, so appending unconditionally renders "…Handover Risk?." —
+ * and `sentence()` deliberately strips a trailing '.' from each entry, so the
+ * multi-entry notice ended with nothing at all and ran into the text the
+ * receipt joins after it. Both directions are wrong; the terminator has to be
+ * conditional on what is already there.
+ */
+function terminate(text: string): string {
+  const trimmed = text.replace(/\s+$/, '');
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
 export function buildBlockedOptionsNotice(
   blocked: readonly BlockedConfiguredOption[],
 ): string | null {
@@ -332,20 +386,44 @@ export function buildBlockedOptionsNotice(
   // repair would not unblock anything. That reinstates exactly the condition
   // this notice exists to remove: the user is told something is wrong and sent
   // to the wrong place. Every blocked option is named, with its own reason.
+  // ⛔ THE LABEL IS QUOTED, AND THAT IS NOT DECORATION.
+  //
+  // Unquoted, the multi-entry notice is genuinely ambiguous, because the
+  // separators it uses are characters real labels and reasons contain. With a
+  // label "Phase 1 — pilot" and a reason "… ; then train", the join renders:
+  //
+  //   2 options aren't settled yet: Phase 1 — pilot; Hire; then train.
+  //
+  // which reads as THREE items, and the user cannot tell which option the
+  // product is talking about. The single-entry branch below has always quoted
+  // (`'${one.label}' isn't settled yet`); the multi-entry branch was added
+  // without it, so the one place the ambiguity can actually arise is the one
+  // place that lacked the fence.
   const sentence = (b: BlockedConfiguredOption): string =>
     typeof b.reason === 'string' && b.reason.length > 0
-      ? `'${b.label}' (${b.reason.replace(/\.$/, '')})`
+      ? `'${b.label}' — ${b.reason.replace(/\.$/, '')}`
       : `'${b.label}'`;
 
+  // ⚠ FRAME: an unsettled option is a gap in the team's thinking, not a gate.
+  // Where the payload gives an answerable question, LEAD with it -- the question
+  // is the thing the user can act on, and answering it is the reasoning.
   if (entries.length === 1) {
     const one = entries[0] as BlockedConfiguredOption;
+    if (one.is_question === true && typeof one.reason === 'string') {
+      return `'${one.label}' isn't settled yet — ${terminate(one.reason)}`;
+    }
     const because =
       typeof one.reason === 'string' && one.reason.length > 0
         ? ` ${one.reason.replace(/\.$/, '')}.`
         : '';
-    return `Note: '${one.label}' still blocks the analysis.${because}`;
+    return `Note: '${one.label}' isn't settled yet.${because}`;
   }
-  return `Note: ${entries.length} options still block the analysis: ${entries.map(sentence).join('; ')}.`;
+  // ⚠ TERMINAL PUNCTUATION IS LOAD-BEARING HERE. `sentence()` strips each
+  // entry's full stop so the `; ` join reads cleanly, which left the WHOLE
+  // notice unterminated — and this notice is joined last into the receipt, so
+  // it ran straight into the following text. Measured 23 Sep: 26 of 33 notices
+  // built from real persisted graphs ended with no terminal punctuation.
+  return terminate(`${entries.length} options aren't settled yet: ${entries.map(sentence).join('; ')}`);
 }
 
 /** Rerun affordance offered when the post-apply graph is analysis-ready. */

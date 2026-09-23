@@ -48,7 +48,7 @@ describe("Paul's blocked journey — the answer he should have received", () => 
     const { assistant_text, offer_run_analysis } = buildUnblockAnalysisAnswer(readiness, {
       authorises_repair: true,
     });
-    expect(assistant_text).toContain('One thing is blocking the analysis');
+    expect(assistant_text).toContain("One thing in your model isn't settled yet");
     expect(assistant_text).toContain('Coordination Overhead Risk');
     expect(offer_run_analysis).toBe(false);
   });
@@ -61,28 +61,28 @@ describe("Paul's blocked journey — the answer he should have received", () => 
 
   it('claims NO change it has not made, and does not promise an assumption it cannot supply', () => {
     const { assistant_text } = buildUnblockAnalysisAnswer(readiness, { authorises_repair: true });
-    expect(assistant_text).toContain('I have not changed anything yet');
+    expect(assistant_text).toContain("I haven't changed anything");
     // repairability is human_input_required — an estimate cannot resolve it.
     // ⚠ Wording updated: the tail used to add "tell me the mechanism and I will
     // write it in", which PRESCRIBED a mapping remedy. On a real multi-issue
     // capture none of the issues was a mapping obligation, so that sentence was
     // a second opinion about what is wrong. It now states only what the payload
     // supports; the remedy stays in each issue's own quoted message.
-    expect(assistant_text).toContain('needs your input');
+    expect(assistant_text).toContain('only you can make');
     expect(assistant_text).not.toMatch(/\bI (?:have )?(?:updated|adjusted|applied|set)\b/i);
   });
 
   it('CONTROL: with no repair authorisation it offers nothing extra', () => {
     const { assistant_text } = buildUnblockAnalysisAnswer(readiness, { authorises_repair: false });
-    expect(assistant_text).toContain('One thing is blocking the analysis');
-    expect(assistant_text).not.toContain('I have not changed anything yet');
+    expect(assistant_text).toContain("One thing in your model isn't settled yet");
+    expect(assistant_text).not.toContain("I haven't changed anything");
   });
 });
 
 describe('buildUnblockAnalysisAnswer — the other states', () => {
   it('a ready model says so and offers the run', () => {
     const r = buildUnblockAnalysisAnswer({ status: 'ready', readiness_issues: [] }, { authorises_repair: false });
-    expect(r.assistant_text).toContain('Nothing is blocking the analysis');
+    expect(r.assistant_text).toContain('enough in it to compare the options');
     expect(r.offer_run_analysis).toBe(true);
   });
 
@@ -101,7 +101,7 @@ describe('buildUnblockAnalysisAnswer — the other states', () => {
     // property is narrower: an `offered` obligation is not LISTED as a blocker,
     // and readiness is still not claimed.
     expect(r.assistant_text).not.toContain('optional extra');
-    expect(r.assistant_text).not.toMatch(/Nothing is blocking/i);
+    expect(r.assistant_text).not.toMatch(/enough in it to compare/i);
     // ⚠ CORRECTED: this used to assert the raw status enum APPEARED in the
     // sentence — pinning the very leak a reviewer then found user-visible
     // ("the model is needs_user_input"). The real property is that the turn
@@ -121,7 +121,7 @@ describe('buildUnblockAnalysisAnswer — the other states', () => {
       },
       { authorises_repair: true },
     );
-    expect(r.assistant_text).toContain('2 things are blocking the analysis');
+    expect(r.assistant_text).toContain("2 things in your model aren't settled yet");
     expect(r.assistant_text).toContain('first thing');
     expect(r.assistant_text).toContain('second thing');
     // Repairable ones may be estimated — but only after the user says go.
@@ -153,7 +153,7 @@ describe('a payload that says it is blocked is never called ready', () => {
       const { assistant_text, offer_run_analysis } = buildUnblockAnalysisAnswer(readiness, {
         authorises_repair: false,
       });
-      expect(assistant_text).not.toMatch(/Nothing is blocking/i);
+      expect(assistant_text).not.toMatch(/enough in it to compare/i);
       expect(assistant_text).not.toMatch(/ready to run/i);
       expect(offer_run_analysis).toBe(false);
     });
@@ -168,7 +168,7 @@ describe('a payload that says it is blocked is never called ready', () => {
 
   it('CONTROL: an explicit ready IS answered as ready', () => {
     const r = buildUnblockAnalysisAnswer({ status: 'ready', readiness_issues: [] }, { authorises_repair: false });
-    expect(r.assistant_text).toContain('Nothing is blocking the analysis');
+    expect(r.assistant_text).toContain('enough in it to compare the options');
     expect(r.offer_run_analysis).toBe(true);
   });
 
@@ -177,7 +177,7 @@ describe('a payload that says it is blocked is never called ready', () => {
     // Same correction: state the refusal, never the enum.
     expect(r.assistant_text).toMatch(/cannot run yet/i);
     expect(r.assistant_text).not.toMatch(/needs_user_mapping/);
-    expect(r.assistant_text).not.toMatch(/Nothing is blocking/i);
+    expect(r.assistant_text).not.toMatch(/enough in it to compare/i);
   });
 
   it('the repair tail sits on its own line after a LIST, not glued to the last item', () => {
@@ -192,8 +192,8 @@ describe('a payload that says it is blocked is never called ready', () => {
       },
       { authorises_repair: true },
     );
-    expect(r.assistant_text).toContain('- third thing\nI have not changed anything yet');
-    expect(r.assistant_text).not.toContain('- third thing I have not changed');
+    expect(r.assistant_text).toContain("- third thing\nI haven't changed anything");
+    expect(r.assistant_text).not.toContain("- third thing I haven't changed");
   });
 });
 
@@ -232,8 +232,8 @@ describe('the repair tail on a real multi-issue capture', () => {
 
   it('does NOT say "This one" when many things block', () => {
     const { assistant_text } = buildUnblockAnalysisAnswer(readiness, { authorises_repair: true });
-    expect(assistant_text).not.toMatch(/This one needs/i);
-    expect(assistant_text).toMatch(/Those need your input/i);
+    expect(assistant_text).not.toMatch(/This is a judgement only you can make/i);
+    expect(assistant_text).toMatch(/These are judgements only you can make/i);
   });
 
   it('⛔ prescribes NO remedy of its own', () => {
@@ -251,7 +251,7 @@ describe('the repair tail on a real multi-issue capture', () => {
         expect(assistant_text).toContain(issue.message);
       }
     }
-    expect(assistant_text).toContain('I have not changed anything yet');
+    expect(assistant_text).toContain("I haven't changed anything");
   });
 
   it('CONTROL: the singular wording is still used for exactly one issue', () => {
@@ -259,7 +259,7 @@ describe('the repair tail on a real multi-issue capture', () => {
       { status: 'needs_user_mapping', readiness_issues: [{ code: 'A', message: 'one thing', repairability: 'human_input_required' }] },
       { authorises_repair: true },
     );
-    expect(assistant_text).toMatch(/That one needs your input/i);
+    expect(assistant_text).toMatch(/This is a judgement only you can make/i);
   });
 });
 
@@ -294,7 +294,7 @@ describe('admission is the run verdict, not the readiness status', () => {
         authorises_repair: false,
       });
       expect(assistant_text).not.toMatch(/cannot run yet/i);
-      expect(assistant_text).toContain('Nothing is blocking the analysis');
+      expect(assistant_text).toContain('enough in it to compare the options');
       expect(offer_run_analysis).toBe(true);
     });
   }
@@ -337,6 +337,72 @@ describe('admission is the run verdict, not the readiness status', () => {
       { authorises_repair: false },
     );
     expect(offer_run_analysis).toBe(true);
-    expect(assistant_text).toMatch(/do(es)? not stop the run/i);
+    expect(assistant_text).toMatch(/stop you comparing/i);
+  });
+});
+
+/**
+ * ⛔ A BLOCKER IS A GAP IN THE TEAM'S THINKING, NOT A GATE ON A MACHINE.
+ *
+ * Olumi's purpose (Paul, 23 Sep): *"a reasoning-enhancement system, not an
+ * answer or decision engine … analysis describes what the current model
+ * implies … model-relative findings for further reasoning, not
+ * recommendations."*
+ *
+ * The earlier copy said "One thing is blocking the analysis", which frames
+ * REACHING AN ANALYSIS as the goal and the issue as an obstacle. It is not:
+ * `OPTION_NEEDS_MAPPING` means the team believes two things are connected and
+ * has not said how — a causal belief the Living Model exists to expose "so [it]
+ * can be expanded, challenged, tested and improved".
+ *
+ * These pin the framing, not the phrasing, so a future edit that drifts back to
+ * gate-language fails.
+ */
+describe('the framing is reasoning, not gate-clearing', () => {
+  const blocked = {
+    status: 'needs_user_mapping',
+    readiness_issues: [
+      { code: 'OPTION_NEEDS_MAPPING', message: 'How does Two Developers change Coordination Overhead Risk?', repairability: 'human_input_required' },
+    ],
+  };
+
+  it('does not describe the issue as blocking a machine', () => {
+    const { assistant_text } = buildUnblockAnalysisAnswer(blocked, { authorises_repair: false });
+    expect(assistant_text).not.toMatch(/blocking the analysis/i);
+    expect(assistant_text).not.toMatch(/stopping the analysis/i);
+    expect(assistant_text).toMatch(/your model/i);
+  });
+
+  it('still quotes the issue verbatim — the question is the point', () => {
+    const { assistant_text } = buildUnblockAnalysisAnswer(blocked, { authorises_repair: false });
+    expect(assistant_text).toContain('How does Two Developers change Coordination Overhead Risk?');
+  });
+
+  it("frames the outstanding item as the team's judgement, not a chore", () => {
+    const { assistant_text } = buildUnblockAnalysisAnswer(blocked, { authorises_repair: true });
+    expect(assistant_text).toMatch(/judgement only you can make/i);
+    expect(assistant_text).not.toMatch(/needs your (input|answer)/i);
+  });
+
+  it('an analysable model is described as CONDITIONAL, never as an answer', () => {
+    const { assistant_text } = buildUnblockAnalysisAnswer(
+      { status: 'ready', readiness_issues: [] },
+      { authorises_repair: false },
+    );
+    expect(assistant_text).toMatch(/what THIS model implies/i);
+    expect(assistant_text).toMatch(/given the assumptions in it/i);
+    // ⛔ never language that implies the product produces the answer
+    expect(assistant_text).not.toMatch(/\b(recommend|best option|you should|the answer)\b/i);
+  });
+
+  it('an estimate the product supplies is offered as ITS OWN, flagged', () => {
+    const { assistant_text } = buildUnblockAnalysisAnswer(
+      {
+        status: 'needs_encoding',
+        readiness_issues: [{ code: 'A', message: 'a thing', repairability: 'auto' }],
+      },
+      { authorises_repair: true },
+    );
+    expect(assistant_text).toMatch(/flagged as mine/i);
   });
 });
