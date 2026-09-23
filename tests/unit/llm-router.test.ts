@@ -208,7 +208,14 @@ describe("LLM Router", () => {
   });
 
   describe("Task/provider capability authority", () => {
-    function expectProviderMismatch(run: () => unknown): void {
+    // ⚠ The task is now a PARAMETER. It used to be hard-coded to
+    // critique_graph, which stopped being an unsupported-provider example the
+    // moment OpenAIAdapter.critiqueGraph was implemented. explain_diff is the
+    // default because its adapter still throws, so it is the live example.
+    function expectProviderMismatch(
+      run: () => unknown,
+      task = "explain_diff",
+    ): void {
       let caught: unknown;
       try {
         run();
@@ -218,7 +225,7 @@ describe("LLM Router", () => {
       expect(caught).toBeInstanceOf(ModelAssignmentError);
       if (!(caught instanceof ModelAssignmentError)) return;
       expect(caught.code).toBe("MODEL_PROVIDER_MISMATCH");
-      expect(caught.message).toContain("does not implement task 'critique_graph'");
+      expect(caught.message).toContain(`does not implement task '${task}'`);
     }
 
     beforeEach(() => {
@@ -255,19 +262,42 @@ describe("LLM Router", () => {
         resolution_source: "env_var",
       });
 
+      // INVERTED: an OpenAI critique override is now VALID, because
+      // OpenAIAdapter.critiqueGraph is implemented. This is the behaviour the
+      // capability widening exists to permit, so it is asserted positively
+      // rather than deleted.
       process.env.CEE_MODEL_CRITIQUE = "gpt-4o";
       _resetConfigCache();
       resetAdapterCache();
-      expectProviderMismatch(() => getAdapterWithResolution("critique_graph"));
+
+      const openaiOverride = getAdapterWithResolution("critique_graph");
+      expect(openaiOverride.adapter.name).toBe("openai");
+      expect(openaiOverride.resolution).toMatchObject({
+        provider: "openai",
+        resolved_model: "gpt-4o",
+        resolution_source: "env_var",
+      });
+    });
+
+    it("⛔ CONTRAST CONTROL — explain_diff still rejects an OpenAI model", () => {
+      // Without this the suite would pass on a map simply opened to everything.
+      // explain_diff's adapter still throws openai_explain_diff_not_supported,
+      // so the guard must still fire for it — that asymmetry is the only
+      // evidence the map tracks the adapters.
+      expectProviderMismatch(
+        () => getAdapterWithResolution("explain_diff", "gpt-4o"),
+        "explain_diff",
+      );
     });
 
     it("applies the same guard to store pins while preserving valid Anthropic pins", () => {
-      expectProviderMismatch(() =>
-        getAdapterWithResolution(
-          "critique_graph",
-          "gpt-4o",
-          "store_model_config",
-        ),
+      // Exercised against explain_diff: critique_graph now implements OpenAI,
+      // so an OpenAI pin there is legitimately accepted. The GUARD is unchanged
+      // and still has to fire for a task whose adapter throws.
+      expectProviderMismatch(
+        () =>
+          getAdapterWithResolution("explain_diff", "gpt-4o", "store_model_config"),
+        "explain_diff",
       );
 
       const valid = getAdapterWithResolution(

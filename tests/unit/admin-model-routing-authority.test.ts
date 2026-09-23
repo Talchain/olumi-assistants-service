@@ -95,8 +95,14 @@ describe('admin runtime model-routing authority', () => {
     );
     expect(EXECUTABLE_RUNTIME_TASKS).toContain('clarify_brief');
     expect(EXECUTABLE_RUNTIME_TASKS).toContain('explain_diff');
+    // critique_graph gained 'openai' when OpenAIAdapter.critiqueGraph was
+    // implemented — the map records which providers IMPLEMENT a task, and the
+    // throwing stub that justified its exclusion is gone. explain_diff keeps
+    // its exclusion because OpenAIAdapter.explainDiff still throws, and that
+    // ASYMMETRY is what proves the map tracks the adapters rather than being
+    // opened to everything.
     expect(ROUTER_TASK_PROVIDER_CAPABILITIES).toEqual({
-      critique_graph: ['anthropic', 'fixtures'],
+      critique_graph: ['anthropic', 'openai', 'fixtures'],
       explain_diff: ['anthropic', 'fixtures'],
     });
   });
