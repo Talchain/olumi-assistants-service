@@ -8,6 +8,7 @@
  */
 
 import OpenAI from "openai";
+import { assertProviderAllowed } from "./provider-policy.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { config, getClientBlockedModels } from "../../config/index.js";
 import { log } from "../../utils/telemetry.js";
@@ -246,6 +247,7 @@ async function callOpenAI(
       "openai",
       modelOverride,
     ).model;
+    assertProviderAllowed('openai', 'extraction.openai', { model, purpose: 'extraction' });
 
     const responsePromise = client.chat.completions.create({
       model,
@@ -302,6 +304,7 @@ async function callOpenAI(
 let anthropicClient: Anthropic | null = null;
 
 function getAnthropicClient(): Anthropic {
+  assertProviderAllowed('anthropic', 'extraction.anthropic', { purpose: 'extraction' });
   const apiKey = config.llm.anthropicApiKey;
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY is required for LLM extraction");

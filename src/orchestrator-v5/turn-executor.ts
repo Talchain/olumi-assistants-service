@@ -114,7 +114,6 @@ import {
   neutraliseUnvalidatedBoldEntities,
 } from './compose/clarify-entity-guard.js';
 import {
-  assessCanonicalAnalysisReadiness,
   buildCanonicalAnalysisReadyFromGraph,
   buildAnalysisRefusalReadiness,
 } from '../orchestrator/tools/analysis-ready-helper.js';
@@ -4120,8 +4119,20 @@ export async function runTurnExecutor(
           });
           commitPerformed = committed.performed;
           stagesCompleted.push('commit');
-          const readback = assessCanonicalAnalysisReadiness(committed.persistedGraph);
-          analysisReadyForTurn = readback.analysisReady;
+          // ⭐ THE ADMISSION IS RECOMPUTED HERE, NOT JUST THE ASSESSMENT.
+          // This read `assessCanonicalAnalysisReadiness(...).analysisReady`,
+          // which does not compute `may_run` — only
+          // `canonicalAnalysisReadyFrom(resolveRunAdmission(g), g)` does. So on
+          // the readiness loop's PAYOFF turn, right after the user supplied what
+          // Olumi asked for, the payload carried no admission verdict and every
+          // consumer gating the Run affordance fell back to the stricter
+          // `status` rule. Measured: `may_run` absent on 400/400 assessments of
+          // real persisted models.
+          // ⚠ NOT A SECOND ASSESSMENT. `resolveRunAdmission` exposes the
+          // assessment it derived from precisely so a caller needing both does
+          // not run the assessor twice; two assessments of one graph could
+          // disagree, which is the hazard `analysis-ready-core` removes.
+          analysisReadyForTurn = buildCanonicalAnalysisReadyFromGraph(committed.persistedGraph);
           const readbackParsed = GraphV3.safeParse(committed.persistedGraph);
           response = {
             ...committed.response,
@@ -4457,8 +4468,20 @@ export async function runTurnExecutor(
           });
           commitPerformed = committed.performed;
           stagesCompleted.push('commit');
-          const readback = assessCanonicalAnalysisReadiness(committed.persistedGraph);
-          analysisReadyForTurn = readback.analysisReady;
+          // ⭐ THE ADMISSION IS RECOMPUTED HERE, NOT JUST THE ASSESSMENT.
+          // This read `assessCanonicalAnalysisReadiness(...).analysisReady`,
+          // which does not compute `may_run` — only
+          // `canonicalAnalysisReadyFrom(resolveRunAdmission(g), g)` does. So on
+          // the readiness loop's PAYOFF turn, right after the user supplied what
+          // Olumi asked for, the payload carried no admission verdict and every
+          // consumer gating the Run affordance fell back to the stricter
+          // `status` rule. Measured: `may_run` absent on 400/400 assessments of
+          // real persisted models.
+          // ⚠ NOT A SECOND ASSESSMENT. `resolveRunAdmission` exposes the
+          // assessment it derived from precisely so a caller needing both does
+          // not run the assessor twice; two assessments of one graph could
+          // disagree, which is the hazard `analysis-ready-core` removes.
+          analysisReadyForTurn = buildCanonicalAnalysisReadyFromGraph(committed.persistedGraph);
           const readbackParsed = GraphV3.safeParse(committed.persistedGraph);
           response = {
             ...committed.response,

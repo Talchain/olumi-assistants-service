@@ -34,6 +34,7 @@ import {
   type ScenarioReader,
 } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
+import { runWithProviderPolicy, OPENAI_ONLY } from '../../../../adapters/llm/provider-policy.js';
 
 // Read the fixture via fs rather than a `with { type: 'json' }` import
 // attribute: the full tsconfig (module=Node16, the typecheck-drift ratchet's
@@ -131,6 +132,27 @@ describe('run_analysis — flag-gated brief-to-PLoT leg (CEE_SEND_BRIEF_TO_PLOT)
   });
 
   it('flag ON: payload.brief carries the snapshot brief verbatim', async () => {
+    (config.cee as { sendBriefToPlot: boolean }).sendBriefToPlot = true;
+    const payload = await runWith(makeScenarioSnapshot({ briefText: BRIEF }));
+    expect(payload.brief).toBe(BRIEF);
+  });
+
+  /**
+   * ⛔ THE BRIEF IS WHAT MAKES PLoT CALL BACK INTO CEE'S LLM REVIEW LEGS, and a
+   * callback is a NEW HTTP request that no request-scoped provider policy reaches.
+   * Measured (preflight review of #1749, verified): CEE_SEND_BRIEF_TO_PLOT is ON on
+   * cee-staging, so the OpenAI Agent's run_analysis made PLoT call CEE's
+   * /assist/v1/review and /assist/v1/decision-review — generative calls outside the
+   * policy and off `_provider_calls`. Under ANY provider policy no brief is sent.
+   */
+  it('RED: flag ON under an OpenAI-only request policy — NO brief is sent, so PLoT makes no LLM callback', async () => {
+    (config.cee as { sendBriefToPlot: boolean }).sendBriefToPlot = true;
+    const payload = await runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), () =>
+      runWith(makeScenarioSnapshot({ briefText: BRIEF })));
+    expect('brief' in payload).toBe(false);
+  });
+
+  it('CONTRAST: flag ON outside any policy (Conventional) — the brief is still sent', async () => {
     (config.cee as { sendBriefToPlot: boolean }).sendBriefToPlot = true;
     const payload = await runWith(makeScenarioSnapshot({ briefText: BRIEF }));
     expect(payload.brief).toBe(BRIEF);

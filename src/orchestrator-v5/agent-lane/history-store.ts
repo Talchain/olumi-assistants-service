@@ -66,6 +66,61 @@ export function dropDanglingCalls(items: readonly unknown[]): unknown[] {
   });
 }
 
+/**
+ * ⛔ THE CONVERSATION OUTLIVES THE PROCESS; THE AGENT'S MEMORY OF IT DID NOT.
+ *
+ * The history above is in-process. cee-staging runs ONE instance (Render API,
+ * 23 Sep: `numInstances: 1`, no autoscaling) and redeploys on EVERY merge to
+ * `staging`; the store also evicts the oldest session past `maxSessions`. Either
+ * way the browser still shows the whole conversation — it reads
+ * `v5_conversation_turns` — while the Agent started from nothing, so "as I said
+ * earlier…" met an Agent that had never heard it.
+ *
+ * So a session this process does not hold is seeded from the durable turns:
+ * the user's and the Agent's TEXT, oldest first. Tool calls and their results
+ * are not durable and are not reconstructed — the Agent re-reads the model
+ * through its tools, which is the authoritative source anyway, and an old
+ * proposal is not revived (the proposal store is in-process too, so
+ * `get_canonical_state` truthfully shows nothing awaiting approval).
+ */
+export function historyFromDurableTurns(
+  turns: readonly { user_message?: string | null; assistant_message?: string | null }[],
+): unknown[] {
+  const items: unknown[] = [];
+  // `readRecent` returns newest first.
+  for (const t of [...turns].reverse()) {
+    if (typeof t.user_message === 'string' && t.user_message.trim().length > 0) {
+      items.push({ role: 'user', content: [{ type: 'input_text', text: t.user_message }] });
+    }
+    if (typeof t.assistant_message === 'string' && t.assistant_message.trim().length > 0) {
+      items.push({ role: 'assistant', content: t.assistant_message });
+    }
+  }
+  return items;
+}
+
+/** Marks a board edit in the Agent's history: the user's own change, already applied — never a request to the Agent. */
+export const BOARD_EDIT_PREFIX = '(Board edit \u2014 the user changed this directly on the canvas and Olumi has already applied it; it is not a request to you.)';
+
+function isBoardEditNote(item: unknown): boolean {
+  const content = (item as { content?: unknown })?.content;
+  const first = Array.isArray(content) ? (content[0] as { text?: unknown } | undefined)?.text : content;
+  return typeof first === 'string' && first.startsWith(BOARD_EDIT_PREFIX);
+}
+
+/**
+ * True when the held history carries no user message of the conversation itself.
+ *
+ * ⛔ A BOARD-EDIT NOTE IS NOT CONVERSATION (preflight integration, #1733 × #1757). The
+ * route records a forwarded canvas edit as a `role: 'user'` item starting with
+ * BOARD_EDIT_PREFIX, so counting every user item meant a board edit made FIRST after
+ * a restart suppressed the seeding, and the Agent forgot the conversation before the
+ * deploy. Notes are ignored here; the seed goes ahead of them.
+ */
+export function needsDurableSeed(held: readonly unknown[]): boolean {
+  return !held.some((i) => (i as { role?: unknown })?.role === 'user' && !isBoardEditNote(i));
+}
+
 export class HistoryStore {
   private readonly items = new Map<string, unknown[]>();
 
@@ -76,6 +131,11 @@ export class HistoryStore {
 
   get(sessionId: string): unknown[] {
     return dropDanglingCalls(this.items.get(sessionId) ?? []);
+  }
+
+  /** Whether THIS process holds a history for the session (evicted or never seen → false). */
+  has(sessionId: string): boolean {
+    return this.items.has(sessionId);
   }
 
   set(sessionId: string, next: readonly unknown[]): void {

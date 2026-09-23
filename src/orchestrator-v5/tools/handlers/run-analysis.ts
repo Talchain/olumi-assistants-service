@@ -69,13 +69,22 @@ import {
   applyIntakeToLeaderPermission,
 } from '../../../orchestrator/context/intake-option-reconciliation.js';
 import { buildIntakeOptionDisclosure } from '../../coaching/intake-option-disclosure.js';
+// D-ask-1 extended to CEE-inferred FACTOR values: the analysis says whose
+// numbers it ran on. See inferred-value-disclosure.ts for the measurement.
+import {
+  buildInferredValueDisclosure,
+  deriveInferredValues,
+} from '../../coaching/inferred-value-disclosure.js';
 import { composeObjectiveContradictionDisclosure } from '../../coaching/objective-contradiction.js';
 import type { PLoTClient, V2RunError } from '../../../orchestrator/plot-client.js';
 import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.js';
 
 import { getHandlerBudgetMs } from '../../budgets.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { collectInterventionControlledFactorIds } from '../../context/intervention-controlled-drivers.js';
+import {
+  collectFactorIdsSetByEveryOption,
+  collectInterventionControlledFactorIds,
+} from '../../context/intervention-controlled-drivers.js';
 import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import type {
   HandlerFn,
@@ -162,6 +171,7 @@ export {
   HandlerResultInvalidError,
   type HandlerInvocationFailedCause,
 } from '../handler-errors.js';
+import { currentProviderPolicy } from '../../../adapters/llm/provider-policy.js';
 
 // ============================================================================
 // Locked assistant_text templates (Refinement R1)
@@ -947,7 +957,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     //     empty string, so PLoT's `no_brief` skip stays honest);
     //   - over PLOT_BRIEF_MAX_CHARS (should be impossible — the DB CHECK
     //     caps at 8000) → bounded with a DISCLOSED warn log, never silent.
-    if (config.cee.sendBriefToPlot && typeof snapshot.briefText === 'string') {
+    //   - ⛔ under ANY request-scoped provider policy (the OpenAI Agent turn) → no
+    //     `brief`: the brief is what makes PLoT call BACK into CEE's LLM review legs
+    //     (/assist/v1/review, /assist/v1/decision-review), and a callback is a new
+    //     HTTP request no policy reaches — a generative call outside it and off
+    //     `_provider_calls` (preflight review of #1749; flag measured ON on staging).
+    if (config.cee.sendBriefToPlot && currentProviderPolicy() === undefined && typeof snapshot.briefText === 'string') {
       const trimmedBrief = snapshot.briefText.trim();
       if (trimmedBrief.length > 0) {
         if (trimmedBrief.length > PLOT_BRIEF_MAX_CHARS) {
@@ -1889,6 +1904,21 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       interventionControlledFactorIds: collectInterventionControlledFactorIds(
         snapshot.rawPersistedGraph ?? { options: snapshot.options },
       ),
+      // P2: the INTERSECTION (factors EVERY option sets). Lets the headline
+      // tell a vacuous "no single factor would change the order" (nothing
+      // could, by construction) from a real finding.
+      //
+      // ⚠ Over the WIRE population (`finalWireOptions`, §3.3), NOT the
+      // persisted graph. The question is "could any option PLoT compared read
+      // the swept value?", so only the options PLoT received, with the
+      // intervention keys PLoT received, may answer it. The persisted graph
+      // differs in both directions: a placeholder the gate EXCLUDED (§2.55)
+      // would empty the intersection and keep a vacuous claim; a status quo
+      // the gate HELD carries interventions only on the wire. The union above
+      // stays persisted-graph-wide on purpose (a safety backstop over-fires).
+      factorIdsSetByEveryOption: collectFactorIdsSetByEveryOption({
+        options: finalWireOptions,
+      }),
       // The named-driver half. Derived from the SAME records the disclosure
       // sentence below is built from, so the sentence and the suppression can
       // never disagree about which factors are unset.
@@ -2158,7 +2188,24 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     const separabilityDisclosure = buildSeparabilityDisclosure(
       headlineDescriptor.separability_withhold,
     );
-    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${separabilityDisclosure}`;
+    // D-ask-1 (2.11) applied to CEE-INFERRED FACTOR values. Measured on staging
+    // 23 Sep (scenario `e243debd`): the brief stated no numbers, the product
+    // supplied three of its four factor values, and the result named a leading option
+    // without ever saying a single number was ours. The ratified ruling —
+    // "the analysis result must never present [our] numbers as user-provided" —
+    // was plumbed for scaffolded OPTIONS and silent on inferred FACTORS.
+    //
+    // ⚠ POSITION IS LOAD-BEARING: it rides immediately after the participation
+    // disclosure because that is its slot in `TAIL_PATTERN`. The egress
+    // allowlist matches the tail in order, so appending it elsewhere would make
+    // the whole summary fail the grammar and collapse to the locked template.
+    //
+    // Read from the graph the analysis actually RAN on, so the sentence can
+    // never describe a different model than the result it rides on.
+    const inferredValueDisclosure = buildInferredValueDisclosure(
+      deriveInferredValues(graphForAnalysis),
+    );
+    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases

@@ -26,12 +26,14 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
+import { OPENAI_ONLY, assertProviderAllowed, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
-import { HistoryStore } from '../orchestrator-v5/agent-lane/history-store.js';
+import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
+import { BOARD_EDIT_PREFIX, HistoryStore, historyFromDurableTurns, needsDurableSeed } from '../orchestrator-v5/agent-lane/history-store.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
 import { log } from '../utils/telemetry.js';
@@ -43,13 +45,15 @@ import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-
 import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
-import { assessCanonicalAnalysisReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { narrateWriteOutcome, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { approvalChipsFor } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
+import type { GraphV3T } from '../schemas/cee-v3.js';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
@@ -110,6 +114,9 @@ const MUTATION_INSTRUCTION =
   config.proxy.agentLanePreview === true
     ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
     : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link, propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
+
+/** Marks a board edit in the Agent's history — defined beside `needsDurableSeed`, which must recognise it. */
+export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.js';
 
 const AGENT_INSTRUCTIONS = [
   'You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user.',
@@ -223,6 +230,7 @@ const AGENT_INSTRUCTIONS = [
    * ordering is sensitive to, and let the user change it and see how much it matters.
    */
   'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one; say which option leads in this model and how firmly. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding.',
+  'History entries that begin \u201c(Board edit\u201d are changes the user made directly on the canvas. When the user asks about \u201cmy change\u201d, start from the most recent board edit, and read the current state before explaining what it did.',
   'British English. Concise but substantive.',
 ].join(' ');
 
@@ -231,9 +239,32 @@ const AGENT_INSTRUCTIONS = [
  * the `draft_graph` the canvas draws. Shared by a live turn and a replay, so a
  * replayed answer is shown against the SAME current state a fresh one would be.
  */
-async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown }> {
+/** @internal Exported for testing. */
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
+  /**
+   * ⛔ THE SCENARIO'S OWN `analysis_state`, not the finaliser's no-context verdict
+   * (preflight UI-contract audit, verified). This route finalises with
+   * `{ scenarioId }` only, so the finaliser stamps what is true of a turn with no
+   * analysis context — `unknown_degraded` / `no_graph_this_turn`, leader withheld —
+   * and the UI treats `analysis_state` as the wire authority: a result that had just
+   * run read "Results may be outdated" and its leading option was withheld, on every
+   * Agent turn. The graph read carries the scenario-bound verdict; it wins when present.
+   */
+  let analysisState: unknown;
+  /**
+   * ⛔ THE RESULT BOUND TO THE GRAPH THIS RESPONSE RETURNS, and nothing else
+   * (independent review of #1760, 5797642232 then 5798478999). A turn can run the
+   * analysis and THEN the graph can change — and another analysis of the new graph
+   * can commit before this readback — so neither the run's own verdict NOR its
+   * blocks may be shown: a current verdict for run B must never license run A's
+   * result. The graph read's `analysis_result` IS the block for the fact its verdict
+   * selected, present ONLY on a fresh graph-hash verdict for the current graph
+   * (`readScenarioAnalysis`), so it is emitted as-is, beside that verdict.
+   * Unavailable readback → no result: never manufacture currentness.
+   */
+  let analysisResult: unknown;
   /**
    * ⛔ THE CANVAS RENDERS FROM `draft_graph`, NOT FROM `graph_hash`.
    *
@@ -257,6 +288,8 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
     if (after.status === 200) {
       graphHash = typeof after.json.graph_hash === 'string' ? after.json.graph_hash : undefined;
       analysisReady = after.json.analysis_ready;
+      if (typeof after.json.analysis_state === 'object' && after.json.analysis_state !== null) analysisState = after.json.analysis_state;
+      if (typeof after.json.analysis_result === 'object' && after.json.analysis_result !== null) analysisResult = after.json.analysis_result;
       /**
        * ⭐ READINESS FROM THE MOMENT THE MODEL EXISTS, not from the moment
        * someone runs an analysis.
@@ -269,16 +302,41 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
        * (`turn 1: analysis_ready.options=0, expected >= 2`), which is how
        * the gap surfaced.
        *
-       * `assessCanonicalAnalysisReadiness` is the ONE readiness authority
-       * named in CLAUDE.md and it is a pure function of the graph — no LLM,
-       * no network, no second orchestrator turn — so this costs a function
+       * The canonical readiness builder is a pure function of the graph — no
+       * LLM, no network, no second orchestrator turn — so this costs a function
        * call, not twenty seconds. The graph read's own `analysis_ready`
        * still wins when it has one, because that reflects a real run.
+       *
+       * ⛔⛔ IT MUST BE THE BUILDER, NOT THE BARE ASSESSMENT — this is the
+       * WHOLE readiness payload for this lane.
+       *
+       * This read `assessCanonicalAnalysisReadiness(...).analysisReady`, which
+       * does NOT compute `may_run`; only
+       * `canonicalAnalysisReadyFrom(resolveRunAdmission(g), g)` — i.e.
+       * `buildCanonicalAnalysisReadyFromGraph` — does. And
+       * `/assist/v1/scenarios/:id/graph` never sends `analysis_ready` at all
+       * (its 200 carries `graph_hash`, `layout_present`, `not_modelled` …), so
+       * the branch above is ALWAYS taken: every readiness payload an Agent-lane
+       * user receives came from here.
+       *
+       * The consequence is not subtle. The client gates the Run affordance on
+       * `admitsRunAffordance(status, may_run) = status === 'ready' || may_run
+       * === true`. With `may_run` absent it falls back to the stricter `status`
+       * term — and measured over the full population of 15,255 persisted models,
+       * 3,168 (20.77%) are `may_run: true` under a NON-ready status. (An
+       * earlier revision said 27.0% from a 400-row `updated_at DESC` slice;
+       * that was recency bias.) Those users can run the
+       * analysis and are never offered it, on the very turn this fallback was
+       * added to serve: straight after a 60-90 s construction.
+       *
+       * ⚠ NOT A SECOND ASSESSMENT. `resolveRunAdmission` exposes the assessment
+       * it derived from, precisely so a caller needing both does not run the
+       * assessor twice.
        */
       if (analysisReady === undefined && after.json.graph !== undefined) {
         try {
-          const assessed = assessCanonicalAnalysisReadiness(after.json.graph);
-          if (assessed.analysisReady !== undefined) analysisReady = assessed.analysisReady;
+          const canonical = buildCanonicalAnalysisReadyFromGraph(after.json.graph);
+          if (canonical !== undefined) analysisReady = canonical;
         } catch {
           // Readiness is a disclosure, never a gate on the user's answer.
         }
@@ -295,18 +353,58 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
        * complete, with HTTP 200. A shape error here does not degrade the
        * turn; it deletes it.
        */
-      const g = after.json.graph as { nodes?: unknown[]; edges?: unknown[] } | undefined;
+      const g = after.json.graph as GraphV3T | undefined;
       if (g !== undefined && Array.isArray(g.nodes) && g.nodes.length > 0) {
-        const nodes = g.nodes;
-        const edges = Array.isArray(g.edges) ? g.edges : [];
-        draftGraph = { node_count: nodes.length, edge_count: edges.length, nodes, edges };
+        /**
+         * ⛔ AND IT CARRIES `goal_constraints`. Assembled by hand it did not, so a
+         * constraint the model holds ("churn under 4%") was cleared from the canvas
+         * on the first build (the UI's `applyDraftResult` sets constraints from this
+         * field). The canonical wire builder is the one Conventional's applied-edit
+         * path uses: the same four fields, plus `goal_constraints` when non-empty.
+         */
+        draftGraph = buildAppliedGraphWireField({ ...g, edges: Array.isArray(g.edges) ? g.edges : [] });
       }
     }
-  } catch {
-    // A readback failure must not lose the user's answer. The turn still
-    // returns; the client simply does not learn the new revision this time.
+  } catch (err) {
+    /**
+     * ⭐⭐ THE FAIL-OPEN IS RIGHT AND IT WAS SILENT — which converted a
+     * measurable problem into an unmeasurable one.
+     *
+     * A readback failure must not lose the user's answer, so returning the turn
+     * is correct and unchanged. But when it happens the client does not learn
+     * the new revision, and **that has a user-visible consequence nobody could
+     * count**: `lastServerGraphHash` in the canvas store is fed by exactly two
+     * wire emitters — the top-level `graph_hash` and
+     * `analysis_ready.current_graph_hash` — and BOTH are omitted on this path.
+     * Null means *"CEE has not stamped one this session"*, and the store's own
+     * comment says a delete then **stands down from the wire** rather than
+     * asserting a base it does not hold.
+     *
+     * So the user's delete gesture silently stops applying, and until now there
+     * was no log line, no event, and no way to know how often. The estate's own
+     * draft-quality doctrine names this exact shape: *"a repair pass whose
+     * fail-open is silent converts a measurable problem into an unmeasurable
+     * one."*
+     *
+     * ⛔ NOTHING ABOUT THE BEHAVIOUR CHANGES. This adds one warn on a path that
+     * already swallowed. It does not refuse the turn, does not retry, and does
+     * not synthesise a revision — a hash this code could not read is one it must
+     * not assert.
+     */
+    log.warn(
+      {
+        event: 'agent_lane.state_readback_failed',
+        scenario_id: scenarioId,
+        err: String(err),
+        // Which emitters the client will be missing, stated rather than implied,
+        // so the consequence is legible without reading the canvas store.
+        graph_hash_emitted: graphHash !== undefined,
+        analysis_ready_emitted: analysisReady !== undefined,
+      },
+      'agent-lane: could not read the current model back — the client will not learn this turn\u2019s revision, so a delete gesture stands down',
+    );
   }
-  return { graphHash, analysisReady, draftGraph };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -375,6 +473,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
   const callModel: CallModel = async (req) => onceMoreOnTransportFailure('conversation', async () => {
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
+    assertProviderAllowed('openai', 'agent-v1-turn.callModel', { model: budget.model, purpose: 'conversation' });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
@@ -402,6 +501,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    * (see BANKED_BUDGETS role 'whole'), not the conversation budget.
    */
   const callStructured: CallStructuredModel = async (reqBody) => onceMoreOnTransportFailure('construction', async () => {
+    assertProviderAllowed('openai', 'agent-v1-turn.callStructured', { model: reqBody.model, purpose: 'construction' });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
@@ -442,7 +542,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     return { text, usage: j.usage };
   }, (call, err) => log.warn({ err, call }, 'agent-lane transport failure, retrying once'));
 
-  app.post('/agent/v1/turn', async (req: FastifyRequest, reply: FastifyReply) => {
+  /*
+   * ⛔ EVERY AGENT TURN IS OPENAI-ONLY (Paul, 23 Sep: zero Anthropic calls on the
+   * OpenAI journey). Any Anthropic attempt beneath this turn — including internal
+   * dispatch to the conventional handlers — is refused before network I/O and logged
+   * (`adapters/llm/provider-policy.ts`).
+   */
+  const agentTurnHandler = async (req: FastifyRequest, reply: FastifyReply) => {
     const startedAt = Date.now();
     const body = (req.body ?? {}) as Record<string, unknown>;
     const scenarioId = typeof body.scenario_id === 'string' ? body.scenario_id : '';
@@ -504,12 +610,30 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         return reply.code(200).send({
           ...finaliseV5Response(composedRefusal, { scenarioId }),
           _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0, stopped_reason: 'read_only_preview' },
+          _provider_calls: recordedProviderCalls(),
         });
       }
 
       const forwarded = await dispatchFor(
         typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
       )('/orchestrate/v2/turn', body);
+      /**
+       * ⛔ THE AGENT MUST KNOW WHAT THE USER CHANGED ON THE BOARD. Measured on served
+       * cc7b26c: after a canvas edit (Tech lead hires 0 → 1), "Re-run the analysis.
+       * How much did my change matter?" was answered about the EARLIER approved
+       * baseline — the forwarded edit never entered the Agent's history, and it did
+       * not re-read state. The product's own narration of the edit (the handler's
+       * truthful text, e.g. "Updated Tech lead hires from 0 hires to 1 hire.") is
+       * appended to this session's history, marked as a board edit — not as
+       * something the user asked the Agent to do.
+       */
+      const narration = typeof forwarded.json.assistant_text === 'string' ? forwarded.json.assistant_text.trim() : '';
+      if (forwarded.status === 200 && kind === 'system_event' && narration.length > 0) {
+        histories.set(sessionId, [
+          ...histories.get(sessionId),
+          { role: 'user', content: [{ type: 'input_text', text: `${BOARD_EDIT_PREFIX} ${narration}` }] },
+        ]);
+      }
       return reply.code(forwarded.status).send({
         ...forwarded.json,
         // Underscore sidecar: egress is `.strict()`. Says plainly that this
@@ -522,6 +646,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           exit_path: 'agent_lane_forwarded',
           forwarded_kind: kind,
         },
+        _provider_calls: recordedProviderCalls(),
       });
     }
 
@@ -624,9 +749,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...finaliseV5Response(composedReplay, { scenarioId }),
         ...(state.graphHash !== undefined ? { graph_hash: state.graphHash } : {}),
         ...(state.analysisReady !== undefined ? { analysis_ready: state.analysisReady } : {}),
+        ...(state.analysisState !== undefined ? { analysis_state: state.analysisState } : {}),
         ...(state.draftGraph !== undefined ? { draft_graph: state.draftGraph } : {}),
         _diagnostic_trace: { exit_path: 'agent_lane_v1', agent_mode: mode, hops: 0, stopped_reason: 'replayed', tools_called: [], replayed: true },
         _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0, stopped_reason: 'replayed', replayed: true, turn_id: turnId },
+        _provider_calls: recordedProviderCalls(),
       };
     };
     // Set only when THIS request owns the turn — used to release it if nothing ran.
@@ -719,8 +846,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * numbers existed and never reached the surface that shows them. This is
      * the same defect shape as the `draft_graph` one: the answer was right and
      * the carrier was missing.
+     *
+     * The carrier is the FINAL readback's bound result and readiness (see
+     * `readBackState`), NOT the tool run's own blocks: a run's blocks can describe a
+     * graph the user no longer has (independent review of #1760).
      */
-    let analysisFromTool: { analysis_ready?: unknown; blocks?: unknown[] } | undefined;
     // Counts every call that could WRITE, so a failed turn knows whether it is
     // safe to release its claim (nothing sent) or must leave it (outcome unknown).
     let writesDispatched = 0;
@@ -728,9 +858,21 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (path.endsWith('/graph/register') || path === '/orchestrate/v2/turn') writesDispatched += 1;
       return dispatch(path, body);
     };
-    const capabilities = createAgentCapabilities(countingDispatch, proposals, callStructured, mode, (payload) => {
-      analysisFromTool = payload;
-    });
+    const capabilities = createAgentCapabilities(countingDispatch, proposals, callStructured, mode);
+    // A session whose in-process history holds no user message (a restart, a
+    // deploy, an eviction — or only a board-edit note appended since) is seeded
+    // from the durable conversation, ahead of whatever is already held — see
+    // `historyFromDurableTurns`. A failed read degrades to no history; it never
+    // fails the turn.
+    const held = histories.get(sessionId);
+    if (needsDurableSeed(held) && typeof store.readRecent === 'function') {
+      try {
+        const durable = historyFromDurableTurns(await store.readRecent(scenarioId));
+        if (durable.length > 0) histories.set(sessionId, [...durable, ...held]);
+      } catch (err) {
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: durable conversation could not be read — continuing without it');
+      }
+    }
     const history = histories.get(sessionId);
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
 
@@ -812,11 +954,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * Read back from the persisted graph, not from what a tool returned: the
      * hash the client caches must be the hash the product would serve it.
      */
-    const { graphHash, analysisReady, draftGraph } = await readBackState(dispatch, scenarioId);
+    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult } = await readBackState(dispatch, scenarioId);
 
-    // The analysis the tool actually ran wins over the graph readback, which
-    // carries only the persisted state and never the run's own options.
-    const analysisBlocks = Array.isArray(analysisFromTool?.blocks) ? analysisFromTool.blocks : [];
     const existingBlocks = Array.isArray((finalised as { blocks?: unknown[] }).blocks)
       ? (finalised as { blocks: unknown[] }).blocks
       : [];
@@ -877,11 +1016,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
     return reply.code(200).send({
       ...finalised,
-      ...(analysisBlocks.length > 0 ? { blocks: [...existingBlocks, ...analysisBlocks] } : {}),
+      // The FINAL readback's bound result block — never the tool run's own blocks. See
+      // `analysisResult` in readBackState. The Agent's text still reports what its run
+      // found and, if the model has since changed, that it has.
+      ...(analysisResult !== undefined ? { blocks: [...existingBlocks, analysisResult] } : {}),
       ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
-      ...(analysisFromTool?.analysis_ready !== undefined
-        ? { analysis_ready: analysisFromTool.analysis_ready }
-        : analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
+      // Readiness of the graph this response returns — the final readback's only.
+      ...(analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
+      // The scenario-bound verdict from the FINAL readback governs; otherwise the
+      // finaliser's own honest no-context verdict stays (present, never deleted).
+      ...(analysisState !== undefined ? { analysis_state: analysisState } : {}),
       ...(draftGraph !== undefined ? { draft_graph: draftGraph } : {}),
       /**
        * ⭐ SAY WHICH PATH SERVED THIS TURN.
@@ -913,9 +1057,28 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         hops: result.hops,
         stopped_reason: result.stopped_reason,
         ...(turnId !== undefined ? { turn_id: turnId, durability } : {}),
+        /**
+         * ⭐ WHICH VERSION THIS TURN PRODUCED, so a surface can reconcile what it
+         * is showing against what was actually saved. `mutated: true` said the
+         * model changed and never said what it became.
+         *
+         * Read back from the tools that performed the writes — `tool_results`
+         * already carries the full results — so nothing here is minted, and an
+         * empty list is reported honestly rather than filled in.
+         */
+        receipts: collectTurnReceipts(result.tool_results),
       },
+      /**
+       * ⭐ EVERY GENERATIVE ATTEMPT THIS TURN MADE, off the provider policy's ledger
+       * (`adapters/llm/provider-policy.ts`) — including those beneath internal
+       * dispatch. The OpenAI-only proof is read from here: any `anthropic` row is a
+       * failure even though it was `refused_before_network`.
+       */
+      _provider_calls: recordedProviderCalls(),
     });
-  });
+  };
+  app.post('/agent/v1/turn', (req: FastifyRequest, reply: FastifyReply) =>
+    runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), () => agentTurnHandler(req, reply)));
 
   log.info({ event: 'agent_lane.route_mounted' }, 'POST /agent/v1/turn mounted');
 }

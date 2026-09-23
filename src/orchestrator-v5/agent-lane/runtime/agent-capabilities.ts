@@ -509,7 +509,11 @@ export function createAgentCapabilities(
     detail:
       'Nothing is awaiting approval. A starting point must give a level for EVERY factor each option acts on, and the pairs in ' +
       'options_missing_levels have none. Call propose_starting_point again with the same values and levels PLUS a level for each ' +
-      'pair (in the factor\u2019s own units, as an assumption to correct), then show the user that one proposal.',
+      'pair (in the factor\u2019s own units, as an assumption to correct), then show the user that one proposal.' +
+      (Array.isArray(extra.levels_not_accepted) && extra.levels_not_accepted.length > 0
+        ? ' Some levels you DID give were not accepted: levels_not_accepted says which and why. Correct each one as its reason ' +
+          'says. Re-sending the same value will be refused again.'
+        : ''),
   });
 
   /**
@@ -732,7 +736,8 @@ export function createAgentCapabilities(
           if (missing === null) return { ok: false, mutated: false, refusal: 'not_found' };
           return incompleteStartingPoint(missing, {
             assumptions: a?.assumptions ?? [], option_levels: b?.interventions ?? [],
-            ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked } : {}), ...refused,
+            ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked } : {}),
+            ...(b !== null && Array.isArray(b.levels_not_accepted) ? { levels_not_accepted: b.levels_not_accepted } : {}), ...refused,
           });
         }
         return { ...made[0], ...refused };
@@ -748,7 +753,8 @@ export function createAgentCapabilities(
         if (missing === null) return { ok: false, mutated: false, refusal: 'not_found' };
         return incompleteStartingPoint(missing, {
           assumptions: a?.assumptions ?? [], option_levels: b?.interventions ?? [],
-          ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked } : {}), ...refused,
+          ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked } : {}),
+          ...(b !== null && Array.isArray(b.levels_not_accepted) ? { levels_not_accepted: b.levels_not_accepted } : {}), ...refused,
         });
       }
       const compound = createProposal({
@@ -773,6 +779,7 @@ export function createAgentCapabilities(
         // Levels the proposer LEFT OUT because the option is not wired to that
         // factor — the Agent must say so and offer a level it CAN record.
         ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked, not_linked_note: b.not_linked_note } : {}),
+        ...(b !== null && Array.isArray(b.levels_not_accepted) ? { levels_not_accepted: b.levels_not_accepted } : {}),
         ...refused,
         note:
           'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +
@@ -796,6 +803,15 @@ export function createAgentCapabilities(
       const unframed: { factor: string; detail: string }[] = [];
       const unchanged: string[] = [];
       const notLinked: { option: string; factor: string; acts_on: string[] }[] = [];
+      /**
+       * ⛔ EVERY SUPPLIED LEVEL THAT IS NOT ACCEPTED, WITH ITS OPTION AND WHY.
+       * MEASURED on served d1829c5 (journey J1): the starting point was refused
+       * `incomplete_starting_point` three times in one turn because a level the
+       * Agent DID supply was dropped here, and the refusal named only the pair
+       * still missing — so the Agent re-sent the same value. The reason travels
+       * with the pair, so the next attempt can correct it.
+       */
+      const notAccepted: { option: string; factor: string; value: unknown; reason: string }[] = [];
       const seen = new Set<string>();
       const set: {
         option: { id: string; label: string }; factor: { id: string; label: string };
@@ -806,8 +822,17 @@ export function createAgentCapabilities(
       for (const i of input) {
         const option = byLabel(String(i?.option_label ?? ''), 'option');
         const factor = byLabel(String(i?.factor_label ?? ''), 'factor');
-        if (option === undefined) { unresolved.push(`option "${String(i?.option_label ?? '')}"`); continue; }
-        if (factor === undefined) { unresolved.push(`factor "${String(i?.factor_label ?? '')}"`); continue; }
+        const asGiven = { option: String(i?.option_label ?? ''), factor: String(i?.factor_label ?? ''), value: i?.value };
+        if (option === undefined) {
+          unresolved.push(`option "${asGiven.option}"`);
+          notAccepted.push({ ...asGiven, reason: `No option in the model is labelled "${asGiven.option}". Use an option label exactly as get_canonical_state gives it.` });
+          continue;
+        }
+        if (factor === undefined) {
+          unresolved.push(`factor "${asGiven.factor}"`);
+          notAccepted.push({ ...asGiven, option: option.label, reason: `No factor in the model is labelled "${asGiven.factor}". Use a factor label exactly as get_canonical_state gives it.` });
+          continue;
+        }
         /**
          * ⛔ A LEVEL CAN ONLY BE SET ON A FACTOR THE OPTION IS WIRED TO — the
          * write's own rule, applied at PROPOSAL time. MEASURED on served
@@ -830,7 +855,11 @@ export function createAgentCapabilities(
           continue;
         }
         const raw = Number(i?.value);
-        if (!Number.isFinite(raw)) { unresolved.push(`${option.label} -> ${factor.label} (no value)`); continue; }
+        if (!Number.isFinite(raw)) {
+          unresolved.push(`${option.label} -> ${factor.label} (no value)`);
+          notAccepted.push({ option: option.label, factor: factor.label, value: i?.value, reason: 'No numeric value was given.' });
+          continue;
+        }
 
         const os = (factor.observed_state ?? {}) as { cap?: unknown; unit?: unknown };
         /**
@@ -851,6 +880,10 @@ export function createAgentCapabilities(
           normalised = raw / cap;
           if (normalised < 0 || normalised > 1) {
             unframed.push({ factor: factor.label, detail: `${raw} is outside the model's range for this factor (0 to ${cap})` });
+            notAccepted.push({
+              option: option.label, factor: factor.label, value: raw,
+              reason: `${raw} is outside the model's range for this factor (0 to ${cap}). Propose a level within that range, in the same units, as an assumption for the user to correct.`,
+            });
             continue;
           }
         } else if (raw >= 0 && raw <= 1) {
@@ -875,12 +908,11 @@ export function createAgentCapabilities(
           derivedFrame = defaultFrameFor(raw);
           normalised = raw / derivedFrame;
         } else {
-          unframed.push({
-            factor: factor.label,
-            detail:
-              `"${factor.label}" has no stated range, and ${raw} cannot be read against one. ` +
-              'Nothing here will pick a range on your behalf for a figure like that.',
-          });
+          const detail =
+            `"${factor.label}" has no stated range, and ${raw} cannot be read against one. ` +
+            'Nothing here will pick a range on your behalf for a figure like that.';
+          unframed.push({ factor: factor.label, detail });
+          notAccepted.push({ option: option.label, factor: factor.label, value: raw, reason: detail });
           continue;
         }
 
@@ -908,6 +940,7 @@ export function createAgentCapabilities(
           ...(notLinked.length > 0 ? { not_linked: notLinked } : {}),
           ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
           ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
+          ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
           detail: 'Nothing could be recorded. Tell the user exactly which of these it was and why.',
         };
       }
@@ -951,6 +984,7 @@ export function createAgentCapabilities(
         } : {}),
         ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
         ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
+        ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
         note:
           'Nothing has changed. Show the user the value in THEIR units and what it rests on, then call ' +
           'authorise_change with this proposal_id once they agree.',
@@ -1124,9 +1158,12 @@ export function createAgentCapabilities(
          * ⚠ REPRESENTATION LOSS, RECORDED. `FactorValueEditEvent` is `.strict()`
          * and carries `{kind, target_id, value, raw_value?, unit?, field?,
          * applied_from?}` — there is NO provenance field on it, and the handler
-         * stamps `source: 'user_explicit'` because it was built for the
-         * inspector. That stamp is right about WHO set the value (the user
-         * authorised this exact set) and silent about WHAT IT RESTS ON. The
+         * stamps `observed_state.source` with `USER_EDIT_SOURCE`
+         * (`canonicalise-value-ops.ts`) because it was built for the inspector.
+         * (`user_explicit` is only the source of the proposal PARAMETER
+         * `factor-value-edit.ts` builds, not the stored stamp.) That stamp is
+         * right about WHO set the value (the user authorised this exact set)
+         * and silent about WHAT IT RESTS ON. The
          * basis therefore survives only in the proposal and in what the Agent
          * says, so the result below tells it to say it.
          */
