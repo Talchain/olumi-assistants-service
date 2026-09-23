@@ -33,7 +33,7 @@
  * number — that is measured from `pass2_call_complete`, which already logs
  * `latency_ms` and the token counts, against the n=795 baseline above.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { CallOpts, ChatArgs } from '../../../src/adapters/llm/types.js';
 
 vi.mock('../../../src/adapters/llm/prompt-loader.js', () => ({
@@ -49,8 +49,16 @@ vi.mock('../../../src/adapters/llm/prompt-loader.js', () => ({
   }),
 }));
 
+// ⚠ HOISTED SPY, referenced inside the factory — the shape the sibling
+// `pass2-budget.test.ts` already uses and CI already typechecks. The previous
+// version of this file reached the adapter by casting `getAdapter` to
+// `ReturnType<typeof vi.fn>`, which is a TS2352: a real function type and
+// vitest's `Mock` do not sufficiently overlap. That single cast was the +1 in
+// `Typecheck Drift (ratchet)` — current 292 vs baseline 291.
+const chatSpy = vi.hoisted(() => vi.fn());
+
 vi.mock('../../../src/adapters/llm/router.js', () => ({
-  getAdapter: vi.fn().mockReturnValue({ name: 'openai', model: 'o4-mini', chat: vi.fn() }),
+  getAdapter: vi.fn().mockReturnValue({ name: 'openai', model: 'o4-mini', chat: chatSpy }),
   getMaxTokensFromConfig: vi.fn().mockReturnValue(4096),
 }));
 
@@ -62,14 +70,13 @@ vi.mock('../../../src/utils/json-extractor.js', () => ({
 }));
 
 vi.mock('../../../src/utils/telemetry.js', () => ({
-  log: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   emit: vi.fn(),
 }));
 
 // ⚠ importOriginal SPREAD, not a hand-listed factory — a factory REPLACES the
 // module, and validate-graph.ts reads several constants from timeouts.js at
 // load, so a two-key mock dies at COLLECTION the moment it reaches for another.
-// This is the shape the sibling suite records as trap 12's prescribed form.
 vi.mock('../../../src/config/timeouts.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/config/timeouts.js')>()),
   VALIDATION_PIPELINE_TIMEOUT_MS: 30_000,
@@ -78,10 +85,9 @@ vi.mock('../../../src/config/timeouts.js', async (importOriginal) => ({
 const { callValidateGraph } = await import(
   '../../../src/cee/validation-pipeline/validate-graph.js'
 );
-const { getAdapter } = await import('../../../src/adapters/llm/router.js');
 const { buildModelParams } = await import('../../../src/adapters/llm/openai.js');
 
-const CALL_OPTS: CallOpts = { requestId: 'effort-req-1' };
+const CALL_OPTS: CallOpts = { requestId: 'effort-req-1', timeoutMs: 30_000 };
 
 const validPass2 = () => ({
   edges: [{
@@ -99,61 +105,62 @@ const chatResult = (parsed: unknown) => ({
   content: JSON.stringify(parsed),
   latencyMs: 200,
   model: 'o4-mini',
+  stopReason: 'stop',
   usage: { input_tokens: 100, output_tokens: 200 },
 });
 
+/** Runs a real Pass-2 call and returns the args the adapter was handed. */
+async function captureChatArgs(): Promise<ChatArgs> {
+  chatSpy.mockReset();
+  chatSpy.mockResolvedValue(chatResult(validPass2()));
+  await callValidateGraph(
+    'Should we migrate the checkout service off the monolith?',
+    [{ id: 'fac_x', kind: 'factor', label: 'X' }],
+    [{ from: 'fac_x', to: 'out_y' }],
+    CALL_OPTS,
+  );
+  // non-vacuity: a zero-call run would satisfy every assertion below vacuously
+  expect(chatSpy).toHaveBeenCalledTimes(1);
+  return chatSpy.mock.calls[0][0] as ChatArgs;
+}
+
 describe('Pass 2 asks the adapter for LOW reasoning effort', () => {
-  let seen: ChatArgs[];
-
-  beforeEach(async () => {
-    seen = [];
-    const adapter = (getAdapter as ReturnType<typeof vi.fn>)();
-    adapter.chat = vi.fn(async (args: ChatArgs) => {
-      seen.push(args);
-      return chatResult(validPass2());
-    });
-    await callValidateGraph(
-      'Should we migrate the checkout service off the monolith?',
-      [{ id: 'fac_x', kind: 'factor', label: 'X' }],
-      [{ from: 'fac_x', to: 'out_y' }],
-      CALL_OPTS,
-    );
+  it('⛔ the call site passes reasoningEffort: low', async () => {
+    const args = await captureChatArgs();
+    expect(args.reasoningEffort).toBe('low');
   });
 
-  it('⛔ the call site passes reasoningEffort: low', () => {
-    expect(seen).toHaveLength(1); // non-vacuity: a zero-call run would pass every `every` below
-    expect(seen[0].reasoningEffort).toBe('low');
-  });
-
-  it('does not disturb the other Pass-2 chat arguments', () => {
+  it('does not disturb the other Pass-2 chat arguments', async () => {
     // Binds by identity, so a change that swapped effort for something else
     // cannot pass. `responseFormat` is what makes the JSON contract work.
-    expect(seen[0].responseFormat).toBe('json_object');
-    expect(typeof seen[0].system).toBe('string');
-    expect(seen[0].system.length).toBeGreaterThan(0);
-    expect(typeof seen[0].maxTokens).toBe('number');
+    const args = await captureChatArgs();
+    expect(args.responseFormat).toBe('json_object');
+    expect(typeof args.system).toBe('string');
+    expect(args.system.length).toBeGreaterThan(0);
+    expect(typeof args.maxTokens).toBe('number');
   });
 });
 
 describe('the adapter contract actually carries the effort through', () => {
+  // No `as Record<string, unknown>` cast: buildModelParams already RETURNS a
+  // typed object carrying `reasoning_effort?`, so the cast was both redundant
+  // and a second conversion the ratchet could charge for.
   it('⛔ buildModelParams emits the requested effort for a reasoning model', () => {
-    const p = buildModelParams('o4-mini', 0, { maxTokens: 4096, reasoningEffort: 'low' }) as
-      Record<string, unknown>;
+    const p = buildModelParams('o4-mini', 0, { maxTokens: 4096, reasoningEffort: 'low' });
     expect(p.reasoning_effort).toBe('low');
   });
 
   it('CONTRAST CONTROL — omitting it still yields the pre-existing default', () => {
     // Proves this change is additive: every caller that says nothing is
     // byte-identical to before, which is why no existing suite had to move.
-    const p = buildModelParams('o4-mini', 0, { maxTokens: 4096 }) as Record<string, unknown>;
+    const p = buildModelParams('o4-mini', 0, { maxTokens: 4096 });
     expect(p.reasoning_effort).toBe('medium');
   });
 
   it('CONTRAST CONTROL — a NON-reasoning model gets no effort at all', () => {
     // The `isReasoningModel` branch is what makes this safe to thread from a
     // shared `chat()`: a gpt-4o call must not acquire a reasoning parameter.
-    const p = buildModelParams('gpt-4o', 0, { maxTokens: 4096, reasoningEffort: 'low' }) as
-      Record<string, unknown>;
+    const p = buildModelParams('gpt-4o', 0, { maxTokens: 4096, reasoningEffort: 'low' });
     expect('reasoning_effort' in p).toBe(false);
   });
 });
