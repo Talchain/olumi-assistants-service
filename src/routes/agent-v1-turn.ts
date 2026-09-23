@@ -40,7 +40,7 @@ import { resolveUserIdentity } from '../orchestrator/user-identity.js';
 import { log } from '../utils/telemetry.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
-import { runAgentTurn, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
+import { runAgentTurn, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
@@ -52,7 +52,8 @@ import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { narrateWriteOutcome, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
-import { approvalChipsFor } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
 
@@ -886,8 +887,54 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const history = histories.get(sessionId);
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
 
-    let result;
-    try {
+    /**
+     * ⭐ FAST PATH 2 — A TYPED APPROVAL IS APPLIED, NOT INTERPRETED (RC #63 5803960423 /
+     * 5803995225). Measured in Paul's staging test: "Use as starting assumptions" took
+     * ~29 s, 4 provider calls and 3 tool hops, and ran an analysis nobody asked for. The
+     * chip names exactly one proposal (`approvalChipsFor`), so there is nothing for a
+     * model to decide: the SAME `authorise_change` capability applies THAT proposal, with
+     * every ownership, integrity and CAS check the Agent's own call would get, and the
+     * status the user reads is composed from the result (`write-outcome`). Zero model
+     * calls, no implicit analysis. Words alone never take this path.
+     */
+    const approvedProposal = typedApprovalOf(body);
+    let fastPath: 'approve' | undefined;
+    let result: AgentTurnResult | undefined;
+    if (approvedProposal !== undefined) {
+      const fastStartedAt = Date.now();
+      const applied = await dispatchTool(
+        'authorise_change', JSON.stringify({ proposal_id: approvedProposal }),
+        { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }, capabilities, mode,
+      );
+      // A proposal this process no longer holds (a deploy, an eviction) is not the
+      // user's doing: the Agent, which can offer it again, takes the turn instead.
+      if (applied.refusal !== 'unknown_proposal') {
+        fastPath = 'approve';
+        const call = {
+          name: 'authorise_change', ok: applied.ok === true, mutated: applied.mutated === true, proposal_id: approvedProposal,
+          ...(typeof applied.outcome === 'string' ? { outcome: applied.outcome } : {}),
+          ...(typeof applied.refusal === 'string' ? { refusal: applied.refusal } : {}),
+        };
+        const said = narrateWriteOutcome('', [call], [applied]).status ?? '';
+        const ms = Date.now() - fastStartedAt;
+        result = {
+          assistant_text: '',
+          // The Agent's next turn sees the approval and what Olumi said about it.
+          items: [
+            ...(history ?? []),
+            { role: 'user', content: [{ type: 'input_text', text: message }] },
+            { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: said }] },
+          ],
+          tool_calls: [call],
+          tool_results: [applied],
+          mutated: applied.mutated === true,
+          hops: 0,
+          stopped_reason: 'answered',
+          timing: { total_ms: ms, provider_ms: 0, tool_ms: ms, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 1, hops: 0 },
+        };
+      }
+    }
+    if (result === undefined) try {
       result = await runAgentTurn(
         {
           ctx: { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id },
@@ -996,7 +1043,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           handler_id: null,
           request_hash: requestHash,
           response_emitted: true,
-          llm_calls_used: result.hops + 1,
+          llm_calls_used: fastPath !== undefined ? 0 : result.hops + 1,
           duration_ms: Date.now() - startedAt,
           handler_facts: [],
           userMessage: message,
@@ -1053,6 +1100,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        */
       _diagnostic_trace: {
         exit_path: 'agent_lane_v1',
+        ...(fastPath !== undefined ? { fast_path: fastPath } : {}),
         agent_mode: mode,
         hops: result.hops,
         stopped_reason: result.stopped_reason,
