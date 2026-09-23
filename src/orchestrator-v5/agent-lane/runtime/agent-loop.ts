@@ -69,6 +69,33 @@ export interface AgentTurnInput {
     readonly packet: CanonicalContextPacket | null;
     readonly expectation: ContextExpectation;
   };
+  /** Injected for deterministic tests; defaults to the wall clock. */
+  readonly now?: () => number;
+}
+
+/**
+ * Where a turn's wall time actually went.
+ *
+ * ⭐ MEASURED REASON THIS EXISTS. On the live estate over 3 days, turns with ONE
+ * provider call average 37.6s (p50 47.4s, p95 73.9s) while turns with TWO
+ * average 12.2s — so wall time tracks the DURATION of a call, not the NUMBER of
+ * them, and construction writes are 0.58s average (~0.8% of the turn). That
+ * points at model generation rather than request overhead, but the turn record
+ * stores only `duration_ms` and `llm_calls_used` and cannot prove it.
+ *
+ * ⛔ `overhead_ms` IS A RESIDUAL, DELIBERATELY: total minus provider minus tool.
+ * Anything not attributed lands in it and shows up as unexplained, so the
+ * measurement cannot quietly under-report the part nobody thought to time.
+ */
+export interface TurnTiming {
+  readonly total_ms: number;
+  readonly provider_ms: number;
+  readonly tool_ms: number;
+  /** total - provider - tool, floored at 0. Never negative. */
+  readonly overhead_ms: number;
+  readonly provider_calls: number;
+  readonly tool_calls: number;
+  readonly hops: number;
 }
 
 export interface AgentTurnResult {
@@ -92,6 +119,8 @@ export interface AgentTurnResult {
   readonly mutated: boolean;
   readonly hops: number;
   readonly stopped_reason: 'answered' | 'hop_limit';
+  /** Where this turn's wall time went. Always present. */
+  readonly timing: TurnTiming;
 }
 
 const DEFAULT_MAX_HOPS = 6;
@@ -121,8 +150,28 @@ export async function runAgentTurn(
   const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string }[] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;
+  const now = input.now ?? (() => Date.now());
+  const startedAt = now();
+  let providerMs = 0;
+  let toolMs = 0;
+  let providerCalls = 0;
+  let toolCallCount = 0;
+  const timingAt = (hopsTaken: number): TurnTiming => {
+    const total = Math.max(0, now() - startedAt);
+    return {
+      total_ms: total,
+      provider_ms: providerMs,
+      tool_ms: toolMs,
+      overhead_ms: Math.max(0, total - providerMs - toolMs),
+      provider_calls: providerCalls,
+      tool_calls: toolCallCount,
+      hops: hopsTaken,
+    };
+  };
 
   for (let hop = 0; hop < maxHops; hop++) {
+    const providerStartedAt = now();
+    providerCalls += 1;
     const resp = await callModel({
       instructions: input.instructions,
       input: items,
@@ -138,6 +187,7 @@ export async function runAgentTurn(
           }).tools) as readonly unknown[],
       max_output_tokens: input.maxOutputTokens,
     });
+    providerMs += Math.max(0, now() - providerStartedAt);
     const out = resp.output ?? [];
     /**
      * ⛔ EVERY CALL IN THE OUTPUT, NOT THE FIRST ONE.
@@ -172,6 +222,7 @@ export async function runAgentTurn(
         mutated,
         hops: hop,
         stopped_reason: 'answered',
+        timing: timingAt(hop),
       };
     }
 
@@ -179,9 +230,12 @@ export async function runAgentTurn(
     // calls — then one output per call, in the order they were made.
     items.push(...out);
     for (const call of calls) {
+      const toolStartedAt = now();
+      toolCallCount += 1;
       const result: ToolResult = await dispatchTool(
         String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode,
       );
+      toolMs += Math.max(0, now() - toolStartedAt);
       if (result.mutated) mutated = true;
       toolCalls.push({
         name: String(call.name),
@@ -211,5 +265,6 @@ export async function runAgentTurn(
     mutated,
     hops: maxHops,
     stopped_reason: 'hop_limit',
+    timing: timingAt(maxHops),
   };
 }
