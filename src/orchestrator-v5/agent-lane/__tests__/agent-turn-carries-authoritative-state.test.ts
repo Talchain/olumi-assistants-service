@@ -21,6 +21,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 
+const SERVED_PRICING = ((j: { graph?: unknown }) => (j.graph ?? j))(JSON.parse(readFileSync(new URL('./fixtures/served-pricing-graph-c4a6cce.json', import.meta.url), 'utf8'))) as { nodes: unknown[]; edges: unknown[] };
 const SERVED_FACT = JSON.parse(readFileSync(new URL('./fixtures/served-run-analysis-fact-for-binding.json', import.meta.url), 'utf8')) as { fact_type: string; result: Record<string, unknown> };
 
 const SCENARIO = '4d2c1b0a-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
@@ -150,6 +151,37 @@ describe('the Agent turn carries the scenario’s state, bound to the graph it r
     expect(s.marker).toBeUndefined();
     expect(s.run_state?.kind).toBe('unknown_degraded');
     expect(((r.json().blocks ?? []) as { type: string }[]).some((b) => b.type === 'analysis_result')).toBe(false);
+  });
+
+  it('RED: mutate/run → current readback — analysis_ready.freshness is "fresh", so the UI clears "Model changed" (Panel 5800618648)', async () => {
+    // A SERVED model, so readiness comes from the canonical assessor exactly as on the wire.
+    currentGraph = SERVED_PRICING;
+    const r = await runThenAnswer();
+    const s = r.json().analysis_state as State;
+    expect(s.run_state?.kind, 'the control: the readback says current').toBe('complete_current');
+    const ar = r.json().analysis_ready as { freshness?: string; freshness_reason?: string };
+    expect(ar.freshness).toBe('fresh');
+    expect(ar.freshness_reason).toBe('agent_readback_run_state_current');
+  });
+
+  it('CONTRAST: the graph changes before readback — never "fresh"; a stale verdict is stamped "stale", not omitted', async () => {
+    currentGraph = SERVED_PRICING;
+    afterRun = () => { currentGraph = { ...SERVED_PRICING, nodes: [...SERVED_PRICING.nodes, { id: 'f_new', kind: 'factor', label: 'Competitor price' }] }; };
+    const r = await runThenAnswer();
+    const kind = (r.json().analysis_state as State).run_state?.kind;
+    expect(r.json().analysis_ready, 'the control: readiness is on the wire').toBeDefined();
+    const ar = r.json().analysis_ready as { freshness?: string };
+    expect(kind).not.toBe('complete_current');
+    expect(ar.freshness).not.toBe('fresh');
+    if (kind === 'complete_stale') expect(ar.freshness).toBe('stale');
+  });
+
+  it('CONTRAST: an unavailable readback stamps no freshness at all', async () => {
+    currentGraph = SERVED_PRICING;
+    graphReadFails = true;
+    const r = await runThenAnswer();
+    const ar = r.json().analysis_ready as { freshness?: string } | undefined;
+    expect(ar?.freshness).toBeUndefined();
   });
 
   it('RED: draft_graph carries the model’s goal_constraints, so the canvas keeps the user’s limits', async () => {
