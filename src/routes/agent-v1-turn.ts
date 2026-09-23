@@ -33,6 +33,7 @@ import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
+import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
 import { BOARD_EDIT_PREFIX, HistoryStore, historyFromDurableTurns, needsDurableSeed } from '../orchestrator-v5/agent-lane/history-store.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
@@ -1037,6 +1038,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         hops: result.hops,
         stopped_reason: result.stopped_reason,
         ...(turnId !== undefined ? { turn_id: turnId, durability } : {}),
+        /**
+         * ⭐ WHICH VERSION THIS TURN PRODUCED, so a surface can reconcile what it
+         * is showing against what was actually saved. `mutated: true` said the
+         * model changed and never said what it became.
+         *
+         * Read back from the tools that performed the writes — `tool_results`
+         * already carries the full results — so nothing here is minted, and an
+         * empty list is reported honestly rather than filled in.
+         */
+        receipts: collectTurnReceipts(result.tool_results),
       },
       /**
        * ⭐ EVERY GENERATIVE ATTEMPT THIS TURN MADE, off the provider policy's ledger
