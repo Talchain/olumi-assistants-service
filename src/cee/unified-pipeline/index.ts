@@ -856,8 +856,11 @@ export async function runUnifiedPipeline(
     } as const;
     return applyDraftQualityPass(
       grammar.drawSpent
-        // Observe-only: `redraw` is ABSENT, not undefined, so a further draw is
-        // structurally impossible rather than merely gated.
+        // Observe-only: `redraw` is ABSENT, not undefined. That is the SECOND
+        // of two defences, not the whole one — see the correction above: the pass
+        // gates on `attemptSource` itself and spends 0 draws on this arm even when
+        // handed the callback. Belt-and-braces, so say so rather than claiming an
+        // impossibility the measurement contradicts.
         ? { ...qualityInput, attemptSource: "quality_redraw" }
         : { ...qualityInput, attemptSource: "first", redraw: redrawAttempt },
     );

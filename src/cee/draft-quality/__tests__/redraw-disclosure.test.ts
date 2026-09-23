@@ -139,3 +139,48 @@ describe('end to end: a shipped redraw is disclosed, a clean draw is not', () =>
     expect((out.body as { coaching: { summary: string } }).coaching.summary).toBe('First.');
   });
 });
+
+/**
+ * ⛔⛔ THE OVERCLAIM, from the Panel-lane exact-head review of #1721 (12:10Z).
+ *
+ * "Nothing you wrote was dropped" was stated UNCONDITIONALLY. The claim rests on
+ * `secondDrawKeepsEveryIdentity`, which loops over `briefStatedIds` — the ids
+ * carrying `provenance: "from_brief"`. With no such marker that loop is empty and
+ * passes VACUOUSLY, so the sentence asserted something nothing had checked.
+ *
+ * The reviewer's probe D-f shipped a draw that DELETED the brief-quoted option
+ * "Raise Pro Plan from £49 to £59" while telling the user nothing they wrote was
+ * dropped. A false reassurance is worse than the silence it replaced: the charter
+ * requires that what Olumi verified stays distinguishable from what it assumed.
+ *
+ * Bound as a DISCRIMINATING PAIR so a fix cannot satisfy it by dropping the
+ * clause everywhere — the clause must survive where it IS checked.
+ */
+describe('the reassurance is only offered when it was actually checked', () => {
+  const REASSURANCE = 'Nothing you wrote was dropped';
+
+  it('withholds it when the first draw carried NO from_brief material', () => {
+    expect(buildRedrawDisclosure(edgesOnly)).not.toContain(REASSURANCE);
+    expect(buildRedrawDisclosure(targetsOnly)).not.toContain(REASSURANCE);
+  });
+
+  it('CONTRAST: still offers it when from_brief material exists to check', () => {
+    const withBrief = readDraftStructureFacts({
+      nodes: [
+        { id: 'o', kind: 'option', provenance: 'from_brief' },
+        { id: 'r', kind: 'risk' },
+      ],
+      edges: [{ from: 'o', to: 'r' }],
+      analysis_ready: { status: 'x', options: [] },
+    });
+    expect(withBrief.briefStatedIds.length, 'precondition: there IS material to check').toBeGreaterThan(0);
+    expect(buildRedrawDisclosure(withBrief)).toContain(REASSURANCE);
+  });
+
+  it('still reads as one sentence either way — no dangling lower-case clause', () => {
+    for (const d of [buildRedrawDisclosure(edgesOnly), buildRedrawDisclosure(targetsOnly)]) {
+      expect(d).not.toBe('');
+      expect(d, 'no full stop followed by a lower-case word').not.toMatch(/\.\s+[a-z]/);
+    }
+  });
+});

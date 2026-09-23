@@ -240,10 +240,19 @@ export function violatesDraftStructure(facts: DraftStructureFacts): boolean {
  * ⭐⭐ DID THE SECOND DRAW KEEP EVERY PIECE OF THE USER'S OWN MATERIAL?
  *
  * A redraw may ADD, and it may replace its OWN inventions — that is the drafter
- * doing its job, and measurement shows it does so on every draw. It may not
- * lose anything marked `from_brief`. Deleting a brief-stated option, or the risk
- * the user named, is the cheapest possible way to score fewer refused options,
- * and it is exactly the move this refuses.
+ * doing its job, and measurement shows it does so on every draw.
+ *
+ * ⚠ WHAT THIS ACTUALLY PROTECTS, STATED NARROWLY: nodes carrying
+ * `provenance: "from_brief"`, by id. Nothing else.
+ *
+ * ⛔ IT DOES **NOT** PROTECT A RISK THE USER NAMED, and the earlier wording here
+ * claimed it did. Measured by the Panel-lane review of #1721: the goal-linked
+ * risk `8f5e99d8` "Subscriber Churn from Price Rise" is `ai_inferred` in 8 of 8
+ * banked captures, so a `from_brief` guard can never reach it. Their probes B3-b,
+ * B3-d and B3-e each ship a draw that dropped a risk or an option. Extending the
+ * conjunct to every first-draw option and the goal-linked risk by id is a
+ * RE-SCOPE of the B3 ruling and needs Release Control's decision, not a docblock
+ * edit by the author.
  */
 export function secondDrawKeepsEveryIdentity(
   first: DraftStructureFacts,
@@ -262,11 +271,15 @@ export function secondDrawIsStructurallyCleaner(
   second: DraftStructureFacts,
 ): boolean {
   if (!first.readable || !second.readable) return false;
-  // ⛔ CLEANER IS NOT ENOUGH — IT MUST ALSO HAVE LOST NOTHING. Deleting a risk
-  // node or dropping an option is the cheapest possible way to score fewer
-  // refused options, and without this conjunct such a draw WINS. Found by
-  // independent review; the PR's "never deletes a causal claim" was true of this
-  // code and false of what the selection could ship.
+  // ⛔ CLEANER IS NOT ENOUGH — IT MUST ALSO HAVE KEPT THE USER'S OWN MATERIAL.
+  // Deleting a node is the cheapest possible way to score fewer refused options,
+  // and without this conjunct such a draw WINS. Found by independent review.
+  //
+  // ⚠ THE CONJUNCT IS NARROWER THAN THAT SENTENCE USED TO IMPLY. It refuses the
+  // loss of `from_brief` ids only. A draw that drops an `ai_inferred` risk, or an
+  // option with no `from_brief` marker, STILL WINS here — verified by the
+  // reviewer's probes B3-b, B3-d and B3-e. Closing that needs a ruling on the B3
+  // scope; until then this comment must not claim the wider protection.
   if (!secondDrawKeepsEveryIdentity(first, second)) return false;
   return second.refusedOptions < first.refusedOptions;
 }
@@ -349,7 +362,25 @@ export function buildRedrawDisclosure(first: DraftStructureFacts): string {
   // still refuses to invent a reason, which is why it is the real guard.
   if (causes.length === 0) return '';
   const because = causes.length === 1 ? causes[0] : `${causes[0]}, and ${causes[1]}`;
-  return `I drafted this model twice. The first version ${because}, so I asked for it again and kept this one. Nothing you wrote was dropped — tell me if anything here does not match your thinking.`;
+  // ⛔⛔ THE REASSURANCE IS ONLY OFFERED WHEN IT WAS ACTUALLY CHECKED.
+  //
+  // "Nothing you wrote was dropped" was stated UNCONDITIONALLY. The claim rests
+  // on `secondDrawKeepsEveryIdentity`, which loops over `briefStatedIds` — the
+  // ids carrying `provenance: "from_brief"`. With no such marker that loop is
+  // empty and passes VACUOUSLY, so the sentence asserted something nothing had
+  // tested. Measured by the Panel-lane exact-head review of #1721 (12:10Z),
+  // probe D-f: a draw that DELETED the brief-quoted option "Raise Pro Plan from
+  // £49 to £59" still told the user nothing they wrote was dropped.
+  //
+  // A false reassurance is worse than the silence it replaced. The charter
+  // requires what Olumi VERIFIED to stay distinguishable from what it assumed,
+  // so the clause now appears only where there was material to verify. The rest
+  // of the sentence — what the first draw did, and the invitation to correct it —
+  // is unconditional, because both of those were observed.
+  const invitation = first.briefStatedIds.length > 0
+    ? 'Nothing you wrote was dropped — tell me if anything here does not match your thinking.'
+    : 'Tell me if anything here does not match your thinking.';
+  return `I drafted this model twice. The first version ${because}, so I asked for it again and kept this one. ${invitation}`;
 }
 
 /**
