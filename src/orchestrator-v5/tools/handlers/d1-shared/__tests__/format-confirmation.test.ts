@@ -273,16 +273,25 @@ describe('formatEdgeAdjustment — no false band transition', () => {
     expect(text).not.toContain('still');
   });
 
-  it('CONTROL: a direction flip inside one band is still reported', () => {
+  it('CONTROL: a direction flip with NO sign change is still reported', () => {
+    // ⚠ THIS CONTROL WAS BLIND ONCE, AND THE MUTANT KIT CAUGHT IT. The first
+    // version used afterMean -0.5, but `describeBandWithDirection` already
+    // decorates a negative mean as "moderate (negative)", so the bands differed
+    // anyway and dropping the `!directionFlipped` conjunct changed nothing —
+    // the mutant SURVIVED.
+    //
+    // The discriminating case is a flip WITHOUT a sign change, which is exactly
+    // why the explicit direction fields exist: a zero or positive mean carries
+    // no direction of its own. Both means are positive and in one band here, so
+    // ONLY `!directionFlipped` prevents the reversal being swallowed.
     const text = formatEdgeAdjustment({
       fromLabel: 'a',
       toLabel: 'b',
       beforeMean: 0.4,
-      afterMean: -0.5,
+      afterMean: 0.5,
       beforeDirection: 'positive',
       afterDirection: 'negative',
     });
-    // Same band magnitude, but the direction changed — that must not be swallowed.
     expect(text).toMatch(/negative/i);
     expect(text).not.toContain('still moderate');
   });
