@@ -126,7 +126,14 @@ describe('decideGoalTargetReceipt', () => {
         commitGraph: null,
         persistedGraph: null,
       }),
-    ).toEqual({ verdict: 'pass', reason: 'no_claim' });
+    ).toEqual({
+      verdict: 'pass',
+      reason: 'no_claim',
+      // ROADMAP — the decision now states what honouring it requires. A pass
+      // costs nothing; kept in the DEEP-equal so a future change that starts
+      // withholding on a pass cannot slip past this assertion.
+      consequences: { withholdGraphWrite: false, withholdReceiptFacts: false },
+    });
   });
 
   it('a claim backed by THIS turn\'s commit graph passes', () => {
@@ -146,7 +153,13 @@ describe('decideGoalTargetReceipt', () => {
         commitGraph: bareGraph,
         persistedGraph: registeringGraph,
       }),
-    ).toEqual({ verdict: 'swap', reason: 'unbacked_claim' });
+    ).toEqual({
+      verdict: 'swap',
+      reason: 'unbacked_claim',
+      // BOTH withheld: withholding the write while committing the `applied`
+      // receipt is the phantom-edit defect (DL-7).
+      consequences: { withholdGraphWrite: true, withholdReceiptFacts: true },
+    });
   });
 
   it('a claim on a NON-mutating turn passes iff the persisted graph registers (honest state descriptions survive)', () => {

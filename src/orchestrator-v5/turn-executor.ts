@@ -36,6 +36,7 @@
  * timeouts) is preserved.
  */
 
+import { buildPostApplyChips } from './handlers/post-apply-chips.js';
 import { createHash } from 'node:crypto';
 
 import type {
@@ -4071,7 +4072,15 @@ export async function runTurnExecutor(
               ? `${remaining} ${remaining === 1 ? 'item still needs' : 'items still need'} your judgement; I did not invent any missing values or relationships.`
               : 'The model now passes the readiness check.'),
           stage: context.stage,
-          suggested_actions: [],
+          // ⭐ THE PAYOFF TURN NOW OFFERS THE NEXT ACT. This was `[]`, and the
+          // return below is unreachable from any `generateChips` site, so the
+          // empty list was FINAL: the user supplied exactly what Olumi asked
+          // for, was told the model now passes, and was offered nothing —
+          // including when the model was fully ready. See `post-apply-chips.ts`.
+          suggested_actions: buildPostApplyChips(
+            outcome.assessmentAfter.analysisReady as never,
+            ((outcome.appliedGraph as { nodes?: unknown[] } | null)?.nodes ?? []) as never,
+          ),
         });
         sonnetTextForLog = appliedResponse.assistant_text;
         resolvedTurnClass = 'direct_answer';
@@ -4391,7 +4400,12 @@ export async function runTurnExecutor(
               ? `${remaining} ${remaining === 1 ? 'item still needs' : 'items still need'} your judgement.`
               : 'The model now passes the readiness check.'),
           stage: context.stage,
-          suggested_actions: [],
+          // ⭐ Same dead end, same close — see the repair sibling above. Fixing
+          // one and not the other is the shape that has bitten this PR twice.
+          suggested_actions: buildPostApplyChips(
+            outcome.assessmentAfter.analysisReady as never,
+            ((outcome.appliedGraph as { nodes?: unknown[] } | null)?.nodes ?? []) as never,
+          ),
         });
         sonnetTextForLog = appliedResponse.assistant_text;
         resolvedTurnClass = 'direct_answer';
@@ -14565,20 +14579,34 @@ export async function runTurnExecutor(
           // turn that writes no graph). Only applies when a graph WAS
           // produced this turn — a swap driven by `persistedGraph` not
           // backing a DESCRIBE-only claim has no graph to withhold.
+          // ⭐ THE GUARD STATES ITS OWN CONSEQUENCES; THIS HONOURS THEM.
+          //
+          // These two withholdings used to be written out here, which made the
+          // requirement invisible to anyone holding only the verdict — a new
+          // controller could swap the text, look correct, and silently
+          // reintroduce the phantom receipt. `consequences` now travels with
+          // the decision, so honouring it does not require reading this file.
+          //
+          // Overnight review F5 — the withheld write must ALSO withhold the
+          // "applied" edit receipt FACT built from the same unbacked mutation.
+          // Committing `handlerFactsForCommit` unchanged (status: 'applied',
+          // noop: false) while the graph write is withheld grounds the NEXT
+          // turn's LLM on a phantom edit — `recent_changes` / prior_facts
+          // readers have no persisted graph to cross-check the fact against,
+          // so they take it at face value (DL-7 violation). A withheld-write
+          // turn is a non-mutating turn, same as any other turn that writes no
+          // graph and emits no facts.
+          //
+          // `graphWasWrittenThisTurn` still gates: a swap driven by
+          // `persistedGraph` not backing a DESCRIBE-only claim has no graph to
+          // withhold, and the guard's consequences do not claim otherwise.
           if (graphWasWrittenThisTurn) {
-            graphForCommit = undefined;
-            // Overnight review F5 — the withheld write must also withhold
-            // the "applied" edit receipt FACT built from the same unbacked
-            // mutation. Committing `handlerFactsForCommit` unchanged here
-            // (status: 'applied', noop: false) while the graph write is
-            // withheld grounds the NEXT turn's LLM on a phantom edit —
-            // `recent_changes` / prior_facts readers have no persisted
-            // graph to cross-check the fact against, so they take it at
-            // face value (DL-7 violation: a receipt narrating an applied
-            // mutation with no persistable graph state behind it). A
-            // withheld-write turn is a non-mutating turn, same as any
-            // other turn that writes no graph and emits no facts.
-            handlerFactsForCommit = [];
+            if (goalReceiptDecision.consequences.withholdGraphWrite) {
+              graphForCommit = undefined;
+            }
+            if (goalReceiptDecision.consequences.withholdReceiptFacts) {
+              handlerFactsForCommit = [];
+            }
           }
         }
       }

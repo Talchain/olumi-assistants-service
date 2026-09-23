@@ -277,6 +277,34 @@ describe('value batch chip click — one approval, one commit', () => {
     expect(result.response.draft_graph).toBeDefined();
   });
 
+  /**
+   * ⭐⭐ THE PAYOFF TURN OFFERS THE NEXT ACT — ASSERTED AT THE ROUTE.
+   *
+   * The turn that applies the user's values built its response with a literal
+   * `suggested_actions: []` and then `return finalizeRun()`, and every
+   * `generateChips(...)` site is far below that return — so the empty list was
+   * FINAL. The user supplied exactly what Olumi asked for, was told the model
+   * now passes, and was offered nothing to do next.
+   *
+   * ⚠ ASSERTED ON THE RESPONSE THE EXECUTOR RETURNS, not on the helper. A unit
+   * test of `buildPostApplyChips` would pass while this call site still sent
+   * `[]` — which is precisely the failure being closed.
+   */
+  it('⭐ the applied turn offers the next act, instead of dead-ending', async () => {
+    const result = await runTurnExecutor(payload(), 'req-value-batch-chips', {
+      routingAdapter: throwingRoutingAdapter(),
+    });
+    const chips = result.response.suggested_actions ?? [];
+    expect(chips.length, 'the payoff turn must not dead-end').toBeGreaterThan(0);
+    // CONTRAST CONTROL: the response itself is real — it carries the applied
+    // narration — so an empty chip list would be a genuine absence, not an
+    // empty response.
+    expect(result.response.assistant_text).toMatch(/Confirmed/i);
+    // Whatever is offered must be renderable by the client, which drops
+    // anything past the third entry.
+    expect(chips.length).toBeLessThanOrEqual(3);
+  });
+
   it('a DECLINED cell writes nothing — an honest refusal is not an invented number', async () => {
     await runTurnExecutor(payload(), 'req-value-batch-declined', {
       routingAdapter: throwingRoutingAdapter(),
