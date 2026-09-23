@@ -75,11 +75,13 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { config } from "../config/index.js";
 import { log } from "../utils/telemetry.js";
 import {
+  AI_MODE_HEADER,
   ALLOWED_REQUEST_HEADERS,
   buildCorsHeaders,
   isOriginAllowed,
   parseAllowedOrigins,
   resolveProxyAssistKey,
+  resolveProxyInternalTarget,
   serialiseProxiedBodyWithoutClaimedIdentity,
 } from "./proxy-v5-turn.js";
 import { streamTurnAsStagedSse, STAGED_FRAME_CLASSES } from "./streamed-turn-sse.js";
@@ -186,6 +188,7 @@ export default async function proxyV5TurnStreamRoute(app: FastifyInstance): Prom
       payload,
       featureVersion: FEATURE_VERSION,
       endpoint: PROXY_STREAMED_TURN_ROUTE,
+      internalTarget: resolveProxyInternalTarget(request.headers[AI_MODE_HEADER]),
       extraResponseHeaders: cors,
     });
 

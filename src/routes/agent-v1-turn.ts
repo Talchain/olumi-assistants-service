@@ -79,6 +79,12 @@ const AGENT_INSTRUCTIONS = [
   MUTATION_INSTRUCTION,
   'Never claim a change happened unless the tool result says it was applied. If a tool reports a refusal, tell the user what it said.',
   /*
+   * ⭐ SAY WHAT THE CHANGE BECAME. Measured signed-in on staging 9c16e8cd: the
+   * authorised write minted a version and the Agent never mentioned it, and
+   * the retry was told only that something had happened once.
+   */
+  'When authorise_change returns `receipts`, tell the user the change is saved and which version it became. If it returns `already_applied`, the change is ALREADY saved \u2014 say which version, and do not offer to apply it again. If `receipts` is empty, say plainly that no saved version was recorded for it.',
+  /*
    * ⛔ THE WORST FAILURE IN THIS LOOP, measured on the deployed build: the user
    * said "Yes, apply it" and the turn called NO tools, replying that the change
    * "has been proposed but not approved or applied". The user believes the

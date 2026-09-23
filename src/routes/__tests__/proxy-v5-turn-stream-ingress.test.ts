@@ -40,6 +40,7 @@ const mockConfig = {
     browserProxyEnabled: true,
     browserProxyAllowedOrigins: STAGING_ORIGIN,
     browserProxyTimeoutMs: 5_000,
+    proxyV5Target: "agent",
   },
   auth: {
     assistApiKey: TEST_ASSIST_KEY,
@@ -59,7 +60,11 @@ vi.mock("../../utils/telemetry.js", () => ({
  * INGRESS decision and the forwarded payload, and nothing else. Everything
  * downstream of here is pinned by `streamed-turn-sse.test.ts`.
  */
-const streamCalls: Array<{ payload: string; internalHeaders: Record<string, string> }> = [];
+const streamCalls: Array<{
+  payload: string;
+  internalHeaders: Record<string, string>;
+  internalTarget?: string;
+}> = [];
 vi.mock("../streamed-turn-sse.js", () => ({
   STAGED_FRAME_CLASSES: {},
   streamTurnAsStagedSse: vi.fn(
@@ -67,12 +72,14 @@ vi.mock("../streamed-turn-sse.js", () => ({
       reply,
       payload,
       internalHeaders,
+      internalTarget,
     }: {
       reply: { code: (n: number) => { send: (b: unknown) => unknown } };
       payload: string;
       internalHeaders: Record<string, string>;
+      internalTarget?: string;
     }) => {
-      streamCalls.push({ payload, internalHeaders });
+      streamCalls.push({ payload, internalHeaders, internalTarget });
       reply.code(200).send({ streamed: true });
     },
   ),
@@ -153,6 +160,28 @@ describe("POST /proxy/v5/turn/stream — guest admission", () => {
       const res = await post(app, SAMPLE_PAYLOAD, { origin: "https://evil.example.com" });
       expect(res.statusCode).toBe(403);
       expect(streamCalls).toHaveLength(0);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe("POST /proxy/v5/turn/stream — explicit AI comparison mode", () => {
+  it("conventional header forces the conventional buffered turn", async () => {
+    const app = await buildApp();
+    try {
+      await post(app, SAMPLE_PAYLOAD, { "x-olumi-ai-mode": "conventional" });
+      expect(streamCalls[0].internalTarget).toBe("/orchestrate/v2/turn");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("openai header forces the Agent buffered turn", async () => {
+    const app = await buildApp();
+    try {
+      await post(app, SAMPLE_PAYLOAD, { "x-olumi-ai-mode": "openai" });
+      expect(streamCalls[0].internalTarget).toBe("/agent/v1/turn");
     } finally {
       await app.close();
     }
