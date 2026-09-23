@@ -26,6 +26,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
+import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
@@ -79,8 +80,19 @@ export const claimTurnIdOf = (turnId: string): string => `${turnId}:claim`;
 const CLAIM_NONCE = '#claim:';
 const claimHashFor = (requestHash: string, nonce: string): string => `${requestHash}${CLAIM_NONCE}${nonce}`;
 const requestHashOfClaim = (claimHash: string): string => claimHash.split(CLAIM_NONCE)[0] ?? '';
-/** How long a request that did not win the claim waits for the winner's answer. */
-export const AGENT_TURN_CLAIM_WAIT = { totalMs: 150_000, everyMs: 1_000 };
+/**
+ * How long a request that did not win the claim waits for the winner's answer.
+ *
+ * ⛔ IT MUST END BEFORE THE BROWSER PROXY GIVES UP (Panel, #1720 APPROVE 5792014826,
+ * non-blocking #1). At 150 s it outlasted the proxy's 125 s inject timeout, so a
+ * same-id duplicate in the browser got a proxy timeout instead of the replay or the
+ * 409 it was designed to return. Derived from the served proxy timeout, less the
+ * same response headroom the V5 turn budget reserves, so the loser always answers.
+ */
+export const AGENT_TURN_CLAIM_WAIT = {
+  totalMs: Math.min(150_000, config.proxy.browserProxyTimeoutMs - TURN_RESPONSE_HEADROOM_MS),
+  everyMs: 1_000,
+};
 
 /** The conversation of record stays Olumi's; this is a per-process cache. */
 const histories = new HistoryStore();
@@ -98,6 +110,9 @@ const MUTATION_INSTRUCTION =
   config.proxy.agentLanePreview === true
     ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
     : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link, propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
+
+/** Marks a board edit in the Agent's history: the user's own change, already applied — never a request to the Agent. */
+export const BOARD_EDIT_PREFIX = '(Board edit \u2014 the user changed this directly on the canvas and Olumi has already applied it; it is not a request to you.)';
 
 const AGENT_INSTRUCTIONS = [
   'You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user.',
@@ -148,6 +163,13 @@ const AGENT_INSTRUCTIONS = [
   'In that same reply, if any factor has no value or any option sets nothing, call propose_starting_point ONCE with a reasoned starting value for each such factor and the level each option sets, in the user\u2019s own units. Show every figure and what it rests on, say they are your assumptions to adopt or correct, and ask for one approval.',
   'If propose_starting_point refuses with incomplete_starting_point, NOTHING is awaiting approval: call it again with a level for every pair in options_missing_levels before you reply. Never ask the user to approve an incomplete starting point.',
   'Discussion, ideation and research are not mutation requests.',
+  /*
+   * ⭐ IDEATION PUSHES BEYOND THE MODEL, AND SAYS WHAT IT DID NOT DO (Paul, 23 Sep:
+   * "generates non-obvious alternatives … surfaces missing factors and perspectives").
+   * Measured on 10 served "just ideas" replies: 10–19 listed items each — more than a
+   * team can weigh — and only 1 of 10 said nothing had been added to the model.
+   */
+  'When the user asks for ideas or other options, offer three to five the model does not already hold, preferring non-obvious ones, and give each one line on what it would change or which assumption it would test. Say plainly that none has been added to the model, and offer to add any the user picks.',
   /*
    * ⛔ MEASURED on Paul's 22 Sep session: fourteen values were applied and the
    * analysis was never run again, so nothing the user could see had moved.
@@ -217,6 +239,7 @@ const AGENT_INSTRUCTIONS = [
    * to endorse instead of an exercise that helps them inspect the model.
    */
   'After an analysis has run, or when the user is converging on an option, call get_applicable_method. If it returns a method, say in one or two sentences why it applies to THIS model (use its reason, naming what it points at). Then open the exercise with ONE question of your own for the user to answer, drawn from the exercise its reason describes \u2014 do not run the whole exercise at once, and never present it as a conclusion. Use its closing_questions only at the end, once the user has worked through the exercise, adapting their wording so that you never ask the user to endorse a recommendation or confirm that one still holds. Cite the evidence strength when a protocol is returned. If it returns no method, do not invent a technique.',
+  'History entries that begin \u201c(Board edit\u201d are changes the user made directly on the canvas. When the user asks about \u201cmy change\u201d, start from the most recent board edit, and read the current state before explaining what it did.',
   'British English. Concise but substantive.',
 ].join(' ');
 
@@ -504,6 +527,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const forwarded = await dispatchFor(
         typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
       )('/orchestrate/v2/turn', body);
+      /**
+       * ⛔ THE AGENT MUST KNOW WHAT THE USER CHANGED ON THE BOARD. Measured on served
+       * cc7b26c: after a canvas edit (Tech lead hires 0 → 1), "Re-run the analysis.
+       * How much did my change matter?" was answered about the EARLIER approved
+       * baseline — the forwarded edit never entered the Agent's history, and it did
+       * not re-read state. The product's own narration of the edit (the handler's
+       * truthful text, e.g. "Updated Tech lead hires from 0 hires to 1 hire.") is
+       * appended to this session's history, marked as a board edit — not as
+       * something the user asked the Agent to do.
+       */
+      const narration = typeof forwarded.json.assistant_text === 'string' ? forwarded.json.assistant_text.trim() : '';
+      if (forwarded.status === 200 && kind === 'system_event' && narration.length > 0) {
+        histories.set(sessionId, [
+          ...histories.get(sessionId),
+          { role: 'user', content: [{ type: 'input_text', text: `${BOARD_EDIT_PREFIX} ${narration}` }] },
+        ]);
+      }
       return reply.code(forwarded.status).send({
         ...forwarded.json,
         // Underscore sidecar: egress is `.strict()`. Says plainly that this

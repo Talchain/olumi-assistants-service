@@ -36,6 +36,7 @@ import {
   ADD_CONSTRAINT_USER_GUIDANCE,
   SET_FACTOR_VALUE_USER_GUIDANCE,
   ADJUST_EDGE_STRENGTH_USER_GUIDANCE,
+  SUCCESS_TARGET_POSITIVE_USER_GUIDANCE,
 } from '../d1-shared/user-guidance.js';
 
 /** The War-Room-locked canonical phrases, imported — never restated here. */
@@ -43,6 +44,13 @@ const CANONICAL: ReadonlyArray<readonly [string, string]> = [
   ['add_constraint', ADD_CONSTRAINT_USER_GUIDANCE],
   ['set_factor_value', SET_FACTOR_VALUE_USER_GUIDANCE],
   ['adjust_edge_strength', ADJUST_EDGE_STRENGTH_USER_GUIDANCE],
+  // ⭐ ADDED WITH #1661, and the guard below is why it is here rather than
+  // implicitly covered. That PR reasoned it should be an EXPORTED constant
+  // precisely so this file's union assertion would see it — which is right, and
+  // incomplete: the union assertion NOTICES an uncovered export, it does not
+  // budget-check one. The entry is what puts the phrase through the real
+  // sanitiser, with headroom, alongside its three siblings.
+  ['success_target_positive', SUCCESS_TARGET_POSITIVE_USER_GUIDANCE],
 ];
 
 describe('D1 user guidance reaches the user WHOLE', () => {

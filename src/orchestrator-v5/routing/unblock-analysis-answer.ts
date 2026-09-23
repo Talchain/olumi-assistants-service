@@ -111,10 +111,14 @@ export function buildUnblockAnalysisAnswer(
     // implying the model is pristine.
     const alsoOutstanding =
       blocking.length > 0
-        ? ` ${blocking.length} thing${blocking.length === 1 ? '' : 's'} could still be tightened, but ${blocking.length === 1 ? 'it does' : 'they do'} not stop the run.`
+        ? ` ${blocking.length} thing${blocking.length === 1 ? '' : 's'} in it ${blocking.length === 1 ? 'is' : 'are'} still unsettled — worth a look, though ${blocking.length === 1 ? 'it doesn\'t' : 'they don\'t'} stop you comparing.`
         : '';
     return {
-      assistant_text: `Nothing is blocking the analysis — it can run now.${alsoOutstanding}`,
+      // ⚠ CONDITIONALITY IS NOT A DISCLAIMER, IT IS THE POINT. What an analysis
+      // returns is what THIS model implies, given ITS assumptions — a finding to
+      // reason from, never an answer. Saying so at the moment the user is about
+      // to run it is where it actually lands.
+      assistant_text: `Your model has enough in it to compare the options — what comes back will be what THIS model implies, given the assumptions in it.${alsoOutstanding}`,
       offer_run_analysis: true,
     };
   }
@@ -135,10 +139,25 @@ export function buildUnblockAnalysisAnswer(
     };
   }
 
+  // ⭐ A BLOCKER IS A GAP IN THE TEAM'S THINKING, NOT A GATE ON A MACHINE.
+  //
+  // This said "One thing is blocking the analysis:", which frames the analysis
+  // as the goal and the issue as an obstacle to it. Olumi is a reasoning
+  // system: *"analysis describes what the current model implies … model-relative
+  // findings for further reasoning, not recommendations"*. Reaching an analysis
+  // is not the win; an improved model is.
+  //
+  // `OPTION_NEEDS_MAPPING` on "Two Developers → Coordination Overhead Risk" is
+  // not a gate. It is the model saying THE TEAM BELIEVES THESE ARE CONNECTED BUT
+  // HAS NOT SAID HOW — exactly the causal belief the Living Model exists to make
+  // visible "so [it] can be expanded, challenged, tested and improved". The old
+  // wording asked the user to service the machine; this asks the question the
+  // team should be arguing about. Same information, and the issue's own message
+  // is still quoted verbatim below.
   const head =
     blocking.length === 1
-      ? 'One thing is blocking the analysis:'
-      : `${blocking.length} things are blocking the analysis:`;
+      ? "One thing in your model isn't settled yet:"
+      : `${blocking.length} things in your model aren't settled yet:`;
 
   const body =
     blocking.length === 1
@@ -166,11 +185,15 @@ export function buildUnblockAnalysisAnswer(
   // whether the outstanding items can be estimated or need the user. The
   // REMEDY is already in each issue's own quoted message above.
   const allNeedHuman = blocking.every((i) => i.repairability === 'human_input_required');
-  const those = blocking.length === 1 ? 'That one needs' : 'Those need';
+  // ⚠ THE TAIL FRAMES WHOSE JUDGEMENT THIS IS. "Needs your input" reads as a
+  // chore the machine is waiting on. These are judgements only the team can
+  // make, and recording them IS the product — "human judgement and agency
+  // remain authoritative: people own the conclusions".
+  const these = blocking.length === 1 ? 'This is a judgement' : 'These are judgements';
   const tail = input.authorises_repair
     ? allNeedHuman
-      ? ` I have not changed anything yet. ${those} your input rather than an assumption from me.`
-      : ' I have not changed anything yet. Tell me to go ahead and I will fill in the parts that can be estimated, and come back to you for the rest.'
+      ? ` I haven't changed anything. ${these} only you can make — tell me what you think and I'll put it in the model.`
+      : " I haven't changed anything. Tell me to go ahead and I'll put in estimates where a reasonable one exists, flagged as mine, and come back to you for the rest."
     : '';
 
   // ⚠ THE TAIL GOES ON ITS OWN LINE AFTER A LIST. Glued to the final bullet it
