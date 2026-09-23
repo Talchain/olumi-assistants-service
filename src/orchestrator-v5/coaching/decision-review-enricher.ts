@@ -224,7 +224,10 @@ type SkipReason =
   // Emitted by the caller (turn-executor / chip-click-dispatch) when the
   // `V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW` config flag is false. Listed
   // here so callers share the same union via `TelemetryEvents.V5DecisionReviewSkipped`.
-  | 'autofire_disabled';
+  | 'autofire_disabled'
+  // The OpenAI Agent lane's run_analysis (chip-click-dispatch AGENT_RUN_ANALYSIS_CHIP_ID):
+  // the Agent explains the canonical analysis; no legacy generative review is called.
+  | 'agent_lane_openai';
 
 /**
  * If the facts array contains a successful run_analysis fact, invoke
