@@ -480,27 +480,37 @@ export function createAgentCapabilities(
    * would apply. The values themselves are never invented here — the Agent is
    * told which pairs to propose before it shows the user anything.
    */
-  const missingLevelsNote = async (ctx: AgentToolContext, proposal: StructuredProposal): Promise<Record<string, unknown>> => {
+  const missingPairs = async (ctx: AgentToolContext, levelPaths: ReadonlySet<string>): Promise<{ option: string; factor: string }[] | null> => {
     const g = await readGraph(ctx.scenario_id);
-    if (g === null) return {};
-    const proposed = new Set(proposal.operations.filter((o) => o.op === 'set_option_intervention').map((o) => o.path));
+    if (g === null) return null;
     const missing: { option: string; factor: string }[] = [];
     for (const o of g.nodes.filter((n) => n.kind === 'option')) {
       const has = (o.interventions ?? {}) as Record<string, unknown>;
       for (const f of linkedFactorsOf(g as never, o.id)) {
-        if (has[f.id] !== undefined || proposed.has(`${o.id}::${f.id}`)) continue;
+        if (has[f.id] !== undefined || levelPaths.has(`${o.id}::${f.id}`)) continue;
         missing.push({ option: o.label, factor: String(f.label ?? f.id) });
       }
     }
-    if (missing.length === 0) return {};
-    return {
-      options_missing_levels: missing,
-      options_missing_levels_note:
-        'INCOMPLETE: the comparison needs a level for EVERY factor each option acts on, and these pairs have none. ' +
-        'Before replying, call propose_starting_point ONCE more with the same values and levels PLUS a level for each pair ' +
-        'listed (in the factor\u2019s own units, as an assumption to correct). The new proposal replaces this one.',
-    };
+    return missing;
   };
+  const levelPathsOf = (ps: readonly StructuredProposal[]): Set<string> =>
+    new Set(ps.flatMap((p) => p.operations).filter((o) => o.op === 'set_option_intervention').map((o) => o.path));
+  /**
+   * ⛔ COMPLETENESS IS AN ADMISSION RULE, NOT A NOTE — independent review of
+   * #1719 at d00727aa: reporting the missing pairs AFTER storing an approvable
+   * proposal let a model that ignored the note ask the user to approve an
+   * incomplete set, and the user still needed a second approval. So an
+   * incomplete starting point leaves NOTHING approvable.
+   */
+  const incompleteStartingPoint = (missing: { option: string; factor: string }[], extra: Record<string, unknown>): ToolResult => ({
+    ok: false, mutated: false, refusal: 'incomplete_starting_point',
+    options_missing_levels: missing,
+    ...extra,
+    detail:
+      'Nothing is awaiting approval. A starting point must give a level for EVERY factor each option acts on, and the pairs in ' +
+      'options_missing_levels have none. Call propose_starting_point again with the same values and levels PLUS a level for each ' +
+      'pair (in the factor\u2019s own units, as an assumption to correct), then show the user that one proposal.',
+  });
 
   /**
    * A newer starting point REPLACES the caller's earlier unapproved one, so
@@ -716,12 +726,30 @@ export function createAgentCapabilities(
       // Only one half could be proposed: it is an ordinary proposal already.
       if (made.length === 1) {
         const only = proposals.get(made[0].proposal_id as string);
-        return { ...made[0], ...(only !== undefined ? await missingLevelsNote(ctx, only) : {}), ...refused };
+        const missing = await missingPairs(ctx, levelPathsOf(only !== undefined ? [only] : []));
+        if (missing === null || missing.length > 0) {
+          if (only !== undefined) proposals.discard(only.proposal_id);
+          if (missing === null) return { ok: false, mutated: false, refusal: 'not_found' };
+          return incompleteStartingPoint(missing, {
+            assumptions: a?.assumptions ?? [], option_levels: b?.interventions ?? [],
+            ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked } : {}), ...refused,
+          });
+        }
+        return { ...made[0], ...refused };
       }
       const halves = made.map((r) => proposals.get(r.proposal_id as string)).filter((p): p is StructuredProposal => p !== undefined);
       if (halves.length !== 2 || halves[0].base_graph_identity_hash !== halves[1].base_graph_identity_hash) {
         for (const h of halves) proposals.discard(h.proposal_id);
         return { ok: false, mutated: false, refusal: 'model_changed_while_proposing', detail: 'The model changed while this was being put together. Read the state again and propose once more.' };
+      }
+      const missing = await missingPairs(ctx, levelPathsOf(halves));
+      if (missing === null || missing.length > 0) {
+        for (const h of halves) proposals.discard(h.proposal_id);
+        if (missing === null) return { ok: false, mutated: false, refusal: 'not_found' };
+        return incompleteStartingPoint(missing, {
+          assumptions: a?.assumptions ?? [], option_levels: b?.interventions ?? [],
+          ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked } : {}), ...refused,
+        });
       }
       const compound = createProposal({
         scenario_id: ctx.scenario_id,
@@ -745,7 +773,6 @@ export function createAgentCapabilities(
         // Levels the proposer LEFT OUT because the option is not wired to that
         // factor — the Agent must say so and offer a level it CAN record.
         ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked, not_linked_note: b.not_linked_note } : {}),
-        ...(await missingLevelsNote(ctx, compound)),
         ...refused,
         note:
           'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +

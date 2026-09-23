@@ -110,7 +110,7 @@ const AGENT_INSTRUCTIONS = [
    * point the user can adopt in a single approval.
    */
   'In that same reply, if any factor has no value or any option sets nothing, call propose_starting_point ONCE with a reasoned starting value for each such factor and the level each option sets, in the user\u2019s own units. Show every figure and what it rests on, say they are your assumptions to adopt or correct, and ask for one approval.',
-  'If propose_starting_point returns options_missing_levels, call it once more with those levels added BEFORE you reply, so the one approval you ask for makes every option comparable.',
+  'If propose_starting_point refuses with incomplete_starting_point, NOTHING is awaiting approval: call it again with a level for every pair in options_missing_levels before you reply. Never ask the user to approve an incomplete starting point.',
   'Discussion, ideation and research are not mutation requests.',
   /*
    * ⛔ MEASURED on Paul's 22 Sep session: fourteen values were applied and the
