@@ -4,11 +4,25 @@ Written for a manual test first thing. **Served build: `c94208cbf000c199fee34922
 
 ---
 
-> **Served build: `e38feb4c23e3`, deployed 04:05:14Z — and it now EQUALS the staging tip.**
-> That deploy carries another lane's *"fix(cee): stop the first brief 500ing on an unparseable
-> factor observe"*, which is directly relevant to your test. An earlier version of this banner said
-> that fix was **not** deployed; it landed at 04:05:14Z, so **that caveat no longer applies** — if
-> your first brief 500s, it is not this known one.
+> ### Derive the served build — do not trust a SHA written here
+>
+> Lanes merged through the night, so any SHA in this file is stale by morning. **Staging
+> auto-deploys on merge** (`cee-staging`, autoDeploy=yes), so the served build follows the tip
+> within minutes. Run this rather than reading a number:
+>
+> ```bash
+> gh api repos/Talchain/olumi-assistants-service/commits/staging --jq '.sha[0:12]'   # tip
+> curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
+>   "https://api.render.com/v1/services/srv-d4slpaili9vc73eiq4og/deploys?limit=10" \
+>   | python3 -c "import json,sys; [print(d['deploy']['status'], d['deploy']['commit']['id'][:12]) for d in json.load(sys.stdin)]" | head -3
+> ```
+>
+> Take the deploy whose status is **`live`**, not the newest one — a newer row may still be
+> `build_in_progress`.
+>
+> **Progression overnight, for context:** `e8cf4c68f150` → `e38feb4c23e3` (04:05Z, carries another
+> lane's *"stop the first brief 500ing on an unparseable factor observe"* — so a first-brief 500 is
+> **not** that known bug) → `1e5b05b92395` (my #1717, 04:37Z) → `0f2f3b87ebb4` and counting.
 
 ## 1. Test this first — the P0 your manual test failed on is fixed
 
