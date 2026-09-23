@@ -114,51 +114,63 @@
  "nodes": [
   {
    "id": "1311b8e7",
-   "kind": "factor"
+   "kind": "factor",
+   "provenance": "ai_inferred"
   },
   {
    "id": "32b7e30c",
-   "kind": "option"
+   "kind": "option",
+   "provenance": "ai_inferred"
   },
   {
    "id": "36f739e4",
-   "kind": "option"
+   "kind": "option",
+   "provenance": "ai_inferred"
   },
   {
    "id": "45376300",
-   "kind": "factor"
+   "kind": "factor",
+   "provenance": "ai_inferred"
   },
   {
    "id": "78c9d7e2",
-   "kind": "decision"
+   "kind": "decision",
+   "provenance": "ai_inferred"
   },
   {
    "id": "8a5386ff",
-   "kind": "goal"
+   "kind": "goal",
+   "provenance": "from_brief"
   },
   {
    "id": "8f5e99d8",
-   "kind": "risk"
+   "kind": "risk",
+   "provenance": "ai_inferred"
   },
   {
    "id": "94fa174b",
-   "kind": "outcome"
+   "kind": "outcome",
+   "provenance": "ai_inferred"
   },
   {
    "id": "af413853",
-   "kind": "option"
+   "kind": "option",
+   "provenance": "ai_inferred"
   },
   {
    "id": "b3393563",
-   "kind": "option"
+   "kind": "option",
+   "provenance": "from_brief"
   },
   {
    "id": "b7eda7ad",
-   "kind": "option"
+   "kind": "option",
+   "provenance": "ai_inferred"
   },
   {
    "id": "ed5b5711",
-   "kind": "factor"
+   "kind": "factor",
+   "provenance": "ai_inferred"
   }
  ],
  "schema_version": "3.0"

@@ -5,6 +5,7 @@ import {
   buildDraftStructureDirective,
   readDraftStructureFacts,
   secondDrawIsStructurallyCleaner,
+  secondDrawKeepsEveryIdentity,
 } from '../draft-structure.js';
 import type { UnifiedPipelineResult } from '../../unified-pipeline/types.js';
 
@@ -99,11 +100,16 @@ describe('on the real wire shape: target-only draws must still redraw', () => {
 
 describe('on the real wire shape: selection', () => {
   it('a ready draw beats a target-only draw', async () => {
+    // ⚠ NOT object identity any more: a shipped redraw carries a DISCLOSURE, so
+    // the result is a new object wrapping the second draw's body. What is
+    // asserted is that the SECOND DRAW'S MODEL shipped — by its own node ids.
     const second = ok(READY);
     const out = (await applyGrammarRedraw({
       first: ok(TARGET_ONLY), requestId: 'r', elapsedMs: AFFORDABLE_MS, redraw: async () => second,
     })).result;
-    expect(out).toBe(second);
+    expect(readDraftStructureFacts(out.body).refusedOptions).toBe(0);
+    expect((out.body as { nodes: { id: string }[] }).nodes.map((n) => n.id))
+      .toEqual((READY as { nodes: { id: string }[] }).nodes.map((n) => n.id));
   });
 
   it('a target-only draw beats a both-mechanisms draw — fewer REFUSED OPTIONS', async () => {
@@ -111,9 +117,8 @@ describe('on the real wire shape: selection', () => {
     const out = (await applyGrammarRedraw({
       first: ok(BOTH), requestId: 'r', elapsedMs: AFFORDABLE_MS, redraw: async () => second,
     })).result;
-    expect(out).toBe(second);
+    expect(readDraftStructureFacts(out.body).refusedOptions).toBe(1);
     expect(readDraftStructureFacts(BOTH).refusedOptions).toBe(5);
-    expect(readDraftStructureFacts(TARGET_ONLY).refusedOptions).toBe(1);
   });
 
   it('a clean draw is never redrawn and the drafter is never called', async () => {
@@ -164,5 +169,107 @@ describe('on the real wire shape: selection', () => {
     // …yet it refuses MORE options, so it must LOSE. The old score had it winning.
     expect(secondDrawIsStructurallyCleaner(f, worse)).toBe(false);
     expect(secondDrawIsStructurallyCleaner(worse, f)).toBe(true);
+  });
+});
+
+
+/**
+ * ⛔⛔ B3 — A CLEANER DRAW THAT LOST THE USER'S MATERIAL MUST NOT WIN.
+ *
+ * Found by independent review. Selection was `refusedOptions <` and nothing
+ * else, so the cheapest way to score better was to DELETE something: drop the
+ * risk and the option→risk violations go with it; drop the option and its
+ * refusal goes too. Either won and shipped, while the module promised it
+ * "never deletes a causal claim".
+ *
+ * ⛔⛔ THE REVIEW PROPOSED "keep every first-draw option". THAT IS
+ * UNIMPLEMENTABLE, and adopting it verbatim would have made the whole feature
+ * dead. MEASURED across two real draws of one brief: **1 of 5 option ids
+ * survive, and 1 of 5 labels.** An independent re-draft invents new
+ * alternatives with new ids every time, so "keep every option" refuses every
+ * redraw there has ever been.
+ *
+ * The survivor is the one carrying `provenance: "from_brief"` — the user's own
+ * material, whose id is stable BECAUSE it derives from their words. All three
+ * banked captures share exactly the same two: the goal and the user's option.
+ * That is the thing worth protecting, and it is #1710's `keepsUserMaterial`
+ * rule applied here.
+ */
+describe('B3 — a redraw may ADD and may replace its OWN inventions; it may never lose the user\'s', () => {
+  const draw = (nodes: Record<string, unknown>[], edges: { from: string; to: string }[]) =>
+    readDraftStructureFacts({ nodes, edges, analysis_ready: { status: 'x', options: [] } });
+
+  const USER_OPT = { id: 'opt_user', kind: 'option', provenance: 'from_brief' };
+  const USER_GOAL = { id: 'goal_user', kind: 'goal', provenance: 'from_brief' };
+  const AI_OPT = { id: 'opt_ai', kind: 'option' };
+
+  const FIRST = draw(
+    [USER_GOAL, USER_OPT, AI_OPT, { id: 'risk_1', kind: 'risk' }],
+    [{ from: 'opt_user', to: 'risk_1' }, { from: 'opt_ai', to: 'risk_1' }],
+  );
+
+  it('the first draw is genuinely dirty, and its user material is identified', () => {
+    expect(FIRST.refusedOptions).toBe(2);
+    expect(FIRST.briefStatedIds).toEqual(['goal_user', 'opt_user']);
+  });
+
+  it('⛔ DROPPING THE USER\'S OPTION scores better and must still LOSE', () => {
+    const thinned = draw([USER_GOAL, AI_OPT, { id: 'risk_1', kind: 'risk' }], [{ from: 'opt_ai', to: 'risk_1' }]);
+    expect(thinned.refusedOptions).toBeLessThan(FIRST.refusedOptions);   // strictly "cleaner"…
+    expect(secondDrawKeepsEveryIdentity(FIRST, thinned)).toBe(false);
+    expect(secondDrawIsStructurallyCleaner(FIRST, thinned)).toBe(false); // …and it loses
+  });
+
+  it('⛔ DROPPING THE USER\'S GOAL must LOSE, even with zero violations', () => {
+    const noGoal = draw([USER_OPT, AI_OPT], []);
+    expect(noGoal.refusedOptions).toBe(0);
+    expect(secondDrawIsStructurallyCleaner(FIRST, noGoal)).toBe(false);
+  });
+
+  it('⛔ SWAPPING the user\'s option for another keeps the COUNT and must LOSE', () => {
+    // Identity, never count — the case a count-based guard misses.
+    const swapped = draw(
+      [USER_GOAL, { id: 'opt_OTHER', kind: 'option', provenance: 'from_brief' }, AI_OPT],
+      [],
+    );
+    expect(swapped.briefStatedIds).toHaveLength(FIRST.briefStatedIds.length);
+    expect(secondDrawKeepsEveryIdentity(FIRST, swapped)).toBe(false);
+  });
+
+  it('⭐ REPLACING THE DRAFTER\'S OWN INVENTIONS is allowed — this is what a real redraw does', () => {
+    // Measured: an independent re-draft keeps 1 of 5 option ids. If this case
+    // did not adopt, the feature would never fire in production.
+    const realistic = draw(
+      [USER_GOAL, USER_OPT, { id: 'opt_ai_DIFFERENT', kind: 'option' },
+       { id: 'risk_NEW', kind: 'risk' }, { id: 'fac_1', kind: 'factor' }],
+      [{ from: 'opt_user', to: 'fac_1' }, { from: 'fac_1', to: 'risk_NEW' }],
+    );
+    expect(realistic.refusedOptions).toBe(0);
+    expect(secondDrawKeepsEveryIdentity(FIRST, realistic)).toBe(true);
+    expect(secondDrawIsStructurallyCleaner(FIRST, realistic)).toBe(true);
+  });
+
+  it('⭐ the three REAL captures all carry the same user material, so a real redraw is adoptable', () => {
+    const ids = [TARGET_ONLY, BOTH, READY].map((b) => readDraftStructureFacts(b).briefStatedIds);
+    expect(ids[0]).toEqual(ids[1]);
+    expect(ids[1]).toEqual(ids[2]);
+    expect(ids[0].length).toBeGreaterThan(0);
+    expect(secondDrawKeepsEveryIdentity(readDraftStructureFacts(BOTH), readDraftStructureFacts(READY))).toBe(true);
+  });
+
+  it('an unreadable draw on either side keeps the first', () => {
+    const bad = readDraftStructureFacts(null);
+    expect(secondDrawKeepsEveryIdentity(FIRST, bad)).toBe(false);
+    expect(secondDrawKeepsEveryIdentity(bad, FIRST)).toBe(false);
+  });
+
+  it('a draw with NO marked user material is judged on cleanliness alone — fails safe', () => {
+    // An absent or differently-spelled marker must not silently refuse every
+    // redraw; it restores exactly the pre-guard behaviour.
+    const a = draw([{ id: 'o', kind: 'option' }, { id: 'r', kind: 'risk' }], [{ from: 'o', to: 'r' }]);
+    const b = draw([{ id: 'o2', kind: 'option' }, { id: 'r2', kind: 'risk' }], []);
+    expect(a.briefStatedIds).toEqual([]);
+    expect(secondDrawKeepsEveryIdentity(a, b)).toBe(true);
+    expect(secondDrawIsStructurallyCleaner(a, b)).toBe(true);
   });
 });

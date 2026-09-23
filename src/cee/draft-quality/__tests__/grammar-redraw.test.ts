@@ -121,11 +121,15 @@ describe('the pass — fail open, always', () => {
   });
 
   it('ships the SECOND draw when it is cleaner', async () => {
+    // ⚠ A shipped redraw is DISCLOSED, so the result wraps the second draw's
+    // body rather than being the same object. The graph that ships is the
+    // second draw's.
     const second = ok(CLEAN);
     const out = (await applyGrammarRedraw({
       first: ok(DIRTY_8), requestId: 'r', elapsedMs: AFFORDABLE_MS, redraw: async () => second,
     })).result;
-    expect(out).toBe(second);
+    expect(out.statusCode).toBe(200);
+    expect(JSON.stringify((out.body as { graph: unknown }).graph)).toBe(JSON.stringify(CLEAN));
   });
 
   it('ships the second draw when it is merely LESS dirty', async () => {
@@ -133,7 +137,7 @@ describe('the pass — fail open, always', () => {
     const out = (await applyGrammarRedraw({
       first: ok(DIRTY_8), requestId: 'r', elapsedMs: AFFORDABLE_MS, redraw: async () => second,
     })).result;
-    expect(out).toBe(second);
+    expect(JSON.stringify((out.body as { graph: unknown }).graph)).toBe(JSON.stringify(DIRTY_2));
   });
 
   it('keeps the FIRST draw on a tie', async () => {

@@ -56,9 +56,11 @@ import { log } from '../../utils/telemetry.js';
 import type { UnifiedPipelineResult } from '../unified-pipeline/types.js';
 import {
   buildDraftStructureDirective,
+  buildRedrawDisclosure,
   readDraftStructureFacts,
   secondDrawIsStructurallyCleaner,
   violatesDraftStructure,
+  withRedrawDisclosure,
   type DraftStructureFacts,
 } from './draft-structure.js';
 import type { DraftAttemptSource } from './types.js';
@@ -231,5 +233,16 @@ async function runGrammarRedraw(input: GrammarRedrawInput): Promise<GrammarRedra
     'Grammar redraw complete',
   );
 
-  return { result: shipSecond ? second : input.first, drawSpent: true };
+  // ⭐⭐ A SHIPPED REDRAW IS DISCLOSED. An automatic change to the team's causal
+  // model may not be silent — `redraw_spent` reached only the trace before this.
+  // The sentence describes THE FIRST DRAW's defects, because those are what
+  // caused the second draft; it names no id, no label and no count of the
+  // user's material.
+  //
+  // ⚠ Only when the SECOND draw ships. If the first draw wins there was no
+  // change to disclose, and saying otherwise would be a false claim about their
+  // model.
+  if (!shipSecond) return { result: input.first, drawSpent: true };
+  const disclosed = withRedrawDisclosure(second.body, buildRedrawDisclosure(decision.facts));
+  return { result: { ...second, body: disclosed }, drawSpent: true };
 }

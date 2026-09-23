@@ -85,6 +85,35 @@ export interface DraftStructureFacts {
   /** Edge violations + unresolvable target strings. TELEMETRY ONLY — it mixes
    *  two units and must never decide which draw ships. */
   readonly totalViolations: number;
+  /**
+   * ⭐⭐ THE USER'S OWN MATERIAL, so a redraw can be refused for LOSING it rather
+   * than only judged for being cleaner.
+   *
+   * ⛔ THE DEFECT THIS EXISTS FOR, found by independent review. Selection was
+   * `second.refusedOptions < first.refusedOptions` AND NOTHING ELSE, so the
+   * cheapest way for a draw to score better was to DELETE something — drop the
+   * risk and its option→risk violations go with it; drop the option and its
+   * refusal goes too. Either won and shipped, while this module's header
+   * promised "never deletes a causal claim".
+   *
+   * ⛔⛔ AND IT IS `from_brief` ONLY, WHICH IS NOT WHAT THE REVIEW PROPOSED.
+   * "Keep every first-draw option" is unimplementable and would have made the
+   * whole feature dead. MEASURED across two real draws of one brief: **1 of 5
+   * option ids survive, and 1 of 5 labels** — an independent re-draft invents
+   * new alternatives with new ids every time. The single survivor was
+   * `b3393563`, and it is the only option carrying
+   * `provenance: "from_brief"` with a `source_quote`. The user's own material
+   * has a stable id BECAUSE it is derived from their words; the drafter's
+   * inventions do not, and requiring those to survive would refuse every redraw.
+   *
+   * ⭐ The same two captures also show the mechanism working: run 7's
+   * `b3393563` carried `interventions: {}` — the defect — and run 8's carried a
+   * real intervention on Pro Plan Price with `source: "brief_extraction"`.
+   *
+   * Same rule as #1710's `keepsUserMaterial`: the user's material may not
+   * regress; everything else is the drafter's to change.
+   */
+  readonly briefStatedIds: readonly string[];
   /** False when the graph's shape could not be read — never "clean". */
   readonly readable: boolean;
 }
@@ -117,15 +146,23 @@ export function readDraftStructureFacts(body: unknown): DraftStructureFacts {
       optionsWithUnresolvableTarget: 0,
       refusedOptions: 0,
       totalViolations: 0,
+      briefStatedIds: [],
       readable: false,
     };
   }
 
   const graphRec = asRecord(graph);
   const nodeIds = new Set<string>();
+  const briefStated: string[] = [];
   for (const node of (graphRec?.nodes as unknown[]) ?? []) {
     const n = asRecord(node);
-    if (n && typeof n.id === 'string') nodeIds.add(n.id);
+    if (!n || typeof n.id !== 'string') continue;
+    nodeIds.add(n.id);
+    // ⚠ THE MARKER IS THE NODE'S OWN `provenance: "from_brief"`, read as a
+    // plain string. Anything else — an absent marker, a different spelling — is
+    // NOT treated as user material, which fails in the safe direction: the
+    // redraw is judged on cleanliness alone, exactly as it was before.
+    if (n.provenance === 'from_brief') briefStated.push(n.id);
   }
 
   // ⚠ READ ONLY FROM `analysis_ready`, never from a loose `options` anywhere in
@@ -179,6 +216,7 @@ export function readDraftStructureFacts(body: unknown): DraftStructureFacts {
     optionsWithUnresolvableTarget: optionsHit,
     refusedOptions: refused.size,
     totalViolations: edgeGrammar.violations.length + unresolvableTargets.length,
+    briefStatedIds: briefStated.sort(),
     readable: true,
   };
 }
@@ -198,11 +236,38 @@ export function violatesDraftStructure(facts: DraftStructureFacts): boolean {
  * draw that fixed the cheaper defect win while the user stayed just as blocked.
  * Both cost the user exactly one refused option.
  */
+/**
+ * ⭐⭐ DID THE SECOND DRAW KEEP EVERY PIECE OF THE USER'S OWN MATERIAL?
+ *
+ * A redraw may ADD, and it may replace its OWN inventions — that is the drafter
+ * doing its job, and measurement shows it does so on every draw. It may not
+ * lose anything marked `from_brief`. Deleting a brief-stated option, or the risk
+ * the user named, is the cheapest possible way to score fewer refused options,
+ * and it is exactly the move this refuses.
+ */
+export function secondDrawKeepsEveryIdentity(
+  first: DraftStructureFacts,
+  second: DraftStructureFacts,
+): boolean {
+  if (!first.readable || !second.readable) return false;
+  const kept = new Set<string>(second.briefStatedIds);
+  // BY IDENTITY, never by count: a draw that dropped one brief-stated node and
+  // gained another has the same count and is not the same model.
+  for (const id of first.briefStatedIds) if (!kept.has(id)) return false;
+  return true;
+}
+
 export function secondDrawIsStructurallyCleaner(
   first: DraftStructureFacts,
   second: DraftStructureFacts,
 ): boolean {
   if (!first.readable || !second.readable) return false;
+  // ⛔ CLEANER IS NOT ENOUGH — IT MUST ALSO HAVE LOST NOTHING. Deleting a risk
+  // node or dropping an option is the cheapest possible way to score fewer
+  // refused options, and without this conjunct such a draw WINS. Found by
+  // independent review; the PR's "never deletes a causal claim" was true of this
+  // code and false of what the selection could ship.
+  if (!secondDrawKeepsEveryIdentity(first, second)) return false;
   return second.refusedOptions < first.refusedOptions;
 }
 
@@ -239,4 +304,74 @@ export function buildDraftStructureDirective(facts: DraftStructureFacts): string
     );
   }
   return parts.join(' ');
+}
+
+/**
+ * ⭐⭐ THE REDRAW MUST NOT BE SILENT — the PRODUCT TEST finding from independent
+ * review, and it is the same charter gap I spent today finding in other
+ * people's work and missed in my own.
+ *
+ *   > "The redraw is a silent change to the team's causal model. The user is
+ *   > never told that a second draft was made, or what changed."
+ *
+ * `redraw_spent` reached only the trace. The doctrine requires Olumi's own
+ * causal claims to stay distinguishable and open to correction, and **any
+ * automatic model change to be visible**. A second draft is an automatic model
+ * change.
+ *
+ * ⛔ IT NAMES ONLY WHAT THE FIRST DRAW ACTUALLY DID. Telling someone their model
+ * had a defect it did not have is the same error the directive refuses to make
+ * to the drafter — and here the reader is the person whose decision it is.
+ *
+ * ⛔ NO IDS, NO LABELS, NO COUNTS OF THEIR MATERIAL. `coaching-safety-scanner`
+ * flags raw node ids in this field (warning, never reject), and a sentence that
+ * quoted the user's own option back at them would be the `"49"` mistake again.
+ *
+ * ⚠ It says "I drafted this twice", not "I fixed it". The second draw is not
+ * known to be correct — only to break fewer of the model's own rules.
+ */
+export function buildRedrawDisclosure(first: DraftStructureFacts): string {
+  // ⚠ DEFENDED TWICE, AND A MUTANT OF MINE SURVIVED PROVING IT. Deleting the
+  // `refusedOptions === 0` clause changes nothing: a clean draw yields no
+  // `causes` and the empty-causes return below catches it. The load-bearing
+  // guard is the one at the foot of this function; this one is the early exit.
+  // Recorded rather than quietly strengthened — "my mutant survived" and "the
+  // code is robust here" look identical from outside, and this is the second.
+  if (!first.readable || first.refusedOptions === 0) return '';
+  const causes: string[] = [];
+  if (first.edgeGrammar.violations.length > 0) {
+    causes.push('linked options straight to risks, which the analysis cannot use as a lever');
+  }
+  if (first.optionsWithUnresolvableTarget > 0) {
+    causes.push('left a stated value with no factor to attach it to');
+  }
+  // NOT an ignore: with the early exit above removed this is the path that
+  // still refuses to invent a reason, which is why it is the real guard.
+  if (causes.length === 0) return '';
+  const because = causes.length === 1 ? causes[0] : `${causes[0]}, and ${causes[1]}`;
+  return `I drafted this model twice. The first version ${because}, so I asked for it again and kept this one. Nothing you wrote was dropped — tell me if anything here does not match your thinking.`;
+}
+
+/**
+ * Attach the disclosure to the shipped draft's own user-facing summary.
+ *
+ * ⚠ FAILS OPEN AND MUTATES NOTHING. It returns a NEW body; if the shape cannot
+ * be read the original object is returned by identity. A disclosure that could
+ * break a shippable draft would be worse than the silence it replaces.
+ *
+ * `coaching.summary` is chosen because it is the draft turn's own rendered
+ * prose — verified in the UI at `InlineBlocks.tsx`, where `coachingSummary` is
+ * read from the store and shown in the conversation. `draft_warnings` and
+ * `record_disclosures` were measured FIRST and rejected: neither is rendered by
+ * any component, so a notice there would be a declared threshold nothing mounts.
+ */
+export function withRedrawDisclosure(body: unknown, disclosure: string): unknown {
+  if (disclosure === '') return body;
+  const rec = asRecord(body);
+  if (!rec) return body;
+  const coaching = asRecord(rec.coaching);
+  if (!coaching) return body;
+  const existing = typeof coaching.summary === 'string' ? coaching.summary.trim() : '';
+  const summary = existing === '' ? disclosure : `${existing} ${disclosure}`;
+  return { ...rec, coaching: { ...coaching, summary } };
 }

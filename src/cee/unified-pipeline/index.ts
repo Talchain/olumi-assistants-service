@@ -837,9 +837,16 @@ export async function runUnifiedPipeline(
     // spent and LOST returns the first draw byte-identical, so inferring spend
     // from object identity would let the quality pass fund a THIRD full draw on
     // the user's clock in precisely the case that already cost the most. When a
-    // draw has been spent this arm becomes OBSERVE-ONLY: `redraw` is omitted
-    // entirely, so a further draw is structurally impossible rather than gated,
-    // and `attempt_source` keeps the two populations separable on the wire.
+    // draw has been spent this arm becomes OBSERVE-ONLY, and `attempt_source`
+    // keeps the two populations separable on the wire.
+    //
+    // ⚠ CORRECTED: this used to say omitting `redraw` made a further draw
+    // "structurally impossible rather than gated". MEASURED — with a judge that
+    // always wants a redraw and a graph thin enough to be nominated — the pass
+    // spends 1 draw on the `first` arm and 0 on `quality_redraw` EVEN WHEN
+    // HANDED THE CALLBACK: it gates on `attemptSource` itself. So this is
+    // defended TWICE, and the omission is belt-and-braces rather than the whole
+    // defence. Pinned in `__tests__/grammar-redraw-mount-behaviour.test.ts`.
     const qualityInput = {
       first: grammar.result,
       brief: readBriefForQuality(input, rawBody),
