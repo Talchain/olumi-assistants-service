@@ -49,9 +49,34 @@ which matches the measured construction p50 of **54.4s** across n=1,579 turns.
 
 ---
 
-## 4. A gap nobody owns
+## 4. A gap nobody owns — and it is the single biggest one
 
-`run_analysis` on your brief took **47.1s and 41.5s with ZERO provider calls** — that is PLoT/ISL compute, about half the journey, and no lane is assigned to it. Worth assigning before the next latency push.
+`run_analysis` is **~42s of the ~95s journey, with ZERO provider calls**, and no lane is assigned to it.
+
+Measured, n = **1,667** over 7 days:
+
+| | secs |
+|---|---|
+| avg | 42.1 |
+| **p10** | **33.0** |
+| p50 | 44.0 |
+| p90 | 52.6 |
+| max | 84 |
+| stddev | 13.0 |
+
+**Even the fastest 10% take 33 seconds.** And graph size does not drive it:
+
+```
+r(nodes, duration) = -0.225      r(edges, duration) = -0.029
+```
+
+The correlation is **negative** — bigger graphs analyse marginally *faster*. By band: 10–11 nodes 40.5s (n=22), 12–15 nodes 41.7s (n=1,061), 16–19 nodes 47.2s (n=452).
+
+**What I established:** the time is **not** CEE waiting. I read `plot-client.ts` and `run-analysis.ts` at the served SHA and found **no poll loop, no sleep, no fixed delay** — CEE's `/v2/run` cap is 75s and sits above PLoT's own budget. So the ~42s is genuinely spent downstream in PLoT/ISL.
+
+**Hypothesis, explicitly NOT verified:** a high floor with no size dependence is the signature of a **fixed simulation budget** — a sample count or iteration count that does not scale with the model. If that is what it is, it is a config change worth more than compaction and `reasoning_effort` combined. I did not verify it: PLoT and ISL are different repos and not my lane.
+
+**Why this matters for sequencing:** compaction (#1710) targets 39% of the construction half; `reasoning_effort` targets 61% of it. **Neither touches this 42s at all.** If the journey needs to feel fast, this is the largest single lever and it currently has no owner.
 
 ---
 
