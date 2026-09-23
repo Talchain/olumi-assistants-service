@@ -258,6 +258,19 @@ const STARTING_POINT_CHIP = {
   message: 'Suggest starting values for everything this model still needs, so I can approve them.',
 } as const;
 
+/**
+ * ⭐ INTERPRETER v0.2 — THE ARCHITECTURE OWNER'S BANKED TEXT, VERBATIM (RC #63 5803995225:
+ * "Interpreter v0.2 is the current prompt candidate"). Source: Talchain/olumi-programme-docs
+ * `openai/capability-v01/ANALYSIS_INTERPRETER_PROFILE_v0_2.md` lines 9-33, blob
+ * 344896ef92177b7308c1d632699bd98bae10c6b7 (programme-docs main 4961b2d1); sha256 of this
+ * string begins 3d979e8406693be4 (pinned by test). APPENDED to the Agent instructions on
+ * fast path 3's single interpreting call, as the profile specifies ("appended only for the
+ * existing Agent final-response path when explaining canonical analysis. No extra model
+ * call."). Prompt text is owned by Paul + ChatGPT; this file only carries it. When CEE #1787
+ * (the packaged profile) lands, this constant is replaced by its import.
+ */
+export const INTERPRETER_V02_BANKED: string = "Explain the current **model-relative** analysis. Do not make the user's decision.\n\n**Finding first.** State the most useful conclusion supported by the supplied analysis, then briefly: why it appears, what is not settled, and at most one next reasoning step when justified.\n\n### Hard grounding rules\n\n- Use only supplied canonical analysis, provenance, currentness and claim permissions. Unknown stays unknown.\n- Keep comparison/outcomes, sensitivity, robustness, constraint satisfaction, before/after deltas and evidence provenance as different meanings. Never substitute one for another.\n- Never call an option objectively best, the winner, the right decision or Olumi's recommendation merely because it leads in the model.\n- Never convert a point result into a probability or invert a local switch/perturbation probability into overall stability.\n- Never claim an edit was tested unless the analysed revision/inputs include it.\n- Identical analytical inputs producing the same result show repeatability under those settings, **not** new validation or increased confidence.\n- A changed input may produce no material output change. Report that without inventing an effect.\n- For before/after comparisons, use only **precomputed supplied deltas**. Do not calculate new differences, ratios, annualisations, margins or unit conversions in prose.\n- Attribute a delta to one edit only when the supplied comparison is explicitly compatible and the relevant units, option identities, analysis/projection semantics and engine settings are held constant. Otherwise say the isolated effect is not established.\n- Preserve exact constraint operators and units. Equality does not satisfy a strict `<` or `>` condition.\n- If only a subset of options was analysed, keep conclusions inside that subset and name exclusions.\n- If the result is stale, present it only as historical. If rerun/action eligibility is unknown, do not imply a current control is available; say a current analysis would be needed.\n- If sensitivity or a flip threshold was not computed, do not invent it.\n- **A first-tested assumption that flips an ordering establishes only that this tested change can flip that ordering. It does NOT establish validation priority, importance, largest effect or best next investigation. Never say \"validate X first\" or equivalent on that basis alone.** If comparable effect size, uncertainty and evidence cost/value are absent, say investigation priority is not established.\n- One edge's perturbation/switch metric is not aggregate stability or factor sensitivity.\n- If a method is declined or applicability is unknown, answer the user's question without starting or completing the method.\n- Do not invent exercise horizons, required counts, missing business dimensions, benchmarks, operating assumptions or retrospective rationales.\n\nKeep the response compact: finding first, then 1–3 grounded points/caveats. Do not force a next step.\n";
+
 /** The UI's Run control: a typed `run_analysis` chip. Words alone never take fast path 3. */
 export function typedRunOf(body: Record<string, unknown>): boolean {
   const chip = body['chip'] as { action_type?: unknown } | null | undefined;
@@ -1045,17 +1058,30 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const fastStartedAt = Date.now();
       const ran = await dispatchTool('run_analysis', JSON.stringify({ reason: 'the user pressed Run' }),
         { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }, capabilities, mode);
+      /**
+       * ⛔ THE INTERPRETER IS GIVEN THE CLAIM PERMISSIONS, NOT LEFT TO INFER THEM. v0.2 says
+       * "use only supplied … currentness and claim permissions", and the run's own tool result
+       * carries no `analysis_state`, so `leader_claim` (and a withheld reason) never reached the
+       * call. The canonical state is read back from the persisted graph after the run — the
+       * SAME reader the response's final readback uses — and handed over beside the run.
+       */
+      let canonicalAfterRun: { analysis_state?: unknown; analysis_ready?: unknown } = {};
+      try {
+        const st = await readBackState(dispatch, scenarioId);
+        canonicalAfterRun = { ...(st.analysisState !== undefined ? { analysis_state: st.analysisState } : {}), ...(st.analysisReady !== undefined ? { analysis_ready: st.analysisReady } : {}) };
+      } catch { canonicalAfterRun = {}; }
+      const runForInterpreter = { ...ran, canonical_state: canonicalAfterRun };
       const callId = `fast_run_${req.id}`.replace(/[^A-Za-z0-9_-]/g, '_');
       const priorAndRun = [
         ...(history ?? []),
         { role: 'user', content: [{ type: 'input_text', text: message }] },
         { type: 'function_call', name: 'run_analysis', call_id: callId, arguments: JSON.stringify({ reason: 'the user pressed Run' }) },
-        { type: 'function_call_output', call_id: callId, output: JSON.stringify(ran) },
+        { type: 'function_call_output', call_id: callId, output: JSON.stringify(runForInterpreter) },
       ];
       try {
         const providerStartedAt = Date.now();
         const resp = await callModel({
-          instructions: AGENT_INSTRUCTIONS,
+          instructions: `${AGENT_INSTRUCTIONS}\n\n${INTERPRETER_V02_BANKED}`,
           input: priorAndRun,
           tools: toolsFor(mode),
           max_output_tokens: budget.max_output_tokens,

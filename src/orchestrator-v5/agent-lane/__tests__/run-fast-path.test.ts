@@ -47,6 +47,8 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
       graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Velocity' }, { id: 'f', kind: 'factor', label: 'Capacity' }], edges: [{ from: 'f', to: 'g' }] },
       graph_hash: 'h1',
+      // The canonical verdict the interpreter must be GIVEN (Paul's case: a guardrail the engine could not score).
+      analysis_state: { run_state: { kind: 'complete_current' }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } },
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
@@ -75,4 +77,20 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
     expect(modelBodies.length, 'the Agent decides, then answers').toBeGreaterThanOrEqual(2);
     expect((r.json() as { _diagnostic_trace: { fast_path?: string } })._diagnostic_trace.fast_path).toBeUndefined();
   });
+  it('the ONE call carries Interpreter v0.2 verbatim (appended) and the canonical claim permissions', async () => {
+    const { INTERPRETER_V02_BANKED } = await import('../../../routes/agent-v1-turn.js');
+    const { createHash } = await import('node:crypto');
+    expect(createHash('sha256').update(INTERPRETER_V02_BANKED, 'utf8').digest('hex').slice(0, 16), 'the banked text, byte for byte (programme-docs blob 344896ef)').toBe('3d979e8406693be4');
+    await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+    } });
+    expect(modelBodies).toHaveLength(1);
+    const instructions = String(modelBodies[0]!['instructions']);
+    expect(instructions.endsWith(INTERPRETER_V02_BANKED), 'appended, not replacing').toBe(true);
+    expect(instructions.length).toBeGreaterThan(INTERPRETER_V02_BANKED.length + 1000);
+    const input = JSON.stringify(modelBodies[0]!['input']);
+    expect(input, 'the withheld leader reaches the interpreter').toContain('constraint_verdict_withheld');
+    expect(input).toContain('leader_claim');
+  });
+
 });
