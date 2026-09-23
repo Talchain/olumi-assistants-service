@@ -66,6 +66,39 @@ export function dropDanglingCalls(items: readonly unknown[]): unknown[] {
   });
 }
 
+/**
+ * ⛔ THE CONVERSATION OUTLIVES THE PROCESS; THE AGENT'S MEMORY OF IT DID NOT.
+ *
+ * The history above is in-process. cee-staging runs ONE instance (Render API,
+ * 23 Sep: `numInstances: 1`, no autoscaling) and redeploys on EVERY merge to
+ * `staging`; the store also evicts the oldest session past `maxSessions`. Either
+ * way the browser still shows the whole conversation — it reads
+ * `v5_conversation_turns` — while the Agent started from nothing, so "as I said
+ * earlier…" met an Agent that had never heard it.
+ *
+ * So a session this process does not hold is seeded from the durable turns:
+ * the user's and the Agent's TEXT, oldest first. Tool calls and their results
+ * are not durable and are not reconstructed — the Agent re-reads the model
+ * through its tools, which is the authoritative source anyway, and an old
+ * proposal is not revived (the proposal store is in-process too, so
+ * `get_canonical_state` truthfully shows nothing awaiting approval).
+ */
+export function historyFromDurableTurns(
+  turns: readonly { user_message?: string | null; assistant_message?: string | null }[],
+): unknown[] {
+  const items: unknown[] = [];
+  // `readRecent` returns newest first.
+  for (const t of [...turns].reverse()) {
+    if (typeof t.user_message === 'string' && t.user_message.trim().length > 0) {
+      items.push({ role: 'user', content: [{ type: 'input_text', text: t.user_message }] });
+    }
+    if (typeof t.assistant_message === 'string' && t.assistant_message.trim().length > 0) {
+      items.push({ role: 'assistant', content: t.assistant_message });
+    }
+  }
+  return items;
+}
+
 export class HistoryStore {
   private readonly items = new Map<string, unknown[]>();
 
@@ -76,6 +109,11 @@ export class HistoryStore {
 
   get(sessionId: string): unknown[] {
     return dropDanglingCalls(this.items.get(sessionId) ?? []);
+  }
+
+  /** Whether THIS process holds a history for the session (evicted or never seen → false). */
+  has(sessionId: string): boolean {
+    return this.items.has(sessionId);
   }
 
   set(sessionId: string, next: readonly unknown[]): void {
