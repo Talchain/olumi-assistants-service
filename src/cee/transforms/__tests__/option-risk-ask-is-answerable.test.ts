@@ -41,13 +41,19 @@ const graph = {
     { from: OPTION_ID, to: RISK_ID, strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' },
     { from: RISK_ID, to: 'goal', strength: { mean: -0.3, std: 0.1 }, exists_probability: 0.9, effect_direction: 'negative' },
   ],
-} as never;
+};
 
 const options = [
   { id: OPTION_ID, label: 'Two Developers', status: 'ready' },
-] as never;
+];
 
-const payload = buildAnalysisReadyPayload(options, 'goal', graph, {});
+// ⚠ THE CAST BELONGS AT THE CALL, NOT ON THE LITERAL. `as never` on `graph` made
+// `graph.edges` unreachable (TS2339 `Property 'edges' does not exist on type
+// 'never'`), which the `Typecheck Drift (ratchet)` check caught — the repo's
+// `tsconfig.build.json` gate excludes tests, so `pnpm typecheck` was green while
+// this file carried an error. Keeping the literals typed means the "the edge is
+// really kept" assertion reads real fields instead of an inline re-declaration.
+const payload = buildAnalysisReadyPayload(options as never, 'goal', graph as never, {});
 const refused = payload.options.find((o) => o.id === OPTION_ID);
 const ask = (refused?.user_questions ?? []).join(' ');
 
@@ -108,7 +114,7 @@ describe('the ask is now answerable', () => {
     // The edge really is retained; only the readiness verdict is withheld. A
     // reassurance that was false would be worse than none.
     expect(ask).toContain('kept either way');
-    expect(graph.edges.some((e: { from: string; to: string }) => e.from === OPTION_ID && e.to === RISK_ID)).toBe(true);
+    expect(graph.edges.some((e) => e.from === OPTION_ID && e.to === RISK_ID)).toBe(true);
   });
 
   it('names the option and the risk by their own labels, inventing neither', () => {
