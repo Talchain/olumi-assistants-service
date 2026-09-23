@@ -17,7 +17,6 @@ import { describe, expect, it } from 'vitest';
 import {
   buildInferredValueDisclosure,
   deriveInferredValues,
-  readInferredValueResolution,
   INFERRED_VALUE_DISCLOSURE_RE_SRC,
   INFERRED_VALUE_DISCLOSURE_MAX_CHARS,
 } from '../inferred-value-disclosure.js';
@@ -125,78 +124,51 @@ describe('buildInferredValueDisclosure', () => {
  * option, and NOT ONE of them would have changed which option led — a fact that
  * makes the result MORE trustworthy and which the user was never told.
  */
-describe('the disclosure says whether OUR numbers actually matter', () => {
-  const inferred = [{ factor_id: 'a' }, { factor_id: 'b' }];
+/**
+ * ⛔⛔ THE PROHIBITION GUARD — the claim this module must NOT make.
+ *
+ * A `p_win_sensitivity`-driven sentence ("our numbers do / do not change which
+ * option comes out in front") was built here and withdrawn unshipped on 23 Sep:
+ * ISL states the field "structurally cannot capture option-switching", and
+ * user-facing narration of it is under a standing ban whose rename-based
+ * escape was already considered and rejected (`uncertainty-priority.ts:38-51`).
+ *
+ * These tests exist so re-adding it is a RED test rather than a silent ship.
+ * They are bound to the CLAIM, not to the drafted wording, so a paraphrase does
+ * not walk past them.
+ */
+describe('⛔ makes no sensitivity or option-switching claim (banned pending a ruling)', () => {
+  const shapes = [[{ factor_id: 'a' }], [{ factor_id: 'a' }, { factor_id: 'b' }]];
 
-  it('none matter → says so, and points at the reasoning instead', () => {
-    const enrichment = { p_win_sensitivity: [
-      { factor_id: 'a', status: 'below_resolution' },
-      { factor_id: 'b', status: 'below_resolution' },
-    ] };
-    expect(readInferredValueResolution(enrichment, inferred)).toBe('none_matter');
-    const s = buildInferredValueDisclosure(inferred, 'none_matter');
-    expect(s).toContain('none of them changes which option comes out in front');
-    // ⛔ THE INVERSION GUARD, PLURAL ONLY. Splicing `${one ? 'it does' :
-    // 'none of them does'} not change` rendered the plural as "none of them
-    // does not change" — a double negative stating the OPPOSITE of the run's
-    // verdict. This test asserted that defective string until 23 Sep, so it is
-    // now bound to the meaning rather than to the bytes that came out. The
-    // singular below is the contrast: there "does not change" is CORRECT, so a
-    // blanket ban on the phrase would be the wrong invariant.
-    expect(s).not.toContain('does not change');
-    expect(s).toContain('push back is the reasoning');
-  });
-
-  it('CONTRAST, singular: the same verdict reads "it does not change"', () => {
-    const one = [{ factor_id: 'a' }];
-    const enrichment = { p_win_sensitivity: [{ factor_id: 'a', status: 'below_resolution' }] };
-    expect(readInferredValueResolution(enrichment, one)).toBe('none_matter');
-    const s = buildInferredValueDisclosure(one, 'none_matter');
-    expect(s).toContain('it does not change which option comes out in front');
-    expect(s).toContain('not that number.');
-  });
-
-  it('one matters → says it is worth settling', () => {
-    const enrichment = { p_win_sensitivity: [
-      { factor_id: 'a', status: 'below_resolution' },
-      { factor_id: 'b', status: 'resolved' },
-    ] };
-    expect(readInferredValueResolution(enrichment, inferred)).toBe('some_matter');
-    expect(buildInferredValueDisclosure(inferred, 'some_matter')).toContain('worth settling');
-  });
-
-  it('⛔ a PARTIAL sweep is unknown — "none matter" needs every factor accounted for', () => {
-    const partial = { p_win_sensitivity: [{ factor_id: 'a', status: 'below_resolution' }] };
-    expect(readInferredValueResolution(partial, inferred)).toBe('unknown');
-  });
-
-  it('missing or malformed enrichment is unknown, never a guess', () => {
-    for (const e of [undefined, null, {}, { p_win_sensitivity: null }, { p_win_sensitivity: [1, 'x'] }]) {
-      expect(readInferredValueResolution(e, inferred)).toBe('unknown');
-    }
-  });
-
-  it('⛔ sensitivity NEVER suppresses the disclosure itself', () => {
-    // An assumption the team would dispute is worth seeing whether or not it
-    // moves the ranking — disputing it is the reasoning.
-    for (const r of ['none_matter', 'some_matter', 'unknown'] as const) {
-      const s = buildInferredValueDisclosure(inferred, r);
-      expect(s).toContain('I supplied 2 of the values behind this');
-      expect(s).toContain('mine rather than yours');
-    }
-  });
-
-  it('EVERY sensitivity variant still satisfies the published grammar', () => {
-    const re = new RegExp(`^(?:${INFERRED_VALUE_DISCLOSURE_RE_SRC})$`);
-    for (const r of ['none_matter', 'some_matter', 'unknown'] as const) {
-      for (const n of [1, 2, 99]) {
-        const s = buildInferredValueDisclosure(
-          Array.from({ length: n }, (_, i) => ({ factor_id: `f${i}` })), r,
-        );
-        expect(re.test(s), `${r} n=${n} failed the grammar: ${s}`).toBe(true);
-        expect(s.length).toBeLessThanOrEqual(INFERRED_VALUE_DISCLOSURE_MAX_CHARS);
+  it('no emittable sentence mentions the ranking or the front-runner', () => {
+    for (const recs of shapes) {
+      const s = buildInferredValueDisclosure(recs);
+      for (const banned of [
+        'comes out in front',
+        'which option',
+        'front-runner',
+        'leading option',
+        'worth settling',
+        'the engine can resolve',
+        'noise floor',
+      ]) {
+        expect(s.toLowerCase()).not.toContain(banned.toLowerCase());
       }
     }
+  });
+
+  it('the published grammar cannot ADMIT such a sentence either', () => {
+    // The grammar is the egress contract: if it admitted the banned claim, a
+    // future builder change could ship it without touching this file.
+    for (const banned of ['comes out in front', 'worth settling', 'engine can resolve']) {
+      expect(INFERRED_VALUE_DISCLOSURE_RE_SRC).not.toContain(banned);
+    }
+  });
+
+  it('CONTRAST: the authorship claim it DOES make survives — this is not a blanket gag', () => {
+    const s = buildInferredValueDisclosure([{ factor_id: 'a' }]);
+    expect(s).toContain('mine rather than yours');
+    expect(s).toContain('changes what this model implies');
   });
 });
 
@@ -211,8 +183,7 @@ describe('the length budget is DERIVED from the builder, never hand-estimated', 
    * the real builder over every shape it can emit, and asserted EQUAL. A copy
    * edit that lengthens a sentence fails this test instead of going dark.
    */
-  it('the constant equals the real worst case over every (count, resolution)', () => {
-    const resolutions = ['none_matter', 'some_matter', 'unknown'] as const;
+  it('the constant equals the real worst case over every rendered count', () => {
     // 1 and 2 cover the singular/plural split; 99 and 150 cover the widest
     // rendered count and the clamp above it.
     const counts = [1, 2, 9, 10, 99, 150];
@@ -220,12 +191,10 @@ describe('the length budget is DERIVED from the builder, never hand-estimated', 
     let worstSentence = '';
     for (const n of counts) {
       const recs = Array.from({ length: n }, (_, i) => ({ factor_id: `f${i}` }));
-      for (const r of resolutions) {
-        const s = buildInferredValueDisclosure(recs, r);
-        if (s.length > worst) {
-          worst = s.length;
-          worstSentence = s;
-        }
+      const s = buildInferredValueDisclosure(recs);
+      if (s.length > worst) {
+        worst = s.length;
+        worstSentence = s;
       }
     }
     expect(worstSentence).not.toBe('');

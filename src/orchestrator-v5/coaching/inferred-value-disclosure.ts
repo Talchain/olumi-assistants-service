@@ -48,14 +48,15 @@
  * The longest suffix this module can emit, for the caller's length budget.
  *
  * ⛔ DERIVED FROM THE BUILDER, NEVER HAND-ESTIMATED. A budget under the real
- * worst case does not truncate — the caller DROPS the suffix, and the user is
- * silently not told the numbers were ours. `inferred-value-disclosure.test.ts`
- * re-derives this by running the builder over every (count, resolution) shape
- * and asserts EQUALITY, so lengthening a sentence fails a test rather than
- * going dark. A hand count of the same sentences said 280; the builder says
- * 272.
+ * worst case does not truncate — the caller DROPS the suffix, so the user is
+ * silently not told the numbers were ours, which is the exact claim-safety
+ * failure this module exists to close. `inferred-value-disclosure.test.ts`
+ * re-derives this by running the builder over every count it can render and
+ * asserts EQUALITY, so lengthening the copy fails a test rather than going
+ * dark. Hand-counting the same sentences gave a different number; the builder
+ * is the authority.
  */
-export const INFERRED_VALUE_DISCLOSURE_MAX_CHARS = 272;
+export const INFERRED_VALUE_DISCLOSURE_MAX_CHARS = 167;
 
 /**
  * The grammar the egress allowlist must admit, or this suffix is silently
@@ -64,7 +65,7 @@ export const INFERRED_VALUE_DISCLOSURE_MAX_CHARS = 272;
  * cannot drift apart (trap 21).
  */
 export const INFERRED_VALUE_DISCLOSURE_RE_SRC =
-  ' (?:I supplied (?:the value|\\d{1,2} of the values) behind this, because your brief did not state (?:it|them)\\. (?:It is|They are) mine rather than yours\\.(?: (?:Changing (?:it|any of them) changes what this model implies\\.|Within the range the engine can resolve, (?:it does not change|none of them changes) which option comes out in front — so the place to push back is the reasoning, not (?:that number|those numbers)\\.|At least one of them does change which option comes out in front, so it is worth settling\\.)))';
+  ' (?:I supplied (?:the value|\\d{1,2} of the values) behind this, because your brief did not state (?:it|them)\\. (?:It is|They are) mine rather than yours\\. Changing (?:it|any of them) changes what this model implies\\.)';
 
 /** A factor value the product chose, rather than one the team stated. */
 export interface InferredValueRecord {
@@ -72,59 +73,42 @@ export interface InferredValueRecord {
 }
 
 /**
- * What the run itself says about whether OUR numbers matter.
+ * ⛔⛔ PARKED, NOT FORGOTTEN: "AND DOES OUR NUMBER ACTUALLY MATTER?"
  *
- * ⭐ THIS IS WHERE "PROVISIONAL" BECOMES REAL. The purpose statement says
- * *"provisional means the user can change something and see how much it
- * matters"* — and the engine already answers it per factor: `p_win_sensitivity`
- * carries `status: "below_resolution"` when resolving that factor perfectly
- * would move the result LESS than the noise floor.
+ * The obvious next sentence here is whether the values WE supplied move the
+ * result — the purpose statement's *"provisional means the user can change
+ * something and see how much it matters"*. It was built (a
+ * `readInferredValueResolution` over `p_win_sensitivity[].status ===
+ * 'below_resolution'`, with six tests) and then WITHDRAWN UNSHIPPED on 23 Sep,
+ * for two independent reasons. Recorded here so the next lane does not rebuild
+ * it and hit the same wall.
  *
- * Measured on scenario `e243debd`: all four inferred values were
- * `below_resolution`. So the product invented four numbers, named a leading
- * option, and **not one of those numbers would have changed which option led** —
- * a fact that makes the result MORE trustworthy and which the user was never
- * told.
+ * 1. THE COPY WOULD HAVE BEEN FALSE. The drafted sentence said our numbers do
+ *    not change *"which option comes out in front"*. ISL says of this exact
+ *    field (`src/models/response_v2.py:1766-1771`) that *"holding the decision
+ *    fixed, it structurally cannot capture option-switching"* — option-switching
+ *    is `factor_evppi`'s question, not this one. The quantity is
+ *    `perfect_metric − current_metric` with THE DECISION HELD FIXED, so it can
+ *    never license a claim about the ranking. That is trap 13c: an expectation
+ *    written from the implementer's reading of a field name rather than from
+ *    the producer's stated semantics.
  *
- * ⛔ IT DOES NOT SUPPRESS THE DISCLOSURE. Sensitivity decides the EMPHASIS,
- * never whether the user is told a number is ours: an assumption the team would
- * DISPUTE is worth seeing whether or not it moves the ranking, because
- * disputing it is the reasoning this product exists to provoke.
+ * 2. USER-FACING NARRATION OF THIS FIELD IS UNDER A STANDING BAN, and the
+ *    tempting way out is already closed. `uncertainty-priority.ts:38-51`
+ *    records the counter-reading — the field was renamed off "EVPI", so
+ *    arguably the EVPI narration ban no longer covers it — as CONSIDERED AND
+ *    REJECTED: *"A rename means the NAME was wrong, not that the narration
+ *    constraint lapsed."*
+ *
+ * WHAT WOULD LIFT IT (unchanged from that module): a non-provisional EVPI
+ * labelling doctrine at ISL, or an explicit science sign-off scoping
+ * `p_win_sensitivity` out of the ban. **Either is a ruling, not a lane's call.**
+ *
+ * ⭐ IF IT IS LIFTED, the honest metric-neutral gloss is *"the uncertainty this
+ * run's result is most sensitive to"* — never a claim about which option leads.
+ * And note the ban does NOT touch this module's actual job: saying a number is
+ * ours is a statement about AUTHORSHIP, which needs no sensitivity science.
  */
-export type InferredValueResolution = 'none_matter' | 'some_matter' | 'unknown';
-
-/**
- * Read the run's own per-factor verdict for the values WE supplied.
- *
- * Returns `unknown` unless every inferred factor is accounted for — a partial
- * sweep cannot support "none of them matters", and claiming it would be the
- * absence-without-a-manifest error.
- */
-export function readInferredValueResolution(
-  enrichment: unknown,
-  inferred: readonly InferredValueRecord[],
-): InferredValueResolution {
-  if (inferred.length === 0) return 'unknown';
-  const rows = (enrichment as { p_win_sensitivity?: unknown } | undefined)?.p_win_sensitivity;
-  if (!Array.isArray(rows)) return 'unknown';
-  const byId = new Map<string, string>();
-  for (const r of rows as Array<Record<string, unknown>>) {
-    if (r === null || typeof r !== 'object') continue;
-    if (typeof r.factor_id === 'string' && typeof r.status === 'string') {
-      byId.set(r.factor_id, r.status);
-    }
-  }
-  let seen = 0;
-  let anyMatters = false;
-  for (const rec of inferred) {
-    const status = byId.get(rec.factor_id);
-    if (status === undefined) continue;
-    seen += 1;
-    if (status !== 'below_resolution') anyMatters = true;
-  }
-  if (seen !== inferred.length) return 'unknown';
-  return anyMatters ? 'some_matter' : 'none_matter';
-}
 
 /**
  * The suffix. Empty when the team stated everything — silence is correct there,
@@ -132,7 +116,6 @@ export function readInferredValueResolution(
  */
 export function buildInferredValueDisclosure(
   inferred: readonly InferredValueRecord[],
-  resolution: InferredValueResolution = 'unknown',
 ): string {
   const n = inferred.length;
   if (n === 0) return '';
@@ -143,14 +126,11 @@ export function buildInferredValueDisclosure(
   const opening = one
     ? ' I supplied the value behind this, because your brief did not state it. It is mine rather than yours.'
     : ` I supplied ${clamped} of the values behind this, because your brief did not state them. They are mine rather than yours.`;
-  // The run's own verdict on whether ours move the result. `unknown` says the
-  // plain provisional truth rather than guessing either way.
-  const tail =
-    resolution === 'none_matter'
-      ? ` Within the range the engine can resolve, ${one ? 'it does not change' : 'none of them changes'} which option comes out in front — so the place to push back is the reasoning, not ${one ? 'that number' : 'those numbers'}.`
-      : resolution === 'some_matter'
-        ? ' At least one of them does change which option comes out in front, so it is worth settling.'
-        : ` Changing ${one ? 'it' : 'any of them'} changes what this model implies.`;
+  // ⛔ MODEL-RELATIVE, AND DELIBERATELY SAYS NOTHING ABOUT MAGNITUDE. "Changing
+  // it changes what this model implies" is true by construction of a model and
+  // needs no sensitivity science to license. Anything stronger — whether ours
+  // move the ranking — is the PARKED claim above, and is banned until a ruling.
+  const tail = ` Changing ${one ? 'it' : 'any of them'} changes what this model implies.`;
   return `${opening}${tail}`;
 }
 
