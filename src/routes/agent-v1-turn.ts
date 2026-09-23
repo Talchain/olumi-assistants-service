@@ -32,6 +32,7 @@ import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
+import { buildValueChangeBlocks } from '../orchestrator-v5/agent-lane/value-change-block.js';
 import { HistoryStore, historyFromDurableTurns, needsDurableSeed } from '../orchestrator-v5/agent-lane/history-store.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
@@ -888,6 +889,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // The analysis the tool actually ran wins over the graph readback, which
     // carries only the persisted state and never the run's own options.
     const analysisBlocks = Array.isArray(analysisFromTool?.blocks) ? analysisFromTool.blocks : [];
+    /**
+     * ⭐ THE SERVER STATES A CHANGE THE USER MUST SEE, on a carrier they
+     * actually read.
+     *
+     * A value the person APPROVED can be stored differently, and a factor's
+     * scale can be chosen BY THE PRODUCT so the analysis can run. Both were
+     * told only to the model, on `must_disclose_rescaling` — a field nothing
+     * reads and nothing verifies.
+     *
+     * ⚠ That obligation was not laziness: the agent response carries no
+     * `coaching` object, so the rendered prose channel the Conventional path
+     * uses does not exist here. A BLOCK does — `V5CoachingBlock.tsx` renders
+     * them and this route already appends some.
+     */
+    const stateFacts = collectTurnStateFacts(result.tool_results);
+    const valueChangeBlocks = buildValueChangeBlocks(stateFacts, new Date().toISOString());
     const existingBlocks = Array.isArray((finalised as { blocks?: unknown[] }).blocks)
       ? (finalised as { blocks: unknown[] }).blocks
       : [];
@@ -948,7 +965,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
     return reply.code(200).send({
       ...finalised,
-      ...(analysisBlocks.length > 0 ? { blocks: [...existingBlocks, ...analysisBlocks] } : {}),
+      ...(analysisBlocks.length > 0 || valueChangeBlocks.length > 0
+        ? { blocks: [...existingBlocks, ...analysisBlocks, ...valueChangeBlocks] }
+        : {}),
       ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
       ...(analysisFromTool?.analysis_ready !== undefined
         ? { analysis_ready: analysisFromTool.analysis_ready }
@@ -999,10 +1018,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * in its own words. Two channels for one fact is right here because they
          * fail differently: prose is readable, structure is reliable.
          */
-        ...(() => {
-          const facts = collectTurnStateFacts(result.tool_results);
-          return facts.rescaled.length > 0 || facts.ranges_added.length > 0 ? { state_facts: facts } : {};
-        })(),
+        ...(stateFacts.rescaled.length > 0 || stateFacts.ranges_added.length > 0
+          ? { state_facts: stateFacts }
+          : {}),
       },
     });
   });
