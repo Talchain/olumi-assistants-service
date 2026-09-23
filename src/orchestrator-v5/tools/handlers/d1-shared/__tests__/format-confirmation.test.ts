@@ -224,3 +224,112 @@ describe('formatGoalTargetUnchanged', () => {
     expect(text).not.toMatch(/is already 15%/);
   });
 });
+
+/**
+ * A REAL CHANGE MUST NOT BE NARRATED AS NO CHANGE.
+ *
+ * ⛔ MEASURED IN A USER SESSION on deployed staging, 23 Sep, scenario
+ * `399c2814` at 23:46:18. After thirty-seven minutes unable to run an analysis,
+ * the user wrote "just help me fix what's stopping me from running the
+ * analysis" and the product replied:
+ *
+ *     "Adjusted the link between Two Developers and Coordination Overhead Risk
+ *      from moderate to moderate."
+ *
+ * ── THE MECHANISM ──────────────────────────────────────────────────────────
+ * `adjust-edge-strength.ts:393` computes `noop` as strict equality of `mean`
+ * AND `std` AND `direction`. This formatter reports BANDS. A mean that moves
+ * WITHIN a band is therefore `noop === false` — a genuine write, fact status
+ * `applied` — yet renders a sentence describing no movement. The guard is FINER
+ * than the sentence it guards, which is why `formatEdgeStrengthUnchanged` (the
+ * honest no-op receipt, already present) never fires for this case.
+ *
+ * Band thresholds are `moderate: 0.3`, `strong: 0.7` (`influence-bands.ts:26`),
+ * so 0.35 and 0.55 are the same band by the code's own definition, not by
+ * this author's choice.
+ */
+describe('formatEdgeAdjustment — no false band transition', () => {
+  it('a change WITHIN a band does not claim a transition', () => {
+    const text = formatEdgeAdjustment({
+      fromLabel: 'Two Developers',
+      toLabel: 'Coordination Overhead Risk',
+      beforeMean: 0.35,
+      afterMean: 0.55,
+    });
+    expect(text).not.toMatch(/from moderate to moderate/);
+    expect(text).toContain('still moderate');
+    // It must still report that something WAS adjusted — this is not a no-op.
+    expect(text).toContain('Adjusted the link');
+  });
+
+  it('CONTROL: a genuine band transition is still reported as one', () => {
+    const text = formatEdgeAdjustment({
+      fromLabel: 'churn',
+      toLabel: 'revenue',
+      beforeMean: 0.4,
+      afterMean: 0.7,
+    });
+    expect(text).toContain('from moderate to strong');
+    expect(text).not.toContain('still');
+  });
+
+  it('near-zero renders English, not "still no material influence"', () => {
+    // `describeBandWithDirection` returns the literal 'no material influence'
+    // below 0.05, so the band noun cannot be a predicate complement here.
+    const text = formatEdgeAdjustment({
+      fromLabel: 'a',
+      toLabel: 'b',
+      beforeMean: 0.01,
+      afterMean: 0.04,
+    });
+    expect(text).not.toMatch(/is still no material influence/);
+    expect(text).toContain('It still has no material influence.');
+  });
+
+  it('a reversal INSIDE one band is reported, not swallowed', () => {
+    const text = formatEdgeAdjustment({
+      fromLabel: 'a',
+      toLabel: 'b',
+      beforeMean: 0.4,
+      afterMean: 0.5,
+      beforeDirection: 'positive',
+      afterDirection: 'negative',
+    });
+    // The string this PR exists to remove must not appear on ANY path.
+    expect(text).not.toMatch(/from moderate to moderate/);
+    expect(text).toContain('still moderate');
+    expect(text).toMatch(/direction is now negative/);
+  });
+
+  it('the joined sentence carries no doubled punctuation', () => {
+    // ⚠ THIS REPLACES A DUPLICATE. The test that stood here was byte-identical
+    // in INPUT to the one above (0.4 → 0.5, positive → negative) with a
+    // strictly weaker assertion set — a reviewer correctly called it a control
+    // that controlled nothing, and it left a mutant alive: dropping the
+    // `.replace(/\.$/, '')` yields "…still moderate., but the direction is now
+    // negative." and nothing went red. This asserts the joint itself.
+    const flipped = formatEdgeAdjustment({
+      fromLabel: 'a',
+      toLabel: 'b',
+      beforeMean: 0.4,
+      afterMean: 0.5,
+      beforeDirection: 'positive',
+      afterDirection: 'negative',
+    });
+    expect(flipped).not.toMatch(/\.,/);
+    expect(flipped).not.toMatch(/\.\s*\./);
+    expect(flipped).toMatch(/still moderate, but the direction is now negative\.$/);
+
+    // The near-zero clause joins the same way, and its noun differs.
+    const nearZero = formatEdgeAdjustment({
+      fromLabel: 'a',
+      toLabel: 'b',
+      beforeMean: 0.01,
+      afterMean: 0.02,
+      beforeDirection: 'positive',
+      afterDirection: 'negative',
+    });
+    expect(nearZero).not.toMatch(/\.,/);
+    expect(nearZero).toMatch(/no material influence, but the direction is now negative\.$/);
+  });
+});
