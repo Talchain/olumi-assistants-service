@@ -312,7 +312,7 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
        * complete, with HTTP 200. A shape error here does not degrade the
        * turn; it deletes it.
        */
-      const g = after.json.graph as { nodes?: unknown[]; edges?: unknown[] } | undefined;
+      const g = after.json.graph as GraphV3T | undefined;
       if (g !== undefined && Array.isArray(g.nodes) && g.nodes.length > 0) {
         /**
          * ⛔ AND IT CARRIES `goal_constraints`. Assembled by hand it did not, so a
@@ -321,7 +321,7 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
          * field). The canonical wire builder is the one Conventional's applied-edit
          * path uses: the same four fields, plus `goal_constraints` when non-empty.
          */
-        draftGraph = buildAppliedGraphWireField({ ...(g as object), edges: Array.isArray(g.edges) ? g.edges : [] } as unknown as GraphV3T);
+        draftGraph = buildAppliedGraphWireField({ ...g, edges: Array.isArray(g.edges) ? g.edges : [] });
       }
     }
   } catch {
