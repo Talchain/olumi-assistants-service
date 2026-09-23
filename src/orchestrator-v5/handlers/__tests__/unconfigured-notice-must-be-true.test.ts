@@ -184,6 +184,39 @@ describe('every blocked option is named, not counted', () => {
     expect(notice).toContain('An effect target is unresolved');
   });
 
+  /**
+   * ⛔ THE MULTI-ENTRY NOTICE WAS AMBIGUOUS, AND THE SEPARATORS ARE CHARACTERS
+   * REAL CONTENT CONTAINS.
+   *
+   * Shipped in #1855 and live on staging until this fix. Unquoted, a label of
+   * "Phase 1 — pilot" and a reason ending "; then train" render as:
+   *
+   *   2 options aren't settled yet: Phase 1 — pilot; Hire; then train.
+   *
+   * — three apparent items for two options, and no way for the user to tell
+   * which option is meant. The SINGLE-entry branch has always quoted; only the
+   * multi-entry branch, where the ambiguity can actually arise, lacked it.
+   */
+  it('⭐ each option is FENCED, so a label containing the separators stays legible', () => {
+    const notice = buildBlockedOptionsNotice([
+      { option_id: 'o1', label: 'Phase 1 — pilot', reason: 'needs a mapping; then train', is_question: false },
+      { option_id: 'o2', label: 'Hire', reason: 'needs a value', is_question: false },
+    ] as never) as string;
+    expect(notice).toContain("'Phase 1 — pilot'");
+    expect(notice).toContain("'Hire'");
+    // The count and the number of fenced labels must agree — that agreement is
+    // what makes the sentence readable, and it is what was broken.
+    const fenced = (notice.match(/'[^']+'/g) ?? []).length;
+    expect(fenced, 'every named option is fenced').toBe(2);
+  });
+
+  it('CONTROL: the single-entry branch quoted all along — unchanged', () => {
+    const notice = buildBlockedOptionsNotice([
+      { option_id: 'o1', label: 'Hire', reason: 'needs a value', is_question: false },
+    ] as never) as string;
+    expect(notice).toContain("'Hire'");
+  });
+
   it('a bare count with no names is never emitted', () => {
     const notice = buildBlockedOptionsNotice(two) as string;
     expect(notice).not.toMatch(/^\d+ options aren't settled yet:?$/);
