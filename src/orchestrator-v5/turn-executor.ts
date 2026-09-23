@@ -297,6 +297,7 @@ import {
   GM_HELD_APPLY_FAILED_ASSISTANT_TEXT,
   buildGmHeldAppliedChips,
   deriveUnconfiguredOptionLabels,
+  deriveBlockedConfiguredOptions,
   executeGmHeldResume,
   readGmHeldResume,
   type GmHeldResumeRead,
@@ -4600,6 +4601,7 @@ export async function runTurnExecutor(
           assistant_text: buildGmHeldAppliedReceipt(
             gmAppliedSubject !== null ? [gmAppliedSubject] : [],
             deriveUnconfiguredOptionLabels(gmReadiness),
+            deriveBlockedConfiguredOptions(gmReadiness),
           ),
           stage: context.stage,
           suggested_actions: buildGmHeldAppliedChips(gmReadiness),
@@ -4861,6 +4863,7 @@ export async function runTurnExecutor(
         let receiptText = buildGmHeldAppliedReceipt(
           appliedSubjects,
           deriveUnconfiguredOptionLabels(gmReadiness),
+          deriveBlockedConfiguredOptions(gmReadiness),
         );
         if (declinedLabels.length > 0) {
           const declinedNamed = declinedLabels.map((l) => `'${l}'`).join(', ');
