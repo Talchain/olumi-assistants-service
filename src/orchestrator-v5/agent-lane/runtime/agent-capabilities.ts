@@ -72,6 +72,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
   }
 }
 
+import { selectGroundedCounterCase } from '../../coaching/grounded-counter-case.js';
 import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
@@ -1472,6 +1473,48 @@ export function createAgentCapabilities(
       const blocks = (r.json.blocks as { type: string }[] | undefined) ?? [];
       const result = blocks.find((b) => b.type === 'analysis_result');
       onAnalysis?.({ analysis_ready: r.json.analysis_ready, blocks });
+      /**
+       * ⭐ DSK-P-003 (Consider-the-Opposite / disconfirmation) ON THE OPENAI PATH.
+       *
+       * RC's fast-path directive asks that an explicit Run end in ONE useful next
+       * reasoning action, and names this intervention. It was never reachable here:
+       * `selectGroundedCounterCase` is called only from `orchestrator-v5/compose.ts`,
+       * the CONVENTIONAL pipeline. The Agent lane imports neither it nor
+       * `lens-selector.ts` — measured, zero references across `agent-v1-turn.ts` and
+       * `agent-lane/**`. On the OpenAI journey the exercise simply never existed.
+       *
+       * ⭐ IT IS ELIGIBLE, not merely importable. Measured on a real Agent-lane run
+       * against served `16d868a`: the enrichment arrives at
+       * `blocks[0].enrichment.robustness` with 12 fragile edges, and the real
+       * selector returns `refusalReason: null` with a counter case naming the actual
+       * link ("Revenue Growth" -> "Revenue Is Flat and Churn Is Rising").
+       *
+       * ⛔ ITS INPUT IS IN-FLIGHT ONLY, which is why it is read HERE. The enrichment
+       * is persisted NOWHERE — 0 rows carrying `fragile_edges` across
+       * `scenarios.analysis`, `latest_analysis_summary`, `analysis_provenance`,
+       * `scenario_snapshots.analysis` and `v5_conversation_turns.coaching_state`.
+       * Once this turn returns, the data is gone.
+       *
+       * ⚠ The text is the selector's own `counterCase`; nothing is re-worded and no
+       * second model call is made. `composeGroundedCounterCase` is deliberately NOT
+       * called — it takes three scalars, and the decision already carries the
+       * finished string. Passing it the decision renders "[object Object]".
+       */
+      const enrichment = (blocks as { enrichment?: unknown }[])
+        .map((b) => b?.enrichment)
+        .find((e) => e !== undefined && e !== null);
+      let considerOpposite: string | undefined;
+      if (enrichment !== undefined) {
+        try {
+          const decision = selectGroundedCounterCase(enrichment);
+          const grounded = decision?.grounded;
+          if (grounded && typeof grounded.counterCase === 'string' && grounded.counterCase !== '') {
+            considerOpposite = grounded.counterCase;
+          }
+        } catch {
+          // A reasoning prompt is an offer, never a gate on the user's answer.
+        }
+      }
       return {
         ok: r.status === 200,
         mutated: false,
@@ -1482,6 +1525,7 @@ export function createAgentCapabilities(
         blockers: ready.blockers ?? [],
         options: ready.options ?? [],
         ...(result !== undefined ? { result } : {}),
+        ...(considerOpposite !== undefined ? { consider_the_opposite: considerOpposite } : {}),
       };
     },
   };
