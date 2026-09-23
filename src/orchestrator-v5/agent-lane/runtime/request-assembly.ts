@@ -255,6 +255,8 @@ export interface OmittedTool {
 export interface ToolEligibility {
   readonly tools: readonly ToolDefinition[];
   readonly omitted: readonly OmittedTool[];
+  /** The verdict this call DERIVED. Returned so callers reuse it, never supply it. */
+  readonly freshness: ContextFreshness;
 }
 
 /**
@@ -266,7 +268,8 @@ const CONTEXT_EQUIVALENT_TOOL = 'get_canonical_state';
 
 export function eligibleTools(input: {
   readonly mode: AgentLaneMode;
-  readonly freshness: ContextFreshness;
+  readonly context?: CanonicalContextPacket | null;
+  readonly expectation: ContextExpectation;
   /**
    * Anything the packet ASSERTS it was granted. Accepted so that a caller can
    * pass a packet through verbatim, and then deliberately ignored — see the
@@ -275,17 +278,27 @@ export function eligibleTools(input: {
    */
   readonly claimedGrants?: readonly string[];
 }): ToolEligibility {
+  // ⛔ THE VERDICT IS DERIVED HERE TOO, NOT ONLY IN `assembleRequest`.
+  //
+  // This function used to take a `freshness` verdict. Assembly was fixed to
+  // derive its own, which closed the reachable hole — but leaving a verdict
+  // parameter on an EXPORTED function keeps the bypass one import away, and
+  // "callers must verify first" in a doc comment is not a boundary, for the
+  // same reason a prompt sentence is not one. There is now no function in this
+  // module that will accept a verdict from a caller.
+  const freshness = assessContextFreshness(input.context, input.expectation);
+
   // `toolsFor` is the authority. Starting from it is what makes the subset
   // property structural rather than something this function has to remember.
   const allowed = toolsFor(input.mode);
-  if (input.freshness.kind !== 'fresh') return { tools: allowed, omitted: [] };
+  if (freshness.kind !== 'fresh') return { tools: allowed, omitted: [], freshness };
 
   const tools = allowed.filter((t) => t.name !== CONTEXT_EQUIVALENT_TOOL);
   const omitted: OmittedTool[] =
     tools.length === allowed.length
       ? []
       : [{ name: CONTEXT_EQUIVALENT_TOOL, reason: 'context_already_supplied' }];
-  return { tools, omitted };
+  return { tools, omitted, freshness };
 }
 
 export interface AssembledRequest {
@@ -350,8 +363,11 @@ export function assembleRequest(input: {
   //
   // A doc comment telling callers to verify first would not close it, for the
   // same reason a prompt sentence is not a safety boundary.
-  const freshness = assessContextFreshness(input.context, input.expectation);
-  const { tools, omitted } = eligibleTools({ mode: input.mode, freshness });
+  const { tools, omitted, freshness } = eligibleTools({
+    mode: input.mode,
+    context: input.context,
+    expectation: input.expectation,
+  });
 
   const promptHash = hash({ id: input.promptSnapshot.id, version: input.promptSnapshot.version, text: input.promptSnapshot.text });
   const toolsHash = hash(tools.map((t) => ({ name: t.name, parameters: t.parameters })));

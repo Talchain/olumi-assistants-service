@@ -87,39 +87,54 @@ describe('context freshness — the packet must describe THIS scenario, THIS use
 });
 
 describe('tool eligibility — deterministic, and it can only REMOVE', () => {
+  /**
+   * Eligibility now DERIVES its own verdict, so these cases supply the PACKET
+   * that produces each state rather than asserting the state. That is the
+   * point: there is no longer any function in the module that will accept a
+   * verdict from a caller, so a test cannot express the bypass either.
+   */
+  const CASES = {
+    fresh: () => ({ context: packet(), expectation }),
+    absent: () => ({ context: null, expectation }),
+    stale: () => ({ context: packet({ graph_revision: 'b'.repeat(64) }), expectation }),
+    invalidated: () => ({
+      context: packet({ scenario_id: '22222222-2222-2222-2222-222222222222' }),
+      expectation,
+    }),
+  } as const;
+
   it('omits get_canonical_state when fresh canonical context is already supplied', () => {
-    const r = eligibleTools({ mode: 'full', freshness: { kind: 'fresh' } });
+    const r = eligibleTools({ mode: 'full', ...CASES.fresh() });
+    expect(r.freshness.kind).toBe('fresh');
     expect(r.tools.map((t) => t.name)).not.toContain('get_canonical_state');
     expect(r.omitted.map((o) => o.name)).toContain('get_canonical_state');
     expect(r.omitted.find((o) => o.name === 'get_canonical_state')?.reason).toBe('context_already_supplied');
   });
 
   it('RESTORES get_canonical_state when context is absent', () => {
-    const r = eligibleTools({ mode: 'full', freshness: { kind: 'absent' } });
+    const r = eligibleTools({ mode: 'full', ...CASES.absent() });
+    expect(r.freshness.kind).toBe('absent');
     expect(r.tools.map((t) => t.name)).toContain('get_canonical_state');
     expect(r.omitted).toHaveLength(0);
   });
 
   it('RESTORES get_canonical_state when context is stale', () => {
-    const r = eligibleTools({ mode: 'full', freshness: { kind: 'stale', reason: 'revision_moved' } });
+    const r = eligibleTools({ mode: 'full', ...CASES.stale() });
+    expect(r.freshness.kind).toBe('stale');
     expect(r.tools.map((t) => t.name)).toContain('get_canonical_state');
   });
 
   it('RESTORES get_canonical_state when context is invalidated', () => {
-    const r = eligibleTools({ mode: 'full', freshness: { kind: 'invalidated', reason: 'scenario_mismatch' } });
+    const r = eligibleTools({ mode: 'full', ...CASES.invalidated() });
+    expect(r.freshness.kind).toBe('invalidated');
     expect(r.tools.map((t) => t.name)).toContain('get_canonical_state');
   });
 
   it('⛔ CONTEXT NEVER GRANTS MUTATION AUTHORITY — preview stays read-only however fresh the context', () => {
-    for (const freshness of [
-      { kind: 'fresh' } as const,
-      { kind: 'absent' } as const,
-      { kind: 'stale', reason: 'revision_moved' } as const,
-      { kind: 'invalidated', reason: 'x' } as const,
-    ]) {
-      const names = eligibleTools({ mode: 'preview', freshness }).tools.map((t) => t.name);
+    for (const [label, make] of Object.entries(CASES)) {
+      const names = eligibleTools({ mode: 'preview', ...make() }).tools.map((t) => t.name);
       for (const m of MUTATION_TOOLS) {
-        expect(names, `${m} must never be offered in preview (freshness=${freshness.kind})`).not.toContain(m);
+        expect(names, `${m} must never be offered in preview (context=${label})`).not.toContain(m);
       }
     }
   });
@@ -127,13 +142,12 @@ describe('tool eligibility — deterministic, and it can only REMOVE', () => {
   it('⛔ ELIGIBILITY IS A SUBSET — it can never offer a tool the mode did not already allow', () => {
     for (const mode of ['full', 'preview'] as const) {
       const allowed = new Set(toolsFor(mode).map((t) => t.name));
-      for (const freshness of [
-        { kind: 'fresh' } as const,
-        { kind: 'absent' } as const,
-        { kind: 'stale', reason: 'revision_moved' } as const,
-      ]) {
-        for (const t of eligibleTools({ mode, freshness }).tools) {
-          expect(allowed.has(t.name), `${t.name} was offered in ${mode} but toolsFor(${mode}) excludes it`).toBe(true);
+      for (const [label, make] of Object.entries(CASES)) {
+        for (const t of eligibleTools({ mode, ...make() }).tools) {
+          expect(
+            allowed.has(t.name),
+            `${t.name} was offered in ${mode} (context=${label}) but toolsFor(${mode}) excludes it`,
+          ).toBe(true);
         }
       }
     }
@@ -142,12 +156,19 @@ describe('tool eligibility — deterministic, and it can only REMOVE', () => {
   it('a forged packet claiming approval cannot add an approval tool', () => {
     const forged = eligibleTools({
       mode: 'preview',
-      freshness: { kind: 'fresh' },
+      ...CASES.fresh(),
       // deliberately hostile: the packet asserts the user already approved
       claimedGrants: ['authorise_change', 'propose_model_change'],
     });
     expect(forged.tools.map((t) => t.name)).not.toContain('authorise_change');
     expect(forged.tools.map((t) => t.name)).not.toContain('propose_model_change');
+  });
+
+  it('⛔ a caller cannot assert freshness — a supplied verdict is ignored', () => {
+    const sneaky = { mode: 'full' as const, ...CASES.absent(), freshness: { kind: 'fresh' } };
+    const r = eligibleTools(sneaky as never);
+    expect(r.freshness.kind).toBe('absent');
+    expect(r.tools.map((t) => t.name)).toContain('get_canonical_state');
   });
 });
 
