@@ -71,7 +71,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
   }
 }
 
-import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary } from '../proposal.js';
+import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { structuralFacts } from '../structural-facts.js';
@@ -139,7 +139,71 @@ export function createAgentCapabilities(
     };
   };
 
-  return {
+  /**
+   * ⛔ ONE APPROVAL MUST BE ABLE TO APPLY A WHOLE STARTING POINT.
+   *
+   * Every proposal is bound to the model revision it was made against, and
+   * `ProposalStore.authorise` refuses one whose base is no longer current. So
+   * two proposals offered together — starting values AND option levels — could
+   * never both be applied from one "yes": applying the first moves the
+   * revision, and the second is `superseded` by our OWN write. Measured on the
+   * replay of Paul's journey (output/paul-test-20260923/repro): the user said
+   * "make those updates immediately", and the model still could not become
+   * analysable in one step.
+   *
+   * A compound proposal is applied PART BY PART through the existing
+   * single-kind paths, in a fixed order (values first — an option level is read
+   * against the factor's frame). Each part carries the approved operations
+   * VERBATIM; only its base is re-bound to the revision our own previous part
+   * produced. Nothing is regenerated. The parent is marked applied only when
+   * every part landed; otherwise the result says exactly which part did not.
+   */
+  const COMPOUND_ORDER = ['set_factor_value', 'set_option_intervention'] as const;
+  const applyCompound = async (ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal): Promise<ToolResult> => {
+    const unsupported = parent.operations.filter((o) => !(COMPOUND_ORDER as readonly string[]).includes(o.op));
+    if (unsupported.length > 0) {
+      return { ok: false, mutated: false, refusal: 'unsupported_compound', detail: `This proposal mixes changes that cannot be applied together: ${[...new Set(unsupported.map((o) => o.op))].join(', ')}.` };
+    }
+    const { proposal_id: _parentId, ...content } = parent;
+    const parts: ToolResult[] = [];
+    const expected = COMPOUND_ORDER.filter((k) => parent.operations.some((o) => o.op === k));
+    for (const kind of expected) {
+      const now = await readGraph(ctx.scenario_id);
+      if (now === null) return { ok: false, mutated: parts.some((p) => p.mutated === true), refusal: 'not_found', parts };
+      const child = createProposal({
+        ...content,
+        base_graph_identity_hash: now.graph_hash,
+        operations: parent.operations.filter((o) => o.op === kind),
+        public_label: `${parent.public_label} [${kind === 'set_factor_value' ? 'values' : 'option levels'}]`,
+      });
+      proposals.put(child);
+      const r = await caps.authoriseChange(ctx, { proposal_id: child.proposal_id });
+      // ⚠ A single-kind path answers `ok: true` when SOME of its writes landed
+      // and lists the rest under `failures` — complete means every one landed.
+      const complete = r.ok === true && !(Array.isArray(r.failures) && r.failures.length > 0);
+      if (!complete) proposals.discard(child.proposal_id);
+      parts.push({ part: kind === 'set_factor_value' ? 'values' : 'option_levels', ...r, ok: complete });
+      if (!complete) break;
+    }
+    const all = parts.length === expected.length && parts.every((p) => p.ok === true);
+    const receipts = parts.flatMap((p) => (Array.isArray(p.receipts) ? (p.receipts as ReceiptSummary[]) : []));
+    if (all) proposals.markApplied(parent.proposal_id, receipts);
+    return {
+      ok: all,
+      mutated: parts.some((p) => p.mutated === true),
+      applied: all,
+      proposal_id: parent.proposal_id,
+      parts,
+      receipts,
+      ...(all
+        ? {}
+        : {
+            refusal: parts.some((p) => p.ok === true) ? 'partially_applied' : 'not_applied',
+            detail: 'Tell the user exactly which part was recorded and which was not, and why.',
+          }),
+    };
+  };
+  const caps: AgentCapabilities = {
     async getCanonicalState(ctx: AgentToolContext): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
@@ -322,6 +386,61 @@ export function createAgentCapabilities(
      * outside [0, 1] cannot be expressed on this wire at all; saying so is the
      * correct outcome, not picking a denominator.
      */
+    /**
+     * ⭐ A STARTING POINT IS ONE PROPOSAL, SO ONE "YES" APPLIES ALL OF IT.
+     * Composed from the two existing proposers — their validation, frames and
+     * refusals are unchanged — then merged into one exact proposal on the SAME
+     * base, and the two halves discarded so only the object the user is shown
+     * is awaiting approval. See `applyCompound` for how it is applied.
+     */
+    async proposeStartingPoint(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const assumptions = Array.isArray(args?.assumptions) ? args.assumptions : [];
+      const levels = Array.isArray(args?.option_levels) ? args.option_levels : [];
+      if (assumptions.length === 0 && levels.length === 0) {
+        return { ok: false, mutated: false, refusal: 'empty_proposal', detail: 'Nothing was proposed.' };
+      }
+      const a = assumptions.length > 0 ? await caps.proposeAssumptions(ctx, { assumptions }) : null;
+      const b = levels.length > 0 ? await caps.proposeOptionInterventions(ctx, { interventions: levels }) : null;
+      const refused = {
+        ...(a !== null && a.ok !== true ? { assumptions_refused: a } : {}),
+        ...(b !== null && b.ok !== true ? { option_levels_refused: b } : {}),
+      };
+      const made = [a, b].filter((r): r is ToolResult => r !== null && r.ok === true && typeof r.proposal_id === 'string');
+      if (made.length === 0) return { ok: false, mutated: false, refusal: 'nothing_to_propose', ...refused };
+      // Only one half could be proposed: it is an ordinary proposal already.
+      if (made.length === 1) return { ...made[0], ...refused };
+      const halves = made.map((r) => proposals.get(r.proposal_id as string)).filter((p): p is StructuredProposal => p !== undefined);
+      if (halves.length !== 2 || halves[0].base_graph_identity_hash !== halves[1].base_graph_identity_hash) {
+        for (const h of halves) proposals.discard(h.proposal_id);
+        return { ok: false, mutated: false, refusal: 'model_changed_while_proposing', detail: 'The model changed while this was being put together. Read the state again and propose once more.' };
+      }
+      const compound = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: halves[0].base_graph_identity_hash,
+        operations: [...halves[0].operations, ...halves[1].operations],
+        provenance: { authored_by: 'model_proposed', basis: 'a starting point — values and what each option sets — for the user to adopt or correct in one approval' },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: `${halves[0].public_label}; ${halves[1].public_label}`,
+      });
+      proposals.put(compound);
+      for (const h of halves) proposals.discard(h.proposal_id);
+      return {
+        ok: true, mutated: false,
+        proposal_id: compound.proposal_id,
+        public_label: compound.public_label,
+        base_revision: compound.base_graph_identity_hash,
+        assumptions: a?.assumptions ?? [],
+        option_levels: b?.interventions ?? [],
+        ...refused,
+        note:
+          'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +
+          'assumptions to adopt or correct, NOT measurements, and that ONE approval applies all of them. Then call ' +
+          'authorise_change with this proposal_id once they agree.',
+      };
+    },
+
     async proposeOptionInterventions(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const g = await readGraph(ctx.scenario_id);
@@ -490,6 +609,9 @@ export function createAgentCapabilities(
 
       // The STORED operations are applied. Nothing is regenerated here.
       const ops = decision.proposal.operations;
+
+      // A starting point mixes kinds; each single-kind path below handles one.
+      if (new Set(ops.map((o) => o.op)).size > 1) return applyCompound(ctx, decision.proposal);
 
       if (ops[0]?.op === 'set_option_intervention') {
         /**
@@ -922,4 +1044,5 @@ export function createAgentCapabilities(
       };
     },
   };
+  return caps;
 }
