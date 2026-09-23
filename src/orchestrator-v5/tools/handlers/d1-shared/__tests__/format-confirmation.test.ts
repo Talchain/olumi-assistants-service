@@ -273,6 +273,34 @@ describe('formatEdgeAdjustment — no false band transition', () => {
     expect(text).not.toContain('still');
   });
 
+  it('near-zero renders English, not "still no material influence"', () => {
+    // `describeBandWithDirection` returns the literal 'no material influence'
+    // below 0.05, so the band noun cannot be a predicate complement here.
+    const text = formatEdgeAdjustment({
+      fromLabel: 'a',
+      toLabel: 'b',
+      beforeMean: 0.01,
+      afterMean: 0.04,
+    });
+    expect(text).not.toMatch(/is still no material influence/);
+    expect(text).toContain('It still has no material influence.');
+  });
+
+  it('a reversal INSIDE one band is reported, not swallowed', () => {
+    const text = formatEdgeAdjustment({
+      fromLabel: 'a',
+      toLabel: 'b',
+      beforeMean: 0.4,
+      afterMean: 0.5,
+      beforeDirection: 'positive',
+      afterDirection: 'negative',
+    });
+    // The string this PR exists to remove must not appear on ANY path.
+    expect(text).not.toMatch(/from moderate to moderate/);
+    expect(text).toContain('still moderate');
+    expect(text).toMatch(/direction is now negative/);
+  });
+
   it('CONTROL: a direction flip with NO sign change is still reported', () => {
     // ⚠ THIS CONTROL WAS BLIND ONCE, AND THE MUTANT KIT CAUGHT IT. The first
     // version used afterMean -0.5, but `describeBandWithDirection` already
@@ -292,7 +320,12 @@ describe('formatEdgeAdjustment — no false band transition', () => {
       beforeDirection: 'positive',
       afterDirection: 'negative',
     });
-    expect(text).toMatch(/negative/i);
-    expect(text).not.toContain('still moderate');
+    // ⚠ THIS ASSERTION WAS UPDATED, AND THE REASON MATTERS. It used to read
+    // `not.toContain('still moderate')`, which was written when the same-band
+    // branch EXCLUDED direction flips. The requirement was never that wording —
+    // it is that a reversal must not be swallowed. The branch now handles the
+    // flip itself and says so explicitly, so the requirement is asserted
+    // directly instead of through a proxy for the old implementation.
+    expect(text).toMatch(/direction is now negative/i);
   });
 });

@@ -651,11 +651,27 @@ export function formatEdgeAdjustment(input: EdgeAdjustmentInput): string {
   // interpreted). So say what is true: the link was adjusted, and the band it
   // sits in is unchanged. `formatEdgeStrengthUnchanged` remains the receipt for
   // an ACTUAL no-op, which this is not.
-  if (beforeBand === afterBand && !directionFlipped) {
-    return (
-      `Adjusted the link between ${input.fromLabel} and ${input.toLabel}. ` +
-      `Its strength is still ${afterBand}.`
-    );
+  if (beforeBand === afterBand) {
+    const link = `Adjusted the link between ${input.fromLabel} and ${input.toLabel}.`;
+    // ⚠ THE BAND NOUN DOES NOT READ AS A PREDICATE COMPLEMENT AT NEAR-ZERO.
+    // `describeBandWithDirection` returns the literal 'no material influence'
+    // below NEAR_ZERO_INFLUENCE_THRESHOLD, so "its strength is still no
+    // material influence" is not English — the same trap
+    // `formatEdgeStrengthUnchanged` already special-cases forty lines below,
+    // and its docblock says so verbatim. Reachable: z.number().min(-1).max(1)
+    // admits 0.01 → 0.04 with directions agreeing and `noop` false.
+    const stillClause =
+      Math.abs(input.afterMean) < NEAR_ZERO_INFLUENCE_THRESHOLD
+        ? 'It still has no material influence.'
+        : `Its strength is still ${afterBand}.`;
+    // A reversal inside one band must still be reported. Without this the
+    // sentence says only that nothing moved, on a turn where the direction
+    // flipped — which is the same class of false receipt this branch exists
+    // to remove, pointed the other way.
+    if (directionFlipped) {
+      return `${link} ${stillClause.replace(/\.$/, '')}, but the direction is now ${afterDirection}.`;
+    }
+    return `${link} ${stillClause}`;
   }
 
   return `Adjusted the link between ${input.fromLabel} and ${input.toLabel} from ${beforeBand} to ${afterBand}.${tail}`;
