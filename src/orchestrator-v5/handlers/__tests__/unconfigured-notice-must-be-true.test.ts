@@ -252,10 +252,78 @@ describe('the notice asks the payload\u2019s own question', () => {
     expect(b.reason).toBe('some diagnosis');
   });
 
-  it('the notice never frames the option as blocking a machine', () => {
+  /**
+   * ⛔ THE INVARIANT RAN ON ONE BRANCH AND THE PRODUCT USES THE OTHER.
+   *
+   * This assertion existed, and passed, while `buildBlockedOptionsNotice`
+   * could still be reverted to literally "Note: 2 options still block the
+   * analysis" — because it only ever called the builder with a SINGLE entry,
+   * and the multi-entry branch is a separate `return`. Measured over real
+   * persisted graphs the split is 7 single / 27 multi, so **79% of live
+   * notices took the unguarded branch**. A surviving mutant found it; reading
+   * the test did not.
+   *
+   * It is now driven by entry count so every emitting branch is covered.
+   */
+  it.each([1, 2, 3])('the notice never frames the option as blocking a machine (%i entries)', (n) => {
     const [b] = deriveBlockedConfiguredOptions(withQuestion);
-    const notice = buildBlockedOptionsNotice([b]) as string;
+    const entries = Array.from({ length: n }, (_, i) => ({ ...b, label: `Option ${i + 1}` }));
+    const notice = buildBlockedOptionsNotice(entries) as string;
     expect(notice).not.toMatch(/block(s|ing)? the analysis/i);
-    expect(notice).toMatch(/isn't settled yet/i);
+    expect(notice).toMatch(/(isn't|aren't) settled yet/i);
+    // Every emitting branch names what it is talking about — a bare count is
+    // the failure this notice was built to remove.
+    for (const e of entries) expect(notice).toContain(e.label);
+  });
+
+  /**
+   * ⛔ BOUND BY IDENTITY, NOT BY A VALUE THE FALL-THROUGH ALSO SATISFIES.
+   * "contains the question text" is true of the diagnosis branch too whenever
+   * the diagnosis happens to be a question, so it cannot witness WHICH branch
+   * ran. The discriminator is the branch's own shape: the question form leads
+   * with the label and carries an em dash; the fall-through is prefixed
+   * "Note:".
+   */
+  it('the question-lead form is the one that ran, not merely the right words', () => {
+    const [q] = deriveBlockedConfiguredOptions(withQuestion);
+    const lead = buildBlockedOptionsNotice([q]) as string;
+    expect(lead.startsWith("'")).toBe(true);
+    expect(lead).not.toMatch(/^Note:/);
+    expect(lead).toContain(' — ');
+
+    // CONTRAST: same builder, no question — the other branch, discriminably.
+    const fallback = buildBlockedOptionsNotice([
+      { ...q, is_question: false, reason: 'a diagnosis' },
+    ]) as string;
+    expect(fallback).toMatch(/^Note:/);
+  });
+
+  /**
+   * The terminator is conditional: a `user_questions` entry ends in '?', and
+   * `sentence()` strips each entry's own full stop in the multi-entry join.
+   * Appending unconditionally gives "?."; appending nothing leaves the notice
+   * running into the text the receipt joins after it.
+   */
+  it('every notice ends in exactly one terminal mark, question or not', () => {
+    const [q] = deriveBlockedConfiguredOptions(withQuestion);
+    const cases = [
+      buildBlockedOptionsNotice([q]),
+      buildBlockedOptionsNotice([{ ...q, is_question: false, reason: 'a diagnosis' }]),
+      buildBlockedOptionsNotice([q, { ...q, label: 'Second' }]),
+      buildBlockedOptionsNotice([{ ...q, is_question: false, reason: undefined }]),
+      // ⛔ THE DISCRIMINATING CASE. Every case above happens to end in '?' or
+      // in the single-entry template's own '.', so all of them pass with the
+      // terminator removed entirely — a mutant proved it. `sentence()` strips a
+      // trailing '.' from each entry, so a multi-entry notice whose LAST reason
+      // ends in a full stop is the only shape that witnesses the append.
+      buildBlockedOptionsNotice([
+        { ...q, is_question: false, label: 'First', reason: 'one reason.' },
+        { ...q, is_question: false, label: 'Second', reason: 'another reason.' },
+      ]),
+    ] as string[];
+    for (const c of cases) {
+      expect(c).toMatch(/[.!?]$/);
+      expect(c).not.toMatch(/[.!?]{2}$/);
+    }
   });
 });

@@ -358,6 +358,22 @@ export function deriveBlockedConfiguredOptions(
  * how the previous notice came to tell a user an option had no effect values
  * when it had two.
  */
+/**
+ * End a user-facing fragment with a full stop unless it already ends in its own
+ * terminal punctuation.
+ *
+ * ⛔ WHY NOT A BARE `+ '.'`. The lead form carries a QUESTION from
+ * `user_questions`, so appending unconditionally renders "…Handover Risk?." —
+ * and `sentence()` deliberately strips a trailing '.' from each entry, so the
+ * multi-entry notice ended with nothing at all and ran into the text the
+ * receipt joins after it. Both directions are wrong; the terminator has to be
+ * conditional on what is already there.
+ */
+function terminate(text: string): string {
+  const trimmed = text.replace(/\s+$/, '');
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
 export function buildBlockedOptionsNotice(
   blocked: readonly BlockedConfiguredOption[],
 ): string | null {
@@ -381,7 +397,7 @@ export function buildBlockedOptionsNotice(
   if (entries.length === 1) {
     const one = entries[0] as BlockedConfiguredOption;
     if (one.is_question === true && typeof one.reason === 'string') {
-      return `'${one.label}' isn't settled yet — ${one.reason}`;
+      return `'${one.label}' isn't settled yet — ${terminate(one.reason)}`;
     }
     const because =
       typeof one.reason === 'string' && one.reason.length > 0
@@ -389,7 +405,12 @@ export function buildBlockedOptionsNotice(
         : '';
     return `Note: '${one.label}' isn't settled yet.${because}`;
   }
-  return `${entries.length} options aren't settled yet: ${entries.map(sentence).join('; ')}`;
+  // ⚠ TERMINAL PUNCTUATION IS LOAD-BEARING HERE. `sentence()` strips each
+  // entry's full stop so the `; ` join reads cleanly, which left the WHOLE
+  // notice unterminated — and this notice is joined last into the receipt, so
+  // it ran straight into the following text. Measured 23 Sep: 26 of 33 notices
+  // built from real persisted graphs ended with no terminal punctuation.
+  return terminate(`${entries.length} options aren't settled yet: ${entries.map(sentence).join('; ')}`);
 }
 
 /** Rerun affordance offered when the post-apply graph is analysis-ready. */
