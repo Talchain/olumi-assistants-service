@@ -10,12 +10,29 @@ Brief: `Should I hire a Tech lead or two developers to increase velocity?`
 
 **What changed:** a first construction now creates **and returns** a canonical model version + receipt. Before tonight it created the graph and never reached the version writer at all.
 
-| | `graph_registration` turns | version created | `model_version_created` NULL |
+| | `graph_registration` turns | version created | NULL |
 |---|---|---|---|
 | before deploy | **959** | **0** | 959 |
-| after 02:08 deploy | **2** | **2** | 0 |
+| after 02:08 deploy | 14 | **7** | 2 |
 
-⚠ **This is WIRE-WITNESSED, not JOURNEY-WITNESSED, and n = 2.** I saw the deployed build write receipts in the database. I did **not** drive a signed-in browser — a key-authed harness structurally cannot witness a receipt (guests mint no versions; a shared key on an owned scenario 422s). **Your test is the journey witness.**
+### ⛔ SIGN IN BEFORE TESTING, or this will look broken
+
+Split by authentication, n = 14 since the deploy. The pattern is total:
+
+| signed in? | registrations | version created |
+|---|---|---|
+| **yes** | **7** | **7 TRUE** |
+| no (guest) | 7 | **0** (5 `false`, 2 `NULL`) |
+
+**7 of 7 signed-in registrations mint a canonical version. 0 of 7 guest ones do** — and that is **correct by design**: the deployed `append_turn_atomic_v5` gates on `v_user_id IS NOT NULL`, so a guest never gets a version. A key-authed harness cannot witness a receipt for the same reason.
+
+**As a guest you will see no version and no receipt, which looks exactly like the bug we just fixed.**
+
+⚠ **Correcting my own earlier claim:** I first reported this as "2 of 2" on n = 2. Direction right, evidence thin — and the thin version would have let a guest test read as a regression. The honest claim is **7 of 7 signed-in**, guests correctly excluded.
+
+*(Cosmetic, noted so nobody re-investigates it: guests split 5 `false` / 2 `NULL`. Both mean "no version" — the carrier returns `kind: 'none'` where the RPC simply does not stamp the flag.)*
+
+**Still WIRE-WITNESSED, not JOURNEY-WITNESSED.** I observed the database on the deployed build; I did not drive a browser. **Your test is the journey witness.**
 
 **What to look for:** after the first model is built, the Agent should be able to name the version it became. If it cannot, the receipt is not reaching the conversation layer even though the row exists.
 
