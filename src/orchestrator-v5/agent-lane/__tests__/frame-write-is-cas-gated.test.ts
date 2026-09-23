@@ -379,3 +379,115 @@ describe('a moved graph refuses the WHOLE authorisation, not just its first op',
     ).toEqual([]);
   });
 });
+
+/**
+ * ⛔⛔⛔ THE FRAME WRITE DESTROYED THE REST OF THE MODEL WHILE PROTECTING IT FROM
+ * OTHER WRITERS.
+ *
+ * Both frame writes sent `graph: { nodes: patched, edges: ... }` — only two
+ * top-level keys. The value-batch write three functions up is the CONTRAST
+ * CONTROL and gets it right (`agent-capabilities.ts:367`):
+ *
+ *     graph: { ...(working as Record<string, unknown>), nodes: workingNodes }
+ *
+ * Everything else on the graph was dropped. And these are not cosmetic keys:
+ * `computeAnalysisAffectingGraphHashSha256` (`context/graph-hash.ts:149-162`)
+ * hashes `nodes`, `edges`, **`options`**, **`goal_node_id`** and
+ * **`goal_constraints`** — so the frame write deleted analysis-affecting model
+ * content, on the very PR whose purpose is to stop a write landing on a model the
+ * user did not approve.
+ *
+ * `readGraph` already keeps the whole object as `raw`, so the fix is a spread.
+ */
+const RICH_GRAPH = {
+  schema_version: 'v3',
+  nodes: NODES,
+  edges: EDGES,
+  options: [{ id: OPTION, label: 'Raise Pro to £59' }],
+  goal_node_id: 'goal_1',
+  goal_constraints: [{ constraint_id: 'gc1', node_id: FACTOR, kind: 'max', value: 1000 }],
+};
+
+function richHarness() {
+  const registerBodies: Record<string, unknown>[] = [];
+  const d: InternalDispatch = async (path, body) => {
+    if (path === '/orchestrate/v2/turn') return { status: 200, json: {} };
+    if (path.endsWith('/graph/register')) {
+      registerBodies.push((body ?? {}) as Record<string, unknown>);
+      return { status: 200, json: {} };
+    }
+    if (path.endsWith('/graph')) {
+      const moved = registerBodies.length > 0;
+      return { status: 200, json: { graph: RICH_GRAPH, graph_hash: moved ? MOVED_HASH : BASE_HASH } };
+    }
+    return { status: 200, json: {} };
+  };
+  return { d, registerBodies };
+}
+
+describe('a frame write must not delete the rest of the model', () => {
+  it('⛔ preserves goal_constraints, goal_node_id and options', async () => {
+    const store = new ProposalStore();
+    const id = seedProposal(store);
+    const h = richHarness();
+    const caps = createAgentCapabilities(h.d, store, structured, 'full', () => undefined);
+    await caps.authoriseChange(ctx as never, { proposal_id: id, approved: true } as never);
+
+    expect(h.registerBodies.length, 'precondition: a frame write was attempted').toBeGreaterThan(0);
+    for (const body of h.registerBodies) {
+      const g = (body.graph ?? {}) as Record<string, unknown>;
+      expect(g.goal_constraints, 'goal_constraints is analysis-affecting (graph-hash.ts:161)').toEqual(RICH_GRAPH.goal_constraints);
+      expect(g.goal_node_id, 'goal_node_id is analysis-affecting (graph-hash.ts:160)').toBe('goal_1');
+      expect(g.options, 'options are analysis-affecting (graph-hash.ts:157)').toEqual(RICH_GRAPH.options);
+      expect(g.schema_version, 'and nothing else is silently dropped either').toBe('v3');
+    }
+  });
+
+  it('CONTRAST: the patched nodes DO replace the originals, so the spread is not a no-op', async () => {
+    const store = new ProposalStore();
+    const id = seedProposal(store);
+    const h = richHarness();
+    const caps = createAgentCapabilities(h.d, store, structured, 'full', () => undefined);
+    await caps.authoriseChange(ctx as never, { proposal_id: id, approved: true } as never);
+
+    const g = (h.registerBodies[0]!.graph ?? {}) as Record<string, unknown>;
+    const factor = (g.nodes as { id: string; observed_state?: { cap?: unknown } }[]).find((n) => n.id === FACTOR);
+    expect(factor?.observed_state?.cap, 'the frame really was attached').toBeDefined();
+  });
+})
+
+/**
+ * ⛔ SITE 2 IS NOT REACHED BY THE BEHAVIOURAL TEST ABOVE, and I am not pretending
+ * otherwise. The proposal shape that exercises the `afterSet` twin is the
+ * factor-value path, not the option-intervention one, so mutating that site's
+ * spread SURVIVES the suite above.
+ *
+ * This is the second time on THIS PR that a claim covered one write and not its
+ * twin — the first time I shipped "both frame writes fixed" when only one had
+ * changed. So the invariant is asserted over the SOURCE, the same way this file
+ * already asserts every register call carries a base: it catches both sites now
+ * and any third one added later.
+ */
+describe('every graph/register in this module sends the WHOLE graph', () => {
+  const SRC = readFileSync(new URL('../runtime/agent-capabilities.ts', import.meta.url), 'utf8');
+
+  it('⛔ no register call sends a bare { nodes, edges } without spreading the read graph', () => {
+    const calls = SRC.split('graph/register`, {').slice(1);
+    expect(calls.length, 'the split must find the register calls').toBe(3);
+    for (const [i, call] of calls.entries()) {
+      // ⚠ Bounded by the call's OWN closing `});`, not a fixed character window.
+      // My first version sliced 400 chars and the docblock I had just added pushed
+      // the `graph:` line out of it, so the guard failed on its own baseline —
+      // a window is a second thing to keep in sync and this needed none.
+      const end = call.indexOf('\n      });');
+      const body = end === -1 ? call.slice(0, 1200) : call.slice(0, end);
+      const graphLine = body.split('\n').find((l) => l.trimStart().startsWith('graph:')) ?? '';
+      expect(graphLine, `register call ${i + 1}: no graph: line found in the call body`).not.toBe('');
+      expect(
+        graphLine,
+        `register call ${i + 1} must spread the read graph — a bare { nodes, edges } DELETES options, ` +
+          'goal_node_id and goal_constraints, all of which are analysis-affecting (graph-hash.ts:149-162)',
+      ).toMatch(/\.\.\./);
+    }
+  });
+})
