@@ -26,7 +26,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
-import { OPENAI_ONLY, assertProviderAllowed, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
+import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
@@ -514,6 +514,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...finaliseV5Response(composedRefusal, { scenarioId }),
           _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0, stopped_reason: 'read_only_preview' },
           _provider_calls: recordedProviderCalls(),
+        ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
         });
       }
 
@@ -533,6 +534,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           forwarded_kind: kind,
         },
         _provider_calls: recordedProviderCalls(),
+        ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
       });
     }
 
@@ -639,6 +641,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         _diagnostic_trace: { exit_path: 'agent_lane_v1', agent_mode: mode, hops: 0, stopped_reason: 'replayed', tools_called: [], replayed: true },
         _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0, stopped_reason: 'replayed', replayed: true, turn_id: turnId },
         _provider_calls: recordedProviderCalls(),
+        ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
       };
     };
     // Set only when THIS request owns the turn — used to release it if nothing ran.
@@ -933,6 +936,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * failure even though it was `refused_before_network`.
        */
       _provider_calls: recordedProviderCalls(),
+        ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
     });
   };
   app.post('/agent/v1/turn', (req: FastifyRequest, reply: FastifyReply) =>
