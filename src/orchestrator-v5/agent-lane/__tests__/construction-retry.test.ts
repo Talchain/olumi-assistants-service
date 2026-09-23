@@ -107,6 +107,35 @@ describe('a lost construction response is recovered', () => {
   });
 });
 
+/**
+ * ⛔ A FOREIGN VERSION MUST NEVER SATISFY THE CONSTRUCTION LOOKUP.
+ *
+ * Independent review of #1691 at 36308a81 (M17): replacing the identity match
+ * in `findConstructionVersion` with "take the newest version" passed every
+ * test, because the contrast above holds ZERO versions. Under that mutant a
+ * model the user built by hand was reported as "already built from this brief
+ * and saved as version 9" — the populated-model guard bypassed with a false
+ * claim. The reviewer's discriminating test, verbatim in substance.
+ */
+describe('a populated scenario whose versions are NOT this construction', () => {
+  it('CONTRAST: a populated scenario WITH an unrelated version is still refused', async () => {
+    const versions = [{
+      version_id: 'aaaaaaaa-0000-4000-8000-000000000009', sequence: 9,
+      creation: { kind: 'committed_mutation', mutation_id: 'm-9', source_turn_id: 'SOME-OTHER-TURN' },
+    }];
+    const d: InternalDispatch = async (path) =>
+      path.endsWith('/versions')
+        ? { status: 200, json: { versions, next_cursor: null } }
+        : { status: 200, json: { graph: { nodes: [{ id: 'x', kind: 'goal', label: 'Built by hand' }], edges: [] }, graph_hash: 'h9' } };
+    let generations = 0;
+    const call: CallStructuredModel = async () => { generations += 1; return { text: '{}' }; };
+    const r = await build(d, call);
+    expect(r.ok, 'a foreign version must never satisfy the construction lookup').toBe(false);
+    expect(r.refusal).toBe('model_already_exists');
+    expect(generations).toBe(0);
+  });
+});
+
 describe('a concurrent build of the same construction', () => {
   it('RED: leaves ONE version and both calls report it — the loser recovers instead of refusing', async () => {
     const store = statefulStore();
