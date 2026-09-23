@@ -64,7 +64,10 @@ describe('a failed state readback is observable', () => {
     // The dangerous direction. A readback failure that started refusing the turn,
     // retrying, or synthesising a hash would be far worse than the silence: a
     // hash this code could not read is one it must not assert.
-    expect(READBACK).toContain('return { graphHash, analysisReady, draftGraph };');
+    // The same three emitters are still returned; #1760 adds the readback's own
+    // bound analysis_state / analysis_result beside them (additive, never a
+    // synthesised value — see the two assertions below).
+    expect(READBACK).toMatch(/return \{ graphHash, analysisReady, draftGraph(, [A-Za-z]+)* \};/);
     expect(READBACK).not.toMatch(/throw |reply\.code\(5/);
     // No fabricated fallback for either emitter.
     expect(READBACK).not.toMatch(/graphHash\s*=\s*['"`]/);

@@ -1,0 +1,5235 @@
+{
+ "result": {
+  "summary": "Improve Engineering System scored highest against your goal in 66% of runs of this model, but treat this as provisional: the result is sensitive to Onboarding demand. The result is not yet robust — small changes could flip it.",
+  "enrichment": {
+   "meta": {
+    "build": "5039cca",
+    "cee_ms": 0,
+    "isl_ms": 5644.442903012037,
+    "n_samples": 10000,
+    "seed_used": "720559173",
+    "latency_ms": 5975.534555003047,
+    "computed_at": "2026-09-23T09:02:58.059701Z",
+    "seed_source": "server_generated",
+    "detail_level": "standard",
+    "feature_flags": {
+     "METRICS": "0",
+     "CORS_DEV": "0",
+     "OPENAPI_DEV": "0",
+     "TEST_ROUTES": "0",
+     "review_pass": true,
+     "AUTH_ENABLED": "1",
+     "RL_CB_ENABLE": "0",
+     "FEATURE_STREAM": "0",
+     "facts_assembly": true,
+     "AUTH_V2_ENABLED": "1",
+     "ENABLE_LOGISTIC": "0",
+     "ENABLE_NOISY_OR": "0",
+     "SCM_LITE_ENABLE": "0",
+     "TOKEN_RL_ENABLE": "0",
+     "IDENT_TAG_ENABLE": "1",
+     "ADAPTIVE_K_ENABLE": "0",
+     "PROMETHEUS_ENABLE": "1",
+     "PROVENANCE_ENABLE": "1",
+     "ENABLE_REVIEW_PASS": "1",
+     "PROMETHEUS_METRICS": "0",
+     "RATE_LIMIT_ENABLED": "1",
+     "COMPARE_VIEW_ENABLE": "1",
+     "ENABLE_DUAL_BELIEFS": "0",
+     "OPS_SNAPSHOT_ENABLE": "0",
+     "WHATIF_DELTA_ENABLE": "0",
+     "ENABLE_NOISY_AND_NOT": "0",
+     "ENABLE_TRACE_CACHING": "0",
+     "STREAM_PARITY_ENABLE": "0",
+     "CONFIDENCE_CALIBRATED": "0",
+     "ENABLE_FACTS_ASSEMBLY": "1",
+     "ENABLE_VALIDATE_PATCH": "1",
+     "DECISION_REVIEW_ENABLE": "1",
+     "INSPECTOR_DEBUG_ENABLE": "0",
+     "CEE_ORCHESTRATOR_ENABLED": "1",
+     "ENABLE_MIXED_COMBINATION": "1",
+     "PROD_SCM_LITE_PLACEHOLDER": "0",
+     "ENABLE_IMPORTANCE_SAMPLING": "1",
+     "ENABLE_STRATIFIED_SAMPLING": "1",
+     "ENABLE_OPTION_PROBABILITIES": "0",
+     "BRIEF_CLAIM_SAFE_SURFACES_ENABLE": "0",
+     "BRIEF_DECISION_RECORD_SUMMARY_ENABLE": "true"
+    },
+    "validation_ms": 0.19986501336097717,
+    "normalization_ms": 2.4445289969444275,
+    "request_id_chain": {
+     "ui": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+     "cee": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+     "isl": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+     "plot": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+     "all_match": true,
+     "cee_echoed": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+     "isl_echoed": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+     "chain_complete": true
+    }
+   },
+   "_meta": {
+    "builds": {
+     "ui": null,
+     "cee": "orchestrator",
+     "isl": "c00f507",
+     "plot": "5039cca"
+    },
+    "evidence": {
+     "isl_build": "c00f507",
+     "plot_build": "5039cca",
+     "isl_request_digest": {
+      "bytes": 4064,
+      "sha256": "08489b6d0759c21c8d7b66e642b47c58aaaf6b4544a79f47df5f89f09417e323",
+      "key_manifest": [
+       "analysis_types",
+       "goal_node_id",
+       "graph",
+       "include_e_values",
+       "include_factor_flips",
+       "include_voi",
+       "n_samples",
+       "options",
+       "parameter_uncertainties",
+       "request_id",
+       "seed"
+      ]
+     },
+     "isl_response_digest": {
+      "bytes": 28316,
+      "sha256": "cfd548d11411d446c6caac76ac2bc83651363cb25fee475e863e4f0972dfc501",
+      "key_manifest": [
+       "analysis_status",
+       "auto_noise_applied",
+       "build",
+       "critiques",
+       "decision_evpi",
+       "endpoint_version",
+       "engine_version",
+       "factor_evppi",
+       "factor_flip_values",
+       "factor_sensitivity",
+       "factor_sensitivity_status",
+       "inference_warnings",
+       "objective_ranking",
+       "options",
+       "p_win_sensitivity",
+       "processing_time_ms",
+       "request_echo",
+       "request_id",
+       "robustness",
+       "robustness_status",
+       "sample_population_provenance",
+       "seed_source",
+       "seed_used",
+       "sensitivity_reference_option_id",
+       "stability_thresholds",
+       "timestamp",
+       "version"
+      ]
+     },
+     "enrichment_contract_ok": true,
+     "isl_wire_generation_ok": true,
+     "enrichment_contract_withheld": [],
+     "enrichment_contract_schema_parsed": true
+    },
+    "payloads": {
+     "isl_request": {
+      "seed": "sha8:0d64d8e8",
+      "graph": {
+       "edges": [
+        {
+         "to": "sha8:22120be1",
+         "from": "sha8:4857d30d",
+         "strength": {
+          "std": "sha8:2317dfc4",
+          "mean": "sha8:8dd4dabd"
+         },
+         "exists_probability": "sha8:63c8f2db"
+        },
+        {
+         "to": "sha8:b25cf186",
+         "from": "sha8:b8189195",
+         "strength": {
+          "std": "sha8:2317dfc4",
+          "mean": "sha8:8dd4dabd"
+         },
+         "exists_probability": "sha8:63c8f2db"
+        },
+        {
+         "to": "sha8:3c2d4452",
+         "from": "sha8:4857d30d",
+         "strength": {
+          "std": "sha8:2317dfc4",
+          "mean": "sha8:8dd4dabd"
+         },
+         "exists_probability": "sha8:63c8f2db"
+        },
+        {
+         "to": "sha8:3c2d4452",
+         "from": "sha8:b8189195",
+         "strength": {
+          "std": "sha8:2317dfc4",
+          "mean": "sha8:8dd4dabd"
+         },
+         "exists_probability": "sha8:63c8f2db"
+        },
+        {
+         "to": "sha8:7a04f1e6",
+         "from": "sha8:718096df",
+         "strength": {
+          "std": "sha8:2317dfc4",
+          "mean": "sha8:8dd4dabd"
+         },
+         "exists_probability": "sha8:63c8f2db"
+        },
+        {
+         "to": "sha8:7a04f1e6",
+         "from": "sha8:c578b833",
+         "strength": {
+          "std": "sha8:2317dfc4",
+          "mean": "sha8:1f495dc6"
+         },
+         "exists_probability": "sha8:63c8f2db"
+        },
+        {
+         "to": "sha8:7a04f1e6",
+         "from": "sha8:22120be1",
+         "strength": {
+          "std": "sha8:2317dfc4",
+          "mean": "sha8:8dd4dabd"
+         },
+         "exists_probability": "sha8:63c8f2db"
+        },
+        {
+         "to": "sha8:7a04f1e6",
+         "from": "sha8:b25cf186",
+         "strength": {
+          "std": "sha8:2317dfc4",
+          "mean": "sha8:8dd4dabd"
+         },
+         "exists_probability": "sha8:63c8f2db"
+        },
+        {
+         "to": "sha8:7a04f1e6",
+         "from": "sha8:3c2d4452",
+         "strength": {
+          "std": "sha8:2317dfc4",
+          "mean": "sha8:1f495dc6"
+         },
+         "exists_probability": "sha8:63c8f2db"
+        },
+        {
+         "to": "sha8:c578b833",
+         "from": "sha8:9f5adac3",
+         "strength": {
+          "std": "sha8:2317dfc4",
+          "mean": "sha8:8dd4dabd"
+         },
+         "exists_probability": "sha8:63c8f2db"
+        },
+        {
+         "to": "sha8:22120be1",
+         "from": "sha8:d6ede6f2",
+         "strength": {
+          "std": "sha8:2317dfc4",
+          "mean": "sha8:1f495dc6"
+         },
+         "exists_probability": "sha8:63c8f2db"
+        },
+        {
+         "to": "sha8:3c2d4452",
+         "from": "sha8:5c0e7634",
+         "strength": {
+          "std": "sha8:2317dfc4",
+          "mean": "sha8:8dd4dabd"
+         },
+         "exists_probability": "sha8:63c8f2db"
+        },
+        {
+         "to": "sha8:7a04f1e6",
+         "from": "sha8:edf7fe46",
+         "strength": {
+          "std": "sha8:2317dfc4",
+          "mean": "sha8:1f495dc6"
+         },
+         "exists_probability": "sha8:63c8f2db"
+        }
+       ],
+       "nodes": [
+        {
+         "id": "sha8:7a04f1e6",
+         "kind": "sha8:b89fa8b2",
+         "label": "sha8:4f21c026",
+         "intercept": "sha8:e41ecda9",
+         "epsilon_std": "sha8:e41ecda9"
+        },
+        {
+         "id": "sha8:4857d30d",
+         "kind": "sha8:af6a9baf",
+         "label": "sha8:cc93e32a",
+         "intercept": "sha8:e41ecda9",
+         "epsilon_std": "sha8:e41ecda9",
+         "observed_state": {
+          "unit": "sha8:128010e5",
+          "value": "sha8:e41ecda9",
+          "source": "sha8:2e59e257",
+          "raw_value": "sha8:e41ecda9"
+         }
+        },
+        {
+         "id": "sha8:b8189195",
+         "kind": "sha8:af6a9baf",
+         "label": "sha8:5ee89bad",
+         "intercept": "sha8:e41ecda9",
+         "epsilon_std": "sha8:e41ecda9",
+         "observed_state": {
+          "unit": "sha8:128010e5",
+          "value": "sha8:e41ecda9",
+          "source": "sha8:2e59e257",
+          "raw_value": "sha8:e41ecda9"
+         }
+        },
+        {
+         "id": "sha8:718096df",
+         "kind": "sha8:af6a9baf",
+         "label": "sha8:764f5677",
+         "intercept": "sha8:e41ecda9",
+         "epsilon_std": "sha8:e41ecda9",
+         "observed_state": {
+          "unit": "sha8:c4739673",
+          "value": "sha8:e41ecda9",
+          "source": "sha8:2e59e257",
+          "raw_value": "sha8:e41ecda9"
+         }
+        },
+        {
+         "id": "sha8:c578b833",
+         "kind": "sha8:af6a9baf",
+         "label": "sha8:f1e3691e",
+         "intercept": "sha8:e41ecda9",
+         "epsilon_std": "sha8:e41ecda9",
+         "observed_state": {
+          "unit": "sha8:a76f02ab",
+          "value": "sha8:2317dfc4",
+          "source": "sha8:2e59e257",
+          "raw_value": "sha8:7909834d"
+         }
+        },
+        {
+         "id": "sha8:9f5adac3",
+         "kind": "sha8:4b6d4d07",
+         "label": "sha8:c80fca30",
+         "intercept": "sha8:e41ecda9",
+         "epsilon_std": "sha8:e41ecda9"
+        },
+        {
+         "id": "sha8:d6ede6f2",
+         "kind": "sha8:4b6d4d07",
+         "label": "sha8:36c7d5e4",
+         "intercept": "sha8:e41ecda9",
+         "epsilon_std": "sha8:e41ecda9"
+        },
+        {
+         "id": "sha8:5c0e7634",
+         "kind": "sha8:4b6d4d07",
+         "label": "sha8:36c27582",
+         "intercept": "sha8:e41ecda9",
+         "epsilon_std": "sha8:e41ecda9"
+        },
+        {
+         "id": "sha8:edf7fe46",
+         "kind": "sha8:4b6d4d07",
+         "label": "sha8:6aec2231",
+         "intercept": "sha8:e41ecda9",
+         "epsilon_std": "sha8:e41ecda9"
+        },
+        {
+         "id": "sha8:22120be1",
+         "kind": "sha8:0fc15b7e",
+         "label": "sha8:90ac4e62",
+         "intercept": "sha8:e41ecda9",
+         "epsilon_std": "sha8:e41ecda9"
+        },
+        {
+         "id": "sha8:b25cf186",
+         "kind": "sha8:0fc15b7e",
+         "label": "sha8:baa617f2",
+         "intercept": "sha8:e41ecda9",
+         "epsilon_std": "sha8:e41ecda9"
+        },
+        {
+         "id": "sha8:3c2d4452",
+         "kind": "sha8:0fc15b7e",
+         "label": "sha8:7b221716",
+         "intercept": "sha8:e41ecda9",
+         "epsilon_std": "sha8:e41ecda9"
+        }
+       ]
+      },
+      "options": [
+       {
+        "id": "sha8:c1a8718b",
+        "label": "sha8:f9724353",
+        "interventions": {
+         "sha8:4857d30d": "sha8:cf94a2c0"
+        }
+       },
+       {
+        "id": "sha8:4734598d",
+        "label": "sha8:0c2187ae",
+        "interventions": {
+         "sha8:b8189195": "sha8:cf94a2c0"
+        }
+       },
+       {
+        "id": "sha8:e1e0d91e",
+        "label": "sha8:641472db",
+        "interventions": {
+         "sha8:4857d30d": "sha8:cf94a2c0",
+         "sha8:b8189195": "sha8:cf94a2c0"
+        }
+       },
+       {
+        "id": "sha8:b5f65a98",
+        "label": "sha8:a9b69840",
+        "interventions": {
+         "sha8:718096df": "sha8:8dd4dabd"
+        }
+       }
+      ],
+      "n_samples": "sha8:5a3464df",
+      "request_id": "sha8:5a26d470",
+      "include_voi": true,
+      "goal_node_id": "sha8:7a04f1e6",
+      "sha8:761f1f56": true,
+      "analysis_types": [
+       "sha8:ad439ce7",
+       "sha8:05aac128",
+       "sha8:4857be51"
+      ],
+      "include_e_values": true,
+      "parameter_uncertainties": [
+       {
+        "std": "sha8:8dd4dabd",
+        "node_id": "sha8:4857d30d",
+        "distribution": "sha8:8dfe62d2"
+       },
+       {
+        "std": "sha8:8dd4dabd",
+        "node_id": "sha8:b8189195",
+        "distribution": "sha8:8dfe62d2"
+       },
+       {
+        "std": "sha8:8dd4dabd",
+        "node_id": "sha8:718096df",
+        "distribution": "sha8:8dfe62d2"
+       },
+       {
+        "std": "sha8:cf94a2c0",
+        "node_id": "sha8:c578b833",
+        "distribution": "sha8:8dfe62d2"
+       }
+      ]
+     },
+     "isl_response": {
+      "build": "c00f507",
+      "options": [
+       {
+        "id": "sha8:c1a8718b",
+        "label": "sha8:f9724353",
+        "status": "sha8:49dbda90",
+        "outcome": {
+         "p10": "sha8:fc6c4fab",
+         "p50": "sha8:43bdf819",
+         "p90": "sha8:4c52d0a4",
+         "std": "sha8:7ca03000",
+         "mean": "sha8:f76609e6",
+         "n_samples": "sha8:5a3464df",
+         "validity_ratio": "sha8:e8dd1b66",
+         "n_valid_samples": "sha8:5a3464df",
+         "percentiles_source": "sha8:4912d708"
+        },
+        "downside": {
+         "p05": "sha8:a5e6f7b8",
+         "cvar_10": "sha8:f773bb7c",
+         "expected_regret": "sha8:db83d76a"
+        },
+        "win_probability": "sha8:b81e98c4"
+       },
+       {
+        "id": "sha8:4734598d",
+        "label": "sha8:0c2187ae",
+        "status": "sha8:49dbda90",
+        "outcome": {
+         "p10": "sha8:d84e4fdb",
+         "p50": "sha8:4eed5d1a",
+         "p90": "sha8:d40508aa",
+         "std": "sha8:de07f3c3",
+         "mean": "sha8:11719b03",
+         "n_samples": "sha8:5a3464df",
+         "validity_ratio": "sha8:e8dd1b66",
+         "n_valid_samples": "sha8:5a3464df",
+         "percentiles_source": "sha8:4912d708"
+        },
+        "downside": {
+         "p05": "sha8:2ab36761",
+         "cvar_10": "sha8:f8c4f549",
+         "expected_regret": "sha8:99bd2f9c"
+        },
+        "win_probability": "sha8:e105dd3e"
+       },
+       {
+        "id": "sha8:e1e0d91e",
+        "label": "sha8:641472db",
+        "status": "sha8:49dbda90",
+        "outcome": {
+         "p10": "sha8:2e94543d",
+         "p50": "sha8:fac4094c",
+         "p90": "sha8:ed5adb4e",
+         "std": "sha8:9eb4a90f",
+         "mean": "sha8:fc37406f",
+         "n_samples": "sha8:5a3464df",
+         "validity_ratio": "sha8:e8dd1b66",
+         "n_valid_samples": "sha8:5a3464df",
+         "percentiles_source": "sha8:4912d708"
+        },
+        "downside": {
+         "p05": "sha8:1bbaf123",
+         "cvar_10": "sha8:6f52b5ce",
+         "expected_regret": "sha8:a2446d89"
+        },
+        "win_probability": "sha8:16f12560"
+       },
+       {
+        "id": "sha8:b5f65a98",
+        "label": "sha8:a9b69840",
+        "status": "sha8:49dbda90",
+        "outcome": {
+         "p10": "sha8:580769bb",
+         "p50": "sha8:53c50c2b",
+         "p90": "sha8:6691679c",
+         "std": "sha8:13d50c75",
+         "mean": "sha8:b14cb99d",
+         "n_samples": "sha8:5a3464df",
+         "validity_ratio": "sha8:e8dd1b66",
+         "n_valid_samples": "sha8:5a3464df",
+         "percentiles_source": "sha8:4912d708"
+        },
+        "downside": {
+         "p05": "sha8:fc6a6a28",
+         "cvar_10": "sha8:5e4d2f6a",
+         "expected_regret": "sha8:168433b7"
+        },
+        "win_probability": "sha8:0e10fc50"
+       }
+      ],
+      "version": "sha8:1f6b443b",
+      "critiques": [
+       {
+        "id": "sha8:19090e80",
+        "code": "sha8:320f9d55",
+        "source": "sha8:b4fff271",
+        "message": "sha8:2ce45aa0",
+        "severity": "sha8:208670af",
+        "suggestion": "sha8:a9dd3a70",
+        "affected_node_ids": [
+         "sha8:7a04f1e6"
+        ]
+       }
+      ],
+      "seed_used": "sha8:0d64d8e8",
+      "timestamp": "sha8:b6619f0e",
+      "request_id": "sha8:5a26d470",
+      "robustness": {
+       "level": "sha8:3bf45a81",
+       "is_robust": false,
+       "confidence": "sha8:bf54f9f4",
+       "robust_edges": [
+        "sha8:8ad3e255",
+        "sha8:764c29a3",
+        "sha8:88aa5f30"
+       ],
+       "edge_e_values": [
+        {
+         "to_id": "sha8:22120be1",
+         "edge_id": "sha8:1f350b7d",
+         "from_id": "sha8:4857d30d",
+         "flip_mean": "sha8:8dd4dabd",
+         "stability": {
+          "n_seeds": "sha8:eb723bd4",
+          "band_max": "sha8:8e62d466",
+          "band_min": "sha8:8e62d466",
+          "band_width": "sha8:e41ecda9",
+          "band_median": "sha8:8e62d466",
+          "n_seeds_flipped": "sha8:e8dd1b66",
+          "seed_flip_means": [
+           null,
+           null,
+           null,
+           null,
+           null,
+           "sha8:8e62d466",
+           null,
+           null,
+           null,
+           null
+          ]
+         },
+         "current_mean": "sha8:8dd4dabd",
+         "flip_direction": "sha8:ae0f54b3",
+         "is_unflippable": true,
+         "baseline_winner_id": "sha8:b5f65a98"
+        },
+        {
+         "to_id": "sha8:b25cf186",
+         "edge_id": "sha8:8ad3e255",
+         "from_id": "sha8:b8189195",
+         "flip_mean": "sha8:8dd4dabd",
+         "stability": {
+          "n_seeds": "sha8:eb723bd4",
+          "band_max": "sha8:cf68f293",
+          "band_min": "sha8:cf68f293",
+          "band_width": "sha8:e41ecda9",
+          "band_median": "sha8:cf68f293",
+          "n_seeds_flipped": "sha8:e8dd1b66",
+          "seed_flip_means": [
+           null,
+           null,
+           null,
+           null,
+           null,
+           "sha8:cf68f293",
+           null,
+           null,
+           null,
+           null
+          ]
+         },
+         "current_mean": "sha8:8dd4dabd",
+         "flip_direction": "sha8:ae0f54b3",
+         "is_unflippable": true,
+         "baseline_winner_id": "sha8:b5f65a98"
+        },
+        {
+         "to_id": "sha8:3c2d4452",
+         "edge_id": "sha8:03cffe98",
+         "from_id": "sha8:4857d30d",
+         "flip_mean": "sha8:8dd4dabd",
+         "stability": {
+          "n_seeds": "sha8:eb723bd4",
+          "band_max": "sha8:bd9d2ceb",
+          "band_min": "sha8:bd9d2ceb",
+          "band_width": "sha8:e41ecda9",
+          "band_median": "sha8:bd9d2ceb",
+          "n_seeds_flipped": "sha8:e8dd1b66",
+          "seed_flip_means": [
+           null,
+           null,
+           null,
+           null,
+           null,
+           "sha8:bd9d2ceb",
+           null,
+           null,
+           null,
+           null
+          ]
+         },
+         "current_mean": "sha8:8dd4dabd",
+         "flip_direction": "sha8:ae0f54b3",
+         "is_unflippable": true,
+         "baseline_winner_id": "sha8:b5f65a98"
+        },
+        {
+         "to_id": "sha8:3c2d4452",
+         "edge_id": "sha8:971502c7",
+         "from_id": "sha8:b8189195",
+         "flip_mean": "sha8:8dd4dabd",
+         "stability": {
+          "n_seeds": "sha8:eb723bd4",
+          "band_max": "sha8:6849ece5",
+          "band_min": "sha8:6849ece5",
+          "band_width": "sha8:e41ecda9",
+          "band_median": "sha8:6849ece5",
+          "n_seeds_flipped": "sha8:e8dd1b66",
+          "seed_flip_means": [
+           null,
+           null,
+           null,
+           null,
+           null,
+           "sha8:6849ece5",
+           null,
+           null,
+           null,
+           null
+          ]
+         },
+         "current_mean": "sha8:8dd4dabd",
+         "flip_direction": "sha8:ae0f54b3",
+         "is_unflippable": true,
+         "baseline_winner_id": "sha8:b5f65a98"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "e_value": "sha8:e8dd1b66",
+         "edge_id": "sha8:8f98e91c",
+         "from_id": "sha8:718096df",
+         "flip_mean": "sha8:9710434a",
+         "stability": {
+          "n_seeds": "sha8:eb723bd4",
+          "band_max": "sha8:665e8f1d",
+          "band_min": "sha8:42306933",
+          "band_width": "sha8:4a5ce2b1",
+          "band_median": "sha8:c2d43048",
+          "n_seeds_flipped": "sha8:eb723bd4",
+          "seed_flip_means": [
+           "sha8:01e77322",
+           "sha8:665e8f1d",
+           "sha8:f5af1def",
+           "sha8:19a3266f",
+           "sha8:acbcbb75",
+           "sha8:fd9c055b",
+           "sha8:42306933",
+           "sha8:016de627",
+           "sha8:3984fc55",
+           "sha8:9c614073"
+          ]
+         },
+         "current_mean": "sha8:8dd4dabd",
+         "flip_direction": "sha8:e5eca208",
+         "is_unflippable": false,
+         "baseline_winner_id": "sha8:b5f65a98",
+         "alternative_winner_id": "sha8:c1a8718b"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:764c29a3",
+         "from_id": "sha8:c578b833",
+         "flip_mean": "sha8:1f495dc6",
+         "stability": {
+          "n_seeds": "sha8:eb723bd4",
+          "n_seeds_flipped": "sha8:e41ecda9",
+          "seed_flip_means": [
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null
+          ]
+         },
+         "current_mean": "sha8:1f495dc6",
+         "flip_direction": "sha8:ae0f54b3",
+         "is_unflippable": true,
+         "baseline_winner_id": "sha8:b5f65a98"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:ae57ee13",
+         "from_id": "sha8:22120be1",
+         "flip_mean": "sha8:8dd4dabd",
+         "stability": {
+          "n_seeds": "sha8:eb723bd4",
+          "band_max": "sha8:432cbb39",
+          "band_min": "sha8:432cbb39",
+          "band_width": "sha8:e41ecda9",
+          "band_median": "sha8:432cbb39",
+          "n_seeds_flipped": "sha8:e8dd1b66",
+          "seed_flip_means": [
+           null,
+           null,
+           null,
+           null,
+           null,
+           "sha8:432cbb39",
+           null,
+           null,
+           null,
+           null
+          ]
+         },
+         "current_mean": "sha8:8dd4dabd",
+         "flip_direction": "sha8:ae0f54b3",
+         "is_unflippable": true,
+         "baseline_winner_id": "sha8:b5f65a98"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:3cea2cc3",
+         "from_id": "sha8:b25cf186",
+         "flip_mean": "sha8:8dd4dabd",
+         "stability": {
+          "n_seeds": "sha8:eb723bd4",
+          "band_max": "sha8:c557e974",
+          "band_min": "sha8:c557e974",
+          "band_width": "sha8:e41ecda9",
+          "band_median": "sha8:c557e974",
+          "n_seeds_flipped": "sha8:e8dd1b66",
+          "seed_flip_means": [
+           null,
+           null,
+           null,
+           null,
+           null,
+           "sha8:c557e974",
+           null,
+           null,
+           null,
+           null
+          ]
+         },
+         "current_mean": "sha8:8dd4dabd",
+         "flip_direction": "sha8:ae0f54b3",
+         "is_unflippable": true,
+         "baseline_winner_id": "sha8:b5f65a98"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:1be32b9b",
+         "from_id": "sha8:3c2d4452",
+         "flip_mean": "sha8:1f495dc6",
+         "stability": {
+          "n_seeds": "sha8:eb723bd4",
+          "band_max": "sha8:187a7169",
+          "band_min": "sha8:187a7169",
+          "band_width": "sha8:e41ecda9",
+          "band_median": "sha8:187a7169",
+          "n_seeds_flipped": "sha8:e8dd1b66",
+          "seed_flip_means": [
+           null,
+           null,
+           null,
+           null,
+           null,
+           "sha8:187a7169",
+           null,
+           null,
+           null,
+           null
+          ]
+         },
+         "current_mean": "sha8:1f495dc6",
+         "flip_direction": "sha8:ae0f54b3",
+         "is_unflippable": true,
+         "baseline_winner_id": "sha8:b5f65a98"
+        },
+        {
+         "to_id": "sha8:c578b833",
+         "edge_id": "sha8:ab19a110",
+         "from_id": "sha8:9f5adac3",
+         "flip_mean": "sha8:8dd4dabd",
+         "stability": {
+          "n_seeds": "sha8:eb723bd4",
+          "n_seeds_flipped": "sha8:e41ecda9",
+          "seed_flip_means": [
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null
+          ]
+         },
+         "current_mean": "sha8:8dd4dabd",
+         "flip_direction": "sha8:ae0f54b3",
+         "is_unflippable": true,
+         "baseline_winner_id": "sha8:b5f65a98"
+        },
+        {
+         "to_id": "sha8:22120be1",
+         "edge_id": "sha8:88aa5f30",
+         "from_id": "sha8:d6ede6f2",
+         "flip_mean": "sha8:1f495dc6",
+         "stability": {
+          "n_seeds": "sha8:eb723bd4",
+          "n_seeds_flipped": "sha8:e41ecda9",
+          "seed_flip_means": [
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null
+          ]
+         },
+         "current_mean": "sha8:1f495dc6",
+         "flip_direction": "sha8:ae0f54b3",
+         "is_unflippable": true,
+         "baseline_winner_id": "sha8:b5f65a98"
+        },
+        {
+         "to_id": "sha8:3c2d4452",
+         "edge_id": "sha8:fb1c6d5f",
+         "from_id": "sha8:5c0e7634",
+         "flip_mean": "sha8:8dd4dabd",
+         "stability": {
+          "n_seeds": "sha8:eb723bd4",
+          "n_seeds_flipped": "sha8:e41ecda9",
+          "seed_flip_means": [
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null
+          ]
+         },
+         "current_mean": "sha8:8dd4dabd",
+         "flip_direction": "sha8:ae0f54b3",
+         "is_unflippable": true,
+         "baseline_winner_id": "sha8:b5f65a98"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:8303840c",
+         "from_id": "sha8:edf7fe46",
+         "flip_mean": "sha8:1f495dc6",
+         "stability": {
+          "n_seeds": "sha8:eb723bd4",
+          "n_seeds_flipped": "sha8:e41ecda9",
+          "seed_flip_means": [
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null,
+           null
+          ]
+         },
+         "current_mean": "sha8:1f495dc6",
+         "flip_direction": "sha8:ae0f54b3",
+         "is_unflippable": true,
+         "baseline_winner_id": "sha8:b5f65a98"
+        }
+       ],
+       "fragile_edges": [
+        {
+         "to_id": "sha8:22120be1",
+         "edge_id": "sha8:1f350b7d",
+         "from_id": "sha8:4857d30d",
+         "switch_probability": "sha8:c68c1f90",
+         "alternative_winner_id": "sha8:4734598d",
+         "marginal_switch_probability": "sha8:e41ecda9"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:ae57ee13",
+         "from_id": "sha8:22120be1",
+         "switch_probability": "sha8:53c085d4",
+         "alternative_winner_id": "sha8:4734598d",
+         "marginal_switch_probability": "sha8:e41ecda9"
+        },
+        {
+         "to_id": "sha8:3c2d4452",
+         "edge_id": "sha8:03cffe98",
+         "from_id": "sha8:4857d30d",
+         "switch_probability": "sha8:fbfff1cb",
+         "alternative_winner_id": "sha8:c1a8718b",
+         "marginal_switch_probability": "sha8:e41ecda9"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:1be32b9b",
+         "from_id": "sha8:3c2d4452",
+         "switch_probability": "sha8:65d61e7c",
+         "alternative_winner_id": "sha8:c1a8718b",
+         "marginal_switch_probability": "sha8:e41ecda9"
+        }
+       ],
+       "sha8:67fb39ed": [
+        "sha8:9f5adac3",
+        "sha8:d6ede6f2",
+        "sha8:5c0e7634",
+        "sha8:edf7fe46"
+       ],
+       "sha8:daabbc13": [
+        "sha8:1be32b9b",
+        "sha8:03cffe98",
+        "sha8:1f350b7d",
+        "sha8:ae57ee13"
+       ],
+       "sha8:feb07b63": "sha8:63c8f2db",
+       "confidence_basis": "sha8:c63f5c27",
+       "edge_sensitivity": [
+        {
+         "to_id": "sha8:22120be1",
+         "edge_id": "sha8:1f350b7d",
+         "from_id": "sha8:4857d30d",
+         "direction": "sha8:127fe274",
+         "elasticity": "sha8:b341ff98",
+         "interpretation": "sha8:3585fe9c",
+         "importance_rank": "sha8:e8dd1b66",
+         "sensitivity_type": "sha8:a277c2dd",
+         "sensitivity_score": "sha8:e8dd1b66"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:ae57ee13",
+         "from_id": "sha8:22120be1",
+         "direction": "sha8:127fe274",
+         "elasticity": "sha8:a1a4859d",
+         "interpretation": "sha8:35809bf8",
+         "importance_rank": "sha8:a7bb1158",
+         "sensitivity_type": "sha8:a277c2dd",
+         "sensitivity_score": "sha8:6fbd7b60"
+        },
+        {
+         "to_id": "sha8:3c2d4452",
+         "edge_id": "sha8:03cffe98",
+         "from_id": "sha8:4857d30d",
+         "direction": "sha8:18887f99",
+         "elasticity": "sha8:f1feac72",
+         "interpretation": "sha8:0e53a11d",
+         "importance_rank": "sha8:7909834d",
+         "sensitivity_type": "sha8:a277c2dd",
+         "sensitivity_score": "sha8:1e0df08a"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:1be32b9b",
+         "from_id": "sha8:3c2d4452",
+         "direction": "sha8:18887f99",
+         "elasticity": "sha8:265fbf32",
+         "interpretation": "sha8:f3de7c24",
+         "importance_rank": "sha8:9d377319",
+         "sensitivity_type": "sha8:a277c2dd",
+         "sensitivity_score": "sha8:74323e6c"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:1be32b9b",
+         "from_id": "sha8:3c2d4452",
+         "direction": "sha8:127fe274",
+         "elasticity": "sha8:5aaf47cd",
+         "interpretation": "sha8:a1fba466",
+         "importance_rank": "sha8:a0753c2c",
+         "sensitivity_type": "sha8:85614138",
+         "sensitivity_score": "sha8:4c62671f"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:ae57ee13",
+         "from_id": "sha8:22120be1",
+         "direction": "sha8:127fe274",
+         "elasticity": "sha8:2427dc4b",
+         "interpretation": "sha8:b2aa0b23",
+         "importance_rank": "sha8:0d7fd7a6",
+         "sensitivity_type": "sha8:85614138",
+         "sensitivity_score": "sha8:40dc135e"
+        },
+        {
+         "to_id": "sha8:c578b833",
+         "edge_id": "sha8:ab19a110",
+         "from_id": "sha8:9f5adac3",
+         "direction": "sha8:127fe274",
+         "elasticity": "sha8:c9765857",
+         "interpretation": "sha8:8bcdd3d1",
+         "importance_rank": "sha8:87b4bf71",
+         "sensitivity_type": "sha8:a277c2dd",
+         "sensitivity_score": "sha8:f3a18e2a"
+        },
+        {
+         "to_id": "sha8:3c2d4452",
+         "edge_id": "sha8:971502c7",
+         "from_id": "sha8:b8189195",
+         "direction": "sha8:18887f99",
+         "elasticity": "sha8:5eed4945",
+         "interpretation": "sha8:f933ca3d",
+         "importance_rank": "sha8:b50b17a0",
+         "sensitivity_type": "sha8:a277c2dd",
+         "sensitivity_score": "sha8:2381eaa6"
+        },
+        {
+         "to_id": "sha8:3c2d4452",
+         "edge_id": "sha8:fb1c6d5f",
+         "from_id": "sha8:5c0e7634",
+         "direction": "sha8:18887f99",
+         "elasticity": "sha8:bd168c67",
+         "interpretation": "sha8:75d73d17",
+         "importance_rank": "sha8:ffd4363c",
+         "sensitivity_type": "sha8:a277c2dd",
+         "sensitivity_score": "sha8:7be0e08b"
+        },
+        {
+         "to_id": "sha8:3c2d4452",
+         "edge_id": "sha8:03cffe98",
+         "from_id": "sha8:4857d30d",
+         "direction": "sha8:18887f99",
+         "elasticity": "sha8:b657e737",
+         "interpretation": "sha8:8f7e933e",
+         "importance_rank": "sha8:eb723bd4",
+         "sensitivity_type": "sha8:85614138",
+         "sensitivity_score": "sha8:e34cd4e0"
+        },
+        {
+         "to_id": "sha8:22120be1",
+         "edge_id": "sha8:1f350b7d",
+         "from_id": "sha8:4857d30d",
+         "direction": "sha8:127fe274",
+         "elasticity": "sha8:489a0ab4",
+         "interpretation": "sha8:19652727",
+         "importance_rank": "sha8:326afab1",
+         "sensitivity_type": "sha8:85614138",
+         "sensitivity_score": "sha8:2d1536f0"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:8f98e91c",
+         "from_id": "sha8:718096df",
+         "direction": "sha8:127fe274",
+         "elasticity": "sha8:7d0ccb49",
+         "interpretation": "sha8:ac5fc3b7",
+         "importance_rank": "sha8:915af9f4",
+         "sensitivity_type": "sha8:a277c2dd",
+         "sensitivity_score": "sha8:bf096130"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:8303840c",
+         "from_id": "sha8:edf7fe46",
+         "direction": "sha8:127fe274",
+         "elasticity": "sha8:412b05cf",
+         "interpretation": "sha8:6a3f309a",
+         "importance_rank": "sha8:87c41039",
+         "sensitivity_type": "sha8:a277c2dd",
+         "sensitivity_score": "sha8:df4ed292"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:3cea2cc3",
+         "from_id": "sha8:b25cf186",
+         "direction": "sha8:18887f99",
+         "elasticity": "sha8:e88140c3",
+         "interpretation": "sha8:d758f45b",
+         "importance_rank": "sha8:936c0c45",
+         "sensitivity_type": "sha8:a277c2dd",
+         "sensitivity_score": "sha8:a71a2d0d"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:8f98e91c",
+         "from_id": "sha8:718096df",
+         "direction": "sha8:127fe274",
+         "elasticity": "sha8:cde0b4ec",
+         "interpretation": "sha8:6228f442",
+         "importance_rank": "sha8:303c6b47",
+         "sensitivity_type": "sha8:85614138",
+         "sensitivity_score": "sha8:b110142e"
+        },
+        {
+         "to_id": "sha8:3c2d4452",
+         "edge_id": "sha8:fb1c6d5f",
+         "from_id": "sha8:5c0e7634",
+         "direction": "sha8:127fe274",
+         "elasticity": "sha8:82c73065",
+         "interpretation": "sha8:81be7049",
+         "importance_rank": "sha8:313846a1",
+         "sensitivity_type": "sha8:85614138",
+         "sensitivity_score": "sha8:37d507e0"
+        },
+        {
+         "to_id": "sha8:b25cf186",
+         "edge_id": "sha8:8ad3e255",
+         "from_id": "sha8:b8189195",
+         "direction": "sha8:18887f99",
+         "elasticity": "sha8:a6ee8656",
+         "interpretation": "sha8:b8739265",
+         "importance_rank": "sha8:17e3863a",
+         "sensitivity_type": "sha8:85614138",
+         "sensitivity_score": "sha8:87185a59"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:764c29a3",
+         "from_id": "sha8:c578b833",
+         "direction": "sha8:127fe274",
+         "elasticity": "sha8:fb43ef3c",
+         "interpretation": "sha8:22b16551",
+         "importance_rank": "sha8:5133450a",
+         "sensitivity_type": "sha8:a277c2dd",
+         "sensitivity_score": "sha8:775d32fa"
+        },
+        {
+         "to_id": "sha8:22120be1",
+         "edge_id": "sha8:88aa5f30",
+         "from_id": "sha8:d6ede6f2",
+         "direction": "sha8:127fe274",
+         "elasticity": "sha8:65fd65c7",
+         "interpretation": "sha8:c995551a",
+         "importance_rank": "sha8:9b1aa4ed",
+         "sensitivity_type": "sha8:a277c2dd",
+         "sensitivity_score": "sha8:ad208ad9"
+        },
+        {
+         "to_id": "sha8:3c2d4452",
+         "edge_id": "sha8:971502c7",
+         "from_id": "sha8:b8189195",
+         "direction": "sha8:18887f99",
+         "elasticity": "sha8:2bc51c02",
+         "interpretation": "sha8:32b4f3e6",
+         "importance_rank": "sha8:94445a2d",
+         "sensitivity_type": "sha8:85614138",
+         "sensitivity_score": "sha8:b743844d"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:764c29a3",
+         "from_id": "sha8:c578b833",
+         "direction": "sha8:18887f99",
+         "elasticity": "sha8:61b950a6",
+         "interpretation": "sha8:3eebed97",
+         "importance_rank": "sha8:117c785b",
+         "sensitivity_type": "sha8:85614138",
+         "sensitivity_score": "sha8:3f7c7f1c"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:3cea2cc3",
+         "from_id": "sha8:b25cf186",
+         "direction": "sha8:127fe274",
+         "elasticity": "sha8:5403e430",
+         "interpretation": "sha8:99193a6a",
+         "importance_rank": "sha8:ba5a4524",
+         "sensitivity_type": "sha8:85614138",
+         "sensitivity_score": "sha8:4d2b2531"
+        },
+        {
+         "to_id": "sha8:c578b833",
+         "edge_id": "sha8:ab19a110",
+         "from_id": "sha8:9f5adac3",
+         "direction": "sha8:18887f99",
+         "elasticity": "sha8:902d0a2c",
+         "interpretation": "sha8:65a5df0c",
+         "importance_rank": "sha8:24d64a46",
+         "sensitivity_type": "sha8:85614138",
+         "sensitivity_score": "sha8:32269525"
+        },
+        {
+         "to_id": "sha8:b25cf186",
+         "edge_id": "sha8:8ad3e255",
+         "from_id": "sha8:b8189195",
+         "direction": "sha8:127fe274",
+         "elasticity": "sha8:1739be64",
+         "interpretation": "sha8:c035c46f",
+         "importance_rank": "sha8:d0fe673f",
+         "sensitivity_type": "sha8:a277c2dd",
+         "sensitivity_score": "sha8:7b46e0bf"
+        },
+        {
+         "to_id": "sha8:22120be1",
+         "edge_id": "sha8:88aa5f30",
+         "from_id": "sha8:d6ede6f2",
+         "direction": "sha8:127fe274",
+         "elasticity": "sha8:15008bd0",
+         "interpretation": "sha8:0ef9f92c",
+         "importance_rank": "sha8:6a84c4e8",
+         "sensitivity_type": "sha8:85614138",
+         "sensitivity_score": "sha8:880f455f"
+        },
+        {
+         "to_id": "sha8:7a04f1e6",
+         "edge_id": "sha8:8303840c",
+         "from_id": "sha8:edf7fe46",
+         "direction": "sha8:18887f99",
+         "elasticity": "sha8:3dd1bd25",
+         "interpretation": "sha8:0c8ab308",
+         "importance_rank": "sha8:a321b387",
+         "sensitivity_type": "sha8:85614138",
+         "sensitivity_score": "sha8:551260e4"
+        }
+       ],
+       "recommendation_stability": "sha8:bf54f9f4"
+      },
+      "seed_source": "sha8:b6ed9037",
+      "factor_evppi": [
+       {
+        "method": "sha8:3f1c6d60",
+        "status": "sha8:3f70bdf5",
+        "factor_id": "sha8:c578b833",
+        "n_samples": "sha8:5a3464df",
+        "sha8:0ce59c93": "sha8:aa2592c6",
+        "sha8:46849881": false,
+        "sha8:8c8d97d0": "sha8:9d377319",
+        "sha8:9329f427": "sha8:e41ecda9",
+        "sha8:9396e256": "sha8:65c102e5",
+        "sha8:9d19c886": "sha8:0fc15b7e",
+        "sha8:addee9ff": "sha8:e41ecda9",
+        "sha8:cc7e649a": false,
+        "sha8:d3d690c0": false,
+        "sha8:f51183b7": "sha8:65c102e5"
+       }
+      ],
+      "decision_evpi": "sha8:168433b7",
+      "sha8:189e7239": {
+       "n_samples": "sha8:5a3464df",
+       "options_count": "sha8:9d377319",
+       "sha8:22e1b7bc": "sha8:a7bb1158",
+       "sha8:2b3b088a": "sha8:87c41039",
+       "sha8:5de26978": "sha8:915af9f4",
+       "sha8:7b175632": false,
+       "sha8:8be3b359": "sha8:05f2b30a"
+      },
+      "sha8:3499e3a5": {
+       "sha8:33dcd9db": {
+        "p05": "sha8:8c4917a4",
+        "p10": "sha8:8c4917a4",
+        "p50": "sha8:8c4917a4",
+        "p90": "sha8:8c4917a4",
+        "mean": "sha8:8c4917a4",
+        "cvar_10": "sha8:8c4917a4",
+        "factor_evppi": "sha8:8c4917a4",
+        "decision_evpi": "sha8:8c4917a4",
+        "sha8:2f9f29b5": "sha8:8c4917a4",
+        "expected_regret": "sha8:8c4917a4",
+        "win_probability": "sha8:8c4917a4",
+        "probability_of_goal": "sha8:8c4917a4"
+       },
+       "sha8:ade851af": false,
+       "sha8:c8223676": [],
+       "calibration_status": "sha8:bfd428c9"
+      },
+      "sha8:78081ac9": {
+       "status": "sha8:49dbda90",
+       "direction": "sha8:553ee96d",
+       "sha8:c6a7177a": false
+      },
+      "sha8:b48afcd2": "sha8:bca1633f",
+      "sha8:f51cf7d1": "sha8:49dbda90",
+      "analysis_status": "sha8:49dbda90",
+      "endpoint_version": "sha8:cbec3d1d",
+      "p_win_sensitivity": [
+       {
+        "method": "sha8:5a308d49",
+        "status": "sha8:97b3e459",
+        "factor_id": "sha8:718096df",
+        "n_samples": "sha8:a45c7855",
+        "sha8:05c54e14": "sha8:7b348911",
+        "sha8:0ce59c93": "sha8:7d5f1ce4",
+        "sha8:5cee7077": "sha8:3e6fd2c9",
+        "sha8:5e782e7f": "sha8:a7ad3e7b",
+        "sha8:868de2d4": "sha8:3ae63c77",
+        "sha8:bf6471f4": false,
+        "sha8:da123d4a": "sha8:e0923111",
+        "sha8:ee450466": "sha8:017c0bfb",
+        "sha8:f9eeb0ad": "sha8:feed68de"
+       },
+       {
+        "method": "sha8:5a308d49",
+        "status": "sha8:3f70bdf5",
+        "factor_id": "sha8:4857d30d",
+        "n_samples": "sha8:a45c7855",
+        "sha8:05c54e14": "sha8:499beec5",
+        "sha8:0ce59c93": "sha8:7d5f1ce4",
+        "sha8:5cee7077": "sha8:e41ecda9",
+        "sha8:5e782e7f": "sha8:e41ecda9",
+        "sha8:868de2d4": "sha8:3ae63c77",
+        "sha8:bf6471f4": true,
+        "sha8:da123d4a": "sha8:e0923111",
+        "sha8:ee450466": "sha8:017c0bfb",
+        "sha8:f9eeb0ad": "sha8:feed68de"
+       },
+       {
+        "method": "sha8:5a308d49",
+        "status": "sha8:3f70bdf5",
+        "factor_id": "sha8:b8189195",
+        "n_samples": "sha8:a45c7855",
+        "sha8:05c54e14": "sha8:26adf627",
+        "sha8:0ce59c93": "sha8:7d5f1ce4",
+        "sha8:5cee7077": "sha8:e41ecda9",
+        "sha8:5e782e7f": "sha8:e41ecda9",
+        "sha8:868de2d4": "sha8:3ae63c77",
+        "sha8:bf6471f4": true,
+        "sha8:da123d4a": "sha8:e0923111",
+        "sha8:ee450466": "sha8:017c0bfb",
+        "sha8:f9eeb0ad": "sha8:feed68de"
+       },
+       {
+        "method": "sha8:5a308d49",
+        "status": "sha8:3f70bdf5",
+        "factor_id": "sha8:c578b833",
+        "n_samples": "sha8:a45c7855",
+        "sha8:05c54e14": "sha8:ec5355c8",
+        "sha8:0ce59c93": "sha8:7d5f1ce4",
+        "sha8:5cee7077": "sha8:e41ecda9",
+        "sha8:5e782e7f": "sha8:e41ecda9",
+        "sha8:868de2d4": "sha8:3ae63c77",
+        "sha8:bf6471f4": true,
+        "sha8:da123d4a": "sha8:e0923111",
+        "sha8:ee450466": "sha8:017c0bfb",
+        "sha8:f9eeb0ad": "sha8:feed68de"
+       }
+      ],
+      "robustness_status": "sha8:49dbda90",
+      "auto_noise_applied": false,
+      "factor_flip_values": [
+       {
+        "factor_id": "sha8:4857d30d",
+        "flip_reason": "sha8:5f1c62ae",
+        "current_value": "sha8:e41ecda9",
+        "baseline_winner_id": "sha8:b5f65a98"
+       },
+       {
+        "factor_id": "sha8:b8189195",
+        "flip_reason": "sha8:5f1c62ae",
+        "current_value": "sha8:e41ecda9",
+        "baseline_winner_id": "sha8:b5f65a98"
+       },
+       {
+        "direction": "sha8:ae0f54b3",
+        "factor_id": "sha8:718096df",
+        "stability": {
+         "n_seeds": "sha8:eb723bd4",
+         "band_max": "sha8:82ca89da",
+         "band_min": "sha8:9b95a72a",
+         "band_width": "sha8:958b4cf3",
+         "band_median": "sha8:7fab0d37",
+         "n_seeds_flipped": "sha8:ffd4363c",
+         "seed_flip_values": [
+          "sha8:9b95a72a",
+          "sha8:86ec9d6b",
+          "sha8:8dd4dabd",
+          "sha8:03abb226",
+          "sha8:7fab0d37",
+          null,
+          "sha8:8dd4dabd",
+          "sha8:82ca89da",
+          "sha8:986ba235",
+          "sha8:93c1a031"
+         ]
+        },
+        "flip_value": "sha8:8dd4dabd",
+        "flip_reason": "sha8:02211b32",
+        "current_value": "sha8:e41ecda9",
+        "baseline_winner_id": "sha8:b5f65a98",
+        "alternative_winner_id": "sha8:e1e0d91e"
+       }
+      ],
+      "factor_sensitivity": [
+       {
+        "label": "sha8:f1e3691e",
+        "node_id": "sha8:c578b833",
+        "direction": "sha8:18887f99",
+        "confidence": "sha8:53207457",
+        "elasticity": "sha8:c2bb4567",
+        "value_source": "sha8:2e59e257",
+        "sha8:069dadba": false,
+        "sha8:1e76ada0": "sha8:2317dfc4",
+        "sha8:39f9ca2d": "sha8:e8dd1b66",
+        "sha8:d4b63777": "sha8:c2bb4567",
+        "elasticity_std": "sha8:598fe0da",
+        "influence_rank": "sha8:e8dd1b66",
+        "interpretation": "sha8:74e40f6d",
+        "rank_flip_rate": "sha8:6111c17a",
+        "importance_rank": "sha8:e8dd1b66",
+        "influence_score": "sha8:e8dd1b66",
+        "stability_method": "sha8:21c04374",
+        "confidence_source": "sha8:34b0ddc7",
+        "sensitivity_score": "sha8:e8dd1b66",
+        "attribution_stability": "sha8:3bf45a81",
+        "confidence_provenance": {
+         "sha8:5d1424dd": false,
+         "method_version": "sha8:fdc70c1a"
+        }
+       },
+       {
+        "label": "sha8:764f5677",
+        "node_id": "sha8:718096df",
+        "direction": "sha8:127fe274",
+        "confidence": "sha8:a5e2ff0d",
+        "elasticity": "sha8:e475a515",
+        "value_source": "sha8:2e59e257",
+        "sha8:069dadba": false,
+        "sha8:1e76ada0": "sha8:e41ecda9",
+        "sha8:39f9ca2d": "sha8:c99dfd9d",
+        "sha8:d4b63777": "sha8:e475a515",
+        "elasticity_std": "sha8:f2c4b402",
+        "influence_rank": "sha8:a7bb1158",
+        "interpretation": "sha8:8606357b",
+        "rank_flip_rate": "sha8:0d6ade3f",
+        "importance_rank": "sha8:a7bb1158",
+        "influence_score": "sha8:e8dd1b66",
+        "stability_method": "sha8:21c04374",
+        "confidence_source": "sha8:34b0ddc7",
+        "sensitivity_score": "sha8:4b385092",
+        "attribution_stability": "sha8:3bf45a81",
+        "confidence_provenance": {
+         "sha8:5d1424dd": false,
+         "method_version": "sha8:fdc70c1a"
+        }
+       },
+       {
+        "label": "sha8:5ee89bad",
+        "node_id": "sha8:b8189195",
+        "direction": "sha8:127fe274",
+        "confidence": "sha8:cf94a2c0",
+        "elasticity": "sha8:4fd553dd",
+        "zero_reason": "sha8:cec512a4",
+        "value_source": "sha8:2e59e257",
+        "sha8:069dadba": false,
+        "sha8:1e76ada0": "sha8:e41ecda9",
+        "sha8:39f9ca2d": "sha8:b66a777a",
+        "sha8:d4b63777": "sha8:4fd553dd",
+        "elasticity_std": "sha8:4d09ccee",
+        "influence_rank": "sha8:7909834d",
+        "interpretation": "sha8:04babdc7",
+        "rank_flip_rate": "sha8:cf94a2c0",
+        "importance_rank": "sha8:7909834d",
+        "influence_score": "sha8:a8ebaea8",
+        "stability_method": "sha8:21c04374",
+        "confidence_source": "sha8:34b0ddc7",
+        "sensitivity_score": "sha8:5b83c8ce",
+        "attribution_stability": "sha8:c08e1385",
+        "confidence_provenance": {
+         "sha8:5d1424dd": false,
+         "method_version": "sha8:fdc70c1a"
+        }
+       },
+       {
+        "label": "sha8:cc93e32a",
+        "node_id": "sha8:4857d30d",
+        "direction": "sha8:18887f99",
+        "confidence": "sha8:cf94a2c0",
+        "elasticity": "sha8:e41ecda9",
+        "zero_reason": "sha8:cec512a4",
+        "value_source": "sha8:2e59e257",
+        "sha8:069dadba": false,
+        "sha8:1e76ada0": "sha8:e41ecda9",
+        "sha8:39f9ca2d": "sha8:e41ecda9",
+        "sha8:d4b63777": "sha8:e41ecda9",
+        "elasticity_std": "sha8:e41ecda9",
+        "influence_rank": "sha8:9d377319",
+        "interpretation": "sha8:031ba9aa",
+        "rank_flip_rate": "sha8:cf94a2c0",
+        "importance_rank": "sha8:9d377319",
+        "influence_score": "sha8:a8ebaea8",
+        "stability_method": "sha8:21c04374",
+        "confidence_source": "sha8:34b0ddc7",
+        "sensitivity_score": "sha8:e41ecda9",
+        "attribution_stability": "sha8:c08e1385",
+        "confidence_provenance": {
+         "sha8:5d1424dd": false,
+         "method_version": "sha8:fdc70c1a"
+        }
+       }
+      ],
+      "inference_warnings": [
+       {
+        "code": "sha8:92a03995",
+        "field": "sha8:eddcf717",
+        "detail": {
+         "message": "sha8:08ec1de2",
+         "node_id": "sha8:9f5adac3",
+         "node_label": "sha8:c80fca30",
+         "sha8:3bb23f88": "sha8:e41ecda9"
+        },
+        "severity": "sha8:8f020611"
+       },
+       {
+        "code": "sha8:92a03995",
+        "field": "sha8:2bfcce6a",
+        "detail": {
+         "message": "sha8:270098f1",
+         "node_id": "sha8:d6ede6f2",
+         "node_label": "sha8:36c7d5e4",
+         "sha8:3bb23f88": "sha8:e41ecda9"
+        },
+        "severity": "sha8:8f020611"
+       },
+       {
+        "code": "sha8:92a03995",
+        "field": "sha8:727752fb",
+        "detail": {
+         "message": "sha8:6c363e91",
+         "node_id": "sha8:5c0e7634",
+         "node_label": "sha8:36c27582",
+         "sha8:3bb23f88": "sha8:e41ecda9"
+        },
+        "severity": "sha8:8f020611"
+       },
+       {
+        "code": "sha8:92a03995",
+        "field": "sha8:11883f48",
+        "detail": {
+         "message": "sha8:34472d53",
+         "node_id": "sha8:edf7fe46",
+         "node_label": "sha8:6aec2231",
+         "sha8:3bb23f88": "sha8:e41ecda9"
+        },
+        "severity": "sha8:8f020611"
+       },
+       {
+        "code": "sha8:3e1a432b",
+        "field": "sha8:9b57d27a",
+        "detail": {
+         "reason": "sha8:26eb0d7b",
+         "message": "sha8:f29068a1",
+         "goal_node_id": "sha8:7a04f1e6",
+         "sha8:6b5d9e14": "sha8:553ee96d"
+        },
+        "severity": "sha8:208670af"
+       },
+       {
+        "code": "sha8:320f9d55",
+        "field": "sha8:6c711e3f",
+        "detail": {
+         "message": "sha8:f8b6fe9a",
+         "node_id": "sha8:7a04f1e6",
+         "sha8:679a1100": [
+          "sha8:edf7fe46",
+          "sha8:9f5adac3",
+          "sha8:d6ede6f2",
+          "sha8:5c0e7634"
+         ]
+        },
+        "severity": "sha8:8f020611"
+       }
+      ],
+      "processing_time_ms": "sha8:be1f549c",
+      "stability_thresholds": {
+       "version": "sha8:00975fe1",
+       "provisional": true,
+       "moderate_low_boundary": "sha8:d37caed5",
+       "high_moderate_boundary": "sha8:cf94a2c0"
+      },
+      "sensitivity_reference_option_id": "sha8:c1a8718b"
+     }
+    },
+    "plot_build": "5039cca",
+    "request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+    "source_path": "isl",
+    "hash_version": 8,
+    "response_hash": "5264dfac03e96aae",
+    "repairs_applied": [
+     {
+      "code": "LEGACY_REPAIR",
+      "after": null,
+      "field": "edges[19]",
+      "layer": "plot",
+      "action": "removed",
+      "before": {
+       "to": "technical_direction",
+       "from": "leadership_mismatch"
+      },
+      "reason": "Forbidden risk→outcome edge has no factor parents; left for LLM repair",
+      "severity": "info",
+      "to_value": null,
+      "field_path": "edges[19]",
+      "from_value": {
+       "to": "technical_direction",
+       "from": "leadership_mismatch"
+      }
+     },
+     {
+      "code": "LEGACY_REPAIR",
+      "after": null,
+      "field": "edges[20]",
+      "layer": "plot",
+      "action": "removed",
+      "before": {
+       "to": "onboarding_demand",
+       "from": "onboarding_drag"
+      },
+      "reason": "Forbidden risk→outcome edge has no factor parents; left for LLM repair",
+      "severity": "info",
+      "to_value": null,
+      "field_path": "edges[20]",
+      "from_value": {
+       "to": "onboarding_demand",
+       "from": "onboarding_drag"
+      }
+     }
+    ],
+    "request_id_chain": {
+     "ui": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+     "cee": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+     "isl": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+     "plot": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+     "all_match": true,
+     "cee_echoed": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+     "isl_echoed": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+     "chain_complete": true
+    },
+    "review_cards_count": 1,
+    "response_content_hash": "rch_v2:a48bf6f579120db5",
+    "feature_flags_snapshot": {
+     "METRICS": "0",
+     "CORS_DEV": "0",
+     "OPENAPI_DEV": "0",
+     "TEST_ROUTES": "0",
+     "AUTH_ENABLED": "1",
+     "RL_CB_ENABLE": "0",
+     "FEATURE_STREAM": "0",
+     "AUTH_V2_ENABLED": "1",
+     "ENABLE_LOGISTIC": "0",
+     "ENABLE_NOISY_OR": "0",
+     "SCM_LITE_ENABLE": "0",
+     "TOKEN_RL_ENABLE": "0",
+     "IDENT_TAG_ENABLE": "1",
+     "ADAPTIVE_K_ENABLE": "0",
+     "PROMETHEUS_ENABLE": "1",
+     "PROVENANCE_ENABLE": "1",
+     "ENABLE_REVIEW_PASS": "1",
+     "PROMETHEUS_METRICS": "0",
+     "RATE_LIMIT_ENABLED": "1",
+     "COMPARE_VIEW_ENABLE": "1",
+     "ENABLE_DUAL_BELIEFS": "0",
+     "OPS_SNAPSHOT_ENABLE": "0",
+     "WHATIF_DELTA_ENABLE": "0",
+     "ENABLE_NOISY_AND_NOT": "0",
+     "ENABLE_TRACE_CACHING": "0",
+     "STREAM_PARITY_ENABLE": "0",
+     "CONFIDENCE_CALIBRATED": "0",
+     "ENABLE_FACTS_ASSEMBLY": "1",
+     "ENABLE_VALIDATE_PATCH": "1",
+     "DECISION_REVIEW_ENABLE": "1",
+     "INSPECTOR_DEBUG_ENABLE": "0",
+     "CEE_ORCHESTRATOR_ENABLED": "1",
+     "ENABLE_MIXED_COMBINATION": "1",
+     "PROD_SCM_LITE_PLACEHOLDER": "0",
+     "ENABLE_IMPORTANCE_SAMPLING": "1",
+     "ENABLE_STRATIFIED_SAMPLING": "1",
+     "ENABLE_OPTION_PROBABILITIES": "0",
+     "BRIEF_CLAIM_SAFE_SURFACES_ENABLE": "0",
+     "BRIEF_DECISION_RECORD_SUMMARY_ENABLE": "true"
+    },
+    "decision_brief_assembled": true,
+    "range_derivation_sources": {
+     "developer_hires": "default",
+     "tech_lead_hires": "default",
+     "engineering_system_investment": "default"
+    },
+    "evidence_priority_card_present": true
+   },
+   "ceeTrace": {
+    "reason": "Legacy CEE calls skipped (M2 decision-review enabled)",
+    "source": "orchestrator",
+    "degraded": false,
+    "requestId": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+    "timestamp": "2026-09-23T09:02:58.082Z"
+   },
+   "insights": null,
+   "critiques": [],
+   "m1_review": {
+    "pre_mortem": {
+     "mitigation": "Confirm actual hiring lead times before committing to a hiring-based option over engineering system investment.",
+     "grounded_in": [
+      "hiring_lead_time",
+      "onboarding_demand->velocity"
+     ],
+     "warning_signs": [
+      "Time-to-hire for technical roles is tracking well beyond your working assumption.",
+      "Onboarding demand is rising faster than delivery capacity after any new hire starts."
+     ],
+     "review_trigger": "Reconvene if hiring lead time data comes in materially different from the working assumption",
+     "failure_scenario": "Six months on, velocity has not improved because hiring lead time ran far longer than assumed, delaying both the Tech lead and developer paths while onboarding demand ate into any early capacity gains."
+    },
+    "bias_findings": [
+     {
+      "type": "DOMINANT_FACTOR",
+      "source": "structural",
+      "description": "Hiring lead time appears to dominate the modelled comparison. Is its weight here based on actual hiring data or an assumed figure?",
+      "dsk_claim_id": "DSK-B-007",
+      "affected_elements": [
+       "hiring_lead_time"
+      ],
+      "evidence_strength": "medium",
+      "linked_critique_code": "DOMINANT_FACTOR"
+     }
+    ],
+    "flip_thresholds": [],
+    "key_assumptions": [
+     "The link from Onboarding demand to Velocity assumes onboarding drag scales the way modelled here for any hire type.",
+     "The link from Hiring lead time to Velocity assumes delay has a consistent negative effect regardless of who is hired.",
+     "Engineering system investment reaching Velocity directly assumes no hiring or onboarding step is required to realise it."
+    ],
+    "story_headlines": {
+     "hire_a_tech_lead": "Hire a Tech Lead depends on the link from Tech lead hires to Technical direction outweighing onboarding demand and lead time drag.",
+     "hire_two_developers": "Hire Two Developers would need delivery capacity gains to overcome onboarding demand and hiring lead time more than modelled.",
+     "improve_engineering_system": "Improve Engineering System avoids hiring lead time entirely by lifting velocity through system investment directly.",
+     "stage_lead_then_developers": "Stage Lead Then Developers would need staged onboarding demand to undercut the lead time penalty built into sequential hiring."
+    },
+    "narrative_summary": "Improve Engineering System produced the best outcome in 66% of runs of this model. Hiring lead time dominates the model, and it is uncertain how much that should drive the comparison.",
+    "scenario_contexts": {},
+    "readiness_rationale": "One factor, hiring lead time, carries a not yet evidence-backed weight in this comparison, and the ordering only holds in about half of the variations tested, so this is settled enough to discuss but not to act on yet.",
+    "evidence_enhancements": {
+     "hiring_lead_time": {
+      "specific_action": "Pull actual time-to-hire data for recent technical roles from your applicant tracking system rather than assuming a figure.",
+      "decision_hygiene": "Write down your own estimate of hiring lead time before checking the records."
+     }
+    },
+    "robustness_explanation": {
+     "summary": "The ordering holds in about 53% of variations, which leaves real room for a different option to come out best.",
+     "primary_risk": "Hiring lead time has an outsized, not yet evidence-backed influence on which option this model favours.",
+     "fragility_factors": [
+      "The link from Onboarding demand to Velocity is sensitive to your assumptions, worth checking before acting.",
+      "The link from Tech lead hires to Technical direction is sensitive to your assumptions, worth checking before acting."
+     ],
+     "stability_factors": [
+      "Engineering system investment links directly to Velocity without passing through hiring risk factors."
+     ]
+    },
+    "decision_quality_prompts": [
+     {
+      "question": "What is the base rate for hiring lead time on technical roles like Hire a Tech Lead or Hire Two Developers at your organisation?",
+      "principle": "Outside View (Kahneman)",
+      "applies_because": "The comparison rests heavily on hiring lead time, and its confidence is not yet firm, so grounding it in past hiring data would sharpen the picture."
+     },
+     {
+      "question": "If Improve Engineering System failed to lift velocity as modelled, what would you expect to see first in delivery capacity or technical direction?",
+      "principle": "Pre-mortem (Klein)",
+      "applies_because": "The comparison is close enough that a pre-mortem on the option this model currently favours can surface risks the numbers alone do not."
+     }
+    ]
+   },
+   "rationale": null,
+   "cee_status": "skipped",
+   "request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+   "robustness": {
+    "level": "low",
+    "near_tie": {
+     "gap": 0.5454666666666667,
+     "is_tie": false,
+     "threshold": 0.1,
+     "top_option_id": "improve_engineering_system",
+     "tied_option_ids": [
+      "improve_engineering_system"
+     ],
+     "second_option_id": "stage_lead_then_developers"
+    },
+    "is_robust": false,
+    "confidence": 0.531,
+    "robust_edges": [
+     {
+      "to_id": "delivery_capacity",
+      "edge_id": "developer_hires->delivery_capacity",
+      "from_id": "developer_hires",
+      "to_label": "Delivery capacity",
+      "from_label": "Developer hires",
+      "alternative_winner_id": null,
+      "alternative_winner_label": null
+     },
+     {
+      "to_id": "velocity",
+      "edge_id": "hiring_lead_time->velocity",
+      "from_id": "hiring_lead_time",
+      "to_label": "Velocity",
+      "from_label": "Hiring lead time",
+      "alternative_winner_id": null,
+      "alternative_winner_label": null
+     },
+     {
+      "to_id": "technical_direction",
+      "edge_id": "leadership_mismatch->technical_direction",
+      "from_id": "leadership_mismatch",
+      "to_label": "Technical direction",
+      "from_label": "Leadership mismatch",
+      "alternative_winner_id": null,
+      "alternative_winner_label": null
+     }
+    ],
+    "fragile_edges": [
+     {
+      "to_id": "velocity",
+      "edge_id": "onboarding_demand->velocity",
+      "from_id": "onboarding_demand",
+      "visible": false,
+      "severity": "warning",
+      "to_label": "Velocity",
+      "from_label": "Onboarding demand",
+      "switch_probability": 0.1316,
+      "alternative_winner_id": "hire_a_tech_lead",
+      "alternative_winner_label": "Hire a Tech Lead",
+      "marginal_switch_probability": 0
+     },
+     {
+      "to_id": "onboarding_demand",
+      "edge_id": "tech_lead_hires->onboarding_demand",
+      "from_id": "tech_lead_hires",
+      "visible": false,
+      "severity": "warning",
+      "to_label": "Onboarding demand",
+      "from_label": "Tech lead hires",
+      "switch_probability": 0.1304,
+      "alternative_winner_id": "hire_a_tech_lead",
+      "alternative_winner_label": "Hire a Tech Lead",
+      "marginal_switch_probability": 0
+     },
+     {
+      "to_id": "velocity",
+      "edge_id": "technical_direction->velocity",
+      "from_id": "technical_direction",
+      "visible": false,
+      "severity": "warning",
+      "to_label": "Velocity",
+      "from_label": "Technical direction",
+      "switch_probability": 0.1136,
+      "alternative_winner_id": "hire_two_developers",
+      "alternative_winner_label": "Hire Two Developers",
+      "marginal_switch_probability": 0
+     },
+     {
+      "to_id": "technical_direction",
+      "edge_id": "tech_lead_hires->technical_direction",
+      "from_id": "tech_lead_hires",
+      "visible": false,
+      "severity": "warning",
+      "to_label": "Technical direction",
+      "from_label": "Tech lead hires",
+      "switch_probability": 0.1132,
+      "alternative_winner_id": "hire_two_developers",
+      "alternative_winner_label": "Hire Two Developers",
+      "marginal_switch_probability": 0
+     }
+    ],
+    "display_verdict": "fragile",
+    "confidence_basis": "recommendation_stability_uncalibrated",
+    "recommended_option_id": "improve_engineering_system",
+    "display_verdict_reason": "small changes to your assumptions could change which option is most likely to achieve your goal",
+    "recommended_option_label": "Improve Engineering System",
+    "recommended_option_compliance": "not_applicable",
+    "recommended_option_compliance_reason": "no limits were set for this decision"
+   },
+   "approximate": false,
+   "m1_coaching": {
+    "readiness": "close_call",
+    "computed_at": "2026-09-23T09:02:58.185Z",
+    "key_drivers": [
+     {
+      "rank": 1,
+      "direction": "negative",
+      "factor_id": "hiring_lead_time",
+      "factor_label": "Hiring lead time",
+      "impact_display": "Very High",
+      "influence_score": 1,
+      "normalised_impact": 1
+     },
+     {
+      "rank": 2,
+      "direction": "positive",
+      "factor_id": "engineering_system_investment",
+      "factor_label": "Engineering system investment",
+      "impact_display": "Very High",
+      "influence_score": 1,
+      "normalised_impact": 1
+     },
+     {
+      "rank": 3,
+      "direction": "positive",
+      "factor_id": "tech_lead_hires",
+      "factor_label": "Tech lead hires",
+      "impact_display": "Low",
+      "influence_score": 0,
+      "normalised_impact": 0
+     },
+     {
+      "rank": 4,
+      "direction": "positive",
+      "factor_id": "developer_hires",
+      "factor_label": "Developer hires",
+      "impact_display": "Low",
+      "influence_score": 0,
+      "normalised_impact": 0
+     }
+    ],
+    "next_actions": [
+     {
+      "action": "Review model assumptions",
+      "priority": 99,
+      "rationale": "Unable to generate specific guidance"
+     }
+    ],
+    "evidence_gaps": [
+     {
+      "unit": "months",
+      "notes": [],
+      "value": 0.125,
+      "factor_id": "hiring_lead_time",
+      "influence": 1,
+      "raw_value": 3,
+      "voi_score": 0.40235,
+      "confidence": 0.59765,
+      "suggestion": "Gather data on \"Hiring lead time\" to reduce uncertainty",
+      "evpi_method": "heuristic",
+      "factor_label": "Hiring lead time",
+      "influence_display": "100%",
+      "confidence_display": "60%",
+      "confidence_defaulted": false,
+      "evpi_percentage_points": 21.9
+     }
+    ],
+    "headline_type": "high_uncertainty",
+    "readiness_tone": "caution",
+    "model_critiques": [
+     {
+      "type": "DOMINANT_FACTOR",
+      "targets": [
+       "hiring_lead_time"
+      ],
+      "severity": "warn",
+      "suggested_action": "Consider whether Hiring lead time's importance is evidence-based or assumed",
+      "challenge_question": "One factor dominates. What would change if Hiring lead time had less influence?"
+     },
+     {
+      "type": "INFLUENTIAL_EXTERNALS",
+      "targets": [
+       "hiring_lead_time"
+      ],
+      "severity": "warn",
+      "suggested_action": "Consider converting to observable (if you can estimate baseline) or add proxy factors with explicit 0-1 scales",
+      "challenge_question": "External factors Hiring lead time significantly affect your outcome but are inherently uncertain. How might you bound these?"
+     }
+    ],
+    "story_headlines": {
+     "hire_a_tech_lead": "Runner-up with 11% win probability",
+     "hire_two_developers": "Runner-up with 10% win probability",
+     "improve_engineering_system": "Improve Engineering System leads, but key assumptions could swing the outcome to another option",
+     "stage_lead_then_developers": "Runner-up with 12% win probability"
+    },
+    "thresholds_used": {
+     "evidence_gap_cap": 3,
+     "evidence_gap_floor": 3,
+     "evidence_gap_min_voi": 0,
+     "action_high_voi_threshold": 0.4,
+     "evidence_gap_top_quartile": true,
+     "headline_close_call_delta": 0.1,
+     "headline_fragile_edge_min": 0.15,
+     "readiness_joint_prob_floor": 0.05,
+     "headline_clear_winner_delta": 0.2,
+     "readiness_high_voi_threshold": 0.4,
+     "tone_confident_stability_min": 0.75,
+     "action_fragile_edge_threshold": 0.2,
+     "headline_high_uncertainty_voi": 0.3,
+     "headline_moderate_winner_delta": 0.1,
+     "tone_low_driver_confidence_max": 0.5,
+     "headline_clear_winner_stability": 0.7,
+     "readiness_joint_prob_close_call": 0.3,
+     "critique_anchoring_baseline_value": 0.5,
+     "critique_overconfidence_threshold": 0.85,
+     "headline_high_uncertainty_fragile": 0.25,
+     "readiness_high_evidence_gap_count": 2,
+     "critique_dominant_factor_threshold": 0.5,
+     "headline_moderate_winner_stability": 0.5,
+     "critique_narrow_framing_max_options": 2,
+     "critique_influential_external_quartile": 0.25
+    },
+    "coaching_version": "1.2.0",
+    "executive_summary": {
+     "summary": "Improve Engineering System currently leads, but the outcome is highly uncertain. However, the outcome is within model uncertainty, so the ranking could shift with new information. Define tie-breaker criteria or gather additional evidence.",
+     "key_qualifier": "However, the outcome is within model uncertainty, so the ranking could shift with new information.",
+     "action_implication": "Define tie-breaker criteria or gather additional evidence.",
+     "decision_statement": "Improve Engineering System currently leads, but the outcome is highly uncertain."
+    },
+    "readiness_reasons": [
+     "NOT_ROBUST",
+     "LOW_ROBUSTNESS",
+     "LOW_STABILITY",
+     "EVIDENCE_GAPS"
+    ],
+    "readiness_signals": {
+     "overall": "close_call",
+     "signals": [
+      {
+       "impact": "negative",
+       "signal": "1 evidence gaps",
+       "weight": 0.2,
+       "dimension": "evidence"
+      },
+      {
+       "impact": "negative",
+       "signal": "Low average confidence (41%)",
+       "weight": 0.2,
+       "dimension": "evidence"
+      },
+      {
+       "impact": "positive",
+       "signal": "Clear 55-point margin",
+       "weight": 0.15,
+       "dimension": "robustness"
+      },
+      {
+       "impact": "positive",
+       "signal": "4 options considered",
+       "weight": 0.1,
+       "dimension": "framing"
+      }
+     ],
+     "dimensions": {
+      "framing_quality": 1,
+      "evidence_quality": 0.6,
+      "model_robustness": 1
+     },
+     "overall_score": 0.55,
+     "computed_score_raw": 0.84
+    },
+    "assumptions_ledger": {
+     "assumptions": [
+      {
+       "field": "edges[19]",
+       "action": "removed",
+       "impact": "low",
+       "reason": "Forbidden risk→outcome edge has no factor parents; left for LLM repair",
+       "to_value": null,
+       "dedup_key": "plot_normaliser:removed:global:unknown:edges[19]",
+       "entity_id": "unknown",
+       "from_value": {
+        "to": "technical_direction",
+        "from": "leadership_mismatch"
+       },
+       "entity_type": "global",
+       "source_service": "plot_normaliser",
+       "impact_reason_code": "STRUCTURAL_ONLY"
+      },
+      {
+       "field": "edges[20]",
+       "action": "removed",
+       "impact": "low",
+       "reason": "Forbidden risk→outcome edge has no factor parents; left for LLM repair",
+       "to_value": null,
+       "dedup_key": "plot_normaliser:removed:global:unknown:edges[20]",
+       "entity_id": "unknown",
+       "from_value": {
+        "to": "onboarding_demand",
+        "from": "onboarding_drag"
+       },
+       "entity_type": "global",
+       "source_service": "plot_normaliser",
+       "impact_reason_code": "STRUCTURAL_ONLY"
+      },
+      {
+       "field": "confidence",
+       "action": "flagged",
+       "impact": "high",
+       "reason": "Factor Engineering system investment has low confidence (45%)",
+       "to_value": 0.44589999999999996,
+       "dedup_key": "isl_engine:flagged:node:engineering_system_investment:confidence",
+       "entity_id": "engineering_system_investment",
+       "from_value": null,
+       "entity_type": "node",
+       "source_service": "isl_engine",
+       "impact_reason_code": "HIGH_INFLUENCE_FACTOR"
+      },
+      {
+       "field": "confidence",
+       "action": "flagged",
+       "impact": "high",
+       "reason": "Factor Tech lead hires has low confidence (30%)",
+       "to_value": 0.3,
+       "dedup_key": "isl_engine:flagged:node:tech_lead_hires:confidence",
+       "entity_id": "tech_lead_hires",
+       "from_value": null,
+       "entity_type": "node",
+       "source_service": "isl_engine",
+       "impact_reason_code": "HIGH_INFLUENCE_FACTOR"
+      },
+      {
+       "field": "confidence",
+       "action": "flagged",
+       "impact": "low",
+       "reason": "Factor Developer hires has low confidence (30%)",
+       "to_value": 0.3,
+       "dedup_key": "isl_engine:flagged:node:developer_hires:confidence",
+       "entity_id": "developer_hires",
+       "from_value": null,
+       "entity_type": "node",
+       "source_service": "isl_engine",
+       "impact_reason_code": "STRUCTURAL_ONLY"
+      }
+     ],
+     "total_count": 5,
+     "low_impact_count": 3,
+     "high_impact_count": 2,
+     "medium_impact_count": 0
+    }
+   },
+   "review_meta": {
+    "model": "claude-sonnet-5",
+    "latency_ms": 18638
+   },
+   "_diagnostics": {
+    "critiques": [
+     {
+      "id": "6f915209-643d-4ef1-a637-e26a75e154ec",
+      "code": "NORMALIZATION_WARNING",
+      "source": "validation",
+      "message": "Node 'hire_a_tech_lead' has kind='option'. Option nodes are filtered before analysis.",
+      "severity": "info",
+      "user_message": "An option was excluded from factor analysis. This is expected.",
+      "blocks_analysis": false
+     },
+     {
+      "id": "5066c250-1141-41a6-b69f-cab2dafd2b36",
+      "code": "NORMALIZATION_WARNING",
+      "source": "validation",
+      "message": "Node 'hire_two_developers' has kind='option'. Option nodes are filtered before analysis.",
+      "severity": "info",
+      "user_message": "An option was excluded from factor analysis. This is expected.",
+      "blocks_analysis": false
+     },
+     {
+      "id": "083672f4-9240-41c3-8823-e0a09ceba723",
+      "code": "NORMALIZATION_WARNING",
+      "source": "validation",
+      "message": "Node 'stage_lead_then_developers' has kind='option'. Option nodes are filtered before analysis.",
+      "severity": "info",
+      "user_message": "An option was excluded from factor analysis. This is expected.",
+      "blocks_analysis": false
+     },
+     {
+      "id": "c42f0875-f124-466f-b4f4-8769c6d3f92f",
+      "code": "NORMALIZATION_WARNING",
+      "source": "validation",
+      "message": "Node 'improve_engineering_system' has kind='option'. Option nodes are filtered before analysis.",
+      "severity": "info",
+      "user_message": "An option was excluded from factor analysis. This is expected.",
+      "blocks_analysis": false
+     },
+     {
+      "id": "critique_d34fe9b0e794",
+      "code": "GOAL_ANCESTOR_DATA_GAP",
+      "source": "isl",
+      "message": "Goal node 'velocity' is scored from its forward-propagated outcome distribution, but root ancestor(s) 'coordination_overload', 'hiring_delay', 'leadership_mismatch', 'onboarding_drag' carry no observed value or ParameterUncertainty and defaulted to 0.0 — goal-level probabilities partially rest on placeholder zeros (insufficient data)",
+      "severity": "warning",
+      "suggestion": "Provide observed values or ParameterUncertainty entries for the listed root ancestors; until then the honest reading of goal-fit is 'insufficient data', not a calibrated probability",
+      "user_message": "Some of the factors feeding your goal carry no data, so the analysis substituted zero for them. The honest reading of goal-fit here is \"not enough data\" rather than a firm probability — add values for those factors to get a calibrated answer.",
+      "blocks_analysis": false,
+      "affected_node_ids": [
+       "velocity"
+      ]
+     }
+    ]
+   },
+   "driver_order": {
+    "basis": "graph_structural",
+    "species": "single",
+    "version": 1,
+    "lever_ids": [
+     "engineering_system_investment",
+     "tech_lead_hires",
+     "developer_hires"
+    ],
+    "lever_policy": "du_union",
+    "separability": {
+     "method": null,
+     "top_pair_separable": null
+    },
+    "rank_stability": {
+     "max_rank_flip_rate": 0.25,
+     "min_attribution_stability": "negligible"
+    },
+    "ranked_factor_ids": [
+     "hiring_lead_time",
+     "engineering_system_investment",
+     "tech_lead_hires",
+     "developer_hires"
+    ]
+   },
+   "fact_objects": [
+    {
+     "data": {
+      "p10": -0.3633965303319286,
+      "p50": -0.04708663190300518,
+      "p90": 0.2571448612981461,
+      "mean": -0.04995144301567209,
+      "type": "probability",
+      "option_id": "hire_a_tech_lead",
+      "option_label": "Hire a Tech Lead"
+     },
+     "fact_id": "439603970726e708",
+     "lineage": {
+      "seed": 720559173,
+      "n_samples": 10000,
+      "graph_hash": "ac892a5e3833cbb3",
+      "config_version": "1",
+      "isl_request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8"
+     },
+     "fact_key": {
+      "type": "probability",
+      "option_id": "hire_a_tech_lead"
+     },
+     "fact_type": "probability",
+     "content_hash": "edfd5c2e88e20695"
+    },
+    {
+     "data": {
+      "p10": -0.36287821193944186,
+      "p50": -0.04903508398965892,
+      "p90": 0.2580168802434802,
+      "mean": -0.0521732143682513,
+      "type": "probability",
+      "option_id": "hire_two_developers",
+      "option_label": "Hire Two Developers"
+     },
+     "fact_id": "efc1ca06ef5fa3e3",
+     "lineage": {
+      "seed": 720559173,
+      "n_samples": 10000,
+      "graph_hash": "ac892a5e3833cbb3",
+      "config_version": "1",
+      "isl_request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8"
+     },
+     "fact_key": {
+      "type": "probability",
+      "option_id": "hire_two_developers"
+     },
+     "fact_type": "probability",
+     "content_hash": "c3b58fedf87cae54"
+    },
+    {
+     "data": {
+      "p10": -0.09437471877119373,
+      "p50": 0.16267969725620846,
+      "p90": 0.3738914641106285,
+      "mean": 0.15051542268384982,
+      "type": "probability",
+      "option_id": "improve_engineering_system",
+      "option_label": "Improve Engineering System"
+     },
+     "fact_id": "61a44b820b92dcdd",
+     "lineage": {
+      "seed": 720559173,
+      "n_samples": 10000,
+      "graph_hash": "ac892a5e3833cbb3",
+      "config_version": "1",
+      "isl_request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8"
+     },
+     "fact_key": {
+      "type": "probability",
+      "option_id": "improve_engineering_system"
+     },
+     "fact_type": "probability",
+     "content_hash": "f92477f138873246"
+    },
+    {
+     "data": {
+      "p10": -0.33755046271173617,
+      "p50": -0.04738429549236531,
+      "p90": 0.23133449212181736,
+      "mean": -0.05094098729866188,
+      "type": "probability",
+      "option_id": "stage_lead_then_developers",
+      "option_label": "Stage Lead Then Developers"
+     },
+     "fact_id": "1b6d628836937493",
+     "lineage": {
+      "seed": 720559173,
+      "n_samples": 10000,
+      "graph_hash": "ac892a5e3833cbb3",
+      "config_version": "1",
+      "isl_request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8"
+     },
+     "fact_key": {
+      "type": "probability",
+      "option_id": "stage_lead_then_developers"
+     },
+     "fact_type": "probability",
+     "content_hash": "f651003bffc891a1"
+    },
+    {
+     "data": {
+      "type": "factor_sensitivity",
+      "label": "Developer hires",
+      "node_id": "developer_hires",
+      "direction": "positive",
+      "confidence": 0.3,
+      "elasticity": 0,
+      "importance_rank": 4,
+      "sensitivity_score": 0,
+      "attribution_stability": "negligible"
+     },
+     "fact_id": "07310aba00708c0a",
+     "lineage": {
+      "seed": 720559173,
+      "n_samples": 10000,
+      "graph_hash": "ac892a5e3833cbb3",
+      "config_version": "1",
+      "isl_request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8"
+     },
+     "fact_key": {
+      "type": "factor_sensitivity",
+      "metric": "sensitivity_score",
+      "node_id": "developer_hires"
+     },
+     "fact_type": "factor_sensitivity",
+     "content_hash": "b5509ef4a3396bf9"
+    },
+    {
+     "data": {
+      "type": "factor_sensitivity",
+      "label": "Engineering system investment",
+      "node_id": "engineering_system_investment",
+      "direction": "positive",
+      "confidence": 0.44589999999999996,
+      "elasticity": 0,
+      "importance_rank": 2,
+      "sensitivity_score": 0,
+      "attribution_stability": "low"
+     },
+     "fact_id": "79b63c809a9c52dc",
+     "lineage": {
+      "seed": 720559173,
+      "n_samples": 10000,
+      "graph_hash": "ac892a5e3833cbb3",
+      "config_version": "1",
+      "isl_request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8"
+     },
+     "fact_key": {
+      "type": "factor_sensitivity",
+      "metric": "sensitivity_score",
+      "node_id": "engineering_system_investment"
+     },
+     "fact_type": "factor_sensitivity",
+     "content_hash": "38d5c6a5f1132be4"
+    },
+    {
+     "data": {
+      "type": "factor_sensitivity",
+      "label": "Hiring lead time",
+      "node_id": "hiring_lead_time",
+      "direction": "negative",
+      "confidence": 0.59765,
+      "elasticity": 1,
+      "importance_rank": 1,
+      "sensitivity_score": -0.5,
+      "attribution_stability": "low"
+     },
+     "fact_id": "bf582cb0caf5c837",
+     "lineage": {
+      "seed": 720559173,
+      "n_samples": 10000,
+      "graph_hash": "ac892a5e3833cbb3",
+      "config_version": "1",
+      "isl_request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8"
+     },
+     "fact_key": {
+      "type": "factor_sensitivity",
+      "metric": "sensitivity_score",
+      "node_id": "hiring_lead_time"
+     },
+     "fact_type": "factor_sensitivity",
+     "content_hash": "ca4c0b00db811d2a"
+    },
+    {
+     "data": {
+      "type": "factor_sensitivity",
+      "label": "Tech lead hires",
+      "node_id": "tech_lead_hires",
+      "direction": "positive",
+      "confidence": 0.3,
+      "elasticity": 0,
+      "importance_rank": 3,
+      "sensitivity_score": 0,
+      "attribution_stability": "negligible"
+     },
+     "fact_id": "f7daeee6e60fc7e6",
+     "lineage": {
+      "seed": 720559173,
+      "n_samples": 10000,
+      "graph_hash": "ac892a5e3833cbb3",
+      "config_version": "1",
+      "isl_request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8"
+     },
+     "fact_key": {
+      "type": "factor_sensitivity",
+      "metric": "sensitivity_score",
+      "node_id": "tech_lead_hires"
+     },
+     "fact_type": "factor_sensitivity",
+     "content_hash": "1540eb104a81c577"
+    },
+    {
+     "data": {
+      "id": "083672f4-9240-41c3-8823-e0a09ceba723",
+      "code": "NORMALIZATION_WARNING",
+      "type": "critique",
+      "message": "Node 'stage_lead_then_developers' has kind='option'. Option nodes are filtered before analysis.",
+      "severity": "info"
+     },
+     "fact_id": "f188fc91d4a0bfac",
+     "lineage": {
+      "seed": 720559173,
+      "n_samples": 10000,
+      "graph_hash": "ac892a5e3833cbb3",
+      "config_version": "1",
+      "isl_request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8"
+     },
+     "fact_key": {
+      "type": "critique",
+      "metric": "NORMALIZATION_WARNING",
+      "node_id": "083672f4-9240-41c3-8823-e0a09ceba723"
+     },
+     "fact_type": "critique",
+     "content_hash": "c337253a8ea5c8df"
+    },
+    {
+     "data": {
+      "id": "5066c250-1141-41a6-b69f-cab2dafd2b36",
+      "code": "NORMALIZATION_WARNING",
+      "type": "critique",
+      "message": "Node 'hire_two_developers' has kind='option'. Option nodes are filtered before analysis.",
+      "severity": "info"
+     },
+     "fact_id": "ec22e951a53edc2c",
+     "lineage": {
+      "seed": 720559173,
+      "n_samples": 10000,
+      "graph_hash": "ac892a5e3833cbb3",
+      "config_version": "1",
+      "isl_request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8"
+     },
+     "fact_key": {
+      "type": "critique",
+      "metric": "NORMALIZATION_WARNING",
+      "node_id": "5066c250-1141-41a6-b69f-cab2dafd2b36"
+     },
+     "fact_type": "critique",
+     "content_hash": "6d58d218db8d3516"
+    },
+    {
+     "data": {
+      "id": "6f915209-643d-4ef1-a637-e26a75e154ec",
+      "code": "NORMALIZATION_WARNING",
+      "type": "critique",
+      "message": "Node 'hire_a_tech_lead' has kind='option'. Option nodes are filtered before analysis.",
+      "severity": "info"
+     },
+     "fact_id": "f3ab14f2cdbeafe6",
+     "lineage": {
+      "seed": 720559173,
+      "n_samples": 10000,
+      "graph_hash": "ac892a5e3833cbb3",
+      "config_version": "1",
+      "isl_request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8"
+     },
+     "fact_key": {
+      "type": "critique",
+      "metric": "NORMALIZATION_WARNING",
+      "node_id": "6f915209-643d-4ef1-a637-e26a75e154ec"
+     },
+     "fact_type": "critique",
+     "content_hash": "2b6c12ba73840558"
+    },
+    {
+     "data": {
+      "id": "c42f0875-f124-466f-b4f4-8769c6d3f92f",
+      "code": "NORMALIZATION_WARNING",
+      "type": "critique",
+      "message": "Node 'improve_engineering_system' has kind='option'. Option nodes are filtered before analysis.",
+      "severity": "info"
+     },
+     "fact_id": "29a8b71273134ba8",
+     "lineage": {
+      "seed": 720559173,
+      "n_samples": 10000,
+      "graph_hash": "ac892a5e3833cbb3",
+      "config_version": "1",
+      "isl_request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8"
+     },
+     "fact_key": {
+      "type": "critique",
+      "metric": "NORMALIZATION_WARNING",
+      "node_id": "c42f0875-f124-466f-b4f4-8769c6d3f92f"
+     },
+     "fact_type": "critique",
+     "content_hash": "526a99e1fb2b5792"
+    },
+    {
+     "data": {
+      "id": "critique_d34fe9b0e794",
+      "code": "GOAL_ANCESTOR_DATA_GAP",
+      "type": "critique",
+      "message": "Goal node 'velocity' is scored from its forward-propagated outcome distribution, but root ancestor(s) 'coordination_overload', 'hiring_delay', 'leadership_mismatch', 'onboarding_drag' carry no observed value or ParameterUncertainty and defaulted to 0.0 — goal-level probabilities partially rest on placeholder zeros (insufficient data)",
+      "severity": "warning",
+      "suggestion": "Provide observed values or ParameterUncertainty entries for the listed root ancestors; until then the honest reading of goal-fit is 'insufficient data', not a calibrated probability",
+      "affected_node_ids": [
+       "velocity"
+      ]
+     },
+     "fact_id": "91085f1e4d9d49d8",
+     "lineage": {
+      "seed": 720559173,
+      "n_samples": 10000,
+      "graph_hash": "ac892a5e3833cbb3",
+      "config_version": "1",
+      "isl_request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8"
+     },
+     "fact_key": {
+      "type": "critique",
+      "metric": "GOAL_ANCESTOR_DATA_GAP",
+      "node_id": "critique_d34fe9b0e794"
+     },
+     "fact_type": "critique",
+     "content_hash": "90de8970fb14fc4c"
+    },
+    {
+     "data": {
+      "type": "robustness",
+      "robustness_level": "moderate",
+      "robustness_score": 0.5
+     },
+     "fact_id": "81391cda0d70472b",
+     "lineage": {
+      "seed": 720559173,
+      "n_samples": 10000,
+      "graph_hash": "ac892a5e3833cbb3",
+      "config_version": "1",
+      "isl_request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8"
+     },
+     "fact_key": {
+      "type": "robustness",
+      "metric": "robustness_score"
+     },
+     "fact_type": "robustness",
+     "content_hash": "746563481e476303"
+    }
+   ],
+   "factor_evppi": [
+    {
+     "evppi": 0,
+     "units": "outcome",
+     "method": "regression_evppi_v1",
+     "status": "below_resolution",
+     "evppi_raw": 0,
+     "factor_id": "hiring_lead_time",
+     "n_samples": 10000,
+     "clamped_low": false,
+     "noise_floor": 0.000002,
+     "clamped_high": false,
+     "regression_degree": 4,
+     "correlation_active": false,
+     "baseline_max_expected_utility": 0.150515,
+     "conditional_max_expected_utility": 0.150515
+    }
+   ],
+   "review_cards": [
+    {
+     "why": "These factors have high sensitivity but low confidence — better data would most improve decision quality.",
+     "what": "Gathering better evidence on Hiring lead time could change the recommendation.",
+     "items": [
+      {
+       "score": 0.40235,
+       "node_id": "hiring_lead_time",
+       "factor_id": "hiring_lead_time",
+       "elasticity": 1,
+       "factor_label": "Hiring lead time",
+       "sensitivity_rank": 1,
+       "sensitivity_value": 1,
+       "suggested_evidence": "Gather evidence on how Hiring lead time affects the goal — this factor is highly sensitive but your confidence in its strength is medium.",
+       "confidence_normalised": 0.59765
+      }
+     ],
+     "card_id": "ep_hiring_lead_time",
+     "priority": 2,
+     "card_type": "evidence_priority",
+     "provenance": {
+      "source": "isl",
+      "origin_id": "evidence_priority"
+     },
+     "review_phase": "post_analysis",
+     "priority_band": "high",
+     "supporting_refs": [
+      {
+       "id": "sensitivity_hiring_lead_time",
+       "kind": "fact",
+       "role": "derived_from"
+      }
+     ],
+     "suggested_action": "add_evidence"
+    }
+   ],
+   "decision_evpi": 0.04278581995544835,
+   "edge_e_values": [
+    {
+     "to_id": "velocity",
+     "e_value": 1,
+     "edge_id": "engineering_system_investment::velocity",
+     "from_id": "engineering_system_investment",
+     "to_label": "Velocity",
+     "flip_mean": -0.000001,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": 0.0762,
+      "band_min": -0.04855,
+      "band_width": 0.12475,
+      "band_median": 0.001243,
+      "n_seeds_flipped": 10,
+      "seed_flip_means": [
+       0.067798,
+       0.0762,
+       -0.007561,
+       -0.005267,
+       0.015354,
+       -0.005388,
+       -0.04855,
+       0.007754,
+       0.033081,
+       -0.026421
+      ]
+     },
+     "from_label": "Engineering system investment",
+     "current_mean": 0.5,
+     "flip_direction": "decrease"
+    }
+   ],
+   "response_hash": "5264dfac03e96aae",
+   "review_status": "complete",
+   "decision_brief": {
+    "seed": 720559173,
+    "lineage": {
+     "n_samples": 10000,
+     "response_hash": "5264dfac03e96aae",
+     "config_version": "aa35b033304d"
+    },
+    "options": [
+     {
+      "rank": 1,
+      "label": "Improve Engineering System",
+      "option_id": "improve_engineering_system",
+      "win_probability": 0.66375
+     },
+     {
+      "rank": 2,
+      "label": "Stage Lead Then Developers",
+      "option_id": "stage_lead_then_developers",
+      "win_probability": 0.11828333333333332
+     },
+     {
+      "rank": 3,
+      "label": "Hire a Tech Lead",
+      "option_id": "hire_a_tech_lead",
+      "win_probability": 0.11373333333333335
+     },
+     {
+      "rank": 4,
+      "label": "Hire Two Developers",
+      "option_id": "hire_two_developers",
+      "win_probability": 0.1042333333333334
+     }
+    ],
+    "version": "1",
+    "brief_id": "6f4ec57d-e0dd-4979-b3ee-9936fd8d17e1",
+    "headline": "Improve Engineering System produced the best outcome in 66% of runs of this model. Hiring lead time dominates the model, and it is uncertain how much that should drive the comparison.",
+    "warnings": [
+     {
+      "code": "DOMINANT_FACTOR",
+      "message": "One factor dominates. What would change if Hiring lead time had less influence?",
+      "severity": "warning"
+     },
+     {
+      "code": "GOAL_ANCESTOR_DATA_GAP",
+      "message": "Goal node 'velocity' is scored from its forward-propagated outcome distribution, but root ancestor(s) 'coordination_overload', 'hiring_delay', 'leadership_mismatch', 'onboarding_drag' carry no observed value or ParameterUncertainty and defaulted to 0.0 — goal-level probabilities partially rest on placeholder zeros (insufficient data)",
+      "severity": "warning"
+     },
+     {
+      "code": "INFLUENTIAL_EXTERNALS",
+      "message": "External factors Hiring lead time significantly affect your outcome but are inherently uncertain. How might you bound these?",
+      "severity": "warning"
+     }
+    ],
+    "created_at": "2026-09-23T09:02:58.189Z",
+    "graph_hash": "5264dfac03e96aae",
+    "robustness": "fragile",
+    "top_drivers": [
+     {
+      "direction": "negative",
+      "sensitivity": 1,
+      "factor_label": "Hiring lead time"
+     }
+    ],
+    "warning_codes": [
+     "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "headline_banded": {
+     "band": "slightly_ahead",
+     "text": "Improve Engineering System is slightly ahead.",
+     "doctrine": "provisional_doctrine_v0",
+     "leader_label": "Improve Engineering System",
+     "runner_up_label": "Stage Lead Then Developers",
+     "leader_option_id": "improve_engineering_system",
+     "robustness_gated": true,
+     "runner_up_option_id": "stage_lead_then_developers",
+     "win_probability_gap": 0.5454666666666667
+    },
+    "key_assumptions": [
+     "Hiring lead time"
+    ],
+    "analysis_summary": {
+     "leading_option": "Improve Engineering System",
+     "robustness_band": "fragile",
+     "win_probability": 0.66375
+    },
+    "robustness_caveat": {
+     "text": "This run was fragile under the changes we tested. Small changes to your assumptions could change which option is most likely to achieve your goal.",
+     "basis": "is_robust",
+     "doctrine": "provisional_doctrine_v0",
+     "flip_evidence": {
+      "text": "Changing at least one tested factor on its own could change which option is most likely to achieve your goal. The other factors we could test could not.",
+      "status": "partial_no_effect"
+     }
+    },
+    "what_would_change": [
+     "Onboarding demand → Velocity",
+     "Technical direction → Velocity"
+    ],
+    "defaulted_assumptions": [
+     {
+      "code": "ROOT_NODE_DEFAULT_VALUE",
+      "note": "No starting value was provided for \"Hiring delay\", so the analysis used a default of 0.0. Results for downstream nodes may be unreliable until a real value or range is set.",
+      "source": "default_disclosure",
+      "doctrine": "provisional_doctrine_v0",
+      "factor_label": "Hiring delay"
+     }
+    ]
+   },
+   "drivers_status": "computed",
+   "analysis_status": "computed",
+   "confidence_tier": "fair",
+   "decision_review": {
+    "pre_mortem": {
+     "mitigation": "Validate the hiring lead time estimate against recent comparable hires before committing to a hiring based path.",
+     "grounded_in": [
+      "hiring_lead_time",
+      "onboarding_demand->velocity"
+     ],
+     "warning_signs": [
+      "Hiring cycles for the relevant roles are running longer than the estimate used here",
+      "Onboarding is visibly slowing existing delivery capacity after a hire lands"
+     ],
+     "review_trigger": "Reconvene if actual hiring lead times diverge from the estimate before an offer is made.",
+     "failure_scenario": "This failed because the link from Hiring lead time to Velocity turned out stronger than modelled, and the chosen path lost more time to onboarding demand than expected."
+    },
+    "produced_at": "2026-09-23T09:03:16.249Z",
+    "bias_findings": [],
+    "flip_thresholds": [],
+    "key_assumptions": [
+     "The link from Engineering system investment to Velocity assumes the improvement effort translates directly into working practice without adoption friction.",
+     "The link from Hiring lead time to Velocity assumes a three month lead time, which is not yet evidence backed.",
+     "The brief frames this as a hiring choice, but the model also includes an engineering system option outside that frame."
+    ],
+    "story_headlines": {
+     "hire_a_tech_lead": "Hire a Tech Lead depends on onboarding demand and technical direction shifting in its favour to lead.",
+     "hire_two_developers": "Hire Two Developers needs delivery capacity gains to outweigh onboarding demand drag to lead.",
+     "improve_engineering_system": "Improve Engineering System avoids hiring lead time entirely, so its investment link to velocity holds cleanly.",
+     "stage_lead_then_developers": "Stage Lead Then Developers combines both hiring paths but still carries hiring lead time drag."
+    },
+    "narrative_summary": "Improve Engineering System produced the best outcome in 66% of runs of this model, and Stage Lead Then Developers produced the best outcome in 12% of runs. The link from Hiring lead time to Velocity is a low confidence relationship worth checking before acting.",
+    "scenario_contexts": {
+     "onboarding_demand->velocity": {
+      "consequence": "the comparison may change; this run does not establish which option would overtake another under that condition.",
+      "trigger_description": "If the link from Onboarding demand to Velocity turns out different from what the model assumes,"
+     },
+     "technical_direction->velocity": {
+      "consequence": "the comparison may change; this run does not establish which option would overtake another under that condition.",
+      "trigger_description": "If the link from Technical direction to Velocity turns out different from what the model assumes,"
+     }
+    },
+    "readiness_rationale": "Two things still hold this back: hiring lead time is a low confidence relationship, and the four options sit close together in the modelled outcomes aside from Improve Engineering System. Worth firming up before committing to hires.",
+    "evidence_enhancements": {
+     "hiring_lead_time": {
+      "rationale": "This evidence does not establish which uncertainty is worth checking first. Consider which uncertainty would most change your next step.",
+      "evidence_type": "internal_data",
+      "specific_action": "Check recent hiring cycles for similar roles to establish an actual lead time range, rather than relying on the current single estimate.",
+      "decision_hygiene": "Estimate your own expected lead time before pulling the historical figures."
+     }
+    },
+    "robustness_explanation": {
+     "summary": "The overall confidence in this comparison is low, so the ordering holds in only a modest share of variations tested.",
+     "primary_risk": "The link from Hiring lead time to Velocity is low confidence and could shift which option this model points to.",
+     "fragility_factors": [
+      "The link from Hiring lead time to Velocity, which is low confidence and moderately negative",
+      "The link from Onboarding demand to Velocity, which could flip the result toward Hire a Tech Lead"
+     ],
+     "stability_factors": [
+      "Engineering system investment reaching Velocity directly, without passing through hiring delay"
+     ]
+    },
+    "decision_quality_prompts": [
+     {
+      "question": "What is the base rate for engineering system improvement efforts delivering the velocity gains modelled for Improve Engineering System?",
+      "principle": "Outside View (Kahneman)",
+      "dsk_grounding": "general",
+      "applies_because": "Overall confidence in this comparison is low, so grounding the estimate in comparable past efforts would help firm it up."
+     },
+     {
+      "question": "Choosing Improve Engineering System, what does giving up the technical direction gains of Hire a Tech Lead cost?",
+      "principle": "Opportunity Cost",
+      "dsk_grounding": "general",
+      "applies_because": "Four options are on the table here, so the cost of forgoing each alternative path is worth naming explicitly."
+     }
+    ]
+   },
+   "flip_thresholds": [
+    {
+     "unit": "hires",
+     "factor_id": "tech_lead_hires",
+     "flip_value": null,
+     "flip_reason": "structurally_invariant",
+     "probes_used": 0,
+     "value_scale": "normalised",
+     "factor_label": "Tech lead hires",
+     "current_value": 0,
+     "iterations_used": 0,
+     "no_flip_in_range": true,
+     "alternative_winner_id": null,
+     "alternative_winner_label": null
+    },
+    {
+     "unit": "hires",
+     "factor_id": "developer_hires",
+     "flip_value": null,
+     "flip_reason": "structurally_invariant",
+     "probes_used": 0,
+     "value_scale": "normalised",
+     "factor_label": "Developer hires",
+     "current_value": 0,
+     "iterations_used": 0,
+     "no_flip_in_range": true,
+     "alternative_winner_id": null,
+     "alternative_winner_label": null
+    },
+    {
+     "unit": "% of the proposed improvement effort",
+     "direction": "increase",
+     "factor_id": "engineering_system_investment",
+     "flip_value": 0.5,
+     "flip_reason": "found",
+     "probes_used": 0,
+     "value_scale": "normalised",
+     "factor_label": "Engineering system investment",
+     "current_value": 0,
+     "iterations_used": 0,
+     "alternative_winner_id": "stage_lead_then_developers",
+     "alternative_winner_label": "Stage Lead Then Developers"
+    }
+   ],
+   "identifiability": {
+    "method": "backdoor",
+    "status": "identifiable",
+    "pairs_checked": 3,
+    "pairs_identifiable": 3
+   },
+   "decision_quality": null,
+   "downstream_calls": {
+    "cee": [
+     {
+      "status": 200,
+      "service": "cee",
+      "endpoint": "/assist/v1/review",
+      "elapsed_ms": 99,
+      "request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+      "payload_hash": "519a57860888",
+      "response_hash": "eddd810ea92f",
+      "request_digest": {
+       "bytes": 1605,
+       "sha256": "06bb47208ff452569799e903980be9cb9bdfa528f2c14087a9f662ba461ff9ec",
+       "key_manifest": [
+        "brief",
+        "graph"
+       ]
+      },
+      "response_digest": {
+       "bytes": 3108,
+       "sha256": "a4ff5346035c2c55cb24638e1163d94ece81c9c97170da1f019d62e22dfb0f50",
+       "key_manifest": [
+        "analysis_state",
+        "archetype",
+        "blocks",
+        "decision_quality",
+        "guidance",
+        "improvement_guidance",
+        "insights",
+        "intent",
+        "quality",
+        "readiness",
+        "response_limits",
+        "robustness_synthesis",
+        "trace"
+       ]
+      }
+     }
+    ],
+    "isl": [
+     {
+      "status": 200,
+      "service": "isl",
+      "endpoint": "/api/v1/robustness/analyze/v2",
+      "elapsed_ms": 5640,
+      "request_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+      "payload_hash": "00ff6a3058c5",
+      "response_hash": "9934f5eb96b3",
+      "request_digest": {
+       "bytes": 4064,
+       "sha256": "08489b6d0759c21c8d7b66e642b47c58aaaf6b4544a79f47df5f89f09417e323",
+       "key_manifest": [
+        "analysis_types",
+        "goal_node_id",
+        "graph",
+        "include_e_values",
+        "include_factor_flips",
+        "include_voi",
+        "n_samples",
+        "options",
+        "parameter_uncertainties",
+        "request_id",
+        "seed"
+       ]
+      },
+      "request_payload": {
+       "seed": "sha8:0d64d8e8",
+       "graph": {
+        "edges": [
+         {
+          "to": "sha8:22120be1",
+          "from": "sha8:4857d30d",
+          "strength": {
+           "std": "sha8:2317dfc4",
+           "mean": "sha8:8dd4dabd"
+          },
+          "exists_probability": "sha8:63c8f2db"
+         },
+         {
+          "to": "sha8:b25cf186",
+          "from": "sha8:b8189195",
+          "strength": {
+           "std": "sha8:2317dfc4",
+           "mean": "sha8:8dd4dabd"
+          },
+          "exists_probability": "sha8:63c8f2db"
+         },
+         {
+          "to": "sha8:3c2d4452",
+          "from": "sha8:4857d30d",
+          "strength": {
+           "std": "sha8:2317dfc4",
+           "mean": "sha8:8dd4dabd"
+          },
+          "exists_probability": "sha8:63c8f2db"
+         },
+         {
+          "to": "sha8:3c2d4452",
+          "from": "sha8:b8189195",
+          "strength": {
+           "std": "sha8:2317dfc4",
+           "mean": "sha8:8dd4dabd"
+          },
+          "exists_probability": "sha8:63c8f2db"
+         },
+         {
+          "to": "sha8:7a04f1e6",
+          "from": "sha8:718096df",
+          "strength": {
+           "std": "sha8:2317dfc4",
+           "mean": "sha8:8dd4dabd"
+          },
+          "exists_probability": "sha8:63c8f2db"
+         },
+         {
+          "to": "sha8:7a04f1e6",
+          "from": "sha8:c578b833",
+          "strength": {
+           "std": "sha8:2317dfc4",
+           "mean": "sha8:1f495dc6"
+          },
+          "exists_probability": "sha8:63c8f2db"
+         },
+         {
+          "to": "sha8:7a04f1e6",
+          "from": "sha8:22120be1",
+          "strength": {
+           "std": "sha8:2317dfc4",
+           "mean": "sha8:8dd4dabd"
+          },
+          "exists_probability": "sha8:63c8f2db"
+         },
+         {
+          "to": "sha8:7a04f1e6",
+          "from": "sha8:b25cf186",
+          "strength": {
+           "std": "sha8:2317dfc4",
+           "mean": "sha8:8dd4dabd"
+          },
+          "exists_probability": "sha8:63c8f2db"
+         },
+         {
+          "to": "sha8:7a04f1e6",
+          "from": "sha8:3c2d4452",
+          "strength": {
+           "std": "sha8:2317dfc4",
+           "mean": "sha8:1f495dc6"
+          },
+          "exists_probability": "sha8:63c8f2db"
+         },
+         {
+          "to": "sha8:c578b833",
+          "from": "sha8:9f5adac3",
+          "strength": {
+           "std": "sha8:2317dfc4",
+           "mean": "sha8:8dd4dabd"
+          },
+          "exists_probability": "sha8:63c8f2db"
+         },
+         {
+          "to": "sha8:22120be1",
+          "from": "sha8:d6ede6f2",
+          "strength": {
+           "std": "sha8:2317dfc4",
+           "mean": "sha8:1f495dc6"
+          },
+          "exists_probability": "sha8:63c8f2db"
+         },
+         {
+          "to": "sha8:3c2d4452",
+          "from": "sha8:5c0e7634",
+          "strength": {
+           "std": "sha8:2317dfc4",
+           "mean": "sha8:8dd4dabd"
+          },
+          "exists_probability": "sha8:63c8f2db"
+         },
+         {
+          "to": "sha8:7a04f1e6",
+          "from": "sha8:edf7fe46",
+          "strength": {
+           "std": "sha8:2317dfc4",
+           "mean": "sha8:1f495dc6"
+          },
+          "exists_probability": "sha8:63c8f2db"
+         }
+        ],
+        "nodes": [
+         {
+          "id": "sha8:7a04f1e6",
+          "kind": "sha8:b89fa8b2",
+          "label": "sha8:4f21c026",
+          "intercept": "sha8:e41ecda9",
+          "epsilon_std": "sha8:e41ecda9"
+         },
+         {
+          "id": "sha8:4857d30d",
+          "kind": "sha8:af6a9baf",
+          "label": "sha8:cc93e32a",
+          "intercept": "sha8:e41ecda9",
+          "epsilon_std": "sha8:e41ecda9",
+          "observed_state": {
+           "unit": "sha8:128010e5",
+           "value": "sha8:e41ecda9",
+           "source": "sha8:2e59e257",
+           "raw_value": "sha8:e41ecda9"
+          }
+         },
+         {
+          "id": "sha8:b8189195",
+          "kind": "sha8:af6a9baf",
+          "label": "sha8:5ee89bad",
+          "intercept": "sha8:e41ecda9",
+          "epsilon_std": "sha8:e41ecda9",
+          "observed_state": {
+           "unit": "sha8:128010e5",
+           "value": "sha8:e41ecda9",
+           "source": "sha8:2e59e257",
+           "raw_value": "sha8:e41ecda9"
+          }
+         },
+         {
+          "id": "sha8:718096df",
+          "kind": "sha8:af6a9baf",
+          "label": "sha8:764f5677",
+          "intercept": "sha8:e41ecda9",
+          "epsilon_std": "sha8:e41ecda9",
+          "observed_state": {
+           "unit": "sha8:c4739673",
+           "value": "sha8:e41ecda9",
+           "source": "sha8:2e59e257",
+           "raw_value": "sha8:e41ecda9"
+          }
+         },
+         {
+          "id": "sha8:c578b833",
+          "kind": "sha8:af6a9baf",
+          "label": "sha8:f1e3691e",
+          "intercept": "sha8:e41ecda9",
+          "epsilon_std": "sha8:e41ecda9",
+          "observed_state": {
+           "unit": "sha8:a76f02ab",
+           "value": "sha8:2317dfc4",
+           "source": "sha8:2e59e257",
+           "raw_value": "sha8:7909834d"
+          }
+         },
+         {
+          "id": "sha8:9f5adac3",
+          "kind": "sha8:4b6d4d07",
+          "label": "sha8:c80fca30",
+          "intercept": "sha8:e41ecda9",
+          "epsilon_std": "sha8:e41ecda9"
+         },
+         {
+          "id": "sha8:d6ede6f2",
+          "kind": "sha8:4b6d4d07",
+          "label": "sha8:36c7d5e4",
+          "intercept": "sha8:e41ecda9",
+          "epsilon_std": "sha8:e41ecda9"
+         },
+         {
+          "id": "sha8:5c0e7634",
+          "kind": "sha8:4b6d4d07",
+          "label": "sha8:36c27582",
+          "intercept": "sha8:e41ecda9",
+          "epsilon_std": "sha8:e41ecda9"
+         },
+         {
+          "id": "sha8:edf7fe46",
+          "kind": "sha8:4b6d4d07",
+          "label": "sha8:6aec2231",
+          "intercept": "sha8:e41ecda9",
+          "epsilon_std": "sha8:e41ecda9"
+         },
+         {
+          "id": "sha8:22120be1",
+          "kind": "sha8:0fc15b7e",
+          "label": "sha8:90ac4e62",
+          "intercept": "sha8:e41ecda9",
+          "epsilon_std": "sha8:e41ecda9"
+         },
+         {
+          "id": "sha8:b25cf186",
+          "kind": "sha8:0fc15b7e",
+          "label": "sha8:baa617f2",
+          "intercept": "sha8:e41ecda9",
+          "epsilon_std": "sha8:e41ecda9"
+         },
+         {
+          "id": "sha8:3c2d4452",
+          "kind": "sha8:0fc15b7e",
+          "label": "sha8:7b221716",
+          "intercept": "sha8:e41ecda9",
+          "epsilon_std": "sha8:e41ecda9"
+         }
+        ]
+       },
+       "options": [
+        {
+         "id": "sha8:c1a8718b",
+         "label": "sha8:f9724353",
+         "interventions": {
+          "sha8:4857d30d": "sha8:cf94a2c0"
+         }
+        },
+        {
+         "id": "sha8:4734598d",
+         "label": "sha8:0c2187ae",
+         "interventions": {
+          "sha8:b8189195": "sha8:cf94a2c0"
+         }
+        },
+        {
+         "id": "sha8:e1e0d91e",
+         "label": "sha8:641472db",
+         "interventions": {
+          "sha8:4857d30d": "sha8:cf94a2c0",
+          "sha8:b8189195": "sha8:cf94a2c0"
+         }
+        },
+        {
+         "id": "sha8:b5f65a98",
+         "label": "sha8:a9b69840",
+         "interventions": {
+          "sha8:718096df": "sha8:8dd4dabd"
+         }
+        }
+       ],
+       "n_samples": "sha8:5a3464df",
+       "request_id": "sha8:5a26d470",
+       "include_voi": true,
+       "goal_node_id": "sha8:7a04f1e6",
+       "sha8:761f1f56": true,
+       "analysis_types": [
+        "sha8:ad439ce7",
+        "sha8:05aac128",
+        "sha8:4857be51"
+       ],
+       "include_e_values": true,
+       "parameter_uncertainties": [
+        {
+         "std": "sha8:8dd4dabd",
+         "node_id": "sha8:4857d30d",
+         "distribution": "sha8:8dfe62d2"
+        },
+        {
+         "std": "sha8:8dd4dabd",
+         "node_id": "sha8:b8189195",
+         "distribution": "sha8:8dfe62d2"
+        },
+        {
+         "std": "sha8:8dd4dabd",
+         "node_id": "sha8:718096df",
+         "distribution": "sha8:8dfe62d2"
+        },
+        {
+         "std": "sha8:cf94a2c0",
+         "node_id": "sha8:c578b833",
+         "distribution": "sha8:8dfe62d2"
+        }
+       ]
+      },
+      "response_digest": {
+       "bytes": 28316,
+       "sha256": "cfd548d11411d446c6caac76ac2bc83651363cb25fee475e863e4f0972dfc501",
+       "key_manifest": [
+        "analysis_status",
+        "auto_noise_applied",
+        "build",
+        "critiques",
+        "decision_evpi",
+        "endpoint_version",
+        "engine_version",
+        "factor_evppi",
+        "factor_flip_values",
+        "factor_sensitivity",
+        "factor_sensitivity_status",
+        "inference_warnings",
+        "objective_ranking",
+        "options",
+        "p_win_sensitivity",
+        "processing_time_ms",
+        "request_echo",
+        "request_id",
+        "robustness",
+        "robustness_status",
+        "sample_population_provenance",
+        "seed_source",
+        "seed_used",
+        "sensitivity_reference_option_id",
+        "stability_thresholds",
+        "timestamp",
+        "version"
+       ]
+      },
+      "response_payload": {
+       "build": "c00f507",
+       "options": [
+        {
+         "id": "sha8:c1a8718b",
+         "label": "sha8:f9724353",
+         "status": "sha8:49dbda90",
+         "outcome": {
+          "p10": "sha8:fc6c4fab",
+          "p50": "sha8:43bdf819",
+          "p90": "sha8:4c52d0a4",
+          "std": "sha8:7ca03000",
+          "mean": "sha8:f76609e6",
+          "n_samples": "sha8:5a3464df",
+          "validity_ratio": "sha8:e8dd1b66",
+          "n_valid_samples": "sha8:5a3464df",
+          "percentiles_source": "sha8:4912d708"
+         },
+         "downside": {
+          "p05": "sha8:a5e6f7b8",
+          "cvar_10": "sha8:f773bb7c",
+          "expected_regret": "sha8:db83d76a"
+         },
+         "win_probability": "sha8:b81e98c4"
+        },
+        {
+         "id": "sha8:4734598d",
+         "label": "sha8:0c2187ae",
+         "status": "sha8:49dbda90",
+         "outcome": {
+          "p10": "sha8:d84e4fdb",
+          "p50": "sha8:4eed5d1a",
+          "p90": "sha8:d40508aa",
+          "std": "sha8:de07f3c3",
+          "mean": "sha8:11719b03",
+          "n_samples": "sha8:5a3464df",
+          "validity_ratio": "sha8:e8dd1b66",
+          "n_valid_samples": "sha8:5a3464df",
+          "percentiles_source": "sha8:4912d708"
+         },
+         "downside": {
+          "p05": "sha8:2ab36761",
+          "cvar_10": "sha8:f8c4f549",
+          "expected_regret": "sha8:99bd2f9c"
+         },
+         "win_probability": "sha8:e105dd3e"
+        },
+        {
+         "id": "sha8:e1e0d91e",
+         "label": "sha8:641472db",
+         "status": "sha8:49dbda90",
+         "outcome": {
+          "p10": "sha8:2e94543d",
+          "p50": "sha8:fac4094c",
+          "p90": "sha8:ed5adb4e",
+          "std": "sha8:9eb4a90f",
+          "mean": "sha8:fc37406f",
+          "n_samples": "sha8:5a3464df",
+          "validity_ratio": "sha8:e8dd1b66",
+          "n_valid_samples": "sha8:5a3464df",
+          "percentiles_source": "sha8:4912d708"
+         },
+         "downside": {
+          "p05": "sha8:1bbaf123",
+          "cvar_10": "sha8:6f52b5ce",
+          "expected_regret": "sha8:a2446d89"
+         },
+         "win_probability": "sha8:16f12560"
+        },
+        {
+         "id": "sha8:b5f65a98",
+         "label": "sha8:a9b69840",
+         "status": "sha8:49dbda90",
+         "outcome": {
+          "p10": "sha8:580769bb",
+          "p50": "sha8:53c50c2b",
+          "p90": "sha8:6691679c",
+          "std": "sha8:13d50c75",
+          "mean": "sha8:b14cb99d",
+          "n_samples": "sha8:5a3464df",
+          "validity_ratio": "sha8:e8dd1b66",
+          "n_valid_samples": "sha8:5a3464df",
+          "percentiles_source": "sha8:4912d708"
+         },
+         "downside": {
+          "p05": "sha8:fc6a6a28",
+          "cvar_10": "sha8:5e4d2f6a",
+          "expected_regret": "sha8:168433b7"
+         },
+         "win_probability": "sha8:0e10fc50"
+        }
+       ],
+       "version": "sha8:1f6b443b",
+       "critiques": [
+        {
+         "id": "sha8:19090e80",
+         "code": "sha8:320f9d55",
+         "source": "sha8:b4fff271",
+         "message": "sha8:2ce45aa0",
+         "severity": "sha8:208670af",
+         "suggestion": "sha8:a9dd3a70",
+         "affected_node_ids": [
+          "sha8:7a04f1e6"
+         ]
+        }
+       ],
+       "seed_used": "sha8:0d64d8e8",
+       "timestamp": "sha8:b6619f0e",
+       "request_id": "sha8:5a26d470",
+       "robustness": {
+        "level": "sha8:3bf45a81",
+        "is_robust": false,
+        "confidence": "sha8:bf54f9f4",
+        "robust_edges": [
+         "sha8:8ad3e255",
+         "sha8:764c29a3",
+         "sha8:88aa5f30"
+        ],
+        "edge_e_values": [
+         {
+          "to_id": "sha8:22120be1",
+          "edge_id": "sha8:1f350b7d",
+          "from_id": "sha8:4857d30d",
+          "flip_mean": "sha8:8dd4dabd",
+          "stability": {
+           "n_seeds": "sha8:eb723bd4",
+           "band_max": "sha8:8e62d466",
+           "band_min": "sha8:8e62d466",
+           "band_width": "sha8:e41ecda9",
+           "band_median": "sha8:8e62d466",
+           "n_seeds_flipped": "sha8:e8dd1b66",
+           "seed_flip_means": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            "sha8:8e62d466",
+            null,
+            null,
+            null,
+            null
+           ]
+          },
+          "current_mean": "sha8:8dd4dabd",
+          "flip_direction": "sha8:ae0f54b3",
+          "is_unflippable": true,
+          "baseline_winner_id": "sha8:b5f65a98"
+         },
+         {
+          "to_id": "sha8:b25cf186",
+          "edge_id": "sha8:8ad3e255",
+          "from_id": "sha8:b8189195",
+          "flip_mean": "sha8:8dd4dabd",
+          "stability": {
+           "n_seeds": "sha8:eb723bd4",
+           "band_max": "sha8:cf68f293",
+           "band_min": "sha8:cf68f293",
+           "band_width": "sha8:e41ecda9",
+           "band_median": "sha8:cf68f293",
+           "n_seeds_flipped": "sha8:e8dd1b66",
+           "seed_flip_means": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            "sha8:cf68f293",
+            null,
+            null,
+            null,
+            null
+           ]
+          },
+          "current_mean": "sha8:8dd4dabd",
+          "flip_direction": "sha8:ae0f54b3",
+          "is_unflippable": true,
+          "baseline_winner_id": "sha8:b5f65a98"
+         },
+         {
+          "to_id": "sha8:3c2d4452",
+          "edge_id": "sha8:03cffe98",
+          "from_id": "sha8:4857d30d",
+          "flip_mean": "sha8:8dd4dabd",
+          "stability": {
+           "n_seeds": "sha8:eb723bd4",
+           "band_max": "sha8:bd9d2ceb",
+           "band_min": "sha8:bd9d2ceb",
+           "band_width": "sha8:e41ecda9",
+           "band_median": "sha8:bd9d2ceb",
+           "n_seeds_flipped": "sha8:e8dd1b66",
+           "seed_flip_means": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            "sha8:bd9d2ceb",
+            null,
+            null,
+            null,
+            null
+           ]
+          },
+          "current_mean": "sha8:8dd4dabd",
+          "flip_direction": "sha8:ae0f54b3",
+          "is_unflippable": true,
+          "baseline_winner_id": "sha8:b5f65a98"
+         },
+         {
+          "to_id": "sha8:3c2d4452",
+          "edge_id": "sha8:971502c7",
+          "from_id": "sha8:b8189195",
+          "flip_mean": "sha8:8dd4dabd",
+          "stability": {
+           "n_seeds": "sha8:eb723bd4",
+           "band_max": "sha8:6849ece5",
+           "band_min": "sha8:6849ece5",
+           "band_width": "sha8:e41ecda9",
+           "band_median": "sha8:6849ece5",
+           "n_seeds_flipped": "sha8:e8dd1b66",
+           "seed_flip_means": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            "sha8:6849ece5",
+            null,
+            null,
+            null,
+            null
+           ]
+          },
+          "current_mean": "sha8:8dd4dabd",
+          "flip_direction": "sha8:ae0f54b3",
+          "is_unflippable": true,
+          "baseline_winner_id": "sha8:b5f65a98"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "e_value": "sha8:e8dd1b66",
+          "edge_id": "sha8:8f98e91c",
+          "from_id": "sha8:718096df",
+          "flip_mean": "sha8:9710434a",
+          "stability": {
+           "n_seeds": "sha8:eb723bd4",
+           "band_max": "sha8:665e8f1d",
+           "band_min": "sha8:42306933",
+           "band_width": "sha8:4a5ce2b1",
+           "band_median": "sha8:c2d43048",
+           "n_seeds_flipped": "sha8:eb723bd4",
+           "seed_flip_means": [
+            "sha8:01e77322",
+            "sha8:665e8f1d",
+            "sha8:f5af1def",
+            "sha8:19a3266f",
+            "sha8:acbcbb75",
+            "sha8:fd9c055b",
+            "sha8:42306933",
+            "sha8:016de627",
+            "sha8:3984fc55",
+            "sha8:9c614073"
+           ]
+          },
+          "current_mean": "sha8:8dd4dabd",
+          "flip_direction": "sha8:e5eca208",
+          "is_unflippable": false,
+          "baseline_winner_id": "sha8:b5f65a98",
+          "alternative_winner_id": "sha8:c1a8718b"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:764c29a3",
+          "from_id": "sha8:c578b833",
+          "flip_mean": "sha8:1f495dc6",
+          "stability": {
+           "n_seeds": "sha8:eb723bd4",
+           "n_seeds_flipped": "sha8:e41ecda9",
+           "seed_flip_means": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+           ]
+          },
+          "current_mean": "sha8:1f495dc6",
+          "flip_direction": "sha8:ae0f54b3",
+          "is_unflippable": true,
+          "baseline_winner_id": "sha8:b5f65a98"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:ae57ee13",
+          "from_id": "sha8:22120be1",
+          "flip_mean": "sha8:8dd4dabd",
+          "stability": {
+           "n_seeds": "sha8:eb723bd4",
+           "band_max": "sha8:432cbb39",
+           "band_min": "sha8:432cbb39",
+           "band_width": "sha8:e41ecda9",
+           "band_median": "sha8:432cbb39",
+           "n_seeds_flipped": "sha8:e8dd1b66",
+           "seed_flip_means": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            "sha8:432cbb39",
+            null,
+            null,
+            null,
+            null
+           ]
+          },
+          "current_mean": "sha8:8dd4dabd",
+          "flip_direction": "sha8:ae0f54b3",
+          "is_unflippable": true,
+          "baseline_winner_id": "sha8:b5f65a98"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:3cea2cc3",
+          "from_id": "sha8:b25cf186",
+          "flip_mean": "sha8:8dd4dabd",
+          "stability": {
+           "n_seeds": "sha8:eb723bd4",
+           "band_max": "sha8:c557e974",
+           "band_min": "sha8:c557e974",
+           "band_width": "sha8:e41ecda9",
+           "band_median": "sha8:c557e974",
+           "n_seeds_flipped": "sha8:e8dd1b66",
+           "seed_flip_means": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            "sha8:c557e974",
+            null,
+            null,
+            null,
+            null
+           ]
+          },
+          "current_mean": "sha8:8dd4dabd",
+          "flip_direction": "sha8:ae0f54b3",
+          "is_unflippable": true,
+          "baseline_winner_id": "sha8:b5f65a98"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:1be32b9b",
+          "from_id": "sha8:3c2d4452",
+          "flip_mean": "sha8:1f495dc6",
+          "stability": {
+           "n_seeds": "sha8:eb723bd4",
+           "band_max": "sha8:187a7169",
+           "band_min": "sha8:187a7169",
+           "band_width": "sha8:e41ecda9",
+           "band_median": "sha8:187a7169",
+           "n_seeds_flipped": "sha8:e8dd1b66",
+           "seed_flip_means": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            "sha8:187a7169",
+            null,
+            null,
+            null,
+            null
+           ]
+          },
+          "current_mean": "sha8:1f495dc6",
+          "flip_direction": "sha8:ae0f54b3",
+          "is_unflippable": true,
+          "baseline_winner_id": "sha8:b5f65a98"
+         },
+         {
+          "to_id": "sha8:c578b833",
+          "edge_id": "sha8:ab19a110",
+          "from_id": "sha8:9f5adac3",
+          "flip_mean": "sha8:8dd4dabd",
+          "stability": {
+           "n_seeds": "sha8:eb723bd4",
+           "n_seeds_flipped": "sha8:e41ecda9",
+           "seed_flip_means": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+           ]
+          },
+          "current_mean": "sha8:8dd4dabd",
+          "flip_direction": "sha8:ae0f54b3",
+          "is_unflippable": true,
+          "baseline_winner_id": "sha8:b5f65a98"
+         },
+         {
+          "to_id": "sha8:22120be1",
+          "edge_id": "sha8:88aa5f30",
+          "from_id": "sha8:d6ede6f2",
+          "flip_mean": "sha8:1f495dc6",
+          "stability": {
+           "n_seeds": "sha8:eb723bd4",
+           "n_seeds_flipped": "sha8:e41ecda9",
+           "seed_flip_means": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+           ]
+          },
+          "current_mean": "sha8:1f495dc6",
+          "flip_direction": "sha8:ae0f54b3",
+          "is_unflippable": true,
+          "baseline_winner_id": "sha8:b5f65a98"
+         },
+         {
+          "to_id": "sha8:3c2d4452",
+          "edge_id": "sha8:fb1c6d5f",
+          "from_id": "sha8:5c0e7634",
+          "flip_mean": "sha8:8dd4dabd",
+          "stability": {
+           "n_seeds": "sha8:eb723bd4",
+           "n_seeds_flipped": "sha8:e41ecda9",
+           "seed_flip_means": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+           ]
+          },
+          "current_mean": "sha8:8dd4dabd",
+          "flip_direction": "sha8:ae0f54b3",
+          "is_unflippable": true,
+          "baseline_winner_id": "sha8:b5f65a98"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:8303840c",
+          "from_id": "sha8:edf7fe46",
+          "flip_mean": "sha8:1f495dc6",
+          "stability": {
+           "n_seeds": "sha8:eb723bd4",
+           "n_seeds_flipped": "sha8:e41ecda9",
+           "seed_flip_means": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+           ]
+          },
+          "current_mean": "sha8:1f495dc6",
+          "flip_direction": "sha8:ae0f54b3",
+          "is_unflippable": true,
+          "baseline_winner_id": "sha8:b5f65a98"
+         }
+        ],
+        "fragile_edges": [
+         {
+          "to_id": "sha8:22120be1",
+          "edge_id": "sha8:1f350b7d",
+          "from_id": "sha8:4857d30d",
+          "switch_probability": "sha8:c68c1f90",
+          "alternative_winner_id": "sha8:4734598d",
+          "marginal_switch_probability": "sha8:e41ecda9"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:ae57ee13",
+          "from_id": "sha8:22120be1",
+          "switch_probability": "sha8:53c085d4",
+          "alternative_winner_id": "sha8:4734598d",
+          "marginal_switch_probability": "sha8:e41ecda9"
+         },
+         {
+          "to_id": "sha8:3c2d4452",
+          "edge_id": "sha8:03cffe98",
+          "from_id": "sha8:4857d30d",
+          "switch_probability": "sha8:fbfff1cb",
+          "alternative_winner_id": "sha8:c1a8718b",
+          "marginal_switch_probability": "sha8:e41ecda9"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:1be32b9b",
+          "from_id": "sha8:3c2d4452",
+          "switch_probability": "sha8:65d61e7c",
+          "alternative_winner_id": "sha8:c1a8718b",
+          "marginal_switch_probability": "sha8:e41ecda9"
+         }
+        ],
+        "sha8:67fb39ed": [
+         "sha8:9f5adac3",
+         "sha8:d6ede6f2",
+         "sha8:5c0e7634",
+         "sha8:edf7fe46"
+        ],
+        "sha8:daabbc13": [
+         "sha8:1be32b9b",
+         "sha8:03cffe98",
+         "sha8:1f350b7d",
+         "sha8:ae57ee13"
+        ],
+        "sha8:feb07b63": "sha8:63c8f2db",
+        "confidence_basis": "sha8:c63f5c27",
+        "edge_sensitivity": [
+         {
+          "to_id": "sha8:22120be1",
+          "edge_id": "sha8:1f350b7d",
+          "from_id": "sha8:4857d30d",
+          "direction": "sha8:127fe274",
+          "elasticity": "sha8:b341ff98",
+          "interpretation": "sha8:3585fe9c",
+          "importance_rank": "sha8:e8dd1b66",
+          "sensitivity_type": "sha8:a277c2dd",
+          "sensitivity_score": "sha8:e8dd1b66"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:ae57ee13",
+          "from_id": "sha8:22120be1",
+          "direction": "sha8:127fe274",
+          "elasticity": "sha8:a1a4859d",
+          "interpretation": "sha8:35809bf8",
+          "importance_rank": "sha8:a7bb1158",
+          "sensitivity_type": "sha8:a277c2dd",
+          "sensitivity_score": "sha8:6fbd7b60"
+         },
+         {
+          "to_id": "sha8:3c2d4452",
+          "edge_id": "sha8:03cffe98",
+          "from_id": "sha8:4857d30d",
+          "direction": "sha8:18887f99",
+          "elasticity": "sha8:f1feac72",
+          "interpretation": "sha8:0e53a11d",
+          "importance_rank": "sha8:7909834d",
+          "sensitivity_type": "sha8:a277c2dd",
+          "sensitivity_score": "sha8:1e0df08a"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:1be32b9b",
+          "from_id": "sha8:3c2d4452",
+          "direction": "sha8:18887f99",
+          "elasticity": "sha8:265fbf32",
+          "interpretation": "sha8:f3de7c24",
+          "importance_rank": "sha8:9d377319",
+          "sensitivity_type": "sha8:a277c2dd",
+          "sensitivity_score": "sha8:74323e6c"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:1be32b9b",
+          "from_id": "sha8:3c2d4452",
+          "direction": "sha8:127fe274",
+          "elasticity": "sha8:5aaf47cd",
+          "interpretation": "sha8:a1fba466",
+          "importance_rank": "sha8:a0753c2c",
+          "sensitivity_type": "sha8:85614138",
+          "sensitivity_score": "sha8:4c62671f"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:ae57ee13",
+          "from_id": "sha8:22120be1",
+          "direction": "sha8:127fe274",
+          "elasticity": "sha8:2427dc4b",
+          "interpretation": "sha8:b2aa0b23",
+          "importance_rank": "sha8:0d7fd7a6",
+          "sensitivity_type": "sha8:85614138",
+          "sensitivity_score": "sha8:40dc135e"
+         },
+         {
+          "to_id": "sha8:c578b833",
+          "edge_id": "sha8:ab19a110",
+          "from_id": "sha8:9f5adac3",
+          "direction": "sha8:127fe274",
+          "elasticity": "sha8:c9765857",
+          "interpretation": "sha8:8bcdd3d1",
+          "importance_rank": "sha8:87b4bf71",
+          "sensitivity_type": "sha8:a277c2dd",
+          "sensitivity_score": "sha8:f3a18e2a"
+         },
+         {
+          "to_id": "sha8:3c2d4452",
+          "edge_id": "sha8:971502c7",
+          "from_id": "sha8:b8189195",
+          "direction": "sha8:18887f99",
+          "elasticity": "sha8:5eed4945",
+          "interpretation": "sha8:f933ca3d",
+          "importance_rank": "sha8:b50b17a0",
+          "sensitivity_type": "sha8:a277c2dd",
+          "sensitivity_score": "sha8:2381eaa6"
+         },
+         {
+          "to_id": "sha8:3c2d4452",
+          "edge_id": "sha8:fb1c6d5f",
+          "from_id": "sha8:5c0e7634",
+          "direction": "sha8:18887f99",
+          "elasticity": "sha8:bd168c67",
+          "interpretation": "sha8:75d73d17",
+          "importance_rank": "sha8:ffd4363c",
+          "sensitivity_type": "sha8:a277c2dd",
+          "sensitivity_score": "sha8:7be0e08b"
+         },
+         {
+          "to_id": "sha8:3c2d4452",
+          "edge_id": "sha8:03cffe98",
+          "from_id": "sha8:4857d30d",
+          "direction": "sha8:18887f99",
+          "elasticity": "sha8:b657e737",
+          "interpretation": "sha8:8f7e933e",
+          "importance_rank": "sha8:eb723bd4",
+          "sensitivity_type": "sha8:85614138",
+          "sensitivity_score": "sha8:e34cd4e0"
+         },
+         {
+          "to_id": "sha8:22120be1",
+          "edge_id": "sha8:1f350b7d",
+          "from_id": "sha8:4857d30d",
+          "direction": "sha8:127fe274",
+          "elasticity": "sha8:489a0ab4",
+          "interpretation": "sha8:19652727",
+          "importance_rank": "sha8:326afab1",
+          "sensitivity_type": "sha8:85614138",
+          "sensitivity_score": "sha8:2d1536f0"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:8f98e91c",
+          "from_id": "sha8:718096df",
+          "direction": "sha8:127fe274",
+          "elasticity": "sha8:7d0ccb49",
+          "interpretation": "sha8:ac5fc3b7",
+          "importance_rank": "sha8:915af9f4",
+          "sensitivity_type": "sha8:a277c2dd",
+          "sensitivity_score": "sha8:bf096130"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:8303840c",
+          "from_id": "sha8:edf7fe46",
+          "direction": "sha8:127fe274",
+          "elasticity": "sha8:412b05cf",
+          "interpretation": "sha8:6a3f309a",
+          "importance_rank": "sha8:87c41039",
+          "sensitivity_type": "sha8:a277c2dd",
+          "sensitivity_score": "sha8:df4ed292"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:3cea2cc3",
+          "from_id": "sha8:b25cf186",
+          "direction": "sha8:18887f99",
+          "elasticity": "sha8:e88140c3",
+          "interpretation": "sha8:d758f45b",
+          "importance_rank": "sha8:936c0c45",
+          "sensitivity_type": "sha8:a277c2dd",
+          "sensitivity_score": "sha8:a71a2d0d"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:8f98e91c",
+          "from_id": "sha8:718096df",
+          "direction": "sha8:127fe274",
+          "elasticity": "sha8:cde0b4ec",
+          "interpretation": "sha8:6228f442",
+          "importance_rank": "sha8:303c6b47",
+          "sensitivity_type": "sha8:85614138",
+          "sensitivity_score": "sha8:b110142e"
+         },
+         {
+          "to_id": "sha8:3c2d4452",
+          "edge_id": "sha8:fb1c6d5f",
+          "from_id": "sha8:5c0e7634",
+          "direction": "sha8:127fe274",
+          "elasticity": "sha8:82c73065",
+          "interpretation": "sha8:81be7049",
+          "importance_rank": "sha8:313846a1",
+          "sensitivity_type": "sha8:85614138",
+          "sensitivity_score": "sha8:37d507e0"
+         },
+         {
+          "to_id": "sha8:b25cf186",
+          "edge_id": "sha8:8ad3e255",
+          "from_id": "sha8:b8189195",
+          "direction": "sha8:18887f99",
+          "elasticity": "sha8:a6ee8656",
+          "interpretation": "sha8:b8739265",
+          "importance_rank": "sha8:17e3863a",
+          "sensitivity_type": "sha8:85614138",
+          "sensitivity_score": "sha8:87185a59"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:764c29a3",
+          "from_id": "sha8:c578b833",
+          "direction": "sha8:127fe274",
+          "elasticity": "sha8:fb43ef3c",
+          "interpretation": "sha8:22b16551",
+          "importance_rank": "sha8:5133450a",
+          "sensitivity_type": "sha8:a277c2dd",
+          "sensitivity_score": "sha8:775d32fa"
+         },
+         {
+          "to_id": "sha8:22120be1",
+          "edge_id": "sha8:88aa5f30",
+          "from_id": "sha8:d6ede6f2",
+          "direction": "sha8:127fe274",
+          "elasticity": "sha8:65fd65c7",
+          "interpretation": "sha8:c995551a",
+          "importance_rank": "sha8:9b1aa4ed",
+          "sensitivity_type": "sha8:a277c2dd",
+          "sensitivity_score": "sha8:ad208ad9"
+         },
+         {
+          "to_id": "sha8:3c2d4452",
+          "edge_id": "sha8:971502c7",
+          "from_id": "sha8:b8189195",
+          "direction": "sha8:18887f99",
+          "elasticity": "sha8:2bc51c02",
+          "interpretation": "sha8:32b4f3e6",
+          "importance_rank": "sha8:94445a2d",
+          "sensitivity_type": "sha8:85614138",
+          "sensitivity_score": "sha8:b743844d"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:764c29a3",
+          "from_id": "sha8:c578b833",
+          "direction": "sha8:18887f99",
+          "elasticity": "sha8:61b950a6",
+          "interpretation": "sha8:3eebed97",
+          "importance_rank": "sha8:117c785b",
+          "sensitivity_type": "sha8:85614138",
+          "sensitivity_score": "sha8:3f7c7f1c"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:3cea2cc3",
+          "from_id": "sha8:b25cf186",
+          "direction": "sha8:127fe274",
+          "elasticity": "sha8:5403e430",
+          "interpretation": "sha8:99193a6a",
+          "importance_rank": "sha8:ba5a4524",
+          "sensitivity_type": "sha8:85614138",
+          "sensitivity_score": "sha8:4d2b2531"
+         },
+         {
+          "to_id": "sha8:c578b833",
+          "edge_id": "sha8:ab19a110",
+          "from_id": "sha8:9f5adac3",
+          "direction": "sha8:18887f99",
+          "elasticity": "sha8:902d0a2c",
+          "interpretation": "sha8:65a5df0c",
+          "importance_rank": "sha8:24d64a46",
+          "sensitivity_type": "sha8:85614138",
+          "sensitivity_score": "sha8:32269525"
+         },
+         {
+          "to_id": "sha8:b25cf186",
+          "edge_id": "sha8:8ad3e255",
+          "from_id": "sha8:b8189195",
+          "direction": "sha8:127fe274",
+          "elasticity": "sha8:1739be64",
+          "interpretation": "sha8:c035c46f",
+          "importance_rank": "sha8:d0fe673f",
+          "sensitivity_type": "sha8:a277c2dd",
+          "sensitivity_score": "sha8:7b46e0bf"
+         },
+         {
+          "to_id": "sha8:22120be1",
+          "edge_id": "sha8:88aa5f30",
+          "from_id": "sha8:d6ede6f2",
+          "direction": "sha8:127fe274",
+          "elasticity": "sha8:15008bd0",
+          "interpretation": "sha8:0ef9f92c",
+          "importance_rank": "sha8:6a84c4e8",
+          "sensitivity_type": "sha8:85614138",
+          "sensitivity_score": "sha8:880f455f"
+         },
+         {
+          "to_id": "sha8:7a04f1e6",
+          "edge_id": "sha8:8303840c",
+          "from_id": "sha8:edf7fe46",
+          "direction": "sha8:18887f99",
+          "elasticity": "sha8:3dd1bd25",
+          "interpretation": "sha8:0c8ab308",
+          "importance_rank": "sha8:a321b387",
+          "sensitivity_type": "sha8:85614138",
+          "sensitivity_score": "sha8:551260e4"
+         }
+        ],
+        "recommendation_stability": "sha8:bf54f9f4"
+       },
+       "seed_source": "sha8:b6ed9037",
+       "factor_evppi": [
+        {
+         "method": "sha8:3f1c6d60",
+         "status": "sha8:3f70bdf5",
+         "factor_id": "sha8:c578b833",
+         "n_samples": "sha8:5a3464df",
+         "sha8:0ce59c93": "sha8:aa2592c6",
+         "sha8:46849881": false,
+         "sha8:8c8d97d0": "sha8:9d377319",
+         "sha8:9329f427": "sha8:e41ecda9",
+         "sha8:9396e256": "sha8:65c102e5",
+         "sha8:9d19c886": "sha8:0fc15b7e",
+         "sha8:addee9ff": "sha8:e41ecda9",
+         "sha8:cc7e649a": false,
+         "sha8:d3d690c0": false,
+         "sha8:f51183b7": "sha8:65c102e5"
+        }
+       ],
+       "decision_evpi": "sha8:168433b7",
+       "sha8:189e7239": {
+        "n_samples": "sha8:5a3464df",
+        "options_count": "sha8:9d377319",
+        "sha8:22e1b7bc": "sha8:a7bb1158",
+        "sha8:2b3b088a": "sha8:87c41039",
+        "sha8:5de26978": "sha8:915af9f4",
+        "sha8:7b175632": false,
+        "sha8:8be3b359": "sha8:05f2b30a"
+       },
+       "sha8:3499e3a5": {
+        "sha8:33dcd9db": {
+         "p05": "sha8:8c4917a4",
+         "p10": "sha8:8c4917a4",
+         "p50": "sha8:8c4917a4",
+         "p90": "sha8:8c4917a4",
+         "mean": "sha8:8c4917a4",
+         "cvar_10": "sha8:8c4917a4",
+         "factor_evppi": "sha8:8c4917a4",
+         "decision_evpi": "sha8:8c4917a4",
+         "sha8:2f9f29b5": "sha8:8c4917a4",
+         "expected_regret": "sha8:8c4917a4",
+         "win_probability": "sha8:8c4917a4",
+         "probability_of_goal": "sha8:8c4917a4"
+        },
+        "sha8:ade851af": false,
+        "sha8:c8223676": [],
+        "calibration_status": "sha8:bfd428c9"
+       },
+       "sha8:78081ac9": {
+        "status": "sha8:49dbda90",
+        "direction": "sha8:553ee96d",
+        "sha8:c6a7177a": false
+       },
+       "sha8:b48afcd2": "sha8:bca1633f",
+       "sha8:f51cf7d1": "sha8:49dbda90",
+       "analysis_status": "sha8:49dbda90",
+       "endpoint_version": "sha8:cbec3d1d",
+       "p_win_sensitivity": [
+        {
+         "method": "sha8:5a308d49",
+         "status": "sha8:97b3e459",
+         "factor_id": "sha8:718096df",
+         "n_samples": "sha8:a45c7855",
+         "sha8:05c54e14": "sha8:7b348911",
+         "sha8:0ce59c93": "sha8:7d5f1ce4",
+         "sha8:5cee7077": "sha8:3e6fd2c9",
+         "sha8:5e782e7f": "sha8:a7ad3e7b",
+         "sha8:868de2d4": "sha8:3ae63c77",
+         "sha8:bf6471f4": false,
+         "sha8:da123d4a": "sha8:e0923111",
+         "sha8:ee450466": "sha8:017c0bfb",
+         "sha8:f9eeb0ad": "sha8:feed68de"
+        },
+        {
+         "method": "sha8:5a308d49",
+         "status": "sha8:3f70bdf5",
+         "factor_id": "sha8:4857d30d",
+         "n_samples": "sha8:a45c7855",
+         "sha8:05c54e14": "sha8:499beec5",
+         "sha8:0ce59c93": "sha8:7d5f1ce4",
+         "sha8:5cee7077": "sha8:e41ecda9",
+         "sha8:5e782e7f": "sha8:e41ecda9",
+         "sha8:868de2d4": "sha8:3ae63c77",
+         "sha8:bf6471f4": true,
+         "sha8:da123d4a": "sha8:e0923111",
+         "sha8:ee450466": "sha8:017c0bfb",
+         "sha8:f9eeb0ad": "sha8:feed68de"
+        },
+        {
+         "method": "sha8:5a308d49",
+         "status": "sha8:3f70bdf5",
+         "factor_id": "sha8:b8189195",
+         "n_samples": "sha8:a45c7855",
+         "sha8:05c54e14": "sha8:26adf627",
+         "sha8:0ce59c93": "sha8:7d5f1ce4",
+         "sha8:5cee7077": "sha8:e41ecda9",
+         "sha8:5e782e7f": "sha8:e41ecda9",
+         "sha8:868de2d4": "sha8:3ae63c77",
+         "sha8:bf6471f4": true,
+         "sha8:da123d4a": "sha8:e0923111",
+         "sha8:ee450466": "sha8:017c0bfb",
+         "sha8:f9eeb0ad": "sha8:feed68de"
+        },
+        {
+         "method": "sha8:5a308d49",
+         "status": "sha8:3f70bdf5",
+         "factor_id": "sha8:c578b833",
+         "n_samples": "sha8:a45c7855",
+         "sha8:05c54e14": "sha8:ec5355c8",
+         "sha8:0ce59c93": "sha8:7d5f1ce4",
+         "sha8:5cee7077": "sha8:e41ecda9",
+         "sha8:5e782e7f": "sha8:e41ecda9",
+         "sha8:868de2d4": "sha8:3ae63c77",
+         "sha8:bf6471f4": true,
+         "sha8:da123d4a": "sha8:e0923111",
+         "sha8:ee450466": "sha8:017c0bfb",
+         "sha8:f9eeb0ad": "sha8:feed68de"
+        }
+       ],
+       "robustness_status": "sha8:49dbda90",
+       "auto_noise_applied": false,
+       "factor_flip_values": [
+        {
+         "factor_id": "sha8:4857d30d",
+         "flip_reason": "sha8:5f1c62ae",
+         "current_value": "sha8:e41ecda9",
+         "baseline_winner_id": "sha8:b5f65a98"
+        },
+        {
+         "factor_id": "sha8:b8189195",
+         "flip_reason": "sha8:5f1c62ae",
+         "current_value": "sha8:e41ecda9",
+         "baseline_winner_id": "sha8:b5f65a98"
+        },
+        {
+         "direction": "sha8:ae0f54b3",
+         "factor_id": "sha8:718096df",
+         "stability": {
+          "n_seeds": "sha8:eb723bd4",
+          "band_max": "sha8:82ca89da",
+          "band_min": "sha8:9b95a72a",
+          "band_width": "sha8:958b4cf3",
+          "band_median": "sha8:7fab0d37",
+          "n_seeds_flipped": "sha8:ffd4363c",
+          "seed_flip_values": [
+           "sha8:9b95a72a",
+           "sha8:86ec9d6b",
+           "sha8:8dd4dabd",
+           "sha8:03abb226",
+           "sha8:7fab0d37",
+           null,
+           "sha8:8dd4dabd",
+           "sha8:82ca89da",
+           "sha8:986ba235",
+           "sha8:93c1a031"
+          ]
+         },
+         "flip_value": "sha8:8dd4dabd",
+         "flip_reason": "sha8:02211b32",
+         "current_value": "sha8:e41ecda9",
+         "baseline_winner_id": "sha8:b5f65a98",
+         "alternative_winner_id": "sha8:e1e0d91e"
+        }
+       ],
+       "factor_sensitivity": [
+        {
+         "label": "sha8:f1e3691e",
+         "node_id": "sha8:c578b833",
+         "direction": "sha8:18887f99",
+         "confidence": "sha8:53207457",
+         "elasticity": "sha8:c2bb4567",
+         "value_source": "sha8:2e59e257",
+         "sha8:069dadba": false,
+         "sha8:1e76ada0": "sha8:2317dfc4",
+         "sha8:39f9ca2d": "sha8:e8dd1b66",
+         "sha8:d4b63777": "sha8:c2bb4567",
+         "elasticity_std": "sha8:598fe0da",
+         "influence_rank": "sha8:e8dd1b66",
+         "interpretation": "sha8:74e40f6d",
+         "rank_flip_rate": "sha8:6111c17a",
+         "importance_rank": "sha8:e8dd1b66",
+         "influence_score": "sha8:e8dd1b66",
+         "stability_method": "sha8:21c04374",
+         "confidence_source": "sha8:34b0ddc7",
+         "sensitivity_score": "sha8:e8dd1b66",
+         "attribution_stability": "sha8:3bf45a81",
+         "confidence_provenance": {
+          "sha8:5d1424dd": false,
+          "method_version": "sha8:fdc70c1a"
+         }
+        },
+        {
+         "label": "sha8:764f5677",
+         "node_id": "sha8:718096df",
+         "direction": "sha8:127fe274",
+         "confidence": "sha8:a5e2ff0d",
+         "elasticity": "sha8:e475a515",
+         "value_source": "sha8:2e59e257",
+         "sha8:069dadba": false,
+         "sha8:1e76ada0": "sha8:e41ecda9",
+         "sha8:39f9ca2d": "sha8:c99dfd9d",
+         "sha8:d4b63777": "sha8:e475a515",
+         "elasticity_std": "sha8:f2c4b402",
+         "influence_rank": "sha8:a7bb1158",
+         "interpretation": "sha8:8606357b",
+         "rank_flip_rate": "sha8:0d6ade3f",
+         "importance_rank": "sha8:a7bb1158",
+         "influence_score": "sha8:e8dd1b66",
+         "stability_method": "sha8:21c04374",
+         "confidence_source": "sha8:34b0ddc7",
+         "sensitivity_score": "sha8:4b385092",
+         "attribution_stability": "sha8:3bf45a81",
+         "confidence_provenance": {
+          "sha8:5d1424dd": false,
+          "method_version": "sha8:fdc70c1a"
+         }
+        },
+        {
+         "label": "sha8:5ee89bad",
+         "node_id": "sha8:b8189195",
+         "direction": "sha8:127fe274",
+         "confidence": "sha8:cf94a2c0",
+         "elasticity": "sha8:4fd553dd",
+         "zero_reason": "sha8:cec512a4",
+         "value_source": "sha8:2e59e257",
+         "sha8:069dadba": false,
+         "sha8:1e76ada0": "sha8:e41ecda9",
+         "sha8:39f9ca2d": "sha8:b66a777a",
+         "sha8:d4b63777": "sha8:4fd553dd",
+         "elasticity_std": "sha8:4d09ccee",
+         "influence_rank": "sha8:7909834d",
+         "interpretation": "sha8:04babdc7",
+         "rank_flip_rate": "sha8:cf94a2c0",
+         "importance_rank": "sha8:7909834d",
+         "influence_score": "sha8:a8ebaea8",
+         "stability_method": "sha8:21c04374",
+         "confidence_source": "sha8:34b0ddc7",
+         "sensitivity_score": "sha8:5b83c8ce",
+         "attribution_stability": "sha8:c08e1385",
+         "confidence_provenance": {
+          "sha8:5d1424dd": false,
+          "method_version": "sha8:fdc70c1a"
+         }
+        },
+        {
+         "label": "sha8:cc93e32a",
+         "node_id": "sha8:4857d30d",
+         "direction": "sha8:18887f99",
+         "confidence": "sha8:cf94a2c0",
+         "elasticity": "sha8:e41ecda9",
+         "zero_reason": "sha8:cec512a4",
+         "value_source": "sha8:2e59e257",
+         "sha8:069dadba": false,
+         "sha8:1e76ada0": "sha8:e41ecda9",
+         "sha8:39f9ca2d": "sha8:e41ecda9",
+         "sha8:d4b63777": "sha8:e41ecda9",
+         "elasticity_std": "sha8:e41ecda9",
+         "influence_rank": "sha8:9d377319",
+         "interpretation": "sha8:031ba9aa",
+         "rank_flip_rate": "sha8:cf94a2c0",
+         "importance_rank": "sha8:9d377319",
+         "influence_score": "sha8:a8ebaea8",
+         "stability_method": "sha8:21c04374",
+         "confidence_source": "sha8:34b0ddc7",
+         "sensitivity_score": "sha8:e41ecda9",
+         "attribution_stability": "sha8:c08e1385",
+         "confidence_provenance": {
+          "sha8:5d1424dd": false,
+          "method_version": "sha8:fdc70c1a"
+         }
+        }
+       ],
+       "inference_warnings": [
+        {
+         "code": "sha8:92a03995",
+         "field": "sha8:eddcf717",
+         "detail": {
+          "message": "sha8:08ec1de2",
+          "node_id": "sha8:9f5adac3",
+          "node_label": "sha8:c80fca30",
+          "sha8:3bb23f88": "sha8:e41ecda9"
+         },
+         "severity": "sha8:8f020611"
+        },
+        {
+         "code": "sha8:92a03995",
+         "field": "sha8:2bfcce6a",
+         "detail": {
+          "message": "sha8:270098f1",
+          "node_id": "sha8:d6ede6f2",
+          "node_label": "sha8:36c7d5e4",
+          "sha8:3bb23f88": "sha8:e41ecda9"
+         },
+         "severity": "sha8:8f020611"
+        },
+        {
+         "code": "sha8:92a03995",
+         "field": "sha8:727752fb",
+         "detail": {
+          "message": "sha8:6c363e91",
+          "node_id": "sha8:5c0e7634",
+          "node_label": "sha8:36c27582",
+          "sha8:3bb23f88": "sha8:e41ecda9"
+         },
+         "severity": "sha8:8f020611"
+        },
+        {
+         "code": "sha8:92a03995",
+         "field": "sha8:11883f48",
+         "detail": {
+          "message": "sha8:34472d53",
+          "node_id": "sha8:edf7fe46",
+          "node_label": "sha8:6aec2231",
+          "sha8:3bb23f88": "sha8:e41ecda9"
+         },
+         "severity": "sha8:8f020611"
+        },
+        {
+         "code": "sha8:3e1a432b",
+         "field": "sha8:9b57d27a",
+         "detail": {
+          "reason": "sha8:26eb0d7b",
+          "message": "sha8:f29068a1",
+          "goal_node_id": "sha8:7a04f1e6",
+          "sha8:6b5d9e14": "sha8:553ee96d"
+         },
+         "severity": "sha8:208670af"
+        },
+        {
+         "code": "sha8:320f9d55",
+         "field": "sha8:6c711e3f",
+         "detail": {
+          "message": "sha8:f8b6fe9a",
+          "node_id": "sha8:7a04f1e6",
+          "sha8:679a1100": [
+           "sha8:edf7fe46",
+           "sha8:9f5adac3",
+           "sha8:d6ede6f2",
+           "sha8:5c0e7634"
+          ]
+         },
+         "severity": "sha8:8f020611"
+        }
+       ],
+       "processing_time_ms": "sha8:be1f549c",
+       "stability_thresholds": {
+        "version": "sha8:00975fe1",
+        "provisional": true,
+        "moderate_low_boundary": "sha8:d37caed5",
+        "high_moderate_boundary": "sha8:cf94a2c0"
+       },
+       "sensitivity_reference_option_id": "sha8:c1a8718b"
+      }
+     }
+    ]
+   },
+   "edge_sensitivity": [
+    {
+     "to": "technical_direction",
+     "from": "tech_lead_hires",
+     "edge_id": "tech_lead_hires::technical_direction",
+     "to_label": "Technical direction",
+     "elasticity": 0.4390153885898755,
+     "from_label": "Tech lead hires",
+     "interpretation": "Decision is highly sensitive to tech_lead_hires->technical_direction existence - consider validating this relationship",
+     "importance_rank": 1,
+     "sensitivity_type": "existence"
+    },
+    {
+     "to": "velocity",
+     "from": "technical_direction",
+     "edge_id": "technical_direction::velocity",
+     "to_label": "Velocity",
+     "elasticity": 0.397772571918026,
+     "from_label": "Technical direction",
+     "interpretation": "Decision is highly sensitive to technical_direction->velocity existence - consider validating this relationship",
+     "importance_rank": 2,
+     "sensitivity_type": "existence"
+    },
+    {
+     "to": "onboarding_demand",
+     "from": "tech_lead_hires",
+     "edge_id": "tech_lead_hires::onboarding_demand",
+     "to_label": "Onboarding demand",
+     "elasticity": -0.38997257176445205,
+     "from_label": "Tech lead hires",
+     "interpretation": "Decision is highly sensitive to tech_lead_hires->onboarding_demand existence - consider validating this relationship",
+     "importance_rank": 3,
+     "sensitivity_type": "existence"
+    },
+    {
+     "to": "velocity",
+     "from": "onboarding_demand",
+     "edge_id": "onboarding_demand::velocity",
+     "to_label": "Velocity",
+     "elasticity": -0.31468745802511294,
+     "from_label": "Onboarding demand",
+     "interpretation": "Decision is highly sensitive to onboarding_demand->velocity existence - consider validating this relationship",
+     "importance_rank": 4,
+     "sensitivity_type": "existence"
+    },
+    {
+     "to": "velocity",
+     "from": "onboarding_demand",
+     "edge_id": "onboarding_demand::velocity",
+     "to_label": "Velocity",
+     "elasticity": 0.1160519234702879,
+     "from_label": "Onboarding demand",
+     "interpretation": "Decision is moderately sensitive to onboarding_demand->velocity effect size",
+     "importance_rank": 5,
+     "sensitivity_type": "magnitude"
+    },
+    {
+     "to": "velocity",
+     "from": "technical_direction",
+     "edge_id": "technical_direction::velocity",
+     "to_label": "Velocity",
+     "elasticity": 0.11283728260322698,
+     "from_label": "Technical direction",
+     "interpretation": "Decision is moderately sensitive to technical_direction->velocity effect size",
+     "importance_rank": 6,
+     "sensitivity_type": "magnitude"
+    },
+    {
+     "to": "hiring_lead_time",
+     "from": "hiring_delay",
+     "edge_id": "hiring_delay::hiring_lead_time",
+     "to_label": "Hiring lead time",
+     "elasticity": 0.09257899117801129,
+     "from_label": "Hiring delay",
+     "interpretation": "Decision is moderately sensitive to hiring_delay->hiring_lead_time existence",
+     "importance_rank": 7,
+     "sensitivity_type": "existence"
+    },
+    {
+     "to": "onboarding_demand",
+     "from": "developer_hires",
+     "edge_id": "developer_hires::onboarding_demand",
+     "to_label": "Onboarding demand",
+     "elasticity": -0.08157608914936623,
+     "from_label": "Developer hires",
+     "interpretation": "Decision is moderately sensitive to developer_hires->onboarding_demand existence",
+     "importance_rank": 8,
+     "sensitivity_type": "existence"
+    },
+    {
+     "to": "onboarding_demand",
+     "from": "onboarding_drag",
+     "edge_id": "onboarding_drag::onboarding_demand",
+     "to_label": "Onboarding demand",
+     "elasticity": -0.078803382711544,
+     "from_label": "Onboarding drag",
+     "interpretation": "Decision is moderately sensitive to onboarding_drag->onboarding_demand existence",
+     "importance_rank": 9,
+     "sensitivity_type": "existence"
+    },
+    {
+     "to": "onboarding_demand",
+     "from": "tech_lead_hires",
+     "edge_id": "tech_lead_hires::onboarding_demand",
+     "to_label": "Onboarding demand",
+     "elasticity": -0.07823368203545304,
+     "from_label": "Tech lead hires",
+     "interpretation": "Decision is moderately sensitive to tech_lead_hires->onboarding_demand effect size",
+     "importance_rank": 10,
+     "sensitivity_type": "magnitude"
+    },
+    {
+     "to": "technical_direction",
+     "from": "tech_lead_hires",
+     "edge_id": "tech_lead_hires::technical_direction",
+     "to_label": "Technical direction",
+     "elasticity": 0.07204663705312969,
+     "from_label": "Tech lead hires",
+     "interpretation": "Decision is moderately sensitive to tech_lead_hires->technical_direction effect size",
+     "importance_rank": 11,
+     "sensitivity_type": "magnitude"
+    },
+    {
+     "to": "velocity",
+     "from": "engineering_system_investment",
+     "edge_id": "engineering_system_investment::velocity",
+     "to_label": "Velocity",
+     "elasticity": 0.0717611354410233,
+     "from_label": "Engineering system investment",
+     "interpretation": "Decision is moderately sensitive to engineering_system_investment->velocity existence",
+     "importance_rank": 12,
+     "sensitivity_type": "existence"
+    },
+    {
+     "to": "velocity",
+     "from": "coordination_overload",
+     "edge_id": "coordination_overload::velocity",
+     "to_label": "Velocity",
+     "elasticity": 0.0629888228334439,
+     "from_label": "Coordination overload",
+     "interpretation": "Decision is moderately sensitive to coordination_overload->velocity existence",
+     "importance_rank": 13,
+     "sensitivity_type": "existence"
+    },
+    {
+     "to": "velocity",
+     "from": "delivery_capacity",
+     "edge_id": "delivery_capacity::velocity",
+     "to_label": "Velocity",
+     "elasticity": -0.061251327084240054,
+     "from_label": "Delivery capacity",
+     "interpretation": "Decision is moderately sensitive to delivery_capacity->velocity existence",
+     "importance_rank": 14,
+     "sensitivity_type": "existence"
+    },
+    {
+     "to": "velocity",
+     "from": "engineering_system_investment",
+     "edge_id": "engineering_system_investment::velocity",
+     "to_label": "Velocity",
+     "elasticity": 0.044068612363942175,
+     "from_label": "Engineering system investment",
+     "interpretation": "Decision is robust to effect size variation in engineering_system_investment->velocity",
+     "importance_rank": 15,
+     "sensitivity_type": "magnitude"
+    },
+    {
+     "to": "onboarding_demand",
+     "from": "onboarding_drag",
+     "edge_id": "onboarding_drag::onboarding_demand",
+     "to_label": "Onboarding demand",
+     "elasticity": 0.03475762275219321,
+     "from_label": "Onboarding drag",
+     "interpretation": "Decision is robust to effect size variation in onboarding_drag->onboarding_demand",
+     "importance_rank": 16,
+     "sensitivity_type": "magnitude"
+    },
+    {
+     "to": "delivery_capacity",
+     "from": "developer_hires",
+     "edge_id": "developer_hires::delivery_capacity",
+     "to_label": "Delivery capacity",
+     "elasticity": -0.03271722344821919,
+     "from_label": "Developer hires",
+     "interpretation": "Decision is robust to effect size variation in developer_hires->delivery_capacity",
+     "importance_rank": 17,
+     "sensitivity_type": "magnitude"
+    },
+    {
+     "to": "velocity",
+     "from": "hiring_lead_time",
+     "edge_id": "hiring_lead_time::velocity",
+     "to_label": "Velocity",
+     "elasticity": 0.028676604120139254,
+     "from_label": "Hiring lead time",
+     "interpretation": "Decision is robust to whether hiring_lead_time->velocity exists",
+     "importance_rank": 18,
+     "sensitivity_type": "existence"
+    },
+    {
+     "to": "technical_direction",
+     "from": "leadership_mismatch",
+     "edge_id": "leadership_mismatch::technical_direction",
+     "to_label": "Technical direction",
+     "elasticity": 0.025071064612921776,
+     "from_label": "Leadership mismatch",
+     "interpretation": "Decision is robust to whether leadership_mismatch->technical_direction exists",
+     "importance_rank": 19,
+     "sensitivity_type": "existence"
+    },
+    {
+     "to": "onboarding_demand",
+     "from": "developer_hires",
+     "edge_id": "developer_hires::onboarding_demand",
+     "to_label": "Onboarding demand",
+     "elasticity": -0.021806752636583746,
+     "from_label": "Developer hires",
+     "interpretation": "Decision is robust to effect size variation in developer_hires->onboarding_demand",
+     "importance_rank": 20,
+     "sensitivity_type": "magnitude"
+    },
+    {
+     "to": "velocity",
+     "from": "hiring_lead_time",
+     "edge_id": "hiring_lead_time::velocity",
+     "to_label": "Velocity",
+     "elasticity": -0.02169808485175591,
+     "from_label": "Hiring lead time",
+     "interpretation": "Decision is robust to effect size variation in hiring_lead_time->velocity",
+     "importance_rank": 21,
+     "sensitivity_type": "magnitude"
+    },
+    {
+     "to": "velocity",
+     "from": "delivery_capacity",
+     "edge_id": "delivery_capacity::velocity",
+     "to_label": "Velocity",
+     "elasticity": 0.01610327733576178,
+     "from_label": "Delivery capacity",
+     "interpretation": "Decision is robust to effect size variation in delivery_capacity->velocity",
+     "importance_rank": 22,
+     "sensitivity_type": "magnitude"
+    },
+    {
+     "to": "hiring_lead_time",
+     "from": "hiring_delay",
+     "edge_id": "hiring_delay::hiring_lead_time",
+     "to_label": "Hiring lead time",
+     "elasticity": -0.005643478066754046,
+     "from_label": "Hiring delay",
+     "interpretation": "Decision is robust to effect size variation in hiring_delay->hiring_lead_time",
+     "importance_rank": 23,
+     "sensitivity_type": "magnitude"
+    },
+    {
+     "to": "delivery_capacity",
+     "from": "developer_hires",
+     "edge_id": "developer_hires::delivery_capacity",
+     "to_label": "Delivery capacity",
+     "elasticity": 0.004320405584420817,
+     "from_label": "Developer hires",
+     "interpretation": "Decision is robust to whether developer_hires->delivery_capacity exists",
+     "importance_rank": 24,
+     "sensitivity_type": "existence"
+    },
+    {
+     "to": "technical_direction",
+     "from": "leadership_mismatch",
+     "edge_id": "leadership_mismatch::technical_direction",
+     "to_label": "Technical direction",
+     "elasticity": 0.003946606706173879,
+     "from_label": "Leadership mismatch",
+     "interpretation": "Decision is robust to effect size variation in leadership_mismatch->technical_direction",
+     "importance_rank": 25,
+     "sensitivity_type": "magnitude"
+    },
+    {
+     "to": "velocity",
+     "from": "coordination_overload",
+     "edge_id": "coordination_overload::velocity",
+     "to_label": "Velocity",
+     "elasticity": -0.00007597854238684974,
+     "from_label": "Coordination overload",
+     "interpretation": "Decision is robust to effect size variation in coordination_overload->velocity",
+     "importance_rank": 26,
+     "sensitivity_type": "magnitude"
+    }
+   ],
+   "endpoint_version": "v2/run",
+   "factor_stability": [
+    {
+     "factor_id": "hiring_lead_time",
+     "factor_label": "Hiring lead time",
+     "elasticity_std": 0.61954096,
+     "rank_flip_rate": 0.25,
+     "stability_method": "bootstrap_20",
+     "attribution_stability": "low"
+    },
+    {
+     "factor_id": "engineering_system_investment",
+     "factor_label": "Engineering system investment",
+     "elasticity_std": 0,
+     "rank_flip_rate": 0.2,
+     "stability_method": "bootstrap_20",
+     "attribution_stability": "low"
+    },
+    {
+     "factor_id": "developer_hires",
+     "factor_label": "Developer hires",
+     "elasticity_std": 0,
+     "rank_flip_rate": 0.1,
+     "stability_method": "bootstrap_20",
+     "attribution_stability": "negligible"
+    },
+    {
+     "factor_id": "tech_lead_hires",
+     "factor_label": "Tech lead hires",
+     "elasticity_std": 0,
+     "rank_flip_rate": 0.1,
+     "stability_method": "bootstrap_20",
+     "attribution_stability": "negligible"
+    }
+   ],
+   "option_comparison": [
+    {
+     "id": "hire_a_tech_lead",
+     "label": "Hire a Tech Lead",
+     "status": "computed",
+     "outcome": {
+      "p10": -0.3633965303319286,
+      "p50": -0.04708663190300518,
+      "p90": 0.2571448612981461,
+      "std": 0.25336709051833584,
+      "mean": -0.04995144301567209,
+      "n_samples": 10000,
+      "validity_ratio": 1,
+      "n_valid_samples": 10000,
+      "percentiles_source": "samples"
+     },
+     "downside": {
+      "p05": -0.474168736914415,
+      "cvar_10": -0.5166873147172271,
+      "expected_regret": 0.24325268565497027
+     },
+     "option_id": "hire_a_tech_lead",
+     "option_label": "Hire a Tech Lead",
+     "win_probability": 0.11373333333333335
+    },
+    {
+     "id": "hire_two_developers",
+     "label": "Hire Two Developers",
+     "status": "computed",
+     "outcome": {
+      "p10": -0.36287821193944186,
+      "p50": -0.04903508398965892,
+      "p90": 0.2580168802434802,
+      "std": 0.2527258208510499,
+      "mean": -0.0521732143682513,
+      "n_samples": 10000,
+      "validity_ratio": 1,
+      "n_valid_samples": 10000,
+      "percentiles_source": "samples"
+     },
+     "downside": {
+      "p05": -0.47202111565794436,
+      "cvar_10": -0.5122783319767397,
+      "expected_regret": 0.24547445700754947
+     },
+     "option_id": "hire_two_developers",
+     "option_label": "Hire Two Developers",
+     "win_probability": 0.1042333333333334
+    },
+    {
+     "id": "stage_lead_then_developers",
+     "label": "Stage Lead Then Developers",
+     "status": "computed",
+     "outcome": {
+      "p10": -0.33755046271173617,
+      "p50": -0.04738429549236531,
+      "p90": 0.23133449212181736,
+      "std": 0.23538876829738237,
+      "mean": -0.05094098729866188,
+      "n_samples": 10000,
+      "validity_ratio": 1,
+      "n_valid_samples": 10000,
+      "percentiles_source": "samples"
+     },
+     "downside": {
+      "p05": -0.4491825950355167,
+      "cvar_10": -0.48775273498756777,
+      "expected_regret": 0.24424222993796002
+     },
+     "option_id": "stage_lead_then_developers",
+     "option_label": "Stage Lead Then Developers",
+     "win_probability": 0.11828333333333332
+    },
+    {
+     "id": "improve_engineering_system",
+     "label": "Improve Engineering System",
+     "status": "computed",
+     "outcome": {
+      "p10": -0.09437471877119373,
+      "p50": 0.16267969725620846,
+      "p90": 0.3738914641106285,
+      "std": 0.19067083354256126,
+      "mean": 0.15051542268384982,
+      "n_samples": 10000,
+      "validity_ratio": 1,
+      "n_valid_samples": 10000,
+      "percentiles_source": "samples"
+     },
+     "downside": {
+      "p05": -0.17294103097125355,
+      "cvar_10": -0.20203420440892045,
+      "expected_regret": 0.04278581995544835
+     },
+     "option_id": "improve_engineering_system",
+     "option_label": "Improve Engineering System",
+     "win_probability": 0.66375
+    }
+   ],
+   "p_win_sensitivity": [
+    {
+     "method": "p_win_delta_at_mean_v1",
+     "status": "resolved",
+     "clamped": false,
+     "factor_id": "engineering_system_investment",
+     "n_samples": 2000,
+     "metric_type": "p_win_recommended",
+     "noise_floor": 0.03099,
+     "p_win_delta": 0.14675,
+     "current_metric": 0.673,
+     "perfect_metric": 0.81975,
+     "labelling_doctrine": "provisional_doctrine_v0",
+     "noise_floor_method": "z95_worst_case_bernoulli_diff",
+     "p_win_delta_percentage_points": 14.67
+    },
+    {
+     "method": "p_win_delta_at_mean_v1",
+     "status": "below_resolution",
+     "clamped": true,
+     "factor_id": "tech_lead_hires",
+     "n_samples": 2000,
+     "metric_type": "p_win_recommended",
+     "noise_floor": 0.03099,
+     "p_win_delta": 0,
+     "current_metric": 0.673,
+     "perfect_metric": 0.669,
+     "labelling_doctrine": "provisional_doctrine_v0",
+     "noise_floor_method": "z95_worst_case_bernoulli_diff",
+     "p_win_delta_percentage_points": 0
+    },
+    {
+     "method": "p_win_delta_at_mean_v1",
+     "status": "below_resolution",
+     "clamped": true,
+     "factor_id": "developer_hires",
+     "n_samples": 2000,
+     "metric_type": "p_win_recommended",
+     "noise_floor": 0.03099,
+     "p_win_delta": 0,
+     "current_metric": 0.673,
+     "perfect_metric": 0.668125,
+     "labelling_doctrine": "provisional_doctrine_v0",
+     "noise_floor_method": "z95_worst_case_bernoulli_diff",
+     "p_win_delta_percentage_points": 0
+    },
+    {
+     "method": "p_win_delta_at_mean_v1",
+     "status": "below_resolution",
+     "clamped": true,
+     "factor_id": "hiring_lead_time",
+     "n_samples": 2000,
+     "metric_type": "p_win_recommended",
+     "noise_floor": 0.03099,
+     "p_win_delta": 0,
+     "current_metric": 0.673,
+     "perfect_metric": 0.660375,
+     "labelling_doctrine": "provisional_doctrine_v0",
+     "noise_floor_method": "z95_worst_case_bernoulli_diff",
+     "p_win_delta_percentage_points": 0
+    }
+   ],
+   "preflight_version": "2025-12-26",
+   "robustness_status": "computed",
+   "auto_noise_applied": false,
+   "coaching_signal_id": "RERUN_ANALYSIS_COMPLETE",
+   "factor_sensitivity": [
+    {
+     "source": "graph",
+     "direction": "negative",
+     "factor_id": "hiring_lead_time",
+     "confidence": 0.59765,
+     "elasticity": 1,
+     "evpi_method": "heuristic",
+     "driver_label": "biggest",
+     "factor_label": "Hiring lead time",
+     "value_source": "user_override",
+     "evidence_hint": false,
+     "influence_rank": 2,
+     "rank_flip_rate": 0.25,
+     "importance_rank": 1,
+     "influence_score": 1,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": -0.5,
+     "flip_risk_category": "negligible",
+     "value_of_information": 0,
+     "attribution_stability": "low",
+     "confidence_components": {
+      "sampling_stability": 0.25,
+      "structural_certainty": 0.8
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "evpi_percentage_points": 0
+    },
+    {
+     "source": "graph",
+     "direction": "positive",
+     "factor_id": "engineering_system_investment",
+     "confidence": 0.44589999999999996,
+     "elasticity": 0,
+     "zero_reason": "intervention_override",
+     "driver_label": "strong",
+     "factor_label": "Engineering system investment",
+     "value_source": "user_override",
+     "influence_rank": 1,
+     "rank_flip_rate": 0.2,
+     "importance_rank": 2,
+     "influence_score": 1,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": 0,
+     "flip_risk_category": "negligible",
+     "value_of_information": 0,
+     "attribution_stability": "low",
+     "confidence_components": {
+      "sampling_stability": 0.25,
+      "structural_certainty": 0.5
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "range_derivation_source": "default"
+    },
+    {
+     "source": "graph",
+     "direction": "positive",
+     "factor_id": "tech_lead_hires",
+     "confidence": 0.3,
+     "elasticity": 0,
+     "zero_reason": "intervention_override",
+     "driver_label": "minor",
+     "factor_label": "Tech lead hires",
+     "value_source": "user_override",
+     "influence_rank": 3,
+     "rank_flip_rate": 0.1,
+     "importance_rank": 3,
+     "influence_score": 0,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": 0,
+     "flip_risk_category": "correlated",
+     "value_of_information": 0,
+     "attribution_stability": "negligible",
+     "confidence_components": {
+      "sampling_stability": 0,
+      "structural_certainty": 0.5
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "range_derivation_source": "default"
+    },
+    {
+     "source": "graph",
+     "direction": "positive",
+     "factor_id": "developer_hires",
+     "confidence": 0.3,
+     "elasticity": 0,
+     "zero_reason": "intervention_override",
+     "driver_label": "minor",
+     "factor_label": "Developer hires",
+     "value_source": "user_override",
+     "influence_rank": 4,
+     "rank_flip_rate": 0.1,
+     "importance_rank": 4,
+     "influence_score": 0,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": 0,
+     "flip_risk_category": "negligible",
+     "value_of_information": 0,
+     "attribution_stability": "negligible",
+     "confidence_components": {
+      "sampling_stability": 0,
+      "structural_certainty": 0.5
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "range_derivation_source": "default"
+    }
+   ],
+   "inference_warnings": [
+    {
+     "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+     "message": "12 edge E-value entries were omitted from edge_e_values: 12 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+     "severity": "info"
+    },
+    {
+     "code": "ROOT_NODE_DEFAULT_VALUE",
+     "field": "nodes[hiring_delay].observed_state.value",
+     "message": "No starting value was provided for \"Hiring delay\", so the analysis used a default of 0.0. Results for downstream nodes may be unreliable until a real value or range is set.",
+     "severity": "info",
+     "node_label": "Hiring delay"
+    },
+    {
+     "code": "ROOT_NODE_DEFAULT_VALUE",
+     "field": "nodes[leadership_mismatch].observed_state.value",
+     "message": "No starting value was provided for \"Leadership mismatch\", so the analysis used a default of 0.0. Results for downstream nodes may be unreliable until a real value or range is set.",
+     "severity": "info",
+     "node_label": "Leadership mismatch"
+    },
+    {
+     "code": "ROOT_NODE_DEFAULT_VALUE",
+     "field": "nodes[onboarding_drag].observed_state.value",
+     "message": "No starting value was provided for \"Onboarding drag\", so the analysis used a default of 0.0. Results for downstream nodes may be unreliable until a real value or range is set.",
+     "severity": "info",
+     "node_label": "Onboarding drag"
+    },
+    {
+     "code": "ROOT_NODE_DEFAULT_VALUE",
+     "field": "nodes[coordination_overload].observed_state.value",
+     "message": "No starting value was provided for \"Coordination overload\", so the analysis used a default of 0.0. Results for downstream nodes may be unreliable until a real value or range is set.",
+     "severity": "info",
+     "node_label": "Coordination overload"
+    },
+    {
+     "code": "GOAL_DIRECTION_UNATTESTED",
+     "field": "goal_direction",
+     "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+     "severity": "warning"
+    },
+    {
+     "code": "GOAL_ANCESTOR_DATA_GAP",
+     "field": "nodes[velocity]",
+     "message": "Goal node 'velocity' is scored from its forward-propagated outcome distribution, but root ancestor(s) 'coordination_overload', 'hiring_delay', 'leadership_mismatch', 'onboarding_drag' carry no observed value or ParameterUncertainty and defaulted to 0.0 — goal-level probabilities partially rest on placeholder zeros (insufficient data).",
+     "severity": "info"
+    }
+   ],
+   "processing_time_ms": 5975.534555003047,
+   "conditional_winners": [],
+   "isl_analysis_status": "computed",
+   "improvement_guidance": null,
+   "robustness_synthesis": null,
+   "stability_thresholds": {
+    "version": "v1.0-operational-defaults",
+    "provisional": true,
+    "moderate_low_boundary": 0.3,
+    "high_moderate_boundary": 0.1
+   },
+   "auto_noise_provenance": {
+    "effect": "widens_outcome_and_risk_uncertainty",
+    "applied": false,
+    "multiplier": 1,
+    "filter_scope": "outcome_and_risk_nodes",
+    "is_provisional": true,
+    "formula_version": "plot_auto_v1",
+    "calibration_status": "provisional_pending_pilot_calibration",
+    "noise_distribution": "normal_zero_mean_outcome_std"
+   },
+   "flip_thresholds_status": "partial_no_effect",
+   "request_schema_version": "v3",
+   "coaching_signal_turn_id": "822f7a0c-365a-4f71-bb63-7bfea6992ec8",
+   "option_comparison_status": "computed",
+   "coaching_signal_produced_at": "2026-09-23T09:03:16.272Z",
+   "flip_thresholds_margin_status": "unavailable",
+   "flip_thresholds_margin_coverage": {
+    "total": 3,
+    "with_margin": 0,
+    "without_margin": 3
+   },
+   "sensitivity_reference_option_id": "hire_a_tech_lead"
+  },
+  "computed_at": "2026-09-23T09:02:52.139Z",
+  "scenario_id": "74f8c4cb-0f59-4a65-b0d4-0b7cb18d5455",
+  "graph_hash_at_run": "9c4902d980e125c6",
+  "leading_option_id": "improve_engineering_system",
+  "win_probabilities": {
+   "Hire a Tech Lead": 0.11373333333333335,
+   "Hire Two Developers": 0.1042333333333334,
+   "Improve Engineering System": 0.66375,
+   "Stage Lead Then Developers": 0.11828333333333332
+  },
+  "constraint_verdict": {
+   "may_name_leading_option": true,
+   "constraint_verdict_state": "not_applicable"
+  }
+ },
+ "fact_type": "run_analysis",
+ "fact_version": 1
+}
