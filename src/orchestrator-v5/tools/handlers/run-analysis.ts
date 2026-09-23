@@ -171,6 +171,7 @@ export {
   HandlerResultInvalidError,
   type HandlerInvocationFailedCause,
 } from '../handler-errors.js';
+import { currentProviderPolicy } from '../../../adapters/llm/provider-policy.js';
 
 // ============================================================================
 // Locked assistant_text templates (Refinement R1)
@@ -956,7 +957,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     //     empty string, so PLoT's `no_brief` skip stays honest);
     //   - over PLOT_BRIEF_MAX_CHARS (should be impossible — the DB CHECK
     //     caps at 8000) → bounded with a DISCLOSED warn log, never silent.
-    if (config.cee.sendBriefToPlot && typeof snapshot.briefText === 'string') {
+    //   - ⛔ under ANY request-scoped provider policy (the OpenAI Agent turn) → no
+    //     `brief`: the brief is what makes PLoT call BACK into CEE's LLM review legs
+    //     (/assist/v1/review, /assist/v1/decision-review), and a callback is a new
+    //     HTTP request no policy reaches — a generative call outside it and off
+    //     `_provider_calls` (preflight review of #1749; flag measured ON on staging).
+    if (config.cee.sendBriefToPlot && currentProviderPolicy() === undefined && typeof snapshot.briefText === 'string') {
       const trimmedBrief = snapshot.briefText.trim();
       if (trimmedBrief.length > 0) {
         if (trimmedBrief.length > PLOT_BRIEF_MAX_CHARS) {
