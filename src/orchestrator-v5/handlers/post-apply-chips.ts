@@ -37,6 +37,24 @@
  * the repair to advertise the run — or the reverse — would be Olumi deciding
  * for them.
  *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⚠⚠ SCOPE, STATED SO NOBODY MISREADS THIS AS LIVE CAPABILITY.
+ *
+ * Measured at the wire by independent review: **neither post-apply path has
+ * ever been entered by a user.** Across 40,921 production turns, `rrp_`
+ * (readiness repair) pendings: **0**; `rvb_` (value batch) pendings: **0**.
+ * Controls in the same query fired — `gmh_` 533, `graph_management_held_v1`
+ * 485, `%Confirmed%` 219 — so the probe sees this table.
+ *
+ * So this closes a dead end that is real IN THE CODE and that no user has yet
+ * reached. That is worth having — the turn exists, the offer was missing, and
+ * the moment either path becomes reachable it now closes the loop instead of
+ * stranding the user who just did exactly what Olumi asked. But it must not be
+ * reported as capability users are receiving today, and an earlier draft of
+ * this PR came close to doing exactly that by quoting a 95/400 static
+ * membership figure as evidence the turn was "genuinely reachable". Static
+ * membership is not wire reachability; the wire says zero.
+ *
  * ⚠ THE RUN LEADS, AND POSITION IS LOAD-BEARING. The client renders
  * `polished.filter(isChipRenderable).slice(0, 3)` (`SuggestedChips.tsx:335`),
  * so anything past the third entry is never displayed. This returns at most
