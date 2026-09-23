@@ -148,7 +148,7 @@ import {
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
-import { appendCheckedGraphWrite } from "../orchestrator-v5/persist-graph-write.js";
+import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
 import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
 import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
@@ -518,6 +518,27 @@ export default async function route(app: FastifyInstance) {
          * original row and receipt rather than a superseded refusal. And a first
          * graph onto an empty scenario is exempt from OLTF2 by design.
          */
+        /**
+         * ⛔ REFUSE A STRUCTURALLY INVALID GRAPH BEFORE IT CLAIMS A GENERATION.
+         *
+         * Independent review of #1706 (CHANGES_REQUIRED at 19a0d8b5 and
+         * 614296be): the claim below ran BEFORE the persistence floor's
+         * invariant check, so an ingress-valid but structurally refused
+         * registration (a duplicate node id) still advanced the scenario's
+         * generation — superseding an earlier VALID in-flight turn while writing
+         * nothing itself. The same terminal check now runs first, on the exact
+         * bytes and the same trusted baseline the floor uses, and throws the
+         * same `PersistedGraphInvariantError` the catch below maps to 422. The
+         * floor inside `appendCheckedGraphWrite` is kept: nothing may mutate the
+         * graph between the two, and a second check is the cheap half of that.
+         */
+        assertNoIntroducedGraphViolations({
+          graph: graphForStore,
+          identity: { scenario_id: scenarioId, turn_id: turnId, turn_class: "direct_answer" },
+          writesGraph: true,
+          baseGraphForInvariants,
+          source: "graph_registration",
+        });
         appendOutcome = await runWithPendingTurnFence(scenarioId, turnId, async () => {
           await admitCurrentTurnFence();
           return appendCheckedGraphWrite({

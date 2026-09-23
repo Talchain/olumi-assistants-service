@@ -1198,6 +1198,28 @@ describe("register — the write is ordered by the turn fence", () => {
     await app.close();
   });
 
+  it("RED: a structurally INVALID registration is refused BEFORE it claims — zero claims, zero appends", async () => {
+    // Independent review of #1706: the claim ran before the invariant check, so
+    // an ingress-valid duplicate-id import advanced the generation and could
+    // supersede a valid in-flight turn while writing nothing.
+    const DUP: WireGraph = { ...IMPORTED, nodes: [...IMPORTED.nodes, { ...IMPORTED.nodes[0]!, label: "a second node re-using an existing id" }] };
+    const app = await buildApp();
+    const res = await post(app, SID, { graph: DUP, operation_id: OP });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.code).toBe("GRAPH_INVARIANT_VIOLATION");
+    expect(claimTurnFence).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("CONTRAST: the same request with a VALID graph does claim, once", async () => {
+    const app = await buildApp();
+    const res = await post(app, SID, { graph: IMPORTED, operation_id: OP });
+    expect(res.statusCode).toBe(200);
+    expect(claimTurnFence).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
   it("a fence we could not claim or read is OUR outage — a retryable 503, never a conflict", async () => {
     append.mockRejectedValue(new TurnFenceRejectedError("refused", { verdict: "unavailable", generation: null, maxGeneration: null } as never));
     const app = await buildApp();
