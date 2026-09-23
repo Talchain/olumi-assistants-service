@@ -51,6 +51,8 @@ import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/d
 import { narrateWriteOutcome, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { approvalChipsFor } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
+import type { GraphV3T } from '../schemas/cee-v3.js';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
@@ -236,9 +238,31 @@ const AGENT_INSTRUCTIONS = [
  * the `draft_graph` the canvas draws. Shared by a live turn and a replay, so a
  * replayed answer is shown against the SAME current state a fresh one would be.
  */
-async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown }> {
+async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
+  /**
+   * ⛔ THE SCENARIO'S OWN `analysis_state`, not the finaliser's no-context verdict
+   * (preflight UI-contract audit, verified). This route finalises with
+   * `{ scenarioId }` only, so the finaliser stamps what is true of a turn with no
+   * analysis context — `unknown_degraded` / `no_graph_this_turn`, leader withheld —
+   * and the UI treats `analysis_state` as the wire authority: a result that had just
+   * run read "Results may be outdated" and its leading option was withheld, on every
+   * Agent turn. The graph read carries the scenario-bound verdict; it wins when present.
+   */
+  let analysisState: unknown;
+  /**
+   * ⛔ THE RESULT BOUND TO THE GRAPH THIS RESPONSE RETURNS, and nothing else
+   * (independent review of #1760, 5797642232 then 5798478999). A turn can run the
+   * analysis and THEN the graph can change — and another analysis of the new graph
+   * can commit before this readback — so neither the run's own verdict NOR its
+   * blocks may be shown: a current verdict for run B must never license run A's
+   * result. The graph read's `analysis_result` IS the block for the fact its verdict
+   * selected, present ONLY on a fresh graph-hash verdict for the current graph
+   * (`readScenarioAnalysis`), so it is emitted as-is, beside that verdict.
+   * Unavailable readback → no result: never manufacture currentness.
+   */
+  let analysisResult: unknown;
   /**
    * ⛔ THE CANVAS RENDERS FROM `draft_graph`, NOT FROM `graph_hash`.
    *
@@ -262,6 +286,8 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
     if (after.status === 200) {
       graphHash = typeof after.json.graph_hash === 'string' ? after.json.graph_hash : undefined;
       analysisReady = after.json.analysis_ready;
+      if (typeof after.json.analysis_state === 'object' && after.json.analysis_state !== null) analysisState = after.json.analysis_state;
+      if (typeof after.json.analysis_result === 'object' && after.json.analysis_result !== null) analysisResult = after.json.analysis_result;
       /**
        * ⭐ READINESS FROM THE MOMENT THE MODEL EXISTS, not from the moment
        * someone runs an analysis.
@@ -300,11 +326,16 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
        * complete, with HTTP 200. A shape error here does not degrade the
        * turn; it deletes it.
        */
-      const g = after.json.graph as { nodes?: unknown[]; edges?: unknown[] } | undefined;
+      const g = after.json.graph as GraphV3T | undefined;
       if (g !== undefined && Array.isArray(g.nodes) && g.nodes.length > 0) {
-        const nodes = g.nodes;
-        const edges = Array.isArray(g.edges) ? g.edges : [];
-        draftGraph = { node_count: nodes.length, edge_count: edges.length, nodes, edges };
+        /**
+         * ⛔ AND IT CARRIES `goal_constraints`. Assembled by hand it did not, so a
+         * constraint the model holds ("churn under 4%") was cleared from the canvas
+         * on the first build (the UI's `applyDraftResult` sets constraints from this
+         * field). The canonical wire builder is the one Conventional's applied-edit
+         * path uses: the same four fields, plus `goal_constraints` when non-empty.
+         */
+        draftGraph = buildAppliedGraphWireField({ ...g, edges: Array.isArray(g.edges) ? g.edges : [] });
       }
     }
   } catch (err) {
@@ -346,7 +377,7 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
       'agent-lane: could not read the current model back — the client will not learn this turn\u2019s revision, so a delete gesture stands down',
     );
   }
-  return { graphHash, analysisReady, draftGraph };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -691,6 +722,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...finaliseV5Response(composedReplay, { scenarioId }),
         ...(state.graphHash !== undefined ? { graph_hash: state.graphHash } : {}),
         ...(state.analysisReady !== undefined ? { analysis_ready: state.analysisReady } : {}),
+        ...(state.analysisState !== undefined ? { analysis_state: state.analysisState } : {}),
         ...(state.draftGraph !== undefined ? { draft_graph: state.draftGraph } : {}),
         _diagnostic_trace: { exit_path: 'agent_lane_v1', agent_mode: mode, hops: 0, stopped_reason: 'replayed', tools_called: [], replayed: true },
         _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0, stopped_reason: 'replayed', replayed: true, turn_id: turnId },
@@ -787,8 +819,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * numbers existed and never reached the surface that shows them. This is
      * the same defect shape as the `draft_graph` one: the answer was right and
      * the carrier was missing.
+     *
+     * The carrier is the FINAL readback's bound result and readiness (see
+     * `readBackState`), NOT the tool run's own blocks: a run's blocks can describe a
+     * graph the user no longer has (independent review of #1760).
      */
-    let analysisFromTool: { analysis_ready?: unknown; blocks?: unknown[] } | undefined;
     // Counts every call that could WRITE, so a failed turn knows whether it is
     // safe to release its claim (nothing sent) or must leave it (outcome unknown).
     let writesDispatched = 0;
@@ -796,9 +831,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (path.endsWith('/graph/register') || path === '/orchestrate/v2/turn') writesDispatched += 1;
       return dispatch(path, body);
     };
-    const capabilities = createAgentCapabilities(countingDispatch, proposals, callStructured, mode, (payload) => {
-      analysisFromTool = payload;
-    });
+    const capabilities = createAgentCapabilities(countingDispatch, proposals, callStructured, mode);
     // A session whose in-process history holds no user message (a restart, a
     // deploy, an eviction — or only a board-edit note appended since) is seeded
     // from the durable conversation, ahead of whatever is already held — see
@@ -894,11 +927,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * Read back from the persisted graph, not from what a tool returned: the
      * hash the client caches must be the hash the product would serve it.
      */
-    const { graphHash, analysisReady, draftGraph } = await readBackState(dispatch, scenarioId);
+    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult } = await readBackState(dispatch, scenarioId);
 
-    // The analysis the tool actually ran wins over the graph readback, which
-    // carries only the persisted state and never the run's own options.
-    const analysisBlocks = Array.isArray(analysisFromTool?.blocks) ? analysisFromTool.blocks : [];
     const existingBlocks = Array.isArray((finalised as { blocks?: unknown[] }).blocks)
       ? (finalised as { blocks: unknown[] }).blocks
       : [];
@@ -959,11 +989,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
     return reply.code(200).send({
       ...finalised,
-      ...(analysisBlocks.length > 0 ? { blocks: [...existingBlocks, ...analysisBlocks] } : {}),
+      // The FINAL readback's bound result block — never the tool run's own blocks. See
+      // `analysisResult` in readBackState. The Agent's text still reports what its run
+      // found and, if the model has since changed, that it has.
+      ...(analysisResult !== undefined ? { blocks: [...existingBlocks, analysisResult] } : {}),
       ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
-      ...(analysisFromTool?.analysis_ready !== undefined
-        ? { analysis_ready: analysisFromTool.analysis_ready }
-        : analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
+      // Readiness of the graph this response returns — the final readback's only.
+      ...(analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
+      // The scenario-bound verdict from the FINAL readback governs; otherwise the
+      // finaliser's own honest no-context verdict stays (present, never deleted).
+      ...(analysisState !== undefined ? { analysis_state: analysisState } : {}),
       ...(draftGraph !== undefined ? { draft_graph: draftGraph } : {}),
       /**
        * ⭐ SAY WHICH PATH SERVED THIS TURN.
