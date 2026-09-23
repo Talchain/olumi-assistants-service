@@ -288,6 +288,7 @@ export async function buildModelFromBrief(
     // What the projection could not carry — the Agent is expected to say this.
     withheld: admitted.withheld.map((w) => ({ from: w.from, to: w.to, reason: w.reason })),
     projected_field_count: admitted.loss.length,
+    ...(admitted.treated_as_context !== undefined ? { treated_as_context: admitted.treated_as_context } : {}),
     // Options that say what they DO, versus options that are inert. An inert
     // option can never be compared, whatever values arrive later.
     options_that_change_nothing: admitted.withheld

@@ -110,6 +110,13 @@ function leftOutLine(r: ToolResult): string {
   return ` To keep it readable, I left out: ${shown}${more}. Ask me to add any of them back.`;
 }
 
+/** Factors held as context because no option changes them — stated, so the user can say which option should. */
+function contextFactorsLine(r: ToolResult): string {
+  const labels = Array.isArray(r.treated_as_context) ? (r.treated_as_context as unknown[]).map((l) => String(l).trim()).filter((l) => l !== '') : [];
+  if (labels.length === 0) return '';
+  return ` No option changes ${labels.join(' or ')}, so I held ${labels.length === 1 ? 'it' : 'them'} as fixed context rather than ${labels.length === 1 ? 'a lever' : 'levers'} \u2014 tell me if one of the options should change ${labels.length === 1 ? 'it' : 'them'}.`;
+}
+
 /** The questions the build parked instead of modelling — what to examine next, not answers. */
 function openQuestionsLine(r: ToolResult): string {
   const qs = Array.isArray(r.open_questions) ? (r.open_questions as unknown[]).map((q) => String(q).trim()).filter((q) => q !== '') : [];
@@ -126,7 +133,7 @@ function statusLine(name: string, r: ToolResult): string {
     const v = (r.model_version as { version_number?: unknown } | undefined)?.version_number;
     const vs = typeof v === 'number' ? ` (version ${v})` : '';
     if (r.ok === true && r.replayed === true) return `This model had already been built${vs}; nothing was built twice.`;
-    if (r.ok === true && r.mutated === true) return `The model was saved${typeof v === 'number' ? ` as version ${v}` : ''}.${leftOutLine(r)}${openQuestionsLine(r)}`;
+    if (r.ok === true && r.mutated === true) return `The model was saved${typeof v === 'number' ? ` as version ${v}` : ''}.${leftOutLine(r)}${openQuestionsLine(r)}${contextFactorsLine(r)}`;
     return `The model was not built: ${REFUSAL_WORDS[String(r.refusal)] ?? `it was refused (${String(r.refusal ?? 'unknown')})`}.`;
   }
   const perPart = partsLine(r);
