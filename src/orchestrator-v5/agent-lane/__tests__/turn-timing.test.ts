@@ -34,6 +34,19 @@ function scriptedClock(steps: number[]) {
   };
 }
 
+/**
+ * A clock returning EXACT values per read, so a test can construct the
+ * pathological case a delta clock structurally cannot: a provider span wider
+ * than the whole turn. A monotonic delta clock always yields
+ * provider <= total, which is why the first version of the negative-overhead
+ * test below was vacuous — the floor could be deleted and it still passed.
+ * Caught by mutating the floor away.
+ */
+function exactClock(values: number[]) {
+  let i = 0;
+  return () => values[Math.min(i++, values.length - 1)] ?? 0;
+}
+
 const textOnly = async () => ({
   output: [{ type: 'message', content: [{ type: 'output_text', text: 'done' }] }],
 }) as never;
@@ -55,9 +68,14 @@ describe('turn timing — provider time separated from in-process overhead', () 
     expect(r.timing.overhead_ms).toBeGreaterThanOrEqual(0);
   });
 
-  it('never reports negative overhead even if the clock misbehaves', async () => {
-    const r = await runAgentTurn({ ...base, now: scriptedClock([0, 0, 999_999, 0]) }, {} as never, textOnly);
-    expect(r.timing.overhead_ms).toBeGreaterThanOrEqual(0);
+  it('never reports negative overhead even if the clock goes backwards', async () => {
+    // reads: startedAt=0, providerStart=10, providerEnd=5000, end=20.
+    // provider_ms = 4990 but total_ms = 20, so the raw residual is -4970.
+    const r = await runAgentTurn({ ...base, now: exactClock([0, 10, 5_000, 20]) }, {} as never, textOnly);
+    // POSITIVE CONTROL: the pathological case really did occur, or this test
+    // proves nothing about the floor.
+    expect(r.timing.provider_ms).toBeGreaterThan(r.timing.total_ms);
+    expect(r.timing.overhead_ms).toBe(0);
   });
 
   it('accumulates provider time across HOPS, and counts them', async () => {
