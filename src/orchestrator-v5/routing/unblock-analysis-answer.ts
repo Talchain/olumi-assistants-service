@@ -32,6 +32,8 @@ export interface UnblockReadinessIssue {
 export interface UnblockReadinessView {
   readonly status?: string;
   readonly readiness_issues?: readonly UnblockReadinessIssue[];
+  /** Named by the refusal producers (e.g. `NO_PATH_TO_GOAL`) with no issue list. */
+  readonly blocked_reason?: string;
 }
 
 export interface UnblockAnalysisAnswer {
@@ -72,11 +74,39 @@ export function buildUnblockAnalysisAnswer(
 
   const blocking = (readiness.readiness_issues ?? []).filter(isBlocking);
 
-  if (readiness.status === 'ready' || blocking.length === 0) {
+  // ⛔ "NOTHING IS BLOCKING" IS ONLY SAYABLE ON AN EXPLICIT `ready`.
+  //
+  // This read `status === 'ready' || blocking.length === 0`, so an EMPTY issue
+  // list alone produced the claim. Measured against a real producer:
+  // `buildAnalysisRefusalReadiness('NO_PATH_TO_GOAL')` returns
+  // `{ status: 'blocked', blocked_reason: 'NO_PATH_TO_GOAL' }` and carries NO
+  // `readiness_issues` — a payload that says it is blocked AND names its
+  // blocker, answered with "the model is ready to run". The absence of a
+  // detailed list is not evidence of readiness; only `ready` is.
+  const explicitlyReady = readiness.status === 'ready';
+  if (explicitlyReady) {
     return {
       assistant_text:
         'Nothing is blocking the analysis — the model is ready to run.',
       offer_run_analysis: true,
+    };
+  }
+
+  if (blocking.length === 0) {
+    // Not ready, and no itemised issues. Say what the payload says and nothing
+    // more — naming a cause it did not give is how the previous notice came to
+    // tell a user an option had no effect values when it had two.
+    const reason =
+      typeof readiness.blocked_reason === 'string' && readiness.blocked_reason.trim().length > 0
+        ? ` The model reports: ${readiness.blocked_reason.trim()}.`
+        : '';
+    const state =
+      typeof readiness.status === 'string' && readiness.status.trim().length > 0
+        ? readiness.status.trim()
+        : 'not ready';
+    return {
+      assistant_text: `The analysis cannot run yet — the model is ${state}.${reason} I do not have an itemised list of what to change for this one.`,
+      offer_run_analysis: false,
     };
   }
 
@@ -101,5 +131,9 @@ export function buildUnblockAnalysisAnswer(
       : ' I have not changed anything yet. Tell me to go ahead and I will fill in the parts that can be estimated, and come back to you for the rest.'
     : '';
 
-  return { assistant_text: `${head}${body}${tail}`, offer_run_analysis: false };
+  // ⚠ THE TAIL GOES ON ITS OWN LINE AFTER A LIST. Glued to the final bullet it
+  // reads as a property of that one item — measured: "This one needs your
+  // answer" appeared appended to the third of three bullets.
+  const joined = blocking.length === 1 ? `${head}${body}${tail}` : `${head}${body}${tail === '' ? '' : `\n${tail.trim()}`}`;
+  return { assistant_text: joined, offer_run_analysis: false };
 }
