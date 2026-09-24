@@ -97,6 +97,7 @@ import { buildModelFromBrief, findConstructionVersion, type CallStructuredModel 
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
+import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 
 /** Marks a compound starting point, so a newer one can replace it before approval. */
 const STARTING_POINT_BASIS = 'a starting point \u2014 values and what each option sets \u2014 for the user to adopt or correct in one approval';
@@ -136,13 +137,39 @@ interface GraphRead {
     interventions?: Record<string, unknown>;
     changes?: unknown;
   }[];
-  readonly edges: { from: string; to: string }[];
+  /** `origin` is read only to recognise a repair-authored edge (`isRepairAuthoredOptionFactorEdge`). */
+  readonly edges: { from: string; to: string; origin?: unknown }[];
   readonly analysis_state: unknown;
   /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
   readonly raw: Record<string, unknown>;
 }
 
 const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$/, '').trim();
+
+/**
+ * ⛔ A HELD STATUS QUO GETS NO LEVELS (Paul's ruling; admission, MG #1838).
+ *
+ * An option that carries on as now is connected to the factors the other options
+ * act on by repair edges with NO level: each factor stays at its starting value.
+ * Readiness already excludes those edges from its level mapping. A level written
+ * there is harmful, not harmless (RC): a later correction to the factor's starting
+ * value would leave the status quo at the OLD figure, so "Maintain current
+ * staffing" would silently model cutting staff.
+ *
+ * Returns `${optionId}::${factorId}` for every pair whose option→factor edges are
+ * ALL repair-authored — the same test readiness applies (a pair with any ordinary
+ * edge is mapped), through the ONE authority, never a copy of it.
+ */
+function heldStatusQuoPairs(g: Pick<GraphRead, 'nodes' | 'edges'>): ReadonlySet<string> {
+  const kinds = new Map(g.nodes.map((n) => [n.id, n.kind] as const));
+  const repaired = new Set<string>();
+  const ordinary = new Set<string>();
+  for (const e of g.edges) {
+    if (kinds.get(e.from) !== 'option' || kinds.get(e.to) !== 'factor') continue;
+    (isRepairAuthoredOptionFactorEdge(e, kinds) ? repaired : ordinary).add(`${e.from}::${e.to}`);
+  }
+  return new Set([...repaired].filter((k) => !ordinary.has(k)));
+}
 
 /**
  * ⭐ ONE PROJECTION of a persisted node into what the Agent is shown — used by
@@ -558,11 +585,14 @@ export function createAgentCapabilities(
   const missingPairs = async (ctx: AgentToolContext, levelPaths: ReadonlySet<string>): Promise<{ option: string; factor: string }[] | null> => {
     const g = await readGraph(ctx.scenario_id);
     if (g === null) return null;
+    const held = heldStatusQuoPairs(g);
     const missing: { option: string; factor: string }[] = [];
     for (const o of g.nodes.filter((n) => n.kind === 'option')) {
       const has = (o.interventions ?? {}) as Record<string, unknown>;
       for (const f of linkedFactorsOf(g as never, o.id)) {
         if (has[f.id] !== undefined || levelPaths.has(`${o.id}::${f.id}`)) continue;
+        // A held status quo is complete with no level (`heldStatusQuoPairs`).
+        if (held.has(`${o.id}::${f.id}`)) continue;
         missing.push({ option: o.label, factor: String(f.label ?? f.id) });
       }
     }
