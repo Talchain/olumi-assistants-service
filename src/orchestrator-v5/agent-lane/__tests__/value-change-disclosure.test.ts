@@ -134,11 +134,43 @@ describe('the route actually carries it to the user', () => {
   it('⭐ the value-change disclosures are folded into `owed`, which reaches assistant_text', () => {
     // Bounded to the `owed` assignment itself, so an unrelated edit elsewhere
     // cannot satisfy this and a moved line cannot break it.
-    const decl = ROUTE.slice(ROUTE.indexOf('const owed = ['));
+    const decl = ROUTE.slice(ROUTE.indexOf('const owed = '));
     const body = decl.slice(0, decl.indexOf('];') + 2);
     expect(body).toContain('disclosuresFor(result.tool_results)');
     expect(body).toContain('valueChangeDisclosures(stateFacts)');
     expect(ROUTE).toContain('withDisclosures(narration.text, owed)');
+  });
+
+  it('⛔⛔ AND `current_state_unknown` SUPPRESSES THE OTHER DISCLOSURES ENTIRELY — the composition order is what decides it', () => {
+    // ⚠ The 044fe50c CHANGES_REQUIRED recurred one level up. `valueChangeDisclosures`
+    // early-returns on `current_state_unknown`, but that governs only what THAT
+    // module composes. The route concatenated `disclosuresFor(...)` first, so one
+    // turn could say "the model is holding a placeholder … I will replace it" and
+    // then "what the model now holds is NOT KNOWN". The placeholder sentence is a
+    // present-state claim a failed readback cannot support.
+    const decl = ROUTE.slice(ROUTE.indexOf('const owed = '));
+    const body = decl.slice(0, decl.indexOf('];') + 2);
+    // Bound to the GUARD, not to a value predicate another edit could satisfy.
+    expect(body).toContain('stateFacts.current_state_unknown === true');
+    // ⭐ DISCRIMINATING: the unknown branch must contain ONLY the module that
+    // early-returns on it. If `disclosuresFor` appears before the ternary's `:` the
+    // suppression does not happen, and this fails.
+    const unknownBranch = body.slice(
+      body.indexOf('current_state_unknown === true'),
+      body.indexOf(': ['),
+    );
+    expect(unknownBranch).toContain('valueChangeDisclosures(stateFacts)');
+    expect(unknownBranch).not.toContain('disclosuresFor');
+  });
+
+  it('⛔ the structured twin ships on the turns that MATTER, not only when something was added', () => {
+    // The old gate was `rescaled.length > 0 || ranges_added.length > 0`, so on the
+    // one turn a reconciling surface most needs — a refused frame write whose
+    // readback failed — `_agent` carried no `state_facts` at all and read as
+    // "nothing happened", while the prose said the state was unknown.
+    const gate = ROUTE.slice(ROUTE.indexOf('{ state_facts: stateFacts }') - 600, ROUTE.indexOf('{ state_facts: stateFacts }'));
+    expect(gate).toContain('current_state_unknown === true');
+    expect(gate).toContain('ranges_not_attached');
   });
 
   it('⭐ the structured twin travels on the _agent sidecar', () => {

@@ -1,7 +1,14 @@
 /**
- * Agent lane — Olumi discloses what it could not represent. Not
-hat
- * they are TOLD when the model now holds a number they never gave.
+ * Agent lane — Olumi discloses what it could not represent, and what it changed.
+ *
+ * ⛔ WHY THE MODULE EXISTS. `structural_add_edge` takes `magnitude: z.number()`,
+ * so an edge the Agent could not quantify is still written with a NUMBER — a
+ * placeholder the product chose, standing where the user's own strength should
+ * be. The same shape applies to a value Olumi rescaled to fit the unit interval:
+ * the stored number is not the number the user typed.
+ *
+ * The user never asked for either. The only acceptable position is that they are
+ * TOLD when the model now holds a number they never gave.
  *
  * So the disclosure is appended deterministically by Olumi, from what actually
  * happened, after the Agent has written its reply. The Agent may also mention it;
@@ -194,9 +201,19 @@ export function valueChangeDisclosures(facts: {
   if (refused.length > 0) {
     owed.push(
       within(refused, (shown, hidden) =>
-        'Note: the analysis still needs a range for ' +
-        `${shown.join('; ')}${andMore(hidden) === '' ? '' : `.${andMore(hidden)}`}` +
-        (andMore(hidden) === '' ? '. ' : '') +
+        // ⛔ `shown` can be EMPTY: `within` walks n down and falls through to
+        // `build([], items.length)` when even one item exceeds the budget, and
+        // node labels have no maximum length (`boundary/request-extensions.ts`
+        // types `label: z.string()`). A disclosure that asserts a gap it cannot
+        // locate — "still needs a range for . …and 3 more." — is worse than one
+        // that says plainly that it cannot name them.
+        (shown.length === 0
+          ? `Note: the analysis still needs a range for ${hidden} factor(s), whose names are too long to list here. `
+          : 'Note: the analysis still needs a range for ' +
+            // ⚠ `andMore` returns a LEADING-space string ending in '.' with no
+            // trailing space, so the sentence used to run straight into the next:
+            // "…and 4 more.Checked against…". Both branches now end in '. '.
+            `${shown.join('; ')}${andMore(hidden) === '' ? '. ' : `.${andMore(hidden)} `}`) +
         'Checked against the model as it now stands. Tell me the range and I will attach it.'),
     );
   }
