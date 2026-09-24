@@ -227,10 +227,10 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       const approve = { id: 'agent-approve-proposal:prop_abc123', label: 'Make this change', message: 'Yes, make that change.' };
       const amend = { id: 'agent-amend-proposal', label: 'Change something first', message: 'Before you apply it, I want to change some of it.' };
       const all = [approve, amend, RUN_OFFER_CHIP];
-      expect(stillValidOffers(all, { outstandingProposalIds: new Set(['prop_abc123']), analysisReady: { may_run: true }, analysisState: {} }).map((a) => a.id))
+      expect(stillValidOffers(all, { outstandingProposalIds: new Set(['prop_abc123']), analysisReady: { may_run: true }, analysisState: {}, modelExists: true }).map((a) => a.id))
         .toEqual([approve.id, amend.id, RUN_OFFER_CHIP.id]);
-      expect(stillValidOffers(all, { outstandingProposalIds: new Set(), analysisReady: { may_run: true }, analysisState: { run_state: { kind: 'complete_current' } } })).toEqual([]);
-      expect(stillValidOffers([], { outstandingProposalIds: new Set(['prop_abc123']), analysisReady: { may_run: true }, analysisState: {} }), 'nothing is invented').toEqual([]);
+      expect(stillValidOffers(all, { outstandingProposalIds: new Set(), analysisReady: { may_run: true }, analysisState: { run_state: { kind: 'complete_current' } }, modelExists: true })).toEqual([]);
+      expect(stillValidOffers([], { outstandingProposalIds: new Set(['prop_abc123']), analysisReady: { may_run: true }, analysisState: {}, modelExists: true }), 'nothing is invented').toEqual([]);
     });
   });
   /**
