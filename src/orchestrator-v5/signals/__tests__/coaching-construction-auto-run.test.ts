@@ -182,7 +182,6 @@ describe('the NEXT explicit Run — rerun arm after a construction auto-run, fir
   it('after a construction auto-run, the user’s next Run takes the RERUN arm', () => {
     const signal = runBranch([CONSTRUCTION_PRIOR()]);
     expect(signal?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
-    expect(signal?.coaching_text).toContain('The result is unchanged');
   });
 
   it('CONTRAST: after a post-draft auto-run, the next Run still reads as the FIRST (not seen)', () => {
@@ -193,5 +192,32 @@ describe('the NEXT explicit Run — rerun arm after a construction auto-run, fir
 
   it('CONTRAST: a user-initiated prior still takes the RERUN arm (the control the construction case matches)', () => {
     expect(runBranch([USER_PRIOR()])?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+  });
+});
+
+/**
+ * ⛔ A CONFINED RUN'S LEADER WAS NEVER SHOWN, SO THE NEXT RUN MAY NOT SAY IT "STILL" LEADS.
+ *
+ * The construction auto-run is SEEN (its figures reach the user) but it is
+ * auto-initiated, so unrequested-analysis confinement WITHHELD its leader.
+ * Every sentence `compareRuns` composes names an option against the prior
+ * run ("X still leads", "X now leads instead of Y"), which asserts a
+ * designation the user was never given. The re-run is acknowledged
+ * comparison-free instead; a user-initiated prior keeps its comparison.
+ * (Verifier major 1 on the marker track, 24 Sep.)
+ */
+describe('the NEXT explicit Run never compares against a leader confinement withheld', () => {
+  it('after a construction auto-run: re-run arm, but no option named against the prior', () => {
+    const signal = runBranch([CONSTRUCTION_PRIOR()]);
+    expect(signal?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+    const text = signal?.coaching_text ?? '';
+    expect(text).not.toMatch(/still leads/i);
+    for (const o of OPTIONS) expect(text).not.toContain(o.label);
+  });
+
+  it('CONTRAST: after a user-initiated run the comparison names the leader', () => {
+    const text = runBranch([USER_PRIOR()])?.coaching_text ?? '';
+    expect(text).toMatch(/still leads/i);
+    expect(text).toContain(OPTIONS[0]!.label);
   });
 });
