@@ -8,8 +8,12 @@ const readAnalysisInvalidatedAt = vi.fn();
 vi.mock('../../orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({ readRecent, readFactsFor, readAnalysisInvalidatedAt }),
 }));
+// `emit` + `TelemetryEvents` too: the read leg now loads facts through the turn
+// path's own readers, which report a degraded read on those channels.
 vi.mock('../../utils/telemetry.js', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  emit: vi.fn(),
+  TelemetryEvents: new Proxy({}, { get: (_t, prop) => String(prop) }),
 }));
 
 import { readScenarioAnalysis } from '../scenario-graph-analysis-read.js';
