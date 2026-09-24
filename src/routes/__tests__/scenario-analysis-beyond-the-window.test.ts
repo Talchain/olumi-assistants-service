@@ -118,4 +118,25 @@ describe('the reload keeps an analysis its turn has aged out of', () => {
     // Bound by identity: the result is THIS run, not any analysis-shaped block.
     expect(JSON.stringify(result.analysis_result)).toContain(HASH);
   });
+
+  it('STALE ARM: an aged-out run on an EARLIER graph reloads as stale, never as current and never as never_run', async () => {
+    // Without this case, a fix that says "a durable fact exists, so it is
+    // current" passes the DEFECT case above. It would show an old run's numbers
+    // as the current answer: worse than the cliff it replaces. The hash
+    // comparison must still decide.
+    const EDITED_GRAPH: GraphStateIngress = {
+      ...GRAPH,
+      nodes: [{ ...GRAPH.nodes[0], goal_threshold: 0.9 }],
+    } as GraphStateIngress;
+    const editedHash = computeAnalysisAffectingGraphHash(EDITED_GRAPH)!;
+    expect(editedHash).not.toBe(HASH);
+    readRecent.mockResolvedValue(newerRows(SESSION_READ_WINDOW_DEFAULT));
+    readFactsFor.mockResolvedValue([]);
+    readFactsWithTurnFor.mockResolvedValue([]);
+
+    const result = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: EDITED_GRAPH, requestId: 'f1-stale' });
+
+    expect(result.analysis_state?.run_state.kind).toBe('complete_stale');
+    expect(result.analysis_result, 'a stale run must not be served as the current result').toBeNull();
+  });
 });
