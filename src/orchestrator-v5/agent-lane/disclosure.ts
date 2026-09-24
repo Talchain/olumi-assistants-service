@@ -108,6 +108,7 @@ export function valueChangeDisclosures(facts: {
   }[];
   readonly ranges_added: readonly { readonly factor: string; readonly range: number }[];
   readonly ranges_not_attached?: readonly { readonly factor: string; readonly range: number }[];
+  readonly current_state_unknown?: boolean;
 } | null | undefined): readonly string[] {
   if (facts === null || facts === undefined) return [];
   const owed: string[] = [];
@@ -150,13 +151,43 @@ export function valueChangeDisclosures(facts: {
    * by the partial-outcome repair on #1743. Absent, this discloses nothing and
    * changes no behaviour, so the two PRs are independent in either merge order.
    */
+  /**
+   * ⛔⛔ THIS SAID MORE THAN ITS INPUT PROVED, AND THAT IS THE DEFECT.
+   *
+   * CHANGES_REQUIRED on `f028650d`, accepted in full. It previously said the
+   * user's values "were saved and are unchanged", that the analysis "still needs
+   * a range", and "Do not re-enter the values" — all inferred from
+   * `ranges_not_attached` alone. That field proves ONE thing: this operation's
+   * range did not attach. A competing writer may already have changed the value
+   * or supplied the range, so every one of those sentences could be false, and
+   * the last is advice that can cost the user the version that landed.
+   *
+   * Two rules now:
+   *   1. `current_state_unknown` WINS. The producer could not read the model
+   *      back, so this reports the historical event, bound to its own tense, and
+   *      advises nothing.
+   *   2. Otherwise `ranges_not_attached` is READBACK-VERIFIED by contract, so the
+   *      missing range may be stated — but still NOTHING about the values, which
+   *      the readback does not check. No "unchanged", no "do not re-enter".
+   */
+  if (facts.current_state_unknown === true) {
+    owed.push(
+      'Note: this turn saved your values and then could not attach a range, because the model changed ' +
+      'underneath it and could not be read back. Those writes were accepted AT THE TIME; whether the ' +
+      'values are still there, and whether the analysis can run, are not known right now. Ask me to ' +
+      're-read the model before changing anything.',
+    );
+    return owed;
+  }
+
   const refused = (facts.ranges_not_attached ?? []).map((r) => r.factor);
   if (refused.length > 0) {
     owed.push(
       within(refused, (shown, hidden) =>
-        'Note: your values were saved and are unchanged, but the analysis still needs a range for ' +
-        `${shown.join('; ')}.${andMore(hidden)} ` +
-        'Do not re-enter the values — tell me the range and I will attach it.'),
+        'Note: the analysis still needs a range for ' +
+        `${shown.join('; ')}${andMore(hidden) === '' ? '' : `.${andMore(hidden)}`}` +
+        (andMore(hidden) === '' ? '. ' : '') +
+        'Checked against the model as it now stands. Tell me the range and I will attach it.'),
     );
   }
 
