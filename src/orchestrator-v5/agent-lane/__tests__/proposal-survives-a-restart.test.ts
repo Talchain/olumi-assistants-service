@@ -23,10 +23,14 @@ const order: string[] = [];
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (sid: string, turnId: string) => rows.get(`${sid}:${turnId}`) ?? null),
-  // The latest committed row's pending actions, JSON round-tripped as the JSONB column returns them.
+  // The latest committed row's pending actions, JSON round-tripped as the JSONB column returns them AND
+  // passed through the REAL parser, exactly as `supabase-store.ts` readMostRecentPendingActions does
+  // (Codex #1823 5812296935: a raw-JSON mock hid that the parser drops an item the store would drop).
   readMostRecentPendingActions: vi.fn(async (sid: string) => {
+    const { parsePendingAction } = await import('../../session/pending-action.js');
     const latest = [...order].reverse().map((k) => rows.get(k)!).find((r) => r.scenario_id === sid);
-    return latest ? JSON.parse(JSON.stringify(latest.pending_actions)) : [];
+    const raw = latest ? (JSON.parse(JSON.stringify(latest.pending_actions)) as unknown[]) : [];
+    return raw.map((x) => parsePendingAction(x)).filter((x) => x !== null);
   }),
   append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; pending_actions?: unknown[] }) => {
     const k = `${w.scenario_id}:${w.turn_id}`;
@@ -127,4 +131,18 @@ describe('a pending approval survives a restart', () => {
     expect(t2._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: false, refusal: 'unknown_proposal' })]);
     expect(edges).toEqual([]);
   }, 60_000);
+});
+
+describe('the persisted carrier satisfies the production parser', () => {
+  it('parsePendingAction accepts what proposalPendingAction emits, with the proposal base as graph_hash', async () => {
+    const { parsePendingAction } = await import('../../session/pending-action.js');
+    const { proposalPendingAction } = await import('../durable-proposal.js');
+    const { createProposal } = await import('../proposal.js');
+    const p = createProposal({ scenario_id: 'scn', user_id: null, base_graph_identity_hash: 'hash-base', operations: [{ op: 'add_edge', path: 'a::b' }],
+      provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Connect a to b' });
+    const pa = proposalPendingAction(p, { id: `agent-approve-proposal:${p.proposal_id}`, label: 'Make this change', message: 'Yes, make that change.' }, { scenario_id: 'scn', emitted_at_iso: new Date().toISOString() });
+    const parsed = parsePendingAction(JSON.parse(JSON.stringify(pa)));
+    expect(parsed, 'the production read would otherwise drop the carrier').not.toBeNull();
+    expect(parsed?.preconditions).toEqual({ graph_hash: 'hash-base' });
+  });
 });

@@ -45,7 +45,10 @@ export function proposalPendingAction(
       public_label: chip.label,
       public_message: chip.message,
     },
-    preconditions: {},
+    // REQUIRED by the production read: `parsePendingAction` drops an `apply_proposed_change` without a
+    // non-empty `preconditions.graph_hash` (Codex #1823 5812296935). It is the proposal's own base revision,
+    // so the carrier also states the freshness it was offered against.
+    preconditions: { graph_hash: proposal.base_graph_identity_hash },
     expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
     expires_at_iso: new Date((Number.isFinite(emitted) ? emitted : Date.now()) + PENDING_ACTION_DEFAULT_WALL_TTL_MS).toISOString(),
     emitted_at_iso: ctx.emitted_at_iso,
