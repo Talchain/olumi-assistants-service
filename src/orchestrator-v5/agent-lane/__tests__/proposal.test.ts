@@ -167,6 +167,62 @@ describe('authorisation applies the STORED proposal', () => {
  * `unknown_proposal` can name a change that WAS saved. What the user reads for it must therefore never
  * say nothing was changed, nor invite a blind second approval.
  */
+/**
+ * ⛔ PARTIAL PROGRESS IS COMMITTED STATE, NOT AN UNTOUCHED PROPOSAL (Codex #1803 5810472138, the
+ * interaction with #1788). An option whose node landed but whose links did not is recorded in `partial`,
+ * and its reply promised "approving the same change again will try only the missing link". Eviction that
+ * treated it as unapplied threw that continuation away and left the partial record orphaned.
+ * Priority: untouched first, then applied (its words are honest when forgotten), a partial one last.
+ */
+describe('eviction keeps saved progress, and leaves no orphaned record', () => {
+  const PARTIAL_REV = 'b'.repeat(64);
+  const progress = { revision: PARTIAL_REV, landed: ['opt_new'], receipts: [] };
+
+  it('RED: 199 applied + one partial, then one more put → the partial survives and its continuation still executes', () => {
+    const s = new ProposalStore();
+    for (let i = 0; i < MAX_PROPOSALS - 1; i++) {
+      const p = s.put(createProposal(content({ public_label: 'applied ' + i })));
+      s.markApplied(p.proposal_id);
+    }
+    const partial = s.put(createProposal(content({ public_label: 'the option the user approved' })));
+    s.markPartial(partial.proposal_id, progress);
+    s.put(createProposal(content({ public_label: 'someone else\u2019s proposal' })));
+    const d = s.authorise(req(partial.proposal_id, { current_graph_identity_hash: PARTIAL_REV }));
+    expect(d.status, 'the promised same-proposal continuation').toBe('execute');
+    if (d.status === 'execute') expect(d.continuation?.landed).toEqual(['opt_new']);
+    expect(s.size()).toBeLessThanOrEqual(MAX_PROPOSALS);
+  });
+
+  it('CONTRAST: an untouched proposal is the one evicted, and the bound holds', () => {
+    const s = new ProposalStore();
+    const untouched = s.put(createProposal(content({ public_label: 'offered and ignored' })));
+    for (let i = 0; i < MAX_PROPOSALS - 2; i++) {
+      const p = s.put(createProposal(content({ public_label: 'applied ' + i })));
+      s.markApplied(p.proposal_id);
+    }
+    const partial = s.put(createProposal(content({ public_label: 'partly saved' })));
+    s.markPartial(partial.proposal_id, progress);
+    s.put(createProposal(content({ public_label: 'one more' })));
+    expect(s.authorise(req(untouched.proposal_id)).status).toBe('unknown_proposal');
+    expect(s.authorise(req(partial.proposal_id, { current_graph_identity_hash: PARTIAL_REV })).status).toBe('execute');
+    expect(s.size()).toBeLessThanOrEqual(MAX_PROPOSALS);
+  });
+
+  it('all-partial at capacity: exactly one (the oldest) goes, and its progress record goes with it', () => {
+    const s = new ProposalStore();
+    const ids: string[] = [];
+    for (let i = 0; i < MAX_PROPOSALS; i++) {
+      const p = s.put(createProposal(content({ public_label: 'partial ' + i })));
+      s.markPartial(p.proposal_id, progress);
+      ids.push(p.proposal_id);
+    }
+    s.put(createProposal(content({ public_label: 'one more' })));
+    expect(s.authorise(req(ids[0]!)).status, 'the oldest went').toBe('unknown_proposal');
+    expect(s.authorise(req(ids[1]!, { current_graph_identity_hash: PARTIAL_REV })).status).toBe('execute');
+    expect(s.recordCounts(), 'no orphaned progress: every record names a held proposal').toEqual({ items: MAX_PROPOSALS, applied: 0, partial: MAX_PROPOSALS - 1 });
+  });
+});
+
 describe('an unknown proposal is never told as "nothing was changed"', () => {
   const said = (refusal: string) => {
     // `toolCalls` is typed `readonly { name: string }[]` and `narrateWriteOutcome` reads

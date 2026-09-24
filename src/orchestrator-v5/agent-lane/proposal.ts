@@ -221,13 +221,28 @@ export class ProposalStore {
    * `authorise` would find the record and have nothing to return with it.
    */
   private evictOne(): void {
+    /**
+     * ⛔ PARTIAL PROGRESS IS COMMITTED STATE (Codex 5810472138, the interaction with #1788): an option
+     * whose node landed but whose links did not was promised a same-proposal continuation. Evicting it as
+     * "unapplied" broke that promise and orphaned its `partial` record. So: an untouched proposal first,
+     * then an applied one (forgotten, it is told honestly — `write-outcome.ts` `unknown_proposal`), and a
+     * partially saved one only when nothing else is left. Every record for the victim goes with it.
+     */
+    const held = (id: string) => this.items.has(id);
     const victim =
-      this.order.find((id) => this.items.has(id) && !this.applied.has(id))
-      ?? this.order.find((id) => this.items.has(id));
+      this.order.find((id) => held(id) && !this.applied.has(id) && !this.partial.has(id))
+      ?? this.order.find((id) => held(id) && this.applied.has(id))
+      ?? this.order.find((id) => held(id));
     if (victim === undefined) return;
     this.items.delete(victim);
     this.applied.delete(victim);
+    this.partial.delete(victim);
     this.order = this.order.filter((x) => x !== victim);
+  }
+
+  /** How many records each map holds — so a test can prove no record outlives its proposal. */
+  recordCounts(): { items: number; applied: number; partial: number } {
+    return { items: this.items.size, applied: this.applied.size, partial: this.partial.size };
   }
 
   get(id: string): StructuredProposal | undefined {
