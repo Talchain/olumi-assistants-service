@@ -9,32 +9,34 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ### `talchain-schemas-0.58.0.tgz` ← **THE CURRENT PIN**
 
-> **⚠ A LOCAL SOURCE-PACK OF AN UNMERGED, UNPUBLISHED RELEASE — NOT A REGISTRY
-> ARTEFACT.** Packed with `rm -rf dist && npm run build && npm pack` from
-> `olumi-schemas` branch `feat/run-provenance-typed-keep` at commit
-> **`6e952fad49748accec1b08700d0c6d1d062efc5d`** (parent `7cee4fc5` = tag
-> `v0.56.0` = `main` at pack time), on 2026-09-24.
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
 >
-> **584,609 bytes.**
+> Downloaded from GitHub Packages at
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.58.0/fa6c4e554c0c3460f65f4ccec86e5476da3f1776`,
+> the tarball `npm publish` produced from `olumi-schemas` `main`
+> **`49bbd4bcfbd64f4306179c7f4ba30643483f6996`** (the #66 merge; the registry's
+> own `gitHead` binds that commit), publish run `36068946091`, 2026-09-24.
+>
+> **583,337 bytes.** Verified against the registry's published metadata:
 >
 > ```
-> npm shasum (sha1)  1b857d1f88d74b916faea5467f8ca27c64c62a1f
-> integrity (sha512) sha512-0imOgyai4mhpfl6DVLKltlnWIJjP1i8EZfQLr3hlReSJMcg44D7EP5F7N8J3yAHZw60J+OdEPJJeXl5ARNTi/w==
-> sha256             f2a811b310c8ca738d0840345a78d2e6f0bacba006a0e0f59e5ecb3f767fc134
+> npm shasum (sha1)  fa6c4e554c0c3460f65f4ccec86e5476da3f1776   ← matches
+> integrity (sha512) sha512-ehGCVv+mnKJ6qN+AiphR+3pZcMdUVYg5Yhh6qsoAM35Ro4KWVXLyFZDHh/dTXiQ45ikSQmkvvygCFk7vKXtstA==   ← matches
+> sha256             6e2128ad8302e9c0a2ea5284a28da52e3728fdbc0a9e136d970c01e155ef9f41
 > ```
 >
 > `pnpm install` wrote the same sha512 into `pnpm-lock.yaml` from the file on
-> disk, so the lockfile and the pack agree independently.
+> disk — two independent paths to one digest.
 >
-> **⛔ REPLACE BEFORE THIS REACHES `staging`.** When `olumi-schemas` merges the
-> branch and `publish.yml` publishes 0.58.0, re-vendor the DOWNLOADED registry
-> artefact (the 0.55.0 procedure below) and expect a different sha256: CI packs
-> after `rm -f package-lock.json && npm install`, so its `dist/` can differ.
+> It REPLACES the local source-pack this PR first vendored (584,609 bytes,
+> sha256 `f2a811b3…`, from `feat/run-provenance-typed-keep` @`6e952fad`); as
+> predicted, CI's pack differs in bytes from a local one. Review of #1857 (B1):
+> a same-version mismatch between staging and the registry is the worst form of
+> schema skew, so only the published bytes may reach `staging`.
+>
 > ⚠ 0.57.0 is claimed by open `olumi-schemas` PRs #62 and #65 (and staging's
-> decision-record migration already cites #65's 0.57.0), so this release takes
-> the next free version, 0.58.0 (RC, #63 5818628860). `publish.yml` SKIPS a
-> version that already exists, so a collision publishes nothing and says so
-> only in the job log.
+> decision-record migration already cites #65's 0.57.0), so this release took
+> the next free version, 0.58.0 (RC, #63 5818628860).
 >
 > **What it adds over the previous pin (0.55.0):** everything in 0.56.0
 > (`analysis_participation_withheld`, `observed_state.raw_value` / `.cap` —
@@ -42,7 +44,7 @@ identically from a normal clone, a CI checkout, and any worktree.
 > plus 0.58.0: `EnrichmentRunProvenanceSchema`,
 > `AnalysisEnrichmentSchema.run_provenance`, and `'run_provenance'` on
 > `CEE_UI_ENRICHMENT_KEEP_LIST`, paired with the same key on
-> `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` in this commit.
+> `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` in this PR.
 
 ### `talchain-schemas-0.55.0.tgz` (historical — no longer vendored as of 0.58.0)
 
