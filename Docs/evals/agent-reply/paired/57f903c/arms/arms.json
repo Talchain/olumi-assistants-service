@@ -1,0 +1,110 @@
+{
+  "generated_by": "tools/agent-reply-eval/paired/build-arms.ts",
+  "served_sha": "57f903c4652783a9de1a3778d6682a8e5f8414e1",
+  "sources": {
+    "served_route": {
+      "repo": "Talchain/olumi-assistants-service",
+      "commit": "57f903c4652783a9de1a3778d6682a8e5f8414e1",
+      "path": "src/routes/agent-v1-turn.ts",
+      "git_blob": "177adc134fcce317c4ed4ca9682b34af7af5b1fe",
+      "mode": "full (config.proxy.agentLanePreview=false)"
+    },
+    "v2_patch": {
+      "file": "sources/ai-quality-copy-correction.v2.patch",
+      "origin": "~/olumi-ai-quality-20260924/ai-quality-copy-correction.v2.patch (posted to Runtime on #63, comment 5820720737)",
+      "sha256": "7bdce98711eb6bedcd96de1395d1dab5af1c652a76bdb9ed375da1235564ed58",
+      "against": "Runtime PR-B text of src/routes/agent-v1-turn.ts (index 97c5039..937b192); PR-B is NOT served"
+    },
+    "v03_profile": {
+      "file": "sources/analysis-interpreter-v03.ts",
+      "repo": "Talchain/olumi-assistants-service",
+      "pr": 1791,
+      "head": "967d25f553fb53327df430887a67d9276a7d5562",
+      "path": "src/orchestrator-v5/agent-lane/prompt-profiles/analysis-interpreter-v03.ts",
+      "git_blob": "cdcbd9b75862e2b17e84f9c84a51274a9821601b",
+      "sha256": "e4414f3c0a38d780d13944801076f8fbbdddf23e3d358eba138013b84b6ddc09",
+      "profile_id": "analysis-interpreter",
+      "profile_version": "0.3-candidate"
+    }
+  },
+  "arms": {
+    "M": {
+      "agent": "M_agent.txt",
+      "fp3": "M_fp3_stack.txt",
+      "profile": "M_v02.txt"
+    },
+    "C1": {
+      "agent": "C1_agent.txt",
+      "fp3": "C1_fp3_stack.txt",
+      "profile": "M_v02.txt"
+    },
+    "C2": {
+      "agent": "C1_agent.txt",
+      "fp3": "C2_fp3_stack.txt",
+      "profile": "C2_v03.txt"
+    }
+  },
+  "files": {
+    "M_agent.txt": {
+      "sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+      "bytes": 8651
+    },
+    "M_interpret_only.txt": {
+      "sha256": "7483703b1cb31ffebdcfe900c6ad510ea3d507312b8b7ff6e0f19bb1dbf86a95",
+      "bytes": 260
+    },
+    "M_v02.txt": {
+      "sha256": "3d979e8406693be42d3b340fd245d76a501c4b1c191d5ffaa1353f2f0380ba32",
+      "bytes": 2931
+    },
+    "C1_agent.txt": {
+      "sha256": "141b924ecdd84c1d70a9dc82f691dc4666111a3a4be6b25b7684c63d41b82262",
+      "bytes": 9726
+    },
+    "C2_v03.txt": {
+      "sha256": "55b7f37b0fb0b97704c939d28a9c8fd0f8680b97ea54b6865624b0bf0b69f4ee",
+      "bytes": 4280
+    },
+    "M_fp3_stack.txt": {
+      "sha256": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64",
+      "bytes": 11846
+    },
+    "C1_fp3_stack.txt": {
+      "sha256": "61217435d011011ce6b2519df5019e2af5799f4120634ef944e0d7d7b9e60716",
+      "bytes": 12921
+    },
+    "C2_fp3_stack.txt": {
+      "sha256": "8bff217e6b4b523d804628cbca7398fc3db538fc14ea39759d0bf8e70d18e9ff",
+      "bytes": 14270
+    },
+    "M_agent.entries.json": {
+      "sha256": "b0f16b06abf7c75a1437e22eb7689f19bc0100e5547b70672f1da954f600d68b",
+      "bytes": 10674
+    },
+    "C1_agent.entries.json": {
+      "sha256": "13a7887363a52d9f7a453505529c106dbadf7cc690c53f7c903062968b913e4b",
+      "bytes": 11749
+    },
+    "TRANSPOSITIONS.json": {
+      "sha256": "07b1c419ad2f5b261d88505bdbca3bbc009b947ca236647b14ee1ea7b6a05fc3",
+      "bytes": 9329
+    }
+  },
+  "served_grep_at_served_sha": [
+    {
+      "term": "claim_permissions",
+      "files": 0,
+      "occurrences": 0
+    },
+    {
+      "term": "leader_may_be_named",
+      "files": 0,
+      "occurrences": 0
+    },
+    {
+      "term": "leader_claim",
+      "files": 45,
+      "occurrences": 143
+    }
+  ]
+}

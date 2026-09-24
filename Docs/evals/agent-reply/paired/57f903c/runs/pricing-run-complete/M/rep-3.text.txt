@@ -1,0 +1,7 @@
+**On the current assumptions, raising Pro to £59 with the feature release leads the comparison**: it had the highest modelled outcome in **83.3%** of simulations, versus **15.4%** for keeping £49 and **1.3%** for phasing the rise. This is a model-relative result, not a recommendation.
+
+Why: the model gives the £59-at-release path both higher revenue per Pro subscriber and full price–release alignment. Its modelled median outcome was **0.315 on the model’s normalised scale**, compared with **0.283** for keeping £49 and **0.283** for phasing.
+
+**Crucial limitation:** the model could not test your requirement that monthly churn remain **under 4%**. “Monthly churn rate < 4%” is recorded, but churn is currently calculated from upstream factors rather than measured on a compatible level scale; the result therefore does **not** establish that any option meets the churn limit. The £20k/month MRR target also was not assessed directly because the MRR baseline/frame needed to align that target is absent.
+
+The ordering held up under the changes tested, but it is particularly exposed to the assumed link between **price–release alignment and perceived Pro value**: in a tested perturbation, changing that relationship could switch the ordering to keeping £49. That shows this assumption can matter; it does not establish investigation priority.

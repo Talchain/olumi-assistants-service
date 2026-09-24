@@ -1,0 +1,3 @@
+The comparison could not run because **Continue Current Staffing** has no stated effect on any factor, so it blocks the whole model.
+
+Please say what it should set — for example, should it leave developer capacity at **8 capacity points (0–20)** and tech-lead capacity at **4 capacity points (0–10)**, or represent a different outcome?

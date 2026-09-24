@@ -1,0 +1,13 @@
+{
+  "method": "POST",
+  "url": "/agent/v1/turn",
+  "payload": {
+    "kind": "message",
+    "scenario_id": "00000000-0000-4000-8000-000000000102",
+    "stage": "frame",
+    "turn_class": "frame",
+    "message": "Should our hospital emergency department add a second triage nurse on night shifts or open a rapid-assessment unit, given 4-hour waits breach 30% of nights?",
+    "source": "user"
+  },
+  "note": "in-process app.inject; no turn_id (it drives only the durable claim/answer rows, never the provider request)"
+}

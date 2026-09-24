@@ -1,0 +1,4 @@
+[function_call] get_canonical_state
+{
+  "reason": "The user asks how a current model link's strength affects the existing analysis, without changing it."
+}

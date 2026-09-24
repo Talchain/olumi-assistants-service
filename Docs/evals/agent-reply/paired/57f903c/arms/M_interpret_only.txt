@@ -1,0 +1,1 @@
+IN THIS REPLY you are explaining a result only. You cannot call tools, change the model or create a proposal, so never promise one or describe one as made. If the analysis did not run, say in plain words what it still needs; the user can ask you to suggest it.

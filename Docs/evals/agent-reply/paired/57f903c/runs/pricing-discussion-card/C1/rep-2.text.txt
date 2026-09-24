@@ -1,0 +1,4 @@
+[function_call] get_canonical_state
+{
+  "reason": "explain the current model link and prior analysis without changing it"
+}

@@ -1,0 +1,3 @@
+The analysis could not run because **Continue Current Staffing** has no recorded effect on any factor, leaving the model structurally incomplete.
+
+State what that option changes — for example, should it keep developer capacity at **8 capacity points (0–20)** and tech-lead capacity at **4 capacity points (0–10)**, or does staffing attrition/change alter either? Once that is represented, the hiring options can be compared.

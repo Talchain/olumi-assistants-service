@@ -1,0 +1,20 @@
+{
+  "id": "resp_intercepted_capture_only",
+  "object": "response",
+  "status": "completed",
+  "model": "gpt-5.6-terra",
+  "output": [
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "The comparison cannot run yet because **Continue Current Staffing** has no stated effect on any factor, so it has no connection to the productivity goal.\n\nThe three hiring options are structurally ready:\n- Tech Lead sets Tech-lead capacity to **8 capacity points (0–10)**.\n- Two Developers sets Developer capacity to **12 capacity points (0–20)**.\n- One Developer sets Developer capacity to **10 capacity points (0–20)**.\n\nTo include the status-quo option, say which factor it changes and to what level — for example, whether it leaves developer capacity at **8 capacity points (0–20)**, tech-lead capacity at **4 capacity points (0–10)**, or both."
+        }
+      ]
+    }
+  ],
+  "usage": null,
+  "_intercepted": true
+}

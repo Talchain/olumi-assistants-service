@@ -1,0 +1,64 @@
+{
+  "case": "pricing-discussion-card",
+  "turn": "token-count-2026-09-24T19-40-29-756Z",
+  "call": "01",
+  "purpose": "token_count",
+  "hop": null,
+  "during_hop": null,
+  "final_reply_hop": false,
+  "model": "gpt-5.6-terra",
+  "url": "https://api.openai.com/v1/responses/input_tokens",
+  "settings": {
+    "max_output_tokens": null,
+    "tool_choice": null,
+    "reasoning": null,
+    "text_format": null,
+    "temperature": null,
+    "tools_count": 9,
+    "tool_names": [
+      "get_canonical_state",
+      "propose_model_change",
+      "authorise_change",
+      "run_analysis",
+      "build_model_from_brief",
+      "propose_assumptions",
+      "propose_new_option",
+      "propose_option_interventions",
+      "propose_starting_point"
+    ],
+    "instructions_chars": 8590,
+    "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+    "input_items": 9,
+    "input_item_types": [
+      "role:user",
+      "role:assistant",
+      "role:user",
+      "role:assistant",
+      "role:user",
+      "function_call",
+      "function_call_output",
+      "message",
+      "role:user"
+    ]
+  },
+  "wall_ms": 331.5,
+  "http_status": 200,
+  "usage": null,
+  "output_function_calls": [],
+  "output_text_chars": 0,
+  "response_headers": {
+    "x-request-id": "req_94c3db8acd544c69bbe249bdbe69e66b",
+    "openai-processing-ms": "141",
+    "openai-version": "2020-10-01"
+  },
+  "intercepted": false,
+  "paid": false,
+  "guard": "openai-only-ok",
+  "guard_detail": {
+    "host": "api.openai.com",
+    "protocol": "https:",
+    "anthropic_env_absent": true,
+    "recorded_before_send": true
+  },
+  "recorded_at": "2026-09-24T19:43:05.845Z"
+}

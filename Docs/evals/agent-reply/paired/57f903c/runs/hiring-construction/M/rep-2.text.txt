@@ -1,0 +1,26 @@
+I’ve set up a comparison model. It includes your two choices plus two reference cases: maintain current staffing and hire one developer.
+
+The model currently has **six unknown starting factors**, and “maintain current staffing” currently changes nothing until levels are set. I’ve prepared one combined set of **assumptions—not measurements**—so it can make an initial comparison:
+
+**Current starting point**
+- Developer hires: **0 hires** — assumes these are additional hires under this decision.
+- Tech Lead hires: **0 hires** — same basis.
+- Engineering capacity: **50/100** — neutral placeholder; your current baseline is unknown.
+- Coordination quality: **50/100** — neutral placeholder; current state unknown.
+- Technical direction quality: **50/100** — neutral placeholder; current state unknown.
+- Onboarding demand: **0 additional hires being onboarded** — assumes no new hire is yet onboarding.
+
+**What each option sets**
+- **Hire Tech Lead:** 1 Tech Lead hire.
+- **Hire Two Developers:** 2 developer hires.
+- **Maintain Current Staffing:** 0 developer hires and 0 Tech Lead hires.
+- **Hire One Developer:** 1 developer hire.
+
+The attempted “zero” levels for factors an option does not affect were correctly left out; for example, *Hire Tech Lead* only acts on Tech Lead hires, not developer hires.
+
+The most important facts still unknown are:
+1. Current team size and delivery baseline.
+2. Whether a Tech Lead will mainly lead and unblock work, or also deliver significant hands-on output.
+3. Onboarding time and the team’s mentoring capacity.
+
+If you approve these starting assumptions, I’ll save them and run the first comparison.

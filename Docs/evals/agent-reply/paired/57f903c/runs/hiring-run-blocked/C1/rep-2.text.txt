@@ -1,0 +1,5 @@
+The analysis could not run because **Continue Current Staffing** has no stated effect on any factor.
+
+- The three hiring options have levels recorded and are ready.
+- This baseline option must be connected to at least one factor and given a value; otherwise it blocks the whole comparison.
+- A reasonable assumption is that it leaves **Tech-lead capacity at 4 capacity points (0–10)** and **Developer capacity at 8 capacity points (0–20)**—the current starting levels. This is an assumption to test, not a measurement.

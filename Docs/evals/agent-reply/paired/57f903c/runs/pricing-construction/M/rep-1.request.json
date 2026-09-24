@@ -1,0 +1,392 @@
+{
+  "url": "https://api.openai.com/v1/responses",
+  "method": "POST",
+  "headers": {
+    "authorization": "[REDACTED]",
+    "content-type": "application/json"
+  },
+  "body": {
+    "model": "gpt-5.6-terra",
+    "instructions": "You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user. Answer the user’s actual question directly and naturally. Never invent canonical facts. Before describing what the model contains, call get_canonical_state. Distinguish user facts and evidence from machine-authored estimates and from unknowns. An absent value is unknown, never zero. An entity’s `value` is on the model’s internal normalised scale and is NOT the figure the user gave. When `raw_value` is present, quote `raw_value` with its `unit` (e.g. £49/month, 9 months); never quote the normalised `value` to the user. Only when there is no `raw_value` may you describe `value`, and then say it is on a normalised scale. To change the model you must first call a proposing tool — propose_model_change for a link, propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once — show the user exactly what it returned (in words: never print a proposal_id or any other internal id — the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it. Never claim a change happened unless the tool result says it was applied. If a tool reports a refusal, tell the user what it said. When authorise_change returns `receipts`, tell the user the change is saved and which version it became. If it returns `already_applied`, the change is ALREADY saved — say which version, and do not offer to apply it again. If `receipts` is empty, say plainly that no saved version was recorded for it. When the user approves, agrees, or says yes, that is an instruction to call authorise_change. get_canonical_state returns `awaiting_your_approval`, newest first: if there is exactly one, authorise THAT proposal_id. If there is more than one, describe each by what it changes (never by its id) and ask which — in the same turn. NEVER reply that a change has not been approved on a turn where the user approved it. If get_canonical_state reports the model is empty, call build_model_from_brief with the user’s own words before answering about the model. build_model_from_brief already returns the model it created, with its entities and its `structure` block. Do NOT call get_canonical_state again afterwards — answer from what it returned. After build_model_from_brief, do NOT call run_analysis on the same turn. A newly built model has no values yet, so the analysis can only report what the build already told you — and it costs the user another twenty seconds. Describe the model and what it still needs, then stop. In that same reply, if any factor has no value or any option sets nothing, call propose_starting_point ONCE with a reasoned starting value for each such factor and the level each option sets, in the user’s own units. Show every figure and what it rests on, say they are your assumptions to adopt or correct, and ask for one approval. If propose_starting_point refuses with incomplete_starting_point, NOTHING is awaiting approval: call it again with a level for every pair in options_missing_levels before you reply. Never ask the user to approve an incomplete starting point. Discussion, ideation and research are not mutation requests. When the user asks for ideas or other options, offer three to five the model does not already hold, preferring non-obvious ones, and give each one line on what it would change or which assumption it would test. Say plainly that none has been added to the model, and offer to add any the user picks. After authorise_change applies values or option levels, call run_analysis in the SAME turn and report what it now says — or, if it still refuses, exactly what is left and the fastest way to supply it. The user asked for a model they can compare, not for a write. get_canonical_state returns a `structure` block computed from the persisted model: which options reach the goal, which cannot, what is unconnected, and how many FACTORS have no value (only factors can hold one). These are facts, not estimates — use them, and say them plainly when they explain why an analysis cannot run. When a tool tells you something was not represented, say so. When the model lacks values, do not send the user away to collect data before they can proceed. Offer a reasoned starting estimate they could adopt, say what it is based on, and invite them to correct it — a decision model tests assumptions, it does not require certainty up front. Say plainly that any such figure is an assumption to test, never a measurement. NEVER record one yourself: the user chooses it, or it does not enter the model. When you offer starting estimates, offer them THROUGH a proposing tool so the user can adopt the exact set you showed them in one step: propose_starting_point whenever factor values AND option levels are both missing (two separate proposals cannot both be applied from one approval), propose_assumptions when only values are. If the user asks you to put your suggested assumptions into the model, that is a request to propose them — propose the figures you just gave, then authorise_change once they confirm. propose_assumptions changes nothing on its own and leaves any factor that already holds a value alone. After authorise_change, report every value the model stored differently from the one approved. An option that connects to a factor but states no level for it blocks the comparison for EVERY option, not only itself. run_analysis names each one. Offer a level in the user’s own units with propose_option_interventions, exactly as you would a starting assumption, and say it is an assumption to correct. Give propose_option_interventions the number the USER would say (54, not 0.27). If it answers `no_stated_range`, that factor has no range to read the number against — say so plainly and do not invent one. get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model — do not wait for the analysis to refuse — ask what that option would actually change, and record the answer with propose_option_interventions. When you report an analysis, describe what the CURRENT model implies given its assumptions — a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one; say which option leads in this model and how firmly. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding. When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each — then authorise_change once they confirm. It adds the option and its links ONLY: say plainly that it cannot be compared until it states what it does to each factor, and offer propose_option_interventions for that. Never invent the direction; if you are not sure which way it pushes a factor, ask. When the user asks to change an assumption after an analysis — which is the whole point of naming the ones the ordering turns on — call propose_assumptions with `revise: true` on that factor and the number THEY gave, then authorise_change once they confirm. Show them the current value and the new one. Never set `revise` to push a figure of your own over theirs. After it applies, confirm what was saved and say that the earlier analysis now describes the previous model — then STOP: do NOT call run_analysis in the same turn. Offer to re-run it and wait for them to ask. NEVER say a proposal, a saved change or a pending action exists unless a tool call in THIS turn returned it. If you did not call a proposing tool, do not describe a proposal, do not say one is pending or ready, and do not ask the user to approve or confirm anything — say what the model still needs and offer to propose it. If a tool refused, say what it refused and what you will do next. Your own intention is not a result: only a tool result is. History entries that begin “(Board edit” are changes the user made directly on the canvas. When the user asks about “my change”, start from the most recent board edit, and read the current state before explaining what it did. British English. Concise but substantive.",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?"
+          }
+        ]
+      },
+      {
+        "id": "rs_0a821fa89f6f709d006ab57ce0cb9487d2a654a283d4e558f3",
+        "type": "reasoning",
+        "content": [],
+        "encrypted_content": "gAAAAABqtXzhG9x06c1BefoOOxPNSv7EtJfqciJ4bff6h0shOCkYf5gN9f7CCPBYTfZQ2-FsuGQdIaGmxfqFKPO9Dg-Frk3WKVGI4NtWFqSbc3kc5SdyY3dweVcAol1b1VEMWN3RAFGenHqrSoW5hMfiEmnI9GJXKmzlLltHCcwd36IDMhQI7uTcYfj2ReJgL1ErOSdBU9QT-cRR5ompstcZr725qdvXiZcVrqVewE6WGvqM2Zz2WWVIlgeAqaNjv09gYoZZFUZoupJq6dZIPax4diJvnVK88vbgCvs65s2072ebHeXnhuDXI097GXtmFQZ9KJpS7HB6gT7muc_bJoMkliIzarfKJjDurYbTBEdR-3oXOaD858iLK5Ic5wsS9QzfFlGAQWiZ_MNvE2Fg92beX_2y5VnLapkB5t2oJ1j9WWKMzMHLlQWNspTorz0ZqdzOxXgjDa400I5jzX6eFEsDN041jA6ixf23VZQmTnK4m_X82uXiFP4V6RzkDuz2iBQNqnrJ4OFIbI1zKiciQM49eYJO-L6VXQ7Ec5Zefb9y9CocWYLoF1QXkpnYisspMYwmGX05gZ0EGDrTDCgGYTMfhhBRvZaIYEqJuWTN5d8Zw93tnFAOVi3Cbzm32EE6k0AOAnS2NU2Mg-dno3vlV7NHt8TMYUvtTCKTu7JgQJ1QQ5i18Al3N-isbNHE9fVBENjpalIvmHdI8G4YgOAZQPWzERDb4RqcFNOKS4v8eUC60qfdQmY4EuaiSsRBOXOhP_5UWxp208-OjtVmguje1VkSZKTXZuZZ5pwHipYCeUiQyZ3j18lDy7zSLMPjy8qkJ5M50grJuPMnau5JgufkkClzU4U68_EjXQ_sSZjm2C_D3k_gm_BOiPWgye3svtkFnlQQEa0o_9MU21q4YNarGHN4TVOpwPNWFc2-BNJjppdZM3sioY2im-4d1xuETbEn2mbLJzjaG_59M-sd_jTWqsNe4WouxdtD1n0RPxt1Mz-EPkv3dtPiplUvtjn26tU5l99N12OH75tRj6ihf-YaAL54rK2Vndj9jY_4djK_pCdD2NKJShOi8-11T7zx1FsFG9Ic-2liGVOmo8t1ZoQlS9AM-dxacOOkpE1Znke_WBiuqGv_rp6HiKvVMc4lxULKnycJ-0oegMsaDIdzUPhR5PTxYR8GgX0DDjJ0THdaEGQLEnNS7NVwk5E=",
+        "summary": []
+      },
+      {
+        "id": "fc_0a821fa89f6f709d006ab57ce10c7087d284240e1b2d81a7d2",
+        "type": "function_call",
+        "status": "completed",
+        "arguments": "{\"reason\":\"To see whether a decision model already exists for the proposed Pro-price change.\"}",
+        "call_id": "call_zs6mi23SC4MG509RsWuoUW0I",
+        "name": "get_canonical_state"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_zs6mi23SC4MG509RsWuoUW0I",
+        "output": "{\"ok\":true,\"mutated\":false,\"graph_revision\":\"\",\"empty\":true,\"entities\":[],\"existing_links\":[],\"structure\":{\"options_reaching_goal\":[],\"options_not_reaching_goal\":[],\"entities_with_no_connections\":[],\"entities_that_cannot_reach_goal\":[],\"factors_without_a_value\":0,\"options_that_change_nothing\":[],\"goal_label\":null},\"analysis\":null,\"awaiting_your_approval\":[]}"
+      },
+      {
+        "id": "fc_0a821fa89f6f709d006ab57ce3235887d2ad1f22d29ebb401c",
+        "type": "function_call",
+        "status": "completed",
+        "arguments": "{\"brief\":\"Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?\"}",
+        "call_id": "call_g5niBU2V0HIWinbiBsZpEbdE",
+        "name": "build_model_from_brief"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_g5niBU2V0HIWinbiBsZpEbdE",
+        "output": "{\"ok\":true,\"mutated\":true,\"nodes\":11,\"edges\":18,\"within_compact_limits\":true,\"size_retried\":false,\"options\":3,\"withheld\":[],\"projected_field_count\":30,\"options_that_change_nothing\":[],\"goal_constraints_carried\":1,\"open_questions\":[\"What are the current Pro conversion rate, Pro subscriber count, and monthly churn rate?\",\"How much customer value will the next Pro feature release add, and will it be available at the same time as the price change?\",\"How price-sensitive are prospective and existing Pro customers at £59 per month?\"],\"not_represented\":[\"The goal is stated with a 12-month horizon, and GraphV3 has nowhere to put it. The projection therefore expresses a threshold with no deadline: \\\"reach it\\\" and \\\"reach it within a year\\\" become the same goal. The horizon survives only in this record and in the rich model.\",\"The goal direction (\\\">=\\\") is not carried by `goal_threshold`, which is a bare number. A consumer cannot tell a floor from a ceiling from the projection alone.\"],\"confirmed_entities\":11,\"graph_revision\":\"a9b77d4bf3ad1231\",\"entities\":[{\"id\":\"decision_mrr\",\"label\":\"Decision: MRR\",\"kind\":\"decision\",\"value\":null,\"provenance\":\"ai_inferred\"},{\"id\":\"mrr\",\"label\":\"MRR\",\"kind\":\"goal\",\"value\":null,\"provenance\":\"from_brief\"},{\"id\":\"keep_49_with_release\",\"label\":\"Keep £49 With Release\",\"kind\":\"option\",\"value\":null,\"provenance\":\"ai_inferred\"},{\"id\":\"raise_to_59_with_release\",\"label\":\"Raise to £59 With Release\",\"kind\":\"option\",\"value\":null,\"provenance\":\"from_brief\"},{\"id\":\"phase_price_after_release\",\"label\":\"Phase Price After Release\",\"kind\":\"option\",\"value\":null,\"provenance\":\"ai_inferred\"},{\"id\":\"pro_plan_price\",\"label\":\"Pro plan price\",\"kind\":\"factor\",\"value\":0.245,\"raw_value\":49,\"unit\":\"GBP/month\",\"cap\":200,\"declared_scale\":\"unit_interval\",\"value_provenance\":{\"source\":\"brief_extraction\"},\"provenance\":\"from_brief\"},{\"id\":\"pro_feature_value\",\"label\":\"Pro feature value\",\"kind\":\"factor\",\"value\":null,\"scale_frame\":100,\"provenance\":\"ai_inferred\"},{\"id\":\"pro_conversion_rate\",\"label\":\"Pro conversion rate\",\"kind\":\"factor\",\"value\":null,\"scale_frame\":100,\"provenance\":\"ai_inferred\"},{\"id\":\"pro_subscriber_count\",\"label\":\"Pro subscriber count\",\"kind\":\"factor\",\"value\":null,\"scale_frame\":2000,\"provenance\":\"ai_inferred\"},{\"id\":\"monthly_churn\",\"label\":\"Monthly churn\",\"kind\":\"factor\",\"value\":null,\"scale_frame\":100,\"provenance\":\"from_brief\"},{\"id\":\"price_increase_churn_risk\",\"label\":\"Price-increase churn risk\",\"kind\":\"risk\",\"value\":null,\"provenance\":\"ai_inferred\"}],\"structure\":{\"options_reaching_goal\":[\"Keep £49 With Release\",\"Raise to £59 With Release\",\"Phase Price After Release\"],\"options_not_reaching_goal\":[],\"entities_with_no_connections\":[],\"entities_that_cannot_reach_goal\":[],\"factors_without_a_value\":4,\"options_that_change_nothing\":[\"Phase Price After Release\"],\"goal_label\":\"MRR\"}}"
+      },
+      {
+        "id": "rs_0a821fa89f6f709d006ab57cfee2c087d2a627c972b49ece32",
+        "type": "reasoning",
+        "content": [],
+        "encrypted_content": "gAAAAABqtX0HryAI20wVfw-rg3hMi-dwe9V-_BgK9E6Hii8QmtpD38VrkrgFhE2t2GQC9yt0jR1RabDYVOk1y-RAegsItowKnSGDhZg3IvOZ2Rai6G7SXEmJi3GqecKcxntKbvHpsp49m-D6c54WChjm5YRvxGGQDXQWIkazU8-PnQctKcA0RkMXvxye7s4A-o_Bem9vOfMO0OS_-pwRgkOVWwzFfo0eggLrrPsn0qfE_sGHAmInv224T7lY4IyvTmH5WHs0l_Mfij5OlhuPSKMuGMw4ru7E5OKXrc79uieNMFGbxjpNda3yRtKGYJVhmsgxBV-ycgzt7XVa1xFB0OuWqLpsfJQ5Qdry7vqaWQva-2DoEIWE3SwfvWZvtWqxg7heRxPu9gY4QpZiBhNvgBdr4QQTrFHmQb-jd95t5JGOngOVBVioz0zxPxFjePozheVE4cSLbry8GgJlc_bOtqf0I4BTLcgaUx2NqFXIGROnruxEf2Q5mWXpj4wjO_o47ts12Hvdv0ZxtKkK8vBDBf8uhoXelIP5xY_t2rScAdNmbKuaT0AfDFaorVGMduZWOFeCVtQj6YDXKl8CV_O8RIfwydQ_OcRFnSEC0XXSsOAf-dJysX4ALwk7_0rwuGOPcurLBltcT5zywlPPi_TlMcVI9if8oVryeYU-O334JRPEvJ-t_G0Aj48mP7lXhRAuToS7Ra0x3Z_No_tsZmZS4s6iCZrhYpLXvZ3b_5DF1IQNkq_-Wq4-sgbYYRe7cOKQJytvoqTWeSUCXVS7KARt6w5NQGJxDa9MeMpAs1v3R3v8K6jBxEbcvCTFLYKvzuuRNxbxbGu_acbHraB3ilnDZjr6jvFfZ3wOs2S9J3Yiq5MTyk23B28iFDVgWalcwG-IvISRCQN9k6lR4Ndfmnc26IYGdcaIVaZuKRPAoHOmUodBDi5T3TZUrh8qYu6duHe0HMi4qAYHKwtLrkFts9C0rlBwPy5YgWgACuD6b6sfBVwrEor2qfogTT3FUGtSsN1hqXXUTRvVUkg_Ssx6Home5WWLSYuH25-ljyFspw-p_vjZNF8XDnsZT6D8XOMl_-4a04tdZ9JS_FMsZM18Kgo9odkPvDWLGB85cZBZXMhlKC0oxm2BMR2JtiM-0k_i0739xtvx46PAandZwcNF6Sza7PcLNc96EO20Jl-HnoXT5KsY1fAc1VJJobTVLM1XmmaJ6sqMRJAZQZmaH0VsX7qtCaDhFwNDJAwGz59BKw9MKH_5qwqyvGSjM1Sql_idA4nv1s_3uw6kHflFGsOgpyMRmSbIQMxf9reIaFjg8GHXIy6A_yKLdjrofpuJR3CrBAZenuXj1gkRYXxyvT4JEN1AjdCmnRmyXQRcubtx4onicX_uLllrYoAqL3pSS0Mb9aehg7X4oUmLvK7zjQjVvOw4uZ6id8758NFPuUNxMsjE9m07JGL6z0mRUyodFF0W3BHPL2tGzIGILUFwIPlR6KSAc_qaFu9vka85QiiWaNEBFd-PydOPgBSP153li2wjoL7_MX9cjAy2N3Rpu35KDu_LgUgN2lfE3-LRWP_wRQO_H5vxdOSSgOtocilWGruftMcW55X9NFDtnqpslgZIBSSr9boH9-yTOHVJNCVeJ5Qo27DHL4691n7sTpN1O8KvnqqK2K7BxCW5v-SxVOPUY7dWzrxiZDOfnLLafxF-4iQr5yxPXXijL4cWsW170-FfT2nSJs8IiaetHJbzRD4Q3cVS2aDMZhX5bkKZfJmb8RrARvFjoWzW2-lrVHxLc0CgigxLQ0vyX9OPf9Wty9zjizwYewL_sHb8AVZxUvzLCwkVTg7JNdphQsIRhTS7N0H9LsPVo3iXjqrNXYuxSvkuUIDFJjocoswODZ_iazhawBEIyVox06NrjFbj9h7_EoZXDSLnh7455CmQFvB1zKHr__LJRTXZmKa0MPhwc4A4vcvCX8buZXANHN9uSad3orgqNjn-mzwDvJ5grgQLVs491eGacPt5uT5oI-ju0czETx1sphrZ7k-RVPgYd2JWnhTAtU6KgKkaLIADHOKbHPHqIlNC8IXaJqgVNz0f_8Q5551iEaxAh3kveG5V1thz4Y2EHlEZ9hsDsGtbqZQD2b68sMr5TXA33V1z54jNzWFDzMYkncJ_tSuVCW83qcYoBJWYep5hUT1lqp5aYnhBvhxqtZrEuX5CY4uLl3lcoylE2Yu_EEWOAs978OhTdqq5FV9RnRHyzvMdq6-gdNyF57xlERAkKqISLOIENHUhcDSMy1X30xkwQ3k5g93wsl1M_hjJHjCUya9OkKy_o5U8yK8pXZpqim-Z7S5PTX4IjbKjySSQQUwGOBsg-LKVRfwZjRD1XBQ6zzvq2roydj68ln6InRGwjLFjs0Sx_FgWQyDg8w1nYP_ZXHesH52PhVIWiznSHLoz5qJ4K05_uxcM11pnyvCECbtxKK99Z4ldNfFcf2fmSyGrFGdvPUd07-REn42LFLVa8rop0sDNDpr2unxm-VdkFmrF4-9w0THgy4ZdfTATjFtXgM2l_a530UrhhHXCeTI2onchMGMRv7z5",
+        "summary": []
+      },
+      {
+        "id": "fc_0a821fa89f6f709d006ab57d02aca887d289349f3975a8b014",
+        "type": "function_call",
+        "status": "completed",
+        "arguments": "{\"assumptions\":[{\"factor_label\":\"Pro feature value\",\"value\":70,\"unit\":\"out of 100\",\"basis\":\"A meaningful feature release is provisionally treated as strong added value; this is an assumption to test, not a measurement.\"},{\"factor_label\":\"Pro conversion rate\",\"value\":5,\"unit\":\"%\",\"basis\":\"A 5% starting conversion rate gives the model a plausible working baseline until you provide your actual funnel data; this is an assumption to test, not a measurement.\"},{\"factor_label\":\"Pro subscriber count\",\"value\":250,\"unit\":\"subscribers\",\"basis\":\"This is a provisional current Pro base for modelling the revenue effect; it is an assumption to test, not a measurement.\"},{\"factor_label\":\"Monthly churn\",\"value\":3,\"unit\":\"%\",\"basis\":\"This starts below the stated 4% ceiling, leaving room to examine price-related churn risk; it is an assumption to test, not a measurement.\"}],\"option_levels\":[{\"option_label\":\"Keep £49 With Release\",\"factor_label\":\"Pro plan price\",\"value\":49,\"basis\":\"The option explicitly keeps the current £49/month price.\"},{\"option_label\":\"Keep £49 With Release\",\"factor_label\":\"Pro feature value\",\"value\":70,\"basis\":\"Assumes the same next Pro feature release is shipped.\"},{\"option_label\":\"Raise to £59 With Release\",\"factor_label\":\"Pro plan price\",\"value\":59,\"basis\":\"The option explicitly raises the price to £59/month.\"},{\"option_label\":\"Raise to £59 With Release\",\"factor_label\":\"Pro feature value\",\"value\":70,\"basis\":\"Assumes the same next Pro feature release is shipped.\"},{\"option_label\":\"Phase Price After Release\",\"factor_label\":\"Pro feature value\",\"value\":70,\"basis\":\"Assumes the next Pro feature release ships before a phased price increase.\"},{\"option_label\":\"Phase Price After Release\",\"factor_label\":\"Pro plan price\",\"value\":59,\"basis\":\"Assumes the phased approach ultimately reaches £59/month; timing and intermediate price are not yet represented.\"}]}",
+        "call_id": "call_9pmhIhFVs8jUNHwLvFLD1YtV",
+        "name": "propose_starting_point"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_9pmhIhFVs8jUNHwLvFLD1YtV",
+        "output": "{\"ok\":true,\"mutated\":false,\"proposal_id\":\"prop_b86a5450e62667ed8103b01e9161c0f3\",\"public_label\":\"Adopt 4 starting assumptions: Monthly churn = 3 %; Pro conversion rate = 5 %; Pro feature value = 70 out of 100; Pro subscriber count = 250 subscribers; Keep £49 With Release sets Pro feature value to 70; Phase Price After Release sets Pro feature value to 70; Phase Price After Release sets Pro plan price to 59 GBP/month; Raise to £59 With Release sets Pro feature value to 70\",\"base_revision\":\"a9b77d4bf3ad1231\",\"assumptions\":[{\"factor\":\"Monthly churn\",\"value\":3,\"unit\":\"%\",\"basis\":\"This starts below the stated 4% ceiling, leaving room to examine price-related churn risk; it is an assumption to test, not a measurement.\"},{\"factor\":\"Pro conversion rate\",\"value\":5,\"unit\":\"%\",\"basis\":\"A 5% starting conversion rate gives the model a plausible working baseline until you provide your actual funnel data; this is an assumption to test, not a measurement.\"},{\"factor\":\"Pro feature value\",\"value\":70,\"unit\":\"out of 100\",\"basis\":\"A meaningful feature release is provisionally treated as strong added value; this is an assumption to test, not a measurement.\"},{\"factor\":\"Pro subscriber count\",\"value\":250,\"unit\":\"subscribers\",\"basis\":\"This is a provisional current Pro base for modelling the revenue effect; it is an assumption to test, not a measurement.\"}],\"option_levels\":[{\"option\":\"Keep £49 With Release\",\"factor\":\"Pro feature value\",\"value\":70,\"unit\":\"\",\"recorded_on_model_scale\":0.7,\"model_range\":100,\"basis\":\"Assumes the same next Pro feature release is shipped.\"},{\"option\":\"Phase Price After Release\",\"factor\":\"Pro feature value\",\"value\":70,\"unit\":\"\",\"recorded_on_model_scale\":0.7,\"model_range\":100,\"basis\":\"Assumes the next Pro feature release ships before a phased price increase.\"},{\"option\":\"Phase Price After Release\",\"factor\":\"Pro plan price\",\"value\":59,\"unit\":\"GBP/month\",\"recorded_on_model_scale\":0.295,\"model_range\":200,\"basis\":\"Assumes the phased approach ultimately reaches £59/month; timing and intermediate price are not yet represented.\"},{\"option\":\"Raise to £59 With Release\",\"factor\":\"Pro feature value\",\"value\":70,\"unit\":\"\",\"recorded_on_model_scale\":0.7,\"model_range\":100,\"basis\":\"Assumes the same next Pro feature release is shipped.\"}],\"note\":\"Nothing has changed. Show the user every value and level and what each rests on, say plainly they are assumptions to adopt or correct, NOT measurements, and that ONE approval applies all of them. Then call authorise_change with this proposal_id once they agree.\"}"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "name": "get_canonical_state",
+        "description": "Read the authoritative persisted decision model for this conversation: its entities, what each one is, which values are stated and which are unknown, and what the analysis currently says. Call this before describing the model. Never assume its contents.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "type": "string",
+              "description": "Why you need it now."
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "propose_model_change",
+        "description": "Propose ONE change to the model. This does NOT change anything: it records an exact proposal and returns its id, which you keep for authorise_change: show the user what it changes, never the id, before asking them to approve. Use the labels exactly as get_canonical_state returned them.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "from_label": {
+              "type": "string"
+            },
+            "to_label": {
+              "type": "string"
+            },
+            "direction": {
+              "type": "string",
+              "enum": [
+                "positive",
+                "negative"
+              ]
+            },
+            "rationale": {
+              "type": "string",
+              "description": "Why this link matters, in the user’s terms."
+            }
+          },
+          "required": [
+            "from_label",
+            "to_label",
+            "direction",
+            "rationale"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "authorise_change",
+        "description": "Apply a previously returned proposal. Call this ONLY after the user has explicitly approved that specific proposal in their own words. The stored proposal is applied — nothing is regenerated. Report exactly what the result says, including a refusal.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "proposal_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "proposal_id"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "run_analysis",
+        "description": "Run the decision analysis over the persisted model. It may refuse and explain what is missing; report that honestly rather than guessing what the result would have been.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "build_model_from_brief",
+        "description": "Build the decision model from the user’s brief when get_canonical_state reports the model is empty. Preserves the user’s own facts, numbers and constraint wording, then adds the options, factors, risks and causal mechanisms that make the decision reasonable to analyse. Report honestly what it says was left out.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "brief": {
+              "type": "string",
+              "description": "The user’s decision in their own words, verbatim."
+            }
+          },
+          "required": [
+            "brief"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "propose_assumptions",
+        "description": "Propose starting values for factors that have none, so the model can be reasoned about instead of sitting blank. This does NOT change anything: it records an exact proposal and returns its id, which you keep for authorise_change: show the user the values, never the id, before asking them to approve. Each value is the user’s assumption to adopt or correct, NEVER a measurement — say so. Propose only factors the model actually has, using the labels get_canonical_state returned. A factor that already holds a value is left alone UNLESS you set `revise: true` on it, which you may do ONLY when the user has just asked for that factor to be changed and named the number themselves. Never set it to replace someone’s figure with one of your own.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "assumptions": {
+              "type": "array",
+              "description": "The factors to give a starting value, with the reasoning for each.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "factor_label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "number"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "basis": {
+                    "type": "string",
+                    "description": "Why this is a reasonable starting point, in the user’s terms."
+                  },
+                  "revise": {
+                    "type": "boolean",
+                    "description": "Set true ONLY when the user has just asked for this factor to be changed and gave the number. It permits replacing a value that is already there; the approval will show the user both the current value and the new one. Omit it in every other case."
+                  }
+                },
+                "required": [
+                  "factor_label",
+                  "value",
+                  "unit",
+                  "basis"
+                ]
+              }
+            }
+          },
+          "required": [
+            "assumptions"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "propose_new_option",
+        "description": "Add an option the user has just asked for, when the model does NOT already have it. This does NOT change anything: it records an exact proposal and returns its id, which you keep for authorise_change: show the user the option and what it will be linked to, never the id, before asking them to approve. Name the factors it would change, using the labels get_canonical_state returned — an option linked to nothing cannot be compared and blocks the comparison for every other option. It adds the option and its links ONLY; say what it does to each factor afterwards with propose_option_interventions.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "type": "string",
+              "description": "The option in the user’s own words."
+            },
+            "acts_on": {
+              "type": "array",
+              "description": "The factors this option would change, and which way. At least one.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "factor_label": {
+                    "type": "string"
+                  },
+                  "direction": {
+                    "type": "string",
+                    "enum": [
+                      "positive",
+                      "negative"
+                    ],
+                    "description": "Whether this option pushes the factor up or down. State it; never guess it for the user."
+                  }
+                },
+                "required": [
+                  "factor_label",
+                  "direction"
+                ]
+              }
+            },
+            "rationale": {
+              "type": "string",
+              "description": "Why this option is worth comparing, in the user’s terms."
+            }
+          },
+          "required": [
+            "label",
+            "acts_on",
+            "rationale"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "propose_option_interventions",
+        "description": "Propose the level an option sets a factor to — what the option actually DOES. An option that names a factor without saying what it sets it to blocks the comparison for EVERY option, not just itself. Give the value in the factor’s own units, as the user would say it (£54, not 0.27). This changes nothing: it records an exact proposal and returns its id for authorise_change; show the user what it sets first, never the id. Propose only what the user’s words support; if an option’s level is not stated, offer one as an assumption and say so, exactly as with propose_assumptions.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "interventions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "option_label": {
+                    "type": "string"
+                  },
+                  "factor_label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "number",
+                    "description": "In the factor’s own units — the number a user would say."
+                  },
+                  "basis": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "option_label",
+                  "factor_label",
+                  "value",
+                  "basis"
+                ]
+              }
+            }
+          },
+          "required": [
+            "interventions"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "propose_starting_point",
+        "description": "Propose, as ONE exact proposal the user approves ONCE, both the starting values for factors that have none AND the level each option sets — everything a first comparison needs. Use this instead of propose_assumptions + propose_option_interventions whenever both are needed: two separate proposals cannot both be applied from one approval, because applying the first changes the model the second was made against. This changes nothing on its own. Every figure is the user’s assumption to adopt or correct, NEVER a measurement — say so. Values in the factor’s own units.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "assumptions": {
+              "type": "array",
+              "description": "Starting values for factors that have none. May be empty.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "factor_label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "number"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "basis": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "factor_label",
+                  "value",
+                  "unit",
+                  "basis"
+                ]
+              }
+            },
+            "option_levels": {
+              "type": "array",
+              "description": "The level each option sets a factor to, in the factor’s own units. May be empty.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "option_label": {
+                    "type": "string"
+                  },
+                  "factor_label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "number"
+                  },
+                  "basis": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "option_label",
+                  "factor_label",
+                  "value",
+                  "basis"
+                ]
+              }
+            }
+          },
+          "required": [
+            "assumptions",
+            "option_levels"
+          ]
+        }
+      }
+    ],
+    "max_output_tokens": 3400
+  }
+}

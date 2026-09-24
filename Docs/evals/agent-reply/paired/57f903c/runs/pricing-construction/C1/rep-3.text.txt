@@ -1,0 +1,7 @@
+I’ve set up the comparison, but it cannot yet answer the pricing question reliably.
+
+- Your stated facts: current Pro price is **£49/month**; target is **£20k MRR**; churn must stay below **4% monthly**. The 12‑month deadline is retained in the record, but the model cannot represent timing in its calculation.
+- I proposed these **assumptions, not measurements**: 250 Pro subscribers, 5% Pro conversion, 3% monthly churn, and feature value 70/100.
+- Options would set the release value to 70/100; the phased and raise options reach **£59/month**. The current-price option remains at £49/month.
+
+Approve these starting assumptions, or correct them.

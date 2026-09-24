@@ -1,0 +1,23 @@
+I’ve set up a comparison model. It includes your two options, plus **maintain current staffing** and **hire one developer** as reference cases.
+
+The model says all four can affect productivity, but it cannot compare them yet: **six factors have no starting values**, and “maintain current staffing” currently has no recorded effect. The build also surfaced the key unknowns: current team size/productivity, how hands-on the Tech Lead would be, and onboarding/mentoring capacity.
+
+I can record the following as **my starting assumptions — not measurements — for you to adopt or correct**:
+
+**Current starting point**
+- Developer hires: **0 hires**
+- Tech Lead hires: **0 hires**
+- Engineering capacity: **50/100** (neutral placeholder)
+- Coordination quality: **50/100** (neutral placeholder)
+- Technical direction quality: **50/100** (neutral placeholder)
+- Onboarding demand: **0 additional hires being onboarded**
+
+**What each option sets**
+- **Hire Tech Lead:** 1 Tech Lead hire  
+- **Hire Two Developers:** 2 developer hires  
+- **Maintain Current Staffing:** 0 developer hires; 0 Tech Lead hires  
+- **Hire One Developer:** 1 developer hire  
+
+The proposal could not record “zero hires” against factors an option does not actually affect; those are deliberately left out rather than forcing links that are not in the model.
+
+If you approve these starting assumptions, I’ll save them and run the comparison.

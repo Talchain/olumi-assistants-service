@@ -1,0 +1,52 @@
+{
+  "case": "hiring-run-blocked",
+  "turn": "token-count-2026-09-24T19-40-29-756Z",
+  "call": "01",
+  "purpose": "token_count",
+  "hop": null,
+  "during_hop": null,
+  "final_reply_hop": false,
+  "model": "gpt-5.6-terra",
+  "url": "https://api.openai.com/v1/responses/input_tokens",
+  "settings": {
+    "max_output_tokens": null,
+    "tool_choice": "none",
+    "reasoning": null,
+    "text_format": null,
+    "temperature": null,
+    "tools_count": 0,
+    "tool_names": [],
+    "instructions_chars": 11783,
+    "instructions_sha256": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64",
+    "input_items": 7,
+    "input_item_types": [
+      "role:user",
+      "role:assistant",
+      "role:user",
+      "role:assistant",
+      "role:user",
+      "function_call",
+      "function_call_output"
+    ]
+  },
+  "wall_ms": 315.5,
+  "http_status": 200,
+  "usage": null,
+  "output_function_calls": [],
+  "output_text_chars": 0,
+  "response_headers": {
+    "x-request-id": "req_2e4c92265f2c41ac896244716fd170c4",
+    "openai-processing-ms": "96",
+    "openai-version": "2020-10-01"
+  },
+  "intercepted": false,
+  "paid": false,
+  "guard": "openai-only-ok",
+  "guard_detail": {
+    "host": "api.openai.com",
+    "protocol": "https:",
+    "anthropic_env_absent": true,
+    "recorded_before_send": true
+  },
+  "recorded_at": "2026-09-24T19:43:05.506Z"
+}

@@ -1,0 +1,4 @@
+[function_call] get_canonical_state
+{
+  "reason": "The user asks how an existing causal link affects the current analysis, so I need the persisted model and latest analysis state."
+}

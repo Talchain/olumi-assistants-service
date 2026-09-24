@@ -1,0 +1,226 @@
+{
+  "case": "pricing-construction",
+  "turn": "construction",
+  "purpose": "live-construction",
+  "status": 200,
+  "brief": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
+  "scenario_id": "00000000-0000-4000-8000-000000000108",
+  "stopped_reason": "answered",
+  "hops": 3,
+  "tools_called": [
+    "get_canonical_state",
+    "build_model_from_brief",
+    "propose_starting_point"
+  ],
+  "served_tools_called": [
+    "get_canonical_state",
+    "build_model_from_brief",
+    "propose_starting_point",
+    "propose_starting_point"
+  ],
+  "tool_sequence_resembles_served": {
+    "starts_get_canonical_state_then_build": true,
+    "proposes_starting_point": true,
+    "no_run_or_write_on_build_turn": true,
+    "identical_to_served": false
+  },
+  "calls": [
+    {
+      "call": "01",
+      "purpose": "conversation",
+      "hop": 0,
+      "during_hop": null,
+      "final_reply_hop": false,
+      "paid": true,
+      "intercepted": false,
+      "http_status": 200,
+      "wall_ms": 2568.7,
+      "model": "gpt-5.6-terra",
+      "function_calls": [
+        "get_canonical_state"
+      ],
+      "usage": {
+        "input_tokens": 3158,
+        "cached_tokens": 3155,
+        "output_tokens": 44,
+        "reasoning_tokens": 8,
+        "total_tokens": 3202
+      }
+    },
+    {
+      "call": "02",
+      "purpose": "conversation",
+      "hop": 1,
+      "during_hop": null,
+      "final_reply_hop": false,
+      "paid": true,
+      "intercepted": false,
+      "http_status": 200,
+      "wall_ms": 1907.5,
+      "model": "gpt-5.6-terra",
+      "function_calls": [
+        "build_model_from_brief"
+      ],
+      "usage": {
+        "input_tokens": 3301,
+        "cached_tokens": 3155,
+        "output_tokens": 64,
+        "reasoning_tokens": 0,
+        "total_tokens": 3365
+      }
+    },
+    {
+      "call": "03",
+      "purpose": "construction",
+      "hop": null,
+      "during_hop": 1,
+      "final_reply_hop": false,
+      "paid": true,
+      "intercepted": false,
+      "http_status": 200,
+      "wall_ms": 25703.8,
+      "model": "gpt-5.6-terra",
+      "function_calls": [],
+      "usage": {
+        "input_tokens": 2548,
+        "cached_tokens": 2545,
+        "output_tokens": 1749,
+        "reasoning_tokens": 1034,
+        "total_tokens": 4297
+      }
+    },
+    {
+      "call": "04",
+      "purpose": "conversation",
+      "hop": 2,
+      "during_hop": null,
+      "final_reply_hop": false,
+      "paid": true,
+      "intercepted": false,
+      "http_status": 200,
+      "wall_ms": 9577.9,
+      "model": "gpt-5.6-terra",
+      "function_calls": [
+        "propose_starting_point"
+      ],
+      "usage": {
+        "input_tokens": 4085,
+        "cached_tokens": 3298,
+        "output_tokens": 644,
+        "reasoning_tokens": 212,
+        "total_tokens": 4729
+      }
+    },
+    {
+      "call": "05",
+      "purpose": "conversation",
+      "hop": 3,
+      "during_hop": null,
+      "final_reply_hop": true,
+      "paid": true,
+      "intercepted": false,
+      "http_status": 200,
+      "wall_ms": 7702.2,
+      "model": "gpt-5.6-terra",
+      "function_calls": [],
+      "usage": {
+        "input_tokens": 5348,
+        "cached_tokens": 4082,
+        "output_tokens": 451,
+        "reasoning_tokens": 86,
+        "total_tokens": 5799
+      }
+    }
+  ],
+  "paid_calls": 5,
+  "final_reply_call": "05",
+  "reply_writing_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-05.request.json",
+  "final_hop_output_text_in_assistant_text": true,
+  "assistant_text": "I’ve built a comparison model with three routes: **keep £49 with the release**, **raise to £59 with the release**, and **phase the increase after the release**.\n\nKnown from your brief: current Pro price is **£49/month**; the target is **£20k MRR**; and monthly churn must stay below **4%**. The 12‑month deadline is retained in the decision record, but the model’s goal projection cannot encode a deadline—so it currently treats this as reaching £20k rather than explicitly reaching it within a year.\n\nIt cannot yet say whether to raise price: current Pro subscribers, conversion, churn, and the release’s value are unknown. I have prepared one set of **starting assumptions—not measurements**—so you can test the trade-off:\n\n- **Monthly churn: 3%** — a working baseline below the 4% ceiling.\n- **Pro conversion rate: 5%** — provisional baseline pending funnel data.\n- **Pro feature value: 70 out of 100** — assumes a meaningfully valuable release.\n- **Pro subscriber count: 250 subscribers** — provisional current base.\n\nAnd the options would be set as follows:\n\n- **Keep £49 With Release:** feature value **70 out of 100**.\n- **Raise to £59 With Release:** feature value **70 out of 100**; price already represented as **£59/month**.\n- **Phase Price After Release:** feature value **70 out of 100**; eventual price **£59/month**.\n\nThe phased option’s timing and any interim price are not represented, so it is a weaker comparison until those are specified.\n\nIf you approve these assumptions, I’ll save them as one change and run the comparison.\n\nThe model was saved. Questions this model does not answer yet: What are the current Pro conversion rate, Pro subscriber count, and monthly churn rate? How much customer value will the next Pro feature release add, and will it be available at the same time as the price change? How price-sensitive are prospective and existing Pro customers at £59 per month?",
+  "suggested_actions": [
+    {
+      "id": "agent-approve-proposal:prop_b86a5450e62667ed8103b01e9161c0f3",
+      "label": "Use as starting assumptions",
+      "message": "Yes, use those."
+    },
+    {
+      "id": "agent-amend-proposal",
+      "label": "Change something first",
+      "message": "Before you apply it, I want to change some of it."
+    },
+    {
+      "id": "agent-run-analysis",
+      "label": "Run analysis",
+      "message": "Run analysis.",
+      "action_type": "run_analysis"
+    }
+  ],
+  "first_hop_input_tokens": {
+    "captured": 3158,
+    "served": 3158,
+    "equal": true
+  },
+  "served_provider_calls": [
+    {
+      "purpose": "conversation",
+      "duration_ms": 1924,
+      "input_tokens": 3158,
+      "output_tokens": 54,
+      "reasoning_tokens": 12
+    },
+    {
+      "purpose": "conversation",
+      "duration_ms": 1813,
+      "input_tokens": 3311,
+      "output_tokens": 64,
+      "reasoning_tokens": 0
+    },
+    {
+      "purpose": "construction",
+      "duration_ms": 32390,
+      "input_tokens": 2548,
+      "output_tokens": 2323,
+      "reasoning_tokens": 1429
+    },
+    {
+      "purpose": "conversation",
+      "duration_ms": 18027,
+      "input_tokens": 4182,
+      "output_tokens": 1068,
+      "reasoning_tokens": 619
+    },
+    {
+      "purpose": "conversation",
+      "duration_ms": 5575,
+      "input_tokens": 5861,
+      "output_tokens": 468,
+      "reasoning_tokens": 45
+    },
+    {
+      "purpose": "conversation",
+      "duration_ms": 6824,
+      "input_tokens": 7016,
+      "output_tokens": 344,
+      "reasoning_tokens": 0
+    }
+  ],
+  "conversation_instructions_equal_source_agent_instructions": true,
+  "internal_dispatch_unexpected": [],
+  "stored_graph_counts": {
+    "nodes": 11,
+    "edges": 18
+  },
+  "fidelity": {
+    "exact": [
+      "every provider request is built by the real route/runtime at 57f903c (AGENT_INSTRUCTIONS, toolsFor(\"full\"), BUILD_INSTRUCTIONS, buildCandidateSchema, BANKED_BUDGETS) and sent by its own callModel/callStructured",
+      "tool results come from the real capabilities (get_canonical_state, build_model_from_brief incl. admission and the size gate, propose_* incl. completeness admission)",
+      "registration applies the real node-kind normalisation, GraphStateIngress parse, projectGraphForPersistence and invariant check; reads return the real analysis-affecting and identity hashes",
+      "empty first turn: no history (a fresh scenario, as served)"
+    ],
+    "approximated": [
+      "the product double stands in for Supabase/PLoT: a guest scenario (no versions, no model_version receipt — served receipts were []), and the never_run analysis_state the served read returned after a build",
+      "a different generation from the served one: the model output (and so later hops) differs by draw; the served turn is a reference, not a replay",
+      "no turn_id: it drives only durable rows, never the provider request"
+    ]
+  }
+}

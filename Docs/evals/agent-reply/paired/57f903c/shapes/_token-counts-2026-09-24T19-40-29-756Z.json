@@ -1,0 +1,41 @@
+{
+  "note": "input token counts of the captured (approximated-history) requests vs the served call's usage.input_tokens",
+  "results": [
+    {
+      "caseId": "pricing-run-complete",
+      "turn": "explicit-run",
+      "served": "pricing",
+      "status": 200,
+      "counted_input_tokens": 9718,
+      "served_input_tokens": 13561,
+      "response": {
+        "object": "response.input_tokens",
+        "input_tokens": 9718
+      }
+    },
+    {
+      "caseId": "hiring-run-blocked",
+      "turn": "explicit-run",
+      "served": "hiring",
+      "status": 200,
+      "counted_input_tokens": 4546,
+      "served_input_tokens": 6877,
+      "response": {
+        "object": "response.input_tokens",
+        "input_tokens": 4546
+      }
+    },
+    {
+      "caseId": "pricing-discussion-card",
+      "turn": "discussion-card",
+      "served": null,
+      "status": 200,
+      "counted_input_tokens": 10712,
+      "served_input_tokens": null,
+      "response": {
+        "object": "response.input_tokens",
+        "input_tokens": 10712
+      }
+    }
+  ]
+}

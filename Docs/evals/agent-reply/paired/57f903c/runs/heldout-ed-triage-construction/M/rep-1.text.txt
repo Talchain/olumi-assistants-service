@@ -1,0 +1,24 @@
+I’ve created a comparison model around the shared goal of reducing **4-hour wait breaches**, currently stated as occurring on **30% of nights**. It includes:
+
+- **Second triage nurse** and **rapid-assessment unit** (your options)
+- **Maintain current setup** and **phased rapid assessment** (comparison cases)
+- Relevant drivers: overnight triage staffing, rapid-assessment capacity, time to triage, time to clinician assessment, and overnight ED flow.
+
+The model still needs starting levels before it can compare options. I have **not** treated these as measurements; they are assumptions for you to adopt or correct:
+
+| Item | Starting assumption | Basis |
+|---|---:|---|
+| Overnight ED flow | 80 patients/night | Illustrative night volume; replace with local arrivals |
+| Dedicated night triage staffing | 1 nurse | Assumes one current triage nurse |
+| Current rapid-assessment capacity | 0 patients/night | Assumes no overnight RAU |
+| Time to triage | 20 minutes | Illustrative for recurrent breach nights |
+| Time to clinician assessment | 90 minutes | Illustrative affected-night performance |
+| Maintain current setup | 1 triage nurse; 0 RAU patients/night | No service change |
+| Phased rapid assessment | 10 patients/night | Illustrative limited overnight scope |
+| Rapid-assessment unit | 20 patients/night | Illustrative full overnight RAU scope |
+
+The second-triage-nurse option already has an implied modelled level of **two dedicated triage nurses**.
+
+The model also cannot yet determine a target—for example, whether you need breaches below 20%, 10%, or another level—and it does not yet capture whether an RAU would require extra staff or redeploy existing staff. Those are important uncertainties, not facts.
+
+If you approve these starting assumptions, I’ll save them together and run the comparison.

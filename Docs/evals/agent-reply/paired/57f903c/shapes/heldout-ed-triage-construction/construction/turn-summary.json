@@ -1,0 +1,195 @@
+{
+  "case": "heldout-ed-triage-construction",
+  "turn": "construction",
+  "purpose": "live-construction",
+  "status": 200,
+  "brief": "Should our hospital emergency department add a second triage nurse on night shifts or open a rapid-assessment unit, given 4-hour waits breach 30% of nights?",
+  "scenario_id": "00000000-0000-4000-8000-000000000102",
+  "stopped_reason": "answered",
+  "hops": 4,
+  "tools_called": [
+    "get_canonical_state",
+    "build_model_from_brief",
+    "propose_starting_point",
+    "propose_starting_point"
+  ],
+  "served_tools_called": null,
+  "tool_sequence_resembles_served": {
+    "starts_get_canonical_state_then_build": true,
+    "proposes_starting_point": true,
+    "no_run_or_write_on_build_turn": true,
+    "identical_to_served": null
+  },
+  "calls": [
+    {
+      "call": "01",
+      "purpose": "conversation",
+      "hop": 0,
+      "during_hop": null,
+      "final_reply_hop": false,
+      "paid": true,
+      "intercepted": false,
+      "http_status": 200,
+      "wall_ms": 2236.2,
+      "model": "gpt-5.6-terra",
+      "function_calls": [
+        "get_canonical_state"
+      ],
+      "usage": {
+        "input_tokens": 3148,
+        "cached_tokens": 3107,
+        "output_tokens": 48,
+        "reasoning_tokens": 8,
+        "total_tokens": 3196
+      }
+    },
+    {
+      "call": "02",
+      "purpose": "conversation",
+      "hop": 1,
+      "during_hop": null,
+      "final_reply_hop": false,
+      "paid": true,
+      "intercepted": false,
+      "http_status": 200,
+      "wall_ms": 1626.5,
+      "model": "gpt-5.6-terra",
+      "function_calls": [
+        "build_model_from_brief"
+      ],
+      "usage": {
+        "input_tokens": 3295,
+        "cached_tokens": 3145,
+        "output_tokens": 54,
+        "reasoning_tokens": 0,
+        "total_tokens": 3349
+      }
+    },
+    {
+      "call": "03",
+      "purpose": "construction",
+      "hop": null,
+      "during_hop": 1,
+      "final_reply_hop": false,
+      "paid": true,
+      "intercepted": false,
+      "http_status": 200,
+      "wall_ms": 34454.2,
+      "model": "gpt-5.6-terra",
+      "function_calls": [],
+      "usage": {
+        "input_tokens": 2538,
+        "cached_tokens": 2497,
+        "output_tokens": 2638,
+        "reasoning_tokens": 1855,
+        "total_tokens": 5176
+      }
+    },
+    {
+      "call": "04",
+      "purpose": "conversation",
+      "hop": 2,
+      "during_hop": null,
+      "final_reply_hop": false,
+      "paid": true,
+      "intercepted": false,
+      "http_status": 200,
+      "wall_ms": 8549.6,
+      "model": "gpt-5.6-terra",
+      "function_calls": [
+        "propose_starting_point"
+      ],
+      "usage": {
+        "input_tokens": 4153,
+        "cached_tokens": 3292,
+        "output_tokens": 488,
+        "reasoning_tokens": 217,
+        "total_tokens": 4641
+      }
+    },
+    {
+      "call": "05",
+      "purpose": "conversation",
+      "hop": 3,
+      "during_hop": null,
+      "final_reply_hop": false,
+      "paid": true,
+      "intercepted": false,
+      "http_status": 200,
+      "wall_ms": 5035.4,
+      "model": "gpt-5.6-terra",
+      "function_calls": [
+        "propose_starting_point"
+      ],
+      "usage": {
+        "input_tokens": 5069,
+        "cached_tokens": 4150,
+        "output_tokens": 438,
+        "reasoning_tokens": 44,
+        "total_tokens": 5507
+      }
+    },
+    {
+      "call": "06",
+      "purpose": "conversation",
+      "hop": 4,
+      "during_hop": null,
+      "final_reply_hop": true,
+      "paid": true,
+      "intercepted": false,
+      "http_status": 200,
+      "wall_ms": 5893.9,
+      "model": "gpt-5.6-terra",
+      "function_calls": [],
+      "usage": {
+        "input_tokens": 6161,
+        "cached_tokens": 5066,
+        "output_tokens": 325,
+        "reasoning_tokens": 0,
+        "total_tokens": 6486
+      }
+    }
+  ],
+  "paid_calls": 6,
+  "final_reply_call": "06",
+  "reply_writing_request": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-06.request.json",
+  "final_hop_output_text_in_assistant_text": true,
+  "assistant_text": "I’ve built a comparison model around the shared outcome: reducing **4-hour wait breaches**, currently stated as occurring on **30% of nights**.\n\nIt includes your two options plus comparators: **maintain the current setup** and **phased rapid assessment**. The model still needs operating assumptions before it can compare them. I could not represent four relationships where the causal direction is not yet stated, including how operational complexity affects performance.\n\nTo make a first comparison possible, I propose these **starting assumptions — not measurements**. Please adopt or correct them:\n\n**Baseline assumptions**\n- Night-shift triage staffing: **1 nurse** — assumes one dedicated triage nurse overnight.\n- Rapid-assessment capacity: **0 patients/night** — assumes there is no current overnight unit.\n- Time to triage: **20 minutes** — placeholder for local typical performance.\n- Time to clinician assessment: **90 minutes** — placeholder for affected nights.\n- ED patient flow: **80 patients/night** — placeholder for overnight arrivals.\n\n**What each option would set**\n- Maintain current setup: **1 triage nurse** and **0 rapid-assessment patients/night**.\n- Phased rapid assessment: **10 rapid-assessment patients/night**.\n- Rapid-assessment unit: **20 rapid-assessment patients/night**.\n- The existing model already treats a second triage nurse as increasing triage staffing.\n\nThese are deliberately testable assumptions, based on the wording of the options and typical overnight scale—not evidence about your hospital. If you approve this full set, I’ll save it and run the comparison.\n\nThe model was saved. Questions this model does not answer yet: The stated current incidence is that 4-hour waits breach on 30% of nights; what reduction target should the decision be assessed against? What are the current night-shift triage staffing level, rapid-assessment capacity, triage time, clinician-assessment time, and ED patient flow? Would a rapid-assessment unit use additional staff or redeploy existing night-shift staff? What scope and operating hours would a phased rapid-assessment option have?",
+  "suggested_actions": [
+    {
+      "id": "agent-approve-proposal:prop_a6139b6dd1fb227bbe7ba79dde2c514c",
+      "label": "Use as starting assumptions",
+      "message": "Yes, use those."
+    },
+    {
+      "id": "agent-amend-proposal",
+      "label": "Change something first",
+      "message": "Before you apply it, I want to change some of it."
+    }
+  ],
+  "first_hop_input_tokens": {
+    "captured": 3148,
+    "served": null,
+    "equal": null
+  },
+  "served_provider_calls": [],
+  "conversation_instructions_equal_source_agent_instructions": true,
+  "internal_dispatch_unexpected": [],
+  "stored_graph_counts": {
+    "nodes": 12,
+    "edges": 16
+  },
+  "fidelity": {
+    "exact": [
+      "every provider request is built by the real route/runtime at 57f903c (AGENT_INSTRUCTIONS, toolsFor(\"full\"), BUILD_INSTRUCTIONS, buildCandidateSchema, BANKED_BUDGETS) and sent by its own callModel/callStructured",
+      "tool results come from the real capabilities (get_canonical_state, build_model_from_brief incl. admission and the size gate, propose_* incl. completeness admission)",
+      "registration applies the real node-kind normalisation, GraphStateIngress parse, projectGraphForPersistence and invariant check; reads return the real analysis-affecting and identity hashes",
+      "empty first turn: no history (a fresh scenario, as served)"
+    ],
+    "approximated": [
+      "the product double stands in for Supabase/PLoT: a guest scenario (no versions, no model_version receipt — served receipts were []), and the never_run analysis_state the served read returned after a build",
+      "a different generation from the served one: the model output (and so later hops) differs by draw; the served turn is a reference, not a replay",
+      "no turn_id: it drives only durable rows, never the provider request"
+    ]
+  }
+}

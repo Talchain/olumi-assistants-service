@@ -1,0 +1,7 @@
+I’ve set up the comparison, but it needs working assumptions before it can test the £59 change.
+
+- **Starting assumptions:** 250 Pro subscribers; 5% Pro conversion; 3% monthly churn; feature value **70/100**. These are estimates to adopt or correct, not measurements.
+- **Option levels:** each release option gets feature value **70/100**; the phased option ultimately reaches **£59/month**. Keeping £49 and raising directly already retain their stated prices.
+- The 12‑month deadline is recorded, but the model cannot calculate against a deadline directly.
+
+Do you approve these assumptions as the starting point?

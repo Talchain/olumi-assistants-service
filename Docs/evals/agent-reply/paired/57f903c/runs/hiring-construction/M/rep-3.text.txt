@@ -1,0 +1,23 @@
+I’ve set up a comparison model. It treats **productivity** as the goal and includes your two choices, plus “maintain current staffing” and “hire one developer” as reference cases.
+
+The model currently has **six missing starting values**, and “maintain current staffing” initially changed nothing. To make a first comparison possible, I can record the following **assumptions — not measurements**:
+
+**Starting point**
+- Developer hires: **0 hires** — no additional developers hired yet.
+- Tech lead hires: **0 hires** — no additional Tech Leads hired yet.
+- Engineering capacity: **50/100** — neutral placeholder; your present baseline is unknown.
+- Coordination quality: **50/100** — neutral placeholder; current coordination is unknown.
+- Technical direction quality: **50/100** — neutral placeholder; current technical direction is unknown.
+- Onboarding demand: **0 additional hires being onboarded**.
+
+**What each option sets**
+- **Hire Tech Lead:** Tech lead hires = **1**.
+- **Hire Two Developers:** Developer hires = **2**.
+- **Hire One Developer:** Developer hires = **1**.
+- **Maintain Current Staffing:** Developer hires = **0**; Tech lead hires = **0**.
+
+The figures of **50/100** are my neutral assumptions, based only on the absence of a baseline; they are intended to be corrected, not treated as evidence. The hiring counts come directly from the option names.
+
+The model also flags three questions most likely to determine the result: your current team size/productivity, how hands-on the Tech Lead would be, and onboarding/mentoring capacity.
+
+Would you like to adopt these starting assumptions and option levels so I can run the comparison?

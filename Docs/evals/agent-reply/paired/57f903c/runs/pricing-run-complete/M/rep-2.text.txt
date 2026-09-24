@@ -1,0 +1,7 @@
+**Finding:** On the current model, raising Pro to **£59/month with the feature release** leads the comparison: it had an **83.28%** chance of producing the highest modelled MRR outcome, versus **15.39%** for keeping £49 and **1.33%** for phasing the increase. This is a result of the model’s assumptions, not a recommendation.
+
+- The lead arises because the model credits the simultaneous release with **100% price–release alignment**, compared with **50%** for the phased path, alongside the higher **£59/month** price.
+- The MRR comparison was robust under the changes tested. However, it does **not** establish that £59 meets your “monthly churn rate **< 4%**” requirement: that constraint could not be scored against the modelled churn output, and was therefore excluded from the comparison.
+- The ordering can flip in a tested scenario if price–release alignment is increased to **97.92%**, where **Keep Pro at £49** becomes the alternative leader. This shows that the treatment of release alignment matters; it does not establish which assumption should be investigated first.
+
+The analysis also assumed that maximising MRR is the goal direction. It does not yet test attainment of **£20k MRR within 12 months**, because the model lacks an observed MRR baseline and a compatible constraint frame.

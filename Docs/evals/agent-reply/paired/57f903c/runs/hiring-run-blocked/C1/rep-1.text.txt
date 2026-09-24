@@ -1,0 +1,3 @@
+The analysis cannot run because **Continue Current Staffing** is not connected to any factor.
+
+The other hiring options are ready, but this option blocks the whole comparison. We need to state what maintaining staffing changes — for example, whether it leaves developer capacity at **8 capacity points (0–20)** and tech-lead capacity at **4 capacity points (0–10)**, or whether you expect either to change over the period considered.

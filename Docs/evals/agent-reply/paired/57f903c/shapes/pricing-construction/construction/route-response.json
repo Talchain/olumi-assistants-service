@@ -1,0 +1,872 @@
+{
+  "status": 200,
+  "wall_ms": 47542,
+  "body": {
+    "response_version": 2,
+    "assistant_text": "I’ve built a comparison model with three routes: **keep £49 with the release**, **raise to £59 with the release**, and **phase the increase after the release**.\n\nKnown from your brief: current Pro price is **£49/month**; the target is **£20k MRR**; and monthly churn must stay below **4%**. The 12‑month deadline is retained in the decision record, but the model’s goal projection cannot encode a deadline—so it currently treats this as reaching £20k rather than explicitly reaching it within a year.\n\nIt cannot yet say whether to raise price: current Pro subscribers, conversion, churn, and the release’s value are unknown. I have prepared one set of **starting assumptions—not measurements**—so you can test the trade-off:\n\n- **Monthly churn: 3%** — a working baseline below the 4% ceiling.\n- **Pro conversion rate: 5%** — provisional baseline pending funnel data.\n- **Pro feature value: 70 out of 100** — assumes a meaningfully valuable release.\n- **Pro subscriber count: 250 subscribers** — provisional current base.\n\nAnd the options would be set as follows:\n\n- **Keep £49 With Release:** feature value **70 out of 100**.\n- **Raise to £59 With Release:** feature value **70 out of 100**; price already represented as **£59/month**.\n- **Phase Price After Release:** feature value **70 out of 100**; eventual price **£59/month**.\n\nThe phased option’s timing and any interim price are not represented, so it is a weaker comparison until those are specified.\n\nIf you approve these assumptions, I’ll save them as one change and run the comparison.\n\nThe model was saved. Questions this model does not answer yet: What are the current Pro conversion rate, Pro subscriber count, and monthly churn rate? How much customer value will the next Pro feature release add, and will it be available at the same time as the price change? How price-sensitive are prospective and existing Pro customers at £59 per month?",
+    "blocks": [],
+    "suggested_actions": [
+      {
+        "id": "agent-approve-proposal:prop_b86a5450e62667ed8103b01e9161c0f3",
+        "label": "Use as starting assumptions",
+        "message": "Yes, use those."
+      },
+      {
+        "id": "agent-amend-proposal",
+        "label": "Change something first",
+        "message": "Before you apply it, I want to change some of it."
+      },
+      {
+        "id": "agent-run-analysis",
+        "label": "Run analysis",
+        "message": "Run analysis.",
+        "action_type": "run_analysis"
+      }
+    ],
+    "insights": [],
+    "stage_indicator": "frame",
+    "analysis_state": {
+      "run_state": {
+        "kind": "never_run"
+      },
+      "readiness": {
+        "status": "unknown",
+        "blockers": []
+      },
+      "leader_claim": {
+        "permitted": false,
+        "withheld_reason": "constraint_verdict_withheld"
+      },
+      "robustness": {},
+      "usable_for_prose": false,
+      "usable_for_chips": false,
+      "usable_for_followup": false,
+      "requires_rerun": false,
+      "blocked_unusable": false,
+      "contradictions": []
+    },
+    "graph_hash": "a9b77d4bf3ad1231",
+    "analysis_ready": {
+      "options": [
+        {
+          "option_id": "keep_49_with_release",
+          "label": "Keep £49 With Release",
+          "status": "ready",
+          "interventions": {
+            "pro_plan_price": 0.245
+          },
+          "is_baseline": false,
+          "intervention_details": {
+            "pro_plan_price": {
+              "display_value": "49 GBP/month",
+              "normalised_value": 0.245,
+              "raw_value": 49,
+              "unit": "GBP/month"
+            }
+          },
+          "status_reason": "1 intervention(s) ready for analysis"
+        },
+        {
+          "option_id": "raise_to_59_with_release",
+          "label": "Raise to £59 With Release",
+          "status": "ready",
+          "interventions": {
+            "pro_plan_price": 0.295
+          },
+          "is_baseline": false,
+          "intervention_details": {
+            "pro_plan_price": {
+              "display_value": "59 GBP/month",
+              "normalised_value": 0.295,
+              "raw_value": 59,
+              "unit": "GBP/month"
+            }
+          },
+          "status_reason": "1 intervention(s) ready for analysis"
+        },
+        {
+          "option_id": "phase_price_after_release",
+          "label": "Phase Price After Release",
+          "status": "needs_encoding",
+          "interventions": {},
+          "is_baseline": false,
+          "status_reason": "Connected to 2 factor(s); awaiting effect value(s)",
+          "user_questions": [
+            "Which factor(s) does \"Phase Price After Release\" change, and what value should each be set to?"
+          ]
+        }
+      ],
+      "goal_node_id": "mrr",
+      "status": "needs_user_input",
+      "blockers": [
+        {
+          "option_id": "keep_49_with_release",
+          "option_label": "Keep £49 With Release",
+          "factor_id": "pro_feature_value",
+          "factor_label": "Pro feature value",
+          "blocker_type": "missing_value",
+          "message": "Factor \"Pro feature value\" needs a numeric value for option \"Keep £49 With Release\"",
+          "suggested_action": "add_value"
+        },
+        {
+          "option_id": "raise_to_59_with_release",
+          "option_label": "Raise to £59 With Release",
+          "factor_id": "pro_feature_value",
+          "factor_label": "Pro feature value",
+          "blocker_type": "missing_value",
+          "message": "Factor \"Pro feature value\" needs a numeric value for option \"Raise to £59 With Release\"",
+          "suggested_action": "add_value"
+        },
+        {
+          "option_id": "phase_price_after_release",
+          "option_label": "Phase Price After Release",
+          "factor_id": "pro_plan_price",
+          "factor_label": "Pro plan price",
+          "blocker_type": "missing_value",
+          "message": "Factor \"Pro plan price\" is currently 49 GBP/month. What should option \"Phase Price After Release\" set it to?",
+          "suggested_action": "add_value"
+        },
+        {
+          "option_id": "phase_price_after_release",
+          "option_label": "Phase Price After Release",
+          "factor_id": "pro_feature_value",
+          "factor_label": "Pro feature value",
+          "blocker_type": "missing_value",
+          "message": "Factor \"Pro feature value\" needs a numeric value for option \"Phase Price After Release\"",
+          "suggested_action": "add_value"
+        }
+      ],
+      "goal_threshold": 0.8,
+      "goal_threshold_raw": 20000,
+      "goal_threshold_unit": "GBP/month",
+      "goal_threshold_cap": 25000,
+      "goal_threshold_cap_provenance": "target_derived_headroom",
+      "bias_findings": [],
+      "readiness_issues": [
+        {
+          "issue_id": "semantic_1",
+          "repairability": "human_input_required",
+          "option_id": "keep_49_with_release",
+          "option_label": "Keep £49 With Release",
+          "factor_id": "pro_feature_value",
+          "factor_label": "Pro feature value",
+          "code": "MISSING_OPTION_VALUE",
+          "category": "option_values",
+          "message": "Factor \"Pro feature value\" needs a numeric value for option \"Keep £49 With Release\"",
+          "provenance": "unattributed",
+          "obligation": "offered"
+        },
+        {
+          "issue_id": "semantic_2",
+          "repairability": "human_input_required",
+          "option_id": "raise_to_59_with_release",
+          "option_label": "Raise to £59 With Release",
+          "factor_id": "pro_feature_value",
+          "factor_label": "Pro feature value",
+          "code": "MISSING_OPTION_VALUE",
+          "category": "option_values",
+          "message": "Factor \"Pro feature value\" needs a numeric value for option \"Raise to £59 With Release\"",
+          "provenance": "unattributed",
+          "obligation": "offered"
+        },
+        {
+          "issue_id": "semantic_3",
+          "repairability": "human_input_required",
+          "option_id": "phase_price_after_release",
+          "option_label": "Phase Price After Release",
+          "factor_id": "pro_plan_price",
+          "factor_label": "Pro plan price",
+          "code": "MISSING_OPTION_VALUE",
+          "category": "option_values",
+          "message": "Factor \"Pro plan price\" is currently 49 GBP/month. What should option \"Phase Price After Release\" set it to?",
+          "provenance": "unattributed",
+          "obligation": "offered"
+        },
+        {
+          "issue_id": "semantic_4",
+          "repairability": "human_input_required",
+          "option_id": "phase_price_after_release",
+          "option_label": "Phase Price After Release",
+          "factor_id": "pro_feature_value",
+          "factor_label": "Pro feature value",
+          "code": "MISSING_OPTION_VALUE",
+          "category": "option_values",
+          "message": "Factor \"Pro feature value\" needs a numeric value for option \"Phase Price After Release\"",
+          "provenance": "unattributed",
+          "obligation": "offered"
+        }
+      ],
+      "repair_proposal": {
+        "proposal_version": "readiness_repair_v1",
+        "complete": true,
+        "issue_ids": [
+          "semantic_1",
+          "semantic_2",
+          "semantic_3",
+          "semantic_4"
+        ],
+        "changes": [],
+        "unresolved_inputs": [
+          {
+            "issue_id": "semantic_1",
+            "kind": "option_effect_value",
+            "prompt": "Factor \"Pro feature value\" needs a numeric value for option \"Keep £49 With Release\"",
+            "option_id": "keep_49_with_release",
+            "factor_id": "pro_feature_value",
+            "obligation": "offered",
+            "provenance": "unattributed"
+          },
+          {
+            "issue_id": "semantic_2",
+            "kind": "option_effect_value",
+            "prompt": "Factor \"Pro feature value\" needs a numeric value for option \"Raise to £59 With Release\"",
+            "option_id": "raise_to_59_with_release",
+            "factor_id": "pro_feature_value",
+            "obligation": "offered",
+            "provenance": "unattributed"
+          },
+          {
+            "issue_id": "semantic_3",
+            "kind": "option_effect_value",
+            "prompt": "Factor \"Pro plan price\" is currently 49 GBP/month. What should option \"Phase Price After Release\" set it to?",
+            "option_id": "phase_price_after_release",
+            "factor_id": "pro_plan_price",
+            "obligation": "offered",
+            "provenance": "unattributed"
+          },
+          {
+            "issue_id": "semantic_4",
+            "kind": "option_effect_value",
+            "prompt": "Factor \"Pro feature value\" needs a numeric value for option \"Phase Price After Release\"",
+            "option_id": "phase_price_after_release",
+            "factor_id": "pro_feature_value",
+            "obligation": "offered",
+            "provenance": "unattributed"
+          }
+        ]
+      },
+      "may_run": true,
+      "analysis_admission": {
+        "structurally_analysable": true,
+        "missing_important_inputs": [
+          {
+            "issue_id": "semantic_1",
+            "code": "MISSING_OPTION_VALUE",
+            "option_id": "keep_49_with_release",
+            "option_label": "Keep £49 With Release",
+            "factor_id": "pro_feature_value",
+            "factor_label": "Pro feature value",
+            "why_it_matters": "Factor \"Pro feature value\" needs a numeric value for option \"Keep £49 With Release\"",
+            "obligation": "offered",
+            "waived_by_exclusion": false
+          },
+          {
+            "issue_id": "semantic_2",
+            "code": "MISSING_OPTION_VALUE",
+            "option_id": "raise_to_59_with_release",
+            "option_label": "Raise to £59 With Release",
+            "factor_id": "pro_feature_value",
+            "factor_label": "Pro feature value",
+            "why_it_matters": "Factor \"Pro feature value\" needs a numeric value for option \"Raise to £59 With Release\"",
+            "obligation": "offered",
+            "waived_by_exclusion": false
+          },
+          {
+            "issue_id": "semantic_3",
+            "code": "MISSING_OPTION_VALUE",
+            "option_id": "phase_price_after_release",
+            "option_label": "Phase Price After Release",
+            "factor_id": "pro_plan_price",
+            "factor_label": "Pro plan price",
+            "why_it_matters": "Factor \"Pro plan price\" is currently 49 GBP/month. What should option \"Phase Price After Release\" set it to?",
+            "obligation": "offered",
+            "waived_by_exclusion": true
+          },
+          {
+            "issue_id": "semantic_4",
+            "code": "MISSING_OPTION_VALUE",
+            "option_id": "phase_price_after_release",
+            "option_label": "Phase Price After Release",
+            "factor_id": "pro_feature_value",
+            "factor_label": "Pro feature value",
+            "why_it_matters": "Factor \"Pro feature value\" needs a numeric value for option \"Phase Price After Release\"",
+            "obligation": "offered",
+            "waived_by_exclusion": true
+          }
+        ],
+        "semantic_quality_sufficient": true,
+        "permitted_analysis_mode": "comparative_leader",
+        "reasons": [
+          {
+            "field": "structurally_analysable",
+            "code": "RUN_WILL_EXCLUDE_OPTIONS",
+            "message": "Analysis can run, leaving out one option you have not set values for."
+          },
+          {
+            "field": "missing_important_inputs",
+            "code": "MODEL_HAS_BLOCKERS",
+            "message": "Olumi filled in the gaps here itself; you can review them, and nothing is required of you."
+          },
+          {
+            "field": "semantic_quality_sufficient",
+            "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+            "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+          },
+          {
+            "field": "permitted_analysis_mode",
+            "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+            "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+          }
+        ],
+        "graph_hash": "a9b77d4bf3ad123195400e861c9dacf2919f4c35141de0af679ddc9aa310844f",
+        "semantic_signals": {
+          "confidence_parameters_total": 16,
+          "confidence_parameters_user_stated": 1,
+          "confidence_parameters_machine_authored": 9,
+          "confidence_parameters_unattributed": 6,
+          "material_parameters_total": 13,
+          "material_parameters_user_stated": 1,
+          "intervened_factor_baselines_total": 1,
+          "intervened_factor_baselines_user_stated": 1,
+          "material_parameters_awaiting_user_node_ids": [
+            "mrr",
+            "pro_conversion_rate",
+            "pro_subscriber_count",
+            "monthly_churn",
+            "price_increase_churn_risk"
+          ],
+          "goal_target_stated": true
+        }
+      },
+      "current_graph_hash": "a9b77d4bf3ad1231"
+    },
+    "draft_graph": {
+      "nodes": [
+        {
+          "id": "decision_mrr",
+          "kind": "decision",
+          "label": "Decision: MRR",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "mrr",
+          "kind": "goal",
+          "label": "MRR",
+          "provenance": "from_brief",
+          "goal_threshold_unit": "GBP/month",
+          "goal_threshold_frame": "level",
+          "goal_threshold_raw": 20000,
+          "goal_threshold_cap": 25000,
+          "goal_threshold_cap_provenance": "target_derived_headroom",
+          "goal_threshold": 0.8
+        },
+        {
+          "id": "keep_49_with_release",
+          "kind": "option",
+          "label": "Keep £49 With Release",
+          "provenance": "ai_inferred",
+          "interventions": {
+            "pro_plan_price": {
+              "value": 0.245,
+              "source": "brief_extraction"
+            }
+          }
+        },
+        {
+          "id": "raise_to_59_with_release",
+          "kind": "option",
+          "label": "Raise to £59 With Release",
+          "provenance": "from_brief",
+          "interventions": {
+            "pro_plan_price": {
+              "value": 0.295,
+              "source": "brief_extraction"
+            }
+          }
+        },
+        {
+          "id": "phase_price_after_release",
+          "kind": "option",
+          "label": "Phase Price After Release",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "pro_plan_price",
+          "kind": "factor",
+          "label": "Pro plan price",
+          "provenance": "from_brief",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0.245,
+            "raw_value": 49,
+            "cap": 200,
+            "declared_scale": "unit_interval",
+            "unit": "GBP/month",
+            "source": "brief_extraction"
+          }
+        },
+        {
+          "id": "pro_feature_value",
+          "kind": "factor",
+          "label": "Pro feature value",
+          "provenance": "ai_inferred",
+          "category": "controllable",
+          "scale_frame": 100
+        },
+        {
+          "id": "pro_conversion_rate",
+          "kind": "factor",
+          "label": "Pro conversion rate",
+          "provenance": "ai_inferred",
+          "category": "observable",
+          "scale_frame": 100
+        },
+        {
+          "id": "pro_subscriber_count",
+          "kind": "factor",
+          "label": "Pro subscriber count",
+          "provenance": "ai_inferred",
+          "category": "observable",
+          "scale_frame": 2000
+        },
+        {
+          "id": "monthly_churn",
+          "kind": "factor",
+          "label": "Monthly churn",
+          "provenance": "from_brief",
+          "category": "observable",
+          "scale_frame": 100
+        },
+        {
+          "id": "price_increase_churn_risk",
+          "kind": "risk",
+          "label": "Price-increase churn risk",
+          "provenance": "ai_inferred"
+        }
+      ],
+      "edges": [
+        {
+          "from": "decision_mrr",
+          "to": "keep_49_with_release",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "decision_mrr",
+          "to": "raise_to_59_with_release",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "decision_mrr",
+          "to": "phase_price_after_release",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "keep_49_with_release",
+          "to": "pro_feature_value",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "keep_49_with_release",
+          "to": "pro_plan_price",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "raise_to_59_with_release",
+          "to": "pro_feature_value",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "raise_to_59_with_release",
+          "to": "pro_plan_price",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "phase_price_after_release",
+          "to": "pro_plan_price",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "phase_price_after_release",
+          "to": "pro_feature_value",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "pro_plan_price",
+          "to": "mrr",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "defaulted": true
+        },
+        {
+          "from": "pro_plan_price",
+          "to": "pro_conversion_rate",
+          "strength": {
+            "mean": -0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "defaulted": true
+        },
+        {
+          "from": "pro_plan_price",
+          "to": "price_increase_churn_risk",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "defaulted": true
+        },
+        {
+          "from": "pro_feature_value",
+          "to": "pro_conversion_rate",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "defaulted": true
+        },
+        {
+          "from": "pro_feature_value",
+          "to": "monthly_churn",
+          "strength": {
+            "mean": -0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "defaulted": true
+        },
+        {
+          "from": "pro_conversion_rate",
+          "to": "pro_subscriber_count",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "defaulted": true
+        },
+        {
+          "from": "price_increase_churn_risk",
+          "to": "monthly_churn",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "defaulted": true
+        },
+        {
+          "from": "monthly_churn",
+          "to": "pro_subscriber_count",
+          "strength": {
+            "mean": -0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "defaulted": true
+        },
+        {
+          "from": "pro_subscriber_count",
+          "to": "mrr",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "defaulted": true
+        }
+      ],
+      "node_count": 11,
+      "edge_count": 18,
+      "goal_constraints": [
+        {
+          "constraint_id": "agent-lane:monthly_churn:<=",
+          "node_id": "monthly_churn",
+          "operator": "<=",
+          "value": 4,
+          "label": "Monthly churn < 4%",
+          "unit": "%",
+          "provenance": "explicit"
+        }
+      ]
+    },
+    "_diagnostic_trace": {
+      "exit_path": "agent_lane_v1",
+      "agent_mode": "full",
+      "hops": 3,
+      "stopped_reason": "answered",
+      "tools_called": [
+        "get_canonical_state",
+        "build_model_from_brief",
+        "propose_starting_point"
+      ],
+      "write_claims_removed": 0
+    },
+    "_agent": {
+      "session_id": "sess_00000000-0000-4000-8000-000000000108",
+      "mode": "full",
+      "tool_calls": [
+        {
+          "name": "get_canonical_state",
+          "ok": true,
+          "mutated": false
+        },
+        {
+          "name": "build_model_from_brief",
+          "ok": true,
+          "mutated": true
+        },
+        {
+          "name": "propose_starting_point",
+          "ok": true,
+          "mutated": false,
+          "proposal_id": "prop_b86a5450e62667ed8103b01e9161c0f3"
+        }
+      ],
+      "mutated": true,
+      "hops": 3,
+      "stopped_reason": "answered",
+      "receipts": []
+    },
+    "_provider_calls": [
+      {
+        "site": "agent-v1-turn.callModel",
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "purpose": "conversation",
+        "outcome": "allowed",
+        "duration_ms": 2572,
+        "usage": {
+          "raw": {
+            "input_tokens": 3158,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 3155
+            },
+            "output_tokens": 44,
+            "output_tokens_details": {
+              "reasoning_tokens": 8
+            },
+            "total_tokens": 3202
+          },
+          "input_tokens": 3158,
+          "output_tokens": 44,
+          "cached_input_tokens": 3155
+        }
+      },
+      {
+        "site": "agent-v1-turn.callModel",
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "purpose": "conversation",
+        "outcome": "allowed",
+        "duration_ms": 1910,
+        "usage": {
+          "raw": {
+            "input_tokens": 3301,
+            "input_tokens_details": {
+              "cache_write_tokens": 143,
+              "cached_tokens": 3155
+            },
+            "output_tokens": 64,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 3365
+          },
+          "input_tokens": 3301,
+          "output_tokens": 64,
+          "cached_input_tokens": 3155
+        }
+      },
+      {
+        "site": "agent-v1-turn.callStructured",
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "purpose": "construction",
+        "outcome": "allowed",
+        "duration_ms": 25718,
+        "usage": {
+          "raw": {
+            "input_tokens": 2548,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 2545
+            },
+            "output_tokens": 1749,
+            "output_tokens_details": {
+              "reasoning_tokens": 1034
+            },
+            "total_tokens": 4297
+          },
+          "input_tokens": 2548,
+          "output_tokens": 1749,
+          "cached_input_tokens": 2545
+        }
+      },
+      {
+        "site": "agent-v1-turn.callModel",
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "purpose": "conversation",
+        "outcome": "allowed",
+        "duration_ms": 9580,
+        "usage": {
+          "raw": {
+            "input_tokens": 4085,
+            "input_tokens_details": {
+              "cache_write_tokens": 784,
+              "cached_tokens": 3298
+            },
+            "output_tokens": 644,
+            "output_tokens_details": {
+              "reasoning_tokens": 212
+            },
+            "total_tokens": 4729
+          },
+          "input_tokens": 4085,
+          "output_tokens": 644,
+          "cached_input_tokens": 3298
+        }
+      },
+      {
+        "site": "agent-v1-turn.callModel",
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "purpose": "conversation",
+        "outcome": "allowed",
+        "duration_ms": 7714,
+        "usage": {
+          "raw": {
+            "input_tokens": 5348,
+            "input_tokens_details": {
+              "cache_write_tokens": 1263,
+              "cached_tokens": 4082
+            },
+            "output_tokens": 451,
+            "output_tokens_details": {
+              "reasoning_tokens": 86
+            },
+            "total_tokens": 5799
+          },
+          "input_tokens": 5348,
+          "output_tokens": 451,
+          "cached_input_tokens": 4082
+        }
+      }
+    ]
+  }
+}

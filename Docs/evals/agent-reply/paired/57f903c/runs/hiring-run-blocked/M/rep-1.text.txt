@@ -1,0 +1,7 @@
+The comparison cannot run yet because **“Continue Current Staffing” has no factor connection or stated effect**. That blocks the whole model, even though the Tech Lead and developer options are otherwise ready.
+
+For a genuine baseline, it would normally set:
+- Tech-lead capacity to **4 capacity points (0–10)**
+- Developer capacity to **8 capacity points (0–20)**
+
+Those are the current-position assumptions already used in the model, not new measurements. The model also requires that this option is linked to at least one factor before it can be analysed.

@@ -1,0 +1,218 @@
+{
+  "case": "hiring-construction",
+  "turn": "construction",
+  "purpose": "live-construction",
+  "status": 200,
+  "brief": "Should I hire a Tech lead or two developers to increase productivity?",
+  "scenario_id": "00000000-0000-4000-8000-000000000104",
+  "stopped_reason": "answered",
+  "hops": 3,
+  "tools_called": [
+    "get_canonical_state",
+    "build_model_from_brief",
+    "propose_starting_point"
+  ],
+  "served_tools_called": [
+    "get_canonical_state",
+    "build_model_from_brief",
+    "propose_starting_point"
+  ],
+  "tool_sequence_resembles_served": {
+    "starts_get_canonical_state_then_build": true,
+    "proposes_starting_point": true,
+    "no_run_or_write_on_build_turn": true,
+    "identical_to_served": true
+  },
+  "calls": [
+    {
+      "call": "01",
+      "purpose": "conversation",
+      "hop": 0,
+      "during_hop": null,
+      "final_reply_hop": false,
+      "paid": true,
+      "intercepted": false,
+      "http_status": 200,
+      "wall_ms": 2720.5,
+      "model": "gpt-5.6-terra",
+      "function_calls": [
+        "get_canonical_state"
+      ],
+      "usage": {
+        "input_tokens": 3127,
+        "cached_tokens": 3124,
+        "output_tokens": 46,
+        "reasoning_tokens": 10,
+        "total_tokens": 3173
+      }
+    },
+    {
+      "call": "02",
+      "purpose": "conversation",
+      "hop": 1,
+      "during_hop": null,
+      "final_reply_hop": false,
+      "paid": true,
+      "intercepted": false,
+      "http_status": 200,
+      "wall_ms": 2113.7,
+      "model": "gpt-5.6-terra",
+      "function_calls": [
+        "build_model_from_brief"
+      ],
+      "usage": {
+        "input_tokens": 3272,
+        "cached_tokens": 3124,
+        "output_tokens": 33,
+        "reasoning_tokens": 0,
+        "total_tokens": 3305
+      }
+    },
+    {
+      "call": "03",
+      "purpose": "construction",
+      "hop": null,
+      "during_hop": 1,
+      "final_reply_hop": false,
+      "paid": true,
+      "intercepted": false,
+      "http_status": 200,
+      "wall_ms": 24967.4,
+      "model": "gpt-5.6-terra",
+      "function_calls": [],
+      "usage": {
+        "input_tokens": 2517,
+        "cached_tokens": 2514,
+        "output_tokens": 1806,
+        "reasoning_tokens": 1034,
+        "total_tokens": 4323
+      }
+    },
+    {
+      "call": "04",
+      "purpose": "conversation",
+      "hop": 2,
+      "during_hop": null,
+      "final_reply_hop": false,
+      "paid": true,
+      "intercepted": false,
+      "http_status": 200,
+      "wall_ms": 8008.7,
+      "model": "gpt-5.6-terra",
+      "function_calls": [
+        "propose_starting_point"
+      ],
+      "usage": {
+        "input_tokens": 3994,
+        "cached_tokens": 3269,
+        "output_tokens": 642,
+        "reasoning_tokens": 167,
+        "total_tokens": 4636
+      }
+    },
+    {
+      "call": "05",
+      "purpose": "conversation",
+      "hop": 3,
+      "during_hop": null,
+      "final_reply_hop": true,
+      "paid": true,
+      "intercepted": false,
+      "http_status": 200,
+      "wall_ms": 5624.1,
+      "model": "gpt-5.6-terra",
+      "function_calls": [],
+      "usage": {
+        "input_tokens": 5272,
+        "cached_tokens": 3991,
+        "output_tokens": 311,
+        "reasoning_tokens": 0,
+        "total_tokens": 5583
+      }
+    }
+  ],
+  "paid_calls": 5,
+  "final_reply_call": "05",
+  "reply_writing_request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-05.request.json",
+  "final_hop_output_text_in_assistant_text": true,
+  "assistant_text": "I’ve set up a comparison model around **productivity**. It includes your two options plus two reference cases: maintain current staffing and hire one developer.\n\nThe model currently has six unknown starting factors, and **maintain current staffing currently changes nothing**, so it cannot yet be compared. I can use the following **assumptions to test — not measurements**:\n\n**Current starting point**\n- Developer hires: **0 hires**\n- Tech lead hires: **0 hires**\n- Engineering capacity: **50 / 100** — neutral placeholder; current baseline unknown\n- Coordination quality: **50 / 100** — neutral placeholder; current state unknown\n- Technical direction quality: **50 / 100** — neutral placeholder; current state unknown\n- Onboarding demand: **0 additional hires being onboarded**\n\n**What each option sets**\n- Hire Tech Lead: **1 Tech Lead hire**\n- Hire Two Developers: **2 developer hires**\n- Hire One Developer: **1 developer hire**\n- Maintain Current Staffing: **0 developer hires; 0 Tech Lead hires**\n\nThe model left out “zero developers” for the Tech Lead option (and equivalent non-actions for the developer options) because those options are not connected to those factors; that is appropriate, not an assumed effect.\n\nThe key real-world questions are: your existing team size, whether the Tech Lead would still deliver directly or chiefly lead, and your onboarding/mentoring capacity.\n\nWould you like to adopt these starting assumptions so we can examine what the model implies?\n\nThe model was saved. Questions this model does not answer yet: What is the current team size and current productivity baseline? How much delivery work would a new Tech Lead perform directly versus spend on leadership and coordination? What is the expected onboarding time and available mentoring capacity for additional developers?",
+  "suggested_actions": [
+    {
+      "id": "agent-approve-proposal:prop_b0f11feaf8db4ceb72371ab24350a1b3",
+      "label": "Use as starting assumptions",
+      "message": "Yes, use those."
+    },
+    {
+      "id": "agent-amend-proposal",
+      "label": "Change something first",
+      "message": "Before you apply it, I want to change some of it."
+    },
+    {
+      "id": "agent-run-analysis",
+      "label": "Run analysis",
+      "message": "Run analysis.",
+      "action_type": "run_analysis"
+    }
+  ],
+  "first_hop_input_tokens": {
+    "captured": 3127,
+    "served": 3127,
+    "equal": true
+  },
+  "served_provider_calls": [
+    {
+      "purpose": "conversation",
+      "duration_ms": 2147,
+      "input_tokens": 3127,
+      "output_tokens": 45,
+      "reasoning_tokens": 10
+    },
+    {
+      "purpose": "conversation",
+      "duration_ms": 1610,
+      "input_tokens": 3271,
+      "output_tokens": 33,
+      "reasoning_tokens": 0
+    },
+    {
+      "purpose": "construction",
+      "duration_ms": 8057,
+      "input_tokens": 2517,
+      "output_tokens": 815,
+      "reasoning_tokens": 0
+    },
+    {
+      "purpose": "conversation",
+      "duration_ms": 11685,
+      "input_tokens": 4121,
+      "output_tokens": 701,
+      "reasoning_tokens": 280
+    },
+    {
+      "purpose": "conversation",
+      "duration_ms": 6704,
+      "input_tokens": 5498,
+      "output_tokens": 379,
+      "reasoning_tokens": 0
+    }
+  ],
+  "conversation_instructions_equal_source_agent_instructions": true,
+  "internal_dispatch_unexpected": [],
+  "stored_graph_counts": {
+    "nodes": 14,
+    "edges": 19
+  },
+  "fidelity": {
+    "exact": [
+      "every provider request is built by the real route/runtime at 57f903c (AGENT_INSTRUCTIONS, toolsFor(\"full\"), BUILD_INSTRUCTIONS, buildCandidateSchema, BANKED_BUDGETS) and sent by its own callModel/callStructured",
+      "tool results come from the real capabilities (get_canonical_state, build_model_from_brief incl. admission and the size gate, propose_* incl. completeness admission)",
+      "registration applies the real node-kind normalisation, GraphStateIngress parse, projectGraphForPersistence and invariant check; reads return the real analysis-affecting and identity hashes",
+      "empty first turn: no history (a fresh scenario, as served)"
+    ],
+    "approximated": [
+      "the product double stands in for Supabase/PLoT: a guest scenario (no versions, no model_version receipt — served receipts were []), and the never_run analysis_state the served read returned after a build",
+      "a different generation from the served one: the model output (and so later hops) differs by draw; the served turn is a reference, not a replay",
+      "no turn_id: it drives only durable rows, never the provider request"
+    ]
+  }
+}

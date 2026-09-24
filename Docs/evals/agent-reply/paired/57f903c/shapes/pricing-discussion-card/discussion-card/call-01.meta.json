@@ -1,0 +1,60 @@
+{
+  "case": "pricing-discussion-card",
+  "turn": "discussion-card",
+  "call": "01",
+  "purpose": "conversation",
+  "hop": 0,
+  "during_hop": null,
+  "final_reply_hop": true,
+  "model": "gpt-5.6-terra",
+  "url": "https://api.openai.com/v1/responses",
+  "settings": {
+    "max_output_tokens": 3400,
+    "tool_choice": null,
+    "reasoning": null,
+    "text_format": null,
+    "temperature": null,
+    "tools_count": 9,
+    "tool_names": [
+      "get_canonical_state",
+      "propose_model_change",
+      "authorise_change",
+      "run_analysis",
+      "build_model_from_brief",
+      "propose_assumptions",
+      "propose_new_option",
+      "propose_option_interventions",
+      "propose_starting_point"
+    ],
+    "instructions_chars": 8590,
+    "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+    "input_items": 9,
+    "input_item_types": [
+      "role:user",
+      "role:assistant",
+      "role:user",
+      "role:assistant",
+      "role:user",
+      "function_call",
+      "function_call_output",
+      "message",
+      "role:user"
+    ]
+  },
+  "wall_ms": 0.2,
+  "http_status": 200,
+  "usage": null,
+  "output_function_calls": [],
+  "output_text_chars": 51,
+  "response_headers": {},
+  "intercepted": true,
+  "paid": false,
+  "guard": "openai-only-ok",
+  "guard_detail": {
+    "host": "api.openai.com",
+    "protocol": "https:",
+    "anthropic_env_absent": true,
+    "recorded_before_send": true
+  },
+  "recorded_at": "2026-09-24T19:39:55.768Z"
+}

@@ -1,0 +1,7 @@
+The model does not yet support a yes/no on raising Pro to £59.
+
+- It produced a comparative result, but no option can be put forward because the **monthly-churn constraint, “< 4%”**, could not be scored against the model’s churn output.
+- The **£20k MRR target** also was not assessed as a level: the model has no observed MRR baseline to place its projected changes against that target.
+- The comparison is most sensitive to the **monthly churn rate** assumption, currently **3%** and user-adopted; the analysis treats this as provisional rather than measured.
+
+So the apparent comparison is conditional on assumptions, not evidence that the £59 increase preserves churn below 4%.

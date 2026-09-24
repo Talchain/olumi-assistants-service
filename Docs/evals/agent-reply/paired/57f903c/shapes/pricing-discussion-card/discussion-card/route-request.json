@@ -1,0 +1,15 @@
+{
+  "method": "POST",
+  "url": "/agent/v1/turn",
+  "payload": {
+    "kind": "message",
+    "scenario_id": "00000000-0000-4000-8000-000000000110",
+    "stage": "frame",
+    "message": "Talk me through what would change if the link from Price-release alignment to Perceived Pro value were weaker or stronger. Don't change the model or re-run anything yet.",
+    "source": "chip",
+    "chip": {
+      "id": "evidence-apply-1790000000000"
+    }
+  },
+  "note": "in-process app.inject; no turn_id (it drives only the durable claim/answer rows, never the provider request)"
+}

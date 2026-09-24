@@ -1,0 +1,13 @@
+{
+  "method": "POST",
+  "url": "/agent/v1/turn",
+  "payload": {
+    "kind": "message",
+    "scenario_id": "00000000-0000-4000-8000-000000000104",
+    "stage": "frame",
+    "turn_class": "frame",
+    "message": "Should I hire a Tech lead or two developers to increase productivity?",
+    "source": "user"
+  },
+  "note": "in-process app.inject; no turn_id (it drives only the durable claim/answer rows, never the provider request)"
+}

@@ -1,0 +1,7 @@
+The £59-at-release path produces the highest MRR outcome in this model, but it does **not** answer whether it keeps churn below 4%.
+
+- That result rests on the adopted assumptions, especially the assumed **3% monthly churn**, **250 Pro subscribers**, and the feature’s perceived value. The comparison was robust under the modelled tests, though confidence remains provisional.
+- The churn constraint was not scored: “under 4%” could not be aligned with the model’s calculated churn measure, and the £20k MRR threshold was also not assessed against a baseline level.
+- The ordering can flip in a tested scenario if price–release alignment rises from the assumed **50%** to **97.92%**; this shows that change can flip the ordering, not that it is the most important assumption to investigate.
+
+So this is directional support for £59 with the release, not a conclusion that it satisfies your churn guardrail.

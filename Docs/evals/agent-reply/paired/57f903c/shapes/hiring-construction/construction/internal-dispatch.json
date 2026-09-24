@@ -1,0 +1,446 @@
+[
+  {
+    "at": "2026-09-24T19:40:38.603Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000104/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:40:40.724Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000104/versions",
+    "body": {
+      "limit": 200
+    },
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:40:40.725Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000104/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:41:05.708Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000104/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:41:05.714Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000104/graph/register",
+    "body": {
+      "graph": {
+        "nodes": [
+          {
+            "id": "decision_productivity",
+            "kind": "decision",
+            "label": "Decision: Productivity",
+            "provenance": "ai_inferred"
+          },
+          {
+            "id": "productivity",
+            "kind": "goal",
+            "label": "Productivity",
+            "provenance": "from_brief",
+            "goal_threshold_unit": "productivity",
+            "goal_threshold_frame": "level"
+          },
+          {
+            "id": "hire_tech_lead",
+            "kind": "option",
+            "label": "Hire Tech Lead",
+            "provenance": "from_brief",
+            "interventions": {
+              "tech_lead_hires": {
+                "value": 0.2,
+                "source": "brief_extraction"
+              }
+            }
+          },
+          {
+            "id": "hire_two_developers",
+            "kind": "option",
+            "label": "Hire Two Developers",
+            "provenance": "from_brief",
+            "interventions": {
+              "developer_hires": {
+                "value": 0.2,
+                "source": "brief_extraction"
+              }
+            }
+          },
+          {
+            "id": "maintain_current_staffing",
+            "kind": "option",
+            "label": "Maintain Current Staffing",
+            "provenance": "ai_inferred"
+          },
+          {
+            "id": "hire_one_developer",
+            "kind": "option",
+            "label": "Hire One Developer",
+            "provenance": "ai_inferred",
+            "interventions": {
+              "developer_hires": {
+                "value": 0.1,
+                "source": "cee_hypothesis"
+              }
+            }
+          },
+          {
+            "id": "developer_hires",
+            "kind": "factor",
+            "label": "Developer hires",
+            "provenance": "from_brief",
+            "category": "controllable",
+            "scale_frame": 10
+          },
+          {
+            "id": "tech_lead_hires",
+            "kind": "factor",
+            "label": "Tech lead hires",
+            "provenance": "from_brief",
+            "category": "controllable",
+            "scale_frame": 5
+          },
+          {
+            "id": "engineering_capacity",
+            "kind": "factor",
+            "label": "Engineering capacity",
+            "provenance": "ai_inferred",
+            "category": "observable",
+            "scale_frame": 100
+          },
+          {
+            "id": "coordination_quality",
+            "kind": "factor",
+            "label": "Coordination quality",
+            "provenance": "ai_inferred",
+            "category": "observable",
+            "scale_frame": 100
+          },
+          {
+            "id": "technical_direction_quality",
+            "kind": "factor",
+            "label": "Technical direction quality",
+            "provenance": "ai_inferred",
+            "category": "observable",
+            "scale_frame": 100
+          },
+          {
+            "id": "onboarding_demand",
+            "kind": "factor",
+            "label": "Onboarding demand",
+            "provenance": "ai_inferred",
+            "category": "observable",
+            "scale_frame": 10
+          },
+          {
+            "id": "onboarding_disruption",
+            "kind": "risk",
+            "label": "Onboarding disruption",
+            "provenance": "ai_inferred"
+          },
+          {
+            "id": "productive_throughput",
+            "kind": "outcome",
+            "label": "Productive throughput",
+            "provenance": "ai_inferred"
+          }
+        ],
+        "edges": [
+          {
+            "from": "decision_productivity",
+            "to": "hire_tech_lead",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "decision_productivity",
+            "to": "hire_two_developers",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "decision_productivity",
+            "to": "maintain_current_staffing",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "decision_productivity",
+            "to": "hire_one_developer",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "hire_tech_lead",
+            "to": "tech_lead_hires",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "hire_two_developers",
+            "to": "developer_hires",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "maintain_current_staffing",
+            "to": "developer_hires",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "maintain_current_staffing",
+            "to": "tech_lead_hires",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "hire_one_developer",
+            "to": "developer_hires",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "developer_hires",
+            "to": "engineering_capacity",
+            "strength": {
+              "mean": 0.5,
+              "std": 0.125
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            },
+            "defaulted": true
+          },
+          {
+            "from": "developer_hires",
+            "to": "onboarding_demand",
+            "strength": {
+              "mean": 0.5,
+              "std": 0.125
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            },
+            "defaulted": true
+          },
+          {
+            "from": "tech_lead_hires",
+            "to": "coordination_quality",
+            "strength": {
+              "mean": 0.5,
+              "std": 0.125
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            },
+            "defaulted": true
+          },
+          {
+            "from": "tech_lead_hires",
+            "to": "technical_direction_quality",
+            "strength": {
+              "mean": 0.5,
+              "std": 0.125
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            },
+            "defaulted": true
+          },
+          {
+            "from": "engineering_capacity",
+            "to": "productive_throughput",
+            "strength": {
+              "mean": 0.5,
+              "std": 0.125
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            },
+            "defaulted": true
+          },
+          {
+            "from": "coordination_quality",
+            "to": "productive_throughput",
+            "strength": {
+              "mean": 0.5,
+              "std": 0.125
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            },
+            "defaulted": true
+          },
+          {
+            "from": "technical_direction_quality",
+            "to": "productive_throughput",
+            "strength": {
+              "mean": 0.5,
+              "std": 0.125
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            },
+            "defaulted": true
+          },
+          {
+            "from": "onboarding_demand",
+            "to": "onboarding_disruption",
+            "strength": {
+              "mean": 0.5,
+              "std": 0.125
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            },
+            "defaulted": true
+          },
+          {
+            "from": "onboarding_disruption",
+            "to": "productive_throughput",
+            "strength": {
+              "mean": -0.5,
+              "std": 0.125
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "negative",
+            "provenance": {
+              "source": "cee_hypothesis"
+            },
+            "defaulted": true
+          },
+          {
+            "from": "productive_throughput",
+            "to": "productivity",
+            "strength": {
+              "mean": 0.5,
+              "std": 0.125
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            },
+            "defaulted": true
+          }
+        ]
+      },
+      "brief_text": "Should I hire a Tech lead or two developers to increase productivity?",
+      "operation_id": "00000000-0000-4000-8000-000000000105"
+    },
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:41:05.723Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000104/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:41:13.740Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000104/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:41:13.742Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000104/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:41:13.744Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000104/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:41:19.397Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000104/graph",
+    "body": {},
+    "status": 200
+  }
+]

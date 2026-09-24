@@ -1,0 +1,5 @@
+The analysis cannot support a yes/no price decision yet, because it did not test either of your stated success conditions reliably.
+
+- The **£20k MRR target** was not assessed: the model lacks an observed MRR baseline needed to compare its level target with the analysis output.
+- The **monthly churn <4%** constraint was also unscored: churn is modelled as a calculated result, not a directly comparable level.
+- The ordering is most sensitive to the user-adopted **3% monthly-churn assumption**, but that sensitivity is provisional and low-confidence. The model’s apparent comparison is therefore not enough to put any option forward.

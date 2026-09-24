@@ -1,0 +1,396 @@
+[
+  {
+    "at": "2026-09-24T19:42:09.245Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000102/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:42:10.875Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000102/versions",
+    "body": {
+      "limit": 200
+    },
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:42:10.875Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000102/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:42:45.334Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000102/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:42:45.336Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000102/graph/register",
+    "body": {
+      "graph": {
+        "nodes": [
+          {
+            "id": "decision_4_hour_wait_breaches",
+            "kind": "decision",
+            "label": "Decision: 4-hour wait breaches",
+            "provenance": "ai_inferred"
+          },
+          {
+            "id": "4_hour_wait_breaches",
+            "kind": "goal",
+            "label": "4-hour wait breaches",
+            "provenance": "ai_inferred",
+            "goal_threshold_unit": "% of nights",
+            "goal_threshold_frame": "level"
+          },
+          {
+            "id": "second_triage_nurse",
+            "kind": "option",
+            "label": "Second triage nurse",
+            "provenance": "from_brief",
+            "interventions": {
+              "night_shift_triage_staffing": {
+                "value": 0.2,
+                "source": "brief_extraction"
+              }
+            }
+          },
+          {
+            "id": "rapid_assessment_unit",
+            "kind": "option",
+            "label": "Rapid-assessment unit",
+            "provenance": "from_brief"
+          },
+          {
+            "id": "maintain_current_setup",
+            "kind": "option",
+            "label": "Maintain current setup",
+            "provenance": "ai_inferred"
+          },
+          {
+            "id": "phased_rapid_assessment",
+            "kind": "option",
+            "label": "Phased rapid assessment",
+            "provenance": "ai_inferred"
+          },
+          {
+            "id": "night_shift_triage_staffing",
+            "kind": "factor",
+            "label": "Night-shift triage staffing",
+            "provenance": "from_brief",
+            "category": "controllable",
+            "scale_frame": 10
+          },
+          {
+            "id": "rapid_assessment_capacity",
+            "kind": "factor",
+            "label": "Rapid-assessment capacity",
+            "provenance": "from_brief",
+            "category": "controllable",
+            "scale_frame": 200
+          },
+          {
+            "id": "time_to_triage",
+            "kind": "factor",
+            "label": "Time to triage",
+            "provenance": "ai_inferred",
+            "category": "observable",
+            "scale_frame": 240
+          },
+          {
+            "id": "time_to_clinician_assessment",
+            "kind": "factor",
+            "label": "Time to clinician assessment",
+            "provenance": "ai_inferred",
+            "category": "observable",
+            "scale_frame": 240
+          },
+          {
+            "id": "ed_patient_flow",
+            "kind": "factor",
+            "label": "ED patient flow",
+            "provenance": "ai_inferred",
+            "category": "observable",
+            "scale_frame": 300
+          },
+          {
+            "id": "operational_complexity",
+            "kind": "risk",
+            "label": "Operational complexity",
+            "provenance": "ai_inferred"
+          }
+        ],
+        "edges": [
+          {
+            "from": "decision_4_hour_wait_breaches",
+            "to": "second_triage_nurse",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "decision_4_hour_wait_breaches",
+            "to": "rapid_assessment_unit",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "decision_4_hour_wait_breaches",
+            "to": "maintain_current_setup",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "decision_4_hour_wait_breaches",
+            "to": "phased_rapid_assessment",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "second_triage_nurse",
+            "to": "night_shift_triage_staffing",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "rapid_assessment_unit",
+            "to": "rapid_assessment_capacity",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "maintain_current_setup",
+            "to": "night_shift_triage_staffing",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "maintain_current_setup",
+            "to": "rapid_assessment_capacity",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "phased_rapid_assessment",
+            "to": "rapid_assessment_capacity",
+            "strength": {
+              "mean": 1,
+              "std": 0.01
+            },
+            "exists_probability": 1,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            }
+          },
+          {
+            "from": "night_shift_triage_staffing",
+            "to": "time_to_triage",
+            "strength": {
+              "mean": -0.5,
+              "std": 0.125
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "negative",
+            "provenance": {
+              "source": "cee_hypothesis"
+            },
+            "defaulted": true
+          },
+          {
+            "from": "rapid_assessment_capacity",
+            "to": "time_to_clinician_assessment",
+            "strength": {
+              "mean": -0.5,
+              "std": 0.125
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "negative",
+            "provenance": {
+              "source": "cee_hypothesis"
+            },
+            "defaulted": true
+          },
+          {
+            "from": "rapid_assessment_capacity",
+            "to": "operational_complexity",
+            "strength": {
+              "mean": 0.5,
+              "std": 0.125
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "positive",
+            "provenance": {
+              "source": "cee_hypothesis"
+            },
+            "defaulted": true
+          },
+          {
+            "from": "time_to_triage",
+            "to": "ed_patient_flow",
+            "strength": {
+              "mean": -0.5,
+              "std": 0.125
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "negative",
+            "provenance": {
+              "source": "cee_hypothesis"
+            },
+            "defaulted": true
+          },
+          {
+            "from": "time_to_clinician_assessment",
+            "to": "ed_patient_flow",
+            "strength": {
+              "mean": -0.5,
+              "std": 0.125
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "negative",
+            "provenance": {
+              "source": "cee_hypothesis"
+            },
+            "defaulted": true
+          },
+          {
+            "from": "operational_complexity",
+            "to": "ed_patient_flow",
+            "strength": {
+              "mean": -0.5,
+              "std": 0.125
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "negative",
+            "provenance": {
+              "source": "cee_hypothesis"
+            },
+            "defaulted": true
+          },
+          {
+            "from": "ed_patient_flow",
+            "to": "4_hour_wait_breaches",
+            "strength": {
+              "mean": -0.5,
+              "std": 0.125
+            },
+            "exists_probability": 0.8,
+            "effect_direction": "negative",
+            "provenance": {
+              "source": "cee_hypothesis"
+            },
+            "defaulted": true
+          }
+        ]
+      },
+      "brief_text": "Should our hospital emergency department add a second triage nurse on night shifts or open a rapid-assessment unit, given 4-hour waits breach 30% of nights?",
+      "operation_id": "00000000-0000-4000-8000-000000000103"
+    },
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:42:45.338Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000102/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:42:53.891Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000102/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:42:53.892Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000102/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:42:53.893Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000102/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:42:58.932Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000102/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:42:58.933Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000102/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:42:58.934Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000102/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:43:04.832Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000102/graph",
+    "body": {},
+    "status": 200
+  }
+]

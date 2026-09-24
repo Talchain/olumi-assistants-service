@@ -1,0 +1,845 @@
+{
+  "status": 200,
+  "wall_ms": 57835,
+  "body": {
+    "response_version": 2,
+    "assistant_text": "I’ve built a comparison model around the shared outcome: reducing **4-hour wait breaches**, currently stated as occurring on **30% of nights**.\n\nIt includes your two options plus comparators: **maintain the current setup** and **phased rapid assessment**. The model still needs operating assumptions before it can compare them. I could not represent four relationships where the causal direction is not yet stated, including how operational complexity affects performance.\n\nTo make a first comparison possible, I propose these **starting assumptions — not measurements**. Please adopt or correct them:\n\n**Baseline assumptions**\n- Night-shift triage staffing: **1 nurse** — assumes one dedicated triage nurse overnight.\n- Rapid-assessment capacity: **0 patients/night** — assumes there is no current overnight unit.\n- Time to triage: **20 minutes** — placeholder for local typical performance.\n- Time to clinician assessment: **90 minutes** — placeholder for affected nights.\n- ED patient flow: **80 patients/night** — placeholder for overnight arrivals.\n\n**What each option would set**\n- Maintain current setup: **1 triage nurse** and **0 rapid-assessment patients/night**.\n- Phased rapid assessment: **10 rapid-assessment patients/night**.\n- Rapid-assessment unit: **20 rapid-assessment patients/night**.\n- The existing model already treats a second triage nurse as increasing triage staffing.\n\nThese are deliberately testable assumptions, based on the wording of the options and typical overnight scale—not evidence about your hospital. If you approve this full set, I’ll save it and run the comparison.\n\nThe model was saved. Questions this model does not answer yet: The stated current incidence is that 4-hour waits breach on 30% of nights; what reduction target should the decision be assessed against? What are the current night-shift triage staffing level, rapid-assessment capacity, triage time, clinician-assessment time, and ED patient flow? Would a rapid-assessment unit use additional staff or redeploy existing night-shift staff? What scope and operating hours would a phased rapid-assessment option have?",
+    "blocks": [],
+    "suggested_actions": [
+      {
+        "id": "agent-approve-proposal:prop_a6139b6dd1fb227bbe7ba79dde2c514c",
+        "label": "Use as starting assumptions",
+        "message": "Yes, use those."
+      },
+      {
+        "id": "agent-amend-proposal",
+        "label": "Change something first",
+        "message": "Before you apply it, I want to change some of it."
+      }
+    ],
+    "insights": [],
+    "stage_indicator": "frame",
+    "analysis_state": {
+      "run_state": {
+        "kind": "never_run"
+      },
+      "readiness": {
+        "status": "unknown",
+        "blockers": []
+      },
+      "leader_claim": {
+        "permitted": false,
+        "withheld_reason": "constraint_verdict_withheld"
+      },
+      "robustness": {},
+      "usable_for_prose": false,
+      "usable_for_chips": false,
+      "usable_for_followup": false,
+      "requires_rerun": false,
+      "blocked_unusable": false,
+      "contradictions": []
+    },
+    "graph_hash": "da823d206de3a338",
+    "analysis_ready": {
+      "options": [
+        {
+          "option_id": "second_triage_nurse",
+          "label": "Second triage nurse",
+          "status": "ready",
+          "interventions": {
+            "night_shift_triage_staffing": 0.2
+          },
+          "is_baseline": false,
+          "intervention_details": {
+            "night_shift_triage_staffing": {
+              "display_value": "2",
+              "normalised_value": 0.2,
+              "raw_value": 2
+            }
+          },
+          "status_reason": "1 intervention(s) ready for analysis"
+        },
+        {
+          "option_id": "rapid_assessment_unit",
+          "label": "Rapid-assessment unit",
+          "status": "needs_encoding",
+          "interventions": {},
+          "is_baseline": false,
+          "status_reason": "Connected to 1 factor(s); awaiting effect value(s)",
+          "user_questions": [
+            "Which factor(s) does \"Rapid-assessment unit\" change, and what value should each be set to?"
+          ]
+        },
+        {
+          "option_id": "maintain_current_setup",
+          "label": "Maintain current setup",
+          "status": "ready",
+          "interventions": {},
+          "is_baseline": true,
+          "status_reason": "Baseline: every factor holds at its observed value, so no effect values are needed",
+          "user_questions": [
+            "Which factor(s) does \"Maintain current setup\" change, and what value should each be set to?"
+          ]
+        },
+        {
+          "option_id": "phased_rapid_assessment",
+          "label": "Phased rapid assessment",
+          "status": "needs_encoding",
+          "interventions": {},
+          "is_baseline": false,
+          "status_reason": "Connected to 1 factor(s); awaiting effect value(s)",
+          "user_questions": [
+            "Which factor(s) does \"Phased rapid assessment\" change, and what value should each be set to?"
+          ]
+        }
+      ],
+      "goal_node_id": "4_hour_wait_breaches",
+      "status": "needs_user_input",
+      "blockers": [
+        {
+          "option_id": "rapid_assessment_unit",
+          "option_label": "Rapid-assessment unit",
+          "factor_id": "rapid_assessment_capacity",
+          "factor_label": "Rapid-assessment capacity",
+          "blocker_type": "missing_value",
+          "message": "Factor \"Rapid-assessment capacity\" needs a numeric value for option \"Rapid-assessment unit\"",
+          "suggested_action": "add_value"
+        },
+        {
+          "option_id": "maintain_current_setup",
+          "option_label": "Maintain current setup",
+          "factor_id": "night_shift_triage_staffing",
+          "factor_label": "Night-shift triage staffing",
+          "blocker_type": "missing_value",
+          "message": "Factor \"Night-shift triage staffing\" needs a numeric value for option \"Maintain current setup\"",
+          "suggested_action": "add_value"
+        },
+        {
+          "option_id": "maintain_current_setup",
+          "option_label": "Maintain current setup",
+          "factor_id": "rapid_assessment_capacity",
+          "factor_label": "Rapid-assessment capacity",
+          "blocker_type": "missing_value",
+          "message": "Factor \"Rapid-assessment capacity\" needs a numeric value for option \"Maintain current setup\"",
+          "suggested_action": "add_value"
+        },
+        {
+          "option_id": "phased_rapid_assessment",
+          "option_label": "Phased rapid assessment",
+          "factor_id": "rapid_assessment_capacity",
+          "factor_label": "Rapid-assessment capacity",
+          "blocker_type": "missing_value",
+          "message": "Factor \"Rapid-assessment capacity\" needs a numeric value for option \"Phased rapid assessment\"",
+          "suggested_action": "add_value"
+        }
+      ],
+      "bias_findings": [],
+      "readiness_issues": [
+        {
+          "issue_id": "semantic_1",
+          "repairability": "human_input_required",
+          "option_id": "rapid_assessment_unit",
+          "option_label": "Rapid-assessment unit",
+          "factor_id": "rapid_assessment_capacity",
+          "factor_label": "Rapid-assessment capacity",
+          "code": "MISSING_OPTION_VALUE",
+          "category": "option_values",
+          "message": "Factor \"Rapid-assessment capacity\" needs a numeric value for option \"Rapid-assessment unit\"",
+          "provenance": "unattributed",
+          "obligation": "offered"
+        },
+        {
+          "issue_id": "semantic_2",
+          "repairability": "human_input_required",
+          "option_id": "maintain_current_setup",
+          "option_label": "Maintain current setup",
+          "factor_id": "night_shift_triage_staffing",
+          "factor_label": "Night-shift triage staffing",
+          "code": "MISSING_OPTION_VALUE",
+          "category": "option_values",
+          "message": "Factor \"Night-shift triage staffing\" needs a numeric value for option \"Maintain current setup\"",
+          "provenance": "unattributed",
+          "obligation": "offered"
+        },
+        {
+          "issue_id": "semantic_3",
+          "repairability": "human_input_required",
+          "option_id": "maintain_current_setup",
+          "option_label": "Maintain current setup",
+          "factor_id": "rapid_assessment_capacity",
+          "factor_label": "Rapid-assessment capacity",
+          "code": "MISSING_OPTION_VALUE",
+          "category": "option_values",
+          "message": "Factor \"Rapid-assessment capacity\" needs a numeric value for option \"Maintain current setup\"",
+          "provenance": "unattributed",
+          "obligation": "offered"
+        },
+        {
+          "issue_id": "semantic_4",
+          "repairability": "human_input_required",
+          "option_id": "phased_rapid_assessment",
+          "option_label": "Phased rapid assessment",
+          "factor_id": "rapid_assessment_capacity",
+          "factor_label": "Rapid-assessment capacity",
+          "code": "MISSING_OPTION_VALUE",
+          "category": "option_values",
+          "message": "Factor \"Rapid-assessment capacity\" needs a numeric value for option \"Phased rapid assessment\"",
+          "provenance": "unattributed",
+          "obligation": "offered"
+        }
+      ],
+      "repair_proposal": {
+        "proposal_version": "readiness_repair_v1",
+        "complete": true,
+        "issue_ids": [
+          "semantic_1",
+          "semantic_2",
+          "semantic_3",
+          "semantic_4"
+        ],
+        "changes": [],
+        "unresolved_inputs": [
+          {
+            "issue_id": "semantic_1",
+            "kind": "option_effect_value",
+            "prompt": "Factor \"Rapid-assessment capacity\" needs a numeric value for option \"Rapid-assessment unit\"",
+            "option_id": "rapid_assessment_unit",
+            "factor_id": "rapid_assessment_capacity",
+            "obligation": "offered",
+            "provenance": "unattributed"
+          },
+          {
+            "issue_id": "semantic_2",
+            "kind": "option_effect_value",
+            "prompt": "Factor \"Night-shift triage staffing\" needs a numeric value for option \"Maintain current setup\"",
+            "option_id": "maintain_current_setup",
+            "factor_id": "night_shift_triage_staffing",
+            "obligation": "offered",
+            "provenance": "unattributed"
+          },
+          {
+            "issue_id": "semantic_3",
+            "kind": "option_effect_value",
+            "prompt": "Factor \"Rapid-assessment capacity\" needs a numeric value for option \"Maintain current setup\"",
+            "option_id": "maintain_current_setup",
+            "factor_id": "rapid_assessment_capacity",
+            "obligation": "offered",
+            "provenance": "unattributed"
+          },
+          {
+            "issue_id": "semantic_4",
+            "kind": "option_effect_value",
+            "prompt": "Factor \"Rapid-assessment capacity\" needs a numeric value for option \"Phased rapid assessment\"",
+            "option_id": "phased_rapid_assessment",
+            "factor_id": "rapid_assessment_capacity",
+            "obligation": "offered",
+            "provenance": "unattributed"
+          }
+        ]
+      },
+      "may_run": false,
+      "analysis_admission": {
+        "structurally_analysable": false,
+        "missing_important_inputs": [
+          {
+            "issue_id": "semantic_1",
+            "code": "MISSING_OPTION_VALUE",
+            "option_id": "rapid_assessment_unit",
+            "option_label": "Rapid-assessment unit",
+            "factor_id": "rapid_assessment_capacity",
+            "factor_label": "Rapid-assessment capacity",
+            "why_it_matters": "Factor \"Rapid-assessment capacity\" needs a numeric value for option \"Rapid-assessment unit\"",
+            "obligation": "offered",
+            "waived_by_exclusion": false
+          },
+          {
+            "issue_id": "semantic_2",
+            "code": "MISSING_OPTION_VALUE",
+            "option_id": "maintain_current_setup",
+            "option_label": "Maintain current setup",
+            "factor_id": "night_shift_triage_staffing",
+            "factor_label": "Night-shift triage staffing",
+            "why_it_matters": "Factor \"Night-shift triage staffing\" needs a numeric value for option \"Maintain current setup\"",
+            "obligation": "offered",
+            "waived_by_exclusion": false
+          },
+          {
+            "issue_id": "semantic_3",
+            "code": "MISSING_OPTION_VALUE",
+            "option_id": "maintain_current_setup",
+            "option_label": "Maintain current setup",
+            "factor_id": "rapid_assessment_capacity",
+            "factor_label": "Rapid-assessment capacity",
+            "why_it_matters": "Factor \"Rapid-assessment capacity\" needs a numeric value for option \"Maintain current setup\"",
+            "obligation": "offered",
+            "waived_by_exclusion": false
+          },
+          {
+            "issue_id": "semantic_4",
+            "code": "MISSING_OPTION_VALUE",
+            "option_id": "phased_rapid_assessment",
+            "option_label": "Phased rapid assessment",
+            "factor_id": "rapid_assessment_capacity",
+            "factor_label": "Rapid-assessment capacity",
+            "why_it_matters": "Factor \"Rapid-assessment capacity\" needs a numeric value for option \"Phased rapid assessment\"",
+            "obligation": "offered",
+            "waived_by_exclusion": false
+          }
+        ],
+        "semantic_quality_sufficient": false,
+        "permitted_analysis_mode": "none",
+        "reasons": [
+          {
+            "field": "structurally_analysable",
+            "code": "MODEL_HAS_BLOCKERS",
+            "message": "Review all 4 readiness issues together before analysis."
+          },
+          {
+            "field": "missing_important_inputs",
+            "code": "MODEL_HAS_BLOCKERS",
+            "message": "Olumi filled in the gaps here itself; you can review them, and nothing is required of you."
+          },
+          {
+            "field": "semantic_quality_sufficient",
+            "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+            "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures can be shown as provisional, but no option can be called the leader and no result can be called stable or robust until you have set at least one of them."
+          },
+          {
+            "field": "permitted_analysis_mode",
+            "code": "MODEL_HAS_BLOCKERS",
+            "message": "This model cannot be analysed yet."
+          }
+        ],
+        "graph_hash": "da823d206de3a33852a5d69a52c4dc7263964901faffbe5106098d05cc196084",
+        "semantic_signals": {
+          "confidence_parameters_total": 14,
+          "confidence_parameters_user_stated": 0,
+          "confidence_parameters_machine_authored": 7,
+          "confidence_parameters_unattributed": 7,
+          "material_parameters_total": 7,
+          "material_parameters_user_stated": 0,
+          "intervened_factor_baselines_total": 1,
+          "intervened_factor_baselines_user_stated": 0,
+          "material_parameters_awaiting_user_node_ids": [
+            "4_hour_wait_breaches",
+            "night_shift_triage_staffing",
+            "time_to_triage",
+            "ed_patient_flow"
+          ],
+          "goal_target_stated": false
+        }
+      },
+      "current_graph_hash": "da823d206de3a338"
+    },
+    "draft_graph": {
+      "nodes": [
+        {
+          "id": "decision_4_hour_wait_breaches",
+          "kind": "decision",
+          "label": "Decision: 4-hour wait breaches",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "4_hour_wait_breaches",
+          "kind": "goal",
+          "label": "4-hour wait breaches",
+          "provenance": "ai_inferred",
+          "goal_threshold_unit": "% of nights",
+          "goal_threshold_frame": "level"
+        },
+        {
+          "id": "second_triage_nurse",
+          "kind": "option",
+          "label": "Second triage nurse",
+          "provenance": "from_brief",
+          "interventions": {
+            "night_shift_triage_staffing": {
+              "value": 0.2,
+              "source": "brief_extraction"
+            }
+          }
+        },
+        {
+          "id": "rapid_assessment_unit",
+          "kind": "option",
+          "label": "Rapid-assessment unit",
+          "provenance": "from_brief"
+        },
+        {
+          "id": "maintain_current_setup",
+          "kind": "option",
+          "label": "Maintain current setup",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "phased_rapid_assessment",
+          "kind": "option",
+          "label": "Phased rapid assessment",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "night_shift_triage_staffing",
+          "kind": "factor",
+          "label": "Night-shift triage staffing",
+          "provenance": "from_brief",
+          "category": "controllable",
+          "scale_frame": 10
+        },
+        {
+          "id": "rapid_assessment_capacity",
+          "kind": "factor",
+          "label": "Rapid-assessment capacity",
+          "provenance": "from_brief",
+          "category": "controllable",
+          "scale_frame": 200
+        },
+        {
+          "id": "time_to_triage",
+          "kind": "factor",
+          "label": "Time to triage",
+          "provenance": "ai_inferred",
+          "category": "observable",
+          "scale_frame": 240
+        },
+        {
+          "id": "time_to_clinician_assessment",
+          "kind": "factor",
+          "label": "Time to clinician assessment",
+          "provenance": "ai_inferred",
+          "category": "observable",
+          "scale_frame": 240
+        },
+        {
+          "id": "ed_patient_flow",
+          "kind": "factor",
+          "label": "ED patient flow",
+          "provenance": "ai_inferred",
+          "category": "observable",
+          "scale_frame": 300
+        },
+        {
+          "id": "operational_complexity",
+          "kind": "risk",
+          "label": "Operational complexity",
+          "provenance": "ai_inferred"
+        }
+      ],
+      "edges": [
+        {
+          "from": "decision_4_hour_wait_breaches",
+          "to": "second_triage_nurse",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "decision_4_hour_wait_breaches",
+          "to": "rapid_assessment_unit",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "decision_4_hour_wait_breaches",
+          "to": "maintain_current_setup",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "decision_4_hour_wait_breaches",
+          "to": "phased_rapid_assessment",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "second_triage_nurse",
+          "to": "night_shift_triage_staffing",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "rapid_assessment_unit",
+          "to": "rapid_assessment_capacity",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "maintain_current_setup",
+          "to": "night_shift_triage_staffing",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "maintain_current_setup",
+          "to": "rapid_assessment_capacity",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "phased_rapid_assessment",
+          "to": "rapid_assessment_capacity",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "night_shift_triage_staffing",
+          "to": "time_to_triage",
+          "strength": {
+            "mean": -0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "defaulted": true
+        },
+        {
+          "from": "rapid_assessment_capacity",
+          "to": "time_to_clinician_assessment",
+          "strength": {
+            "mean": -0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "defaulted": true
+        },
+        {
+          "from": "rapid_assessment_capacity",
+          "to": "operational_complexity",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "defaulted": true
+        },
+        {
+          "from": "time_to_triage",
+          "to": "ed_patient_flow",
+          "strength": {
+            "mean": -0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "defaulted": true
+        },
+        {
+          "from": "time_to_clinician_assessment",
+          "to": "ed_patient_flow",
+          "strength": {
+            "mean": -0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "defaulted": true
+        },
+        {
+          "from": "operational_complexity",
+          "to": "ed_patient_flow",
+          "strength": {
+            "mean": -0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "defaulted": true
+        },
+        {
+          "from": "ed_patient_flow",
+          "to": "4_hour_wait_breaches",
+          "strength": {
+            "mean": -0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis"
+          },
+          "defaulted": true
+        }
+      ],
+      "node_count": 12,
+      "edge_count": 16
+    },
+    "_diagnostic_trace": {
+      "exit_path": "agent_lane_v1",
+      "agent_mode": "full",
+      "hops": 4,
+      "stopped_reason": "answered",
+      "tools_called": [
+        "get_canonical_state",
+        "build_model_from_brief",
+        "propose_starting_point",
+        "propose_starting_point"
+      ],
+      "write_claims_removed": 0
+    },
+    "_agent": {
+      "session_id": "sess_00000000-0000-4000-8000-000000000102",
+      "mode": "full",
+      "tool_calls": [
+        {
+          "name": "get_canonical_state",
+          "ok": true,
+          "mutated": false
+        },
+        {
+          "name": "build_model_from_brief",
+          "ok": true,
+          "mutated": true
+        },
+        {
+          "name": "propose_starting_point",
+          "ok": false,
+          "mutated": false,
+          "refusal": "incomplete_starting_point"
+        },
+        {
+          "name": "propose_starting_point",
+          "ok": true,
+          "mutated": false,
+          "proposal_id": "prop_a6139b6dd1fb227bbe7ba79dde2c514c"
+        }
+      ],
+      "mutated": true,
+      "hops": 4,
+      "stopped_reason": "answered",
+      "receipts": []
+    },
+    "_provider_calls": [
+      {
+        "site": "agent-v1-turn.callModel",
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "purpose": "conversation",
+        "outcome": "allowed",
+        "duration_ms": 2238,
+        "usage": {
+          "raw": {
+            "input_tokens": 3148,
+            "input_tokens_details": {
+              "cache_write_tokens": 38,
+              "cached_tokens": 3107
+            },
+            "output_tokens": 48,
+            "output_tokens_details": {
+              "reasoning_tokens": 8
+            },
+            "total_tokens": 3196
+          },
+          "input_tokens": 3148,
+          "output_tokens": 48,
+          "cached_input_tokens": 3107
+        }
+      },
+      {
+        "site": "agent-v1-turn.callModel",
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "purpose": "conversation",
+        "outcome": "allowed",
+        "duration_ms": 1629,
+        "usage": {
+          "raw": {
+            "input_tokens": 3295,
+            "input_tokens_details": {
+              "cache_write_tokens": 147,
+              "cached_tokens": 3145
+            },
+            "output_tokens": 54,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 3349
+          },
+          "input_tokens": 3295,
+          "output_tokens": 54,
+          "cached_input_tokens": 3145
+        }
+      },
+      {
+        "site": "agent-v1-turn.callStructured",
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "purpose": "construction",
+        "outcome": "allowed",
+        "duration_ms": 34457,
+        "usage": {
+          "raw": {
+            "input_tokens": 2538,
+            "input_tokens_details": {
+              "cache_write_tokens": 38,
+              "cached_tokens": 2497
+            },
+            "output_tokens": 2638,
+            "output_tokens_details": {
+              "reasoning_tokens": 1855
+            },
+            "total_tokens": 5176
+          },
+          "input_tokens": 2538,
+          "output_tokens": 2638,
+          "cached_input_tokens": 2497
+        }
+      },
+      {
+        "site": "agent-v1-turn.callModel",
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "purpose": "conversation",
+        "outcome": "allowed",
+        "duration_ms": 8552,
+        "usage": {
+          "raw": {
+            "input_tokens": 4153,
+            "input_tokens_details": {
+              "cache_write_tokens": 858,
+              "cached_tokens": 3292
+            },
+            "output_tokens": 488,
+            "output_tokens_details": {
+              "reasoning_tokens": 217
+            },
+            "total_tokens": 4641
+          },
+          "input_tokens": 4153,
+          "output_tokens": 488,
+          "cached_input_tokens": 3292
+        }
+      },
+      {
+        "site": "agent-v1-turn.callModel",
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "purpose": "conversation",
+        "outcome": "allowed",
+        "duration_ms": 5038,
+        "usage": {
+          "raw": {
+            "input_tokens": 5069,
+            "input_tokens_details": {
+              "cache_write_tokens": 916,
+              "cached_tokens": 4150
+            },
+            "output_tokens": 438,
+            "output_tokens_details": {
+              "reasoning_tokens": 44
+            },
+            "total_tokens": 5507
+          },
+          "input_tokens": 5069,
+          "output_tokens": 438,
+          "cached_input_tokens": 4150
+        }
+      },
+      {
+        "site": "agent-v1-turn.callModel",
+        "provider": "openai",
+        "model": "gpt-5.6-terra",
+        "purpose": "conversation",
+        "outcome": "allowed",
+        "duration_ms": 5896,
+        "usage": {
+          "raw": {
+            "input_tokens": 6161,
+            "input_tokens_details": {
+              "cache_write_tokens": 1092,
+              "cached_tokens": 5066
+            },
+            "output_tokens": 325,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 6486
+          },
+          "input_tokens": 6161,
+          "output_tokens": 325,
+          "cached_input_tokens": 5066
+        }
+      }
+    ]
+  }
+}

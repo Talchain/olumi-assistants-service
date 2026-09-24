@@ -1,0 +1,8 @@
+The comparison did not run because **“Continue Current Staffing” has no factor connection or stated level**, which blocks the whole model.
+
+The three hiring options are ready:
+- **Tech Lead:** Tech-lead capacity set to **8 capacity points (0–10)**
+- **Two Developers:** Developer capacity set to **12 capacity points (0–20)**
+- **One Developer:** Developer capacity set to **10 capacity points (0–20)**
+
+To include the status-quo option, the model needs what it actually changes. The natural interpretation is that it holds current capacities at their existing levels — but that is an assumption, not yet represented.

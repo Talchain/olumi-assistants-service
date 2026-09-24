@@ -1,0 +1,195 @@
+{
+  "case": "pricing-run-complete",
+  "turn": "explicit-run",
+  "purpose": "fp3-explicit-run",
+  "status": 200,
+  "fast_path": "run",
+  "tools_called": [
+    "run_analysis"
+  ],
+  "calls": [
+    {
+      "call": "01",
+      "purpose": "conversation",
+      "hop": 0,
+      "during_hop": null,
+      "final_reply_hop": true,
+      "paid": false,
+      "intercepted": true,
+      "http_status": 200,
+      "wall_ms": 1.8,
+      "model": "gpt-5.6-terra",
+      "function_calls": [],
+      "usage": null
+    }
+  ],
+  "reply_writing_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/explicit-run/call-01.request.json",
+  "assistant_text_matches_served": true,
+  "served_reference": {
+    "files": [
+      {
+        "path": "~/olumi-ai-quality-20260924/captures/57f903c-pricing/construction.request.json",
+        "sha256": "175cd922030a44045ac53645e0c0a7dc7a22fbb39548c430b3a9dc625748ffd1"
+      },
+      {
+        "path": "~/olumi-ai-quality-20260924/captures/57f903c-pricing/construction.response.json",
+        "sha256": "aa6ad10fc47d6ad99d5ab648a9de36e703c838a236d91c756eb704f9ea1605f8"
+      },
+      {
+        "path": "~/olumi-ai-quality-20260924/captures/57f903c-pricing/approve.request.json",
+        "sha256": "ba0aed455c849efe4d980f86af7985e5a63b6603abebf0d06f9e477b3224add1"
+      },
+      {
+        "path": "~/olumi-ai-quality-20260924/captures/57f903c-pricing/approve.response.json",
+        "sha256": "ed9a22aa1cf3dfcf1011b8814032a6a01e8f6519621149a54e41884c26a5b89d"
+      },
+      {
+        "path": "~/olumi-ai-quality-20260924/captures/57f903c-pricing/explicit-run.request.json",
+        "sha256": "ef6427ad23c654e08ea9c75b5934a625392c43fe8deb6f4085fb2f8e3ae50fdc"
+      },
+      {
+        "path": "~/olumi-ai-quality-20260924/captures/57f903c-pricing/explicit-run.response.json",
+        "sha256": "a601f2735df834e3486cd0b6c22d4d2920890fc19a3f6b743afc767dfe64507d"
+      }
+    ],
+    "served_input_tokens": 13561,
+    "served_usage": {
+      "raw": {
+        "input_tokens": 13561,
+        "input_tokens_details": {
+          "cache_write_tokens": 11126,
+          "cached_tokens": 2432
+        },
+        "output_tokens": 745,
+        "output_tokens_details": {
+          "reasoning_tokens": 463
+        },
+        "total_tokens": 14306
+      },
+      "input_tokens": 13561,
+      "output_tokens": 745,
+      "cached_input_tokens": 2432
+    }
+  },
+  "reconstruction": {
+    "graph_candidates": [
+      {
+        "name": "draft_graph_as_served",
+        "analysis_hash": "0eaecb02ebe33f65",
+        "matches_served_graph_hash": true
+      },
+      {
+        "name": "draft_graph_projected_for_persistence",
+        "analysis_hash": "0eaecb02ebe33f65",
+        "matches_served_graph_hash": true
+      }
+    ],
+    "graph_chosen": "draft_graph_as_served",
+    "served_graph_hash": "0eaecb02ebe33f65",
+    "readiness_mode": "derived_from_graph",
+    "derived_vs_served_analysis_ready_diff_keys": []
+  },
+  "checks": {
+    "instructions_sha256_equals_source_fp3": {
+      "pass": true,
+      "captured": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64",
+      "source": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64"
+    },
+    "instructions_end_with_exported_v02": {
+      "pass": true
+    },
+    "v02_sha256_prefix_is_banked_3d979e8406693be4": {
+      "pass": true,
+      "source": "3d979e8406693be42d3b340fd245d76a501c4b1c191d5ffaa1353f2f0380ba32"
+    },
+    "source_constants_equal_module_exports": {
+      "pass": true
+    },
+    "tool_choice_none": {
+      "pass": true
+    },
+    "tools_empty": {
+      "pass": true
+    },
+    "model_is_gpt_5_6_terra": {
+      "pass": true
+    },
+    "max_output_tokens_3400": {
+      "pass": true
+    },
+    "no_reasoning_field": {
+      "pass": true
+    },
+    "input_item_shape": {
+      "pass": true,
+      "types": [
+        "role:user",
+        "role:assistant",
+        "role:user",
+        "role:assistant",
+        "role:user",
+        "function_call",
+        "function_call_output"
+      ]
+    },
+    "seeded_history_is_served_durable_turns": {
+      "pass": true,
+      "user_texts": [
+        "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
+        "Yes, use those.",
+        "Run analysis"
+      ]
+    },
+    "run_pair_present": {
+      "pass": true
+    },
+    "canonical_state_analysis_state_equals_served": {
+      "pass": true
+    },
+    "canonical_state_analysis_ready_equals_served": {
+      "pass": true,
+      "diff_keys": [],
+      "readiness_mode": "derived_from_graph"
+    },
+    "leader_claim_reaches_interpreter": {
+      "pass": true,
+      "leader_claim": {
+        "permitted": false,
+        "withheld_reason": "constraint_verdict_withheld",
+        "separation": "separated"
+      }
+    },
+    "ran_flags": {
+      "ran": true,
+      "status": "ready",
+      "what_is_missing": "",
+      "result_present": true,
+      "options": 3,
+      "blockers": []
+    },
+    "scenario_id_in_request": {
+      "present": false,
+      "note": "informational: the served scenario id is reused in-process"
+    }
+  },
+  "fidelity": {
+    "exact": [
+      "instructions: AGENT_INSTRUCTIONS + \"\\n\\n\" + INTERPRET_ONLY_CONSTRAINT + \"\\n\\n\" + INTERPRETER_V02_BANKED, built by the real route at 57f903c and sha256-checked against the same constants re-derived from the source text",
+      "model / max_output_tokens / tools [] / tool_choice none, from the real callModel (BANKED_BUDGETS conversation: gpt-5.6-terra, 3400); no reasoning field",
+      "the run pair: the real route builds the user message, the synthetic function_call run_analysis and its function_call_output from the real run_analysis capability",
+      "canonical_state.analysis_state: the SERVED explicit-run analysis_state, handed through the real readBackState",
+      "canonical_state.analysis_ready: see checks.canonical_state_analysis_ready_equals_served (derived by the real readBackState from the served graph when it reproduces the served value; otherwise served verbatim, then re-stamped by the route)",
+      "the user message \"Run analysis\" and chip {\"action_type\":\"run_analysis\"} exactly as served"
+    ],
+    "approximated": [
+      "HISTORY: seeded from the two durable turns (construction, approve) exactly as the route's own restart seeding (historyFromDurableTurns over store.readRecent) presents them — user text + the FINAL served assistant_text. The served process held the construction turn's in-process items instead (reasoning items, get_canonical_state/build_model_from_brief/propose_starting_point function_call + function_call_output pairs, and the model's pre-post-processing final message). Those raw tool items are NOT reproducible from the served captures; this is the only history approximation.",
+      "ran.what_is_missing: the internal conventional Run's assistant_text was not captured and the Agent route echoes it nowhere in its response, so the double answers \"\" (the served value is unknown).",
+      "ran.status / ran.options / ran.blockers: read from the SERVED explicit-run analysis_ready (the route's final readback), standing in for the internal conventional turn's own analysis_ready, which was not captured.",
+      "ran.result: the SERVED analysis_result block from the final readback (bound to the same fact), standing in for the block the internal conventional turn returned.",
+      "call_id: fast_run_<Fastify req.id> — same shape as served (default Fastify id \"req-N\"), different N.",
+      "no turn_id is sent in-process: turn_id drives only the durable claim/answer rows, never the provider request.",
+      "the intercepted answer is the SERVED assistant_text (the route's post-processing on this path is a pass-through: no write narration, no stripping) so the turn completes; no model output was generated here."
+    ]
+  },
+  "readRecent_calls": 1
+}

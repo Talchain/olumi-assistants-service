@@ -1,0 +1,7 @@
+It depends on whether leadership/coordination is the bottleneck, rather than raw delivery capacity.
+
+- I’ve mapped both hires (plus one-developer and no-hire comparators) to Productivity. The model has no disconnected options, but needs six starting assumptions before it can compare them.
+- Proposed assumptions—not measurements: current engineering capacity, coordination and technical direction each **50/100**; current additional hires **0 developers**, **0 Tech Leads**, and onboarding demand **0**.
+- The options set hiring levels as named: Tech Lead = **1 Tech Lead**; Two Developers = **2 developers**; One Developer = **1 developer**; Maintain staffing = **0 of each**. The 50/100 figures are neutral placeholders because your current baseline is unknown.
+
+These are my assumptions to adopt or correct; one approval applies them all.

@@ -1,0 +1,92 @@
+{
+  "case": "pricing-discussion-card",
+  "turn": "discussion-card",
+  "purpose": "discussion-card-first-hop",
+  "status": 200,
+  "session": "sess_00000000-0000-4000-8000-000000000110 (same in-process session as pricing-run-complete, immediately after it)",
+  "message": "Talk me through what would change if the link from Price-release alignment to Perceived Pro value were weaker or stronger. Don't change the model or re-run anything yet.",
+  "chip": {
+    "id": "evidence-apply-1790000000000"
+  },
+  "fragile_link": {
+    "from_label": "Price-release alignment",
+    "to_label": "Perceived Pro value",
+    "edge_id": "price_release_alignment->perceived_pro_value",
+    "switch_probability": 0.4432,
+    "source": "analysis_result.enrichment.robustness.fragile_edges (max switch_probability, visible)"
+  },
+  "calls": [
+    {
+      "call": "01",
+      "purpose": "conversation",
+      "hop": 0,
+      "during_hop": null,
+      "final_reply_hop": true,
+      "paid": false,
+      "intercepted": true,
+      "http_status": 200,
+      "wall_ms": 0.2,
+      "model": "gpt-5.6-terra",
+      "function_calls": [],
+      "usage": null
+    }
+  ],
+  "reply_writing_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-discussion-card/discussion-card/call-01.request.json",
+  "reply_writing_note": "FIRST hop only. In a live turn this hop may instead call a tool (e.g. get_canonical_state), in which case a later hop writes the reply; the paired test replays this first-hop request.",
+  "checks": {
+    "instructions_equal_source_agent_instructions": {
+      "pass": true,
+      "captured": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+      "source": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc"
+    },
+    "tools_are_full_mode_toolset": {
+      "pass": true,
+      "names": [
+        "get_canonical_state",
+        "propose_model_change",
+        "authorise_change",
+        "run_analysis",
+        "build_model_from_brief",
+        "propose_assumptions",
+        "propose_new_option",
+        "propose_option_interventions",
+        "propose_starting_point"
+      ]
+    },
+    "no_tool_choice": {
+      "pass": true
+    },
+    "last_item_is_the_card_message": {
+      "pass": true
+    },
+    "carries_the_fp3_run_pair_and_answer": {
+      "pass": true
+    },
+    "not_a_fast_path": {
+      "pass": true
+    },
+    "input_item_types": [
+      "role:user",
+      "role:assistant",
+      "role:user",
+      "role:assistant",
+      "role:user",
+      "function_call",
+      "function_call_output",
+      "message",
+      "role:user"
+    ]
+  },
+  "fidelity": {
+    "exact": [
+      "instructions = AGENT_INSTRUCTIONS (sha256-checked against the source text)",
+      "tools = toolsFor(\"full\") (9 tools), no tool_choice",
+      "model / max_output_tokens from the real callModel",
+      "the card message and chip id exactly as specified; typed as neither approval nor Run, so it takes runAgentTurn"
+    ],
+    "approximated": [
+      "history = the pricing FP3 turn's items (durable-seeded construction + approve text, the FP3 run pair, the SERVED interpretation as a plain assistant message with no reasoning item or id) — see pricing-run-complete fidelity",
+      "source \"chip\" and no turn_class are assumptions about the UI payload; the route reads neither"
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+It depends chiefly on whether your bottleneck is leadership/coordination or hands-on delivery; the model cannot yet distinguish them.
+
+I’ve set up the comparison, including “maintain staffing” and “hire one developer” as inferred alternatives. It needs six starting assumptions. These are **assumptions to test, not measurements**:
+
+- Current capacity, coordination, and technical direction: **50/100** each (neutral placeholders); current additional developer and Tech Lead hires: **0**; onboarding demand: **0**.
+- “Maintain current staffing” would set both additional developer and Tech Lead hires to **0**.
+
+These rest on no team baseline being provided. Adopt these starting assumptions?

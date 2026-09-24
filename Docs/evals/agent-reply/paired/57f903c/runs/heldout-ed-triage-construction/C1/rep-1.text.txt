@@ -1,0 +1,9 @@
+I’ve set up the comparison around reducing 4-hour wait breaches, currently reported on 30% of nights.
+
+To make it analysable, these are **my assumptions, not measurements**—adopt or correct them:
+
+- Current overnight state: 1 triage nurse; no rapid-assessment capacity; 80 patients/night; 20 minutes to triage; 90 minutes to clinician assessment.
+- Options: maintain current setup = 1 nurse and 0 rapid-assessment patients/night; phased rapid assessment = 10 patients/night; full rapid-assessment unit = 20 patients/night.
+- A second triage nurse is already represented as increasing triage staffing.
+
+Say **yes** to adopt this complete starting point, or tell me which figures to alter.

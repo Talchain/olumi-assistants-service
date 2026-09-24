@@ -1,0 +1,3 @@
+The £59-with-release scenario produced the strongest MRR outcome in this model, but it cannot answer your actual question yet: the **under-4% monthly churn limit was not assessed**. Monthly churn is modelled as a calculated effect, while the 4% limit is a level; without a compatible observed churn baseline/frame, the comparison cannot test whether any option stays below it.
+
+The result is otherwise robust under the tested assumptions, but it rests materially on the assumed churn rate, subscriber base, and perceived value of the release. It also assumes that *more* MRR is the goal direction.

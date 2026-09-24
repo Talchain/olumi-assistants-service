@@ -1,0 +1,20 @@
+I’ve set up a comparison model around the stated problem: **4-hour waits breach on 30% of nights**. That figure is user-provided evidence. The model also includes a baseline and a phased rapid-assessment alternative, so the two headline choices can be judged against doing nothing and a lower-commitment version.
+
+It still needs operating assumptions before it can compare options. I propose the following as **assumptions to adopt or correct — not measurements**:
+
+**Current overnight position**
+- Night-shift triage staffing: **1 nurse** — assumes one dedicated triage nurse.
+- Rapid-assessment capacity: **0 patients/night** — assumes no overnight unit currently operates.
+- Time to triage: **20 minutes** — placeholder for the local typical time.
+- Time to clinician assessment: **90 minutes** — placeholder for affected nights.
+- ED patient flow: **80 patients/night** — placeholder for overnight arrivals.
+
+**What each option would set**
+- **Second triage nurse:** already represented as increasing dedicated triage staffing to **2 nurses**.
+- **Maintain current setup:** **1 triage nurse** and **0 rapid-assessment patients/night**.
+- **Phased rapid assessment:** **10 rapid-assessment patients/night**.
+- **Rapid-assessment unit:** **20 rapid-assessment patients/night**.
+
+The 20- and 10-patient capacities are especially consequential assumptions: they depend on scope, staffing, diagnostics access, and whether the unit uses new or redeployed staff.
+
+If you approve this complete starting point, I’ll save it and run the comparison.

@@ -1,0 +1,82 @@
+{
+  "case": "hiring-construction",
+  "turn": "construction",
+  "call": "04",
+  "purpose": "conversation",
+  "hop": 2,
+  "during_hop": null,
+  "final_reply_hop": false,
+  "model": "gpt-5.6-terra",
+  "url": "https://api.openai.com/v1/responses",
+  "settings": {
+    "max_output_tokens": 3400,
+    "tool_choice": null,
+    "reasoning": null,
+    "text_format": null,
+    "temperature": null,
+    "tools_count": 9,
+    "tool_names": [
+      "get_canonical_state",
+      "propose_model_change",
+      "authorise_change",
+      "run_analysis",
+      "build_model_from_brief",
+      "propose_assumptions",
+      "propose_new_option",
+      "propose_option_interventions",
+      "propose_starting_point"
+    ],
+    "instructions_chars": 8590,
+    "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+    "input_items": 6,
+    "input_item_types": [
+      "role:user",
+      "reasoning",
+      "function_call",
+      "function_call_output",
+      "function_call",
+      "function_call_output"
+    ]
+  },
+  "wall_ms": 8008.7,
+  "http_status": 200,
+  "usage": {
+    "input_tokens": 3994,
+    "cached_tokens": 3269,
+    "cache_write_tokens": 722,
+    "output_tokens": 642,
+    "reasoning_tokens": 167,
+    "total_tokens": 4636,
+    "raw": {
+      "input_tokens": 3994,
+      "input_tokens_details": {
+        "cache_write_tokens": 722,
+        "cached_tokens": 3269
+      },
+      "output_tokens": 642,
+      "output_tokens_details": {
+        "reasoning_tokens": 167
+      },
+      "total_tokens": 4636
+    }
+  },
+  "output_function_calls": [
+    "propose_starting_point"
+  ],
+  "output_text_chars": 0,
+  "response_headers": {
+    "x-request-id": "req_7716881c2cfb4f929ded8446100e196b",
+    "openai-processing-ms": "7691",
+    "openai-version": "2020-10-01"
+  },
+  "intercepted": false,
+  "paid": true,
+  "guard": "openai-only-ok",
+  "guard_detail": {
+    "host": "api.openai.com",
+    "protocol": "https:",
+    "anthropic_env_absent": true,
+    "recorded_before_send": true
+  },
+  "recorded_at": "2026-09-24T19:41:13.736Z"
+}

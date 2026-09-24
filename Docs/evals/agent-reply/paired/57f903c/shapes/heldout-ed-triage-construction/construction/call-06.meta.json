@@ -1,0 +1,86 @@
+{
+  "case": "heldout-ed-triage-construction",
+  "turn": "construction",
+  "call": "06",
+  "purpose": "conversation",
+  "hop": 4,
+  "during_hop": null,
+  "final_reply_hop": true,
+  "model": "gpt-5.6-terra",
+  "url": "https://api.openai.com/v1/responses",
+  "settings": {
+    "max_output_tokens": 3400,
+    "tool_choice": null,
+    "reasoning": null,
+    "text_format": null,
+    "temperature": null,
+    "tools_count": 9,
+    "tool_names": [
+      "get_canonical_state",
+      "propose_model_change",
+      "authorise_change",
+      "run_analysis",
+      "build_model_from_brief",
+      "propose_assumptions",
+      "propose_new_option",
+      "propose_option_interventions",
+      "propose_starting_point"
+    ],
+    "instructions_chars": 8590,
+    "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+    "input_items": 12,
+    "input_item_types": [
+      "role:user",
+      "reasoning",
+      "function_call",
+      "function_call_output",
+      "function_call",
+      "function_call_output",
+      "reasoning",
+      "function_call",
+      "function_call_output",
+      "reasoning",
+      "function_call",
+      "function_call_output"
+    ]
+  },
+  "wall_ms": 5893.9,
+  "http_status": 200,
+  "usage": {
+    "input_tokens": 6161,
+    "cached_tokens": 5066,
+    "cache_write_tokens": 1092,
+    "output_tokens": 325,
+    "reasoning_tokens": 0,
+    "total_tokens": 6486,
+    "raw": {
+      "input_tokens": 6161,
+      "input_tokens_details": {
+        "cache_write_tokens": 1092,
+        "cached_tokens": 5066
+      },
+      "output_tokens": 325,
+      "output_tokens_details": {
+        "reasoning_tokens": 0
+      },
+      "total_tokens": 6486
+    }
+  },
+  "output_function_calls": [],
+  "output_text_chars": 1605,
+  "response_headers": {
+    "x-request-id": "req_dd03c9439b3f4cb8847ce9d0b4c22560",
+    "openai-processing-ms": "5562",
+    "openai-version": "2020-10-01"
+  },
+  "intercepted": false,
+  "paid": true,
+  "guard": "openai-only-ok",
+  "guard_detail": {
+    "host": "api.openai.com",
+    "protocol": "https:",
+    "anthropic_env_absent": true,
+    "recorded_before_send": true
+  },
+  "recorded_at": "2026-09-24T19:43:04.831Z"
+}

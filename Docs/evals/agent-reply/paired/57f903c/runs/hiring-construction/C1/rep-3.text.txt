@@ -1,0 +1,8 @@
+It depends on whether your constraint is leadership or hands-on capacity.
+
+- The model includes both choices, plus “one developer” and no-hire comparators. It treats coordination, technical direction, capacity and onboarding disruption as the main mechanisms.
+- Your stated facts contain no current-team baseline, delivery bottleneck, or onboarding capacity, so it needs assumptions before a comparison is meaningful.
+
+I’ve prepared these **assumptions, not measurements**, for one approval: current capacity, coordination and technical direction at **50/100**; no hires currently onboarding; and current additional hires at **0**. “Maintain current staffing” sets both additional developer and Tech Lead hires to **0**.
+
+The attempted zero-level settings for the other options were not recorded because those options are not linked to those factors. Adopt these starting assumptions?

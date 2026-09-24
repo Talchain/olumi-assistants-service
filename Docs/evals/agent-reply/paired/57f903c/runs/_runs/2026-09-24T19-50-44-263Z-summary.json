@@ -1,0 +1,1387 @@
+{
+  "schema": "agent-reply-paired-summary.v1",
+  "ledger": "Docs/evals/agent-reply/paired/57f903c/runs/_runs/2026-09-24T19-50-44-263Z-ledger.json",
+  "recorded_reps": 44,
+  "text_files": 44,
+  "text_sha256": {
+    "heldout-ed-triage-construction/C1/rep-1": "7ce244ff0ad31ae17b4fa86c5424e7974a05690cca66c311f462defd005fca29",
+    "heldout-ed-triage-construction/C1/rep-2": "c50285089f701d0d02ad70ed3c38a707436d82744f54d32ff60962c6c60667f3",
+    "heldout-ed-triage-construction/C1/rep-3": "be8fc8890f8804e665a15483c13c1bebbad0fd3737ee74ba6d280164e9322fd0",
+    "heldout-ed-triage-construction/M/rep-1": "bcdf405a730147c717a241545bb76151dbe20176ac5a5fc7d7dcae60e8444447",
+    "heldout-ed-triage-construction/M/rep-2": "967a1893f08e623ca291efcd0778d351d3d96ef2efc3f0ca4f03c11b340e5223",
+    "heldout-ed-triage-construction/M/rep-3": "4ab4217439a4992db95024e2de310d7688c644035a36d9d0f1a03cbf74312825",
+    "hiring-construction/C1/rep-1": "7f277ff209f9a200dd0359ac8adccf59e61882d86535ebda4173d6c4c2d27e62",
+    "hiring-construction/C1/rep-2": "98f437640b50f0007ee115f983125e17ac8d2b50f497d4c673e35c25bf700c76",
+    "hiring-construction/C1/rep-3": "b1b7defb78b0f492c1e83f6afee5c5af4a92b66f1d69a970dcfdce82fc4763bd",
+    "hiring-construction/M/rep-1": "a98620dface4e774ab319f7c29265feec45070fb0eb554cd8014b2d5e5b3ec32",
+    "hiring-construction/M/rep-2": "5fe7eb0b589268a0f90abd26cb144f511beb8c821879c54e76aa33ac945876ae",
+    "hiring-construction/M/rep-3": "d08b5a0f55596f696ebd8f8012dcbf276b671f0efd3ea5f27b1f0fe0419a7707",
+    "hiring-run-blocked/C1/rep-1": "138813a55f9fe61d957f18c739115e80ca616a33d617641ecef7a2c315b9c2ba",
+    "hiring-run-blocked/C1/rep-2": "fab6bfbcbf21b0685f39a1452f5b4e224f24d803026d2625c861813c23cc35fe",
+    "hiring-run-blocked/C1/rep-3": "ac7eb60894c311773bf18625068334199c967c9e7b4cb07328f13f6219181346",
+    "hiring-run-blocked/C2/rep-1": "742d9b559f58df38d234fa0269e591602b3d764795b7d03dcb905ea6d66e6832",
+    "hiring-run-blocked/C2/rep-2": "8bf2596a8b7807191ca651396671a8ddad0d8611e9a42749c4ecf9b02aabe539",
+    "hiring-run-blocked/C2/rep-3": "24ba67880a4e65c1a9f3ba1ea27b1469eb3878848d2260ab28871b37cd916d1d",
+    "hiring-run-blocked/M/rep-1": "6e8a7e608a22e2032a2a4cdcf01ccade51aceacf4fd668753a6f53161daea39a",
+    "hiring-run-blocked/M/rep-2": "fda4890276bdad53603709e6528ee857d496bb1f87d99e029cba11af9bcc798a",
+    "hiring-run-blocked/M/rep-3": "53ea4117369f9e8d766129e565712248b6bc73c6f1b5e7d2fcf98f968e779562",
+    "pricing-construction/C1/rep-1": "4b91aa7bc6fa6f69f26af8f0608a2147e9663896a09d329db2cf3570af1c618e",
+    "pricing-construction/C1/rep-2": "be23cf11f7b3097fbe85ff144b12ca1339c45bfe1ed41b9cc7268bab25c31eb1",
+    "pricing-construction/C1/rep-3": "245b9d7af961512dab4e32256612c15b6411d292c5b8e7d1cd78e55681446aa6",
+    "pricing-construction/M/rep-1": "2fe0c50afa1c2b6dc2b060b5a6f4e5d361f2f0ce4bde63c03fbfa5df5ea3677a",
+    "pricing-construction/M/rep-2": "a1c6dd58631579027f769e0ade4d200c1924d9ecdb6f935638ea9ba4ed7296ad",
+    "pricing-construction/M/rep-3": "406e6b7c3c9781d988f2166d4cc0db86c1f746c83c4aeaac7f8d597696b0b128",
+    "pricing-discussion-card/C1/rep-1": "ce7ce10a137e41e723d9c57e88a9924817fe9d2614aa08fb262756e927dd1fab",
+    "pricing-discussion-card/C1/rep-2": "2b62f0348dc7ca84c6df6d86098ffbae31730374f777b34379540f2bb46448e8",
+    "pricing-discussion-card/C1/rep-3": "ab1fc2104026f772e28bab39b92cd041a6f8782e7b1daeb33db558443ec22b29",
+    "pricing-discussion-card/M/rep-1": "7a2748383eff5154a248d94d233b0eb2c71d6f6a3739cdbe333146ed090b5ac7",
+    "pricing-discussion-card/M/rep-2": "af5fd137e38e50aaa4c5b680ae133dbd716e4b582ac4eb0bc5318803afddfd34",
+    "pricing-discussion-card/M/rep-3": "6f1a4c5a88283309be28e9f5c9cccf85023658c0fce31c5ff2d638796f8bb17d",
+    "pricing-run-complete/C1/rep-1": "5fa8539dc256fe81a77436473e0c55b7de5b3a3daa06985b929a1fdcc033a2cf",
+    "pricing-run-complete/C1/rep-2": "bb21b8048a79baa3fba50d8b695975e36432319d26bc6fc7f5c72918d0fe58fd",
+    "pricing-run-complete/C1/rep-3": "8ebaabb7ac3d56dcdb0c1007d0231e87991ccef21b3d8ed24415a21d54ba2185",
+    "pricing-run-complete/C2/rep-1": "7732aa79d785ac11525affc777c169dd8848fa2304ca55cbe67573f957e8333f",
+    "pricing-run-complete/C2/rep-2": "53d606f257f3c88378303c7b7fada2f4b4f56eff666b9b1eb7c6f0973a619a08",
+    "pricing-run-complete/C2/rep-3": "b571f9810769903109e40dd0937c0c915ff7ade683bed96758c4f66093ccf0c2",
+    "pricing-run-complete/M/rep-1": "839b1ed1d3cb588e38a07ecb06fd435d126255b61b77c700c5587d28418a2974",
+    "pricing-run-complete/M/rep-2": "92ab0b2f5213d982c1a76f9157072167b4ff712441cd978498a20b422989abd0",
+    "pricing-run-complete/M/rep-3": "cb158b506df8a2927f0a5dbf25462df016fda2ea1215ff0ffc520164afd71206",
+    "pricing-run-complete/M/rep-4": "d4b2f90eccb09682cacb78dec69d1d6df24119cfa6364333eeffa0ec93267407",
+    "pricing-run-complete/M/rep-5": "96109dd6ac00f95dbaa4cbbdd061cf8a81ccf12839d0063ecdac3872bbe4f49f"
+  },
+  "request_identity": {
+    "all_rest_equal": true,
+    "all_instructions_equal_arm_file": true,
+    "M_whole_body_equal": true,
+    "non_M_whole_body_differs": true,
+    "all_auth_redacted": true,
+    "rows": [
+      {
+        "case": "heldout-ed-triage-construction",
+        "arm": "C1",
+        "rep": 1,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "heldout-ed-triage-construction",
+        "arm": "C1",
+        "rep": 2,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "heldout-ed-triage-construction",
+        "arm": "C1",
+        "rep": 3,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "heldout-ed-triage-construction",
+        "arm": "M",
+        "rep": 1,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "heldout-ed-triage-construction",
+        "arm": "M",
+        "rep": 2,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "heldout-ed-triage-construction",
+        "arm": "M",
+        "rep": 3,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "hiring-construction",
+        "arm": "C1",
+        "rep": 1,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "hiring-construction",
+        "arm": "C1",
+        "rep": 2,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "hiring-construction",
+        "arm": "C1",
+        "rep": 3,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "hiring-construction",
+        "arm": "M",
+        "rep": 1,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "hiring-construction",
+        "arm": "M",
+        "rep": 2,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "hiring-construction",
+        "arm": "M",
+        "rep": 3,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "hiring-run-blocked",
+        "arm": "C1",
+        "rep": 1,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "hiring-run-blocked",
+        "arm": "C1",
+        "rep": 2,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "hiring-run-blocked",
+        "arm": "C1",
+        "rep": 3,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "hiring-run-blocked",
+        "arm": "C2",
+        "rep": 1,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "hiring-run-blocked",
+        "arm": "C2",
+        "rep": 2,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "hiring-run-blocked",
+        "arm": "C2",
+        "rep": 3,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "hiring-run-blocked",
+        "arm": "M",
+        "rep": 1,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "hiring-run-blocked",
+        "arm": "M",
+        "rep": 2,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "hiring-run-blocked",
+        "arm": "M",
+        "rep": 3,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-construction",
+        "arm": "C1",
+        "rep": 1,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-construction",
+        "arm": "C1",
+        "rep": 2,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-construction",
+        "arm": "C1",
+        "rep": 3,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-construction",
+        "arm": "M",
+        "rep": 1,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-construction",
+        "arm": "M",
+        "rep": 2,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-construction",
+        "arm": "M",
+        "rep": 3,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-discussion-card",
+        "arm": "C1",
+        "rep": 1,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-discussion-card",
+        "arm": "C1",
+        "rep": 2,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-discussion-card",
+        "arm": "C1",
+        "rep": 3,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-discussion-card",
+        "arm": "M",
+        "rep": 1,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-discussion-card",
+        "arm": "M",
+        "rep": 2,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-discussion-card",
+        "arm": "M",
+        "rep": 3,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-run-complete",
+        "arm": "C1",
+        "rep": 1,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-run-complete",
+        "arm": "C1",
+        "rep": 2,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-run-complete",
+        "arm": "C1",
+        "rep": 3,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-run-complete",
+        "arm": "C2",
+        "rep": 1,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-run-complete",
+        "arm": "C2",
+        "rep": 2,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-run-complete",
+        "arm": "C2",
+        "rep": 3,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": false,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-run-complete",
+        "arm": "M",
+        "rep": 1,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-run-complete",
+        "arm": "M",
+        "rep": 2,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-run-complete",
+        "arm": "M",
+        "rep": 3,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-run-complete",
+        "arm": "M",
+        "rep": 4,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      },
+      {
+        "case": "pricing-run-complete",
+        "arm": "M",
+        "rep": 5,
+        "rest_equal_to_capture": true,
+        "instructions_equal_arm_file": true,
+        "whole_body_equal_to_capture": true,
+        "auth_redacted": true
+      }
+    ]
+  },
+  "per_arm": [
+    {
+      "key": "heldout-ed-triage-construction/C1",
+      "n": 3,
+      "reps": [
+        1,
+        2,
+        3
+      ],
+      "http": [
+        200,
+        200,
+        200
+      ],
+      "outcome_types": [
+        "text",
+        "text",
+        "text"
+      ],
+      "function_calls": [
+        [],
+        [],
+        []
+      ],
+      "words": [
+        101,
+        89,
+        101
+      ],
+      "mean_words": 97,
+      "input_tokens": [
+        6388,
+        6388,
+        6388
+      ],
+      "cached_tokens": [
+        3334,
+        6385,
+        6385
+      ],
+      "output_tokens": [
+        158,
+        147,
+        160
+      ],
+      "reasoning_tokens": [
+        0,
+        0,
+        0
+      ],
+      "wall_ms": [
+        3012.1,
+        2915.6,
+        3161.3
+      ],
+      "mean_wall_ms": 3029.7,
+      "response_status": [
+        "completed",
+        "completed",
+        "completed"
+      ]
+    },
+    {
+      "key": "heldout-ed-triage-construction/M",
+      "n": 3,
+      "reps": [
+        1,
+        2,
+        3
+      ],
+      "http": [
+        200,
+        200,
+        200
+      ],
+      "outcome_types": [
+        "text",
+        "text",
+        "text"
+      ],
+      "function_calls": [
+        [],
+        [],
+        []
+      ],
+      "words": [
+        280,
+        224,
+        216
+      ],
+      "mean_words": 240,
+      "input_tokens": [
+        6161,
+        6161,
+        6161
+      ],
+      "cached_tokens": [
+        6158,
+        6158,
+        6158
+      ],
+      "output_tokens": [
+        392,
+        326,
+        328
+      ],
+      "reasoning_tokens": [
+        0,
+        0,
+        0
+      ],
+      "wall_ms": [
+        6780.6,
+        7589.9,
+        5777.6
+      ],
+      "mean_wall_ms": 6716,
+      "response_status": [
+        "completed",
+        "completed",
+        "completed"
+      ]
+    },
+    {
+      "key": "hiring-construction/C1",
+      "n": 3,
+      "reps": [
+        1,
+        2,
+        3
+      ],
+      "http": [
+        200,
+        200,
+        200
+      ],
+      "outcome_types": [
+        "text",
+        "text",
+        "text"
+      ],
+      "function_calls": [
+        [],
+        [],
+        []
+      ],
+      "words": [
+        94,
+        121,
+        122
+      ],
+      "mean_words": 112.3,
+      "input_tokens": [
+        5499,
+        5499,
+        5499
+      ],
+      "cached_tokens": [
+        3334,
+        5496,
+        5496
+      ],
+      "output_tokens": [
+        406,
+        364,
+        342
+      ],
+      "reasoning_tokens": [
+        260,
+        186,
+        171
+      ],
+      "wall_ms": [
+        8358.1,
+        6894.4,
+        6835.7
+      ],
+      "mean_wall_ms": 7362.7,
+      "response_status": [
+        "completed",
+        "completed",
+        "completed"
+      ]
+    },
+    {
+      "key": "hiring-construction/M",
+      "n": 3,
+      "reps": [
+        1,
+        2,
+        3
+      ],
+      "http": [
+        200,
+        200,
+        200
+      ],
+      "outcome_types": [
+        "text",
+        "text",
+        "text"
+      ],
+      "function_calls": [
+        [],
+        [],
+        []
+      ],
+      "words": [
+        211,
+        250,
+        248
+      ],
+      "mean_words": 236.3,
+      "input_tokens": [
+        5272,
+        5272,
+        5272
+      ],
+      "cached_tokens": [
+        5269,
+        5269,
+        5269
+      ],
+      "output_tokens": [
+        307,
+        351,
+        358
+      ],
+      "reasoning_tokens": [
+        0,
+        0,
+        0
+      ],
+      "wall_ms": [
+        5725.3,
+        6372.8,
+        6399.3
+      ],
+      "mean_wall_ms": 6165.8,
+      "response_status": [
+        "completed",
+        "completed",
+        "completed"
+      ]
+    },
+    {
+      "key": "hiring-run-blocked/C1",
+      "n": 3,
+      "reps": [
+        1,
+        2,
+        3
+      ],
+      "http": [
+        200,
+        200,
+        200
+      ],
+      "outcome_types": [
+        "text",
+        "text",
+        "text"
+      ],
+      "function_calls": [
+        [],
+        [],
+        []
+      ],
+      "words": [
+        67,
+        84,
+        73
+      ],
+      "mean_words": 74.7,
+      "input_tokens": [
+        4773,
+        4773,
+        4773
+      ],
+      "cached_tokens": [
+        2659,
+        4770,
+        4770
+      ],
+      "output_tokens": [
+        91,
+        113,
+        91
+      ],
+      "reasoning_tokens": [
+        0,
+        0,
+        0
+      ],
+      "wall_ms": [
+        2732.2,
+        3502.1,
+        3004.8
+      ],
+      "mean_wall_ms": 3079.7,
+      "response_status": [
+        "completed",
+        "completed",
+        "completed"
+      ]
+    },
+    {
+      "key": "hiring-run-blocked/C2",
+      "n": 3,
+      "reps": [
+        1,
+        2,
+        3
+      ],
+      "http": [
+        200,
+        200,
+        200
+      ],
+      "outcome_types": [
+        "text",
+        "text",
+        "text"
+      ],
+      "function_calls": [
+        [],
+        [],
+        []
+      ],
+      "words": [
+        55,
+        54,
+        63
+      ],
+      "mean_words": 57.3,
+      "input_tokens": [
+        5010,
+        5010,
+        5010
+      ],
+      "cached_tokens": [
+        0,
+        5007,
+        5007
+      ],
+      "output_tokens": [
+        82,
+        77,
+        91
+      ],
+      "reasoning_tokens": [
+        0,
+        0,
+        0
+      ],
+      "wall_ms": [
+        2353.1,
+        2773.1,
+        2629.4
+      ],
+      "mean_wall_ms": 2585.2,
+      "response_status": [
+        "completed",
+        "completed",
+        "completed"
+      ]
+    },
+    {
+      "key": "hiring-run-blocked/M",
+      "n": 3,
+      "reps": [
+        1,
+        2,
+        3
+      ],
+      "http": [
+        200,
+        200,
+        200
+      ],
+      "outcome_types": [
+        "text",
+        "text",
+        "text"
+      ],
+      "function_calls": [
+        [],
+        [],
+        []
+      ],
+      "words": [
+        88,
+        94,
+        102
+      ],
+      "mean_words": 94.7,
+      "input_tokens": [
+        4546,
+        4546,
+        4546
+      ],
+      "cached_tokens": [
+        2432,
+        4543,
+        4543
+      ],
+      "output_tokens": [
+        119,
+        136,
+        156
+      ],
+      "reasoning_tokens": [
+        0,
+        0,
+        0
+      ],
+      "wall_ms": [
+        3028.3,
+        3165.3,
+        3270
+      ],
+      "mean_wall_ms": 3154.5,
+      "response_status": [
+        "completed",
+        "completed",
+        "completed"
+      ]
+    },
+    {
+      "key": "pricing-construction/C1",
+      "n": 3,
+      "reps": [
+        1,
+        2,
+        3
+      ],
+      "http": [
+        200,
+        200,
+        200
+      ],
+      "outcome_types": [
+        "text",
+        "text",
+        "text"
+      ],
+      "function_calls": [
+        [],
+        [],
+        []
+      ],
+      "words": [
+        113,
+        91,
+        99
+      ],
+      "mean_words": 101,
+      "input_tokens": [
+        5575,
+        5575,
+        5575
+      ],
+      "cached_tokens": [
+        3334,
+        5572,
+        5572
+      ],
+      "output_tokens": [
+        345,
+        136,
+        160
+      ],
+      "reasoning_tokens": [
+        170,
+        0,
+        0
+      ],
+      "wall_ms": [
+        6371.8,
+        3076.7,
+        3915.7
+      ],
+      "mean_wall_ms": 4454.7,
+      "response_status": [
+        "completed",
+        "completed",
+        "completed"
+      ]
+    },
+    {
+      "key": "pricing-construction/M",
+      "n": 3,
+      "reps": [
+        1,
+        2,
+        3
+      ],
+      "http": [
+        200,
+        200,
+        200
+      ],
+      "outcome_types": [
+        "text",
+        "text",
+        "text"
+      ],
+      "function_calls": [
+        [],
+        [],
+        []
+      ],
+      "words": [
+        200,
+        214,
+        203
+      ],
+      "mean_words": 205.7,
+      "input_tokens": [
+        5348,
+        5348,
+        5348
+      ],
+      "cached_tokens": [
+        5345,
+        5345,
+        5345
+      ],
+      "output_tokens": [
+        309,
+        321,
+        305
+      ],
+      "reasoning_tokens": [
+        0,
+        0,
+        0
+      ],
+      "wall_ms": [
+        6331.2,
+        6236.6,
+        5854.9
+      ],
+      "mean_wall_ms": 6140.9,
+      "response_status": [
+        "completed",
+        "completed",
+        "completed"
+      ]
+    },
+    {
+      "key": "pricing-discussion-card/C1",
+      "n": 3,
+      "reps": [
+        1,
+        2,
+        3
+      ],
+      "http": [
+        200,
+        200,
+        200
+      ],
+      "outcome_types": [
+        "function_call",
+        "function_call",
+        "function_call"
+      ],
+      "function_calls": [
+        [
+          "get_canonical_state"
+        ],
+        [
+          "get_canonical_state"
+        ],
+        [
+          "get_canonical_state"
+        ]
+      ],
+      "words": [
+        0,
+        0,
+        0
+      ],
+      "mean_words": 0,
+      "input_tokens": [
+        10939,
+        10939,
+        10939
+      ],
+      "cached_tokens": [
+        0,
+        10936,
+        10936
+      ],
+      "output_tokens": [
+        37,
+        31,
+        50
+      ],
+      "reasoning_tokens": [
+        0,
+        0,
+        9
+      ],
+      "wall_ms": [
+        2820.7,
+        2623.4,
+        1914.7
+      ],
+      "mean_wall_ms": 2452.9,
+      "response_status": [
+        "completed",
+        "completed",
+        "completed"
+      ]
+    },
+    {
+      "key": "pricing-discussion-card/M",
+      "n": 3,
+      "reps": [
+        1,
+        2,
+        3
+      ],
+      "http": [
+        200,
+        200,
+        200
+      ],
+      "outcome_types": [
+        "function_call",
+        "function_call",
+        "function_call"
+      ],
+      "function_calls": [
+        [
+          "get_canonical_state"
+        ],
+        [
+          "get_canonical_state"
+        ],
+        [
+          "get_canonical_state"
+        ]
+      ],
+      "words": [
+        0,
+        0,
+        0
+      ],
+      "mean_words": 0,
+      "input_tokens": [
+        10712,
+        10712,
+        10712
+      ],
+      "cached_tokens": [
+        3155,
+        10709,
+        10709
+      ],
+      "output_tokens": [
+        51,
+        55,
+        41
+      ],
+      "reasoning_tokens": [
+        11,
+        10,
+        0
+      ],
+      "wall_ms": [
+        2371.8,
+        2561.6,
+        1925.4
+      ],
+      "mean_wall_ms": 2286.3,
+      "response_status": [
+        "completed",
+        "completed",
+        "completed"
+      ]
+    },
+    {
+      "key": "pricing-run-complete/C1",
+      "n": 3,
+      "reps": [
+        1,
+        2,
+        3
+      ],
+      "http": [
+        200,
+        200,
+        200
+      ],
+      "outcome_types": [
+        "text",
+        "text",
+        "text"
+      ],
+      "function_calls": [
+        [],
+        [],
+        []
+      ],
+      "words": [
+        144,
+        111,
+        99
+      ],
+      "mean_words": 118,
+      "input_tokens": [
+        9945,
+        9945,
+        9945
+      ],
+      "cached_tokens": [
+        0,
+        9942,
+        9942
+      ],
+      "output_tokens": [
+        196,
+        327,
+        494
+      ],
+      "reasoning_tokens": [
+        0,
+        172,
+        356
+      ],
+      "wall_ms": [
+        4685.7,
+        8086.6,
+        11391.5
+      ],
+      "mean_wall_ms": 8054.6,
+      "response_status": [
+        "completed",
+        "completed",
+        "completed"
+      ]
+    },
+    {
+      "key": "pricing-run-complete/C2",
+      "n": 3,
+      "reps": [
+        1,
+        2,
+        3
+      ],
+      "http": [
+        200,
+        200,
+        200
+      ],
+      "outcome_types": [
+        "text",
+        "text",
+        "text"
+      ],
+      "function_calls": [
+        [],
+        [],
+        []
+      ],
+      "words": [
+        107,
+        101,
+        94
+      ],
+      "mean_words": 100.7,
+      "input_tokens": [
+        10182,
+        10182,
+        10182
+      ],
+      "cached_tokens": [
+        2896,
+        10179,
+        10179
+      ],
+      "output_tokens": [
+        277,
+        133,
+        195
+      ],
+      "reasoning_tokens": [
+        130,
+        0,
+        67
+      ],
+      "wall_ms": [
+        6013.1,
+        2887.9,
+        4442.6
+      ],
+      "mean_wall_ms": 4447.9,
+      "response_status": [
+        "completed",
+        "completed",
+        "completed"
+      ]
+    },
+    {
+      "key": "pricing-run-complete/M",
+      "n": 5,
+      "reps": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "http": [
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "outcome_types": [
+        "text",
+        "text",
+        "text",
+        "text",
+        "text"
+      ],
+      "function_calls": [
+        [],
+        [],
+        [],
+        [],
+        []
+      ],
+      "words": [
+        221,
+        200,
+        203,
+        147,
+        168
+      ],
+      "mean_words": 187.8,
+      "input_tokens": [
+        9718,
+        9718,
+        9718,
+        9718,
+        9718
+      ],
+      "cached_tokens": [
+        2432,
+        9715,
+        9715,
+        9715,
+        9715
+      ],
+      "output_tokens": [
+        312,
+        290,
+        297,
+        497,
+        425
+      ],
+      "reasoning_tokens": [
+        0,
+        0,
+        0,
+        284,
+        178
+      ],
+      "wall_ms": [
+        7293,
+        6143.4,
+        6397.1,
+        9400.4,
+        9230.5
+      ],
+      "mean_wall_ms": 7692.9,
+      "response_status": [
+        "completed",
+        "completed",
+        "completed",
+        "completed",
+        "completed"
+      ]
+    }
+  ],
+  "noise_control": {
+    "proxy": "word-set Jaccard of output text (crude lexical similarity; not a quality measure)",
+    "within_M_reps_1_to_5": {
+      "pairs": 10,
+      "mean": 0.352,
+      "min": 0.293,
+      "max": 0.417
+    },
+    "M_x_C1": {
+      "pairs": 15,
+      "mean": 0.261,
+      "min": 0.192,
+      "max": 0.354
+    },
+    "M_x_C2": {
+      "pairs": 15,
+      "mean": 0.232,
+      "min": 0.175,
+      "max": 0.318
+    },
+    "within_C1": {
+      "pairs": 3,
+      "mean": 0.329,
+      "min": 0.255,
+      "max": 0.418
+    },
+    "within_C2": {
+      "pairs": 3,
+      "mean": 0.257,
+      "min": 0.229,
+      "max": 0.3
+    },
+    "M_words_reps_1_to_5": [
+      221,
+      200,
+      203,
+      147,
+      168
+    ]
+  }
+}

@@ -1,0 +1,395 @@
+{
+  "url": "https://api.openai.com/v1/responses",
+  "method": "POST",
+  "headers": {
+    "authorization": "[REDACTED]",
+    "content-type": "application/json"
+  },
+  "body": {
+    "model": "gpt-5.6-terra",
+    "instructions": "You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user. Answer the user’s actual question directly and naturally. Never invent canonical facts. Before describing what the model contains, call get_canonical_state. Distinguish user facts and evidence from machine-authored estimates and from unknowns. An absent value is unknown, never zero. An entity’s `value` is on the model’s internal normalised scale and is NOT the figure the user gave. When `raw_value` is present, quote `raw_value` with its `unit` (e.g. £49/month, 9 months); never quote the normalised `value` to the user. Only when there is no `raw_value` may you describe `value`, and then say it is on a normalised scale. To change the model you must first call a proposing tool — propose_model_change for a link, propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once — show the user exactly what it returned (in words: never print a proposal_id or any other internal id — the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it. Never claim a change happened unless the tool result says it was applied. If a tool reports a refusal, tell the user what it said. When authorise_change returns `receipts`, tell the user the change is saved and which version it became. If it returns `already_applied`, the change is ALREADY saved — say which version, and do not offer to apply it again. If `receipts` is empty, say plainly that no saved version was recorded for it. When the user approves, agrees, or says yes, that is an instruction to call authorise_change. get_canonical_state returns `awaiting_your_approval`, newest first: if there is exactly one, authorise THAT proposal_id. If there is more than one, describe each by what it changes (never by its id) and ask which — in the same turn. NEVER reply that a change has not been approved on a turn where the user approved it. If get_canonical_state reports the model is empty, call build_model_from_brief with the user’s own words before answering about the model. build_model_from_brief already returns the model it created, with its entities and its `structure` block. Do NOT call get_canonical_state again afterwards — answer from what it returned. After build_model_from_brief, do NOT call run_analysis on the same turn. A newly built model has no values yet, so the analysis can only report what the build already told you — and it costs the user another twenty seconds. Describe the model and what it still needs, then stop. In that same reply, if any factor has no value or any option sets nothing, call propose_starting_point ONCE with a reasoned starting value for each such factor and the level each option sets, in the user’s own units. Show every figure and what it rests on, say they are your assumptions to adopt or correct, and ask for one approval. If propose_starting_point refuses with incomplete_starting_point, NOTHING is awaiting approval: call it again with a level for every pair in options_missing_levels before you reply. Never ask the user to approve an incomplete starting point. Discussion, ideation and research are not mutation requests. When the user asks for ideas or other options, offer three to five the model does not already hold, preferring non-obvious ones, and give each one line on what it would change or which assumption it would test. Say plainly that none has been added to the model, and offer to add any the user picks. After authorise_change applies values or option levels, call run_analysis in the SAME turn and report what it now says — or, if it still refuses, exactly what is left and the fastest way to supply it. The user asked for a model they can compare, not for a write. get_canonical_state returns a `structure` block computed from the persisted model: which options reach the goal, which cannot, what is unconnected, and how many FACTORS have no value (only factors can hold one). These are facts, not estimates — use them, and say them plainly when they explain why an analysis cannot run. When a tool tells you something was not represented, say so. When the model lacks values, do not send the user away to collect data before they can proceed. Offer a reasoned starting estimate they could adopt, say what it is based on, and invite them to correct it — a decision model tests assumptions, it does not require certainty up front. Say plainly that any such figure is an assumption to test, never a measurement. NEVER record one yourself: the user chooses it, or it does not enter the model. When you offer starting estimates, offer them THROUGH a proposing tool so the user can adopt the exact set you showed them in one step: propose_starting_point whenever factor values AND option levels are both missing (two separate proposals cannot both be applied from one approval), propose_assumptions when only values are. If the user asks you to put your suggested assumptions into the model, that is a request to propose them — propose the figures you just gave, then authorise_change once they confirm. propose_assumptions changes nothing on its own and leaves any factor that already holds a value alone. After authorise_change, report every value the model stored differently from the one approved. An option that connects to a factor but states no level for it blocks the comparison for EVERY option, not only itself. run_analysis names each one. Offer a level in the user’s own units with propose_option_interventions, exactly as you would a starting assumption, and say it is an assumption to correct. Give propose_option_interventions the number the USER would say (54, not 0.27). If it answers `no_stated_range`, that factor has no range to read the number against — say so plainly and do not invent one. get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model — do not wait for the analysis to refuse — ask what that option would actually change, and record the answer with propose_option_interventions. When you report an analysis, describe what the CURRENT model implies given its assumptions — a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one; say which option leads in this model and how firmly. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding. When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each — then authorise_change once they confirm. It adds the option and its links ONLY: say plainly that it cannot be compared until it states what it does to each factor, and offer propose_option_interventions for that. Never invent the direction; if you are not sure which way it pushes a factor, ask. When the user asks to change an assumption after an analysis — which is the whole point of naming the ones the ordering turns on — call propose_assumptions with `revise: true` on that factor and the number THEY gave, then authorise_change once they confirm. Show them the current value and the new one. Never set `revise` to push a figure of your own over theirs. After it applies, confirm what was saved and say that the earlier analysis now describes the previous model — then STOP: do NOT call run_analysis in the same turn. Offer to re-run it and wait for them to ask. NEVER say a proposal, a saved change or a pending action exists unless a tool call in THIS turn returned it. If you did not call a proposing tool, do not describe a proposal, do not say one is pending or ready, and do not ask the user to approve or confirm anything — say what the model still needs and offer to propose it. If a tool refused, say what it refused and what you will do next. Your own intention is not a result: only a tool result is. History entries that begin “(Board edit” are changes the user made directly on the canvas. When the user asks about “my change”, start from the most recent board edit, and read the current state before explaining what it did. British English. Concise but substantive.",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": "I’ve set up a comparison model with three paths: keep Pro at £49, raise it to £59 with the release, or phase the increase. It cannot yet determine the implication because key inputs were not supplied.\n\nHere is one **single set of starting assumptions** to adopt or correct — these are **not measurements**:\n\n**Current starting point**\n- Monthly churn: **3%**, cautiously below the 4% constraint.\n- Pro subscriber base: **250 subscribers** — a round planning baseline, implying about **£12,250/month** at £49 before other plans.\n- Pro conversion rate: **5%** — neutral placeholder pending funnel data.\n- Perceived Pro value: **60%** — moderate, because no evidence was provided on the feature’s willingness-to-pay effect.\n- Price–release alignment: **50%** — neutral because the strength of the feature/price connection is unknown.\n- MRR per Pro subscriber: **£49/month**, matching the current price.\n\n**Option levels**\n- **Raise Pro to £59 at release:** price–release alignment **100%**, since the increase occurs with the release.\n- **Phase Pro price increase:** Pro price **£54/month** and price–release alignment **50%**. This is a midpoint assumption only; no actual phasing path was specified.\n- The existing model already has **£49/month** for keeping price flat and **£59/month** for the direct increase.\n\nIf you approve, I’ll save this whole starting point and run the comparison. The result will show what the model implies, and especially whether the £59 move risks the **under-4% churn** constraint.\n\nThe model was saved. Questions this model does not answer yet: Does the £59 price apply to existing Pro subscribers, new subscribers, or both? What is the current Pro subscriber base, conversion rate, and monthly churn rate? What feature is being released, and is its expected effect on perceived Pro value or retention known? Would a phased increase have a defined price path and timing before the 12-month horizon?"
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Yes, use those."
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": "Note: the analysis needed a range for some factors and Olumi chose one so it could run — Price-release alignment (0 to 100). Those ranges are not yours. Tell me the right ones and I will replace them.\n\nSaved 6 of 6 starting values. Saved 3 of 3 option levels."
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Run analysis"
+          }
+        ]
+      },
+      {
+        "type": "function_call",
+        "name": "run_analysis",
+        "call_id": "fast_run_req-1",
+        "arguments": "{\"reason\":\"the user pressed Run\"}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "fast_run_req-1",
+        "output": "{\"ok\":true,\"mutated\":false,\"ran\":true,\"status\":\"ready\",\"what_is_missing\":\"\",\"blockers\":[],\"options\":[{\"option_id\":\"keep_pro_at_49\",\"label\":\"Keep Pro at £49\",\"status\":\"ready\",\"interventions\":{\"pro_plan_price\":0.245},\"is_baseline\":false,\"intervention_details\":{\"pro_plan_price\":{\"display_value\":\"49 £ per month\",\"normalised_value\":0.245,\"raw_value\":49,\"unit\":\"£ per month\"}},\"status_reason\":\"1 intervention(s) ready for analysis\"},{\"option_id\":\"raise_pro_to_59_at_release\",\"label\":\"Raise Pro to £59 at release\",\"status\":\"ready\",\"interventions\":{\"pro_plan_price\":0.295,\"price_release_alignment\":1},\"is_baseline\":false,\"intervention_details\":{\"pro_plan_price\":{\"display_value\":\"59 £ per month\",\"normalised_value\":0.295,\"raw_value\":59,\"unit\":\"£ per month\"},\"price_release_alignment\":{\"display_value\":\"100%\",\"normalised_value\":1,\"raw_value\":100,\"unit\":\"%\"}},\"status_reason\":\"2 intervention(s) ready for analysis\"},{\"option_id\":\"phase_pro_price_increase\",\"label\":\"Phase Pro price increase\",\"status\":\"ready\",\"interventions\":{\"pro_plan_price\":0.27,\"price_release_alignment\":0.5},\"is_baseline\":false,\"intervention_details\":{\"pro_plan_price\":{\"display_value\":\"54 £ per month\",\"normalised_value\":0.27,\"raw_value\":54,\"unit\":\"£ per month\"},\"price_release_alignment\":{\"display_value\":\"50%\",\"normalised_value\":0.5,\"raw_value\":50,\"unit\":\"%\"}},\"status_reason\":\"2 intervention(s) ready for analysis\"}],\"result\":{\"type\":\"analysis_result\",\"summary\":\"Ran analysis on your current scenario. One limit on your model could not be checked: “Monthly churn rate < 4%”. We could not line it up with anything this analysis measures, so it was not part of the comparison. The part of your model it points at is worked out from other parts, so it has no measured starting point of its own, and restating the limit cannot give it one. Tell me which part of your model it applies to and I will record it there; this one stays on the model. Then run the analysis again.\",\"leading_option_id\":null,\"win_probabilities\":{\"Keep Pro at £49\":0.1538999999999994,\"Phase Pro price increase\":0.01329999999999994,\"Raise Pro to £59 at release\":0.8327999999999954},\"enrichment\":{\"option_comparison\":[{\"id\":\"keep_pro_at_49\",\"label\":\"Keep Pro at £49\",\"status\":\"computed\",\"outcome\":{\"p10\":0.08712825333170417,\"p50\":0.2832547089280347,\"p90\":0.518018363852239,\"std\":0.1696640084674043,\"mean\":0.2946294294439442,\"n_samples\":10000,\"validity_ratio\":1,\"n_valid_samples\":10000,\"percentiles_source\":\"samples\"},\"downside\":{\"p05\":0.031183359183057237,\"cvar_10\":0.027042438175746173,\"expected_regret\":0.03810295865453023},\"option_id\":\"keep_pro_at_49\",\"option_label\":\"Keep Pro at £49\",\"win_probability\":0.1538999999999994},{\"id\":\"raise_pro_to_59_at_release\",\"label\":\"Raise Pro to £59 at release\",\"status\":\"computed\",\"outcome\":{\"p10\":0.09396194104414612,\"p50\":0.3147658878999301,\"p90\":0.5905344317083505,\"std\":0.19688685030291908,\"mean\":0.331470636624043,\"n_samples\":10000,\"validity_ratio\":1,\"n_valid_samples\":10000,\"percentiles_source\":\"samples\"},\"downside\":{\"p05\":0.03414761715341817,\"cvar_10\":0.02918597598898568,\"expected_regret\":0.0012617514744314015},\"option_id\":\"raise_pro_to_59_at_release\",\"option_label\":\"Raise Pro to £59 at release\",\"win_probability\":0.8327999999999954},{\"id\":\"phase_pro_price_increase\",\"label\":\"Phase Pro price increase\",\"status\":\"computed\",\"outcome\":{\"p10\":0.08415626598709723,\"p50\":0.283017185777377,\"p90\":0.5175832170617652,\"std\":0.16993782082655892,\"mean\":0.2939977515440686,\"n_samples\":10000,\"validity_ratio\":1,\"n_valid_samples\":10000,\"percentiles_source\":\"samples\"},\"downside\":{\"p05\":0.027989157567975147,\"cvar_10\":0.024129243862920688,\"expected_regret\":0.03873463655440581},\"option_id\":\"phase_pro_price_increase\",\"option_label\":\"Phase Pro price increase\",\"win_probability\":0.01329999999999994}],\"factor_sensitivity\":[{\"source\":\"graph\",\"direction\":\"negative\",\"factor_id\":\"monthly_churn_rate\",\"confidence\":0.6003000000000001,\"elasticity\":1,\"evpi_method\":\"heuristic\",\"driver_label\":\"biggest\",\"factor_label\":\"Monthly churn rate\",\"value_source\":\"user_override\",\"evidence_hint\":false,\"influence_rank\":1,\"rank_flip_rate\":0.2,\"importance_rank\":1,\"influence_score\":1,\"importance_basis\":\"graph_structural\",\"confidence_source\":\"plot_unified_from_isl_bootstrap\",\"sensitivity_score\":-0.5,\"flip_risk_category\":\"correlated\",\"value_of_information\":0,\"attribution_stability\":\"low\",\"confidence_components\":{\"sampling_stability\":0.25,\"structural_certainty\":0.8},\"confidence_provenance\":{\"input_quality\":\"standard\",\"is_provisional\":true,\"formula_version\":\"plot_unified_v3\",\"calibration_status\":\"provisional_pending_pilot_calibration\",\"computation_source\":\"plot_unified_from_isl_bootstrap\"},\"evpi_percentage_points\":0,\"range_derivation_source\":\"inferred_value\"},{\"source\":\"graph\",\"direction\":\"positive\",\"factor_id\":\"pro_subscriber_base\",\"confidence\":0.5966,\"elasticity\":1,\"evpi_method\":\"heuristic\",\"driver_label\":\"strong\",\"factor_label\":\"Pro subscriber base\",\"value_source\":\"user_override\",\"evidence_hint\":false,\"influence_rank\":2,\"rank_flip_rate\":0.3,\"importance_rank\":2,\"influence_score\":1,\"importance_basis\":\"graph_structural\",\"confidence_source\":\"plot_unified_from_isl_bootstrap\",\"sensitivity_score\":0.5,\"flip_risk_category\":\"negligible\",\"value_of_information\":0,\"attribution_stability\":\"low\",\"confidence_components\":{\"sampling_stability\":0.25,\"structural_certainty\":0.8},\"confidence_provenance\":{\"input_quality\":\"standard\",\"is_provisional\":true,\"formula_version\":\"plot_unified_v3\",\"calibration_status\":\"provisional_pending_pilot_calibration\",\"computation_source\":\"plot_unified_from_isl_bootstrap\"},\"evpi_percentage_points\":0,\"range_derivation_source\":\"inferred_value\"},{\"source\":\"graph\",\"direction\":\"positive\",\"factor_id\":\"mrr_per_pro_subscriber\",\"confidence\":0.5942000000000001,\"elasticity\":1,\"evpi_method\":\"heuristic\",\"driver_label\":\"strong\",\"factor_label\":\"MRR per Pro subscriber\",\"value_source\":\"user_override\",\"evidence_hint\":false,\"influence_rank\":3,\"rank_flip_rate\":0.35,\"importance_rank\":3,\"influence_score\":1,\"importance_basis\":\"graph_structural\",\"confidence_source\":\"plot_unified_from_isl_bootstrap\",\"sensitivity_score\":0.5,\"flip_risk_category\":\"correlated\",\"value_of_information\":0,\"attribution_stability\":\"low\",\"confidence_components\":{\"sampling_stability\":0.25,\"structural_certainty\":0.8},\"confidence_provenance\":{\"input_quality\":\"standard\",\"is_provisional\":true,\"formula_version\":\"plot_unified_v3\",\"calibration_status\":\"provisional_pending_pilot_calibration\",\"computation_source\":\"plot_unified_from_isl_bootstrap\"},\"evpi_percentage_points\":0,\"range_derivation_source\":\"inferred_value\"},{\"source\":\"graph\",\"direction\":\"positive\",\"factor_id\":\"perceived_pro_value\",\"confidence\":0.59485,\"elasticity\":0.75,\"evpi_method\":\"heuristic\",\"driver_label\":\"strong\",\"factor_label\":\"Perceived Pro value\",\"value_source\":\"user_override\",\"evidence_hint\":true,\"influence_rank\":4,\"rank_flip_rate\":0.2,\"importance_rank\":4,\"influence_score\":0.75,\"importance_basis\":\"graph_structural\",\"confidence_source\":\"plot_unified_from_isl_bootstrap\",\"sensitivity_score\":0.375,\"flip_risk_category\":\"isolated\",\"value_of_information\":0.06599999999999999,\"attribution_stability\":\"low\",\"confidence_components\":{\"sampling_stability\":0.25,\"structural_certainty\":0.8},\"confidence_provenance\":{\"input_quality\":\"standard\",\"is_provisional\":true,\"formula_version\":\"plot_unified_v3\",\"calibration_status\":\"provisional_pending_pilot_calibration\",\"computation_source\":\"plot_unified_from_isl_bootstrap\"},\"evpi_percentage_points\":4.5,\"range_derivation_source\":\"inferred_value\"},{\"source\":\"graph\",\"direction\":\"positive\",\"factor_id\":\"pro_conversion_rate\",\"confidence\":0.5789500000000001,\"elasticity\":0.5,\"evpi_method\":\"heuristic\",\"driver_label\":\"strong\",\"factor_label\":\"Pro conversion rate\",\"value_source\":\"user_override\",\"evidence_hint\":false,\"influence_rank\":5,\"rank_flip_rate\":0.35,\"importance_rank\":5,\"influence_score\":0.5,\"importance_basis\":\"graph_structural\",\"confidence_source\":\"plot_unified_from_isl_bootstrap\",\"sensitivity_score\":0.25,\"flip_risk_category\":\"negligible\",\"value_of_information\":0,\"attribution_stability\":\"low\",\"confidence_components\":{\"sampling_stability\":0.25,\"structural_certainty\":0.8},\"confidence_provenance\":{\"input_quality\":\"standard\",\"is_provisional\":true,\"formula_version\":\"plot_unified_v3\",\"calibration_status\":\"provisional_pending_pilot_calibration\",\"computation_source\":\"plot_unified_from_isl_bootstrap\"},\"evpi_percentage_points\":0,\"range_derivation_source\":\"inferred_value\"},{\"source\":\"graph\",\"direction\":\"positive\",\"factor_id\":\"price_release_alignment\",\"confidence\":0.42655,\"elasticity\":0,\"zero_reason\":\"intervention_override\",\"driver_label\":\"moderate\",\"factor_label\":\"Price-release alignment\",\"value_source\":\"user_override\",\"influence_rank\":6,\"rank_flip_rate\":0.35,\"importance_rank\":6,\"influence_score\":0.375,\"importance_basis\":\"graph_structural\",\"confidence_source\":\"plot_unified_from_isl_bootstrap\",\"sensitivity_score\":0,\"flip_risk_category\":\"isolated\",\"value_of_information\":0,\"attribution_stability\":\"low\",\"confidence_components\":{\"sampling_stability\":0.25,\"structural_certainty\":0.5},\"confidence_provenance\":{\"input_quality\":\"standard\",\"is_provisional\":true,\"formula_version\":\"plot_unified_v3\",\"calibration_status\":\"provisional_pending_pilot_calibration\",\"computation_source\":\"plot_unified_from_isl_bootstrap\"},\"range_derivation_source\":\"explicit_cap\"},{\"source\":\"graph\",\"direction\":\"negative\",\"factor_id\":\"pro_plan_price\",\"confidence\":0.3,\"elasticity\":0,\"zero_reason\":\"intervention_override\",\"driver_label\":\"moderate\",\"factor_label\":\"Pro plan price\",\"value_source\":\"brief_extraction\",\"influence_rank\":7,\"rank_flip_rate\":0.4,\"importance_rank\":7,\"influence_score\":0.25,\"importance_basis\":\"graph_structural\",\"confidence_source\":\"plot_unified_from_isl_bootstrap\",\"sensitivity_score\":0,\"flip_risk_category\":\"correlated\",\"value_of_information\":0,\"attribution_stability\":\"negligible\",\"confidence_components\":{\"sampling_stability\":0,\"structural_certainty\":0.5},\"confidence_provenance\":{\"input_quality\":\"standard\",\"is_provisional\":true,\"formula_version\":\"plot_unified_v3\",\"calibration_status\":\"provisional_pending_pilot_calibration\",\"computation_source\":\"plot_unified_from_isl_bootstrap\"},\"range_derivation_source\":\"explicit_cap\"}],\"robustness\":{\"level\":\"high\",\"near_tie\":{\"gap\":0.6788999999999961,\"is_tie\":false,\"threshold\":0.1},\"is_robust\":true,\"confidence\":0.8327999999999954,\"robust_edges\":[{\"to_id\":\"mrr\",\"edge_id\":\"churn_above_4->mrr\",\"from_id\":\"churn_above_4\",\"to_label\":\"MRR\",\"from_label\":\"Churn above 4%\",\"alternative_winner_id\":null,\"alternative_winner_label\":null},{\"to_id\":\"churn_above_4\",\"edge_id\":\"monthly_churn_rate->churn_above_4\",\"from_id\":\"monthly_churn_rate\",\"to_label\":\"Churn above 4%\",\"from_label\":\"Monthly churn rate\",\"alternative_winner_id\":null,\"alternative_winner_label\":null},{\"to_id\":\"pro_subscriber_base\",\"edge_id\":\"monthly_churn_rate->pro_subscriber_base\",\"from_id\":\"monthly_churn_rate\",\"to_label\":\"Pro subscriber base\",\"from_label\":\"Monthly churn rate\",\"alternative_winner_id\":null,\"alternative_winner_label\":null},{\"to_id\":\"pro_subscriber_base\",\"edge_id\":\"pro_conversion_rate->pro_subscriber_base\",\"from_id\":\"pro_conversion_rate\",\"to_label\":\"Pro subscriber base\",\"from_label\":\"Pro conversion rate\",\"alternative_winner_id\":null,\"alternative_winner_label\":null},{\"to_id\":\"mrr\",\"edge_id\":\"pro_subscriber_base->mrr\",\"from_id\":\"pro_subscriber_base\",\"to_label\":\"MRR\",\"from_label\":\"Pro subscriber base\",\"alternative_winner_id\":null,\"alternative_winner_label\":null}],\"fragile_edges\":[{\"to_id\":\"perceived_pro_value\",\"edge_id\":\"price_release_alignment->perceived_pro_value\",\"from_id\":\"price_release_alignment\",\"visible\":true,\"severity\":\"warning\",\"to_label\":\"Perceived Pro value\",\"from_label\":\"Price-release alignment\",\"switch_probability\":0.4432,\"alternative_winner_id\":\"keep_pro_at_49\",\"alternative_winner_label\":\"Keep Pro at £49\",\"marginal_switch_probability\":0.22},{\"to_id\":\"mrr_per_pro_subscriber\",\"edge_id\":\"pro_plan_price->mrr_per_pro_subscriber\",\"from_id\":\"pro_plan_price\",\"visible\":true,\"severity\":\"warning\",\"to_label\":\"MRR per Pro subscriber\",\"from_label\":\"Pro plan price\",\"switch_probability\":0.2556,\"alternative_winner_id\":\"keep_pro_at_49\",\"alternative_winner_label\":\"Keep Pro at £49\",\"marginal_switch_probability\":0},{\"to_id\":\"mrr\",\"edge_id\":\"mrr_per_pro_subscriber->mrr\",\"from_id\":\"mrr_per_pro_subscriber\",\"visible\":true,\"severity\":\"warning\",\"to_label\":\"MRR\",\"from_label\":\"MRR per Pro subscriber\",\"switch_probability\":0.2384,\"alternative_winner_id\":\"keep_pro_at_49\",\"alternative_winner_label\":\"Keep Pro at £49\",\"marginal_switch_probability\":0},{\"to_id\":\"monthly_churn_rate\",\"edge_id\":\"perceived_pro_value->monthly_churn_rate\",\"from_id\":\"perceived_pro_value\",\"visible\":false,\"severity\":\"warning\",\"to_label\":\"Monthly churn rate\",\"from_label\":\"Perceived Pro value\",\"switch_probability\":0.124,\"alternative_winner_id\":\"keep_pro_at_49\",\"alternative_winner_label\":\"Keep Pro at £49\",\"marginal_switch_probability\":0},{\"to_id\":\"monthly_churn_rate\",\"edge_id\":\"pro_plan_price->monthly_churn_rate\",\"from_id\":\"pro_plan_price\",\"visible\":false,\"severity\":\"warning\",\"to_label\":\"Monthly churn rate\",\"from_label\":\"Pro plan price\",\"switch_probability\":0.0844,\"alternative_winner_id\":\"keep_pro_at_49\",\"alternative_winner_label\":\"Keep Pro at £49\",\"marginal_switch_probability\":0}],\"display_verdict\":\"robust\",\"confidence_basis\":\"recommendation_stability_uncalibrated\",\"display_verdict_reason\":\"this run held up under the changes we tested\",\"recommended_option_compliance\":\"not_assessed\",\"recommended_option_compliance_reason\":\"we could not check every limit you set on this run\"},\"option_comparison_status\":\"computed\",\"edge_e_values\":[{\"to_id\":\"perceived_pro_value\",\"e_value\":1,\"edge_id\":\"price_release_alignment::perceived_pro_value\",\"from_id\":\"price_release_alignment\",\"to_label\":\"Perceived Pro value\",\"flip_mean\":0.020833,\"stability\":{\"n_seeds\":10,\"band_max\":0.126272,\"band_min\":-0.113016,\"band_width\":0.239288,\"band_median\":-0.003271,\"n_seeds_flipped\":7,\"seed_flip_means\":[-0.003271,0.007071,-0.073269,null,null,0.024313,-0.113016,null,-0.075728,0.126272]},\"from_label\":\"Price-release alignment\",\"current_mean\":0.5,\"flip_direction\":\"decrease\"},{\"to_id\":\"pro_conversion_rate\",\"e_value\":1.875,\"edge_id\":\"perceived_pro_value::pro_conversion_rate\",\"from_id\":\"perceived_pro_value\",\"to_label\":\"Pro conversion rate\",\"flip_mean\":-0.937501,\"stability\":{\"n_seeds\":10,\"band_max\":-0.003112,\"band_min\":-0.811683,\"band_width\":0.808571,\"band_median\":-0.508714,\"n_seeds_flipped\":5,\"seed_flip_means\":[-0.003112,null,-0.078615,null,null,null,-0.508714,null,-0.811683,-0.529297]},\"from_label\":\"Perceived Pro value\",\"current_mean\":0.5,\"flip_direction\":\"decrease\"},{\"to_id\":\"monthly_churn_rate\",\"e_value\":1,\"edge_id\":\"perceived_pro_value::monthly_churn_rate\",\"from_id\":\"perceived_pro_value\",\"to_label\":\"Monthly churn rate\",\"flip_mean\":0.21875,\"stability\":{\"n_seeds\":10,\"band_max\":0.460028,\"band_min\":-0.0228,\"band_width\":0.482828,\"band_median\":0.094829,\"n_seeds_flipped\":4,\"seed_flip_means\":[null,null,0.460028,null,null,-0.0228,null,null,0.079379,0.110278]},\"from_label\":\"Perceived Pro value\",\"current_mean\":-0.5,\"flip_direction\":\"increase\"},{\"to_id\":\"mrr\",\"e_value\":1,\"edge_id\":\"pro_subscriber_base::mrr\",\"from_id\":\"pro_subscriber_base\",\"to_label\":\"MRR\",\"flip_mean\":-0.339287,\"stability\":{\"n_seeds\":10,\"band_max\":0.864876,\"band_min\":-0.893567,\"band_width\":1.758443,\"band_median\":-0.140742,\"n_seeds_flipped\":10,\"seed_flip_means\":[-0.147655,0.864876,-0.240447,-0.230963,-0.133828,-0.049581,-0.893567,-0.000001,-0.159098,-0.000001]},\"from_label\":\"Pro subscriber base\",\"current_mean\":0.5,\"flip_direction\":\"decrease\"}],\"inference_warnings\":[{\"code\":\"CONSTRAINT_TARGET_UNRELIABLE\",\"message\":\"The target on \\\"Monthly churn rate\\\" can't be scored against this model: \\\"Monthly churn rate\\\" is calculated from the factors feeding into it, so the analysis produces a modelled change for it, not a reading on the same scale as your target. Comparing the two would report a near-zero chance for every option no matter how good the options are, so goal-fit probabilities were withheld for this run rather than shown. Setting a current value for \\\"Monthly churn rate\\\" would not change that — it is calculated from its inputs, so it has no measured starting point of its own to anchor to. Your limit is recorded and was left unscored rather than scored against the wrong number.\",\"severity\":\"warning\"},{\"code\":\"EDGE_E_VALUE_NON_FINITE_DROPPED\",\"message\":\"8 edge E-value entries were omitted from edge_e_values: 8 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.\",\"severity\":\"info\"},{\"code\":\"CONSTRAINT_FRAME_UNSPECIFIED\",\"field\":\"goal_constraints[0].value_frame\",\"message\":\"constraint value=0.04 was supplied without goal_constraints[0].value_frame, so the frame it is expressed in is unknown. A level threshold compared against the target's change-from-origin samples yields a structurally impossible probability, so constraint_analysis is omitted rather than guessed. Stamp 'level' or 'delta'.\",\"severity\":\"warning\"},{\"code\":\"GOAL_DIRECTION_UNATTESTED\",\"field\":\"goal_direction\",\"message\":\"No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.\",\"severity\":\"warning\"},{\"code\":\"GOAL_THRESHOLD_NOT_CONVERTIBLE\",\"field\":\"nodes[mrr].observed_state.baseline\",\"message\":\"A 'level' frame requires goal node 'mrr' to carry observed_state.baseline to convert the level into the samples' frame, but it carries no observed_state at all.\",\"severity\":\"warning\"},{\"code\":\"EVPI_UNAVAILABLE\",\"field\":\"p_win_sensitivity\",\"message\":\"Win-probability sensitivity (p_win_sensitivity) was skipped: its metric is P(joint_goal) and at least one goal constraint could not be resolved into its target's sample frame. Base analysis is unaffected.\",\"severity\":\"warning\",\"elapsed_ms\":1769.9}],\"confidence_tier\":\"needs_work\",\"flip_thresholds\":[{\"unit\":\"£ per month\",\"factor_id\":\"pro_plan_price\",\"flip_value\":null,\"flip_reason\":\"structurally_invariant\",\"probes_used\":0,\"value_scale\":\"display\",\"factor_label\":\"Pro plan price\",\"current_value\":49,\"current_display\":\"49 £ per month\",\"iterations_used\":0,\"no_flip_in_range\":true,\"alternative_winner_id\":null,\"alternative_winner_label\":null},{\"unit\":\"%\",\"direction\":\"increase\",\"factor_id\":\"price_release_alignment\",\"flip_value\":97.92,\"flip_reason\":\"found\",\"probes_used\":0,\"value_scale\":\"display\",\"factor_label\":\"Price-release alignment\",\"flip_display\":\"97.92 %\",\"current_value\":50,\"current_display\":\"50 %\",\"iterations_used\":0,\"alternative_winner_id\":\"keep_pro_at_49\",\"alternative_winner_label\":\"Keep Pro at £49\"}],\"decision_brief\":{\"options\":[{\"label\":\"Keep Pro at £49\",\"option_id\":\"keep_pro_at_49\",\"win_probability\":0.1538999999999994},{\"label\":\"Phase Pro price increase\",\"option_id\":\"phase_pro_price_increase\",\"win_probability\":0.01329999999999994},{\"label\":\"Raise Pro to £59 at release\",\"option_id\":\"raise_pro_to_59_at_release\",\"win_probability\":0.8327999999999954}],\"version\":\"1\",\"brief_id\":\"00000000-0000-4000-8000-000000000101\",\"warnings\":[{\"code\":\"M2_UNAVAILABLE\",\"message\":\"Decision review was unavailable; brief uses deterministic coaching fallback\",\"severity\":\"warning\"}],\"created_at\":\"2026-09-24T19:20:55.402Z\",\"robustness\":\"robust\",\"top_drivers\":[{\"direction\":\"negative\",\"sensitivity\":1,\"factor_label\":\"Monthly churn rate\"},{\"direction\":\"positive\",\"sensitivity\":1,\"factor_label\":\"Pro subscriber base\"},{\"direction\":\"positive\",\"sensitivity\":1,\"factor_label\":\"MRR per Pro subscriber\"},{\"direction\":\"positive\",\"sensitivity\":0.75,\"factor_label\":\"Perceived Pro value\"},{\"direction\":\"positive\",\"sensitivity\":0.5,\"factor_label\":\"Pro conversion rate\"}],\"warning_codes\":[\"CONSTRAINT_FRAME_UNSPECIFIED\",\"CONSTRAINT_TARGET_UNRELIABLE\",\"EVPI_UNAVAILABLE\",\"GOAL_DIRECTION_UNATTESTED\",\"GOAL_THRESHOLD_NOT_CONVERTIBLE\"],\"key_assumptions\":[\"MRR per Pro subscriber\",\"Pro subscriber base\",\"Monthly churn rate\"],\"analysis_summary\":{\"robustness_band\":\"robust\"},\"what_would_change\":[\"MRR per Pro subscriber → MRR\",\"Perceived Pro value → Monthly churn rate\"],\"defaulted_assumptions\":[]},\"factor_evppi\":[{\"evppi\":0,\"units\":\"outcome\",\"method\":\"regression_evppi_v1\",\"status\":\"below_resolution\",\"evppi_raw\":0,\"factor_id\":\"perceived_pro_value\",\"n_samples\":10000,\"clamped_low\":false,\"noise_floor\":0,\"clamped_high\":false,\"regression_degree\":4,\"correlation_active\":false,\"baseline_max_expected_utility\":0.331471,\"conditional_max_expected_utility\":0.331471},{\"evppi\":0,\"units\":\"outcome\",\"method\":\"regression_evppi_v1\",\"status\":\"below_resolution\",\"evppi_raw\":0,\"factor_id\":\"pro_conversion_rate\",\"n_samples\":10000,\"clamped_low\":false,\"noise_floor\":0,\"clamped_high\":false,\"regression_degree\":4,\"correlation_active\":false,\"baseline_max_expected_utility\":0.331471,\"conditional_max_expected_utility\":0.331471},{\"evppi\":0,\"units\":\"outcome\",\"method\":\"regression_evppi_v1\",\"status\":\"below_resolution\",\"evppi_raw\":0,\"factor_id\":\"monthly_churn_rate\",\"n_samples\":10000,\"clamped_low\":false,\"noise_floor\":0,\"clamped_high\":false,\"regression_degree\":4,\"correlation_active\":false,\"baseline_max_expected_utility\":0.331471,\"conditional_max_expected_utility\":0.331471},{\"evppi\":0,\"units\":\"outcome\",\"method\":\"regression_evppi_v1\",\"status\":\"below_resolution\",\"evppi_raw\":0,\"factor_id\":\"pro_subscriber_base\",\"n_samples\":10000,\"clamped_low\":false,\"noise_floor\":0,\"clamped_high\":false,\"regression_degree\":4,\"correlation_active\":false,\"baseline_max_expected_utility\":0.331471,\"conditional_max_expected_utility\":0.331471},{\"evppi\":0,\"units\":\"outcome\",\"method\":\"regression_evppi_v1\",\"status\":\"below_resolution\",\"evppi_raw\":0,\"factor_id\":\"mrr_per_pro_subscriber\",\"n_samples\":10000,\"clamped_low\":true,\"noise_floor\":0,\"clamped_high\":false,\"regression_degree\":4,\"correlation_active\":false,\"baseline_max_expected_utility\":0.331471,\"conditional_max_expected_utility\":0.331471}],\"decision_evpi\":0.0012617514744314015,\"conditional_winners\":[]},\"computed_against_hash\":\"0eaecb02ebe33f65\"},\"canonical_state\":{\"analysis_state\":{\"run_state\":{\"kind\":\"complete_current\",\"computed_at\":\"2026-09-24T19:20:50.835Z\"},\"readiness\":{\"status\":\"unknown\",\"blockers\":[]},\"leader_claim\":{\"permitted\":false,\"withheld_reason\":\"constraint_verdict_withheld\",\"separation\":\"separated\"},\"robustness\":{\"aggregate_level\":\"high\"},\"usable_for_prose\":true,\"usable_for_chips\":true,\"usable_for_followup\":true,\"requires_rerun\":false,\"blocked_unusable\":false,\"contradictions\":[]},\"analysis_ready\":{\"options\":[{\"option_id\":\"keep_pro_at_49\",\"label\":\"Keep Pro at £49\",\"status\":\"ready\",\"interventions\":{\"pro_plan_price\":0.245},\"is_baseline\":false,\"intervention_details\":{\"pro_plan_price\":{\"display_value\":\"49 £ per month\",\"normalised_value\":0.245,\"raw_value\":49,\"unit\":\"£ per month\"}},\"status_reason\":\"1 intervention(s) ready for analysis\"},{\"option_id\":\"raise_pro_to_59_at_release\",\"label\":\"Raise Pro to £59 at release\",\"status\":\"ready\",\"interventions\":{\"pro_plan_price\":0.295,\"price_release_alignment\":1},\"is_baseline\":false,\"intervention_details\":{\"pro_plan_price\":{\"display_value\":\"59 £ per month\",\"normalised_value\":0.295,\"raw_value\":59,\"unit\":\"£ per month\"},\"price_release_alignment\":{\"display_value\":\"100%\",\"normalised_value\":1,\"raw_value\":100,\"unit\":\"%\"}},\"status_reason\":\"2 intervention(s) ready for analysis\"},{\"option_id\":\"phase_pro_price_increase\",\"label\":\"Phase Pro price increase\",\"status\":\"ready\",\"interventions\":{\"pro_plan_price\":0.27,\"price_release_alignment\":0.5},\"is_baseline\":false,\"intervention_details\":{\"pro_plan_price\":{\"display_value\":\"54 £ per month\",\"normalised_value\":0.27,\"raw_value\":54,\"unit\":\"£ per month\"},\"price_release_alignment\":{\"display_value\":\"50%\",\"normalised_value\":0.5,\"raw_value\":50,\"unit\":\"%\"}},\"status_reason\":\"2 intervention(s) ready for analysis\"}],\"goal_node_id\":\"mrr\",\"status\":\"ready\",\"goal_threshold\":0.8,\"goal_threshold_raw\":20000,\"goal_threshold_unit\":\"£ per month\",\"goal_threshold_cap\":25000,\"goal_threshold_cap_provenance\":\"target_derived_headroom\",\"bias_findings\":[],\"may_run\":true,\"analysis_admission\":{\"structurally_analysable\":true,\"missing_important_inputs\":[],\"semantic_quality_sufficient\":true,\"permitted_analysis_mode\":\"comparative_leader\",\"reasons\":[{\"field\":\"structurally_analysable\",\"code\":\"READY_TO_COMPARE\",\"message\":\"Analysis can run on this model as it stands.\"},{\"field\":\"semantic_quality_sufficient\",\"code\":\"CONFIDENCE_PARAMETERS_PARTLY_USER_STATED\",\"message\":\"At least one of the estimates this comparison rests on is yours, so a leading option can be named.\"},{\"field\":\"permitted_analysis_mode\",\"code\":\"CONFIDENCE_PARAMETERS_PARTLY_USER_STATED\",\"message\":\"At least one of the estimates this comparison rests on is yours, so a leading option can be named.\"}],\"graph_hash\":\"0eaecb02ebe33f65fc841a4b653edbc5375ae604326d2c3f934898ff9b2cc610\",\"semantic_signals\":{\"confidence_parameters_total\":21,\"confidence_parameters_user_stated\":8,\"confidence_parameters_machine_authored\":11,\"confidence_parameters_unattributed\":2,\"material_parameters_total\":21,\"material_parameters_user_stated\":8,\"intervened_factor_baselines_total\":2,\"intervened_factor_baselines_user_stated\":2,\"material_parameters_awaiting_user_node_ids\":[\"mrr\",\"churn_above_4\"],\"goal_target_stated\":true}},\"freshness\":\"fresh\",\"freshness_reason\":\"agent_readback_run_state_current\",\"graph_hash_at_run\":\"0eaecb02ebe33f65\",\"current_graph_hash\":\"0eaecb02ebe33f65\",\"computed_at\":\"2026-09-24T19:20:50.835Z\"}}}"
+      },
+      {
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "**This run does not establish whether you should raise Pro to £59**, because it could not test the stated churn limit and did not convert the £20k MRR threshold into the analysis’s outcome frame.\n\n- On the model’s **MRR-only, normalised outcome scale**, the £59-at-release path was most often highest in the simulated comparison (**83.28%** of runs), versus **15.39%** for keeping £49 and **1.33%** for phasing. Those are comparative model results, not probabilities of achieving £20k MRR.\n- The decisive caveat is that **“monthly churn rate < 4%” was unscored**: the model treats churn as calculated from other factors, and the constraint’s frame was unspecified. So this result does not show whether £59 keeps churn below 4%.\n- The comparison also rests on adopted starting assumptions, notably **3% monthly churn**, **250 Pro subscribers**, and **£49/month MRR per Pro subscriber**. The model flags churn, subscriber base, and MRR per subscriber as its strongest structural drivers.\n\nThe next useful reasoning step is to define the churn constraint in a comparable form—whether it is an absolute monthly rate or a change from a measured baseline—so the £59 path can be assessed against the limit rather than on MRR alone."
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Talk me through what would change if the link from Price-release alignment to Perceived Pro value were weaker or stronger. Don't change the model or re-run anything yet."
+          }
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "name": "get_canonical_state",
+        "description": "Read the authoritative persisted decision model for this conversation: its entities, what each one is, which values are stated and which are unknown, and what the analysis currently says. Call this before describing the model. Never assume its contents.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "type": "string",
+              "description": "Why you need it now."
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "propose_model_change",
+        "description": "Propose ONE change to the model. This does NOT change anything: it records an exact proposal and returns its id, which you keep for authorise_change: show the user what it changes, never the id, before asking them to approve. Use the labels exactly as get_canonical_state returned them.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "from_label": {
+              "type": "string"
+            },
+            "to_label": {
+              "type": "string"
+            },
+            "direction": {
+              "type": "string",
+              "enum": [
+                "positive",
+                "negative"
+              ]
+            },
+            "rationale": {
+              "type": "string",
+              "description": "Why this link matters, in the user’s terms."
+            }
+          },
+          "required": [
+            "from_label",
+            "to_label",
+            "direction",
+            "rationale"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "authorise_change",
+        "description": "Apply a previously returned proposal. Call this ONLY after the user has explicitly approved that specific proposal in their own words. The stored proposal is applied — nothing is regenerated. Report exactly what the result says, including a refusal.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "proposal_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "proposal_id"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "run_analysis",
+        "description": "Run the decision analysis over the persisted model. It may refuse and explain what is missing; report that honestly rather than guessing what the result would have been.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "build_model_from_brief",
+        "description": "Build the decision model from the user’s brief when get_canonical_state reports the model is empty. Preserves the user’s own facts, numbers and constraint wording, then adds the options, factors, risks and causal mechanisms that make the decision reasonable to analyse. Report honestly what it says was left out.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "brief": {
+              "type": "string",
+              "description": "The user’s decision in their own words, verbatim."
+            }
+          },
+          "required": [
+            "brief"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "propose_assumptions",
+        "description": "Propose starting values for factors that have none, so the model can be reasoned about instead of sitting blank. This does NOT change anything: it records an exact proposal and returns its id, which you keep for authorise_change: show the user the values, never the id, before asking them to approve. Each value is the user’s assumption to adopt or correct, NEVER a measurement — say so. Propose only factors the model actually has, using the labels get_canonical_state returned. A factor that already holds a value is left alone UNLESS you set `revise: true` on it, which you may do ONLY when the user has just asked for that factor to be changed and named the number themselves. Never set it to replace someone’s figure with one of your own.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "assumptions": {
+              "type": "array",
+              "description": "The factors to give a starting value, with the reasoning for each.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "factor_label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "number"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "basis": {
+                    "type": "string",
+                    "description": "Why this is a reasonable starting point, in the user’s terms."
+                  },
+                  "revise": {
+                    "type": "boolean",
+                    "description": "Set true ONLY when the user has just asked for this factor to be changed and gave the number. It permits replacing a value that is already there; the approval will show the user both the current value and the new one. Omit it in every other case."
+                  }
+                },
+                "required": [
+                  "factor_label",
+                  "value",
+                  "unit",
+                  "basis"
+                ]
+              }
+            }
+          },
+          "required": [
+            "assumptions"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "propose_new_option",
+        "description": "Add an option the user has just asked for, when the model does NOT already have it. This does NOT change anything: it records an exact proposal and returns its id, which you keep for authorise_change: show the user the option and what it will be linked to, never the id, before asking them to approve. Name the factors it would change, using the labels get_canonical_state returned — an option linked to nothing cannot be compared and blocks the comparison for every other option. It adds the option and its links ONLY; say what it does to each factor afterwards with propose_option_interventions.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "type": "string",
+              "description": "The option in the user’s own words."
+            },
+            "acts_on": {
+              "type": "array",
+              "description": "The factors this option would change, and which way. At least one.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "factor_label": {
+                    "type": "string"
+                  },
+                  "direction": {
+                    "type": "string",
+                    "enum": [
+                      "positive",
+                      "negative"
+                    ],
+                    "description": "Whether this option pushes the factor up or down. State it; never guess it for the user."
+                  }
+                },
+                "required": [
+                  "factor_label",
+                  "direction"
+                ]
+              }
+            },
+            "rationale": {
+              "type": "string",
+              "description": "Why this option is worth comparing, in the user’s terms."
+            }
+          },
+          "required": [
+            "label",
+            "acts_on",
+            "rationale"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "propose_option_interventions",
+        "description": "Propose the level an option sets a factor to — what the option actually DOES. An option that names a factor without saying what it sets it to blocks the comparison for EVERY option, not just itself. Give the value in the factor’s own units, as the user would say it (£54, not 0.27). This changes nothing: it records an exact proposal and returns its id for authorise_change; show the user what it sets first, never the id. Propose only what the user’s words support; if an option’s level is not stated, offer one as an assumption and say so, exactly as with propose_assumptions.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "interventions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "option_label": {
+                    "type": "string"
+                  },
+                  "factor_label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "number",
+                    "description": "In the factor’s own units — the number a user would say."
+                  },
+                  "basis": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "option_label",
+                  "factor_label",
+                  "value",
+                  "basis"
+                ]
+              }
+            }
+          },
+          "required": [
+            "interventions"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "propose_starting_point",
+        "description": "Propose, as ONE exact proposal the user approves ONCE, both the starting values for factors that have none AND the level each option sets — everything a first comparison needs. Use this instead of propose_assumptions + propose_option_interventions whenever both are needed: two separate proposals cannot both be applied from one approval, because applying the first changes the model the second was made against. This changes nothing on its own. Every figure is the user’s assumption to adopt or correct, NEVER a measurement — say so. Values in the factor’s own units.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "assumptions": {
+              "type": "array",
+              "description": "Starting values for factors that have none. May be empty.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "factor_label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "number"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "basis": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "factor_label",
+                  "value",
+                  "unit",
+                  "basis"
+                ]
+              }
+            },
+            "option_levels": {
+              "type": "array",
+              "description": "The level each option sets a factor to, in the factor’s own units. May be empty.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "option_label": {
+                    "type": "string"
+                  },
+                  "factor_label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "number"
+                  },
+                  "basis": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "option_label",
+                  "factor_label",
+                  "value",
+                  "basis"
+                ]
+              }
+            }
+          },
+          "required": [
+            "assumptions",
+            "option_levels"
+          ]
+        }
+      }
+    ],
+    "max_output_tokens": 3400
+  }
+}

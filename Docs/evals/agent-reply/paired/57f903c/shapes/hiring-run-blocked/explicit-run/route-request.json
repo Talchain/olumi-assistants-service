@@ -1,0 +1,16 @@
+{
+  "method": "POST",
+  "url": "/agent/v1/turn",
+  "payload": {
+    "kind": "message",
+    "scenario_id": "00000000-0000-4000-8000-000000000107",
+    "stage": "frame",
+    "turn_class": "decide",
+    "message": "Run analysis",
+    "source": "chip_click",
+    "chip": {
+      "action_type": "run_analysis"
+    }
+  },
+  "note": "in-process app.inject; no turn_id (it drives only the durable claim/answer rows, never the provider request)"
+}

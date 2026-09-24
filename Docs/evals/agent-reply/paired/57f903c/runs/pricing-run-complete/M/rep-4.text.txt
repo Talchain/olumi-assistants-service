@@ -1,0 +1,5 @@
+**On the model’s MRR comparison alone, raising Pro to £59 with the release leads**: it ranked highest in **83.28%** of the model’s sampled scenarios, versus **15.39%** for keeping £49 and **1.33%** for phasing the increase. This is a model-relative result, not a recommendation.
+
+However, it does **not yet answer your full question**. The model could not assess the constraint **“monthly churn rate < 4%”**, nor could it test attainment of the **£20k/month** target in its current sample frame. It also assumed that higher MRR is the intended direction because that was not explicitly encoded.
+
+The ordering is conditional on the planning assumptions used, particularly the assumed effects of the release on perceived Pro value, conversion, and churn. The analysis found that changing the price–release-alignment assumption could flip the ordering to keeping Pro at £49; that establishes a tested sensitivity, not which assumption is most important to investigate.

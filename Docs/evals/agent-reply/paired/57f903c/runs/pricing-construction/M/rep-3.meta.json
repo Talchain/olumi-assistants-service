@@ -1,0 +1,109 @@
+{
+  "schema": "agent-reply-paired-run-meta.v1",
+  "case": "pricing-construction",
+  "kind": "construction-final-hop",
+  "arm": "M",
+  "rep": 3,
+  "control": false,
+  "block": 3,
+  "schedule_index": 44,
+  "seed": 20260924,
+  "run_stamp": "2026-09-24T19-50-44-263Z",
+  "served_head": "57f903c4652783a9de1a3778d6682a8e5f8414e1",
+  "captured_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-05.request.json",
+  "model": "gpt-5.6-terra",
+  "response_model": "gpt-5.6-terra",
+  "settings": {
+    "max_output_tokens": 3400,
+    "tool_choice": null,
+    "reasoning": null,
+    "temperature": null,
+    "tools_count": 9,
+    "tool_names": [
+      "get_canonical_state",
+      "propose_model_change",
+      "authorise_change",
+      "run_analysis",
+      "build_model_from_brief",
+      "propose_assumptions",
+      "propose_new_option",
+      "propose_option_interventions",
+      "propose_starting_point"
+    ],
+    "instructions_file": "Docs/evals/agent-reply/paired/57f903c/arms/M_agent.txt",
+    "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+    "instructions_chars": 8590,
+    "input_items": 9,
+    "input_sha256": "f657de6fcce284aa3424db0df956a25b3cc394b86663e279a7910f07e285f5d6",
+    "body_sha256": "c98c463ecefe28c1aef4894ecea3689137bed2dc6be21b7349c5518ad14a9325",
+    "response_reasoning": {
+      "context": "all_turns",
+      "effort": "medium",
+      "mode": "standard",
+      "summary": null
+    },
+    "response_service_tier": "default"
+  },
+  "started_at": "2026-09-24T19:54:16.899Z",
+  "wall_ms": 5854.9,
+  "http_status": 200,
+  "response_id": "resp_0a821fa89f6f709d006ab57fe9291c87d28035555afe17768c",
+  "response_status": "completed",
+  "incomplete_details": null,
+  "usage": {
+    "input_tokens": 5348,
+    "cached_tokens": 5345,
+    "output_tokens": 305,
+    "reasoning_tokens": 0,
+    "total_tokens": 5653,
+    "raw": {
+      "input_tokens": 5348,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 5345
+      },
+      "output_tokens": 305,
+      "output_tokens_details": {
+        "reasoning_tokens": 0
+      },
+      "total_tokens": 5653
+    }
+  },
+  "outcome": {
+    "type": "text",
+    "text_chars": 1302,
+    "words": 203,
+    "function_calls": [],
+    "refusals": []
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-24T19:54:16.899Z",
+      "wall_ms": 5854.9,
+      "http_status": 200,
+      "error": null,
+      "response_headers": {
+        "x-request-id": "req_2c4dd60a631c4f55a496054b3ba85a63",
+        "openai-processing-ms": "5450",
+        "openai-version": "2020-10-01"
+      },
+      "guard_seq": 45,
+      "guard_decision": "allowed",
+      "file": null
+    }
+  ],
+  "response_headers": {
+    "x-request-id": "req_2c4dd60a631c4f55a496054b3ba85a63",
+    "openai-processing-ms": "5450",
+    "openai-version": "2020-10-01"
+  },
+  "guard": "openai-only-ok",
+  "guard_detail": {
+    "seq": 45,
+    "host": "api.openai.com",
+    "decision": "allowed",
+    "anthropic_env_asserted_absent_before_send": true
+  },
+  "recorded_at": "2026-09-24T19:54:22.755Z"
+}

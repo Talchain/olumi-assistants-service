@@ -1,0 +1,7 @@
+**Model finding:** on the current assumptions, **raising Pro to £59 with the feature release leads the MRR comparison**. It led in 83.28% of the model’s simulated cases, versus 15.39% for keeping £49 and 1.33% for phasing the rise. The run describes this ordering as robust under the changes it tested.
+
+Why it appears: the £59 option combines **£59/month** per Pro subscriber with **100% price–release alignment**, whereas the phased route is modelled at **£54/month** and **50% alignment**. This result rests on the planning assumptions previously adopted, rather than observed conversion or retention evidence.
+
+**Critical limitation:** it does **not** answer whether the £59 change keeps monthly churn below **4%**. The model could not score that constraint: monthly churn is calculated from other factors, and the constraint has no specified value frame or compatible measured baseline. As a result, the comparison is an MRR ordering only—not evidence that any option satisfies the churn limit or achieves **£20,000 MRR within 12 months**.
+
+The ordering can change in the model if price–release alignment is lower: in the tested sensitivity, reducing that alignment from the phased assumption of **50%** was sufficient to switch the ordering towards keeping Pro at £49 at an alignment of **97.92%** in the stated test context. That is a tested switch condition, not a measure of overall stability or an observed customer response.

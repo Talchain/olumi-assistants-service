@@ -1,0 +1,117 @@
+{
+  "schema": "agent-reply-paired-run-meta.v1",
+  "case": "pricing-discussion-card",
+  "kind": "discussion-card",
+  "arm": "M",
+  "rep": 2,
+  "control": false,
+  "block": 2,
+  "schedule_index": 15,
+  "seed": 20260924,
+  "run_stamp": "2026-09-24T19-50-44-263Z",
+  "served_head": "57f903c4652783a9de1a3778d6682a8e5f8414e1",
+  "captured_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-discussion-card/discussion-card/call-01.request.json",
+  "model": "gpt-5.6-terra",
+  "response_model": "gpt-5.6-terra",
+  "settings": {
+    "max_output_tokens": 3400,
+    "tool_choice": null,
+    "reasoning": null,
+    "temperature": null,
+    "tools_count": 9,
+    "tool_names": [
+      "get_canonical_state",
+      "propose_model_change",
+      "authorise_change",
+      "run_analysis",
+      "build_model_from_brief",
+      "propose_assumptions",
+      "propose_new_option",
+      "propose_option_interventions",
+      "propose_starting_point"
+    ],
+    "instructions_file": "Docs/evals/agent-reply/paired/57f903c/arms/M_agent.txt",
+    "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+    "instructions_chars": 8590,
+    "input_items": 9,
+    "input_sha256": "bd7940869cffb9e96ab7fb5f163204d82dc5767ca43d438752dba9d38c315622",
+    "body_sha256": "f98aff271510c8c8b04837c55c06a3ee2b667d520e1ced830d6c246cecbc7d80",
+    "response_reasoning": {
+      "context": "all_turns",
+      "effort": "medium",
+      "mode": "standard",
+      "summary": null
+    },
+    "response_service_tier": "default"
+  },
+  "started_at": "2026-09-24T19:51:52.261Z",
+  "wall_ms": 2561.6,
+  "http_status": 200,
+  "response_id": "resp_0175b0a02ee73369006ab57f587f7487d2be165e465a17d342",
+  "response_status": "completed",
+  "incomplete_details": null,
+  "usage": {
+    "input_tokens": 10712,
+    "cached_tokens": 10709,
+    "output_tokens": 55,
+    "reasoning_tokens": 10,
+    "total_tokens": 10767,
+    "raw": {
+      "input_tokens": 10712,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 10709
+      },
+      "output_tokens": 55,
+      "output_tokens_details": {
+        "reasoning_tokens": 10
+      },
+      "total_tokens": 10767
+    }
+  },
+  "outcome": {
+    "type": "function_call",
+    "text_chars": 0,
+    "words": 0,
+    "function_calls": [
+      {
+        "name": "get_canonical_state",
+        "call_id": "call_OIP1jxMMLLnL5TThBsGiJHXa",
+        "arguments": {
+          "reason": "The user asks how an existing causal link affects the current analysis, so I need the persisted model and latest analysis state."
+        }
+      }
+    ],
+    "refusals": []
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-24T19:51:52.261Z",
+      "wall_ms": 2561.6,
+      "http_status": 200,
+      "error": null,
+      "response_headers": {
+        "x-request-id": "req_7d629f68ed5b4330b6b9fb3f8f0fb70f",
+        "openai-processing-ms": "2302",
+        "openai-version": "2020-10-01"
+      },
+      "guard_seq": 16,
+      "guard_decision": "allowed",
+      "file": null
+    }
+  ],
+  "response_headers": {
+    "x-request-id": "req_7d629f68ed5b4330b6b9fb3f8f0fb70f",
+    "openai-processing-ms": "2302",
+    "openai-version": "2020-10-01"
+  },
+  "guard": "openai-only-ok",
+  "guard_detail": {
+    "seq": 16,
+    "host": "api.openai.com",
+    "decision": "allowed",
+    "anthropic_env_asserted_absent_before_send": true
+  },
+  "recorded_at": "2026-09-24T19:51:54.825Z"
+}

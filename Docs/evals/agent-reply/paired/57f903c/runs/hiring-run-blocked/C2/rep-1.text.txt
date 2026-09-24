@@ -1,0 +1,3 @@
+The comparison did not run because **Continue Current Staffing** has no defined effect in the model.
+
+To include it, specify which factor it changes and to what level—most plausibly, it could leave developer capacity at **8 capacity points (0–20)** and tech-lead capacity at **4 capacity points (0–10)**. Those would be assumptions to test, not measurements.

@@ -1,0 +1,16 @@
+I’ve created a comparison model with three options: keep £49 with the release, raise to £59 with it, or phase the increase after release. It also captures the £20k MRR threshold and the under-4% monthly-churn constraint. The 12-month deadline is retained in the decision record, but the model’s goal projection cannot represent a deadline directly.
+
+It needs starting assumptions before it can compare the options. I propose these **assumptions to adopt or correct — not measurements**:
+
+- Current Pro subscribers: **250**
+- Current Pro conversion rate: **5%**
+- Current monthly churn: **3%** — below your 4% ceiling, to test the headroom a price increase consumes
+- Value of the next Pro feature release: **70/100** — provisionally treating it as a meaningful release
+
+And the option definitions would be:
+
+- **Keep £49 With Release:** feature value **70/100**; price remains at the already-stated **£49/month**
+- **Raise to £59 With Release:** feature value **70/100**; price is the already-stated **£59/month**
+- **Phase Price After Release:** feature value **70/100**; ultimately reaches **£59/month**. The timing/intermediate price is not represented, so that option will be less informative until specified.
+
+These figures are working assumptions, especially the subscriber base, conversion and release value; your actuals may materially change the result. If you approve this set, I’ll save it and run the comparison.

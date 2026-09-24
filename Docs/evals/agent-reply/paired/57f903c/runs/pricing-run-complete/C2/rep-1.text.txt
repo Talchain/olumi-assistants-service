@@ -1,0 +1,5 @@
+The comparison is incomplete: it could not assess the **monthly churn under 4%** constraint, so it cannot answer whether £59 meets both of your stated conditions. On the model’s current assumptions, the £59-at-release path produced the strongest MRR comparison, but that is not a recommendation or a verified constraint-safe result.
+
+- The comparison assumes that higher MRR is the objective; that direction was not explicitly recorded.
+- Monthly churn is the most influential assumption, and its current **3%** is a user-adopted planning estimate, not a measurement.
+- The next useful step is to define how the 4% churn limit should be evaluated against the model, then rerun.

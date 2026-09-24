@@ -1,0 +1,18 @@
+I’ve set up a comparison model with three paths: keep £49 with the release, raise to £59 with it, or phase the increase after it.
+
+Your stated facts are: current Pro price **£49/month**, a target of **£20k MRR**, and monthly churn to remain **under 4%**. The 12‑month horizon is retained in the decision record, though the model’s goal projection cannot encode the deadline itself.
+
+To run a first comparison, adopt or correct these **machine-authored starting assumptions — not measurements**:
+
+- Current monthly churn: **3%** — a working baseline below the 4% limit.
+- Pro conversion rate: **5%** — provisional, pending your funnel data.
+- Current Pro subscribers: **250 subscribers** — provisional revenue base.
+- Feature-release value: **70/100** — assumes a meaningfully valuable release.
+
+And the options would be recorded as:
+
+- **Keep £49 With Release:** feature value **70/100**; price remains **£49/month**.
+- **Raise to £59 With Release:** feature value **70/100**; price **£59/month**.
+- **Phase Price After Release:** feature value **70/100**; ultimately **£59/month**. Timing and any intermediate price are not represented, so this is a simplified phased path.
+
+These figures are assumptions to test, not claimed evidence. If you approve this exact starting point, I’ll save it and run the comparison.

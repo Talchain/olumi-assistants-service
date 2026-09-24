@@ -1,0 +1,428 @@
+{
+  "id": "resp_03a193bf719d8c5a006ab57d358ef487d28e3d5addea64d596",
+  "object": "response",
+  "created_at": 1790278965,
+  "status": "completed",
+  "access_programs": null,
+  "background": false,
+  "billing": {
+    "payer": "developer"
+  },
+  "completed_at": 1790278973,
+  "error": null,
+  "frequency_penalty": 0,
+  "incomplete_details": null,
+  "instructions": "You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user. Answer the user’s actual question directly and naturally. Never invent canonical facts. Before describing what the model contains, call get_canonical_state. Distinguish user facts and evidence from machine-authored estimates and from unknowns. An absent value is unknown, never zero. An entity’s `value` is on the model’s internal normalised scale and is NOT the figure the user gave. When `raw_value` is present, quote `raw_value` with its `unit` (e.g. £49/month, 9 months); never quote the normalised `value` to the user. Only when there is no `raw_value` may you describe `value`, and then say it is on a normalised scale. To change the model you must first call a proposing tool — propose_model_change for a link, propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once — show the user exactly what it returned (in words: never print a proposal_id or any other internal id — the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it. Never claim a change happened unless the tool result says it was applied. If a tool reports a refusal, tell the user what it said. When authorise_change returns `receipts`, tell the user the change is saved and which version it became. If it returns `already_applied`, the change is ALREADY saved — say which version, and do not offer to apply it again. If `receipts` is empty, say plainly that no saved version was recorded for it. When the user approves, agrees, or says yes, that is an instruction to call authorise_change. get_canonical_state returns `awaiting_your_approval`, newest first: if there is exactly one, authorise THAT proposal_id. If there is more than one, describe each by what it changes (never by its id) and ask which — in the same turn. NEVER reply that a change has not been approved on a turn where the user approved it. If get_canonical_state reports the model is empty, call build_model_from_brief with the user’s own words before answering about the model. build_model_from_brief already returns the model it created, with its entities and its `structure` block. Do NOT call get_canonical_state again afterwards — answer from what it returned. After build_model_from_brief, do NOT call run_analysis on the same turn. A newly built model has no values yet, so the analysis can only report what the build already told you — and it costs the user another twenty seconds. Describe the model and what it still needs, then stop. In that same reply, if any factor has no value or any option sets nothing, call propose_starting_point ONCE with a reasoned starting value for each such factor and the level each option sets, in the user’s own units. Show every figure and what it rests on, say they are your assumptions to adopt or correct, and ask for one approval. If propose_starting_point refuses with incomplete_starting_point, NOTHING is awaiting approval: call it again with a level for every pair in options_missing_levels before you reply. Never ask the user to approve an incomplete starting point. Discussion, ideation and research are not mutation requests. When the user asks for ideas or other options, offer three to five the model does not already hold, preferring non-obvious ones, and give each one line on what it would change or which assumption it would test. Say plainly that none has been added to the model, and offer to add any the user picks. After authorise_change applies values or option levels, call run_analysis in the SAME turn and report what it now says — or, if it still refuses, exactly what is left and the fastest way to supply it. The user asked for a model they can compare, not for a write. get_canonical_state returns a `structure` block computed from the persisted model: which options reach the goal, which cannot, what is unconnected, and how many FACTORS have no value (only factors can hold one). These are facts, not estimates — use them, and say them plainly when they explain why an analysis cannot run. When a tool tells you something was not represented, say so. When the model lacks values, do not send the user away to collect data before they can proceed. Offer a reasoned starting estimate they could adopt, say what it is based on, and invite them to correct it — a decision model tests assumptions, it does not require certainty up front. Say plainly that any such figure is an assumption to test, never a measurement. NEVER record one yourself: the user chooses it, or it does not enter the model. When you offer starting estimates, offer them THROUGH a proposing tool so the user can adopt the exact set you showed them in one step: propose_starting_point whenever factor values AND option levels are both missing (two separate proposals cannot both be applied from one approval), propose_assumptions when only values are. If the user asks you to put your suggested assumptions into the model, that is a request to propose them — propose the figures you just gave, then authorise_change once they confirm. propose_assumptions changes nothing on its own and leaves any factor that already holds a value alone. After authorise_change, report every value the model stored differently from the one approved. An option that connects to a factor but states no level for it blocks the comparison for EVERY option, not only itself. run_analysis names each one. Offer a level in the user’s own units with propose_option_interventions, exactly as you would a starting assumption, and say it is an assumption to correct. Give propose_option_interventions the number the USER would say (54, not 0.27). If it answers `no_stated_range`, that factor has no range to read the number against — say so plainly and do not invent one. get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model — do not wait for the analysis to refuse — ask what that option would actually change, and record the answer with propose_option_interventions. When you report an analysis, describe what the CURRENT model implies given its assumptions — a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one; say which option leads in this model and how firmly. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding. When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each — then authorise_change once they confirm. It adds the option and its links ONLY: say plainly that it cannot be compared until it states what it does to each factor, and offer propose_option_interventions for that. Never invent the direction; if you are not sure which way it pushes a factor, ask. When the user asks to change an assumption after an analysis — which is the whole point of naming the ones the ordering turns on — call propose_assumptions with `revise: true` on that factor and the number THEY gave, then authorise_change once they confirm. Show them the current value and the new one. Never set `revise` to push a figure of your own over theirs. After it applies, confirm what was saved and say that the earlier analysis now describes the previous model — then STOP: do NOT call run_analysis in the same turn. Offer to re-run it and wait for them to ask. NEVER say a proposal, a saved change or a pending action exists unless a tool call in THIS turn returned it. If you did not call a proposing tool, do not describe a proposal, do not say one is pending or ready, and do not ask the user to approve or confirm anything — say what the model still needs and offer to propose it. If a tool refused, say what it refused and what you will do next. Your own intention is not a result: only a tool result is. History entries that begin “(Board edit” are changes the user made directly on the canvas. When the user asks about “my change”, start from the most recent board edit, and read the current state before explaining what it did. British English. Concise but substantive.",
+  "max_output_tokens": 3400,
+  "max_tool_calls": null,
+  "model": "gpt-5.6-terra",
+  "moderation": null,
+  "output": [
+    {
+      "id": "rs_03a193bf719d8c5a006ab57d36645c87d292010036942eabd7",
+      "type": "reasoning",
+      "content": [],
+      "encrypted_content": "gAAAAABqtX09E0G13RmYk1OZLoRNNYYLMCqePfBOxqlFARiHZ1jFeRWteqkgwFzyR5dyjclWUBuDwwVeQiNM3_grCWXqG7wnBzWBdnVuMhUbskDY_KKspkwsIW6M_-E3FMsCRtceLVjwDGYY1CRvp9APMl5XEyZVGjUQ1HgOgfxLPsHrgIA7-DWG3yEHEQIc-o80CggvOroj1mi4UCMkhHVUssmfyul7z03UnsGNoOdhzZyPrSbJoTpvt93LY-jezTyDef8SIp2H4ERPwghJVXPop0iE8KI_sK7eto9aQdql9SRXuGE3whtlbJUoRGMgpTq_omVccfJLS-gf_YL0bsauPFwnfQfl8c6AHHMPyE95ZygEBGoj9Wdce3idpUCyWrYlstdzYZQR8IxcE5uHDXDY6B3lx-i5rDw_PtZ_IYeNB3WWk5Qi19qt2Gj8vk-fcQr9CRUxWcK48ljK_GmY3Jj0-4RGOfFjUVOScY9KLt3HUpF7VPFpS9tN6gx1nCPj4o0pxknh79t2KO_dXesbR0Vx43cinMrGmNitKZoGiAnqEMN_pKyJvHKm_wQeryfiYHQNqWqi2nkBeB9YnlhN3FYQHlKgmPNIqq24sT8e_kxnunv442L9qCyaN3CE529HlL92CGvIxnRmQS013fTBnw7oJuNWVA_HZiEtjgazHHjw3bbzECH-5Wf3A7XfNJOSpntycqhZvwEGBuEOAaa2vHHYJ3xVlsKZQfFQF5obKhCBGjaU52CphJz3oVbwc7hdQZK1lYfOeX6zuYYdlSWu0UKdDlg5iM1uETQQ9WcTU4NLJQJEvDT-ZD7pX0g9sz2VZ6GhUebeHhMFt_VEd2O36arB9nz0Kce45-I9e3O0tag4-58uLmR-od9idK0vGrcNVpf3tEfxGi0iwL0kJd3-b9vJZFXUWL-uvZ3ktzypZBDNu6bdZHH0e9YWWDZ79i-v5ZPe2yX1hjSD2tkZRr05P-5KEETk3SCByI5pth3XBVqegoZczP1c1UIEFWbCVYS5IKXDN0GqMeWonYppPEJ2TdltGAeLBYnw9fMxz13Ky1HlaSHfaL_gIPQk4MT7XPlr3f2_ZDBiWKWBQwFs88N37Ohp9iO7n44yCkOEaKc3Nu8Q0QPUTl9gepRWCY3bj3N1bydJ2R5wdmQ34P2xhjWZQWO0FTn3ZPVwYZmZGn1YrC7GOnmVP4C2YP28ACTl4aZfMuEIN10SuAc2S9tHhe1bZ3YTqMxpp7HtBmv7l3lwFzYknN90I5TTg8TFebm65oqlt13Bff3IAdn8yRefwfA0t0_H8emRmrPctlHLnqyGGA9Rk3TAFkRyNrdyConc7K0bNSSUdVAclOlZteMt1xiUSt4V3e6hRu_r5DCPcpohokgyLSlPMBSJ5wtjpdsznCGh8EWY2ou2RERtTwNX4Db_s_GLEJ7djQkRHL13y2qsHm5KuFOkAvt_uOxiz7xUMWMpw7DHN1Vke9rye1Af4nCBWc5xzWOifwIFPY-zD92-gOXqKLB9wLkL-ezConyWXdUJdHKSG6FzpBTwkbRg-0-OAhBv11IGhIPiqJPq0KkA5gkGM7MkqlpKmUyNe8bzh04n6NnGULPrkSjgjGssfLWxqIzqjgcNfzMcLkzZEkTL0veZZt3ePDGYkqI-_UAdvqUlmzJ_d7KZO8hD2aEPWvWUa-2_6o8TIPumZCLdZ6UXf9x0tHZ9fBFo4h5n4NiZnytrs1gpnHruVrXJL22FA6Pu4zj652daA0qZzR-5wFqnFrq9Y4JzwpVkS7l7812rFKRA5FFWILCRLocaqt97CUXTz2Wkt2B56JBiBv9TKhN5dGUTrg0Rak8EaJFgWrS529dMM8BFJCPQJIo21pY3KXX4lJJmXoXUQepZ32Hk9lKaoPdFOhM231-gP3CHnLf9R6dum85L5cdkFaiKdrYxvuPaIaJPn-IAPLWn5IIoTF8abGEuNlYfZbEOTDBxcJbCAG8tvuzGvztl7vlMPZ_-wRymJuB9KDLC0BC74rUtR6Y9oqJoIrTm4u1UllI7SpQJZbPy5BJVxn6lfJIIXk5TVKwSTDbUYeJ3FHtZjGR-T_FwCTCy-9QzbBPAokGnm1GYkVZ8wru4VAC9ZuK2cVGuQDE1DOQQctAbyS1XGzrQT2YpOcov5MzpKLNftXMNGoullrFM_ny5M6Qxgqz_aS_qVZCEuDUAIOCMm6rC_bc60-5CB8euwHEesG521hDZrHpx0PlhYVJQ_1h_t6qZXeMxUsnzm1fPcCVZvtQ3_myxYurtT80uSL8mUoSpPzSnetNxUrEMXBbQm76t4h4sr4JVwwc2IbUwg4CiQxB3d9aneelYnAer3JlXjen2R9oKWPzdLTUoIfEg8vhBquHLy6zg57rOUvCK687hWSm9Be_V79mejaqhYurpWYvjkzfhMbXo5i5ibnKJhfKcoBjYDimPIhJPgrH-K9mboj2gWNcO3foMNs6esjGMowP_KM0N9cdhp6M4rNE0E5ceJzeq_NKCPRGa3Mj49B-YZXBK7EdR00vXfhJZ_zCzwLWE17tuDzNu65rALr9GpBL-TCFswWyFQm_-jsoyiSQ630WOE-Fl580Ul0TvazAVLoNlew4=",
+      "summary": []
+    },
+    {
+      "id": "fc_03a193bf719d8c5a006ab57d3a76d487d29858ae4b0ba89672",
+      "type": "function_call",
+      "status": "completed",
+      "arguments": "{\"assumptions\":[{\"factor_label\":\"Night-shift triage staffing\",\"value\":1,\"unit\":\"nurses\",\"basis\":\"Starting assumption: a single dedicated triage nurse currently covers the night shift; correct this to the actual staffed number.\"},{\"factor_label\":\"Rapid-assessment capacity\",\"value\":0,\"unit\":\"patients per night\",\"basis\":\"Starting assumption: no rapid-assessment unit currently operates overnight.\"},{\"factor_label\":\"Time to triage\",\"value\":20,\"unit\":\"minutes\",\"basis\":\"Starting assumption for an ED with recurrent overnight 4-hour breaches; replace with the local median or mean.\"},{\"factor_label\":\"Time to clinician assessment\",\"value\":90,\"unit\":\"minutes\",\"basis\":\"Starting assumption for the time from arrival to clinician assessment on affected nights; replace with local performance data.\"},{\"factor_label\":\"ED patient flow\",\"value\":80,\"unit\":\"patients per night\",\"basis\":\"Starting assumption for overnight ED arrivals; replace with the actual overnight arrival volume.\"}],\"option_levels\":[{\"option_label\":\"Second triage nurse\",\"factor_label\":\"Night-shift triage staffing\",\"value\":2,\"basis\":\"The option is described as adding a second triage nurse, so it sets dedicated night triage staffing to two nurses.\"}]}",
+      "call_id": "call_TadHtgGEJMBE94VwsthH8bva",
+      "name": "propose_starting_point"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "presence_penalty": 0,
+  "previous_response_id": null,
+  "prompt_cache_key": null,
+  "prompt_cache_retention": "24h",
+  "reasoning": {
+    "context": "all_turns",
+    "effort": "medium",
+    "mode": "standard",
+    "summary": null
+  },
+  "safety_identifier": null,
+  "service_tier": "default",
+  "store": true,
+  "temperature": 1,
+  "text": {
+    "format": {
+      "type": "text"
+    },
+    "verbosity": "medium"
+  },
+  "tool_choice": "auto",
+  "tool_usage": {
+    "image_gen": {
+      "input_tokens": 0,
+      "input_tokens_details": {
+        "image_tokens": 0,
+        "text_tokens": 0
+      },
+      "output_tokens": 0,
+      "output_tokens_details": {
+        "image_tokens": 0,
+        "text_tokens": 0
+      },
+      "total_tokens": 0
+    },
+    "web_search": {
+      "num_requests": 0
+    }
+  },
+  "tools": [
+    {
+      "type": "function",
+      "description": "Read the authoritative persisted decision model for this conversation: its entities, what each one is, which values are stated and which are unknown, and what the analysis currently says. Call this before describing the model. Never assume its contents.",
+      "name": "get_canonical_state",
+      "output_schema": null,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Why you need it now."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "strict": true
+    },
+    {
+      "type": "function",
+      "description": "Propose ONE change to the model. This does NOT change anything: it records an exact proposal and returns its id, which you keep for authorise_change: show the user what it changes, never the id, before asking them to approve. Use the labels exactly as get_canonical_state returned them.",
+      "name": "propose_model_change",
+      "output_schema": null,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from_label": {
+            "type": "string"
+          },
+          "to_label": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "positive",
+              "negative"
+            ]
+          },
+          "rationale": {
+            "type": "string",
+            "description": "Why this link matters, in the user’s terms."
+          }
+        },
+        "required": [
+          "from_label",
+          "to_label",
+          "direction",
+          "rationale"
+        ]
+      },
+      "strict": true
+    },
+    {
+      "type": "function",
+      "description": "Apply a previously returned proposal. Call this ONLY after the user has explicitly approved that specific proposal in their own words. The stored proposal is applied — nothing is regenerated. Report exactly what the result says, including a refusal.",
+      "name": "authorise_change",
+      "output_schema": null,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "proposal_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposal_id"
+        ]
+      },
+      "strict": true
+    },
+    {
+      "type": "function",
+      "description": "Run the decision analysis over the persisted model. It may refuse and explain what is missing; report that honestly rather than guessing what the result would have been.",
+      "name": "run_analysis",
+      "output_schema": null,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "strict": true
+    },
+    {
+      "type": "function",
+      "description": "Build the decision model from the user’s brief when get_canonical_state reports the model is empty. Preserves the user’s own facts, numbers and constraint wording, then adds the options, factors, risks and causal mechanisms that make the decision reasonable to analyse. Report honestly what it says was left out.",
+      "name": "build_model_from_brief",
+      "output_schema": null,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "brief": {
+            "type": "string",
+            "description": "The user’s decision in their own words, verbatim."
+          }
+        },
+        "required": [
+          "brief"
+        ]
+      },
+      "strict": true
+    },
+    {
+      "type": "function",
+      "description": "Propose starting values for factors that have none, so the model can be reasoned about instead of sitting blank. This does NOT change anything: it records an exact proposal and returns its id, which you keep for authorise_change: show the user the values, never the id, before asking them to approve. Each value is the user’s assumption to adopt or correct, NEVER a measurement — say so. Propose only factors the model actually has, using the labels get_canonical_state returned. A factor that already holds a value is left alone UNLESS you set `revise: true` on it, which you may do ONLY when the user has just asked for that factor to be changed and named the number themselves. Never set it to replace someone’s figure with one of your own.",
+      "name": "propose_assumptions",
+      "output_schema": null,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "assumptions": {
+            "type": "array",
+            "description": "The factors to give a starting value, with the reasoning for each.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "factor_label": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "number"
+                },
+                "unit": {
+                  "type": "string"
+                },
+                "basis": {
+                  "type": "string",
+                  "description": "Why this is a reasonable starting point, in the user’s terms."
+                },
+                "revise": {
+                  "type": "boolean",
+                  "description": "Set true ONLY when the user has just asked for this factor to be changed and gave the number. It permits replacing a value that is already there; the approval will show the user both the current value and the new one. Omit it in every other case."
+                }
+              },
+              "required": [
+                "factor_label",
+                "value",
+                "unit",
+                "basis",
+                "revise"
+              ]
+            }
+          }
+        },
+        "required": [
+          "assumptions"
+        ]
+      },
+      "strict": true
+    },
+    {
+      "type": "function",
+      "description": "Add an option the user has just asked for, when the model does NOT already have it. This does NOT change anything: it records an exact proposal and returns its id, which you keep for authorise_change: show the user the option and what it will be linked to, never the id, before asking them to approve. Name the factors it would change, using the labels get_canonical_state returned — an option linked to nothing cannot be compared and blocks the comparison for every other option. It adds the option and its links ONLY; say what it does to each factor afterwards with propose_option_interventions.",
+      "name": "propose_new_option",
+      "output_schema": null,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "The option in the user’s own words."
+          },
+          "acts_on": {
+            "type": "array",
+            "description": "The factors this option would change, and which way. At least one.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "factor_label": {
+                  "type": "string"
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "positive",
+                    "negative"
+                  ],
+                  "description": "Whether this option pushes the factor up or down. State it; never guess it for the user."
+                }
+              },
+              "required": [
+                "factor_label",
+                "direction"
+              ]
+            }
+          },
+          "rationale": {
+            "type": "string",
+            "description": "Why this option is worth comparing, in the user’s terms."
+          }
+        },
+        "required": [
+          "label",
+          "acts_on",
+          "rationale"
+        ]
+      },
+      "strict": true
+    },
+    {
+      "type": "function",
+      "description": "Propose the level an option sets a factor to — what the option actually DOES. An option that names a factor without saying what it sets it to blocks the comparison for EVERY option, not just itself. Give the value in the factor’s own units, as the user would say it (£54, not 0.27). This changes nothing: it records an exact proposal and returns its id for authorise_change; show the user what it sets first, never the id. Propose only what the user’s words support; if an option’s level is not stated, offer one as an assumption and say so, exactly as with propose_assumptions.",
+      "name": "propose_option_interventions",
+      "output_schema": null,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "interventions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "option_label": {
+                  "type": "string"
+                },
+                "factor_label": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "number",
+                  "description": "In the factor’s own units — the number a user would say."
+                },
+                "basis": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "option_label",
+                "factor_label",
+                "value",
+                "basis"
+              ]
+            }
+          }
+        },
+        "required": [
+          "interventions"
+        ]
+      },
+      "strict": true
+    },
+    {
+      "type": "function",
+      "description": "Propose, as ONE exact proposal the user approves ONCE, both the starting values for factors that have none AND the level each option sets — everything a first comparison needs. Use this instead of propose_assumptions + propose_option_interventions whenever both are needed: two separate proposals cannot both be applied from one approval, because applying the first changes the model the second was made against. This changes nothing on its own. Every figure is the user’s assumption to adopt or correct, NEVER a measurement — say so. Values in the factor’s own units.",
+      "name": "propose_starting_point",
+      "output_schema": null,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "assumptions": {
+            "type": "array",
+            "description": "Starting values for factors that have none. May be empty.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "factor_label": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "number"
+                },
+                "unit": {
+                  "type": "string"
+                },
+                "basis": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "factor_label",
+                "value",
+                "unit",
+                "basis"
+              ]
+            }
+          },
+          "option_levels": {
+            "type": "array",
+            "description": "The level each option sets a factor to, in the factor’s own units. May be empty.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "option_label": {
+                  "type": "string"
+                },
+                "factor_label": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "number"
+                },
+                "basis": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "option_label",
+                "factor_label",
+                "value",
+                "basis"
+              ]
+            }
+          }
+        },
+        "required": [
+          "assumptions",
+          "option_levels"
+        ]
+      },
+      "strict": true
+    }
+  ],
+  "top_logprobs": 0,
+  "top_p": 0.98,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 4153,
+    "input_tokens_details": {
+      "cache_write_tokens": 858,
+      "cached_tokens": 3292
+    },
+    "output_tokens": 488,
+    "output_tokens_details": {
+      "reasoning_tokens": 217
+    },
+    "total_tokens": 4641
+  },
+  "user": null,
+  "metadata": {}
+}

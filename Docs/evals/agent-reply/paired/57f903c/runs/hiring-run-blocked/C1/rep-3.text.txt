@@ -1,0 +1,5 @@
+The comparison cannot run because **Continue Current Staffing** has no recorded effect on any factor.
+
+- The three hiring options have stated levels and are ready.
+- To include the staffing baseline, specify what it sets — likely no change from the current **tech-lead capacity** and **developer capacity**, unless you expect staffing to change without hiring.
+- This is a structural gap, so it blocks the whole comparison rather than only that option.

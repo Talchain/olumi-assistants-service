@@ -1,0 +1,11 @@
+Not yet: the model needs baseline commercial assumptions before it can test the £59 change against MRR and churn.
+
+It represents three paths—keep £49 with the release, raise to £59 with it, or phase the increase—but the 12‑month deadline is retained only in the brief, not the calculation.
+
+I’ve prepared one set of **assumptions, not measurements**, to enable a first comparison:
+
+- Current Pro base: **250 subscribers**; conversion: **5%**; monthly churn: **3%**.
+- Feature value: **70/100** for the next release.
+- The release is set to **70/100** under all three paths; the phased path ultimately sets price to **£59/month**.
+
+These are reasoned starting points to adopt or correct. Shall I apply this set?

@@ -1,0 +1,455 @@
+{
+  "id": "resp_0d7a8a750c6144fe006ab57ce42f4c87d28c44811209a02c3d",
+  "object": "response",
+  "created_at": 1790278884,
+  "status": "completed",
+  "access_programs": null,
+  "background": false,
+  "billing": {
+    "payer": "developer"
+  },
+  "completed_at": 1790278908,
+  "error": null,
+  "frequency_penalty": 0,
+  "incomplete_details": null,
+  "instructions": "Produce a complete causal decision model from the brief in ONE pass. Preserve exact user facts, numbers, constraint semantics and time horizon. Do not invent numeric baselines or behavioural effects. For each option fill `interventions` with the factor levels it sets — record a level the brief states with provenance \"explicit\", and never guess one it does not give. EVERY OPTION MUST SAY WHAT IT DOES. An option with no `interventions` AND no `changes` is inert: it can never be compared with another option, whatever values are supplied later, and the whole decision becomes unanswerable. If the brief does not say what an option changes, still name the factors it ACTS ON in `changes` — that is a structural claim, not a numeric one. EVERY option must also list, in `changes`, the factors it acts on WITHOUT a stated level. An option that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping. KEEP THE FIRST MODEL DECISION-CRITICAL, NOT COMPREHENSIVE — BUT NOT THIN. The shape to aim for is this envelope: one goal; EVERY option the user stated, never dropped or merged, and normally 3 to 5 options in total — when the user states fewer than 3, add carrying on as now if they did not state it, then the strongest alternative the question itself points to (such as a partial, phased or smaller version of a stated option), each marked \"ai_proposed\"; roughly 4 to 8 factors that actually move the goal — besides any factor an option sets directly, name the MECHANISMS through which those changes reach the goal, never an option merely restated as a quantity; and up to 4 to 6 outcomes and risks between them, only where they materially change the reasoning (the outcome the factors act through, the risk that could reverse the answer). A model below this envelope cannot carry the reasoning; a model above it buries it. Do NOT widen beyond it on this turn: no speculative options, secondary factors, or decorative risks and outcomes. Anything you judge material but that does not meet that bar belongs in `unknowns` as a question, NOT as a node — it can become a proposal later. Stay within 18 nodes and 30 links in total, counting one link from the decision to each option. Correct, connected items beat a comprehensive map: an oversized first model is refused before it reaches the canvas. Mark provenance honestly on EVERY item: \"explicit\" only for what the user stated, \"inferred\" for what you read out of the brief, \"ai_proposed\" for anything you added beyond it. A GOAL TARGET THE BRIEF DOES NOT STATE MUST BE LEFT UNSTATED. If the user named a number to reach — \"to 40%\", \"by £3m\", \"under 4 weeks\" — set `target_stated: true` and put that number in `goal.value`. If they only named a DIRECTION — \"increase productivity\", \"cut churn\", \"improve velocity\" — then set `target_stated: false` and `goal.value: null`. Never substitute 0, never invent a plausible target, and never treat the absence of a number as a target of zero: a direction with no number is a complete and ordinary goal, and the analysis compares options against it perfectly well. Getting this wrong tells the user they asked for something they did not ask for. THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link — do not invent a near-synonym outcome like \"X Improvement\" for a goal called \"X change\", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all. EVERY RISK AND EVERY FACTOR MUST BE WIRED IN. A node with no link, or with links that dead-end before the goal, is not merely decorative — it stops the ENTIRE model being analysed. Measured on a real model: 8 of 20 nodes were unreachable, all five risks among them, and the analysis refused outright. EVERY FACTOR YOU KEEP NEEDS ITS OWN LINK TOWARD THE GOAL in `links`: straight to the goal metric (its EXACT label), or to a kept outcome that itself links to the goal metric. An option naming a factor in `changes` connects the option TO the factor; it does NOT connect the factor to anything, so a factor that only receives links from options dead-ends. Measured on a real first model: two factors, both fed only by options, neither linked on, the goal orphaned and the analysis refused. Give every risk a link to what it threatens. AND NEVER LINK AN OPTION STRAIGHT TO A RISK. An option changes a FACTOR, and it is the factor that raises or lowers the risk, so state it as `option -> factor` (through `changes`/`interventions`) and then `factor -> risk` with its own direction, and the risk on to what it threatens. A bare option -> risk link is the one shape that LOOKS connected and cannot be analysed at all: Olumi has to stop and ask how that option changes that risk before ANY of the model can run. Measured: ONE such link refuses the whole analysis, and a real first model carried four of them. If you cannot name the factor in between, do not draw the link: ask which factor carries it in `unknowns`. EACH LINK IS A CAUSAL HYPOTHESIS, AND ITS DIRECTION MUST BE STATED, NOT DEFAULTED. Take the direction from the brief where it says so; otherwise from the causal reasoning you could state in one line (\"more delivery capacity raises velocity\"; \"a higher price raises churn\"; \"higher churn lowers recurring revenue\"). Such a link is Olumi's hypothesis, not the user's claim: provenance \"inferred\" when it is read out of the brief, \"ai_proposed\" when it is your own reasoning, and \"explicit\" ONLY when the user stated that relationship. WHICH option is better is the question the analysis answers — it is never a reason to mark a factor's link to the goal \"unknown\": more capacity raises velocity whichever option supplies it. Only when you genuinely cannot say which way a link runs, set its direction to \"unknown\" AND add a question to `unknowns` asking the user which way it runs. An \"unknown\" link is withheld from the model and never counts as a path, so every option must still reach the goal through links whose direction you can state. GIVE EVERY FACTOR A `plausible_max`. IT IS REQUIRED AND NEVER NULL, for every factor, whether or not it has a baseline today. A number above 1 with no range beside it CANNOT BE ANALYSED — the engine has nothing to read it against, Olumi refuses the WHOLE analysis rather than guess, and NO LATER EDIT CAN SUPPLY THE RANGE: the only remedy is rebuilding the model. The range is a SCALE, not a forecast: 100 for a percentage or a score out of 100, exactly 1 for something already between 0 and 1, and a round number comfortably above anything realistic for a count, an amount or a price. Measured twice on real models. Labels are NAMES, not sentences. Output only the schema.",
+  "max_output_tokens": 6000,
+  "max_tool_calls": null,
+  "model": "gpt-5.6-terra",
+  "moderation": null,
+  "output": [
+    {
+      "id": "rs_0d7a8a750c6144fe006ab57ce4e10087d2b2471ebc60ce4b2f",
+      "type": "reasoning",
+      "content": [],
+      "encrypted_content": "gAAAAABqtXz8QBoox2VAkkPsGR6tqStRS-SPymc_kLdcmEQC5t5xf63wRJxLoYFNl3tS6qYnZIPZ3aRz2-wgeLVfLoSxczQ6-8H_8HyIhjik4GGWT2Dg-1uYAqdrr_cRMCWJyh8W0n2aBb1tvU1xmnbx64xgdCIejU8a5dnBbc1wDh-10rbI7KOjq-N09dt26F2nJrv-y6rj520Z0iYX7SHHWVaiOtgRhjt0S2ZCFT1cSJiKg_pSi9xMvkIAkpolWApvxyE49s5lmAEQWyYY3LvrF1bRpsxD2FfS7cA9WK2PnFCIBSgHK19wvyILYSkCCCogmgXeEO7ksM0IeTJPOG8BclKYnUAK8qxXvFRVRZHPXVDNDhlmZKxPHFt6TYvl0y-fGyJIkA9SjwbXKTltklEhDxb4hW8iQ0X0kmrjWlRaUafh4BVarYg8hzMgEJad8u4W0YmYoycCBGlDhVca-mvv05r1yutGGCyM0TXe4oFq_-qnE8xFGhc6N3-x4Jf-95HMYLeFMvfAUIzmLF9txDYHl2HJrZhNktBrC8ZruoLbcLU1MQHlWALABUdzPsop1YlMFmm8E7fDS6Lj8DwiRY5FYqFB9FrbFS5Q4gQlIE2zBa3hU7ooF2kRVMv4J1Ixi3JA-btXssDFPsiTZkFejeTFK196gRUKxXUhUEUJBfs-ih_qCHi9k7bFkFC2wEFRpW-SWq7iFNyPl4Bm2l7Kaaze3n3Q4OJQMknNEU7EErP9-sslUjJQ44zO_Rb-cMOycyoM-JRVx0Vxh27XwTrEeFlBQt9mjQrkALkb9RFrA0bU1oUYpdo7pX4fbSDXRHytp_pdLTZoiCb2cuM6hb-jlE3y1hebcOBvYpnMm_RkbrOLATeiehyHM3aTardDT3vbDmKClZ_EwQxWEVaoV2F8l81Fz9cEuuBEOsnAcY3V3plkQq8wxskVzLK48HW3HTxsN1ktIqTglwqkDz1LVWZkIwbOPShzLnJmZmQe5teWJ5mtK8duqRFlNhX6Yibgn24NvQQj49s_xlq-8yVDb8ywEulGFYOS4vRczFfOWspZWguxiGpByoiRLYwj5DLzydZYRdBCYxnWfCktpUy3rlqpn-LzTUxiYk9XLEW9-pAQm1us2aeNiYxEgJnJ_n0f7_yUw14NKNZRZX1UaoPW9uP65sV2r9qMkPUvrSVW-O6xR3VIUNEtirGictgIJji2dvGPv_eya7T5BlGlGJt4x2mSDvnbMBp4vqvTc0tRoivpvUEKOmPaXpsJee6-iQDZsWsjNVMEeHJ414t8rW5_Aa4RhJIz0KB_vN0ZXMf_rwCfTTVu1h77RNAYj2QDXCYhWB3QRBjg6g8PvUD8j_9b3BQT2KLG2ypEOy2nJCxZC9LpZ8grkLIxtOTmIujimS49BWR05dg3SIHUB-SlWsM8NFqdho7E6fnukWyOX8XUti-mUoMvHNF83yFeyL1j2KvbQQeIxwphcWqwhB9GgtKDJslq_MFvqEGP2ybCBpoWO_hXtGnK2-66y6r9xdxViUseiRM7XbQB3fKuu4JCFnlGQqRzFD-Kgr_-9r8MMFmm5dJlJvX3CxWs04qzmG-OhBmawbcO60z0DRIum-7HWQ2KYE9fcQAi22s5SYGL2Obq6bWqQueNtgD8P5akVYZalZQ94yjRQLONcx6kOzVK5mXaM0Hh9RzKZNu509jqDZ29GzBrPYs6pm2ALaYZJ4ZwaXXto9QNepAAEh-D2S5iTRLWRrumZUDh0Qv7vf1olJQWnuQ0oxeHPbVlf2ElCOe2tdPUk_m97Z2sKcllpEy9UtuDr40SMF4fzemw2E5SsChEOUZFJ4iNKCgqv9ivxdfPePMFxaQFYtUECLP5FEHMRl-m4tRUAYVTDkePCQyHD8YhrH7H1BH-Ncz2CX2yyngimVxYu6qioby88vDDDRx7yUVIo9hI9qltkZ-QdMYmVm8GgDz3mazmOcXnf7Ehvy2Gt4zso9UHO0R9ZxHKyqEJ1hk2V2zBXdORnwZXG6zp3qKr1ED4qkc2x0LwDflt4uQXwQIAx7qILxmw4QTmaiip0j_0ga9yOTSNuAYdVcxSbXVCQJKgnPtsMW2RKUiQVIY0ackbPG98opkowrjQ6vd8DQghhnPHgHioQyHkHZg4yYnKiNLAub-7GpMgF9UOWMTl6Edc_xkFONlceaslYfORrS1xqTMLiG8HN96XVdQT9PTmjj-5tjRK3NC_9plLPHMuUPJTR9fAa-DSZpYjcrlvfX5jm97MAk9uD0iueh1ZYneEPIOwJyrfTMXe0hYnrOavZLKXX-PkUixZR0FqkdW8M4jNnJ_ZzDrT4Vac3ZrsC6N1TaBw6AMQ39cdJiYT25DXYNV7XX7tIxiPauwHQ_4WuOFdOUUARiX_0CtgWX8DdFVkbqwjPe9zOEYYbfD6bBsnv-riaIGvHQ06Pk6By_UFMepH1_ywyvMgglckZL-433ayT6Mm3DTfXeDiGs5pQAwooaPLS38yEmvUDeNZigZ94FYEKdU_eEV9MTZOLtl_kvbQaeJYQpI6DKFxp5Zote8qUy0OZpbsmQkibQCDERpNZWsm0mou2fOMI9icDYVpKy1k1Egpovuj_drsHFn4-cBHywe1T91Ki94bvWaQaQxh_BKI8pHRgp6dZexzl1WubHAgTs3dVtgQq6fyIhcLvtokh1iJJBAlzJVnX3ul-aVLSgS452_h9KJjNLMIZw6c9IX5p21uOZKFSFfb7MkLkVLsBbUCd12-br94OFkZ_2V2x6qMi-P84aiIW0Ebai5D6_67TFfiiAzE9I0cudXzfASfKtI8ZwBqnI84wHBKPH2Kb7BchdCQHex4Tk1OCEUls6AvfRBANDhvqAP-_TQyavgBUEQv9B58wC-KyqiVFrmNdXk_T_kjddAXfKkTkTW1f3opRPRrLMQwO4QzsEu8VW5kO9PvpuX-Uk23R7pTWKmbRN5Tb6t_DeN6-1Q01bhk_mAOgASoQP8PoNFUFnqPEbzaVRyDD7mTy1nnCtwcghyKSluLkFrwY8l_LgxYEekfsdDdTjXTiTTMND3cA7Z6uUL_Ipfu4Sb2HTcJqEetoEWJtp4v6FTPV4d1DspuTHtA_HnZu4MTvPlgh8hjoafMle2c60PM16OcU5ULSb-nQvtUAiigHfjJ0yO69_xL5Y4BslT-jdNfYceQz8Xwvt9w4kVUtJeF_bXYiPblXHumMNigMI3A6rF2Z60YAYqVANsNEfbUHbs68kqajy0726glmHBZrc8vhQFgd-AM__uPvP4NIzN_-c7KNpLWeIpXE6ydfW4uh-MTDB3M9wzGSA8UXMpLMz-xVLw4vLvxcZANPdFFndJrzHMTcfvsIgyqbm6v0CDcv2I_dRnDXNm3kN8cE5236bzljxkIsw_fDKisxda6T07o9S6ZJz6CvuKdtIlmle-VBiwm4Pbzv4_X33k-en9ljLUigfAvEwo57e93atW1W4VVunEsJTK1wumEgXaXS3hO_L6aHIbuRIFZ1Oc7nt5Yf_dr4UAAgtyMwKXi3Wl_qwnBbQjn3YP87rAonLywzT-D7d5JBAkmAdxZk0yxksY7gQ-nUAVef_D3UNyyIeKimXrzgkaPh54-j1C1D9514JEZCvonN2Zqalfb_ytR2t29MznQLjs3XD4HG-sUOONh-9ul0VSrUPNpAaU350Tvxb2DPBlyV0WiCgz7Lfv71PZo8ynK9-faucp8j0P6bB7OIWSKSW88Kg9NaBruqn0rOwknXXGolEVaHV6H3T3BtZxQLmm3GkxtUELugQrIuKvheB96pn49ZXhlqCfG9dqFtc5fw71sXAQZo_Cgk1iT960YQUz2ejoKAxWZHzKsYXlbb2V11Y8CNbOnY2-RDqZARtThX_IXq9kMl1WtodeoCNWSDwgfM0TxiQsyeWBR2lhjapT5APIwRENpw3lvWxbtNXk0cvpSvwsKWTn5dn6WZfGM_b8fi3UwMNNEzjfMnYtjETBVekUsYVCRsXN3IK0Td7zAkWrRDkTUs_yeCu-JYnvAHFl2pblp-LSOioeg0yVYAaW9IZV3jy0DHLNR2_taE--McOTAfVfaM8WuWH1sjzrV3aeBV9IGxd7UEOKOafcLXU8m4PL9y-VtcwlcAKHg9YsGGt-xsNHkv68OUXR1y0QraQpYlaA3UkdPe085ppjVT3-ZedyidPmWJU6M9wbzx_F90vC6izT1sq3xevQyvRXIMG_BljHwSUVtPBb0xSgRDSrBk5y40P0PHolcw1b9cdrSXKVitheWhknLG42_Ugy4nl2_3KkAWFsNaZydCjfBTvwoyGFBnvJAFY3qYjdxP8mYHd4GHgiDg_vVFem-xeTgSXrQKitx137FT0F2HuymN7HxoFhsB0HF6vnJ4sJZX8FRf0UO5wJj9N_u6OioDQcrZDraRBSTj9XEJCQYbfXZ5V68z-qSfYWNcFGFOj2Q-0AY1MDT298ajpZy201JfBH4cemOEzPIGDFRkEsfNRDXby4LQx8266L1l1lhaL50xpD_Qeydwvv1_MAefp3L8hfkzQ0FRxDI4dMCryhnK7Nt",
+      "summary": []
+    },
+    {
+      "id": "rs_0d7a8a750c6144fe006ab57ceda91c87d2925c7d7de5a390e3",
+      "type": "reasoning",
+      "content": [],
+      "encrypted_content": "gAAAAABqtXz8ECNNtiVRFJOh11ELTIWPakZIIG20GG2h2tKZU1HCvy9LGEJBoAjNuioBi-EGpuNcXRQRJaSJW6R3_MmLY5j_yU93hOsDYvcABowQUaMK66U5dU5PCM18dosKMofKEL1isoAApZ9SMdugVdBYlTzNJtGh08aYiUZMvuU0tAg7iwSTXWHNPDQRtT5bCjk_L60MqSMDlD9NC79aNGdlz81dI1Vh2o2oIESjiCa-dE5i1tRieICsfSQ_Pf1vsKu07F_2cQ7tMjXHiD071oMhom3h1kTCpC-R6L7BjbhWAvoaoGuGVfnHFoYZjaCuq_amhQnM5Vo9AB3AARDdjQSxadhu0Xzu7SV6Yn8qGnsKGq1WYKxBuo9SzPCi4gnX7tFyVg1Fs6_TRNsy37YWOvaDK95Qaa8yhcDAnWBMdXciQGSJ4RPIQDpAqxNZ7eLoDX5DNjbbJCnXtoXHv50UmSW_zFo2XzKhNy0hMh6SipYeilDepASArztB0VGoo2z1WQhHSH4t7-z-6N1rT99UEQbJQo7P65mkej9t1yLohJ4RnOrDshCe55c4C3H9oYXX9cbWptKOu4z9SIRWiq1-1Fe9r0XylH8PJd4cKyUU4cOM3EmdXl9dCNm1PboNVvKS_vSGAlrbf_6HJgRdjzD_OUHr2bh-mtlXypw2hXXhTrHKHlUOGd3qF5S-do8sznYLIGuu1a2hzXT4m7HhatiLqsBKXkFKQGdAYz_W86t1cBB2-bBZVo1OoSrjf_QCzRB9zUF_6uZrauDTTBvaNCgubFkabEXok_jrt5xJofXnKqpj5Wg-nIv6_VvgVD7hVnLiKmGyiIG02sxwsn2_bV1NQUPdkqNpjVhXQ5Qqt9XNZlB5VH9xAoxLMaoSEB4wBpGiyjxx2gjWluc1W8Ks8kgYmE37rwf8ij7asWlxlJjpDPmg34TnUtI9O9dyBWQgXyJ4610EaLtFApNOHxgC9T8aK-8_aroSZqO_MxkWH92yGNtprKf9tJozQnGcjA1FKxiHET-er0KoQ7TU3tegWJou_a95NmGsXR_R4HAiqMBSlWAorbWd2ABwJCUBAQER4geVIvAcg0QmnQS8F438rmOacQGh6kY_m7VsTohrB_APUUSLc1ZlSRpTDaNMVytP5Afz4q3oABqDSVsUlGHzrMqLfGpsQdIr0UjPtCq7xJwDmteCpO87KEduD7K_QerERQ4ZOTeuuyPnsHYwNGGuJmYX-G7UnuBL_PrDZQnyChvyeHvUbDllgixdPASrvkTUm5erKTycsQctsMNI6lqRZw8FtPTmLmuZ2qOlUiWkcSi2MEyYzCifb8fwTNutlcj2LgdJXLsbSxKYedMbMn-V5M8fMVQ5E0qfjIPg1cGgwIHblX0K10d7IDw5Cr5j9O_8k316ia6FX0vkj3hPJPBKAgjU_nIESd8iXV8f7K7KxqYKrrwv9_ow2Os9embzLS7mQIQaZBvYMuRjSLdRNmAZWDjG98NtfCYHcJZ-c1KUuUnq76FtI2GYXjLNCaf5xbooR00kq3f_KhwUIyDRN0fM7R8vdrB0q_wtQItiru5LZ4VTbdqUyDNN2Cx2xdK8g93lsEvpJr3LNFQ8bS7sOIBvNKQOYCX4thD_ztQEjTLgw4Rm9O0wg8wad87McWdrnuZaT4PieyRemqRdzVPelOEKZySTKywQvBW74qxodqZi4EkzcibdzhvkWwIj5WvApXngJSdNY1Ow9A1ZjWqwj2V0ez99KIxATWjdeXZtdwTEfRc8yu2XrkcnXbosMKeWeA5wGgiJccaaQSD_kSbr7ErhIL8XpoazUDx8iIeLKuiSyml6gnEELCXJuYexl9RLrv8c81ybIZchllD8Nit3xlQkCnUROIJUYpbTuAtNSPkMa_BBXjXj4U3lM9lB3rrubwVWV3VujWoW9U08AlMioBDDF3Xi2VOqCdSLMjUh1MD8Dtm1hGiqgkQnwNOnm2a6nQN2ljYQtIWZekBDFAdKSWMNRnYLI6g9Th-d4BMvSxyYhsdz12Gvm-aX875I9AiY9fnxheB3slPBeMcPVwZixDi7bfrhHt3nqZDX-IT4W018cXqQ6lC5CpcAVsgJ2Cug9TKbCTPAXi1FcPlYoWCgjNIkWP87yDf6NWEL8NbpqlllS5KgSdMzXvvnfT6L1tgokvQqjtAr3JS8IdIr3zvZk9T8DFhg52Xzk5Te6jINDfeU5QEmYPP_XIhrb2EZ6ofBwAqZ2D1giAmYn_2YaInIeOd_Dx8jCZiQpy1Z0CMTL1ePvzZELHyQ6IexRLzn7NCJtZ4mOEScIEcO11b7e6ZpHOTnhX7MIdBFU63T3SvAeg3Ux2NeAYUxMIHK0O7TRlHXp2eAY5qzrlZHg2chm4LwSxjwLXN1V4Wyc_NjRZ3lq13dXzvkQc2-olK999PFjr1KZwQ5ATQcctjLDxPjEXzya_4P1NGqt9TBHCSrCMZs7g5RVFbIB4EJbm5EeM9ZtZNRwB5a2Vtopr2dW2Giq0h_7SeiF2YH3qMMsa861F6aFJUemYi2tvjD7v_kWtrTLkowRfD-EA_Zs-owys-Rtz3Xsqb6IC0OxPwtU3UWlZrkBu3MmuBh8u9xji1SOxsEm-dhRRD82g3gYpztV9nr17x5U57C0iMPivMFbYvK9WjS5JIX-QB94zeAQcww-hweSJ1X_YbcJSdG4Cm6BJiYqVKLTsgq4vBDPjRSJapPYDVsWgqx66Aiptm-G-7GIOFRQfs9nAXMlZCQ54orBvWZlCmoXu2gHDYWG8TuvV_Ysy5hHhkiTJT1XHNa8XcicS3PBx83-xxn7lC_oz4VejCJpUbeCBYdX2WBeCazbpm5m8fUjjzbL8glhYQAC5fpq3PEMt_a6MrUtYtoyKpfNqUAlVBw5UgIbZyLO6UCouNkL4GR8OtSuVTq-cAZVy2R2uAQlnQzpcXgcx_kCCvPmB-3JIioKJ6NtkoQBBumtiOxX5EBAmQN2r6UD0ioUhprWXWOhzbrAM0CEVlS-wQN20KGZg1uZjUlC2wu6I_eZZ5fq55ch6_XcftU6KeXIvczqDAW0lTD-D1IjNMKP2ymbWRA6wURCKBWGwZf1Oh6xGNIuLWapkuAB4AVW_l9GXIHdjE6HclhNRkpB8C0tg5r-u6Mmmtr_gXZXlS38lEFKLED_5_FUWIoyokO3A0zC2YMua5ydtnVKQq5MgD7LM7gLeWN_XqtkJCPhBfLbRpMkyiu54FqH1ru8-6sbQq6Zl_0g1YsFqdBDDlqEp94wGx2UrKnFBY-49jCa7jBxMVH04z2iaxTdibt25dkk8mgbidouEaCdRdT3pm1HDcvZa6haibvYB8bUrn7G40u5H5SnUTb0uyRG7OeOpcbX8mkpOtCx38pbihcWJzITFOfbIpZsdiq6dtUzVQMcb-erq89sZymfV9s_rh6KVv8GOO-EPeBC-989Q7cc2HjuveC-cJK-A4fQPc4sJ75j4BdGq7o3t8gGsr3WTyLC2aQ2l__fjltWtjfwmIflEIFBBbCDGfphud_M1ZxFRupf_AwCrTWOeyBxPcX0PKWfLCDTvlfkodvmTQF2Yg8hXhVB1yWHn9WlouAVW_clCtnXDGqlVlz-UwkqJiIJStZNgXhSNwyLe0Ixo6quS5Ni2KH6bJ4YOfLwnU5EV5LPgnMlagDzZCMOZQ9fpSX_nXOCJblLVNQ-ni-WjEDPWCgAecRP6lwpRMYMn22sQAhSEngqNBfi1N3FRUS9pV70_L-e4VtDM2cOSMJC37KKKnqBl1uq5jGzkl_BrHSZ7kDLTg3CFYOA9-No27Fr3N4aS1V26NqZzoBaA3kjjmjeCxTX55nwMwtgAALfP61OzZFtBBKsf91766ASzqKtFr6qYaDTk8d5EfVesVbRuYrHIIxqkfndtTkDIj1ZTjyfkDR13XIGA6YCrWRfWos9G_3LMeWIxsmj_tgPtPkP1j1W3rZXX6mOtIY4Mme-TkAP2tUswGWVubNrhmkTiPu0Sj_Dg1jFs1rwd3qpYF1EiOK2U8Wa_TdfFZvhlHppK0ntQkB0QTvbyj93GLz8SZO5MdL4iUbwkx9MZYrTetv0EW09imJPSVt9YHoAobEtSk2G0v3sptiv6mFt6Z_f59kh8V2vm1IMKFpv6uFHdrXx3QkMWb2mkJu08L8kQkY2P_ikKCXqEEUW_c_s4hdXnJOwA0spWmeFgggeMJEXMc_Y_Hasbxr-LGODOznuwQ0CFZDgQZrFAy6V_AhD_TspE4YdkR8Z4XBx6zLYr9SgbCEWsrytfQfm5bRsZFxjWRUzLTtSbr4asXFHFGDFAQC53oUiwUCLLdKnFFI22rtLcWZVKwCCLm6mRqmh_2jN82pJt65OKBhl89L4YaY1GiscdJrSBdO-9XyXZcoxapk9Kxrv9ZiG0S_ri6EFdfzZMo3TONMr_nGEMedjqlNTLcWs2ahUwlyw4ZO4zocC_IbHw3qHQpXAK26qwlW-5jhEISN04qY9VEeQor2yTjI73ZhOrc_IcDwRj750dg0jRo7cANQVzE-Jzr188UmaPXiP-4_k6aw",
+      "summary": []
+    },
+    {
+      "id": "msg_0d7a8a750c6144fe006ab57cf73c1087d29ac7ba8de8502406",
+      "type": "message",
+      "status": "completed",
+      "content": [
+        {
+          "type": "output_text",
+          "annotations": [],
+          "logprobs": [],
+          "text": "{\"goal\":{\"metric\":\"MRR\",\"operator\":\">=\",\"target_stated\":true,\"value\":20000,\"unit\":\"GBP/month\",\"horizon_months\":12,\"provenance\":\"explicit\"},\"constraints\":[{\"metric\":\"Monthly churn\",\"operator\":\"<\",\"value\":4,\"unit\":\"%\",\"provenance\":\"explicit\"}],\"options\":[{\"label\":\"Keep £49 With Release\",\"provenance\":\"ai_proposed\",\"changes\":[\"Pro feature value\"],\"interventions\":[{\"factor_label\":\"Pro plan price\",\"value\":49,\"unit\":\"GBP/month\",\"provenance\":\"explicit\"}]},{\"label\":\"Raise to £59 With Release\",\"provenance\":\"explicit\",\"changes\":[\"Pro feature value\"],\"interventions\":[{\"factor_label\":\"Pro plan price\",\"value\":59,\"unit\":\"GBP/month\",\"provenance\":\"explicit\"}]},{\"label\":\"Phase Price After Release\",\"provenance\":\"ai_proposed\",\"changes\":[\"Pro plan price\",\"Pro feature value\"],\"interventions\":[]}],\"factors\":[{\"label\":\"Pro plan price\",\"role\":\"controllable\",\"baseline_known\":true,\"baseline_value\":49,\"unit\":\"GBP/month\",\"provenance\":\"explicit\",\"plausible_max\":200},{\"label\":\"Pro feature value\",\"role\":\"controllable\",\"baseline_known\":false,\"baseline_value\":null,\"unit\":\"score out of 100\",\"provenance\":\"inferred\",\"plausible_max\":100},{\"label\":\"Pro conversion rate\",\"role\":\"observable\",\"baseline_known\":false,\"baseline_value\":null,\"unit\":\"%\",\"provenance\":\"inferred\",\"plausible_max\":100},{\"label\":\"Pro subscriber count\",\"role\":\"observable\",\"baseline_known\":false,\"baseline_value\":null,\"unit\":\"subscribers\",\"provenance\":\"inferred\",\"plausible_max\":2000},{\"label\":\"Monthly churn\",\"role\":\"observable\",\"baseline_known\":false,\"baseline_value\":null,\"unit\":\"%\",\"provenance\":\"explicit\",\"plausible_max\":100}],\"risks\":[{\"label\":\"Price-increase churn risk\",\"provenance\":\"inferred\"}],\"outcomes\":[],\"links\":[{\"from\":\"Pro plan price\",\"to\":\"MRR\",\"direction\":\"positive\",\"provenance\":\"inferred\"},{\"from\":\"Pro plan price\",\"to\":\"Pro conversion rate\",\"direction\":\"negative\",\"provenance\":\"inferred\"},{\"from\":\"Pro plan price\",\"to\":\"Price-increase churn risk\",\"direction\":\"positive\",\"provenance\":\"inferred\"},{\"from\":\"Pro feature value\",\"to\":\"Pro conversion rate\",\"direction\":\"positive\",\"provenance\":\"inferred\"},{\"from\":\"Pro feature value\",\"to\":\"Monthly churn\",\"direction\":\"negative\",\"provenance\":\"inferred\"},{\"from\":\"Pro conversion rate\",\"to\":\"Pro subscriber count\",\"direction\":\"positive\",\"provenance\":\"inferred\"},{\"from\":\"Price-increase churn risk\",\"to\":\"Monthly churn\",\"direction\":\"positive\",\"provenance\":\"inferred\"},{\"from\":\"Monthly churn\",\"to\":\"Pro subscriber count\",\"direction\":\"negative\",\"provenance\":\"inferred\"},{\"from\":\"Pro subscriber count\",\"to\":\"MRR\",\"direction\":\"positive\",\"provenance\":\"inferred\"}],\"unknowns\":[\"What are the current Pro conversion rate, Pro subscriber count, and monthly churn rate?\",\"How much customer value will the next Pro feature release add, and will it be available at the same time as the price change?\",\"How price-sensitive are prospective and existing Pro customers at £59 per month?\"]}"
+        }
+      ],
+      "phase": "final_answer",
+      "role": "assistant"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "presence_penalty": 0,
+  "previous_response_id": null,
+  "prompt_cache_key": null,
+  "prompt_cache_retention": "24h",
+  "reasoning": {
+    "context": "all_turns",
+    "effort": "medium",
+    "mode": "standard",
+    "summary": null
+  },
+  "safety_identifier": null,
+  "service_tier": "default",
+  "store": true,
+  "temperature": 1,
+  "text": {
+    "format": {
+      "type": "json_schema",
+      "description": null,
+      "name": "whole_candidate",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "goal": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "metric": {
+                "type": "string"
+              },
+              "operator": {
+                "type": "string",
+                "enum": [
+                  ">=",
+                  "<=",
+                  ">",
+                  "<"
+                ]
+              },
+              "target_stated": {
+                "type": "boolean"
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "unit": {
+                "type": "string"
+              },
+              "horizon_months": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "provenance": {
+                "type": "string",
+                "enum": [
+                  "explicit",
+                  "inferred",
+                  "ai_proposed"
+                ]
+              }
+            },
+            "required": [
+              "metric",
+              "operator",
+              "target_stated",
+              "value",
+              "unit",
+              "horizon_months",
+              "provenance"
+            ]
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "metric": {
+                  "type": "string"
+                },
+                "operator": {
+                  "type": "string",
+                  "enum": [
+                    ">=",
+                    "<=",
+                    ">",
+                    "<"
+                  ]
+                },
+                "value": {
+                  "type": "number"
+                },
+                "unit": {
+                  "type": "string"
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "explicit",
+                    "inferred",
+                    "ai_proposed"
+                  ]
+                }
+              },
+              "required": [
+                "metric",
+                "operator",
+                "value",
+                "unit",
+                "provenance"
+              ]
+            }
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "A NAME, not a sentence. Keep it under 33 characters where you can."
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "explicit",
+                    "inferred",
+                    "ai_proposed"
+                  ]
+                },
+                "changes": {
+                  "type": "array",
+                  "description": "Factor labels this option changes when it states no level — e.g. an option that phases, grandfathers or tests something. Use the factor labels exactly. An option that names nothing here and has no interventions is unreachable from the decision and cannot be analysed.",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "interventions": {
+                  "type": "array",
+                  "description": "The factor levels this option sets. Record a level the brief states, with provenance \"explicit\". Empty when the option changes nothing. Never guess a level.",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "factor_label": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "number"
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "provenance": {
+                        "type": "string",
+                        "enum": [
+                          "explicit",
+                          "inferred",
+                          "ai_proposed"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "factor_label",
+                      "value",
+                      "unit",
+                      "provenance"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "label",
+                "provenance",
+                "changes",
+                "interventions"
+              ]
+            }
+          },
+          "factors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "controllable",
+                    "observable",
+                    "external"
+                  ]
+                },
+                "baseline_known": {
+                  "type": "boolean"
+                },
+                "baseline_value": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "unit": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "explicit",
+                    "inferred",
+                    "ai_proposed"
+                  ]
+                },
+                "plausible_max": {
+                  "type": "number",
+                  "description": "REQUIRED, and NEVER null. The top of the range this factor could plausibly take, in its own unit — the SCALE it is read against, not a prediction. A percentage or a score out of 100: 100. A count, an amount or a price: a round number comfortably above anything realistic (a £49 price might use 200; 300 subscribers might use 2000). Something ALREADY between 0 and 1: exactly 1. Every factor gets one, with or without a baseline today — a value adopted later is read against this same range."
+                }
+              },
+              "required": [
+                "label",
+                "role",
+                "baseline_known",
+                "baseline_value",
+                "unit",
+                "provenance",
+                "plausible_max"
+              ]
+            }
+          },
+          "risks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "explicit",
+                    "inferred",
+                    "ai_proposed"
+                  ]
+                }
+              },
+              "required": [
+                "label",
+                "provenance"
+              ]
+            }
+          },
+          "outcomes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "explicit",
+                    "inferred",
+                    "ai_proposed"
+                  ]
+                }
+              },
+              "required": [
+                "label",
+                "provenance"
+              ]
+            }
+          },
+          "links": {
+            "type": "array",
+            "description": "Causal links, stated as hypotheses. Every factor you keep needs at least one link FROM it toward the goal metric (directly, or via a kept outcome that links to the goal). Never link an option directly to a risk — link the option to the factor it changes and the factor to the risk, because a bare option-to-risk link cannot be analysed.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "positive",
+                    "negative",
+                    "unknown"
+                  ],
+                  "description": "The direction read from the brief or from causal reasoning you can state in one line. \"unknown\" only when you genuinely cannot say — then ask which way it runs in `unknowns`; an unknown link is withheld and is not a path."
+                },
+                "provenance": {
+                  "type": "string",
+                  "enum": [
+                    "explicit",
+                    "inferred",
+                    "ai_proposed"
+                  ]
+                }
+              },
+              "required": [
+                "from",
+                "to",
+                "direction",
+                "provenance"
+              ]
+            }
+          },
+          "unknowns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "goal",
+          "constraints",
+          "options",
+          "factors",
+          "risks",
+          "outcomes",
+          "links",
+          "unknowns"
+        ]
+      },
+      "strict": true
+    },
+    "verbosity": "medium"
+  },
+  "tool_choice": "auto",
+  "tool_usage": {
+    "image_gen": {
+      "input_tokens": 0,
+      "input_tokens_details": {
+        "image_tokens": 0,
+        "text_tokens": 0
+      },
+      "output_tokens": 0,
+      "output_tokens_details": {
+        "image_tokens": 0,
+        "text_tokens": 0
+      },
+      "total_tokens": 0
+    },
+    "web_search": {
+      "num_requests": 0
+    }
+  },
+  "tools": [],
+  "top_logprobs": 0,
+  "top_p": 0.98,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 2548,
+    "input_tokens_details": {
+      "cache_write_tokens": 0,
+      "cached_tokens": 2545
+    },
+    "output_tokens": 1749,
+    "output_tokens_details": {
+      "reasoning_tokens": 1034
+    },
+    "total_tokens": 4297
+  },
+  "user": null,
+  "metadata": {}
+}

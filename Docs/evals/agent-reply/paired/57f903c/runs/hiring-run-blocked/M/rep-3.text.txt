@@ -1,0 +1,8 @@
+The comparison did not run because **“Continue Current Staffing” has no factor connection or stated effect**. That blocks analysis for all options.
+
+The other options are ready:
+- **Hire a Tech Lead** sets tech-lead capacity to **8 capacity points (0–10)**.
+- **Hire Two Developers** sets developer capacity to **12 capacity points (0–20)**.
+- **Hire One Developer** sets developer capacity to **10 capacity points (0–20)**.
+
+To make the baseline comparable, specify what continuing current staffing does. For example, should it leave both tech-lead capacity at **4 capacity points (0–10)** and developer capacity at **8 capacity points (0–20)**, or does it change another factor?

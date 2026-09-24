@@ -1,0 +1,765 @@
+{
+  "schema": "agent-reply-paired-plan.v1",
+  "run_stamp": "2026-09-24T19-50-44-263Z",
+  "dry_run": false,
+  "head": "57f903c4652783a9de1a3778d6682a8e5f8414e1",
+  "seed": 20260924,
+  "budget": 80,
+  "reps": 3,
+  "noise_control": {
+    "caseId": "pricing-run-complete",
+    "arm": "M",
+    "reps": [
+      4,
+      5
+    ]
+  },
+  "planned_calls": 44,
+  "arm_hashes": {
+    "M_agent.txt": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+    "C1_agent.txt": "141b924ecdd84c1d70a9dc82f691dc4666111a3a4be6b25b7684c63d41b82262",
+    "M_interpret_only.txt": "7483703b1cb31ffebdcfe900c6ad510ea3d507312b8b7ff6e0f19bb1dbf86a95",
+    "M_v02.txt": "3d979e8406693be42d3b340fd245d76a501c4b1c191d5ffaa1353f2f0380ba32",
+    "C2_v03.txt": "55b7f37b0fb0b97704c939d28a9c8fd0f8680b97ea54b6865624b0bf0b69f4ee",
+    "M_fp3_stack.txt": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64",
+    "C1_fp3_stack.txt": "61217435d011011ce6b2519df5019e2af5799f4120634ef944e0d7d7b9e60716",
+    "C2_fp3_stack.txt": "8bff217e6b4b523d804628cbca7398fc3db538fc14ea39759d0bf8e70d18e9ff"
+  },
+  "anthropic_env_removed_at_start": [],
+  "guard_selftest": {
+    "predicate": {
+      "https://api.openai.com/v1/responses": true,
+      "https://api.anthropic.com/v1/messages": false,
+      "http://api.openai.com/v1/responses": false,
+      "https://api.openai.com.evil.example/v1/responses": false,
+      "https://user:pw@api.openai.com/v1/responses": false,
+      "https://cee-staging.onrender.com/agent/v1/turn": false,
+      "https://example.com/": false
+    },
+    "predicate_allows_only_openai": true,
+    "blocked_fetch_threw": "network guard: example.com is not api.openai.com — refused before send",
+    "real_fetch_invoked_by_blocked_call": false
+  },
+  "arm_bodies": [
+    {
+      "case": "heldout-ed-triage-construction",
+      "kind": "construction-final-hop",
+      "arm": "M",
+      "instructions_file": "M_agent.txt",
+      "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+      "captured_request": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-06.request.json",
+      "captured_instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+      "key_diff_vs_captured": [],
+      "key_order_equal": true,
+      "non_instruction_bytes_sha256": {
+        "captured": "b566548116f3ba12f05b64f5e77482a78178f909250557030259061327b498cc",
+        "arm": "b566548116f3ba12f05b64f5e77482a78178f909250557030259061327b498cc",
+        "equal": true
+      },
+      "whole_body_byte_identical_to_capture": true,
+      "settings": {
+        "model": "gpt-5.6-terra",
+        "max_output_tokens": 3400,
+        "tool_choice": null,
+        "reasoning": null,
+        "tools_count": 9,
+        "input_items": 12
+      }
+    },
+    {
+      "case": "heldout-ed-triage-construction",
+      "kind": "construction-final-hop",
+      "arm": "C1",
+      "instructions_file": "C1_agent.txt",
+      "instructions_sha256": "141b924ecdd84c1d70a9dc82f691dc4666111a3a4be6b25b7684c63d41b82262",
+      "captured_request": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-06.request.json",
+      "captured_instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+      "key_diff_vs_captured": [
+        "instructions"
+      ],
+      "key_order_equal": true,
+      "non_instruction_bytes_sha256": {
+        "captured": "b566548116f3ba12f05b64f5e77482a78178f909250557030259061327b498cc",
+        "arm": "b566548116f3ba12f05b64f5e77482a78178f909250557030259061327b498cc",
+        "equal": true
+      },
+      "whole_body_byte_identical_to_capture": false,
+      "settings": {
+        "model": "gpt-5.6-terra",
+        "max_output_tokens": 3400,
+        "tool_choice": null,
+        "reasoning": null,
+        "tools_count": 9,
+        "input_items": 12
+      }
+    },
+    {
+      "case": "hiring-construction",
+      "kind": "construction-final-hop",
+      "arm": "M",
+      "instructions_file": "M_agent.txt",
+      "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+      "captured_request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-05.request.json",
+      "captured_instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+      "key_diff_vs_captured": [],
+      "key_order_equal": true,
+      "non_instruction_bytes_sha256": {
+        "captured": "9057aef9479d4ea8ad0e2931e1a62fcb8b965fb6f106a62cbf4a5f0d1b14f468",
+        "arm": "9057aef9479d4ea8ad0e2931e1a62fcb8b965fb6f106a62cbf4a5f0d1b14f468",
+        "equal": true
+      },
+      "whole_body_byte_identical_to_capture": true,
+      "settings": {
+        "model": "gpt-5.6-terra",
+        "max_output_tokens": 3400,
+        "tool_choice": null,
+        "reasoning": null,
+        "tools_count": 9,
+        "input_items": 9
+      }
+    },
+    {
+      "case": "hiring-construction",
+      "kind": "construction-final-hop",
+      "arm": "C1",
+      "instructions_file": "C1_agent.txt",
+      "instructions_sha256": "141b924ecdd84c1d70a9dc82f691dc4666111a3a4be6b25b7684c63d41b82262",
+      "captured_request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-05.request.json",
+      "captured_instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+      "key_diff_vs_captured": [
+        "instructions"
+      ],
+      "key_order_equal": true,
+      "non_instruction_bytes_sha256": {
+        "captured": "9057aef9479d4ea8ad0e2931e1a62fcb8b965fb6f106a62cbf4a5f0d1b14f468",
+        "arm": "9057aef9479d4ea8ad0e2931e1a62fcb8b965fb6f106a62cbf4a5f0d1b14f468",
+        "equal": true
+      },
+      "whole_body_byte_identical_to_capture": false,
+      "settings": {
+        "model": "gpt-5.6-terra",
+        "max_output_tokens": 3400,
+        "tool_choice": null,
+        "reasoning": null,
+        "tools_count": 9,
+        "input_items": 9
+      }
+    },
+    {
+      "case": "hiring-run-blocked",
+      "kind": "fp3",
+      "arm": "M",
+      "instructions_file": "M_fp3_stack.txt",
+      "instructions_sha256": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64",
+      "captured_request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/explicit-run/call-01.request.json",
+      "captured_instructions_sha256": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64",
+      "key_diff_vs_captured": [],
+      "key_order_equal": true,
+      "non_instruction_bytes_sha256": {
+        "captured": "a6c54caec8e6f636cc63d432f1f5c01a21c42a6bd31c9be79c7936f6030878ca",
+        "arm": "a6c54caec8e6f636cc63d432f1f5c01a21c42a6bd31c9be79c7936f6030878ca",
+        "equal": true
+      },
+      "whole_body_byte_identical_to_capture": true,
+      "settings": {
+        "model": "gpt-5.6-terra",
+        "max_output_tokens": 3400,
+        "tool_choice": "none",
+        "reasoning": null,
+        "tools_count": 0,
+        "input_items": 7
+      }
+    },
+    {
+      "case": "hiring-run-blocked",
+      "kind": "fp3",
+      "arm": "C1",
+      "instructions_file": "C1_fp3_stack.txt",
+      "instructions_sha256": "61217435d011011ce6b2519df5019e2af5799f4120634ef944e0d7d7b9e60716",
+      "captured_request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/explicit-run/call-01.request.json",
+      "captured_instructions_sha256": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64",
+      "key_diff_vs_captured": [
+        "instructions"
+      ],
+      "key_order_equal": true,
+      "non_instruction_bytes_sha256": {
+        "captured": "a6c54caec8e6f636cc63d432f1f5c01a21c42a6bd31c9be79c7936f6030878ca",
+        "arm": "a6c54caec8e6f636cc63d432f1f5c01a21c42a6bd31c9be79c7936f6030878ca",
+        "equal": true
+      },
+      "whole_body_byte_identical_to_capture": false,
+      "settings": {
+        "model": "gpt-5.6-terra",
+        "max_output_tokens": 3400,
+        "tool_choice": "none",
+        "reasoning": null,
+        "tools_count": 0,
+        "input_items": 7
+      }
+    },
+    {
+      "case": "hiring-run-blocked",
+      "kind": "fp3",
+      "arm": "C2",
+      "instructions_file": "C2_fp3_stack.txt",
+      "instructions_sha256": "8bff217e6b4b523d804628cbca7398fc3db538fc14ea39759d0bf8e70d18e9ff",
+      "captured_request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/explicit-run/call-01.request.json",
+      "captured_instructions_sha256": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64",
+      "key_diff_vs_captured": [
+        "instructions"
+      ],
+      "key_order_equal": true,
+      "non_instruction_bytes_sha256": {
+        "captured": "a6c54caec8e6f636cc63d432f1f5c01a21c42a6bd31c9be79c7936f6030878ca",
+        "arm": "a6c54caec8e6f636cc63d432f1f5c01a21c42a6bd31c9be79c7936f6030878ca",
+        "equal": true
+      },
+      "whole_body_byte_identical_to_capture": false,
+      "settings": {
+        "model": "gpt-5.6-terra",
+        "max_output_tokens": 3400,
+        "tool_choice": "none",
+        "reasoning": null,
+        "tools_count": 0,
+        "input_items": 7
+      }
+    },
+    {
+      "case": "pricing-construction",
+      "kind": "construction-final-hop",
+      "arm": "M",
+      "instructions_file": "M_agent.txt",
+      "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+      "captured_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-05.request.json",
+      "captured_instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+      "key_diff_vs_captured": [],
+      "key_order_equal": true,
+      "non_instruction_bytes_sha256": {
+        "captured": "7ef0961d3d65ee01ba0617ca5e01796c3a266ecf58d216c5d559e4e730cb9915",
+        "arm": "7ef0961d3d65ee01ba0617ca5e01796c3a266ecf58d216c5d559e4e730cb9915",
+        "equal": true
+      },
+      "whole_body_byte_identical_to_capture": true,
+      "settings": {
+        "model": "gpt-5.6-terra",
+        "max_output_tokens": 3400,
+        "tool_choice": null,
+        "reasoning": null,
+        "tools_count": 9,
+        "input_items": 9
+      }
+    },
+    {
+      "case": "pricing-construction",
+      "kind": "construction-final-hop",
+      "arm": "C1",
+      "instructions_file": "C1_agent.txt",
+      "instructions_sha256": "141b924ecdd84c1d70a9dc82f691dc4666111a3a4be6b25b7684c63d41b82262",
+      "captured_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-05.request.json",
+      "captured_instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+      "key_diff_vs_captured": [
+        "instructions"
+      ],
+      "key_order_equal": true,
+      "non_instruction_bytes_sha256": {
+        "captured": "7ef0961d3d65ee01ba0617ca5e01796c3a266ecf58d216c5d559e4e730cb9915",
+        "arm": "7ef0961d3d65ee01ba0617ca5e01796c3a266ecf58d216c5d559e4e730cb9915",
+        "equal": true
+      },
+      "whole_body_byte_identical_to_capture": false,
+      "settings": {
+        "model": "gpt-5.6-terra",
+        "max_output_tokens": 3400,
+        "tool_choice": null,
+        "reasoning": null,
+        "tools_count": 9,
+        "input_items": 9
+      }
+    },
+    {
+      "case": "pricing-discussion-card",
+      "kind": "discussion-card",
+      "arm": "M",
+      "instructions_file": "M_agent.txt",
+      "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+      "captured_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-discussion-card/discussion-card/call-01.request.json",
+      "captured_instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+      "key_diff_vs_captured": [],
+      "key_order_equal": true,
+      "non_instruction_bytes_sha256": {
+        "captured": "55dc6e049fd26f9548594f3e3e731ce3a1be6b99ede4f0b4b67faeb983f3bf85",
+        "arm": "55dc6e049fd26f9548594f3e3e731ce3a1be6b99ede4f0b4b67faeb983f3bf85",
+        "equal": true
+      },
+      "whole_body_byte_identical_to_capture": true,
+      "settings": {
+        "model": "gpt-5.6-terra",
+        "max_output_tokens": 3400,
+        "tool_choice": null,
+        "reasoning": null,
+        "tools_count": 9,
+        "input_items": 9
+      }
+    },
+    {
+      "case": "pricing-discussion-card",
+      "kind": "discussion-card",
+      "arm": "C1",
+      "instructions_file": "C1_agent.txt",
+      "instructions_sha256": "141b924ecdd84c1d70a9dc82f691dc4666111a3a4be6b25b7684c63d41b82262",
+      "captured_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-discussion-card/discussion-card/call-01.request.json",
+      "captured_instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+      "key_diff_vs_captured": [
+        "instructions"
+      ],
+      "key_order_equal": true,
+      "non_instruction_bytes_sha256": {
+        "captured": "55dc6e049fd26f9548594f3e3e731ce3a1be6b99ede4f0b4b67faeb983f3bf85",
+        "arm": "55dc6e049fd26f9548594f3e3e731ce3a1be6b99ede4f0b4b67faeb983f3bf85",
+        "equal": true
+      },
+      "whole_body_byte_identical_to_capture": false,
+      "settings": {
+        "model": "gpt-5.6-terra",
+        "max_output_tokens": 3400,
+        "tool_choice": null,
+        "reasoning": null,
+        "tools_count": 9,
+        "input_items": 9
+      }
+    },
+    {
+      "case": "pricing-run-complete",
+      "kind": "fp3",
+      "arm": "M",
+      "instructions_file": "M_fp3_stack.txt",
+      "instructions_sha256": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64",
+      "captured_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/explicit-run/call-01.request.json",
+      "captured_instructions_sha256": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64",
+      "key_diff_vs_captured": [],
+      "key_order_equal": true,
+      "non_instruction_bytes_sha256": {
+        "captured": "b3814c11684c08c551fb0895bb940f4435ca3278026848d061b197ff50487bf5",
+        "arm": "b3814c11684c08c551fb0895bb940f4435ca3278026848d061b197ff50487bf5",
+        "equal": true
+      },
+      "whole_body_byte_identical_to_capture": true,
+      "settings": {
+        "model": "gpt-5.6-terra",
+        "max_output_tokens": 3400,
+        "tool_choice": "none",
+        "reasoning": null,
+        "tools_count": 0,
+        "input_items": 7
+      }
+    },
+    {
+      "case": "pricing-run-complete",
+      "kind": "fp3",
+      "arm": "C1",
+      "instructions_file": "C1_fp3_stack.txt",
+      "instructions_sha256": "61217435d011011ce6b2519df5019e2af5799f4120634ef944e0d7d7b9e60716",
+      "captured_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/explicit-run/call-01.request.json",
+      "captured_instructions_sha256": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64",
+      "key_diff_vs_captured": [
+        "instructions"
+      ],
+      "key_order_equal": true,
+      "non_instruction_bytes_sha256": {
+        "captured": "b3814c11684c08c551fb0895bb940f4435ca3278026848d061b197ff50487bf5",
+        "arm": "b3814c11684c08c551fb0895bb940f4435ca3278026848d061b197ff50487bf5",
+        "equal": true
+      },
+      "whole_body_byte_identical_to_capture": false,
+      "settings": {
+        "model": "gpt-5.6-terra",
+        "max_output_tokens": 3400,
+        "tool_choice": "none",
+        "reasoning": null,
+        "tools_count": 0,
+        "input_items": 7
+      }
+    },
+    {
+      "case": "pricing-run-complete",
+      "kind": "fp3",
+      "arm": "C2",
+      "instructions_file": "C2_fp3_stack.txt",
+      "instructions_sha256": "8bff217e6b4b523d804628cbca7398fc3db538fc14ea39759d0bf8e70d18e9ff",
+      "captured_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/explicit-run/call-01.request.json",
+      "captured_instructions_sha256": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64",
+      "key_diff_vs_captured": [
+        "instructions"
+      ],
+      "key_order_equal": true,
+      "non_instruction_bytes_sha256": {
+        "captured": "b3814c11684c08c551fb0895bb940f4435ca3278026848d061b197ff50487bf5",
+        "arm": "b3814c11684c08c551fb0895bb940f4435ca3278026848d061b197ff50487bf5",
+        "equal": true
+      },
+      "whole_body_byte_identical_to_capture": false,
+      "settings": {
+        "model": "gpt-5.6-terra",
+        "max_output_tokens": 3400,
+        "tool_choice": "none",
+        "reasoning": null,
+        "tools_count": 0,
+        "input_items": 7
+      }
+    }
+  ],
+  "schedule": [
+    {
+      "i": 1,
+      "caseId": "heldout-ed-triage-construction",
+      "arm": "M",
+      "rep": 1,
+      "control": false,
+      "block": 1
+    },
+    {
+      "i": 2,
+      "caseId": "pricing-run-complete",
+      "arm": "C1",
+      "rep": 1,
+      "control": false,
+      "block": 1
+    },
+    {
+      "i": 3,
+      "caseId": "hiring-run-blocked",
+      "arm": "C1",
+      "rep": 1,
+      "control": false,
+      "block": 1
+    },
+    {
+      "i": 4,
+      "caseId": "hiring-run-blocked",
+      "arm": "C2",
+      "rep": 1,
+      "control": false,
+      "block": 1
+    },
+    {
+      "i": 5,
+      "caseId": "hiring-run-blocked",
+      "arm": "M",
+      "rep": 1,
+      "control": false,
+      "block": 1
+    },
+    {
+      "i": 6,
+      "caseId": "pricing-run-complete",
+      "arm": "C2",
+      "rep": 1,
+      "control": false,
+      "block": 1
+    },
+    {
+      "i": 7,
+      "caseId": "pricing-discussion-card",
+      "arm": "C1",
+      "rep": 1,
+      "control": false,
+      "block": 1
+    },
+    {
+      "i": 8,
+      "caseId": "heldout-ed-triage-construction",
+      "arm": "C1",
+      "rep": 1,
+      "control": false,
+      "block": 1
+    },
+    {
+      "i": 9,
+      "caseId": "pricing-run-complete",
+      "arm": "M",
+      "rep": 1,
+      "control": false,
+      "block": 1
+    },
+    {
+      "i": 10,
+      "caseId": "hiring-construction",
+      "arm": "M",
+      "rep": 1,
+      "control": false,
+      "block": 1
+    },
+    {
+      "i": 11,
+      "caseId": "hiring-construction",
+      "arm": "C1",
+      "rep": 1,
+      "control": false,
+      "block": 1
+    },
+    {
+      "i": 12,
+      "caseId": "pricing-discussion-card",
+      "arm": "M",
+      "rep": 1,
+      "control": false,
+      "block": 1
+    },
+    {
+      "i": 13,
+      "caseId": "pricing-construction",
+      "arm": "C1",
+      "rep": 1,
+      "control": false,
+      "block": 1
+    },
+    {
+      "i": 14,
+      "caseId": "pricing-construction",
+      "arm": "M",
+      "rep": 1,
+      "control": false,
+      "block": 1
+    },
+    {
+      "i": 15,
+      "caseId": "pricing-discussion-card",
+      "arm": "M",
+      "rep": 2,
+      "control": false,
+      "block": 2
+    },
+    {
+      "i": 16,
+      "caseId": "pricing-run-complete",
+      "arm": "C2",
+      "rep": 2,
+      "control": false,
+      "block": 2
+    },
+    {
+      "i": 17,
+      "caseId": "heldout-ed-triage-construction",
+      "arm": "C1",
+      "rep": 2,
+      "control": false,
+      "block": 2
+    },
+    {
+      "i": 18,
+      "caseId": "pricing-discussion-card",
+      "arm": "C1",
+      "rep": 2,
+      "control": false,
+      "block": 2
+    },
+    {
+      "i": 19,
+      "caseId": "heldout-ed-triage-construction",
+      "arm": "M",
+      "rep": 2,
+      "control": false,
+      "block": 2
+    },
+    {
+      "i": 20,
+      "caseId": "pricing-construction",
+      "arm": "C1",
+      "rep": 2,
+      "control": false,
+      "block": 2
+    },
+    {
+      "i": 21,
+      "caseId": "hiring-construction",
+      "arm": "C1",
+      "rep": 2,
+      "control": false,
+      "block": 2
+    },
+    {
+      "i": 22,
+      "caseId": "pricing-run-complete",
+      "arm": "C1",
+      "rep": 2,
+      "control": false,
+      "block": 2
+    },
+    {
+      "i": 23,
+      "caseId": "hiring-run-blocked",
+      "arm": "C1",
+      "rep": 2,
+      "control": false,
+      "block": 2
+    },
+    {
+      "i": 24,
+      "caseId": "pricing-construction",
+      "arm": "M",
+      "rep": 2,
+      "control": false,
+      "block": 2
+    },
+    {
+      "i": 25,
+      "caseId": "hiring-run-blocked",
+      "arm": "M",
+      "rep": 2,
+      "control": false,
+      "block": 2
+    },
+    {
+      "i": 26,
+      "caseId": "hiring-construction",
+      "arm": "M",
+      "rep": 2,
+      "control": false,
+      "block": 2
+    },
+    {
+      "i": 27,
+      "caseId": "pricing-run-complete",
+      "arm": "M",
+      "rep": 2,
+      "control": false,
+      "block": 2
+    },
+    {
+      "i": 28,
+      "caseId": "hiring-run-blocked",
+      "arm": "C2",
+      "rep": 2,
+      "control": false,
+      "block": 2
+    },
+    {
+      "i": 29,
+      "caseId": "pricing-run-complete",
+      "arm": "M",
+      "rep": 4,
+      "control": true,
+      "block": 2
+    },
+    {
+      "i": 30,
+      "caseId": "pricing-construction",
+      "arm": "C1",
+      "rep": 3,
+      "control": false,
+      "block": 3
+    },
+    {
+      "i": 31,
+      "caseId": "hiring-run-blocked",
+      "arm": "C2",
+      "rep": 3,
+      "control": false,
+      "block": 3
+    },
+    {
+      "i": 32,
+      "caseId": "hiring-run-blocked",
+      "arm": "C1",
+      "rep": 3,
+      "control": false,
+      "block": 3
+    },
+    {
+      "i": 33,
+      "caseId": "pricing-discussion-card",
+      "arm": "M",
+      "rep": 3,
+      "control": false,
+      "block": 3
+    },
+    {
+      "i": 34,
+      "caseId": "pricing-run-complete",
+      "arm": "M",
+      "rep": 5,
+      "control": true,
+      "block": 3
+    },
+    {
+      "i": 35,
+      "caseId": "hiring-run-blocked",
+      "arm": "M",
+      "rep": 3,
+      "control": false,
+      "block": 3
+    },
+    {
+      "i": 36,
+      "caseId": "hiring-construction",
+      "arm": "M",
+      "rep": 3,
+      "control": false,
+      "block": 3
+    },
+    {
+      "i": 37,
+      "caseId": "pricing-run-complete",
+      "arm": "C1",
+      "rep": 3,
+      "control": false,
+      "block": 3
+    },
+    {
+      "i": 38,
+      "caseId": "pricing-run-complete",
+      "arm": "C2",
+      "rep": 3,
+      "control": false,
+      "block": 3
+    },
+    {
+      "i": 39,
+      "caseId": "pricing-discussion-card",
+      "arm": "C1",
+      "rep": 3,
+      "control": false,
+      "block": 3
+    },
+    {
+      "i": 40,
+      "caseId": "heldout-ed-triage-construction",
+      "arm": "C1",
+      "rep": 3,
+      "control": false,
+      "block": 3
+    },
+    {
+      "i": 41,
+      "caseId": "heldout-ed-triage-construction",
+      "arm": "M",
+      "rep": 3,
+      "control": false,
+      "block": 3
+    },
+    {
+      "i": 42,
+      "caseId": "hiring-construction",
+      "arm": "C1",
+      "rep": 3,
+      "control": false,
+      "block": 3
+    },
+    {
+      "i": 43,
+      "caseId": "pricing-run-complete",
+      "arm": "M",
+      "rep": 3,
+      "control": false,
+      "block": 3
+    },
+    {
+      "i": 44,
+      "caseId": "pricing-construction",
+      "arm": "M",
+      "rep": 3,
+      "control": false,
+      "block": 3
+    }
+  ]
+}

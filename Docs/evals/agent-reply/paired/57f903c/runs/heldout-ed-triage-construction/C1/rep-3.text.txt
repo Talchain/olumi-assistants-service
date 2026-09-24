@@ -1,0 +1,9 @@
+I’ve framed the choice around reducing 4-hour wait breaches, currently stated as occurring on 30% of nights.
+
+To make a first comparison, these are **my assumptions to adopt or correct, not measurements**:
+
+- Current night position: **1 triage nurse**, **0 rapid-assessment patients/night**, **80 ED patients/night**, **20 minutes to triage**, and **90 minutes to clinician assessment**.
+- Options: maintain current setup = **1 nurse / 0 rapid-assessment capacity**; phased rapid assessment = **10 patients/night**; full rapid-assessment unit = **20 patients/night**.
+- The second-triage-nurse option already acts on night triage staffing in the model.
+
+Do you approve these starting assumptions and option levels?

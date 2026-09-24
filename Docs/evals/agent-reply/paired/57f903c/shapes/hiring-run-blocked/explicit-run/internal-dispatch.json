@@ -1,0 +1,33 @@
+[
+  {
+    "at": "2026-09-24T19:39:55.796Z",
+    "path": "/orchestrate/v2/turn",
+    "body": {
+      "kind": "message",
+      "turn_id": "00000000-0000-4000-8000-000000000106",
+      "scenario_id": "00000000-0000-4000-8000-000000000107",
+      "stage": "analyse",
+      "turn_class": "decide",
+      "source": "chip_click",
+      "message": "the user pressed Run",
+      "chip": {
+        "id": "agent-run-analysis",
+        "action_type": "run_analysis"
+      }
+    },
+    "status": 200,
+    "note": "served conventional run (approximated from the served readback)"
+  },
+  {
+    "at": "2026-09-24T19:39:55.798Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000107/graph",
+    "body": {},
+    "status": 200
+  },
+  {
+    "at": "2026-09-24T19:39:55.806Z",
+    "path": "/assist/v1/scenarios/00000000-0000-4000-8000-000000000107/graph",
+    "body": {},
+    "status": 200
+  }
+]

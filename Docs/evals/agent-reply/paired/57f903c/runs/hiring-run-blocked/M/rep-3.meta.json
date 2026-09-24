@@ -1,0 +1,99 @@
+{
+  "schema": "agent-reply-paired-run-meta.v1",
+  "case": "hiring-run-blocked",
+  "kind": "fp3",
+  "arm": "M",
+  "rep": 3,
+  "control": false,
+  "block": 3,
+  "schedule_index": 35,
+  "seed": 20260924,
+  "run_stamp": "2026-09-24T19-50-44-263Z",
+  "served_head": "57f903c4652783a9de1a3778d6682a8e5f8414e1",
+  "captured_request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/explicit-run/call-01.request.json",
+  "model": "gpt-5.6-terra",
+  "response_model": "gpt-5.6-terra",
+  "settings": {
+    "max_output_tokens": 3400,
+    "tool_choice": "none",
+    "reasoning": null,
+    "temperature": null,
+    "tools_count": 0,
+    "tool_names": [],
+    "instructions_file": "Docs/evals/agent-reply/paired/57f903c/arms/M_fp3_stack.txt",
+    "instructions_sha256": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64",
+    "instructions_chars": 11783,
+    "input_items": 7,
+    "input_sha256": "adca8bd9ce5cf905c4c6ab590f6d46096c322b81ab783bf8dd76038babca7584",
+    "body_sha256": "44fe083203aa2e248f41b9da4fcc63083d8b2ba148915d980419b4e173e08f64",
+    "response_reasoning": {
+      "context": "all_turns",
+      "effort": "medium",
+      "mode": "standard",
+      "summary": null
+    },
+    "response_service_tier": "default"
+  },
+  "started_at": "2026-09-24T19:53:27.258Z",
+  "wall_ms": 3270,
+  "http_status": 200,
+  "response_id": "resp_0abb7a3fe4687767006ab57fb774ac87d2a324adc4197eadab",
+  "response_status": "completed",
+  "incomplete_details": null,
+  "usage": {
+    "input_tokens": 4546,
+    "cached_tokens": 4543,
+    "output_tokens": 156,
+    "reasoning_tokens": 0,
+    "total_tokens": 4702,
+    "raw": {
+      "input_tokens": 4546,
+      "input_tokens_details": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 4543
+      },
+      "output_tokens": 156,
+      "output_tokens_details": {
+        "reasoning_tokens": 0
+      },
+      "total_tokens": 4702
+    }
+  },
+  "outcome": {
+    "type": "text",
+    "text_chars": 680,
+    "words": 102,
+    "function_calls": [],
+    "refusals": []
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-24T19:53:27.258Z",
+      "wall_ms": 3270,
+      "http_status": 200,
+      "error": null,
+      "response_headers": {
+        "x-request-id": "req_4127692cf77e4c6bb8529dffd748c3ee",
+        "openai-processing-ms": "3064",
+        "openai-version": "2020-10-01"
+      },
+      "guard_seq": 36,
+      "guard_decision": "allowed",
+      "file": null
+    }
+  ],
+  "response_headers": {
+    "x-request-id": "req_4127692cf77e4c6bb8529dffd748c3ee",
+    "openai-processing-ms": "3064",
+    "openai-version": "2020-10-01"
+  },
+  "guard": "openai-only-ok",
+  "guard_detail": {
+    "seq": 36,
+    "host": "api.openai.com",
+    "decision": "allowed",
+    "anthropic_env_asserted_absent_before_send": true
+  },
+  "recorded_at": "2026-09-24T19:53:30.532Z"
+}

@@ -1,0 +1,1350 @@
+{
+  "schema": "agent-reply-paired-ledger.v1",
+  "run_stamp": "2026-09-24T19-50-44-263Z",
+  "head": "57f903c4652783a9de1a3778d6682a8e5f8414e1",
+  "seed": 20260924,
+  "plan": "Docs/evals/agent-reply/paired/57f903c/runs/_runs/2026-09-24T19-50-44-263Z-plan.json",
+  "journal": "Docs/evals/agent-reply/paired/57f903c/runs/_runs/2026-09-24T19-50-44-263Z-journal.jsonl",
+  "stop_reason": null,
+  "planned_calls": 44,
+  "recorded_units": 44,
+  "skipped_units": 0,
+  "paid_attempts": 44,
+  "budget": 80,
+  "totals": {
+    "input_tokens": 319640,
+    "cached_tokens": 259830,
+    "output_tokens": 9879,
+    "reasoning_tokens": 2004,
+    "total_tokens": 329519,
+    "sum_call_wall_ms": 218257,
+    "run_wall_ms": 218465
+  },
+  "guard": {
+    "fetch_attempts_excluding_selftest": 44,
+    "allowed_openai": 44,
+    "blocked_excluding_selftest": [],
+    "hosts_seen_excluding_selftest": [
+      "api.openai.com"
+    ],
+    "anthropic_host_attempts": 0,
+    "real_fetch_invocations": 44,
+    "selftest": {
+      "predicate": {
+        "https://api.openai.com/v1/responses": true,
+        "https://api.anthropic.com/v1/messages": false,
+        "http://api.openai.com/v1/responses": false,
+        "https://api.openai.com.evil.example/v1/responses": false,
+        "https://user:pw@api.openai.com/v1/responses": false,
+        "https://cee-staging.onrender.com/agent/v1/turn": false,
+        "https://example.com/": false
+      },
+      "predicate_allows_only_openai": true,
+      "blocked_fetch_threw": "network guard: example.com is not api.openai.com — refused before send",
+      "real_fetch_invoked_by_blocked_call": false
+    },
+    "anthropic_env_removed_at_start": [],
+    "anthropic_env_absent_at_end": true,
+    "log": [
+      {
+        "seq": 1,
+        "at": "2026-09-24T19:50:44.264Z",
+        "url": "https://example.com/guard-selftest",
+        "host": "example.com",
+        "decision": "blocked",
+        "selftest": true,
+        "label": ""
+      },
+      {
+        "seq": 2,
+        "at": "2026-09-24T19:50:44.294Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "heldout-ed-triage-construction/M/rep-1/attempt-1"
+      },
+      {
+        "seq": 3,
+        "at": "2026-09-24T19:50:51.077Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-run-complete/C1/rep-1/attempt-1"
+      },
+      {
+        "seq": 4,
+        "at": "2026-09-24T19:50:55.771Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "hiring-run-blocked/C1/rep-1/attempt-1"
+      },
+      {
+        "seq": 5,
+        "at": "2026-09-24T19:50:58.505Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "hiring-run-blocked/C2/rep-1/attempt-1"
+      },
+      {
+        "seq": 6,
+        "at": "2026-09-24T19:51:00.868Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "hiring-run-blocked/M/rep-1/attempt-1"
+      },
+      {
+        "seq": 7,
+        "at": "2026-09-24T19:51:03.899Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-run-complete/C2/rep-1/attempt-1"
+      },
+      {
+        "seq": 8,
+        "at": "2026-09-24T19:51:09.916Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-discussion-card/C1/rep-1/attempt-1"
+      },
+      {
+        "seq": 9,
+        "at": "2026-09-24T19:51:12.740Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "heldout-ed-triage-construction/C1/rep-1/attempt-1"
+      },
+      {
+        "seq": 10,
+        "at": "2026-09-24T19:51:15.755Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-run-complete/M/rep-1/attempt-1"
+      },
+      {
+        "seq": 11,
+        "at": "2026-09-24T19:51:23.052Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "hiring-construction/M/rep-1/attempt-1"
+      },
+      {
+        "seq": 12,
+        "at": "2026-09-24T19:51:28.780Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "hiring-construction/C1/rep-1/attempt-1"
+      },
+      {
+        "seq": 13,
+        "at": "2026-09-24T19:51:37.141Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-discussion-card/M/rep-1/attempt-1"
+      },
+      {
+        "seq": 14,
+        "at": "2026-09-24T19:51:39.516Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-construction/C1/rep-1/attempt-1"
+      },
+      {
+        "seq": 15,
+        "at": "2026-09-24T19:51:45.891Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-construction/M/rep-1/attempt-1"
+      },
+      {
+        "seq": 16,
+        "at": "2026-09-24T19:51:52.261Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-discussion-card/M/rep-2/attempt-1"
+      },
+      {
+        "seq": 17,
+        "at": "2026-09-24T19:51:54.827Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-run-complete/C2/rep-2/attempt-1"
+      },
+      {
+        "seq": 18,
+        "at": "2026-09-24T19:51:57.719Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "heldout-ed-triage-construction/C1/rep-2/attempt-1"
+      },
+      {
+        "seq": 19,
+        "at": "2026-09-24T19:52:00.637Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-discussion-card/C1/rep-2/attempt-1"
+      },
+      {
+        "seq": 20,
+        "at": "2026-09-24T19:52:03.264Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "heldout-ed-triage-construction/M/rep-2/attempt-1"
+      },
+      {
+        "seq": 21,
+        "at": "2026-09-24T19:52:10.857Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-construction/C1/rep-2/attempt-1"
+      },
+      {
+        "seq": 22,
+        "at": "2026-09-24T19:52:13.936Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "hiring-construction/C1/rep-2/attempt-1"
+      },
+      {
+        "seq": 23,
+        "at": "2026-09-24T19:52:20.832Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-run-complete/C1/rep-2/attempt-1"
+      },
+      {
+        "seq": 24,
+        "at": "2026-09-24T19:52:28.923Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "hiring-run-blocked/C1/rep-2/attempt-1"
+      },
+      {
+        "seq": 25,
+        "at": "2026-09-24T19:52:32.428Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-construction/M/rep-2/attempt-1"
+      },
+      {
+        "seq": 26,
+        "at": "2026-09-24T19:52:38.668Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "hiring-run-blocked/M/rep-2/attempt-1"
+      },
+      {
+        "seq": 27,
+        "at": "2026-09-24T19:52:41.837Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "hiring-construction/M/rep-2/attempt-1"
+      },
+      {
+        "seq": 28,
+        "at": "2026-09-24T19:52:48.212Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-run-complete/M/rep-2/attempt-1"
+      },
+      {
+        "seq": 29,
+        "at": "2026-09-24T19:52:54.359Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "hiring-run-blocked/C2/rep-2/attempt-1"
+      },
+      {
+        "seq": 30,
+        "at": "2026-09-24T19:52:57.135Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-run-complete/M/rep-4/attempt-1"
+      },
+      {
+        "seq": 31,
+        "at": "2026-09-24T19:53:06.538Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-construction/C1/rep-3/attempt-1"
+      },
+      {
+        "seq": 32,
+        "at": "2026-09-24T19:53:10.456Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "hiring-run-blocked/C2/rep-3/attempt-1"
+      },
+      {
+        "seq": 33,
+        "at": "2026-09-24T19:53:13.088Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "hiring-run-blocked/C1/rep-3/attempt-1"
+      },
+      {
+        "seq": 34,
+        "at": "2026-09-24T19:53:16.095Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-discussion-card/M/rep-3/attempt-1"
+      },
+      {
+        "seq": 35,
+        "at": "2026-09-24T19:53:18.024Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-run-complete/M/rep-5/attempt-1"
+      },
+      {
+        "seq": 36,
+        "at": "2026-09-24T19:53:27.258Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "hiring-run-blocked/M/rep-3/attempt-1"
+      },
+      {
+        "seq": 37,
+        "at": "2026-09-24T19:53:30.534Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "hiring-construction/M/rep-3/attempt-1"
+      },
+      {
+        "seq": 38,
+        "at": "2026-09-24T19:53:36.941Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-run-complete/C1/rep-3/attempt-1"
+      },
+      {
+        "seq": 39,
+        "at": "2026-09-24T19:53:48.343Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-run-complete/C2/rep-3/attempt-1"
+      },
+      {
+        "seq": 40,
+        "at": "2026-09-24T19:53:52.791Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-discussion-card/C1/rep-3/attempt-1"
+      },
+      {
+        "seq": 41,
+        "at": "2026-09-24T19:53:54.711Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "heldout-ed-triage-construction/C1/rep-3/attempt-1"
+      },
+      {
+        "seq": 42,
+        "at": "2026-09-24T19:53:57.875Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "heldout-ed-triage-construction/M/rep-3/attempt-1"
+      },
+      {
+        "seq": 43,
+        "at": "2026-09-24T19:54:03.657Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "hiring-construction/C1/rep-3/attempt-1"
+      },
+      {
+        "seq": 44,
+        "at": "2026-09-24T19:54:10.497Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-run-complete/M/rep-3/attempt-1"
+      },
+      {
+        "seq": 45,
+        "at": "2026-09-24T19:54:16.899Z",
+        "url": "https://api.openai.com/v1/responses",
+        "host": "api.openai.com",
+        "decision": "allowed",
+        "selftest": false,
+        "label": "pricing-construction/M/rep-3/attempt-1"
+      }
+    ]
+  },
+  "units": [
+    {
+      "caseId": "heldout-ed-triage-construction",
+      "arm": "M",
+      "rep": 1,
+      "control": false,
+      "block": 1,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 6780.6,
+      "usage": {
+        "input_tokens": 6161,
+        "cached_tokens": 6158,
+        "output_tokens": 392,
+        "reasoning_tokens": 0,
+        "total_tokens": 6553
+      },
+      "outcome": "text",
+      "words": 280,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-run-complete",
+      "arm": "C1",
+      "rep": 1,
+      "control": false,
+      "block": 1,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 4685.7,
+      "usage": {
+        "input_tokens": 9945,
+        "cached_tokens": 0,
+        "output_tokens": 196,
+        "reasoning_tokens": 0,
+        "total_tokens": 10141
+      },
+      "outcome": "text",
+      "words": 144,
+      "fn": []
+    },
+    {
+      "caseId": "hiring-run-blocked",
+      "arm": "C1",
+      "rep": 1,
+      "control": false,
+      "block": 1,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 2732.2,
+      "usage": {
+        "input_tokens": 4773,
+        "cached_tokens": 2659,
+        "output_tokens": 91,
+        "reasoning_tokens": 0,
+        "total_tokens": 4864
+      },
+      "outcome": "text",
+      "words": 67,
+      "fn": []
+    },
+    {
+      "caseId": "hiring-run-blocked",
+      "arm": "C2",
+      "rep": 1,
+      "control": false,
+      "block": 1,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 2353.1,
+      "usage": {
+        "input_tokens": 5010,
+        "cached_tokens": 0,
+        "output_tokens": 82,
+        "reasoning_tokens": 0,
+        "total_tokens": 5092
+      },
+      "outcome": "text",
+      "words": 55,
+      "fn": []
+    },
+    {
+      "caseId": "hiring-run-blocked",
+      "arm": "M",
+      "rep": 1,
+      "control": false,
+      "block": 1,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 3028.3,
+      "usage": {
+        "input_tokens": 4546,
+        "cached_tokens": 2432,
+        "output_tokens": 119,
+        "reasoning_tokens": 0,
+        "total_tokens": 4665
+      },
+      "outcome": "text",
+      "words": 88,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-run-complete",
+      "arm": "C2",
+      "rep": 1,
+      "control": false,
+      "block": 1,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 6013.1,
+      "usage": {
+        "input_tokens": 10182,
+        "cached_tokens": 2896,
+        "output_tokens": 277,
+        "reasoning_tokens": 130,
+        "total_tokens": 10459
+      },
+      "outcome": "text",
+      "words": 107,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-discussion-card",
+      "arm": "C1",
+      "rep": 1,
+      "control": false,
+      "block": 1,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 2820.7,
+      "usage": {
+        "input_tokens": 10939,
+        "cached_tokens": 0,
+        "output_tokens": 37,
+        "reasoning_tokens": 0,
+        "total_tokens": 10976
+      },
+      "outcome": "function_call",
+      "words": 0,
+      "fn": [
+        "get_canonical_state"
+      ]
+    },
+    {
+      "caseId": "heldout-ed-triage-construction",
+      "arm": "C1",
+      "rep": 1,
+      "control": false,
+      "block": 1,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 3012.1,
+      "usage": {
+        "input_tokens": 6388,
+        "cached_tokens": 3334,
+        "output_tokens": 158,
+        "reasoning_tokens": 0,
+        "total_tokens": 6546
+      },
+      "outcome": "text",
+      "words": 101,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-run-complete",
+      "arm": "M",
+      "rep": 1,
+      "control": false,
+      "block": 1,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 7293,
+      "usage": {
+        "input_tokens": 9718,
+        "cached_tokens": 2432,
+        "output_tokens": 312,
+        "reasoning_tokens": 0,
+        "total_tokens": 10030
+      },
+      "outcome": "text",
+      "words": 221,
+      "fn": []
+    },
+    {
+      "caseId": "hiring-construction",
+      "arm": "M",
+      "rep": 1,
+      "control": false,
+      "block": 1,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 5725.3,
+      "usage": {
+        "input_tokens": 5272,
+        "cached_tokens": 5269,
+        "output_tokens": 307,
+        "reasoning_tokens": 0,
+        "total_tokens": 5579
+      },
+      "outcome": "text",
+      "words": 211,
+      "fn": []
+    },
+    {
+      "caseId": "hiring-construction",
+      "arm": "C1",
+      "rep": 1,
+      "control": false,
+      "block": 1,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 8358.1,
+      "usage": {
+        "input_tokens": 5499,
+        "cached_tokens": 3334,
+        "output_tokens": 406,
+        "reasoning_tokens": 260,
+        "total_tokens": 5905
+      },
+      "outcome": "text",
+      "words": 94,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-discussion-card",
+      "arm": "M",
+      "rep": 1,
+      "control": false,
+      "block": 1,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 2371.8,
+      "usage": {
+        "input_tokens": 10712,
+        "cached_tokens": 3155,
+        "output_tokens": 51,
+        "reasoning_tokens": 11,
+        "total_tokens": 10763
+      },
+      "outcome": "function_call",
+      "words": 0,
+      "fn": [
+        "get_canonical_state"
+      ]
+    },
+    {
+      "caseId": "pricing-construction",
+      "arm": "C1",
+      "rep": 1,
+      "control": false,
+      "block": 1,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 6371.8,
+      "usage": {
+        "input_tokens": 5575,
+        "cached_tokens": 3334,
+        "output_tokens": 345,
+        "reasoning_tokens": 170,
+        "total_tokens": 5920
+      },
+      "outcome": "text",
+      "words": 113,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-construction",
+      "arm": "M",
+      "rep": 1,
+      "control": false,
+      "block": 1,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 6331.2,
+      "usage": {
+        "input_tokens": 5348,
+        "cached_tokens": 5345,
+        "output_tokens": 309,
+        "reasoning_tokens": 0,
+        "total_tokens": 5657
+      },
+      "outcome": "text",
+      "words": 200,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-discussion-card",
+      "arm": "M",
+      "rep": 2,
+      "control": false,
+      "block": 2,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 2561.6,
+      "usage": {
+        "input_tokens": 10712,
+        "cached_tokens": 10709,
+        "output_tokens": 55,
+        "reasoning_tokens": 10,
+        "total_tokens": 10767
+      },
+      "outcome": "function_call",
+      "words": 0,
+      "fn": [
+        "get_canonical_state"
+      ]
+    },
+    {
+      "caseId": "pricing-run-complete",
+      "arm": "C2",
+      "rep": 2,
+      "control": false,
+      "block": 2,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 2887.9,
+      "usage": {
+        "input_tokens": 10182,
+        "cached_tokens": 10179,
+        "output_tokens": 133,
+        "reasoning_tokens": 0,
+        "total_tokens": 10315
+      },
+      "outcome": "text",
+      "words": 101,
+      "fn": []
+    },
+    {
+      "caseId": "heldout-ed-triage-construction",
+      "arm": "C1",
+      "rep": 2,
+      "control": false,
+      "block": 2,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 2915.6,
+      "usage": {
+        "input_tokens": 6388,
+        "cached_tokens": 6385,
+        "output_tokens": 147,
+        "reasoning_tokens": 0,
+        "total_tokens": 6535
+      },
+      "outcome": "text",
+      "words": 89,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-discussion-card",
+      "arm": "C1",
+      "rep": 2,
+      "control": false,
+      "block": 2,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 2623.4,
+      "usage": {
+        "input_tokens": 10939,
+        "cached_tokens": 10936,
+        "output_tokens": 31,
+        "reasoning_tokens": 0,
+        "total_tokens": 10970
+      },
+      "outcome": "function_call",
+      "words": 0,
+      "fn": [
+        "get_canonical_state"
+      ]
+    },
+    {
+      "caseId": "heldout-ed-triage-construction",
+      "arm": "M",
+      "rep": 2,
+      "control": false,
+      "block": 2,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 7589.9,
+      "usage": {
+        "input_tokens": 6161,
+        "cached_tokens": 6158,
+        "output_tokens": 326,
+        "reasoning_tokens": 0,
+        "total_tokens": 6487
+      },
+      "outcome": "text",
+      "words": 224,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-construction",
+      "arm": "C1",
+      "rep": 2,
+      "control": false,
+      "block": 2,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 3076.7,
+      "usage": {
+        "input_tokens": 5575,
+        "cached_tokens": 5572,
+        "output_tokens": 136,
+        "reasoning_tokens": 0,
+        "total_tokens": 5711
+      },
+      "outcome": "text",
+      "words": 91,
+      "fn": []
+    },
+    {
+      "caseId": "hiring-construction",
+      "arm": "C1",
+      "rep": 2,
+      "control": false,
+      "block": 2,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 6894.4,
+      "usage": {
+        "input_tokens": 5499,
+        "cached_tokens": 5496,
+        "output_tokens": 364,
+        "reasoning_tokens": 186,
+        "total_tokens": 5863
+      },
+      "outcome": "text",
+      "words": 121,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-run-complete",
+      "arm": "C1",
+      "rep": 2,
+      "control": false,
+      "block": 2,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 8086.6,
+      "usage": {
+        "input_tokens": 9945,
+        "cached_tokens": 9942,
+        "output_tokens": 327,
+        "reasoning_tokens": 172,
+        "total_tokens": 10272
+      },
+      "outcome": "text",
+      "words": 111,
+      "fn": []
+    },
+    {
+      "caseId": "hiring-run-blocked",
+      "arm": "C1",
+      "rep": 2,
+      "control": false,
+      "block": 2,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 3502.1,
+      "usage": {
+        "input_tokens": 4773,
+        "cached_tokens": 4770,
+        "output_tokens": 113,
+        "reasoning_tokens": 0,
+        "total_tokens": 4886
+      },
+      "outcome": "text",
+      "words": 84,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-construction",
+      "arm": "M",
+      "rep": 2,
+      "control": false,
+      "block": 2,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 6236.6,
+      "usage": {
+        "input_tokens": 5348,
+        "cached_tokens": 5345,
+        "output_tokens": 321,
+        "reasoning_tokens": 0,
+        "total_tokens": 5669
+      },
+      "outcome": "text",
+      "words": 214,
+      "fn": []
+    },
+    {
+      "caseId": "hiring-run-blocked",
+      "arm": "M",
+      "rep": 2,
+      "control": false,
+      "block": 2,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 3165.3,
+      "usage": {
+        "input_tokens": 4546,
+        "cached_tokens": 4543,
+        "output_tokens": 136,
+        "reasoning_tokens": 0,
+        "total_tokens": 4682
+      },
+      "outcome": "text",
+      "words": 94,
+      "fn": []
+    },
+    {
+      "caseId": "hiring-construction",
+      "arm": "M",
+      "rep": 2,
+      "control": false,
+      "block": 2,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 6372.8,
+      "usage": {
+        "input_tokens": 5272,
+        "cached_tokens": 5269,
+        "output_tokens": 351,
+        "reasoning_tokens": 0,
+        "total_tokens": 5623
+      },
+      "outcome": "text",
+      "words": 250,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-run-complete",
+      "arm": "M",
+      "rep": 2,
+      "control": false,
+      "block": 2,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 6143.4,
+      "usage": {
+        "input_tokens": 9718,
+        "cached_tokens": 9715,
+        "output_tokens": 290,
+        "reasoning_tokens": 0,
+        "total_tokens": 10008
+      },
+      "outcome": "text",
+      "words": 200,
+      "fn": []
+    },
+    {
+      "caseId": "hiring-run-blocked",
+      "arm": "C2",
+      "rep": 2,
+      "control": false,
+      "block": 2,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 2773.1,
+      "usage": {
+        "input_tokens": 5010,
+        "cached_tokens": 5007,
+        "output_tokens": 77,
+        "reasoning_tokens": 0,
+        "total_tokens": 5087
+      },
+      "outcome": "text",
+      "words": 54,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-run-complete",
+      "arm": "M",
+      "rep": 4,
+      "control": true,
+      "block": 2,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 9400.4,
+      "usage": {
+        "input_tokens": 9718,
+        "cached_tokens": 9715,
+        "output_tokens": 497,
+        "reasoning_tokens": 284,
+        "total_tokens": 10215
+      },
+      "outcome": "text",
+      "words": 147,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-construction",
+      "arm": "C1",
+      "rep": 3,
+      "control": false,
+      "block": 3,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 3915.7,
+      "usage": {
+        "input_tokens": 5575,
+        "cached_tokens": 5572,
+        "output_tokens": 160,
+        "reasoning_tokens": 0,
+        "total_tokens": 5735
+      },
+      "outcome": "text",
+      "words": 99,
+      "fn": []
+    },
+    {
+      "caseId": "hiring-run-blocked",
+      "arm": "C2",
+      "rep": 3,
+      "control": false,
+      "block": 3,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 2629.4,
+      "usage": {
+        "input_tokens": 5010,
+        "cached_tokens": 5007,
+        "output_tokens": 91,
+        "reasoning_tokens": 0,
+        "total_tokens": 5101
+      },
+      "outcome": "text",
+      "words": 63,
+      "fn": []
+    },
+    {
+      "caseId": "hiring-run-blocked",
+      "arm": "C1",
+      "rep": 3,
+      "control": false,
+      "block": 3,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 3004.8,
+      "usage": {
+        "input_tokens": 4773,
+        "cached_tokens": 4770,
+        "output_tokens": 91,
+        "reasoning_tokens": 0,
+        "total_tokens": 4864
+      },
+      "outcome": "text",
+      "words": 73,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-discussion-card",
+      "arm": "M",
+      "rep": 3,
+      "control": false,
+      "block": 3,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 1925.4,
+      "usage": {
+        "input_tokens": 10712,
+        "cached_tokens": 10709,
+        "output_tokens": 41,
+        "reasoning_tokens": 0,
+        "total_tokens": 10753
+      },
+      "outcome": "function_call",
+      "words": 0,
+      "fn": [
+        "get_canonical_state"
+      ]
+    },
+    {
+      "caseId": "pricing-run-complete",
+      "arm": "M",
+      "rep": 5,
+      "control": true,
+      "block": 3,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 9230.5,
+      "usage": {
+        "input_tokens": 9718,
+        "cached_tokens": 9715,
+        "output_tokens": 425,
+        "reasoning_tokens": 178,
+        "total_tokens": 10143
+      },
+      "outcome": "text",
+      "words": 168,
+      "fn": []
+    },
+    {
+      "caseId": "hiring-run-blocked",
+      "arm": "M",
+      "rep": 3,
+      "control": false,
+      "block": 3,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 3270,
+      "usage": {
+        "input_tokens": 4546,
+        "cached_tokens": 4543,
+        "output_tokens": 156,
+        "reasoning_tokens": 0,
+        "total_tokens": 4702
+      },
+      "outcome": "text",
+      "words": 102,
+      "fn": []
+    },
+    {
+      "caseId": "hiring-construction",
+      "arm": "M",
+      "rep": 3,
+      "control": false,
+      "block": 3,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 6399.3,
+      "usage": {
+        "input_tokens": 5272,
+        "cached_tokens": 5269,
+        "output_tokens": 358,
+        "reasoning_tokens": 0,
+        "total_tokens": 5630
+      },
+      "outcome": "text",
+      "words": 248,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-run-complete",
+      "arm": "C1",
+      "rep": 3,
+      "control": false,
+      "block": 3,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 11391.5,
+      "usage": {
+        "input_tokens": 9945,
+        "cached_tokens": 9942,
+        "output_tokens": 494,
+        "reasoning_tokens": 356,
+        "total_tokens": 10439
+      },
+      "outcome": "text",
+      "words": 99,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-run-complete",
+      "arm": "C2",
+      "rep": 3,
+      "control": false,
+      "block": 3,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 4442.6,
+      "usage": {
+        "input_tokens": 10182,
+        "cached_tokens": 10179,
+        "output_tokens": 195,
+        "reasoning_tokens": 67,
+        "total_tokens": 10377
+      },
+      "outcome": "text",
+      "words": 94,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-discussion-card",
+      "arm": "C1",
+      "rep": 3,
+      "control": false,
+      "block": 3,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 1914.7,
+      "usage": {
+        "input_tokens": 10939,
+        "cached_tokens": 10936,
+        "output_tokens": 50,
+        "reasoning_tokens": 9,
+        "total_tokens": 10989
+      },
+      "outcome": "function_call",
+      "words": 0,
+      "fn": [
+        "get_canonical_state"
+      ]
+    },
+    {
+      "caseId": "heldout-ed-triage-construction",
+      "arm": "C1",
+      "rep": 3,
+      "control": false,
+      "block": 3,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 3161.3,
+      "usage": {
+        "input_tokens": 6388,
+        "cached_tokens": 6385,
+        "output_tokens": 160,
+        "reasoning_tokens": 0,
+        "total_tokens": 6548
+      },
+      "outcome": "text",
+      "words": 101,
+      "fn": []
+    },
+    {
+      "caseId": "heldout-ed-triage-construction",
+      "arm": "M",
+      "rep": 3,
+      "control": false,
+      "block": 3,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 5777.6,
+      "usage": {
+        "input_tokens": 6161,
+        "cached_tokens": 6158,
+        "output_tokens": 328,
+        "reasoning_tokens": 0,
+        "total_tokens": 6489
+      },
+      "outcome": "text",
+      "words": 216,
+      "fn": []
+    },
+    {
+      "caseId": "hiring-construction",
+      "arm": "C1",
+      "rep": 3,
+      "control": false,
+      "block": 3,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 6835.7,
+      "usage": {
+        "input_tokens": 5499,
+        "cached_tokens": 5496,
+        "output_tokens": 342,
+        "reasoning_tokens": 171,
+        "total_tokens": 5841
+      },
+      "outcome": "text",
+      "words": 122,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-run-complete",
+      "arm": "M",
+      "rep": 3,
+      "control": false,
+      "block": 3,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 6397.1,
+      "usage": {
+        "input_tokens": 9718,
+        "cached_tokens": 9715,
+        "output_tokens": 297,
+        "reasoning_tokens": 0,
+        "total_tokens": 10015
+      },
+      "outcome": "text",
+      "words": 203,
+      "fn": []
+    },
+    {
+      "caseId": "pricing-construction",
+      "arm": "M",
+      "rep": 3,
+      "control": false,
+      "block": 3,
+      "status": 200,
+      "attempts": 1,
+      "wall_ms": 5854.9,
+      "usage": {
+        "input_tokens": 5348,
+        "cached_tokens": 5345,
+        "output_tokens": 305,
+        "reasoning_tokens": 0,
+        "total_tokens": 5653
+      },
+      "outcome": "text",
+      "words": 203,
+      "fn": []
+    }
+  ]
+}

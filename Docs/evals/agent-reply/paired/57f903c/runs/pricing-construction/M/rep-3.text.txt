@@ -1,0 +1,16 @@
+I’ve built a comparison model with three paths: keep £49 with the release, raise to £59 with it, or phase the rise after release. The model captures the £20k MRR goal and the under-4% monthly-churn constraint; the 12-month deadline is retained in the decision record but cannot be represented as a deadline in the calculation.
+
+It still needs working assumptions before it can compare the options. I propose these **assumptions, not measurements**:
+
+**Starting position**
+- Monthly churn: **3%** — below your 4% ceiling, to test headroom for a price effect.
+- Pro conversion rate: **5%** — provisional baseline pending your actual funnel data.
+- Pro feature value: **70/100** — assumes the release adds substantial value.
+- Pro subscriber count: **250 subscribers** — provisional current Pro base.
+
+**What each option would set**
+- **Keep £49 With Release:** feature value **70/100**; price remains **£49/month**.
+- **Raise to £59 With Release:** feature value **70/100**; price is **£59/month**.
+- **Phase Price After Release:** feature value **70/100**; eventual price **£59/month**. The timing and any interim price are not yet represented.
+
+These are all my starting assumptions to adopt or correct, not facts about your business. If you approve them, I’ll save the full set and run the comparison.

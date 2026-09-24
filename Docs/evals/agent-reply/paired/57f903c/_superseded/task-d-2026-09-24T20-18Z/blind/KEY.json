@@ -1,0 +1,330 @@
+{
+  "schema": "agent-reply-paired-blind-key.v1",
+  "pack": "Docs/evals/agent-reply/paired/57f903c/blind/PACK.md",
+  "pack_sha256": "16484ce8b62d21e750aa2631b6f05be030a5bcfe6b20c2c79a3839cf6161a27c",
+  "seed": 924026,
+  "prng": "mulberry32(seed); Fisher–Yates over versions in the fixed order [M, C1, C2] present for the case; one PRNG stream consumed case by case in pack order",
+  "rep": 1,
+  "text_shown": "simulated final visible reply (visible_text in the scores file)",
+  "scores_file": "Docs/evals/agent-reply/paired/57f903c/scores/2026-09-24T20-18-10-639Z-scores.json",
+  "versions": {
+    "M": "M — served 57f903c stack (AGENT_INSTRUCTIONS; explicit Run adds INTERPRET_ONLY + v0.2)",
+    "C1": "C1 — v2 copy corrections transposed onto the served Agent instructions (explicit Run: + INTERPRET_ONLY + v0.2)",
+    "C2": "C2 — C1 on conversation turns; explicit Run uses interpreter v0.3 (PR #1791 @967d25f5)"
+  },
+  "cases": {
+    "Case 1": {
+      "case": "hiring-construction",
+      "order": [
+        "C1",
+        "M"
+      ],
+      "letters": {
+        "A": {
+          "version": "C1",
+          "rep": 1,
+          "visible_sha256": "03918df897f565f817bf5e699ce8847645b0fc8c392acbd1291fff361a3ec849",
+          "files": {
+            "request": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-construction/C1/rep-1.request.json",
+            "response": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-construction/C1/rep-1.response.json",
+            "meta": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-construction/C1/rep-1.meta.json",
+            "text": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-construction/C1/rep-1.text.txt",
+            "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/route-response.json"
+          }
+        },
+        "B": {
+          "version": "M",
+          "rep": 1,
+          "visible_sha256": "e00657e0bce3e173d7eeb85016508e6bc8d4c6bc43ac9843881c8d873a2eb4a1",
+          "files": {
+            "request": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-construction/M/rep-1.request.json",
+            "response": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-construction/M/rep-1.response.json",
+            "meta": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-construction/M/rep-1.meta.json",
+            "text": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-construction/M/rep-1.text.txt",
+            "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/route-response.json"
+          }
+        }
+      }
+    },
+    "Case 2": {
+      "case": "pricing-construction",
+      "order": [
+        "M",
+        "C1"
+      ],
+      "letters": {
+        "A": {
+          "version": "M",
+          "rep": 1,
+          "visible_sha256": "0bab1eeffa6f4c216c4dae806b32f68525c12b71c9aa1b731272207e9902d381",
+          "files": {
+            "request": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-construction/M/rep-1.request.json",
+            "response": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-construction/M/rep-1.response.json",
+            "meta": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-construction/M/rep-1.meta.json",
+            "text": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-construction/M/rep-1.text.txt",
+            "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/route-response.json"
+          }
+        },
+        "B": {
+          "version": "C1",
+          "rep": 1,
+          "visible_sha256": "00c798ec1d734503fb704bd3d63d72dbd477e0cb7a86f67cea0c481a81606839",
+          "files": {
+            "request": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-construction/C1/rep-1.request.json",
+            "response": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-construction/C1/rep-1.response.json",
+            "meta": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-construction/C1/rep-1.meta.json",
+            "text": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-construction/C1/rep-1.text.txt",
+            "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/route-response.json"
+          }
+        }
+      }
+    },
+    "Case 3": {
+      "case": "heldout-ed-triage-construction",
+      "order": [
+        "C1",
+        "M"
+      ],
+      "letters": {
+        "A": {
+          "version": "C1",
+          "rep": 1,
+          "visible_sha256": "72e598143fb67b0ffdfa33dd53717c47fdeeb5267d811edc905e791010d216eb",
+          "files": {
+            "request": "Docs/evals/agent-reply/paired/57f903c/runs/heldout-ed-triage-construction/C1/rep-1.request.json",
+            "response": "Docs/evals/agent-reply/paired/57f903c/runs/heldout-ed-triage-construction/C1/rep-1.response.json",
+            "meta": "Docs/evals/agent-reply/paired/57f903c/runs/heldout-ed-triage-construction/C1/rep-1.meta.json",
+            "text": "Docs/evals/agent-reply/paired/57f903c/runs/heldout-ed-triage-construction/C1/rep-1.text.txt",
+            "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/route-response.json"
+          }
+        },
+        "B": {
+          "version": "M",
+          "rep": 1,
+          "visible_sha256": "7ed46a16b7b25e053f8c7e5ea5517a39367ed84b56d68b2024234de79e31e3b7",
+          "files": {
+            "request": "Docs/evals/agent-reply/paired/57f903c/runs/heldout-ed-triage-construction/M/rep-1.request.json",
+            "response": "Docs/evals/agent-reply/paired/57f903c/runs/heldout-ed-triage-construction/M/rep-1.response.json",
+            "meta": "Docs/evals/agent-reply/paired/57f903c/runs/heldout-ed-triage-construction/M/rep-1.meta.json",
+            "text": "Docs/evals/agent-reply/paired/57f903c/runs/heldout-ed-triage-construction/M/rep-1.text.txt",
+            "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/route-response.json"
+          }
+        }
+      }
+    },
+    "Case 4": {
+      "case": "pricing-run-complete",
+      "order": [
+        "M",
+        "C2",
+        "C1"
+      ],
+      "letters": {
+        "A": {
+          "version": "M",
+          "rep": 1,
+          "visible_sha256": "bd25dcaeae3b027fec9bcb208932829e8b572f9d1da0d6f099e2b423ee86c1fa",
+          "files": {
+            "request": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-run-complete/M/rep-1.request.json",
+            "response": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-run-complete/M/rep-1.response.json",
+            "meta": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-run-complete/M/rep-1.meta.json",
+            "text": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-run-complete/M/rep-1.text.txt",
+            "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/explicit-run/route-response.json"
+          }
+        },
+        "B": {
+          "version": "C2",
+          "rep": 1,
+          "visible_sha256": "b89d7c5b6d29058116c23291a7f66f3874cbbae06aba85e48d6f84e5575600f0",
+          "files": {
+            "request": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-run-complete/C2/rep-1.request.json",
+            "response": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-run-complete/C2/rep-1.response.json",
+            "meta": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-run-complete/C2/rep-1.meta.json",
+            "text": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-run-complete/C2/rep-1.text.txt",
+            "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/explicit-run/route-response.json"
+          }
+        },
+        "C": {
+          "version": "C1",
+          "rep": 1,
+          "visible_sha256": "d7235fca9ba6645bb672fdabe3e4d473d05c34f5e9c26683999b24c2d4c5eaad",
+          "files": {
+            "request": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-run-complete/C1/rep-1.request.json",
+            "response": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-run-complete/C1/rep-1.response.json",
+            "meta": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-run-complete/C1/rep-1.meta.json",
+            "text": "Docs/evals/agent-reply/paired/57f903c/runs/pricing-run-complete/C1/rep-1.text.txt",
+            "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/explicit-run/route-response.json"
+          }
+        }
+      }
+    },
+    "Case 5": {
+      "case": "hiring-run-blocked",
+      "order": [
+        "M",
+        "C2",
+        "C1"
+      ],
+      "letters": {
+        "A": {
+          "version": "M",
+          "rep": 1,
+          "visible_sha256": "41c289a271bbc8cc40529891e83f7570f31fcbf781368920cf77edf31213f3d5",
+          "files": {
+            "request": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-run-blocked/M/rep-1.request.json",
+            "response": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-run-blocked/M/rep-1.response.json",
+            "meta": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-run-blocked/M/rep-1.meta.json",
+            "text": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-run-blocked/M/rep-1.text.txt",
+            "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/explicit-run/route-response.json"
+          }
+        },
+        "B": {
+          "version": "C2",
+          "rep": 1,
+          "visible_sha256": "81e2415d3c295413644239578e5b625bd8c41c450ac1fe6ebdb1b4c08ad59e80",
+          "files": {
+            "request": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-run-blocked/C2/rep-1.request.json",
+            "response": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-run-blocked/C2/rep-1.response.json",
+            "meta": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-run-blocked/C2/rep-1.meta.json",
+            "text": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-run-blocked/C2/rep-1.text.txt",
+            "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/explicit-run/route-response.json"
+          }
+        },
+        "C": {
+          "version": "C1",
+          "rep": 1,
+          "visible_sha256": "f8a0b4c0810009f051488ed4c2cae5c1f9cf82f8d37bf99aae53fb47a93df2f0",
+          "files": {
+            "request": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-run-blocked/C1/rep-1.request.json",
+            "response": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-run-blocked/C1/rep-1.response.json",
+            "meta": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-run-blocked/C1/rep-1.meta.json",
+            "text": "Docs/evals/agent-reply/paired/57f903c/runs/hiring-run-blocked/C1/rep-1.text.txt",
+            "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/explicit-run/route-response.json"
+          }
+        }
+      }
+    }
+  },
+  "leak_check": {
+    "tokens": [
+      "M_",
+      "C1",
+      "C2",
+      "v0.2",
+      "v0.3",
+      "candidate",
+      "baseline",
+      "arm"
+    ],
+    "case_insensitive": true,
+    "whole_pack_hits": [
+      {
+        "token": "baseline",
+        "line": 31,
+        "excerpt": "These rest on no team baseline being provided. Adopt these s"
+      },
+      {
+        "token": "baseline",
+        "line": 33,
+        "excerpt": "size and current productivity baseline? How much delivery work would"
+      },
+      {
+        "token": "baseline",
+        "line": 63,
+        "excerpt": "size and current productivity baseline? How much delivery work would"
+      },
+      {
+        "token": "baseline",
+        "line": 89,
+        "excerpt": "hly churn: **3%** — a working baseline below the 4% limit."
+      },
+      {
+        "token": "baseline",
+        "line": 108,
+        "excerpt": "Not yet: the model needs baseline commercial assumptions before"
+      },
+      {
+        "token": "baseline",
+        "line": 204,
+        "excerpt": " frame or compatible measured baseline. As a result, the comparison "
+      },
+      {
+        "token": "baseline",
+        "line": 225,
+        "excerpt": "s also not assessed against a baseline level."
+      },
+      {
+        "token": "baseline",
+        "line": 248,
+        "excerpt": "For a genuine baseline, it would normally set:"
+      }
+    ],
+    "whole_pack_hits_attributed": [
+      {
+        "line": 31,
+        "token": "baseline",
+        "case": "Case 1",
+        "letter": "A",
+        "version": "C1",
+        "owner": "model"
+      },
+      {
+        "line": 33,
+        "token": "baseline",
+        "case": "Case 1",
+        "letter": "A",
+        "version": "C1",
+        "owner": "server"
+      },
+      {
+        "line": 63,
+        "token": "baseline",
+        "case": "Case 1",
+        "letter": "B",
+        "version": "M",
+        "owner": "server"
+      },
+      {
+        "line": 89,
+        "token": "baseline",
+        "case": "Case 2",
+        "letter": "A",
+        "version": "M",
+        "owner": "model"
+      },
+      {
+        "line": 108,
+        "token": "baseline",
+        "case": "Case 2",
+        "letter": "B",
+        "version": "C1",
+        "owner": "model"
+      },
+      {
+        "line": 204,
+        "token": "baseline",
+        "case": "Case 4",
+        "letter": "A",
+        "version": "M",
+        "owner": "model"
+      },
+      {
+        "line": 225,
+        "token": "baseline",
+        "case": "Case 4",
+        "letter": "C",
+        "version": "C1",
+        "owner": "model"
+      },
+      {
+        "line": 248,
+        "token": "baseline",
+        "case": "Case 5",
+        "letter": "A",
+        "version": "M",
+        "owner": "model"
+      }
+    ],
+    "outside_verbatim_replies_hits": 0
+  }
+}

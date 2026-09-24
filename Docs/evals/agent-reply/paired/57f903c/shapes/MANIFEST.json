@@ -1,0 +1,1204 @@
+{
+  "schema": "agent-reply-paired-shapes-manifest.v1",
+  "generated_at": "2026-09-24T19:44:14.399Z",
+  "head": "57f903c4652783a9de1a3778d6682a8e5f8414e1",
+  "branch": "aiq/agent-reply-paired",
+  "harness": {
+    "test": "tools/agent-reply-eval/paired/capture-shapes.test.ts",
+    "config": "tools/agent-reply-eval/paired/vitest.config.ts",
+    "helpers": [
+      "tools/agent-reply-eval/paired/capture/network-guard.ts",
+      "tools/agent-reply-eval/paired/capture/product-double.ts",
+      "tools/agent-reply-eval/paired/capture/served.ts",
+      "tools/agent-reply-eval/paired/capture/source-instructions.ts",
+      "tools/agent-reply-eval/paired/capture/build-manifest.ts"
+    ],
+    "phases": {
+      "intercept": "npx vitest run tools/agent-reply-eval/paired/capture-shapes.test.ts --config tools/agent-reply-eval/paired/vitest.config.ts  (no key in env; FP3 + discussion card; zero network calls)",
+      "live": "OPENAI_API_KEY=<from olumi-assistants-service/.env, never printed> RUN_LIVE_CAPTURE=1 <same command>  (construction turns + token counts)"
+    },
+    "route_under_test": "src/routes/agent-v1-turn.ts agentV1TurnRoute (REAL, in-process, AGENT_LANE_ENABLED=true, AGENT_LANE_PREVIEW=false), under its own runWithProviderPolicy(OPENAI_ONLY)",
+    "doubles": "session store (ensureScenarioExists → guest; readRecent → durable rows), resolveUserIdentity → {mode:\"off\"}, internal routes answered by capture/product-double.ts",
+    "served_captures": "~/olumi-ai-quality-20260924/captures/57f903c-{hiring,pricing}/ (read-only; sha256 of each file used is in the FP3 turn-summary served_reference.files)"
+  },
+  "guard": [
+    {
+      "file": "Docs/evals/agent-reply/paired/57f903c/shapes/_runs/2026-09-24T19-39-46-606Z-intercept.json",
+      "run_stamp": "2026-09-24T19-39-46-606Z",
+      "live": false,
+      "head": "57f903c4652783a9de1a3778d6682a8e5f8414e1",
+      "anthropic_env_removed_at_start": [],
+      "anthropic_env_absent_at_end": true,
+      "guard": {
+        "blocked": [],
+        "generation_calls": 0,
+        "token_count_calls": 0
+      },
+      "unexpected_internal_dispatch": [],
+      "source_prompt_sha256": {
+        "agent_instructions": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+        "interpret_only": "7483703b1cb31ffebdcfe900c6ad510ea3d507312b8b7ff6e0f19bb1dbf86a95",
+        "interpreter_v02": "3d979e8406693be42d3b340fd245d76a501c4b1c191d5ffaa1353f2f0380ba32",
+        "fast_path_3_instructions": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64"
+      }
+    },
+    {
+      "file": "Docs/evals/agent-reply/paired/57f903c/shapes/_runs/2026-09-24T19-40-29-756Z-live.json",
+      "run_stamp": "2026-09-24T19-40-29-756Z",
+      "live": true,
+      "head": "57f903c4652783a9de1a3778d6682a8e5f8414e1",
+      "anthropic_env_removed_at_start": [],
+      "anthropic_env_absent_at_end": true,
+      "guard": {
+        "blocked": [],
+        "generation_calls": 16,
+        "token_count_calls": 3
+      },
+      "unexpected_internal_dispatch": [],
+      "source_prompt_sha256": {
+        "agent_instructions": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc",
+        "interpret_only": "7483703b1cb31ffebdcfe900c6ad510ea3d507312b8b7ff6e0f19bb1dbf86a95",
+        "interpreter_v02": "3d979e8406693be42d3b340fd245d76a501c4b1c191d5ffaa1353f2f0380ba32",
+        "fast_path_3_instructions": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64"
+      }
+    }
+  ],
+  "fidelity_summary": {
+    "fp3_exact_checks_failed": [
+      {
+        "case": "hiring-run-blocked",
+        "failed": []
+      },
+      {
+        "case": "pricing-run-complete",
+        "failed": []
+      }
+    ],
+    "fp3_and_card_history_token_gap": [
+      {
+        "case": "hiring-run-blocked",
+        "counted_input_tokens": 4546,
+        "served_input_tokens": 6877,
+        "delta": -2331,
+        "pct": -33.9
+      },
+      {
+        "case": "pricing-discussion-card",
+        "counted_input_tokens": 10712,
+        "served_input_tokens": null,
+        "delta": null,
+        "pct": null
+      },
+      {
+        "case": "pricing-run-complete",
+        "counted_input_tokens": 9718,
+        "served_input_tokens": 13561,
+        "delta": -3843,
+        "pct": -28.3
+      }
+    ],
+    "fp3_history_gap_reason": "the served FP3 call carried the construction turn’s in-process items (reasoning items, three or four tool call/output pairs, the pre-post-processing final message); the capture seeds the two durable turns’ text instead, exactly as the route does after a restart. Instructions, tools, tool_choice, the run pair and canonical_state are exact.",
+    "construction_parity": [
+      {
+        "case": "heldout-ed-triage-construction",
+        "first_hop_input_tokens": {
+          "captured": 3148,
+          "served": null,
+          "equal": null
+        },
+        "construction_call_input_tokens": {
+          "captured": 2538,
+          "served": null,
+          "equal": null
+        },
+        "tools_called": [
+          "get_canonical_state",
+          "build_model_from_brief",
+          "propose_starting_point",
+          "propose_starting_point"
+        ],
+        "served_tools_called": null
+      },
+      {
+        "case": "hiring-construction",
+        "first_hop_input_tokens": {
+          "captured": 3127,
+          "served": 3127,
+          "equal": true
+        },
+        "construction_call_input_tokens": {
+          "captured": 2517,
+          "served": 2517,
+          "equal": true
+        },
+        "tools_called": [
+          "get_canonical_state",
+          "build_model_from_brief",
+          "propose_starting_point"
+        ],
+        "served_tools_called": [
+          "get_canonical_state",
+          "build_model_from_brief",
+          "propose_starting_point"
+        ]
+      },
+      {
+        "case": "pricing-construction",
+        "first_hop_input_tokens": {
+          "captured": 3158,
+          "served": 3158,
+          "equal": true
+        },
+        "construction_call_input_tokens": {
+          "captured": 2548,
+          "served": 2548,
+          "equal": true
+        },
+        "tools_called": [
+          "get_canonical_state",
+          "build_model_from_brief",
+          "propose_starting_point"
+        ],
+        "served_tools_called": [
+          "get_canonical_state",
+          "build_model_from_brief",
+          "propose_starting_point",
+          "propose_starting_point"
+        ]
+      }
+    ]
+  },
+  "totals": {
+    "paid_generation_calls": 16,
+    "token_count_calls": 3,
+    "intercepted_calls": 3,
+    "blocked_non_openai_attempts": 0
+  },
+  "cases": [
+    {
+      "case": "heldout-ed-triage-construction",
+      "turn": "construction",
+      "purpose": "live-construction",
+      "route_request": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/route-request.json",
+      "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/route-response.json",
+      "internal_dispatch": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/internal-dispatch.json",
+      "turn_summary": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/turn-summary.json",
+      "reply_writing_request": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-06.request.json",
+      "reply_writing_call": "06",
+      "reply_writing_note": "the last conversation call with no function_call in its output; its output text is the model part of assistant_text (server post-processing appends Olumi’s own status/disclosures)",
+      "paid_calls": 6,
+      "intercepted_calls": 0,
+      "tools_called": [
+        "get_canonical_state",
+        "build_model_from_brief",
+        "propose_starting_point",
+        "propose_starting_point"
+      ],
+      "served_tools_called": null,
+      "tool_sequence_resembles_served": {
+        "starts_get_canonical_state_then_build": true,
+        "proposes_starting_point": true,
+        "no_run_or_write_on_build_turn": true,
+        "identical_to_served": null
+      },
+      "first_hop_input_tokens": {
+        "captured": 3148,
+        "served": null,
+        "equal": null
+      },
+      "token_count": null,
+      "checks_passed": [],
+      "checks_failed": [],
+      "fidelity": {
+        "exact": [
+          "every provider request is built by the real route/runtime at 57f903c (AGENT_INSTRUCTIONS, toolsFor(\"full\"), BUILD_INSTRUCTIONS, buildCandidateSchema, BANKED_BUDGETS) and sent by its own callModel/callStructured",
+          "tool results come from the real capabilities (get_canonical_state, build_model_from_brief incl. admission and the size gate, propose_* incl. completeness admission)",
+          "registration applies the real node-kind normalisation, GraphStateIngress parse, projectGraphForPersistence and invariant check; reads return the real analysis-affecting and identity hashes",
+          "empty first turn: no history (a fresh scenario, as served)"
+        ],
+        "approximated": [
+          "the product double stands in for Supabase/PLoT: a guest scenario (no versions, no model_version receipt — served receipts were []), and the never_run analysis_state the served read returned after a build",
+          "a different generation from the served one: the model output (and so later hops) differs by draw; the served turn is a reference, not a replay",
+          "no turn_id: it drives only durable rows, never the provider request"
+        ]
+      },
+      "requests": [
+        {
+          "call": "01",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-01.request.json",
+          "request_sha256": "22c142df675e30c96a62c49c7f2c783a735178d247f81cc53b3257a15bd37374",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-01.response.json",
+          "response_sha256": "8c4371105d48d11f77453f85ea58a3091ee8d16197289f39da144755902c7948",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-01.meta.json",
+          "purpose": "conversation",
+          "hop": 0,
+          "during_hop": null,
+          "final_reply_hop": false,
+          "paid": true,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 2236.2,
+          "usage": {
+            "input_tokens": 3148,
+            "cached_tokens": 3107,
+            "output_tokens": 48,
+            "reasoning_tokens": 8
+          },
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 3400,
+            "tool_choice": null,
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 9,
+            "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc"
+          }
+        },
+        {
+          "call": "02",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-02.request.json",
+          "request_sha256": "0ad8b9b5846654f853446af8071a335d490ea5f43b8c7d2c15493fefef34325b",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-02.response.json",
+          "response_sha256": "6fcbb14dc437bec46977ad652fbb56d2b7510a0478fcd8c548a3e8cccd3e5e7e",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-02.meta.json",
+          "purpose": "conversation",
+          "hop": 1,
+          "during_hop": null,
+          "final_reply_hop": false,
+          "paid": true,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 1626.5,
+          "usage": {
+            "input_tokens": 3295,
+            "cached_tokens": 3145,
+            "output_tokens": 54,
+            "reasoning_tokens": 0
+          },
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 3400,
+            "tool_choice": null,
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 9,
+            "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc"
+          }
+        },
+        {
+          "call": "03",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-03.request.json",
+          "request_sha256": "d7e2b5368372902f9c8b9617dadff63a76952d8afb79b26533f881d4f76c9c18",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-03.response.json",
+          "response_sha256": "ab54f38a85158ee597c2f5f2de4242c971d46cdc73c75ea43b721d281e9c1f76",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-03.meta.json",
+          "purpose": "construction",
+          "hop": null,
+          "during_hop": 1,
+          "final_reply_hop": false,
+          "paid": true,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 34454.2,
+          "usage": {
+            "input_tokens": 2538,
+            "cached_tokens": 2497,
+            "output_tokens": 2638,
+            "reasoning_tokens": 1855
+          },
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 6000,
+            "tool_choice": null,
+            "reasoning": {
+              "effort": "medium"
+            },
+            "text_format": {
+              "type": "json_schema",
+              "name": "whole_candidate",
+              "strict": true
+            },
+            "tools_count": null,
+            "instructions_sha256": "4ef1802dc112bf29751bccd48927fe4521d23b5c7278a85e7c103cabcf003ec6"
+          }
+        },
+        {
+          "call": "04",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-04.request.json",
+          "request_sha256": "71672d30891cb87ad4764831a8304a0dfec879c611a9897e44aa71c4abf05b78",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-04.response.json",
+          "response_sha256": "0943fb5d181970a2a13783de7b7936062b0e29113163385c2328ae43bb092934",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-04.meta.json",
+          "purpose": "conversation",
+          "hop": 2,
+          "during_hop": null,
+          "final_reply_hop": false,
+          "paid": true,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 8549.6,
+          "usage": {
+            "input_tokens": 4153,
+            "cached_tokens": 3292,
+            "output_tokens": 488,
+            "reasoning_tokens": 217
+          },
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 3400,
+            "tool_choice": null,
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 9,
+            "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc"
+          }
+        },
+        {
+          "call": "05",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-05.request.json",
+          "request_sha256": "72c8258ad7338189c9988143a5942c4841b9f3d9dfd696310b13a30d746da32b",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-05.response.json",
+          "response_sha256": "a7f61aa755cffe7be7ea5124d00e61b64620a693625b3633f559131f3d39962f",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-05.meta.json",
+          "purpose": "conversation",
+          "hop": 3,
+          "during_hop": null,
+          "final_reply_hop": false,
+          "paid": true,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 5035.4,
+          "usage": {
+            "input_tokens": 5069,
+            "cached_tokens": 4150,
+            "output_tokens": 438,
+            "reasoning_tokens": 44
+          },
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 3400,
+            "tool_choice": null,
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 9,
+            "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc"
+          }
+        },
+        {
+          "call": "06",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-06.request.json",
+          "request_sha256": "00e452be59c3117393f9e4af3c0b77ff604fb0617afdb7778efd1ed82ab3ca1f",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-06.response.json",
+          "response_sha256": "4632fc007cff1aaf40be1269d351664889d48cc4b1350d9c948e54d01397fd59",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/heldout-ed-triage-construction/construction/call-06.meta.json",
+          "purpose": "conversation",
+          "hop": 4,
+          "during_hop": null,
+          "final_reply_hop": true,
+          "paid": true,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 5893.9,
+          "usage": {
+            "input_tokens": 6161,
+            "cached_tokens": 5066,
+            "output_tokens": 325,
+            "reasoning_tokens": 0
+          },
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 3400,
+            "tool_choice": null,
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 9,
+            "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc"
+          }
+        }
+      ]
+    },
+    {
+      "case": "hiring-construction",
+      "turn": "construction",
+      "purpose": "live-construction",
+      "route_request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/route-request.json",
+      "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/route-response.json",
+      "internal_dispatch": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/internal-dispatch.json",
+      "turn_summary": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/turn-summary.json",
+      "reply_writing_request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-05.request.json",
+      "reply_writing_call": "05",
+      "reply_writing_note": "the last conversation call with no function_call in its output; its output text is the model part of assistant_text (server post-processing appends Olumi’s own status/disclosures)",
+      "paid_calls": 5,
+      "intercepted_calls": 0,
+      "tools_called": [
+        "get_canonical_state",
+        "build_model_from_brief",
+        "propose_starting_point"
+      ],
+      "served_tools_called": [
+        "get_canonical_state",
+        "build_model_from_brief",
+        "propose_starting_point"
+      ],
+      "tool_sequence_resembles_served": {
+        "starts_get_canonical_state_then_build": true,
+        "proposes_starting_point": true,
+        "no_run_or_write_on_build_turn": true,
+        "identical_to_served": true
+      },
+      "first_hop_input_tokens": {
+        "captured": 3127,
+        "served": 3127,
+        "equal": true
+      },
+      "token_count": null,
+      "checks_passed": [],
+      "checks_failed": [],
+      "fidelity": {
+        "exact": [
+          "every provider request is built by the real route/runtime at 57f903c (AGENT_INSTRUCTIONS, toolsFor(\"full\"), BUILD_INSTRUCTIONS, buildCandidateSchema, BANKED_BUDGETS) and sent by its own callModel/callStructured",
+          "tool results come from the real capabilities (get_canonical_state, build_model_from_brief incl. admission and the size gate, propose_* incl. completeness admission)",
+          "registration applies the real node-kind normalisation, GraphStateIngress parse, projectGraphForPersistence and invariant check; reads return the real analysis-affecting and identity hashes",
+          "empty first turn: no history (a fresh scenario, as served)"
+        ],
+        "approximated": [
+          "the product double stands in for Supabase/PLoT: a guest scenario (no versions, no model_version receipt — served receipts were []), and the never_run analysis_state the served read returned after a build",
+          "a different generation from the served one: the model output (and so later hops) differs by draw; the served turn is a reference, not a replay",
+          "no turn_id: it drives only durable rows, never the provider request"
+        ]
+      },
+      "requests": [
+        {
+          "call": "01",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-01.request.json",
+          "request_sha256": "bc8a876c01d121b9d0c1933bc63552e60f709dc8be3fb476292e1e973c226d9c",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-01.response.json",
+          "response_sha256": "4264a214ba0d44597512668c86196d6bce81e4326c08a337853f5c37cf94d42f",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-01.meta.json",
+          "purpose": "conversation",
+          "hop": 0,
+          "during_hop": null,
+          "final_reply_hop": false,
+          "paid": true,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 2720.5,
+          "usage": {
+            "input_tokens": 3127,
+            "cached_tokens": 3124,
+            "output_tokens": 46,
+            "reasoning_tokens": 10
+          },
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 3400,
+            "tool_choice": null,
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 9,
+            "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc"
+          }
+        },
+        {
+          "call": "02",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-02.request.json",
+          "request_sha256": "c5700a7d54306ed83fb0a525a64f81aea2c776b955a25d8276d7287e9238bac3",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-02.response.json",
+          "response_sha256": "e65f5fdd487d29b851b744faaee169af6fde7c0f6429c78dde20766836111769",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-02.meta.json",
+          "purpose": "conversation",
+          "hop": 1,
+          "during_hop": null,
+          "final_reply_hop": false,
+          "paid": true,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 2113.7,
+          "usage": {
+            "input_tokens": 3272,
+            "cached_tokens": 3124,
+            "output_tokens": 33,
+            "reasoning_tokens": 0
+          },
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 3400,
+            "tool_choice": null,
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 9,
+            "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc"
+          }
+        },
+        {
+          "call": "03",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-03.request.json",
+          "request_sha256": "49980b49d2f918a5c42b04b08184974409888cfd4cad35f3b4456f11f6b28013",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-03.response.json",
+          "response_sha256": "2bcb8b3232d2170d8068fcb26b6ef780c975d1af7c4eaf1ddb80d22f5052a96a",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-03.meta.json",
+          "purpose": "construction",
+          "hop": null,
+          "during_hop": 1,
+          "final_reply_hop": false,
+          "paid": true,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 24967.4,
+          "usage": {
+            "input_tokens": 2517,
+            "cached_tokens": 2514,
+            "output_tokens": 1806,
+            "reasoning_tokens": 1034
+          },
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 6000,
+            "tool_choice": null,
+            "reasoning": {
+              "effort": "medium"
+            },
+            "text_format": {
+              "type": "json_schema",
+              "name": "whole_candidate",
+              "strict": true
+            },
+            "tools_count": null,
+            "instructions_sha256": "4ef1802dc112bf29751bccd48927fe4521d23b5c7278a85e7c103cabcf003ec6"
+          }
+        },
+        {
+          "call": "04",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-04.request.json",
+          "request_sha256": "3894ed9673b90202e08ca5e0f9237188d761fdf12fd9315517218b37d9069220",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-04.response.json",
+          "response_sha256": "3347a769e4cb3f9f24882246f61fc2ad14c6bd461742023a314eebdf5dd71c34",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-04.meta.json",
+          "purpose": "conversation",
+          "hop": 2,
+          "during_hop": null,
+          "final_reply_hop": false,
+          "paid": true,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 8008.7,
+          "usage": {
+            "input_tokens": 3994,
+            "cached_tokens": 3269,
+            "output_tokens": 642,
+            "reasoning_tokens": 167
+          },
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 3400,
+            "tool_choice": null,
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 9,
+            "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc"
+          }
+        },
+        {
+          "call": "05",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-05.request.json",
+          "request_sha256": "5d1ff01ae76cd5219cd4b67d04d7549185059934e43a66d21a407794f78dab44",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-05.response.json",
+          "response_sha256": "277a08b0ecfb90a10f33feafbcb00081c96961bf3015e4d832cb1ce7a85897d4",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-construction/construction/call-05.meta.json",
+          "purpose": "conversation",
+          "hop": 3,
+          "during_hop": null,
+          "final_reply_hop": true,
+          "paid": true,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 5624.1,
+          "usage": {
+            "input_tokens": 5272,
+            "cached_tokens": 3991,
+            "output_tokens": 311,
+            "reasoning_tokens": 0
+          },
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 3400,
+            "tool_choice": null,
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 9,
+            "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc"
+          }
+        }
+      ]
+    },
+    {
+      "case": "hiring-run-blocked",
+      "turn": "explicit-run",
+      "purpose": "fp3-explicit-run",
+      "route_request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/explicit-run/route-request.json",
+      "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/explicit-run/route-response.json",
+      "internal_dispatch": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/explicit-run/internal-dispatch.json",
+      "turn_summary": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/explicit-run/turn-summary.json",
+      "reply_writing_request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/explicit-run/call-01.request.json",
+      "reply_writing_call": "01",
+      "reply_writing_note": "fast path 3 makes exactly ONE call; it writes the reply",
+      "paid_calls": 0,
+      "intercepted_calls": 1,
+      "tools_called": [
+        "run_analysis"
+      ],
+      "served_tools_called": null,
+      "tool_sequence_resembles_served": null,
+      "first_hop_input_tokens": null,
+      "token_count": {
+        "counted_input_tokens": 4546,
+        "served_input_tokens": 6877,
+        "delta_vs_served": -2331,
+        "file": "Docs/evals/agent-reply/paired/57f903c/shapes/_token-counts-2026-09-24T19-40-29-756Z.json"
+      },
+      "checks_passed": [
+        "instructions_sha256_equals_source_fp3",
+        "instructions_end_with_exported_v02",
+        "v02_sha256_prefix_is_banked_3d979e8406693be4",
+        "source_constants_equal_module_exports",
+        "tool_choice_none",
+        "tools_empty",
+        "model_is_gpt_5_6_terra",
+        "max_output_tokens_3400",
+        "no_reasoning_field",
+        "input_item_shape",
+        "seeded_history_is_served_durable_turns",
+        "run_pair_present",
+        "canonical_state_analysis_state_equals_served",
+        "canonical_state_analysis_ready_equals_served",
+        "leader_claim_reaches_interpreter"
+      ],
+      "checks_failed": [],
+      "fidelity": {
+        "exact": [
+          "instructions: AGENT_INSTRUCTIONS + \"\\n\\n\" + INTERPRET_ONLY_CONSTRAINT + \"\\n\\n\" + INTERPRETER_V02_BANKED, built by the real route at 57f903c and sha256-checked against the same constants re-derived from the source text",
+          "model / max_output_tokens / tools [] / tool_choice none, from the real callModel (BANKED_BUDGETS conversation: gpt-5.6-terra, 3400); no reasoning field",
+          "the run pair: the real route builds the user message, the synthetic function_call run_analysis and its function_call_output from the real run_analysis capability",
+          "canonical_state.analysis_state: the SERVED explicit-run analysis_state, handed through the real readBackState",
+          "canonical_state.analysis_ready: see checks.canonical_state_analysis_ready_equals_served (derived by the real readBackState from the served graph when it reproduces the served value; otherwise served verbatim, then re-stamped by the route)",
+          "the user message \"Run analysis\" and chip {\"action_type\":\"run_analysis\"} exactly as served"
+        ],
+        "approximated": [
+          "HISTORY: seeded from the two durable turns (construction, approve) exactly as the route's own restart seeding (historyFromDurableTurns over store.readRecent) presents them — user text + the FINAL served assistant_text. The served process held the construction turn's in-process items instead (reasoning items, get_canonical_state/build_model_from_brief/propose_starting_point function_call + function_call_output pairs, and the model's pre-post-processing final message). Those raw tool items are NOT reproducible from the served captures; this is the only history approximation.",
+          "ran.what_is_missing: the internal conventional Run's assistant_text was not captured and the Agent route echoes it nowhere in its response, so the double answers \"\" (the served value is unknown).",
+          "ran.status / ran.options / ran.blockers: read from the SERVED explicit-run analysis_ready (the route's final readback), standing in for the internal conventional turn's own analysis_ready, which was not captured.",
+          "ran.result: the SERVED analysis_result block from the final readback (bound to the same fact), standing in for the block the internal conventional turn returned.",
+          "call_id: fast_run_<Fastify req.id> — same shape as served (default Fastify id \"req-N\"), different N.",
+          "no turn_id is sent in-process: turn_id drives only the durable claim/answer rows, never the provider request.",
+          "the intercepted answer is the SERVED assistant_text (the route's post-processing on this path is a pass-through: no write narration, no stripping) so the turn completes; no model output was generated here."
+        ]
+      },
+      "requests": [
+        {
+          "call": "01",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/explicit-run/call-01.request.json",
+          "request_sha256": "99495c529137851d3ef8d7c7aec0f26f58986aa23378cb1e5845ab1ea31d7845",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/explicit-run/call-01.response.json",
+          "response_sha256": "4082ece67013df37150aefd9f63542653fe1b78e6ef20c625f4e64e6eadc33de",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/explicit-run/call-01.meta.json",
+          "purpose": "conversation",
+          "hop": 0,
+          "during_hop": null,
+          "final_reply_hop": true,
+          "paid": false,
+          "intercepted": true,
+          "guard": "openai-only-ok",
+          "wall_ms": 0.3,
+          "usage": null,
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 3400,
+            "tool_choice": "none",
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 0,
+            "instructions_sha256": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64"
+          }
+        }
+      ]
+    },
+    {
+      "case": "hiring-run-blocked",
+      "turn": "token-count-2026-09-24T19-40-29-756Z",
+      "purpose": "token-count (input_tokens endpoint; no generation)",
+      "requests": [
+        {
+          "call": "01",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/token-count-2026-09-24T19-40-29-756Z/call-01.request.json",
+          "request_sha256": "f78b06e02a7b45f9e803befd34c5e6af6d4a6ea46c10aa933354b04751ca11c2",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/token-count-2026-09-24T19-40-29-756Z/call-01.response.json",
+          "response_sha256": "a48a613cee41866ebedb85c7c738c9d88a57374b0f41befad3920e4aa6f37848",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/hiring-run-blocked/token-count-2026-09-24T19-40-29-756Z/call-01.meta.json",
+          "purpose": "token_count",
+          "hop": null,
+          "during_hop": null,
+          "final_reply_hop": false,
+          "paid": false,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 315.5,
+          "usage": null,
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": null,
+            "tool_choice": "none",
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 0,
+            "instructions_sha256": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64"
+          }
+        }
+      ]
+    },
+    {
+      "case": "pricing-construction",
+      "turn": "construction",
+      "purpose": "live-construction",
+      "route_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/route-request.json",
+      "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/route-response.json",
+      "internal_dispatch": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/internal-dispatch.json",
+      "turn_summary": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/turn-summary.json",
+      "reply_writing_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-05.request.json",
+      "reply_writing_call": "05",
+      "reply_writing_note": "the last conversation call with no function_call in its output; its output text is the model part of assistant_text (server post-processing appends Olumi’s own status/disclosures)",
+      "paid_calls": 5,
+      "intercepted_calls": 0,
+      "tools_called": [
+        "get_canonical_state",
+        "build_model_from_brief",
+        "propose_starting_point"
+      ],
+      "served_tools_called": [
+        "get_canonical_state",
+        "build_model_from_brief",
+        "propose_starting_point",
+        "propose_starting_point"
+      ],
+      "tool_sequence_resembles_served": {
+        "starts_get_canonical_state_then_build": true,
+        "proposes_starting_point": true,
+        "no_run_or_write_on_build_turn": true,
+        "identical_to_served": false
+      },
+      "first_hop_input_tokens": {
+        "captured": 3158,
+        "served": 3158,
+        "equal": true
+      },
+      "token_count": null,
+      "checks_passed": [],
+      "checks_failed": [],
+      "fidelity": {
+        "exact": [
+          "every provider request is built by the real route/runtime at 57f903c (AGENT_INSTRUCTIONS, toolsFor(\"full\"), BUILD_INSTRUCTIONS, buildCandidateSchema, BANKED_BUDGETS) and sent by its own callModel/callStructured",
+          "tool results come from the real capabilities (get_canonical_state, build_model_from_brief incl. admission and the size gate, propose_* incl. completeness admission)",
+          "registration applies the real node-kind normalisation, GraphStateIngress parse, projectGraphForPersistence and invariant check; reads return the real analysis-affecting and identity hashes",
+          "empty first turn: no history (a fresh scenario, as served)"
+        ],
+        "approximated": [
+          "the product double stands in for Supabase/PLoT: a guest scenario (no versions, no model_version receipt — served receipts were []), and the never_run analysis_state the served read returned after a build",
+          "a different generation from the served one: the model output (and so later hops) differs by draw; the served turn is a reference, not a replay",
+          "no turn_id: it drives only durable rows, never the provider request"
+        ]
+      },
+      "requests": [
+        {
+          "call": "01",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-01.request.json",
+          "request_sha256": "fad8b256371810eb821eea32a85064dc9a85d5d4aab0a2bd504a0cb0aef4d868",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-01.response.json",
+          "response_sha256": "2c2c4c54912f13cafd45c1513426918cf2e2397f48c0abe9cef0d0645f4dd69c",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-01.meta.json",
+          "purpose": "conversation",
+          "hop": 0,
+          "during_hop": null,
+          "final_reply_hop": false,
+          "paid": true,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 2568.7,
+          "usage": {
+            "input_tokens": 3158,
+            "cached_tokens": 3155,
+            "output_tokens": 44,
+            "reasoning_tokens": 8
+          },
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 3400,
+            "tool_choice": null,
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 9,
+            "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc"
+          }
+        },
+        {
+          "call": "02",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-02.request.json",
+          "request_sha256": "b8ff6794716b9a7bbc97eb4e3515fdfb39bf48e1273ae0225fbdfc255a622e5c",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-02.response.json",
+          "response_sha256": "dc16c1a01b06c08dc7c1aad532e596ea060890a602ba0cf6d28581bd0c601a89",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-02.meta.json",
+          "purpose": "conversation",
+          "hop": 1,
+          "during_hop": null,
+          "final_reply_hop": false,
+          "paid": true,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 1907.5,
+          "usage": {
+            "input_tokens": 3301,
+            "cached_tokens": 3155,
+            "output_tokens": 64,
+            "reasoning_tokens": 0
+          },
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 3400,
+            "tool_choice": null,
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 9,
+            "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc"
+          }
+        },
+        {
+          "call": "03",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-03.request.json",
+          "request_sha256": "dee43ac4dffe056ab9ab395444fdff235708645428f943af58f383d840660a3b",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-03.response.json",
+          "response_sha256": "373b83e6a53a7a004b464201b25090e91ef50ddb71cab04a55137e6ea9e40ad6",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-03.meta.json",
+          "purpose": "construction",
+          "hop": null,
+          "during_hop": 1,
+          "final_reply_hop": false,
+          "paid": true,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 25703.8,
+          "usage": {
+            "input_tokens": 2548,
+            "cached_tokens": 2545,
+            "output_tokens": 1749,
+            "reasoning_tokens": 1034
+          },
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 6000,
+            "tool_choice": null,
+            "reasoning": {
+              "effort": "medium"
+            },
+            "text_format": {
+              "type": "json_schema",
+              "name": "whole_candidate",
+              "strict": true
+            },
+            "tools_count": null,
+            "instructions_sha256": "4ef1802dc112bf29751bccd48927fe4521d23b5c7278a85e7c103cabcf003ec6"
+          }
+        },
+        {
+          "call": "04",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-04.request.json",
+          "request_sha256": "efbc29ecad1099f3aec37253407562302e22549c3d73431a3409f4ebad3d4807",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-04.response.json",
+          "response_sha256": "070b580eda61654e4064202b9a99a86c3d518227bfc8975e12def0f6ffe123b7",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-04.meta.json",
+          "purpose": "conversation",
+          "hop": 2,
+          "during_hop": null,
+          "final_reply_hop": false,
+          "paid": true,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 9577.9,
+          "usage": {
+            "input_tokens": 4085,
+            "cached_tokens": 3298,
+            "output_tokens": 644,
+            "reasoning_tokens": 212
+          },
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 3400,
+            "tool_choice": null,
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 9,
+            "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc"
+          }
+        },
+        {
+          "call": "05",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-05.request.json",
+          "request_sha256": "70d42c665ceda573e176f27cddd6020ef00ca87225e6b0e34a0358f80e00a8d3",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-05.response.json",
+          "response_sha256": "f009473265fac70b2eaefb36fedce7c76844ce68b643912c612857b130890b56",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-construction/construction/call-05.meta.json",
+          "purpose": "conversation",
+          "hop": 3,
+          "during_hop": null,
+          "final_reply_hop": true,
+          "paid": true,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 7702.2,
+          "usage": {
+            "input_tokens": 5348,
+            "cached_tokens": 4082,
+            "output_tokens": 451,
+            "reasoning_tokens": 86
+          },
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 3400,
+            "tool_choice": null,
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 9,
+            "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc"
+          }
+        }
+      ]
+    },
+    {
+      "case": "pricing-discussion-card",
+      "turn": "discussion-card",
+      "purpose": "discussion-card-first-hop",
+      "route_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-discussion-card/discussion-card/route-request.json",
+      "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-discussion-card/discussion-card/route-response.json",
+      "internal_dispatch": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-discussion-card/discussion-card/internal-dispatch.json",
+      "turn_summary": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-discussion-card/discussion-card/turn-summary.json",
+      "reply_writing_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-discussion-card/discussion-card/call-01.request.json",
+      "reply_writing_call": "01",
+      "reply_writing_note": "FIRST hop only. In a live turn this hop may instead call a tool (e.g. get_canonical_state), in which case a later hop writes the reply; the paired test replays this first-hop request.",
+      "paid_calls": 0,
+      "intercepted_calls": 1,
+      "tools_called": null,
+      "served_tools_called": null,
+      "tool_sequence_resembles_served": null,
+      "first_hop_input_tokens": null,
+      "token_count": {
+        "counted_input_tokens": 10712,
+        "served_input_tokens": null,
+        "delta_vs_served": null,
+        "file": "Docs/evals/agent-reply/paired/57f903c/shapes/_token-counts-2026-09-24T19-40-29-756Z.json"
+      },
+      "checks_passed": [
+        "instructions_equal_source_agent_instructions",
+        "tools_are_full_mode_toolset",
+        "no_tool_choice",
+        "last_item_is_the_card_message",
+        "carries_the_fp3_run_pair_and_answer",
+        "not_a_fast_path"
+      ],
+      "checks_failed": [],
+      "fidelity": {
+        "exact": [
+          "instructions = AGENT_INSTRUCTIONS (sha256-checked against the source text)",
+          "tools = toolsFor(\"full\") (9 tools), no tool_choice",
+          "model / max_output_tokens from the real callModel",
+          "the card message and chip id exactly as specified; typed as neither approval nor Run, so it takes runAgentTurn"
+        ],
+        "approximated": [
+          "history = the pricing FP3 turn's items (durable-seeded construction + approve text, the FP3 run pair, the SERVED interpretation as a plain assistant message with no reasoning item or id) — see pricing-run-complete fidelity",
+          "source \"chip\" and no turn_class are assumptions about the UI payload; the route reads neither"
+        ]
+      },
+      "requests": [
+        {
+          "call": "01",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-discussion-card/discussion-card/call-01.request.json",
+          "request_sha256": "f9cb29b2238c77f6367a1c7d6f774ca7ebdd892b33dbe402dfea0ea493e1d3c2",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-discussion-card/discussion-card/call-01.response.json",
+          "response_sha256": "f676fff47f72be27ef751d7a2e1ed9dfad5a378c9f614275cf71ca6375431058",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-discussion-card/discussion-card/call-01.meta.json",
+          "purpose": "conversation",
+          "hop": 0,
+          "during_hop": null,
+          "final_reply_hop": true,
+          "paid": false,
+          "intercepted": true,
+          "guard": "openai-only-ok",
+          "wall_ms": 0.2,
+          "usage": null,
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 3400,
+            "tool_choice": null,
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 9,
+            "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc"
+          }
+        }
+      ]
+    },
+    {
+      "case": "pricing-discussion-card",
+      "turn": "token-count-2026-09-24T19-40-29-756Z",
+      "purpose": "token-count (input_tokens endpoint; no generation)",
+      "requests": [
+        {
+          "call": "01",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-discussion-card/token-count-2026-09-24T19-40-29-756Z/call-01.request.json",
+          "request_sha256": "deb9f51eb3b39e1d581266a984942b31dd24e530184971812649ce63454e6bd0",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-discussion-card/token-count-2026-09-24T19-40-29-756Z/call-01.response.json",
+          "response_sha256": "c6bc0fc239997b512a6ab1fff20c4256f51a20813239eaff3cee4386ece7c4ac",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-discussion-card/token-count-2026-09-24T19-40-29-756Z/call-01.meta.json",
+          "purpose": "token_count",
+          "hop": null,
+          "during_hop": null,
+          "final_reply_hop": false,
+          "paid": false,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 331.5,
+          "usage": null,
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": null,
+            "tool_choice": null,
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 9,
+            "instructions_sha256": "23ab41ca8a51d4e852f1d86e133d8f4438006db9548b882ffd88649f3d6cbedc"
+          }
+        }
+      ]
+    },
+    {
+      "case": "pricing-run-complete",
+      "turn": "explicit-run",
+      "purpose": "fp3-explicit-run",
+      "route_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/explicit-run/route-request.json",
+      "route_response": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/explicit-run/route-response.json",
+      "internal_dispatch": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/explicit-run/internal-dispatch.json",
+      "turn_summary": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/explicit-run/turn-summary.json",
+      "reply_writing_request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/explicit-run/call-01.request.json",
+      "reply_writing_call": "01",
+      "reply_writing_note": "fast path 3 makes exactly ONE call; it writes the reply",
+      "paid_calls": 0,
+      "intercepted_calls": 1,
+      "tools_called": [
+        "run_analysis"
+      ],
+      "served_tools_called": null,
+      "tool_sequence_resembles_served": null,
+      "first_hop_input_tokens": null,
+      "token_count": {
+        "counted_input_tokens": 9718,
+        "served_input_tokens": 13561,
+        "delta_vs_served": -3843,
+        "file": "Docs/evals/agent-reply/paired/57f903c/shapes/_token-counts-2026-09-24T19-40-29-756Z.json"
+      },
+      "checks_passed": [
+        "instructions_sha256_equals_source_fp3",
+        "instructions_end_with_exported_v02",
+        "v02_sha256_prefix_is_banked_3d979e8406693be4",
+        "source_constants_equal_module_exports",
+        "tool_choice_none",
+        "tools_empty",
+        "model_is_gpt_5_6_terra",
+        "max_output_tokens_3400",
+        "no_reasoning_field",
+        "input_item_shape",
+        "seeded_history_is_served_durable_turns",
+        "run_pair_present",
+        "canonical_state_analysis_state_equals_served",
+        "canonical_state_analysis_ready_equals_served",
+        "leader_claim_reaches_interpreter"
+      ],
+      "checks_failed": [],
+      "fidelity": {
+        "exact": [
+          "instructions: AGENT_INSTRUCTIONS + \"\\n\\n\" + INTERPRET_ONLY_CONSTRAINT + \"\\n\\n\" + INTERPRETER_V02_BANKED, built by the real route at 57f903c and sha256-checked against the same constants re-derived from the source text",
+          "model / max_output_tokens / tools [] / tool_choice none, from the real callModel (BANKED_BUDGETS conversation: gpt-5.6-terra, 3400); no reasoning field",
+          "the run pair: the real route builds the user message, the synthetic function_call run_analysis and its function_call_output from the real run_analysis capability",
+          "canonical_state.analysis_state: the SERVED explicit-run analysis_state, handed through the real readBackState",
+          "canonical_state.analysis_ready: see checks.canonical_state_analysis_ready_equals_served (derived by the real readBackState from the served graph when it reproduces the served value; otherwise served verbatim, then re-stamped by the route)",
+          "the user message \"Run analysis\" and chip {\"action_type\":\"run_analysis\"} exactly as served"
+        ],
+        "approximated": [
+          "HISTORY: seeded from the two durable turns (construction, approve) exactly as the route's own restart seeding (historyFromDurableTurns over store.readRecent) presents them — user text + the FINAL served assistant_text. The served process held the construction turn's in-process items instead (reasoning items, get_canonical_state/build_model_from_brief/propose_starting_point function_call + function_call_output pairs, and the model's pre-post-processing final message). Those raw tool items are NOT reproducible from the served captures; this is the only history approximation.",
+          "ran.what_is_missing: the internal conventional Run's assistant_text was not captured and the Agent route echoes it nowhere in its response, so the double answers \"\" (the served value is unknown).",
+          "ran.status / ran.options / ran.blockers: read from the SERVED explicit-run analysis_ready (the route's final readback), standing in for the internal conventional turn's own analysis_ready, which was not captured.",
+          "ran.result: the SERVED analysis_result block from the final readback (bound to the same fact), standing in for the block the internal conventional turn returned.",
+          "call_id: fast_run_<Fastify req.id> — same shape as served (default Fastify id \"req-N\"), different N.",
+          "no turn_id is sent in-process: turn_id drives only the durable claim/answer rows, never the provider request.",
+          "the intercepted answer is the SERVED assistant_text (the route's post-processing on this path is a pass-through: no write narration, no stripping) so the turn completes; no model output was generated here."
+        ]
+      },
+      "requests": [
+        {
+          "call": "01",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/explicit-run/call-01.request.json",
+          "request_sha256": "41ffc1329a1cd2d4da39792c74cb3aedc74fbeda7106d0c816b48197fd62430a",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/explicit-run/call-01.response.json",
+          "response_sha256": "af801356bd6d24b17bfec8e80bbc729dce1978a147b0a7d0a5eb338a4e6bf431",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/explicit-run/call-01.meta.json",
+          "purpose": "conversation",
+          "hop": 0,
+          "during_hop": null,
+          "final_reply_hop": true,
+          "paid": false,
+          "intercepted": true,
+          "guard": "openai-only-ok",
+          "wall_ms": 1.8,
+          "usage": null,
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": 3400,
+            "tool_choice": "none",
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 0,
+            "instructions_sha256": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64"
+          }
+        }
+      ]
+    },
+    {
+      "case": "pricing-run-complete",
+      "turn": "token-count-2026-09-24T19-40-29-756Z",
+      "purpose": "token-count (input_tokens endpoint; no generation)",
+      "requests": [
+        {
+          "call": "01",
+          "request": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/token-count-2026-09-24T19-40-29-756Z/call-01.request.json",
+          "request_sha256": "f06790d550244033a8b906ec96a3a0e7e609ec8a176c4506eaaac4da8d6a0108",
+          "response": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/token-count-2026-09-24T19-40-29-756Z/call-01.response.json",
+          "response_sha256": "53183a33cedb7b0dedb08a53c464cedb512bf5828c0f7d43cda237dcaeffaf60",
+          "meta": "Docs/evals/agent-reply/paired/57f903c/shapes/pricing-run-complete/token-count-2026-09-24T19-40-29-756Z/call-01.meta.json",
+          "purpose": "token_count",
+          "hop": null,
+          "during_hop": null,
+          "final_reply_hop": false,
+          "paid": false,
+          "intercepted": false,
+          "guard": "openai-only-ok",
+          "wall_ms": 282.7,
+          "usage": null,
+          "settings": {
+            "model": "gpt-5.6-terra",
+            "max_output_tokens": null,
+            "tool_choice": "none",
+            "reasoning": null,
+            "text_format": null,
+            "tools_count": 0,
+            "instructions_sha256": "cee36a9ffd84806db90a006f3559f2eca693d2dd208a44bcb3d36ffc71681c64"
+          }
+        }
+      ]
+    }
+  ]
+}

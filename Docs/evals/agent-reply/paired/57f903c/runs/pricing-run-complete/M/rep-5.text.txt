@@ -1,0 +1,7 @@
+**The £59-at-release path leads in the current model’s MRR comparison**, with an 83.28% modelled chance of leading the three options; keeping £49 is at 15.39%, and phasing is at 1.33%. This is a comparison under the **user-approved planning assumptions**, not evidence that £59 is the right commercial decision.
+
+Why it leads: it combines **£59/month** with **100% price–release alignment**, whereas the phased path assumes **£54/month** and **50% alignment**.
+
+The crucial unresolved point is your churn condition: **monthly churn rate < 4% could not be assessed in this run**. The model treats churn as calculated from other inputs, while the constraint has no specified comparison frame or measured baseline on the same scale. So this result does **not** establish that the £59 path keeps churn under 4%.
+
+The ordering was robust in the model’s tested scenarios, but one tested change can reverse it: changing the assumed price–release alignment to **97.92%** switches the ordering to keeping Pro at £49. That shows this assumption can matter; it does not establish investigation priority.

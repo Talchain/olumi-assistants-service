@@ -1,0 +1,412 @@
+{
+  "url": "https://api.openai.com/v1/responses",
+  "method": "POST",
+  "headers": {
+    "authorization": "[REDACTED]",
+    "content-type": "application/json"
+  },
+  "body": {
+    "model": "gpt-5.6-terra",
+    "instructions": "You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user. Answer the user’s actual question directly and naturally. Never invent canonical facts. Before describing what the model contains, call get_canonical_state. Distinguish user facts and evidence from machine-authored estimates and from unknowns. An absent value is unknown, never zero. An entity’s `value` is on the model’s internal normalised scale and is NOT the figure the user gave. When `raw_value` is present, quote `raw_value` with its `unit` (e.g. £49/month, 9 months); never quote the normalised `value` to the user. Only when there is no `raw_value` may you describe `value`, and then say it is on a normalised scale. To change the model you must first call a proposing tool — propose_model_change for a link, propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once — show the user exactly what it returned (in words: never print a proposal_id or any other internal id — the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it. Never claim a change happened unless the tool result says it was applied. If a tool reports a refusal, tell the user what it said. When authorise_change returns `receipts`, tell the user the change is saved and which version it became. If it returns `already_applied`, the change is ALREADY saved — say which version, and do not offer to apply it again. If `receipts` is empty, say plainly that no saved version was recorded for it. When the user approves, agrees, or says yes, that is an instruction to call authorise_change. get_canonical_state returns `awaiting_your_approval`, newest first: if there is exactly one, authorise THAT proposal_id. If there is more than one, describe each by what it changes (never by its id) and ask which — in the same turn. NEVER reply that a change has not been approved on a turn where the user approved it. If get_canonical_state reports the model is empty, call build_model_from_brief with the user’s own words before answering about the model. build_model_from_brief already returns the model it created, with its entities and its `structure` block. Do NOT call get_canonical_state again afterwards — answer from what it returned. After build_model_from_brief, do NOT call run_analysis on the same turn. A newly built model has no values yet, so the analysis can only report what the build already told you — and it costs the user another twenty seconds. Describe the model and what it still needs, then stop. In that same reply, if any factor has no value or any option sets nothing, call propose_starting_point ONCE with a reasoned starting value for each such factor and the level each option sets, in the user’s own units. Show every figure and what it rests on, say they are your assumptions to adopt or correct, and ask for one approval. If propose_starting_point refuses with incomplete_starting_point, NOTHING is awaiting approval: call it again with a level for every pair in options_missing_levels before you reply. Never ask the user to approve an incomplete starting point. Discussion, ideation and research are not mutation requests. When the user asks for ideas or other options, offer three to five the model does not already hold, preferring non-obvious ones, and give each one line on what it would change or which assumption it would test. Say plainly that none has been added to the model, and offer to add any the user picks. After authorise_change applies values or option levels, call run_analysis in the SAME turn and report what it now says — or, if it still refuses, exactly what is left and the fastest way to supply it. The user asked for a model they can compare, not for a write. get_canonical_state returns a `structure` block computed from the persisted model: which options reach the goal, which cannot, what is unconnected, and how many FACTORS have no value (only factors can hold one). These are facts, not estimates — use them, and say them plainly when they explain why an analysis cannot run. When a tool tells you something was not represented, say so. When the model lacks values, do not send the user away to collect data before they can proceed. Offer a reasoned starting estimate they could adopt, say what it is based on, and invite them to correct it — a decision model tests assumptions, it does not require certainty up front. Say plainly that any such figure is an assumption to test, never a measurement. NEVER record one yourself: the user chooses it, or it does not enter the model. When you offer starting estimates, offer them THROUGH a proposing tool so the user can adopt the exact set you showed them in one step: propose_starting_point whenever factor values AND option levels are both missing (two separate proposals cannot both be applied from one approval), propose_assumptions when only values are. If the user asks you to put your suggested assumptions into the model, that is a request to propose them — propose the figures you just gave, then authorise_change once they confirm. propose_assumptions changes nothing on its own and leaves any factor that already holds a value alone. After authorise_change, report every value the model stored differently from the one approved. An option that connects to a factor but states no level for it blocks the comparison for EVERY option, not only itself. run_analysis names each one. Offer a level in the user’s own units with propose_option_interventions, exactly as you would a starting assumption, and say it is an assumption to correct. Give propose_option_interventions the number the USER would say (54, not 0.27). If it answers `no_stated_range`, that factor has no range to read the number against — say so plainly and do not invent one. get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model — do not wait for the analysis to refuse — ask what that option would actually change, and record the answer with propose_option_interventions. When you report an analysis, describe what the CURRENT model implies given its assumptions — a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one; say which option leads in this model and how firmly. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding. When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each — then authorise_change once they confirm. It adds the option and its links ONLY: say plainly that it cannot be compared until it states what it does to each factor, and offer propose_option_interventions for that. Never invent the direction; if you are not sure which way it pushes a factor, ask. When the user asks to change an assumption after an analysis — which is the whole point of naming the ones the ordering turns on — call propose_assumptions with `revise: true` on that factor and the number THEY gave, then authorise_change once they confirm. Show them the current value and the new one. Never set `revise` to push a figure of your own over theirs. After it applies, confirm what was saved and say that the earlier analysis now describes the previous model — then STOP: do NOT call run_analysis in the same turn. Offer to re-run it and wait for them to ask. NEVER say a proposal, a saved change or a pending action exists unless a tool call in THIS turn returned it. If you did not call a proposing tool, do not describe a proposal, do not say one is pending or ready, and do not ask the user to approve or confirm anything — say what the model still needs and offer to propose it. If a tool refused, say what it refused and what you will do next. Your own intention is not a result: only a tool result is. History entries that begin “(Board edit” are changes the user made directly on the canvas. When the user asks about “my change”, start from the most recent board edit, and read the current state before explaining what it did. British English. Concise but substantive.",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Should our hospital emergency department add a second triage nurse on night shifts or open a rapid-assessment unit, given 4-hour waits breach 30% of nights?"
+          }
+        ]
+      },
+      {
+        "id": "rs_03a193bf719d8c5a006ab57d10296087d29ed56bfab59ad316",
+        "type": "reasoning",
+        "content": [],
+        "encrypted_content": "gAAAAABqtX0RaCKtA01C4_I2c9CWFfMYvybhBubfnIeHOqFxCqlKptWBPttNGNEmBo-wG_Ohn0x-jUxDmnqkBQnQRRq1mXTpHFk2jNVJOeWUMMgMuO_nr_S0AIlbJsmSkAPF5KcDvGpXt29ypX2j7vvsnqPmM-6rqPvPJBKJ5-ar2BZjBa6vQWhxI9rIKla9D-lFZmSoLljMkBom_QYiD-xWycnS4ro4ZIURkQ1uzCFTb2dufKN5zR3ZpJIJpAuKmjjCaktZKJwmyt6Y4oqtKWeDgqHpOE6yCRzW_ScVaahAYu38-0163XYUMDN22AlILGJVdC-gI-gL7RMAdYJzrqLd4Cx2D7hQqW5z80asAZ5UAifDv_2qGiT6Q-s-fiWM7vbhnNUH9uE9rXgzSFrnf5PP9qGNxsNK1qKGVCDZXBD22Z-N5uensRLxzsx0ih-tXFu8mlqEBDYQnUAwQV0VgxPHaz9QgeQGOvHgEx91xFByLpBYWaVVjXQDZQ-h5rm6vQdUPKtTrqYuu6fQQJoYXvmzKqEhsfHaoAHCnJOddKgVvX4H8OBq5pRE210a0KeLiv40BymnCHwB4rTr-36jJtR6bStBzs3Yeeqs_sykGyPhpGI8t75ndJn4I7FXb1MOYsCa9A3emAdgoc2Zx_XPVIsyW_7CXjIMQT6SoWZYx5auhh8Q004PzfnKyZmBA37YM232dtzQm4U0aDpz4sOSRpvOL9o2vrdPrEjbrMWFXRwTuKx8h3VOERQSSd_Uo7I3yTxYsQgH5M8oNgK616eVKRMgyOL3vZvhR2Wi5h7z52uopR5Tgg9YWZ1WkZzxyBM5PhQEHR_778mhIpYrIA-et1bFcBwRCR2Je9QTRpST1ZYnWaw756cMJ1pAGKaHhOOc1PjobnXdhxgN8fNlqNtDVnHYOdNkTKpSp_ThwmIUmQFA-6UgHV48QZYkPcUnn7atxmxTtR1l2ZRkJao3nwXKOYHiv-ekp891u3TnoRCgw7awGkwhFu5Xi-Guq4--GjNzpFzHKpWy2LAHY6E8VJ7osp6UaYeNwnEocWr3embigO0_nov9i33thv4aOGBISoTcmgJ8d2FNQ1nHJ8N7w-M4CntcuoxwtfIPaZqdKmmpbRysB8JOYNhRqThewbdUAGg8Aq4mpj2KVOG0GV80jPTXaehJBB1J7KLLEDBW_ygTJqOhcC0HLIWF5Vk=",
+        "summary": []
+      },
+      {
+        "id": "fc_03a193bf719d8c5a006ab57d104fbc87d2b62411add4b125ab",
+        "type": "function_call",
+        "status": "completed",
+        "arguments": "{\"reason\":\"To see whether a decision model already exists before modelling the emergency-department staffing and flow choice.\"}",
+        "call_id": "call_k3P7LsJWYK7nI7s6c6BZzehY",
+        "name": "get_canonical_state"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_k3P7LsJWYK7nI7s6c6BZzehY",
+        "output": "{\"ok\":true,\"mutated\":false,\"graph_revision\":\"\",\"empty\":true,\"entities\":[],\"existing_links\":[],\"structure\":{\"options_reaching_goal\":[],\"options_not_reaching_goal\":[],\"entities_with_no_connections\":[],\"entities_that_cannot_reach_goal\":[],\"factors_without_a_value\":0,\"options_that_change_nothing\":[],\"goal_label\":null},\"analysis\":null,\"awaiting_your_approval\":[]}"
+      },
+      {
+        "id": "fc_03a193bf719d8c5a006ab57d12214c87d2a732cf28f1d4da54",
+        "type": "function_call",
+        "status": "completed",
+        "arguments": "{\"brief\":\"Should our hospital emergency department add a second triage nurse on night shifts or open a rapid-assessment unit, given 4-hour waits breach 30% of nights?\"}",
+        "call_id": "call_8oPdc4qSQaNa5kNVANLQpPOd",
+        "name": "build_model_from_brief"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_8oPdc4qSQaNa5kNVANLQpPOd",
+        "output": "{\"ok\":true,\"mutated\":true,\"nodes\":12,\"edges\":16,\"within_compact_limits\":true,\"size_retried\":false,\"options\":4,\"withheld\":[{\"from\":\"Decision\",\"to\":\"Second triage nurse\",\"reason\":\"unresolved_endpoint\"},{\"from\":\"Decision\",\"to\":\"Rapid-assessment unit\",\"reason\":\"unresolved_endpoint\"},{\"from\":\"Decision\",\"to\":\"Maintain current setup\",\"reason\":\"unresolved_endpoint\"},{\"from\":\"Decision\",\"to\":\"Phased rapid assessment\",\"reason\":\"unresolved_endpoint\"}],\"projected_field_count\":22,\"options_that_change_nothing\":[],\"goal_constraints_carried\":0,\"open_questions\":[\"The stated current incidence is that 4-hour waits breach on 30% of nights; what reduction target should the decision be assessed against?\",\"What are the current night-shift triage staffing level, rapid-assessment capacity, triage time, clinician-assessment time, and ED patient flow?\",\"Would a rapid-assessment unit use additional staff or redeploy existing night-shift staff?\",\"What scope and operating hours would a phased rapid-assessment option have?\"],\"not_represented\":[\"4 relationship(s) were left out because nobody has stated which way they run.\",\"The goal direction (\\\"<\\\") is not carried by `goal_threshold`, which is a bare number. A consumer cannot tell a floor from a ceiling from the projection alone.\"],\"confirmed_entities\":12,\"graph_revision\":\"da823d206de3a338\",\"entities\":[{\"id\":\"decision_4_hour_wait_breaches\",\"label\":\"Decision: 4-hour wait breaches\",\"kind\":\"decision\",\"value\":null,\"provenance\":\"ai_inferred\"},{\"id\":\"4_hour_wait_breaches\",\"label\":\"4-hour wait breaches\",\"kind\":\"goal\",\"value\":null,\"provenance\":\"ai_inferred\"},{\"id\":\"second_triage_nurse\",\"label\":\"Second triage nurse\",\"kind\":\"option\",\"value\":null,\"provenance\":\"from_brief\"},{\"id\":\"rapid_assessment_unit\",\"label\":\"Rapid-assessment unit\",\"kind\":\"option\",\"value\":null,\"provenance\":\"from_brief\"},{\"id\":\"maintain_current_setup\",\"label\":\"Maintain current setup\",\"kind\":\"option\",\"value\":null,\"provenance\":\"ai_inferred\"},{\"id\":\"phased_rapid_assessment\",\"label\":\"Phased rapid assessment\",\"kind\":\"option\",\"value\":null,\"provenance\":\"ai_inferred\"},{\"id\":\"night_shift_triage_staffing\",\"label\":\"Night-shift triage staffing\",\"kind\":\"factor\",\"value\":null,\"scale_frame\":10,\"provenance\":\"from_brief\"},{\"id\":\"rapid_assessment_capacity\",\"label\":\"Rapid-assessment capacity\",\"kind\":\"factor\",\"value\":null,\"scale_frame\":200,\"provenance\":\"from_brief\"},{\"id\":\"time_to_triage\",\"label\":\"Time to triage\",\"kind\":\"factor\",\"value\":null,\"scale_frame\":240,\"provenance\":\"ai_inferred\"},{\"id\":\"time_to_clinician_assessment\",\"label\":\"Time to clinician assessment\",\"kind\":\"factor\",\"value\":null,\"scale_frame\":240,\"provenance\":\"ai_inferred\"},{\"id\":\"ed_patient_flow\",\"label\":\"ED patient flow\",\"kind\":\"factor\",\"value\":null,\"scale_frame\":300,\"provenance\":\"ai_inferred\"},{\"id\":\"operational_complexity\",\"label\":\"Operational complexity\",\"kind\":\"risk\",\"value\":null,\"provenance\":\"ai_inferred\"}],\"structure\":{\"options_reaching_goal\":[\"Second triage nurse\",\"Rapid-assessment unit\",\"Maintain current setup\",\"Phased rapid assessment\"],\"options_not_reaching_goal\":[],\"entities_with_no_connections\":[],\"entities_that_cannot_reach_goal\":[],\"factors_without_a_value\":5,\"options_that_change_nothing\":[\"Rapid-assessment unit\",\"Maintain current setup\",\"Phased rapid assessment\"],\"goal_label\":\"4-hour wait breaches\"}}"
+      },
+      {
+        "id": "rs_03a193bf719d8c5a006ab57d36645c87d292010036942eabd7",
+        "type": "reasoning",
+        "content": [],
+        "encrypted_content": "gAAAAABqtX09E0G13RmYk1OZLoRNNYYLMCqePfBOxqlFARiHZ1jFeRWteqkgwFzyR5dyjclWUBuDwwVeQiNM3_grCWXqG7wnBzWBdnVuMhUbskDY_KKspkwsIW6M_-E3FMsCRtceLVjwDGYY1CRvp9APMl5XEyZVGjUQ1HgOgfxLPsHrgIA7-DWG3yEHEQIc-o80CggvOroj1mi4UCMkhHVUssmfyul7z03UnsGNoOdhzZyPrSbJoTpvt93LY-jezTyDef8SIp2H4ERPwghJVXPop0iE8KI_sK7eto9aQdql9SRXuGE3whtlbJUoRGMgpTq_omVccfJLS-gf_YL0bsauPFwnfQfl8c6AHHMPyE95ZygEBGoj9Wdce3idpUCyWrYlstdzYZQR8IxcE5uHDXDY6B3lx-i5rDw_PtZ_IYeNB3WWk5Qi19qt2Gj8vk-fcQr9CRUxWcK48ljK_GmY3Jj0-4RGOfFjUVOScY9KLt3HUpF7VPFpS9tN6gx1nCPj4o0pxknh79t2KO_dXesbR0Vx43cinMrGmNitKZoGiAnqEMN_pKyJvHKm_wQeryfiYHQNqWqi2nkBeB9YnlhN3FYQHlKgmPNIqq24sT8e_kxnunv442L9qCyaN3CE529HlL92CGvIxnRmQS013fTBnw7oJuNWVA_HZiEtjgazHHjw3bbzECH-5Wf3A7XfNJOSpntycqhZvwEGBuEOAaa2vHHYJ3xVlsKZQfFQF5obKhCBGjaU52CphJz3oVbwc7hdQZK1lYfOeX6zuYYdlSWu0UKdDlg5iM1uETQQ9WcTU4NLJQJEvDT-ZD7pX0g9sz2VZ6GhUebeHhMFt_VEd2O36arB9nz0Kce45-I9e3O0tag4-58uLmR-od9idK0vGrcNVpf3tEfxGi0iwL0kJd3-b9vJZFXUWL-uvZ3ktzypZBDNu6bdZHH0e9YWWDZ79i-v5ZPe2yX1hjSD2tkZRr05P-5KEETk3SCByI5pth3XBVqegoZczP1c1UIEFWbCVYS5IKXDN0GqMeWonYppPEJ2TdltGAeLBYnw9fMxz13Ky1HlaSHfaL_gIPQk4MT7XPlr3f2_ZDBiWKWBQwFs88N37Ohp9iO7n44yCkOEaKc3Nu8Q0QPUTl9gepRWCY3bj3N1bydJ2R5wdmQ34P2xhjWZQWO0FTn3ZPVwYZmZGn1YrC7GOnmVP4C2YP28ACTl4aZfMuEIN10SuAc2S9tHhe1bZ3YTqMxpp7HtBmv7l3lwFzYknN90I5TTg8TFebm65oqlt13Bff3IAdn8yRefwfA0t0_H8emRmrPctlHLnqyGGA9Rk3TAFkRyNrdyConc7K0bNSSUdVAclOlZteMt1xiUSt4V3e6hRu_r5DCPcpohokgyLSlPMBSJ5wtjpdsznCGh8EWY2ou2RERtTwNX4Db_s_GLEJ7djQkRHL13y2qsHm5KuFOkAvt_uOxiz7xUMWMpw7DHN1Vke9rye1Af4nCBWc5xzWOifwIFPY-zD92-gOXqKLB9wLkL-ezConyWXdUJdHKSG6FzpBTwkbRg-0-OAhBv11IGhIPiqJPq0KkA5gkGM7MkqlpKmUyNe8bzh04n6NnGULPrkSjgjGssfLWxqIzqjgcNfzMcLkzZEkTL0veZZt3ePDGYkqI-_UAdvqUlmzJ_d7KZO8hD2aEPWvWUa-2_6o8TIPumZCLdZ6UXf9x0tHZ9fBFo4h5n4NiZnytrs1gpnHruVrXJL22FA6Pu4zj652daA0qZzR-5wFqnFrq9Y4JzwpVkS7l7812rFKRA5FFWILCRLocaqt97CUXTz2Wkt2B56JBiBv9TKhN5dGUTrg0Rak8EaJFgWrS529dMM8BFJCPQJIo21pY3KXX4lJJmXoXUQepZ32Hk9lKaoPdFOhM231-gP3CHnLf9R6dum85L5cdkFaiKdrYxvuPaIaJPn-IAPLWn5IIoTF8abGEuNlYfZbEOTDBxcJbCAG8tvuzGvztl7vlMPZ_-wRymJuB9KDLC0BC74rUtR6Y9oqJoIrTm4u1UllI7SpQJZbPy5BJVxn6lfJIIXk5TVKwSTDbUYeJ3FHtZjGR-T_FwCTCy-9QzbBPAokGnm1GYkVZ8wru4VAC9ZuK2cVGuQDE1DOQQctAbyS1XGzrQT2YpOcov5MzpKLNftXMNGoullrFM_ny5M6Qxgqz_aS_qVZCEuDUAIOCMm6rC_bc60-5CB8euwHEesG521hDZrHpx0PlhYVJQ_1h_t6qZXeMxUsnzm1fPcCVZvtQ3_myxYurtT80uSL8mUoSpPzSnetNxUrEMXBbQm76t4h4sr4JVwwc2IbUwg4CiQxB3d9aneelYnAer3JlXjen2R9oKWPzdLTUoIfEg8vhBquHLy6zg57rOUvCK687hWSm9Be_V79mejaqhYurpWYvjkzfhMbXo5i5ibnKJhfKcoBjYDimPIhJPgrH-K9mboj2gWNcO3foMNs6esjGMowP_KM0N9cdhp6M4rNE0E5ceJzeq_NKCPRGa3Mj49B-YZXBK7EdR00vXfhJZ_zCzwLWE17tuDzNu65rALr9GpBL-TCFswWyFQm_-jsoyiSQ630WOE-Fl580Ul0TvazAVLoNlew4=",
+        "summary": []
+      },
+      {
+        "id": "fc_03a193bf719d8c5a006ab57d3a76d487d29858ae4b0ba89672",
+        "type": "function_call",
+        "status": "completed",
+        "arguments": "{\"assumptions\":[{\"factor_label\":\"Night-shift triage staffing\",\"value\":1,\"unit\":\"nurses\",\"basis\":\"Starting assumption: a single dedicated triage nurse currently covers the night shift; correct this to the actual staffed number.\"},{\"factor_label\":\"Rapid-assessment capacity\",\"value\":0,\"unit\":\"patients per night\",\"basis\":\"Starting assumption: no rapid-assessment unit currently operates overnight.\"},{\"factor_label\":\"Time to triage\",\"value\":20,\"unit\":\"minutes\",\"basis\":\"Starting assumption for an ED with recurrent overnight 4-hour breaches; replace with the local median or mean.\"},{\"factor_label\":\"Time to clinician assessment\",\"value\":90,\"unit\":\"minutes\",\"basis\":\"Starting assumption for the time from arrival to clinician assessment on affected nights; replace with local performance data.\"},{\"factor_label\":\"ED patient flow\",\"value\":80,\"unit\":\"patients per night\",\"basis\":\"Starting assumption for overnight ED arrivals; replace with the actual overnight arrival volume.\"}],\"option_levels\":[{\"option_label\":\"Second triage nurse\",\"factor_label\":\"Night-shift triage staffing\",\"value\":2,\"basis\":\"The option is described as adding a second triage nurse, so it sets dedicated night triage staffing to two nurses.\"}]}",
+        "call_id": "call_TadHtgGEJMBE94VwsthH8bva",
+        "name": "propose_starting_point"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_TadHtgGEJMBE94VwsthH8bva",
+        "output": "{\"ok\":false,\"mutated\":false,\"refusal\":\"incomplete_starting_point\",\"options_missing_levels\":[{\"option\":\"Rapid-assessment unit\",\"factor\":\"Rapid-assessment capacity\"},{\"option\":\"Maintain current setup\",\"factor\":\"Night-shift triage staffing\"},{\"option\":\"Maintain current setup\",\"factor\":\"Rapid-assessment capacity\"},{\"option\":\"Phased rapid assessment\",\"factor\":\"Rapid-assessment capacity\"}],\"assumptions\":[{\"factor\":\"ED patient flow\",\"value\":80,\"unit\":\"patients per night\",\"basis\":\"Starting assumption for overnight ED arrivals; replace with the actual overnight arrival volume.\"},{\"factor\":\"Night-shift triage staffing\",\"value\":1,\"unit\":\"nurses\",\"basis\":\"Starting assumption: a single dedicated triage nurse currently covers the night shift; correct this to the actual staffed number.\"},{\"factor\":\"Rapid-assessment capacity\",\"value\":0,\"unit\":\"patients per night\",\"basis\":\"Starting assumption: no rapid-assessment unit currently operates overnight.\"},{\"factor\":\"Time to clinician assessment\",\"value\":90,\"unit\":\"minutes\",\"basis\":\"Starting assumption for the time from arrival to clinician assessment on affected nights; replace with local performance data.\"},{\"factor\":\"Time to triage\",\"value\":20,\"unit\":\"minutes\",\"basis\":\"Starting assumption for an ED with recurrent overnight 4-hour breaches; replace with the local median or mean.\"}],\"option_levels\":[],\"option_levels_refused\":{\"ok\":false,\"mutated\":false,\"refusal\":\"nothing_to_set\",\"already_set\":[\"Second triage nurse already sets Night-shift triage staffing to 0.2\"],\"detail\":\"Nothing could be recorded. Tell the user exactly which of these it was and why.\"},\"detail\":\"Nothing is awaiting approval. A starting point must give a level for EVERY factor each option acts on, and the pairs in options_missing_levels have none. Call propose_starting_point again with the same values and levels PLUS a level for each pair (in the factor’s own units, as an assumption to correct), then show the user that one proposal.\"}"
+      },
+      {
+        "id": "rs_03a193bf719d8c5a006ab57d3ee70887d28503d14c6e9715e5",
+        "type": "reasoning",
+        "content": [],
+        "encrypted_content": "gAAAAABqtX1CRaLQ9gluAPXachDqdzIX_P8qJp8X9xn1U-DeCi2s2zYLjLXcMUQE0-JyZls2bPlyUKn_XJDIPp7YN_W8bx_anJ-T5vYB5C8x3ZAaUNaJKIVLbVOMiD0TiDgpK95YX88kQ3Ij9oBb8Pp0zZHUEh3iFa27XXObZk--KjOL7M6qZeaKf9bJycesc8Inl3U0ecSn4Vr1kv2biu0f8NtNsjGOjttbdHoibMwDvndszINzkkcG2p_MN6ladG2kLVYAHLQzBg0dUbb69VxZa2fzKKMpg-96E8Mpfrg570qLRp-1UlyodSOvRC8bGLVErs4bjHxugGyybAxzx5DJCK6wHoKQf1T_nF_0VqqcwzxggKCzskjRMkLGj--DvkBfKy6q-3A3bxJA-uXpVRSTgMc96J3hx_aKQ-wj14LhNm145r8Z3cgpEknKH5toZSmzOoQhg9aAbGqmoE5Zb4gws8jR6xgXEeHoFLmq2NrLgQ4w07xXfR4PjSZjB7aZeJNFKF7pm1GdHTlUXtrLONmb-rwKgXfoXfveVA8ROc2HqpySxAWGrJxsQ1okbGGoR_S8GuaaYvQAov6msXEVsgp-RGAEQ5zxhBRSKSx0GkUNzaa-dBlDVVl0TNuRenNvLOm20BDIPKj0CDXSe-SSmLSwZuuZl4rVxxndlBHYfxAGnOt4zv1bmw3nEWR5Ju9rbhGDY5RXBatW6W8CrYvzNe9F2UC7wDU0E3biYB175_ju3HVe8OcEnLmBb1_kAU37mUaP97u7KpzuZEXAp3CAwzKymhYqJHTipfsA4hCWYovL2uKJx-oOv6bSfjd7ahUytZQbdPlfF97CX3EKQI16LzniACWa4NfV4GWrtlg5M0pJBt51wt_OYghZwe4zFLpbKkXjkVakzjhYEZ11gmCjmjrmjk-B9bMsN68xQoRZfn3GADzLmOdxw9530NX-xw0znO4oS1tFTHcY8BIWvEG5QzxCmJAhN4Dq_LQefZeeH87W8-DCw9SOaexJ4OXht3BUXP3mYnWQQvKdV1IP4_PUSEGfKGlmbO8jj7SGrGnh5yyMymsCp6IWAHh4X1uommMLrcflEfUvap0pW15QsJ0v1t8luP94PP6O3mTRZ6jARJtA7Dg8n6yTnSGzcvwZQV7K-GQ1dLeFa8iU8jih_-yquDunWpyu-x3uO8GylhkMks5sIk4lWs6qQb6gpC6OPpOavQGh8gbQzw5XW5hI1b-4RB0g3MTVrzvfmGVk24YBi8DHNy46cuGrEq1a7dsbtypAvH0hQeoVVDyAKZYIBrSXEuQTdp19bozI8AB-cEmMQBnsZMSGpsSjwd_kLX4QDLNr9pTQVcSjd6bnlcnInqNbjUrSCaJzxCoAyXoIQ3yVyCZCJOtr4Lpd9iw7ehF4xXdbPOMtb1Pj8le3",
+        "summary": []
+      },
+      {
+        "id": "fc_03a193bf719d8c5a006ab57d3f9b0087d2aada21cd6b584101",
+        "type": "function_call",
+        "status": "completed",
+        "arguments": "{\"assumptions\":[{\"factor_label\":\"Night-shift triage staffing\",\"value\":1,\"unit\":\"nurses\",\"basis\":\"Starting assumption: one dedicated triage nurse currently covers the night shift; correct this to the actual staffed number.\"},{\"factor_label\":\"Rapid-assessment capacity\",\"value\":0,\"unit\":\"patients per night\",\"basis\":\"Starting assumption: no rapid-assessment unit currently operates overnight.\"},{\"factor_label\":\"Time to triage\",\"value\":20,\"unit\":\"minutes\",\"basis\":\"Starting assumption for an ED with recurrent overnight 4-hour breaches; replace with the local median or mean.\"},{\"factor_label\":\"Time to clinician assessment\",\"value\":90,\"unit\":\"minutes\",\"basis\":\"Starting assumption for the time from arrival to clinician assessment on affected nights; replace with local performance data.\"},{\"factor_label\":\"ED patient flow\",\"value\":80,\"unit\":\"patients per night\",\"basis\":\"Starting assumption for overnight ED arrivals; replace with the actual overnight arrival volume.\"}],\"option_levels\":[{\"option_label\":\"Rapid-assessment unit\",\"factor_label\":\"Rapid-assessment capacity\",\"value\":20,\"basis\":\"Assumption: a fully opened overnight unit can rapidly assess 20 patients per night; correct for the proposed staffing and scope.\"},{\"option_label\":\"Maintain current setup\",\"factor_label\":\"Night-shift triage staffing\",\"value\":1,\"basis\":\"Assumption: maintaining the current setup leaves the dedicated triage staffing at one nurse.\"},{\"option_label\":\"Maintain current setup\",\"factor_label\":\"Rapid-assessment capacity\",\"value\":0,\"basis\":\"Assumption: maintaining the current setup provides no overnight rapid-assessment capacity.\"},{\"option_label\":\"Phased rapid assessment\",\"factor_label\":\"Rapid-assessment capacity\",\"value\":10,\"basis\":\"Assumption: a phased overnight service can rapidly assess 10 patients per night; correct for its intended hours and scope.\"}]}",
+        "call_id": "call_IZUC55ldknCHSYwqy7HMNwae",
+        "name": "propose_starting_point"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_IZUC55ldknCHSYwqy7HMNwae",
+        "output": "{\"ok\":true,\"mutated\":false,\"proposal_id\":\"prop_a6139b6dd1fb227bbe7ba79dde2c514c\",\"public_label\":\"Adopt 5 starting assumptions: ED patient flow = 80 patients per night; Night-shift triage staffing = 1 nurses; Rapid-assessment capacity = 0 patients per night; Time to clinician assessment = 90 minutes; Time to triage = 20 minutes; Maintain current setup sets Night-shift triage staffing to 1; Maintain current setup sets Rapid-assessment capacity to 0; Phased rapid assessment sets Rapid-assessment capacity to 10; Rapid-assessment unit sets Rapid-assessment capacity to 20\",\"base_revision\":\"da823d206de3a338\",\"assumptions\":[{\"factor\":\"ED patient flow\",\"value\":80,\"unit\":\"patients per night\",\"basis\":\"Starting assumption for overnight ED arrivals; replace with the actual overnight arrival volume.\"},{\"factor\":\"Night-shift triage staffing\",\"value\":1,\"unit\":\"nurses\",\"basis\":\"Starting assumption: one dedicated triage nurse currently covers the night shift; correct this to the actual staffed number.\"},{\"factor\":\"Rapid-assessment capacity\",\"value\":0,\"unit\":\"patients per night\",\"basis\":\"Starting assumption: no rapid-assessment unit currently operates overnight.\"},{\"factor\":\"Time to clinician assessment\",\"value\":90,\"unit\":\"minutes\",\"basis\":\"Starting assumption for the time from arrival to clinician assessment on affected nights; replace with local performance data.\"},{\"factor\":\"Time to triage\",\"value\":20,\"unit\":\"minutes\",\"basis\":\"Starting assumption for an ED with recurrent overnight 4-hour breaches; replace with the local median or mean.\"}],\"option_levels\":[{\"option\":\"Maintain current setup\",\"factor\":\"Night-shift triage staffing\",\"value\":1,\"unit\":\"\",\"recorded_on_model_scale\":0.1,\"model_range\":10,\"basis\":\"Assumption: maintaining the current setup leaves the dedicated triage staffing at one nurse.\"},{\"option\":\"Maintain current setup\",\"factor\":\"Rapid-assessment capacity\",\"value\":0,\"unit\":\"\",\"recorded_on_model_scale\":0,\"model_range\":200,\"basis\":\"Assumption: maintaining the current setup provides no overnight rapid-assessment capacity.\"},{\"option\":\"Phased rapid assessment\",\"factor\":\"Rapid-assessment capacity\",\"value\":10,\"unit\":\"\",\"recorded_on_model_scale\":0.05,\"model_range\":200,\"basis\":\"Assumption: a phased overnight service can rapidly assess 10 patients per night; correct for its intended hours and scope.\"},{\"option\":\"Rapid-assessment unit\",\"factor\":\"Rapid-assessment capacity\",\"value\":20,\"unit\":\"\",\"recorded_on_model_scale\":0.1,\"model_range\":200,\"basis\":\"Assumption: a fully opened overnight unit can rapidly assess 20 patients per night; correct for the proposed staffing and scope.\"}],\"note\":\"Nothing has changed. Show the user every value and level and what each rests on, say plainly they are assumptions to adopt or correct, NOT measurements, and that ONE approval applies all of them. Then call authorise_change with this proposal_id once they agree.\"}"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "name": "get_canonical_state",
+        "description": "Read the authoritative persisted decision model for this conversation: its entities, what each one is, which values are stated and which are unknown, and what the analysis currently says. Call this before describing the model. Never assume its contents.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "type": "string",
+              "description": "Why you need it now."
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "propose_model_change",
+        "description": "Propose ONE change to the model. This does NOT change anything: it records an exact proposal and returns its id, which you keep for authorise_change: show the user what it changes, never the id, before asking them to approve. Use the labels exactly as get_canonical_state returned them.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "from_label": {
+              "type": "string"
+            },
+            "to_label": {
+              "type": "string"
+            },
+            "direction": {
+              "type": "string",
+              "enum": [
+                "positive",
+                "negative"
+              ]
+            },
+            "rationale": {
+              "type": "string",
+              "description": "Why this link matters, in the user’s terms."
+            }
+          },
+          "required": [
+            "from_label",
+            "to_label",
+            "direction",
+            "rationale"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "authorise_change",
+        "description": "Apply a previously returned proposal. Call this ONLY after the user has explicitly approved that specific proposal in their own words. The stored proposal is applied — nothing is regenerated. Report exactly what the result says, including a refusal.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "proposal_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "proposal_id"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "run_analysis",
+        "description": "Run the decision analysis over the persisted model. It may refuse and explain what is missing; report that honestly rather than guessing what the result would have been.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "build_model_from_brief",
+        "description": "Build the decision model from the user’s brief when get_canonical_state reports the model is empty. Preserves the user’s own facts, numbers and constraint wording, then adds the options, factors, risks and causal mechanisms that make the decision reasonable to analyse. Report honestly what it says was left out.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "brief": {
+              "type": "string",
+              "description": "The user’s decision in their own words, verbatim."
+            }
+          },
+          "required": [
+            "brief"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "propose_assumptions",
+        "description": "Propose starting values for factors that have none, so the model can be reasoned about instead of sitting blank. This does NOT change anything: it records an exact proposal and returns its id, which you keep for authorise_change: show the user the values, never the id, before asking them to approve. Each value is the user’s assumption to adopt or correct, NEVER a measurement — say so. Propose only factors the model actually has, using the labels get_canonical_state returned. A factor that already holds a value is left alone UNLESS you set `revise: true` on it, which you may do ONLY when the user has just asked for that factor to be changed and named the number themselves. Never set it to replace someone’s figure with one of your own.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "assumptions": {
+              "type": "array",
+              "description": "The factors to give a starting value, with the reasoning for each.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "factor_label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "number"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "basis": {
+                    "type": "string",
+                    "description": "Why this is a reasonable starting point, in the user’s terms."
+                  },
+                  "revise": {
+                    "type": "boolean",
+                    "description": "Set true ONLY when the user has just asked for this factor to be changed and gave the number. It permits replacing a value that is already there; the approval will show the user both the current value and the new one. Omit it in every other case."
+                  }
+                },
+                "required": [
+                  "factor_label",
+                  "value",
+                  "unit",
+                  "basis"
+                ]
+              }
+            }
+          },
+          "required": [
+            "assumptions"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "propose_new_option",
+        "description": "Add an option the user has just asked for, when the model does NOT already have it. This does NOT change anything: it records an exact proposal and returns its id, which you keep for authorise_change: show the user the option and what it will be linked to, never the id, before asking them to approve. Name the factors it would change, using the labels get_canonical_state returned — an option linked to nothing cannot be compared and blocks the comparison for every other option. It adds the option and its links ONLY; say what it does to each factor afterwards with propose_option_interventions.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "type": "string",
+              "description": "The option in the user’s own words."
+            },
+            "acts_on": {
+              "type": "array",
+              "description": "The factors this option would change, and which way. At least one.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "factor_label": {
+                    "type": "string"
+                  },
+                  "direction": {
+                    "type": "string",
+                    "enum": [
+                      "positive",
+                      "negative"
+                    ],
+                    "description": "Whether this option pushes the factor up or down. State it; never guess it for the user."
+                  }
+                },
+                "required": [
+                  "factor_label",
+                  "direction"
+                ]
+              }
+            },
+            "rationale": {
+              "type": "string",
+              "description": "Why this option is worth comparing, in the user’s terms."
+            }
+          },
+          "required": [
+            "label",
+            "acts_on",
+            "rationale"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "propose_option_interventions",
+        "description": "Propose the level an option sets a factor to — what the option actually DOES. An option that names a factor without saying what it sets it to blocks the comparison for EVERY option, not just itself. Give the value in the factor’s own units, as the user would say it (£54, not 0.27). This changes nothing: it records an exact proposal and returns its id for authorise_change; show the user what it sets first, never the id. Propose only what the user’s words support; if an option’s level is not stated, offer one as an assumption and say so, exactly as with propose_assumptions.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "interventions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "option_label": {
+                    "type": "string"
+                  },
+                  "factor_label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "number",
+                    "description": "In the factor’s own units — the number a user would say."
+                  },
+                  "basis": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "option_label",
+                  "factor_label",
+                  "value",
+                  "basis"
+                ]
+              }
+            }
+          },
+          "required": [
+            "interventions"
+          ]
+        }
+      },
+      {
+        "type": "function",
+        "name": "propose_starting_point",
+        "description": "Propose, as ONE exact proposal the user approves ONCE, both the starting values for factors that have none AND the level each option sets — everything a first comparison needs. Use this instead of propose_assumptions + propose_option_interventions whenever both are needed: two separate proposals cannot both be applied from one approval, because applying the first changes the model the second was made against. This changes nothing on its own. Every figure is the user’s assumption to adopt or correct, NEVER a measurement — say so. Values in the factor’s own units.",
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "assumptions": {
+              "type": "array",
+              "description": "Starting values for factors that have none. May be empty.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "factor_label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "number"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "basis": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "factor_label",
+                  "value",
+                  "unit",
+                  "basis"
+                ]
+              }
+            },
+            "option_levels": {
+              "type": "array",
+              "description": "The level each option sets a factor to, in the factor’s own units. May be empty.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "option_label": {
+                    "type": "string"
+                  },
+                  "factor_label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "number"
+                  },
+                  "basis": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "option_label",
+                  "factor_label",
+                  "value",
+                  "basis"
+                ]
+              }
+            }
+          },
+          "required": [
+            "assumptions",
+            "option_levels"
+          ]
+        }
+      }
+    ],
+    "max_output_tokens": 3400
+  }
+}

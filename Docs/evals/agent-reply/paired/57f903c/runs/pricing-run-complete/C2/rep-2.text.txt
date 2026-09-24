@@ -1,0 +1,3 @@
+The model favours raising Pro to **£59/month with the feature release** on its MRR outcome, and that ordering held under the tested variations. However, it cannot answer your full question yet: the **under-4% monthly churn constraint was not assessed**, because the model’s churn output is not aligned to the stated 4% level.
+
+The conclusion is most exposed to the assumed connection between the release and perceived Pro value; it rests on provisional planning estimates, not observed churn or conversion data. Clarify whether the 4% target is a monthly churn **level** and provide a measured churn baseline to test that constraint properly.
