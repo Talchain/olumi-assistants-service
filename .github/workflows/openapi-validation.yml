@@ -3,10 +3,11 @@ name: OpenAPI Validation
 on:
   pull_request:
     # Always run on PRs (required check) - path filtering done in job
+  # No `feat/**` push trigger: a feature branch is validated by its PR above.
+  # The push copy ran a second time on the same SHA (see ci.yml `on:`).
   push:
     branches:
       - main
-      - feat/**
     paths:
       - 'openapi.yaml'
       - 'src/**/*.ts'
@@ -16,6 +17,12 @@ on:
 permissions:
   contents: read
   packages: read
+
+# Same shape as ci.yml: a newer push to a PR supersedes its older run; a run on
+# main (the record for that SHA) is never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/staging' && github.ref != 'refs/heads/main' }}
 
 jobs:
   validate:
