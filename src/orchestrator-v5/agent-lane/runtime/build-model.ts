@@ -56,11 +56,29 @@ export function buildCandidateSchema(): Record<string, unknown> {
     type: 'object', additionalProperties: false, properties, required,
   });
   return obj({
+    /**
+     * ⛔ AN UNSTATED TARGET MUST BE SAYABLE. `value` used to be a bare
+     * `{ type: 'number' }` in `required`, so the schema made "the brief names no
+     * numeric target" IMPOSSIBLE to express: the model had to emit a number, and for
+     * "increase productivity" it emitted 0. Admission then wrote
+     * `goal_threshold_raw: 0, unit: '%'` and stamped it `from_brief`, so the product
+     * told the user THEY had asked for a 0% increase. Measured on Paul's hiring brief
+     * (#63 5811781699): "Goal productivity_increase is stamped from_brief,
+     * threshold_raw 0, unit %, frame level; admission says goal_target_stated=true.
+     * Brief states no numeric target."
+     *
+     * ⭐ THE FIX IS THE PATTERN THIS SCHEMA ALREADY USES FOR FACTORS, not a new one:
+     * `baseline_known: boolean` beside a nullable `baseline_value`, so a factor can
+     * say "no baseline was given". The goal had no equivalent. It does now.
+     * `target_stated` stays in `required` so the key must be emitted — an absent
+     * flag is how this estate gets silent defaults.
+     */
     goal: obj({
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
-      value: { type: 'number' }, unit: { type: 'string' },
+      target_stated: { type: 'boolean' },
+      value: { anyOf: [{ type: 'number' }, { type: 'null' }] }, unit: { type: 'string' },
       horizon_months: { anyOf: [{ type: 'integer' }, { type: 'null' }] }, provenance,
-    }, ['metric', 'operator', 'value', 'unit', 'horizon_months', 'provenance']),
+    }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance']),
     constraints: { type: 'array', items: obj({
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
       value: { type: 'number' }, unit: { type: 'string' }, provenance,
@@ -146,6 +164,13 @@ export const BUILD_INSTRUCTIONS = [
   + 'Anything you judge material but that does not meet that bar belongs in `unknowns` as a question, NOT as a node \u2014 it can become a proposal later. '
   + `Stay within ${COMPACT_LIMITS.maxNodes} nodes and ${COMPACT_LIMITS.maxEdges} links in total, counting one link from the decision to each option. Correct, connected items beat a comprehensive map: an oversized first model is refused before it reaches the canvas.`,
   'Mark provenance honestly on EVERY item: "explicit" only for what the user stated, "inferred" for what you read out of the brief, "ai_proposed" for anything you added beyond it.',
+  /*
+   * ⛔ THE COMPANION INSTRUCTION TO `target_stated`. The schema now lets the model say
+   * "no target was given"; nothing yet told it WHEN to. Without this the nullable field
+   * is a capability no caller uses — and a 0 attributed to the user is the worst of the
+   * available wrong answers, because it reads as a deliberate choice they made.
+   */
+  'A GOAL TARGET THE BRIEF DOES NOT STATE MUST BE LEFT UNSTATED. If the user named a number to reach \u2014 "to 40%", "by \u00a33m", "under 4 weeks" \u2014 set `target_stated: true` and put that number in `goal.value`. If they only named a DIRECTION \u2014 "increase productivity", "cut churn", "improve velocity" \u2014 then set `target_stated: false` and `goal.value: null`. Never substitute 0, never invent a plausible target, and never treat the absence of a number as a target of zero: a direction with no number is a complete and ordinary goal, and the analysis compares options against it perfectly well. Getting this wrong tells the user they asked for something they did not ask for.',
   'THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like "X Improvement" for a goal called "X change", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all.',
   // ⛔ THE LINK CONTRACT (#63 ruling 5793252993). There is NO default-positive
   // factor->goal repair in admission, by ruling: a sign nobody stated would be a
@@ -271,7 +296,13 @@ export function retrySchemaPinningGoal(goal: CandidateModel['goal']): Record<str
   goalSchema['properties'] = {
     metric: { type: 'string', enum: [goal.metric] },
     operator: { type: 'string', enum: [goal.operator] },
-    value: { type: 'number', enum: [goal.value] },
+    // A pinned `null` must stay expressible: `{type:'number', enum:[null]}` is
+    // unsatisfiable, so the compaction retry could never return the goal it was
+    // pinned to and every unstated-target brief would lose its retry.
+    target_stated: { type: 'boolean', enum: [goal.target_stated !== false] },
+    value: goal.value === null || typeof goal.value !== 'number'
+      ? { type: 'null' }
+      : { type: 'number', enum: [goal.value] },
     unit: { type: 'string', enum: [goal.unit] },
     horizon_months: goal.horizon_months === null ? { type: 'null' } : { type: 'integer', enum: [goal.horizon_months] },
     provenance: { type: 'string', enum: [goal.provenance] },
