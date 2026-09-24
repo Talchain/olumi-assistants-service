@@ -228,7 +228,34 @@ else
   say "7) FP3's typed Run chip — SKIPPED, FP3 is not on the served build (typedRunOf absent)"
 fi
 
+# ⛔⛔ THE TURN AFTER THE RUN. This witness ran the Run LAST, so it never took another
+# turn — and that is exactly where CEE #1809's served P0 lands: fast path 3 saved only
+# the interpreting call's `message` items into the conversation of record and dropped
+# the `reasoning` item each belongs to, so the NEXT turn is refused
+#   openai_400: Item 'msg_…' of type 'message' was provided without its required
+#               'reasoning' item: 'rs_…'
+# and the user gets HTTP 502 UPSTREAM_ERROR, losing the conversation. Witness c9-f828a61
+# hit it in both journeys.
+#
+# My own six-dimension review of #1786 FOUND this mechanism and filed it non-blocking,
+# and this witness then went 24/24 green over a build that had it. A journey check whose
+# last step is the thing under test cannot see what the thing under test breaks. So the
+# journey now continues past the Run, always.
+say "8) the turn AFTER the Run — the conversation must survive it"
+T0=$(date +%s)
+AFTER=$(post /agent/v1/turn "$(jq -nc --arg s "$SCEN" '{scenario_id:$s,message:"Which assumption would change that conclusion most?"}')")
+EL=$(( $(date +%s) - T0 ))
+A_ERR=$(jqv "$AFTER" '.error // ""')
+A_TXT=$(jqv "$AFTER" '.assistant_text // ""')
+say "   ${EL}s · error=${A_ERR:-none} · $(printf '%s' "$A_TXT" | wc -c | tr -d ' ') chars"
+gate "after the Run: the turn is not refused" "$([ -z "$A_ERR" ] && echo 1 || echo 0)" "error=${A_ERR:-none}"
+gate "after the Run: a substantive answer came back" "$([ "$(printf '%s' "$A_TXT" | wc -c | tr -d ' ')" -gt 120 ] && echo 1 || echo 0)" "$(printf '%s' "$A_TXT" | wc -c | tr -d ' ') chars"
+if [ -n "$A_ERR" ]; then
+  say "   ⛔ CEE #1809 is the fix for this. What the turn returned:"
+  printf '%s' "$AFTER" | jq -r '.detail // .message // "(no detail)"' 2>/dev/null | head -3 | sed 's/^/        /'
+fi
 say ""
+
 say "==== $pass passed · $fail failed · served $SERVED ===="
 say "scenario for follow-up: $SCEN"
 [ "$fail" = "0" ] || exit 1
