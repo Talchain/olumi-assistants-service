@@ -832,6 +832,48 @@ function valueCarriers(node: Record<string, unknown>): ValueCarrier[] {
     }
     out.push({ unit: carrier.unit, values });
   }
+  /**
+   * ⭐ THE GOAL'S OWN THRESHOLD, WHICH NO OTHER CARRIER CAN SEE.
+   *
+   * WIRE-WITNESSED on served CEE `d2afc2c` (scenario
+   * 8a317cdc-bf30-4899-8614-fd24d98dfc37): the brief said "Budget is £900k either
+   * way and we want to add £3m of new ARR", and the manifest answered
+   *   £900k -> in_model (matched: gtm_budget)
+   *   £3m   -> absent  (matched: none)
+   * although the model holds £3m as `new_arr.goal_threshold_raw: 3000000`. The
+   * figure is invisible to the loop above twice over: `goal_threshold_raw` is not
+   * in {@link VALUE_FIELDS}, and the unit lives in `goal_threshold_unit` rather
+   * than `unit`, so even adding the field would have paired it with the wrong
+   * unit — or with none.
+   *
+   * ⚠ A SEPARATE CARRIER, NOT A NEW `VALUE_FIELDS` ENTRY. This preserves the rule
+   * stated above it: a value never borrows a unit from elsewhere. The pair is read
+   * from the SAME object, and the carrier is confined to `kind === "goal"` so no
+   * other node's numbers change meaning.
+   *
+   * ⚠ THE `kind === "goal"` GUARD IS DELIBERATELY UNPINNED, and saying so is the
+   * honest option. Removing it leaves all 389 specs in this directory green,
+   * because no committed capture carries `goal_threshold_raw` on a non-goal node —
+   * so the guard is defence against a shape the corpus does not contain. Pinning it
+   * would need a fixture written here, which the sibling specs forbid outright
+   * (trap 16-inverse). It stays because it costs nothing and confines the carrier;
+   * it is not claimed as tested.
+   *
+   * The UNIT pairing, by contrast, IS pinned: swapping `goal_threshold_unit` for
+   * `unit` turns £3m back to `absent` and REDs the new spec.
+   *
+   * This is the third instance of the class `VALUE_FIELDS`' own comment records —
+   * "a field MISSING here means a figure the user really stated goes unseen, and
+   * we then tell them we invented their own number" — after `observed_state.cap`
+   * and `raw_value`. It reduces disclosure claims rather than widening them,
+   * which is this module's safe direction, and it applies to BOTH lanes:
+   * `goal_threshold_raw` is written by Conventional (`prompts/defaults-v15`,
+   * `defaults-v19`, `routing/value-update-gate`, `context/constraint-feasibility`)
+   * as well as by the agent lane's `admit-model`.
+   */
+  if (node.kind === "goal" && typeof node.goal_threshold_raw === "number" && Number.isFinite(node.goal_threshold_raw)) {
+    out.push({ unit: node.goal_threshold_unit, values: [node.goal_threshold_raw] });
+  }
   return out;
 }
 
