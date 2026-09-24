@@ -152,3 +152,38 @@ describe('the route actually carries it to the user', () => {
     expect(ROUTE).not.toContain('value-change-block');
   });
 });
+
+describe('a value that saved with NO range is disclosed too', () => {
+  it('⭐ says the values are saved AND that a range is still needed, naming the factor', () => {
+    const [text] = valueChangeDisclosures({
+      rescaled: [],
+      ranges_added: [],
+      ranges_not_attached: [{ factor: 'Headcount', range: 500 }],
+    });
+    expect(text).toContain('Headcount');
+    expect(text).toContain('saved');
+    expect(text).toContain('range');
+    // The consequence of the old wording was a redone write.
+    expect(text.toLowerCase()).toContain('do not re-enter');
+  });
+
+  it('⛔ absent field changes nothing — the producer may not emit it', () => {
+    // #1743 emits it; this PR must degrade cleanly without it.
+    expect(valueChangeDisclosures({ rescaled: [], ranges_added: [] })).toEqual([]);
+  });
+
+  it('⭐ end to end from the PRODUCER’s own key, not a hand-made object', () => {
+    const facts = collectTurnStateFacts([
+      { ranges_not_attached: [{ factor: 'Headcount', range: 500 }] },
+    ]);
+    expect(facts.ranges_not_attached).toEqual([{ factor: 'Headcount', range: 500 }]);
+    expect(valueChangeDisclosures(facts)).toHaveLength(1);
+  });
+
+  it('⛔ an unusable range is not named — it would tell the user something untrue', () => {
+    const facts = collectTurnStateFacts([
+      { ranges_not_attached: [{ factor: 'Bad', range: 1 }, { factor: 'Good', range: 400 }] },
+    ]);
+    expect(facts.ranges_not_attached.map((r) => r.factor)).toEqual(['Good']);
+  });
+});
