@@ -301,7 +301,7 @@ const AGENT_INSTRUCTIONS = [
    * applied, the analysis never run again, nothing visible moved). The visible-movement gap is now closed
    * by the typed Run offer after a change, not by an implicit run — see NO_RUN_ON_APPROVAL_INSTRUCTION.
    */
-  NO_RUN_ON_APPROVAL_INSTRUCTION,
+  'After authorise_change applies values or option levels, call run_analysis in the SAME turn and report what it now says.',
   'get_canonical_state returns a `structure` block computed from the persisted model: which options reach the goal, which cannot, what is unconnected, and how many FACTORS have no value (only factors can hold one). These are facts, not estimates \u2014 use them, and say them plainly when they explain why an analysis cannot run.',
   'When a tool tells you something was not represented, say so.',
   /*
