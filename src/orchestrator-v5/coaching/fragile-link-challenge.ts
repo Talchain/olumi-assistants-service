@@ -115,20 +115,39 @@ export interface FragileLinkChallengeCopy {
 }
 
 /**
+ * The body's wordings, preferred first. The contract's sentence names both
+ * endpoints twice; when that does not fit `body_max` (the first-pass prefix
+ * pushes ordinary served labels past it: 9 of 49 groundable runs in the
+ * 24 Sep served sample), the
+ * second clause says "this link" instead of repeating the labels. That short
+ * form fits every label pair `selectGroundedCounterCase` admits (its own
+ * 400-char sentence bound caps the two labels at 87 characters together), so
+ * a length refusal can only come from a bound this module does not own.
+ */
+export function fragileLinkBodyForms(fromLabel: string, toLabel: string, firstPass: boolean): readonly string[] {
+  const flagged = `the robustness check flagged the link from ${fromLabel} to ${toLabel} as fragile — `;
+  const findings = [
+    `${flagged}a modest change in how strongly ${fromLabel} drives ${toLabel} could change how the options compare.`,
+    `${flagged}a modest change in the strength of this link could change how the options compare.`,
+  ];
+  return findings.map((finding) => (firstPass ? `${FIRST_PASS_PREFIX}${finding}` : `T${finding.slice(1)}`));
+}
+
+/**
  * The card's words. ONE definition, so the strings the gates see are the
- * strings that ship.
+ * strings that ship. The body is the first form within `body_max`; when none
+ * fits, the last is returned and the copy gate refuses it.
  */
 export function composeFragileLinkChallenge(
   fromLabel: string,
   toLabel: string,
   firstPass: boolean,
 ): FragileLinkChallengeCopy {
-  const finding =
-    `the robustness check flagged the link from ${fromLabel} to ${toLabel} as fragile — ` +
-    `a modest change in how strongly ${fromLabel} drives ${toLabel} could change how the options compare.`;
+  const forms = fragileLinkBodyForms(fromLabel, toLabel, firstPass);
+  const body = forms.find((form) => form.length <= RUN_TURN_COACHING_CONTRACT.limits.body_max) ?? forms[forms.length - 1]!;
   return {
     title: 'Pressure-test a fragile link',
-    body: firstPass ? `${FIRST_PASS_PREFIX}${finding}` : `T${finding.slice(1)}`,
+    body,
     action_label: 'Pressure-test this link',
     action_prompt:
       `Talk me through what would change if the link from ${fromLabel} to ${toLabel} were weaker or stronger. ` +

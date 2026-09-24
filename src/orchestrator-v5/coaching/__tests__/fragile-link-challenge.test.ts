@@ -9,10 +9,11 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/boundary';
+import { AnalysisRunStateSchema, CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/boundary';
 
 import { runTurnCoaching } from '../../agent-lane/analysis-coaching-pass-through.js';
 import { AMEND_CHIP, approvalChipsFor, typedApprovalOf } from '../../agent-lane/approval-chips.js';
+import { REFUSAL_REASON_UNSPECIFIED } from '../../compose/analysis-state-v1.js';
 import { deterministicBlockId } from '../../compose/block-id.js';
 import { buildAutoRunProvenance } from '../../context/run-initiator.js';
 import { RUN_OFFER_CHIP, typedRunOf } from '../../../routes/agent-v1-turn.js';
@@ -20,6 +21,7 @@ import {
   RUN_TURN_COACHING_CONTRACT,
   buildFragileLinkChallenge,
   composeFragileLinkChallenge,
+  fragileLinkBodyForms,
 } from '../fragile-link-challenge.js';
 import { selectGroundedCounterCase } from '../grounded-counter-case.js';
 import {
@@ -55,6 +57,25 @@ function withResult(c: RunTurnCase, mutate: (result: Record<string, any>) => voi
   mutate(captured.blocks![0] as Record<string, any>);
   mutate(final.analysisResult as Record<string, any>);
   return { ...c, captured, final };
+}
+
+/**
+ * Relabel the row the selector GROUNDS — found by its (from_id, to_id) after
+ * `mutate`, not by array position — on both the capture and the readback.
+ */
+function withGroundedLabels(
+  c: RunTurnCase,
+  fromLabel: string,
+  toLabel: string,
+  mutate: (result: Record<string, any>) => void = () => {},
+): RunTurnCase {
+  return withResult(c, (r) => {
+    mutate(r);
+    const { fromId, toId } = selectGroundedCounterCase(r.enrichment).grounded!;
+    const row = r.enrichment.robustness.fragile_edges.find((e: any) => e.from_id === fromId && e.to_id === toId);
+    row.from_label = fromLabel;
+    row.to_label = toLabel;
+  });
 }
 
 function withComputedAt(c: RunTurnCase, computedAt: string): RunTurnCase {
@@ -161,6 +182,79 @@ describe('run-turn fragile-link challenge', () => {
     expect(fragileLinkCards(runTurnCoaching(plain.captured, plain.final).blocks)[0]!.body.startsWith(FIRST_PASS_PREFIX)).toBe(false);
   });
 
+  it('(iii-b) first pass with served labels the long wording cannot fit → the card, its second clause saying "this link"', () => {
+    // Served labels (construction witness pre-a693ba6-A, 23 Sep): one of the 9
+    // groundable served runs the first pass used to refuse as copy_gate.
+    const from = 'Engineering delivery capacity';
+    const to = 'Delivery throughput';
+    const [longFirstPass, shortFirstPass] = fragileLinkBodyForms(from, to, true);
+    // The contract's long wording cannot ship here, so this exercises the fallback.
+    expect(longFirstPass!.length).toBeGreaterThan(300);
+
+    const auto = withGroundedLabels(runTurnCase('B', 't2', 'auto_first_pass'), from, to);
+    const out = runTurnCoaching(auto.captured, auto.final);
+    expect(out.eligibility).toEqual({ eligible: true });
+    const card = fragileLinkCards(out.blocks)[0]!;
+    expect(CoachingBlockSchema.safeParse(card).success).toBe(true);
+    expect(card.body).toBe(
+      'Before relying on this first pass on Olumi\'s estimates, note that the robustness check flagged the link from Engineering delivery capacity to Delivery throughput as fragile — a modest change in the strength of this link could change how the options compare.',
+    );
+    expect(card.body).toBe(shortFirstPass);
+    expect(card.body.length).toBeLessThanOrEqual(300);
+    expect(card.target_refs).toEqual([{ id: card.target_refs[0]!.id, kind: 'edge', label: 'Engineering delivery capacity → Delivery throughput' }]);
+
+    // Contrast: the explicit Run on the same labels keeps the contract's long wording.
+    const explicit = withGroundedLabels(runTurnCase('B', 't2', 'explicit_run'), from, to);
+    const explicitOut = runTurnCoaching(explicit.captured, explicit.final);
+    expect(explicitOut.eligibility).toEqual({ eligible: true });
+    expect(fragileLinkCards(explicitOut.blocks)[0]!.body).toBe(
+      'The robustness check flagged the link from Engineering delivery capacity to Delivery throughput as fragile — a modest change in how strongly Engineering delivery capacity drives Delivery throughput could change how the options compare.',
+    );
+  });
+
+  it('(iii-c) every label pair the selector admits fits a card on both triggers; one character more and the selector itself refuses', () => {
+    const labels = (total: number): [string, string] => ['A'.repeat(Math.ceil(total / 2)), 'B'.repeat(Math.floor(total / 2))];
+    const variants: [string, (r: Record<string, any>) => void, boolean][] = [
+      // The selector's sentence is shorter without a finite switch probability,
+      // so it admits longer labels — long enough to overflow the explicit wording too.
+      ['served rows (finite switch probability)', () => {}, false],
+      ['rows without a switch probability', (r) => { for (const e of r.enrichment.robustness.fragile_edges) delete e.switch_probability; }, true],
+    ];
+    for (const [name, mutate, explicitOverflows] of variants) {
+      const groundable = (total: number) => {
+        const c = withGroundedLabels(runTurnCase('B', 't2', 'explicit_run'), ...labels(total), mutate);
+        return selectGroundedCounterCase((c.final.analysisResult as Record<string, any>).enrichment).grounded !== null;
+      };
+      let max = 0;
+      for (let total = 2; total <= 200 && groundable(total); total += 1) max = total;
+      expect(max, name).toBeGreaterThanOrEqual(60);
+      expect(groundable(max + 1), name).toBe(false);
+
+      const [from, to] = labels(max);
+      expect(fragileLinkBodyForms(from, to, true)[0]!.length, name).toBeGreaterThan(300);
+      expect(fragileLinkBodyForms(from, to, false)[0]!.length > 300, name).toBe(explicitOverflows);
+      for (const trigger of ['explicit_run', 'auto_first_pass'] as const) {
+        const c = withGroundedLabels(runTurnCase('B', 't2', trigger), from, to, mutate);
+        const out = runTurnCoaching(c.captured, c.final);
+        expect(out.eligibility, `${name} / ${trigger}`).toEqual({ eligible: true });
+        const card = fragileLinkCards(out.blocks)[0]!;
+        expect(card.body.length).toBeLessThanOrEqual(300);
+        expect(CoachingBlockSchema.safeParse(card).success).toBe(true);
+
+        const over = withGroundedLabels(runTurnCase('B', 't2', trigger), from, to, mutate);
+        const overResult = (r: Record<string, any>) => {
+          const row = r.enrichment.robustness.fragile_edges.find((e: any) => e.to_label === to);
+          row.to_label = `${to}B`;
+        };
+        overResult(over.captured.blocks![0] as Record<string, any>);
+        overResult(over.final.analysisResult as Record<string, any>);
+        expect(runTurnCoaching(over.captured, over.final), `${name} / ${trigger} / +1`).toEqual({
+          blocks: [], eligibility: { eligible: false, reason: 'copy_gate' },
+        });
+      }
+    }
+  });
+
   it('(iv) no groundable edge (fragile_edges removed; labels removed) → no card, no_groundable_fragile_edge', () => {
     const noEdges = withResult(runTurnCase('B', 't2', 'explicit_run'), (r) => { r.enrichment.robustness.fragile_edges = []; });
     expect(runTurnCoaching(noEdges.captured, noEdges.final)).toEqual({
@@ -189,6 +283,41 @@ describe('run-turn fragile-link challenge', () => {
     expect(runTurnCoaching(c.captured, { ...c.final, graphHash: 'fedcba9876543210' })).toEqual({
       blocks: [], eligibility: { eligible: false, reason: 'identity_mismatch' },
     });
+  });
+
+  it('(vi-b) run_state other than complete_current on the capture, the readback or both → no card, identity_mismatch', () => {
+    // complete_current on both sides is the ONLY licence for the freshness
+    // 'fresh' runTurnCoaching hands the claim cage; a refused run is kept out
+    // only by this gate (refusal freshness is clamped to stale | unknown).
+    const base = runTurnCase('B', 't2', 'explicit_run');
+    const computedAt = base.turn.analysis_state.run_state.computed_at;
+    // Kind swapped, computed_at KEPT: nothing but the kind gate can refuse these.
+    const kindOnly = ['unknown_degraded', 'complete_stale', 'refused'].map((kind) => ({ kind, computed_at: computedAt }));
+    // The contract's own shapes for a degraded, stale and refused run.
+    const schemaShapes = [
+      { kind: 'unknown_degraded', cause: 'refusal_unverified' },
+      { kind: 'unknown_degraded', cause: 'store_unreadable' },
+      { kind: 'complete_stale', computed_at: computedAt, cause: 'graph_changed' },
+      { kind: 'refused', reason_code: REFUSAL_REASON_UNSPECIFIED },
+    ];
+    for (const shape of schemaShapes) expect(AnalysisRunStateSchema.safeParse(shape).success, shape.kind).toBe(true);
+
+    const refused = { blocks: [], eligibility: { eligible: false, reason: 'identity_mismatch' } };
+    for (const runState of [...kindOnly, ...schemaShapes]) {
+      for (const side of ['capture', 'readback', 'both'] as const) {
+        for (const trigger of ['explicit_run', 'auto_first_pass'] as const) {
+          const c = runTurnCase('B', 't2', trigger);
+          if (side !== 'readback') (c.captured.analysis_state as Record<string, any>).run_state = structuredClone(runState);
+          if (side !== 'capture') (c.final.analysisState as Record<string, any>).run_state = structuredClone(runState);
+          expect(runTurnCoaching(c.captured, c.final), `${JSON.stringify(runState)} on ${side} / ${trigger}`).toEqual(refused);
+        }
+      }
+    }
+    // Contrast: complete_current on both sides builds the card, on both triggers.
+    for (const trigger of ['explicit_run', 'auto_first_pass'] as const) {
+      const c = runTurnCase('B', 't2', trigger);
+      expect(runTurnCoaching(c.captured, c.final).eligibility).toEqual({ eligible: true });
+    }
   });
 
   it('(vii) re-run on the same graph (different computed_at) → a different block_id', () => {
