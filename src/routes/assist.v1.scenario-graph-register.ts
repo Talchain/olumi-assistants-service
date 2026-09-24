@@ -137,6 +137,7 @@ import type { FastifyInstance } from "fastify";
 
 import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES } from "../config/graphCaps.js";
 import { normaliseGraphNodeKindField } from "../orchestrator-v5/graph-registration/normalise-node-kind.js";
+import { attributeUnsourcedLevelCells } from "../orchestrator-v5/graph-registration/attribute-unsourced-levels.js";
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
 import { GraphStateIngressSchema } from "../orchestrator-v5/boundary/request-extensions.js";
 import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
@@ -495,7 +496,9 @@ export default async function route(app: FastifyInstance) {
       // which a graph is persisted". Hashing before it would advertise an
       // identity for bytes we do not store, which is the exact ordering defect
       // `commit.ts` was restructured to close.
-      const graphForStore = projectGraphForPersistence(parsed.data, {
+      // An option level with no recorded origin is stored as Olumi's (OC-1), so the level
+      // writer can later revise it; a present `source` is never rewritten.
+      const graphForStore = projectGraphForPersistence(attributeUnsourcedLevelCells(parsed.data), {
         scenarioId,
         turnClass: "direct_answer",
         source: "graph_registration",

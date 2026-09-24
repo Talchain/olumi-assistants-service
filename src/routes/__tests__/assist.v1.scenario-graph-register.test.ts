@@ -1295,3 +1295,41 @@ describe("register — an optional caller expectation makes the write conditiona
     await app.close();
   });
 });
+
+/**
+ * OC-1, through the REAL route and the REAL level writer: an imported option level with no
+ * recorded origin was stored as is, and every later edit of it was refused
+ * `invalid_existing_intervention` (Canvas manual witness, #63 5805819378). Registration now
+ * stores it as Olumi's, so the writer PREPARES the user's revision instead.
+ */
+describe("register — an imported option level with no recorded origin is stored as Olumi's, and stays revisable", async () => {
+  const { prepareOptionInterventionEdit } = await import("../../orchestrator-v5/system-events/option-intervention-edit.js");
+  const { computeAnalysisAffectingGraphHash } = await import("../../orchestrator-v5/context/graph-hash.js");
+  const withCells = (cells: Record<string, unknown>) => ({
+    ...IMPORTED,
+    nodes: IMPORTED.nodes.map((n) => (n.id === "opt_alpha" ? { ...n, interventions: cells } : n)),
+  });
+
+  it("RED: the served CDP shape is stored with source cee_hypothesis, and the writer then PREPARES a revision", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: withCells({ fac_alpha: { value: 0.5, display_value: "£60k" } }) });
+    expect(res.statusCode).toBe(200);
+    const stored = writtenGraph() as unknown as { nodes: { id: string; interventions?: Record<string, { source?: unknown }> }[] };
+    expect(stored.nodes.find((n) => n.id === "opt_alpha")!.interventions!.fac_alpha!.source).toBe("cee_hypothesis");
+    const edit = prepareOptionInterventionEdit({
+      persistedGraph: stored, optionId: "opt_alpha", factorId: "fac_alpha", modelValue: 0.7,
+      expectedGraphHash: computeAnalysisAffectingGraphHash(stored as never)!,
+    });
+    expect(edit.kind, JSON.stringify(edit)).toBe("prepared");
+    await app.close();
+  });
+
+  it("CONTRAST: a stated origin is stored exactly as sent", async () => {
+    const app = await buildApp();
+    const cell = { value: 0, source: "brief_extraction", display_value: "Low (0)" };
+    await post(app, SCENARIO, { graph: withCells({ fac_alpha: cell }) });
+    const stored = writtenGraph() as unknown as { nodes: { id: string; interventions?: Record<string, unknown> }[] };
+    expect(stored.nodes.find((n) => n.id === "opt_alpha")!.interventions!.fac_alpha).toEqual(cell);
+    await app.close();
+  });
+});
