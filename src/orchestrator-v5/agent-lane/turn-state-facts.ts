@@ -79,11 +79,27 @@ export interface RangeNotAttached {
 export interface TurnStateFacts {
   readonly rescaled: readonly RescaledValue[];
   readonly ranges_added: readonly RangeAddedForAnalysis[];
-  /** Ranges that were refused — the value landed, the range did not. */
+  /**
+   * Ranges the producer has VERIFIED, by a post-refusal readback, are still
+   * absent. ⚠ Its presence is the guarantee: the producer emits it only when a
+   * readback confirmed it, and emits `current_state_unknown` instead when the
+   * readback failed.
+   */
   readonly ranges_not_attached: readonly RangeNotAttached[];
+  /**
+   * ⛔ THE PRODUCER COULD NOT READ THE MODEL BACK, so nothing about the present
+   * state is known — not the values, not the ranges, not readiness.
+   *
+   * CHANGES_REQUIRED on `f028650d`: this consumer turned an event field into a
+   * present-state claim ("unchanged", "still needs a range", "do not re-enter")
+   * with no readback behind it. A refusal proves only that ONE write did not
+   * land. When this is true the disclosure reports the historical event and
+   * says the present state is unknown — it never advises.
+   */
+  readonly current_state_unknown: boolean;
 }
 
-const EMPTY: TurnStateFacts = { rescaled: [], ranges_added: [], ranges_not_attached: [] };
+const EMPTY: TurnStateFacts = { rescaled: [], ranges_added: [], ranges_not_attached: [], current_state_unknown: false };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -114,6 +130,7 @@ export function collectTurnStateFacts(toolResults: readonly unknown[] | undefine
   const seenRescaled = new Set<string>();
   const seenRange = new Set<string>();
   const seenNotAttached = new Set<string>();
+  let unknown = false;
 
   for (const result of toolResults) {
     const r = asRecord(result);
@@ -166,6 +183,8 @@ export function collectTurnStateFacts(toolResults: readonly unknown[] | undefine
      * or it was refused. Reading only the first told the user a range had been
      * chosen and never that one was missing.
      */
+    if (r.current_state_unknown === true) unknown = true;
+
     for (const entry of Array.isArray(r.ranges_not_attached) ? r.ranges_not_attached : []) {
       const e = asRecord(entry);
       if (e === null) continue;
@@ -179,5 +198,5 @@ export function collectTurnStateFacts(toolResults: readonly unknown[] | undefine
     }
   }
 
-  return { rescaled, ranges_added: ranges, ranges_not_attached: notAttached };
+  return { rescaled, ranges_added: ranges, ranges_not_attached: notAttached, current_state_unknown: unknown };
 }

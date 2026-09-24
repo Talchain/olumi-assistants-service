@@ -154,17 +154,65 @@ describe('the route actually carries it to the user', () => {
 });
 
 describe('a value that saved with NO range is disclosed too', () => {
-  it('⭐ says the values are saved AND that a range is still needed, naming the factor', () => {
+  it('⭐ names the factor that still needs a range, and says the claim was CHECKED', () => {
+    // ⚠ THIS TEST PREVIOUSLY ASSERTED THE UNSAFE COPY — that the values were
+    // "saved" and the user should "not re-enter" them. CHANGES_REQUIRED on
+    // f028650d: `ranges_not_attached` proves only that THIS operation's range did
+    // not attach. It says nothing about the values, which a competing writer may
+    // have changed. The field is readback-verified by contract, so the missing
+    // RANGE may be stated; the values may not.
     const [text] = valueChangeDisclosures({
       rescaled: [],
       ranges_added: [],
       ranges_not_attached: [{ factor: 'Headcount', range: 500 }],
     });
     expect(text).toContain('Headcount');
-    expect(text).toContain('saved');
     expect(text).toContain('range');
-    // The consequence of the old wording was a redone write.
-    expect(text.toLowerCase()).toContain('do not re-enter');
+    expect(text).toContain('as it now stands');
+    expect(text).not.toContain('unchanged');
+    expect(text.toLowerCase()).not.toContain('do not re-enter');
+    expect(text.toLowerCase()).not.toContain('were saved');
+  });
+
+  it('⛔⛔ current_state_unknown WINS — it reports the event and advises NOTHING', () => {
+    // The producer could not read the model back, so no present-state claim is
+    // available at all. This is the branch that must never advise.
+    const owed = valueChangeDisclosures({
+      rescaled: [],
+      ranges_added: [],
+      ranges_not_attached: [],
+      current_state_unknown: true,
+    });
+    expect(owed).toHaveLength(1);
+    const text = owed[0];
+    expect(text).toContain('AT THE TIME');
+    expect(text).toContain('not known');
+    expect(text).not.toContain('unchanged');
+    expect(text.toLowerCase()).not.toContain('do not re-enter');
+  });
+
+  it('⛔ unknown SUPPRESSES a stale verified list rather than being merged with it', () => {
+    // If both ever arrive together, the unknown is the weaker claim and must win.
+    // Emitting both would let a reader take the specific one as current.
+    const owed = valueChangeDisclosures({
+      rescaled: [{ factor: 'Churn rate', requested: 40, recorded: 0.4 }],
+      ranges_added: [],
+      ranges_not_attached: [{ factor: 'Headcount', range: 500 }],
+      current_state_unknown: true,
+    });
+    expect(owed.join('\n')).not.toContain('Headcount');
+    expect(owed.join('\n')).toContain('AT THE TIME');
+  });
+
+  it('⭐ THE COMPETING-WRITER CASE the reviewer asked for, at the consumer', () => {
+    // A competing writer supplied the range before the refusal, so the producer's
+    // readback removed that factor from the field. The consumer must then say
+    // nothing about it — proving the consumer adds no claim of its own.
+    const facts = collectTurnStateFacts([
+      { ranges_not_attached: [] },
+    ]);
+    expect(facts.ranges_not_attached).toEqual([]);
+    expect(valueChangeDisclosures(facts)).toEqual([]);
   });
 
   it('⛔ absent field changes nothing — the producer may not emit it', () => {
