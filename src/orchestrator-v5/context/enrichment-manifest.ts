@@ -18,8 +18,9 @@
  *      record, not a pure PLoT passthrough: the run-analysis handler stores
  *      the PLoT `/v2/run` body verbatim (every top-level `RunResponseV3`
  *      key — the count is deliberately NOT written here, see below), then
- *      CEE enrichers WRITE 4 more keys onto the same record (decision_review +
- *      3 coaching-signal markers) before the analysis→LLM projection reads it,
+ *      CEE WRITES more keys onto the same record (decision_review, the
+ *      3 coaching-signal markers, and the auto-run `run_provenance` stamp)
+ *      before the analysis→LLM projection reads it,
  *      and one legacy V1-tolerance key (`results`) rounds out the boundary
  *      contract. Manifesting the CEE-injected keys is load-bearing — omitting
  *      them would false-positive the runtime tripwire on every run_analysis
@@ -61,7 +62,7 @@ import { log } from '../../utils/telemetry.js';
  *
  * Sections: (a) the PLoT `/v2/run` `RunResponseV3` keys — citations are
  * `engine-v3.ts` line numbers, grouped by the interface's own section headers;
- * (b) 4 CEE-injected keys written onto the same record after PLoT returns;
+ * (b) the CEE-injected keys written onto the same record after PLoT returns;
  * (c) 1 legacy V1 inbound-tolerance key.
  *
  * ⚠ SECTION (a) IS A HAND-MAINTAINED MIRROR OF A PRODUCER IN ANOTHER REPO, and
@@ -223,6 +224,10 @@ export const ENRICHMENT_PRODUCER_MANIFEST: ReadonlySet<string> = new Set<string>
   'coaching_signal_turn_id', // CEE-injected: coaching/coaching-signal-application.ts:151
   'coaching_signal_produced_at', // CEE-injected: coaching/coaching-signal-application.ts:152
   '_diagnostics', // CEE-injected (DEBUG only, CEE_TURN_DEBUG_ENABLED): coaching/decision-review-enricher.ts:345-348
+  // The auto-run provenance stamp (context/run-initiator.ts), written on a
+  // SERVER-initiated run only. Unmanifested until now, so every auto-run fact
+  // fired the unknown-key tripwire.
+  'run_provenance', // CEE-injected: handlers/chip-click-dispatch.ts stampAutoRunProvenance
   // ── Legacy V1 inbound-tolerance ───────────────────────────────────────────
   // Not emitted by the live PLoT /v2/run producer (RunResponseV3 has no
   // top-level `results`); emitted by the V1 bundle (plot v1/run.ts:589) and
@@ -404,6 +409,8 @@ const R_VOI_NOT_COACH_NARRATED =
   'Value-of-information MAGNITUDES — transported to the UI (P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP) for a deterministic ranking surface with NO magnitudes, and deliberately withheld from the analysis→LLM projection: the values are outcome-unit / percentage-point magnitudes, and narrating them in prose is the "worth X" / "by N pp" claim class the no-EVPI-display doctrine forbids. Adding a MAGNITUDE deriver is a doctrine ruling, not a wiring gap. See the block comment above for what changed for factor_evppi and what did not.';
 const R_COACHING_SIGNAL =
   'CEE-injected coaching-signal marker for the next turn coaching-cache reader (coaching-signal-application.ts) — routing metadata, not analysis content.';
+const R_RUN_PROVENANCE =
+  'CEE-injected run-initiation marker (context/run-initiator.ts) — provenance, not analysis content. Its readers are the initiation/delivery predicates in run-initiator.ts (coaching first-vs-rerun, unrequested-analysis confinement), never the analysis→LLM derivers.';
 const R_LEGACY_COMPACT =
   'Legacy V1 inbound-tolerance array — not emitted by the live /v2/run producer; consumed by the shared compactAnalysis projection (results[].factor_sensitivity / results[].robustness), not the row-#2 enrichment derivers.';
 
@@ -479,6 +486,7 @@ export const ENRICHMENT_ANALYSIS_LLM_SKIP: ReadonlyMap<string, string> = new Map
   ['coaching_signal_turn_id', R_COACHING_SIGNAL],
   ['coaching_signal_produced_at', R_COACHING_SIGNAL],
   ['_diagnostics', R_INTERNAL],
+  ['run_provenance', R_RUN_PROVENANCE],
   ['results', R_LEGACY_COMPACT],
   // V7-C slice 1b — transported to the UI, never narrated by the coach.
   ['correlation_model', R_VOI_NOT_COACH_NARRATED],

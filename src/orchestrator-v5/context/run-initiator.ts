@@ -101,28 +101,65 @@ export const RUN_PROVENANCE_ENRICHMENT_KEY = 'run_provenance';
  * The `initiated_by` value that means "the SERVER started this run after a fresh
  * draft; the user did not ask for it".
  *
- * A closed vocabulary of one. A user-initiated run carries NO provenance stamp
- * at all rather than an `initiated_by: 'user'` counterpart — so the reader must
- * treat "no marker" as user-initiated, which is the fail-SAFE direction for
- * every consumer added so far: an unrecognised or absent marker degrades to the
- * pre-R2 behaviour instead of silently suppressing a real prior run.
+ * A closed vocabulary — this and {@link AUTO_RUN_POST_CONSTRUCTION_INITIATOR}.
+ * A user-initiated run carries NO provenance stamp at all rather than an
+ * `initiated_by: 'user'` counterpart — so the reader must treat "no marker" as
+ * user-initiated, which is the fail-SAFE direction for every consumer added so
+ * far: an unrecognised or absent marker degrades to the pre-R2 behaviour
+ * instead of silently suppressing a real prior run.
  */
 export const AUTO_RUN_POST_DRAFT_INITIATOR = 'auto_post_draft' as const;
 
-/** The stamp's shape. Built by {@link buildAutoRunProvenance}, read by
- *  {@link isAutoInitiatedRunAnalysisFact}. */
-export interface AutoRunProvenance {
+/**
+ * The `initiated_by` value that means "the SERVER started this run once, on the
+ * revision a successful Agent-lane construction just committed; the user asked
+ * for a model, not for an analysis".
+ *
+ * Paul's ruling (#63 5812069638): after a successful construction the EXISTING
+ * analysis runs once on the generated revision, provisional (machine-authored
+ * estimates), and later edits or approvals never auto-run.
+ *
+ * It differs from {@link AUTO_RUN_POST_DRAFT_INITIATOR} on exactly ONE of this
+ * module's two questions, and that is why it is a second value rather than a
+ * reuse of the first:
+ *   - auto-initiated? YES, the same — so the unrequested-analysis confinement
+ *     stays on as the safe default ({@link isAutoInitiatedRunAnalysisFact});
+ *   - seen by the user? YES, unlike post-draft — the run is delivered inside
+ *     the user's OWN synchronous build response, which is parity with a
+ *     user-initiated run ({@link hasUserSeenRunAnalysisResult}).
+ */
+export const AUTO_RUN_POST_CONSTRUCTION_INITIATOR = 'auto_post_construction' as const;
+
+/** The post-draft stamp. Built by {@link buildAutoRunProvenance}. */
+export interface DraftAutoRunProvenance {
   readonly initiated_by: typeof AUTO_RUN_POST_DRAFT_INITIATOR;
   readonly provisional: true;
   readonly draft_turn_id: string;
 }
 
 /**
+ * The post-construction stamp. Built by {@link buildConstructionAutoRunProvenance}.
+ *
+ * ⛔ It carries NO graph hash, deliberately: the transport projection deletes
+ * `graph_hash` / `graph_hash_at_run` at any depth, and the revision the run was
+ * computed against is already the fact's own `result.graph_hash_at_run`.
+ */
+export interface ConstructionAutoRunProvenance {
+  readonly initiated_by: typeof AUTO_RUN_POST_CONSTRUCTION_INITIATOR;
+  readonly provisional: true;
+  readonly construction_turn_id: string;
+}
+
+/** The stamp's shape, one arm per initiator. Read by
+ *  {@link isAutoInitiatedRunAnalysisFact}. */
+export type AutoRunProvenance = DraftAutoRunProvenance | ConstructionAutoRunProvenance;
+
+/**
  * Build the provenance stamp for a post-draft auto-run.
  *
  * @param draftTurnId the fresh-draft turn this run was initiated for.
  */
-export function buildAutoRunProvenance(draftTurnId: string): AutoRunProvenance {
+export function buildAutoRunProvenance(draftTurnId: string): DraftAutoRunProvenance {
   return {
     initiated_by: AUTO_RUN_POST_DRAFT_INITIATOR,
     provisional: true,
@@ -131,23 +168,52 @@ export function buildAutoRunProvenance(draftTurnId: string): AutoRunProvenance {
 }
 
 /**
- * Was this `run_analysis` fact produced by the SERVER's post-draft auto-run
- * rather than by the user?
+ * Build the provenance stamp for the Agent lane's automatic first analysis.
+ *
+ * @param constructionTurnId the construction's own turn identity —
+ *        `registrationTurnId(scenarioId, constructionOperationId(scenarioId, brief))`,
+ *        stable across retries (provenance, and the runner's dedup key).
+ */
+export function buildConstructionAutoRunProvenance(
+  constructionTurnId: string,
+): ConstructionAutoRunProvenance {
+  return {
+    initiated_by: AUTO_RUN_POST_CONSTRUCTION_INITIATOR,
+    provisional: true,
+    construction_turn_id: constructionTurnId,
+  };
+}
+
+/**
+ * The auto-run initiator stamped on this fact, or `null` when it carries none
+ * this build RECOGNISES. Matching is by identity against the two known values,
+ * so an unknown future value reads as `null` — user-initiated — never as either.
+ */
+function readAutoRunInitiator(
+  fact: HandlerFact,
+): typeof AUTO_RUN_POST_DRAFT_INITIATOR | typeof AUTO_RUN_POST_CONSTRUCTION_INITIATOR | null {
+  if (fact.fact_type !== 'run_analysis') return null;
+  const provenance = fact.result.enrichment?.[RUN_PROVENANCE_ENRICHMENT_KEY];
+  if (provenance === null || typeof provenance !== 'object') return null;
+  const initiatedBy = (provenance as Record<string, unknown>).initiated_by;
+  if (initiatedBy === AUTO_RUN_POST_DRAFT_INITIATOR) return AUTO_RUN_POST_DRAFT_INITIATOR;
+  if (initiatedBy === AUTO_RUN_POST_CONSTRUCTION_INITIATOR) return AUTO_RUN_POST_CONSTRUCTION_INITIATOR;
+  return null;
+}
+
+/**
+ * Was this `run_analysis` fact started by the SERVER rather than by the user —
+ * after a fresh draft, or after an Agent-lane construction?
  *
  * FALSE for every non-`run_analysis` fact, for an unstamped fact, and for a
- * stamp whose `initiated_by` is anything other than
- * {@link AUTO_RUN_POST_DRAFT_INITIATOR} — including a future initiator value
- * this build does not know. That asymmetry is deliberate: an unknown marker must
- * not be assumed to mean "invisible to the user". A false negative degrades to
- * pre-R2 behaviour; a false positive would suppress a run the user really saw.
+ * stamp whose `initiated_by` is anything other than the two known initiators —
+ * including a future initiator value this build does not know. That asymmetry
+ * is deliberate: an unknown marker must not be assumed to mean "invisible to
+ * the user". A false negative degrades to pre-R2 behaviour; a false positive
+ * would suppress a run the user really saw.
  */
 export function isAutoInitiatedRunAnalysisFact(fact: HandlerFact): boolean {
-  if (fact.fact_type !== 'run_analysis') return false;
-  const provenance = fact.result.enrichment?.[RUN_PROVENANCE_ENRICHMENT_KEY];
-  if (provenance === null || typeof provenance !== 'object') return false;
-  return (
-    (provenance as Record<string, unknown>).initiated_by === AUTO_RUN_POST_DRAFT_INITIATOR
-  );
+  return readAutoRunInitiator(fact) !== null;
 }
 
 /**
@@ -289,8 +355,10 @@ export const AUTO_RUN_RESULT_REACHES_USER = false;
  * Has this `run_analysis` fact's result been put in front of the user?
  *
  * FALSE for every non-`run_analysis` fact. TRUE for a user-initiated run — the
- * turn that ran it is the turn that displayed it. For an auto-initiated run the
- * answer is {@link AUTO_RUN_RESULT_REACHES_USER} — `false`, fail-closed, after the
+ * turn that ran it is the turn that displayed it — and TRUE for the
+ * post-CONSTRUCTION auto-run on the same argument (it is delivered in the user's
+ * own synchronous build response). For the post-DRAFT auto-run the answer is
+ * {@link AUTO_RUN_RESULT_REACHES_USER} — `false`, fail-closed, after the
  * delivered posture was refuted by a second deployed witness on 2026-09-11.
  * ⚠ That constant is an ESTATE-WIDE claim about a channel, not a per-user
  * observation, which is why it cannot be right in either direction: read its
@@ -305,6 +373,7 @@ export const AUTO_RUN_RESULT_REACHES_USER = false;
  *
  * @param autoRunResultReachesUser injectable ONLY so both postures can be pinned
  *        by test without module mocking. Production always takes the default.
+ *        It governs the post-DRAFT auto-run only.
  *        ⭐ It is also the ONLY discriminating handle either posture spec has now
  *        that the constant equals the delivered posture — a control asserting the
  *        constant's current value alone cannot fail (CLAUDE.md trap #12b).
@@ -314,6 +383,14 @@ export function hasUserSeenRunAnalysisResult(
   autoRunResultReachesUser: boolean = AUTO_RUN_RESULT_REACHES_USER,
 ): boolean {
   if (fact.fact_type !== 'run_analysis') return false;
-  if (!isAutoInitiatedRunAnalysisFact(fact)) return true;
+  const initiator = readAutoRunInitiator(fact);
+  if (initiator === null) return true;
+  // ⭐ The construction auto-run is delivered in the user's OWN synchronous
+  // build response — the turn that ran it is the turn that displayed it, the
+  // same argument that makes a user-initiated run `true`. The fail-closed
+  // posture below exists for the post-draft run's ASYNC channel and does not
+  // govern this one; inheriting it would narrate the user's next Run as their
+  // first and drop the re-run comparison.
+  if (initiator === AUTO_RUN_POST_CONSTRUCTION_INITIATOR) return true;
   return autoRunResultReachesUser;
 }

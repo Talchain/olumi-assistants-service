@@ -75,7 +75,9 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { extractGraphOptionIds } from '../context/option-identity.js';
 import {
   buildAutoRunProvenance,
+  buildConstructionAutoRunProvenance,
   RUN_PROVENANCE_ENRICHMENT_KEY,
+  type AutoRunProvenance,
 } from '../context/run-initiator.js';
 import {
   deriveAnalysisFreshness,
@@ -276,10 +278,20 @@ export const AUTO_RUN_PROVISIONAL_DISCLOSURE =
  *   2. the run_analysis fact is stamped with `enrichment.run_provenance`;
  *   3. the assistant answer opens with AUTO_RUN_PROVISIONAL_DISCLOSURE.
  */
-export interface ChipClickAutoRunTrigger {
-  /** The fresh-draft turn this run was initiated for (provenance only). */
-  readonly draftTurnId: string;
-}
+export type ChipClickAutoRunTrigger =
+  | {
+      /** The fresh-draft turn this run was initiated for (provenance only). */
+      readonly draftTurnId: string;
+    }
+  | {
+      /**
+       * The Agent-lane construction this run was initiated for — its registration
+       * turn id (provenance, and the first-analysis runner's dedup key). Stamps
+       * `auto_post_construction` instead of `auto_post_draft`; the other two
+       * consequences above are identical.
+       */
+      readonly constructionTurnId: string;
+    };
 
 /**
  * ⭐⭐ STANDING INVARIANT FOR STATE-RECOVERY CODE (2.1353 r4):
@@ -1267,17 +1279,22 @@ export async function dispatchDeterministicChipClick(
  */
 function stampAutoRunProvenance(
   facts: readonly HandlerFact[],
-  draftTurnId: string,
+  trigger: ChipClickAutoRunTrigger,
 ): readonly HandlerFact[] {
   return facts.map((fact) => {
     if (fact.fact_type !== 'run_analysis') return fact;
+    // The matching builder for the trigger's arm — run-initiator.ts owns each shape.
+    const provenance: AutoRunProvenance =
+      'constructionTurnId' in trigger
+        ? buildConstructionAutoRunProvenance(trigger.constructionTurnId)
+        : buildAutoRunProvenance(trigger.draftTurnId);
     return {
       ...fact,
       result: {
         ...fact.result,
         enrichment: {
           ...(fact.result.enrichment ?? {}),
-          [RUN_PROVENANCE_ENRICHMENT_KEY]: buildAutoRunProvenance(draftTurnId),
+          [RUN_PROVENANCE_ENRICHMENT_KEY]: provenance,
         },
       },
     };
@@ -1678,7 +1695,7 @@ export async function dispatchChipClickRunAnalysis(
     // the key (see RUN_PROVENANCE_ENRICHMENT_KEY), so today's UI renders an
     // ordinary completed analysis — the required graceful degradation.
     if (params.autoRun !== undefined) {
-      enrichedFacts = stampAutoRunProvenance(enrichedFacts, params.autoRun.draftTurnId);
+      enrichedFacts = stampAutoRunProvenance(enrichedFacts, params.autoRun);
     }
 
     // V5 coaching parity — emit the same post-analysis suggested_actions
