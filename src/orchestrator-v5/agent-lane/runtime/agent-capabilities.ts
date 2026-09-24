@@ -1006,6 +1006,7 @@ export function createAgentCapabilities(
       }
       const byLabel = (l: string, kind: string) =>
         g.nodes.find((n) => n.kind === kind && (norm(n.label) === norm(l) || norm(n.description) === norm(l)));
+      const held = heldStatusQuoPairs(g);
 
       const unresolved: string[] = [];
       const unframed: { factor: string; detail: string }[] = [];
@@ -1059,6 +1060,14 @@ export function createAgentCapabilities(
           notLinked.push({
             option: option.label, factor: factor.label,
             acts_on: linked.map((f) => String(f.label ?? f.id)),
+          });
+          continue;
+        }
+        // ⛔ A held status quo takes no level (`heldStatusQuoPairs`): not accepted, never an operation.
+        if (held.has(`${option.id}::${factor.id}`)) {
+          notAccepted.push({
+            option: option.label, factor: factor.label, value: i?.value,
+            reason: `${option.label} is held at its starting values — carrying on as now sets no level, so none is recorded for ${factor.label}. Leave it out.`,
           });
           continue;
         }
