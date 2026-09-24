@@ -136,6 +136,26 @@ function rememberOffered(key: string, actions: readonly OfferedAction[]): void {
   offeredActions.set(key, actions);
 }
 
+/**
+ * ⛔ PRESSING RUN MUST NOT DELETE THE WAY TO APPROVE WHAT IS STILL WAITING (Technical Architecture, #63
+ * 5808759682, served `4fd2703`): a fresh brief offered approve AND Run; the Run turn's chips were derived
+ * from its own tool calls, `run_analysis` carries no proposal, so the approve chip vanished beside a
+ * provisional answer it would have grounded. The approve chip last offered per scenario and subject is
+ * remembered here, and a Run turn carries it forward only while the store would still execute it.
+ */
+const LAST_APPROVE_MAX = 500;
+const lastApproveOffer = new Map<string, OfferedAction>();
+function rememberApprove(key: string, offered: readonly OfferedAction[]): void {
+  const approve = offered.find((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined);
+  if (approve === undefined) return;
+  lastApproveOffer.delete(key);
+  if (lastApproveOffer.size >= LAST_APPROVE_MAX) {
+    const oldest = lastApproveOffer.keys().next().value;
+    if (oldest !== undefined) lastApproveOffer.delete(oldest);
+  }
+  lastApproveOffer.set(key, approve);
+}
+
 /** The originally offered actions that are still valid on the CURRENT state, in their original order. */
 export function stillValidOffers(
   offered: readonly OfferedAction[],
@@ -1290,13 +1310,27 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // The turn's LAST build was refused as too large and nothing was saved: offer the rebuild the reply names.
     const lastBuild = result.tool_calls.filter((c) => c.name === 'build_model_from_brief').at(-1);
     const offerRebuild = lastBuild?.refusal === 'model_too_large' && !result.mutated;
+    // A Run changes no graph: the ONE proposal still awaiting a yes keeps its chip if the store would still
+    // execute it on this revision (never on a guess — two outstanding, or a moved model, carry nothing).
+    const approveKey = `${scenarioId}:${userId ?? ''}`;
+    const carriedApproval = ((): OfferedAction[] => {
+      if (fastPath !== 'run' || graphHash === undefined) return [];
+      const chip = lastApproveOffer.get(approveKey);
+      const id = chip !== undefined ? typedApprovalOf({ chip: { id: chip.id } }) : undefined;
+      const waiting = proposals.outstanding(scenarioId, userId);
+      if (chip === undefined || id === undefined || waiting.length !== 1 || waiting[0]!.proposal_id !== id) return [];
+      const decision = proposals.authorise({ proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash });
+      return decision.status === 'execute' ? [chip, AMEND_CHIP] : [];
+    })();
     const offeredNow: OfferedAction[] = [
       ...approvalChipsFor(result.tool_calls),
+      ...carriedApproval,
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
       ...(runBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
       ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
     ];
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
+    rememberApprove(approveKey, offeredNow);
 
     // A Run writes nothing: its interpretation is never passed through the WRITE narrator, whose
     // completion-claim stripper would delete a sentence and append a false write-status line
