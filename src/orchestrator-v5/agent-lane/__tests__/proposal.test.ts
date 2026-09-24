@@ -135,17 +135,23 @@ describe('authorisation applies the STORED proposal', () => {
    * shared by every user and scenario (`agent-v1-turn.ts`), so the cap is reached
    * by total traffic, not by one conversation.
    */
-  it('an applied proposal survives eviction pressure — already_applied, never unknown', () => {
+  /**
+   * ⚠ SUPERSEDED PREMISE, kept as the honest statement of the NEW contract (b2b691ff): an applied proposal is
+   * now the PREFERRED eviction victim — its cycle is complete, and keeping the proposal a user is looking at
+   * matters more (a two-half starting point otherwise evicts its own first half). What must hold instead is
+   * that the forgotten approval is TOLD honestly, never "nothing was changed" (the describe block below).
+   */
+  it('under eviction pressure an applied proposal is forgotten FIRST, and the user is told it may already be saved', () => {
     const s = new ProposalStore();
     const approved = s.put(createProposal(content({ public_label: 'the one the user approved' })));
     s.markApplied(approved.proposal_id, [{ version: 7, scenario_id: SCENARIO, label: 'v7' } as never]);
-    // Push well past the cap. `approved` is the OLDEST, so FIFO eviction targets it first.
     for (let i = 0; i < MAX_PROPOSALS + 5; i++) s.put(createProposal(content({ public_label: 'filler ' + i })));
     const d = s.authorise(req(approved.proposal_id));
-    expect(d.status, 'reporting an applied proposal as unknown invites a second write of a change already saved').toBe('already_applied');
-    if (d.status === 'already_applied') {
-      expect(d.receipts.map((r) => (r as { version?: number }).version), 'the receipts must survive with it, or the user cannot be told which version it became').toEqual([7]);
-    }
+    expect(d.status).toBe('unknown_proposal');
+    const n = narrateWriteOutcome('Done.', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: d.status }]);
+    const text = withWriteOutcome(n.text, n.status);
+    expect(text).not.toMatch(/nothing was changed/i);
+    expect(text).toMatch(/may already be in the model/i);
   });
 
   /**
