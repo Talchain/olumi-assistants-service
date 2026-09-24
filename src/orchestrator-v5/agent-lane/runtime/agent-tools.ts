@@ -239,7 +239,8 @@ export interface AgentCapabilities {
   runAnalysis(ctx: AgentToolContext, args: { reason: string }): Promise<ToolResult>;
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
-    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
+    /** `revise` only when the user named a new figure for a factor that already holds one. */
+    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string; revise?: boolean }[];
   }): Promise<ToolResult>;
   proposeNewOption(ctx: AgentToolContext, args: {
     label: string; acts_on: { factor_label: string; direction: 'positive' | 'negative' }[]; rationale: string;
