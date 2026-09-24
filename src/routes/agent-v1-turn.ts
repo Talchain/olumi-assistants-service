@@ -41,7 +41,7 @@ import { resolveUserIdentity } from '../orchestrator/user-identity.js';
 import { log } from '../utils/telemetry.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
-import { runAgentTurn, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
+import { runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
@@ -484,6 +484,21 @@ export function typedRunOf(body: Record<string, unknown>): boolean {
   const chip = body['chip'] as { action_type?: unknown; id?: unknown } | null | undefined;
   // The Agent's own Run offer is recognised by its id too, in case a client echoes only the id.
   return (body['kind'] === undefined || body['kind'] === 'message') && (chip?.action_type === 'run_analysis' || chip?.id === RUN_OFFER_CHIP.id);
+}
+
+/**
+ * ⛔ A SUGGESTION-BUTTON CLICK CARRIES NO CONSENT TO WRITE OR TO RUN (RC #63 5819467504 §2).
+ * A chip-initiated message whose chip is neither the typed approval nor the typed Run (a coaching
+ * card's action, a next-step chip) reaches the Agent loop without `authorise_change` or
+ * `run_analysis`: an approval has its own chip, and a Run has its own control. Measured before this
+ * guard (#63 5819380376): a surprise Run, a same-turn propose-and-authorise, and an earlier turn's
+ * proposal authorised, each on one click. Composer messages are untouched.
+ */
+export const CHIP_TURN_WITHHELD_TOOLS: readonly string[] = ['authorise_change', 'run_analysis'];
+export function withheldToolsOf(body: Record<string, unknown>): readonly string[] {
+  const chip = body['chip'];
+  if (chip === null || typeof chip !== 'object') return [];
+  return typedApprovalOf(body) === undefined && !typedRunOf(body) ? CHIP_TURN_WITHHELD_TOOLS : [];
 }
 
 export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown }> {
@@ -1403,6 +1418,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           instructions: AGENT_INSTRUCTIONS,
           maxOutputTokens: budget.max_output_tokens,
           mode,
+          withheldTools: withheldToolsOf(body),
         },
         capabilities,
         callModel,
@@ -1536,7 +1552,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === id);
       return chip !== undefined ? [chip, AMEND_CHIP] : [];
     })();
-    const approvals = approvalChipsFor(result.tool_calls);
+    // A withheld call consumed no proposal and moved nothing: it is not an authorisation, and
+    // counting one (it has no proposal id) would strand the proposal it named without its chip.
+    const approvals = approvalChipsFor(result.tool_calls.filter((c) => c.refusal !== WITHHELD_ON_CHIP_TURN));
     // A first analysis the model could not run offers its repair: the approve chip when the Agent
     // proposed the missing values this turn, otherwise the next-step chip.
     const firstAnalysisBlocked = fa !== undefined && !fa.ran && (fa.reason === 'not_admissible' || fa.reason === 'refused')
