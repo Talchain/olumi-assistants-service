@@ -158,6 +158,21 @@ function statusLine(name: string, r: ToolResult): string {
     const head = vs.length > 0 ? `Saved${versionPhrase(vs)}.` : 'Saved. No version number was recorded for it.';
     return partial ? `${head} Some of it was not recorded — see above.` : head;
   }
+  /**
+   * ⛔ A PARTIALLY ADDED OPTION SAYS WHAT LANDED AND WHAT REMAINS (independent review of #1788,
+   * 5806071796). The generic line said "the change was refused (unknown reason)" and dropped the
+   * named missing link. Composed only from the capability's readback-confirmed fields.
+   */
+  const opt = r.option as { label?: unknown; linked_to?: unknown } | undefined;
+  if (r.ok !== true && r.mutated === true && opt !== undefined && Array.isArray(r.not_linked) && r.not_linked.length > 0) {
+    const label = String(opt.label ?? 'The option');
+    const linkedTo = Array.isArray(opt.linked_to) ? opt.linked_to.map(String) : [];
+    const missing = (r.not_linked as { factor?: unknown }[]).map((n) => String(n.factor ?? ''));
+    const vs = versionsOf(r);
+    return `Partly saved${versionPhrase(vs)}: "${label}" was added${linkedTo.length > 0 ? ` and linked to ${linkedTo.join(', ')}` : ''}, `
+      + `but not yet linked to ${missing.join(', ')}. Approving the same change again will try only the missing ${missing.length === 1 ? 'link' : 'links'}; `
+      + 'if the model has changed since, you will be asked to confirm again.';
+  }
   const code = String(r.refusal ?? '');
   const mutated = r.mutated === true;
   return `${mutated ? 'Partly saved' : 'Not saved'}: ${REFUSAL_WORDS[code] ?? `the change was refused (${code || 'unknown reason'})`}.`;
@@ -216,6 +231,40 @@ export function narrateWriteOutcome(
 }
 
 /** The user-visible text: the model's (checked) words, then the server's status line. */
+/**
+ * ⛔ WHAT A PROPOSAL LEAVES OUT IS SAID BY OLUMI, NOT LEFT TO THE MODEL (independent review of
+ * #1800, 5806926323 / 5807008891). A named input that cannot hold a value (a risk, an outcome) is
+ * dropped from the proposal; the one-click approval is generic, and a model reply that says only
+ * "here is a starting point" would offer consent while the user-named input was silently absent.
+ * This line is composed from the proposers' own results and rides with the status line, so the
+ * response itself names every omission and why BEFORE the approval it accompanies.
+ */
+export function notAdoptedLine(
+  toolCalls: readonly { name: string }[],
+  toolResults: readonly ToolResult[],
+): string | null {
+  const PROPOSERS = ['propose_assumptions', 'propose_starting_point'];
+  const seen = new Set<string>();
+  const items: string[] = [];
+  toolCalls.forEach((c, i) => {
+    if (!PROPOSERS.includes(c.name)) return;
+    const r = toolResults[i] as { not_a_factor?: unknown; assumptions_refused?: { not_a_factor?: unknown } } | undefined;
+    const list = [
+      ...(Array.isArray(r?.not_a_factor) ? r!.not_a_factor : []),
+      ...(Array.isArray(r?.assumptions_refused?.not_a_factor) ? r!.assumptions_refused!.not_a_factor as unknown[] : []),
+    ] as { label?: unknown; kind?: unknown }[];
+    for (const n of list) {
+      const label = String(n?.label ?? '').trim();
+      if (label === '' || seen.has(label)) continue;
+      seen.add(label);
+      const kind = String(n?.kind ?? '').trim();
+      items.push(kind !== '' ? `${label} (${/^[aeiou]/i.test(kind) ? 'an' : 'a'} ${kind})` : label);
+    }
+  });
+  if (items.length === 0) return null;
+  return `Not included in this proposal: ${items.join('; ')}. Only a factor can hold a starting value, so ${items.length === 1 ? 'it was' : 'they were'} left out — approving adds nothing for ${items.length === 1 ? 'it' : 'them'}.`;
+}
+
 export function withWriteOutcome(body: string, status: string | null): string {
   if (status === null) return body;
   return body.trim().length > 0 ? `${body}\n\n${status}` : status;
