@@ -248,8 +248,8 @@ describe('a value the user revises is saved on its own frame, and only called sa
     // Keying `ownWrite` on the receipt ALONE would report "not saved" for a write that
     // landed, which is worse than the defect item 4 fixes. `model_version_receipt` is the
     // single DEGRADABLE_EGRESS_FIELD (validators/b1.ts:128): when it is the only field that
-    // fails egress validation it is deleted and the rest of the response passes. The second
-    // signal is the canonical hash moving across this op's own dispatch.
+    // fails egress validation it is deleted and the rest of the response passes. What still
+    // proves it is this op's own `graph_patch` (status 'applied') in the same response.
     const p = framedProduct('committed_no_receipt');
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const proposed = await caps.proposeAssumptions(ctx, {

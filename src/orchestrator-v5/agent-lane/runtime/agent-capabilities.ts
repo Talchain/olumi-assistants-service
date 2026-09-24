@@ -100,6 +100,46 @@ import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 
+/**
+ * ⭐ DID *THIS* `factor_value_edit` COMMIT A WRITE? Read from its OWN response only.
+ *
+ * What the served `/orchestrate/v2/turn` system-event response carries, derived at
+ * `route-v2.ts` (the `ingress.kind === 'system_event'` branch) and
+ * `system-events/dispatch.ts` (`dispatchFactorValueEdit`):
+ *
+ *   · COMMITTED → HTTP 200, `blocks: [{ type: 'graph_patch', status: 'applied',
+ *     operation: 'set_factor_value', target_id, before, after }]`, `graph_hash` (the
+ *     commit's own persisted hash), `draft_graph`, and a `model_version_receipt` only
+ *     when a version was minted. A guest never gets one (`append_turn_atomic_v5`:
+ *     `v_should_create := v_user_id IS NOT NULL AND …`, else `'model_version_receipt',
+ *     NULL`); it is also flag-dependent and the one `DEGRADABLE_EGRESS_FIELD`.
+ *   · REFUSED → ALSO HTTP 200. The refusal is committed as a turn with no graph
+ *     (`commitPerformed: true, graph: null`), so the body is `blocks: []`, no
+ *     `graph_hash`, no receipt, and copy such as "…so I haven't changed anything."
+ *   · COMMIT FAILED → 500 (`system_event_commit_failed`).
+ *   · REPLAY / REUSED ID → 200, but `commit.ts` rewrites the patch to `status: 'noop'`
+ *     ("nothing was written") and strips the receipt on a reused id.
+ *   · VALUE ALREADY HELD → 200, the handler's own fact says `status: 'noop'`.
+ *
+ * So the one per-operation proof a guest's write carries is the `graph_patch` block
+ * with `status: 'applied'` for THIS target. It is built from this request's own
+ * handler fact and returned only on this request's response, so ANOTHER writer cannot
+ * produce it: their commits move the graph and its hash, which is exactly why neither
+ * the hash nor a read-back of the target is evidence of anything we did.
+ */
+function valueWriteCommittedByThisRequest(
+  res: { status: number; json: Record<string, unknown> },
+  targetId: string,
+): boolean {
+  if (res.status !== 200) return false;
+  const blocks: unknown[] = Array.isArray(res.json.blocks) ? res.json.blocks : [];
+  return blocks.some((b) => {
+    if (b === null || typeof b !== 'object') return false;
+    const p = b as { type?: unknown; operation?: unknown; target_id?: unknown; status?: unknown };
+    return p.type === 'graph_patch' && p.operation === 'set_factor_value' && p.target_id === targetId && p.status === 'applied';
+  });
+}
+
 /** Marks a compound starting point, so a newer one can replace it before approval. */
 const STARTING_POINT_BASIS = 'a starting point \u2014 values and what each option sets \u2014 for the user to adopt or correct in one approval';
 
@@ -1721,30 +1761,19 @@ export function createAgentCapabilities(
         const failures: { factor: string; detail: string }[] = [];
         const receipts: ReceiptSummary[] = [];
         /**
-         * Did THIS approval's own write for that factor actually land? See item 4 below.
+         * Did THIS approval's own write for that factor actually land? Decided per
+         * operation by `valueWriteCommittedByThisRequest` — see its docblock for what the
+         * served response carries and why nothing else can satisfy it.
          *
-         * ⛔ A RECEIPT ALONE IS NOT A SUFFICIENT SIGNAL, and keying only on it would turn a
-         * real save into "not saved" — the opposite of the defect item 4 fixes, and worse.
-         * `model_version_receipt` is the single `DEGRADABLE_EGRESS_FIELD`
-         * (`validators/b1.ts:128`): when it is the ONLY field that fails egress validation,
-         * it is DELETED and the rest of the response passes. That is reachable today — its
-         * own docblock says the durable fix (not minting >200-character labels) has not
-         * landed. So a committed write can answer 200 with no receipt.
-         *
-         * Hence TWO independent signals, either of which is sufficient: this op's receipt,
-         * or the canonical graph hash moving across this op's own dispatch. The hash is read
-         * per op, which also keeps the chain accurate when one approval carries several.
-         *
-         * ⚠ The `priorTurnConflict` path in `commit.ts:1746-1766` also strips the receipt,
-         * but there the write genuinely did not happen for THIS request, and the hash will
-         * not have moved either — so both signals correctly read false and that case stays
-         * reported as not saved, which is what that branch exists to say.
+         * ⛔⛔ IT USED TO BE `r.status === 200 && (receipt || graph_hash moved)`, and that
+         * reported refused writes as saved. A refused `factor_value_edit` answers HTTP 200
+         * (the refusal is committed as a turn), a guest gets no receipt, and the graph hash
+         * moves for ANY writer — so an unrelated edit landing in the same window turned a
+         * refusal into "Saved", and the old value read back became the "recorded" figure.
          */
         const ownWrite = new Map<string, boolean>();
         /** The frame the factor already carries, read from the pre-write state. */
         const beforeById = new Map((before.nodes ?? []).map((n) => [n.id, n]));
-        /** The canonical revision this loop has advanced to, so each op's own move is visible. */
-        let carriedHash = before.graph_hash;
         const capOf = (id: string): number | undefined => {
           const c = ((beforeById.get(id)?.observed_state ?? {}) as { cap?: unknown }).cap;
           return typeof c === 'number' && c > 0 ? c : undefined;
@@ -1769,16 +1798,23 @@ export function createAgentCapabilities(
               ...(v.unit !== undefined && v.unit !== '' ? { unit: v.unit } : {}),
             },
           });
+          // ⛔ OWN-WRITE EVIDENCE, PER OP, FROM THIS REQUEST'S OWN RESPONSE (Codex
+          // 5810763729 item 4). A later read cannot tell "my write landed" from "the old
+          // number was already there" or "someone else wrote it".
+          const own = valueWriteCommittedByThisRequest(r, o.path);
           if (r.status !== 200) failures.push({ factor: o.path, detail: `http ${r.status}` });
+          else if (!own) {
+            // A 200 that is not this op's committed write: a refusal (committed as a turn,
+            // nothing written) or a no-op. Olumi's own words say which, so they travel.
+            const said = typeof r.json.assistant_text === 'string' ? r.json.assistant_text.trim() : '';
+            failures.push({ factor: o.path, detail: said !== '' ? said : 'not recorded by this approval' });
+          }
           const rc = receiptSummaryOf(r.json);
-          if (rc.summary !== null) receipts.push(rc.summary);
+          // A receipt is reported only alongside this op's own committed write, so the
+          // result can never pair "not recorded" with "saved as version N".
+          if (own && rc.summary !== null) receipts.push(rc.summary);
           if (rc.unreadable) failures.push({ factor: o.path, detail: 'a receipt arrived but could not be read' });
-          // ⛔ OWN-WRITE EVIDENCE, PER OP (Codex 5810763729 item 4). A later read alone
-          // cannot tell "my write landed" from "the old number was already there".
-          const afterOp = await readGraph(ctx.scenario_id);
-          const moved = afterOp !== null && afterOp.graph_hash !== carriedHash;
-          if (afterOp !== null) carriedHash = afterOp.graph_hash;
-          ownWrite.set(o.path, r.status === 200 && (rc.summary !== null || moved));
+          ownWrite.set(o.path, own);
         }
 
         // ⛔ CONFIRMED FROM STATE. The handler may rescale what it was sent
@@ -1801,7 +1837,8 @@ export function createAgentCapabilities(
            * held 0.7 still reads a number back after a refused write, so the refusal was
            * reported as "Saved", and the number shown was the model's divisor rather than
            * the user's own. So: read the native figure (`raw_value`, else the model value
-           * scaled back up by the cap), and require this approval's own receipt.
+           * scaled back up by the cap), and require THIS operation's own committed write
+           * (`ownWrite`, from its own response — never a receipt-or-hash guess).
            *
            * ⚠ A RESCALE IS STILL REPORTED, NOT SUPPRESSED. When the handler stores a
            * different number from the one approved, `recorded` carries what is actually
@@ -1834,7 +1871,11 @@ export function createAgentCapabilities(
         if (landed.length === 0) {
           return {
             ok: false, mutated: false, applied: false, refusal: 'not_applied',
-            detail: 'None of the values were recorded. The model is unchanged.',
+            // ⛔ NOT "the model is unchanged": a refusal proves only that THIS approval
+            // wrote nothing. Another writer may have changed the model in the same window.
+            detail:
+              'None of the values were recorded, so this approval left the model unchanged. Read the model again ' +
+              'before describing it: someone else may have changed it meanwhile.',
             failures, values: applied,
           };
         }
