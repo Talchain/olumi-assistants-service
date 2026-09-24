@@ -402,7 +402,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       // wrote and then ran left the UI saying "Model changed" over its own run.
       // Restates `run_state` from this SAME readback, after the
       // readiness fallback above so an assessed `analysis_ready` is stamped too — see the helper.
-      analysisReady = withRunStateFreshness(analysisReady, analysisState);
+      analysisReady = withRunStateFreshness(analysisReady, analysisState, { graphHash, analysisResult });
       // Only when it actually has content: an empty graph must not overwrite
       // whatever the client already has hydrated.
       /**
