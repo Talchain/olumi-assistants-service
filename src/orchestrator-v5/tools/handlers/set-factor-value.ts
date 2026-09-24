@@ -617,6 +617,48 @@ export function createSetFactorValueHandler(): HandlerFn {
           userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
         });
       }
+      /**
+       * ⛔⛔ A VALUE EDIT MUST NOT LEAVE A DECLARATION IT HAS JUST FALSIFIED.
+       *
+       * WIRE-WITNESSED on served `c2ef0b8`, scenario `ba19709c`, driven end to end.
+       * The constructor produced a factor carrying
+       *   `{ value: 0, unit: "unit_interval", declared_scale: "unit_interval" }`
+       * with NO cap and NO `scale_frame`. At that moment the declaration was TRUE —
+       * 0 is in [0,1]. One `factor_value_edit` to 40 then persisted
+       *   `{ value: 40, raw_value: 40, declared_scale: "unit_interval" }`
+       * still with no cap, because this merge spreads the prior `observed_state`
+       * and only overwrites `value`/`raw_value`.
+       *
+       * ⛔ The graph then DECLARES the value is on a 0–1 unit interval while holding
+       * 40. The edit falsified a previously-true declaration. Every downstream reader
+       * is entitled to believe `declared_scale`, so this is strictly worse than the
+       * already-known problem that `value === raw_value` with no cap is unanalysable:
+       * the model is SELF-CONTRADICTORY.
+       *
+       * ⭐ DROP THE CLAIM; DO NOT INVENT A SCALE. Deriving a frame here is REFUSED
+       * with measurement (`stored-scale-frame-edit.test.ts` — the option levels were
+       * framed against the DRAFT's frame, so a ladder turns a visible refusal into a
+       * silent wrong answer: 9 of 25 framings distorted, worst 100x). Clearing a false
+       * declaration is the opposite move — it converts a WRONG claim into an ABSENT
+       * one, which is this lane's fabrication boundary. The analysis still refuses the
+       * pair, honestly and for the real reason.
+       *
+       * ⚠ Same shape, and the same argument, as the `display_value` clearing a few
+       * lines below: "we normalise back to undefined-meaning-cleared rather than
+       * persisting the prior value."
+       *
+       * Narrow by construction: fires ONLY when the declaration says unit-interval,
+       * the stored value is outside [0,1], and no cap accompanies it after the write.
+       * A capped pair carries its own frame and is untouched; a value genuinely in
+       * [0,1] keeps its true declaration.
+       */
+      const priorObserved = (node.observed_state ?? {}) as { declared_scale?: unknown; cap?: unknown };
+      const capAfterWrite = after.cap !== undefined ? after.cap : priorObserved.cap;
+      const declarationFalsified =
+        String(priorObserved.declared_scale ?? '') === 'unit_interval'
+        && typeof capAfterWrite !== 'number'
+        && Number.isFinite(normalised.value)
+        && Math.abs(normalised.value) > 1;
       const merged = {
         ...(node.observed_state ?? {}),
         value: normalised.value,
@@ -700,6 +742,17 @@ export function createSetFactorValueHandler(): HandlerFn {
       // `delete`, for the reason given for `elicited_from` above. The NODE-LEVEL
       // spelling is withdrawn below, beside `provenance`.
       delete (merged as { extractionType?: unknown }).extractionType;
+      /**
+       * ⛔⛔ AND THE FALSIFIED SCALE DECLARATION — see the long note above the merge.
+       *
+       * `delete`, for exactly the reason given for `elicited_from` and
+       * `extractionType`: a present-but-undefined key survives structuredClone and
+       * object spreads while READING AS PRESENT, so `declared_scale: undefined` would
+       * leave the false claim addressable. The key must be ABSENT.
+       */
+      if (declarationFalsified) {
+        delete (merged as { declared_scale?: unknown }).declared_scale;
+      }
 
       node.observed_state = merged;
 
