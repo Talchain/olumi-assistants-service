@@ -1394,7 +1394,18 @@ export function createAgentCapabilities(
                   failures.push({
                     factor: 'scale_frame',
                     detail: savedSomething
-                      ? 'the model changed while the range was being attached, and it could not be read back afterwards. What is certain: this turn saved values earlier, and its range write was refused. The CURRENT state of those values, their ranges and whether the analysis can run is UNKNOWN — read the model again before advising anything.'
+                      ? /**
+                       * ⚠ THE HISTORICAL FACT IS BOUND TO ITS OWN TENSE. I asked
+                       * the reviewer whether to withhold it entirely; on
+                       * reflection that is my call, and withholding it is worse —
+                       * it is the one thing that stops a user redoing a write
+                       * that was accepted. What matters is that it cannot be
+                       * READ as a current-state claim, so the sentence says the
+                       * writes were accepted AT THE TIME and that whether those
+                       * values are still in the model is unknown, rather than
+                       * stating a fact and an UNKNOWN side by side.
+                       */
+                      'the model changed while the range was being attached, and it could not be read back afterwards. This turn\u2019s value writes were accepted AT THE TIME, and its range write was refused. Whether those values are still in the model, whether they now carry a range, and whether the analysis can run are ALL UNKNOWN, because the model could not be read. Read it again before describing or advising anything \u2014 and do not tell the user their figures are safe.'
                       : 'the model changed while this was being prepared and could not be read back. No range was attached by this turn; the current state is unknown — read it again and propose afresh.',
                   });
                 } else {

@@ -211,7 +211,13 @@ describe('⛔ THE COMPETING WRITER CONTROL — a refusal means the model MOVED',
     const { r } = await authorise({ frameRefusal: true, readbackFails: true });
     const failures = (r.failures ?? []) as { factor?: string; detail: string }[];
     const frame = failures.find((f) => f.factor === 'scale_frame')!;
-    expect(frame.detail).toContain('UNKNOWN');
+    expect(frame.detail).toContain('ALL UNKNOWN');
     expect(frame.detail).not.toContain('Do not re-enter');
+    // ⚠ The historical fact is allowed, but ONLY bound to its own tense — it may
+    // not read as a claim about the model now. Stating a bare fact beside an
+    // UNKNOWN invites the reader to act on the fact.
+    expect(frame.detail).toContain('AT THE TIME');
+    expect(frame.detail).not.toContain('are unchanged');
+    expect(frame.detail).toContain('do not tell the user their figures are safe');
   });
 });
