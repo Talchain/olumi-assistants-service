@@ -109,13 +109,14 @@ export function buildCandidateSchema(): Record<string, unknown> {
         'Factor labels this option changes when it states no level \u2014 e.g. an option that phases, grandfathers or tests something. Use the factor labels exactly. An option that names nothing here and has no interventions is unreachable from the decision and cannot be analysed.',
         items: { type: 'string' } },
       interventions: { type: 'array', description:
-        'The factor levels this option sets. Record a level the brief states, with provenance "explicit". Empty when the option changes nothing. Never guess a level.',
-        items: obj({ factor_label: { type: 'string' }, value: { type: 'number' }, unit: { type: 'string' }, provenance },
-          ['factor_label', 'value', 'unit', 'provenance']) },
+        'The factor level this option sets, or a signed addition to its baseline. Distinguish these meanings with value_kind. Preserve user numbers; an estimated level is ai_proposed, never explicit. Include the unchanged levels for the current-state option.',
+        items: obj({ factor_label: { type: 'string' }, value: { type: 'number' }, value_kind: { type: 'string', enum: ['absolute', 'additional'] }, unit: { type: 'string' }, provenance },
+          ['factor_label', 'value', 'value_kind', 'unit', 'provenance']) },
     }, ['label', 'provenance', 'changes', 'interventions']) },
     factors: { type: 'array', items: obj({
       label: { type: 'string' }, role: { type: 'string', enum: ['controllable', 'observable', 'external'] },
-      baseline_known: { type: 'boolean' }, baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+      baseline_known: { type: 'boolean', description: 'True only for a baseline supplied by the user or evidence. A provisional AI estimate keeps this false.' },
+      baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }], description: 'A stated baseline or a clearly provisional AI modelling estimate. Provide a reasonable estimate for a first calculation when possible; use null only when no defensible estimate is available.' },
       unit: { anyOf: [{ type: 'string' }, { type: 'null' }] }, provenance,
       plausible_max: { type: 'number',
         description: 'REQUIRED, and NEVER null. The top of the range this factor could plausibly take, in its own unit \u2014 the SCALE it is read against, not a prediction. A percentage or a score out of 100: 100. A count, an amount or a price: a round number comfortably above anything realistic (a \u00a349 price might use 200; 300 subscribers might use 2000). Something ALREADY between 0 and 1: exactly 1. Every factor gets one, with or without a baseline today \u2014 a value adopted later is read against this same range.' },
@@ -136,8 +137,9 @@ export function buildCandidateSchema(): Record<string, unknown> {
 
 export const BUILD_INSTRUCTIONS = [
   'Produce a complete causal decision model from the brief in ONE pass.',
-  'Preserve exact user facts, numbers, constraint semantics and time horizon. Do not invent numeric baselines or behavioural effects.',
-  'For each option fill `interventions` with the factor levels it sets \u2014 record a level the brief states with provenance "explicit", and never guess one it does not give.',
+  'Preserve exact user facts, numbers, constraint semantics and time horizon. The first model must support a PROVISIONAL calculation before user adoption: provide defensible starting estimates where the brief gives no baseline, mark those factors ai_proposed with baseline_known:false, and explain the uncertainty in unknowns. These are modelling assumptions, never measurements or user-validated facts. If no defensible estimate is possible, leave it null and name the specific unresolved input.',
+  'For each option fill `interventions` with its factor settings. value_kind:"absolute" means the resulting total or level; value_kind:"additional" means a signed change from the same factor baseline. For hiring, adding two to a proposed baseline of five means total seven, never total two. Record the user-stated addition as explicit but keep an estimated resulting level ai_proposed. Keep one unit and plausible_max frame per factor across all baselines and options; the current-state option explicitly keeps those baseline levels.',
+  'Connect options to the controllable factors they change, then through supported causal mechanisms to risks and the goal. Never emit a direct option-to-risk link: it cannot be interpreted as an option setting a risk value. Retain each meaningful risk hypothesis, its sign and its downstream path; express its exposure through a causal factor or mediator, rather than deleting the risk or claiming equal exposure.',
   'EVERY OPTION MUST SAY WHAT IT DOES. An option with no `interventions` AND no `changes` is inert: it can never be compared with another option, whatever values are supplied later, and the whole decision becomes unanswerable. If the brief does not say what an option changes, still name the factors it ACTS ON in `changes` \u2014 that is a structural claim, not a numeric one. '
   + 'EVERY option must also list, in `changes`, the factors it acts on WITHOUT a stated level. An option that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping.',
   // ⛔ THE EXPLOSION CLAUSE, REPLACED. This previously read: "Then widen: add the
@@ -310,6 +312,74 @@ export function retrySchemaPinningGoal(goal: CandidateModel['goal']): Record<str
   return schema;
 }
 
+/** Resolve declared additions before admission's absolute-level contract. */
+export function prepareProvisionalCandidate(model: CandidateModel): { candidate: CandidateModel; issues: string[] } {
+  const issues: string[] = [];
+  const options = model.options.map((option) => ({
+    ...option,
+    interventions: option.interventions?.map((intervention) => {
+      const kind = (intervention as typeof intervention & { value_kind?: string }).value_kind;
+      if (kind === undefined || kind === 'absolute') return intervention; // Existing stored candidates.
+      if (kind !== 'additional') {
+        issues.push(`${option.label}: unknown value_kind for ${intervention.factor_label}`);
+        return intervention;
+      }
+      const factors = model.factors.filter((f) => f.label === intervention.factor_label);
+      const factor = factors.length === 1 ? factors[0] : undefined;
+      if (factor === undefined || typeof factor.baseline_value !== 'number' || !Number.isFinite(factor.baseline_value)
+        || !Number.isFinite(intervention.value) || !Number.isFinite(factor.baseline_value + intervention.value)
+        || !factor.unit || !intervention.unit || factor.unit.trim().toLowerCase() !== intervention.unit.trim().toLowerCase()) {
+        issues.push(`${option.label}: ${intervention.factor_label} needs one finite baseline and matching units before an addition can become a total`);
+        return intervention;
+      }
+      return {
+        ...intervention, value_kind: 'absolute', value: factor.baseline_value + intervention.value,
+        provenance: factor.baseline_known && factor.provenance === 'explicit' && intervention.provenance === 'explicit'
+          ? 'explicit' : 'ai_proposed',
+      };
+    }),
+  }));
+  const optionLabels = new Set(model.options.map((o) => o.label));
+  const riskLabels = new Set(model.risks.map((r) => r.label));
+  for (const link of model.links) {
+    if (optionLabels.has(link.from) && riskLabels.has(link.to)) {
+      issues.push(`${link.from} -> ${link.to}: retain this risk hypothesis through a causal factor or mediator, not a direct option-risk setting`);
+    }
+  }
+  return { candidate: { ...model, options }, issues };
+}
+
+/** A repair may replace an invalid direct edge, but must preserve its signed path. */
+function retainsRiskHypotheses(before: CandidateModel, after: CandidateModel): boolean {
+  const paths = (model: CandidateModel, from: string, to: string): Set<number> => {
+    const links = [
+      ...model.links.filter((l) => l.direction !== 'unknown').map((l) => ({ from: l.from, to: l.to, sign: l.direction === 'negative' ? -1 : 1 })),
+      ...model.options.flatMap((o) => [...(o.changes ?? []), ...(o.interventions ?? []).map((i) => i.factor_label)]
+        .map((factor) => ({ from: o.label, to: factor, sign: 1 }))),
+    ];
+    const signs = new Set<number>();
+    const walk = (at: string, sign: number, seen: Set<string>): void => {
+      if (at === to) { signs.add(sign); return; }
+      for (const link of links.filter((l) => l.from === at && !seen.has(l.to))) {
+        walk(link.to, sign * link.sign, new Set([...seen, link.to]));
+      }
+    };
+    walk(from, 1, new Set([from]));
+    return signs;
+  };
+  for (const risk of before.risks) {
+    if (!after.risks.some((r) => r.label === risk.label)) return false;
+    const downstream = paths(after, risk.label, after.goal.metric);
+    if (downstream.size === 0 || [...paths(before, risk.label, before.goal.metric)].some((s) => !downstream.has(s))) return false;
+    for (const option of before.options) {
+      const prior = paths(before, option.label, risk.label);
+      const repaired = paths(after, option.label, risk.label);
+      if ([...prior].some((s) => !repaired.has(s))) return false;
+    }
+  }
+  return before.options.every((o) => after.options.some((kept) => kept.label === o.label));
+}
+
 export async function buildModelFromBrief(
   scenarioId: string,
   brief: string,
@@ -337,6 +407,8 @@ export async function buildModelFromBrief(
     return { ok: false, mutated: false, refusal: 'construction_failed', detail: String(err).slice(0, 200) };
   }
 
+  let preparation = prepareProvisionalCandidate(candidate);
+  candidate = preparation.candidate;
   let admitted = admitCandidateModel(candidate, {});
 
   /**
@@ -360,25 +432,31 @@ export async function buildModelFromBrief(
    */
   let size: ConstructionSizeVerdict = assessConstructionSize(admitted);
   let sizeRetried = false;
+  let constructionRetried = false;
   // ⛔ NEVER SILENTLY. What an adopted retry shed from the first draft, and the
   // questions it parked in `unknowns`, travel with the result so the Agent can say
   // them — otherwise an option the model mislabelled as its own vanishes unseen.
   let leftOut: { kind: string; label: string }[] = [];
-  if (!size.within && !size.user_material_exceeds_limit) {
-    sizeRetried = true;
+  const needsSizeRetry = !size.within && !size.user_material_exceeds_limit;
+  if (needsSizeRetry || preparation.issues.length > 0) {
+    sizeRetried = needsSizeRetry;
+    constructionRetried = true;
     try {
       const retry = await callStructured({
         model: budget.model,
         // The delta is APPENDED, so every rule the first pass obeyed still holds —
-        // provenance, wiring, plausible_max, no invented numbers.
-        instructions: `${BUILD_INSTRUCTIONS} ${retryInstruction(size)}`,
-        input: brief,
+        // provenance, wiring, plausible_max and clearly labelled estimates.
+        instructions: `${BUILD_INSTRUCTIONS} ${needsSizeRetry ? retryInstruction(size) : ''} Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
+        input: preparation.issues.length > 0
+          ? `${brief}\n\nConstruction issues: ${JSON.stringify(preparation.issues)}\nCandidate to repair: ${JSON.stringify(candidate)}`
+          : brief,
         max_output_tokens: budget.max_output_tokens,
         reasoning_effort: budget.reasoning_effort,
         schema: retrySchemaPinningGoal(candidate.goal),
       });
       if (retry.text.length > 0) {
-        const retryCandidate = JSON.parse(retry.text) as CandidateModel;
+        const retryPreparation = prepareProvisionalCandidate(JSON.parse(retry.text) as CandidateModel);
+        const retryCandidate = retryPreparation.candidate;
         const retryAdmitted = admitCandidateModel(retryCandidate, {});
         const retrySize = assessConstructionSize(retryAdmitted);
         // ⚠ ADOPT ONLY WHAT IS ACTUALLY SMALLER, on BOTH dimensions. A retry that
@@ -394,9 +472,9 @@ export async function buildModelFromBrief(
         // fact and relationship the user stated must still be there by name.
         const keepsUserMaterial = keepsEveryUserStatedIdentity(size, retrySize);
         if (
-          retrySize.nodes <= size.nodes &&
-          retrySize.edges <= size.edges &&
-          keepsUserMaterial
+          (needsSizeRetry ? retrySize.nodes <= size.nodes && retrySize.edges <= size.edges : retrySize.within || retrySize.user_material_exceeds_limit) &&
+          keepsUserMaterial && retryPreparation.issues.length === 0 &&
+          (!preparation.issues.length || retainsRiskHypotheses(candidate, retryCandidate))
         ) {
           const kept = new Set(retryAdmitted.nodes.map(nodeIdentity));
           leftOut = admitted.nodes
@@ -405,12 +483,19 @@ export async function buildModelFromBrief(
           candidate = retryCandidate;
           admitted = retryAdmitted;
           size = retrySize;
+          preparation = retryPreparation;
         }
       }
     } catch {
       // A failed retry costs the retry, never the turn: the refusal below reports
       // the FIRST model's real counts rather than inventing a reason.
     }
+  }
+
+  if (preparation.issues.length > 0) {
+    return { ok: false, mutated: false, refusal: 'construction_needs_semantic_repair',
+      detail: 'The model could not preserve a supported risk mechanism or a coherent option total. Nothing was saved.',
+      issues: preparation.issues, retried: constructionRetried };
   }
 
   if (!size.within && !size.user_material_exceeds_limit) {
@@ -553,6 +638,7 @@ export async function buildModelFromBrief(
     // rather than hidden inside a latency number.
     within_compact_limits: size.within,
     size_retried: sizeRetried,
+    construction_retried: constructionRetried,
     ...(size.user_material_exceeds_limit
       ? { admitted_over_limit_because: 'your own stated options and facts exceed the compact limit' }
       : {}),
