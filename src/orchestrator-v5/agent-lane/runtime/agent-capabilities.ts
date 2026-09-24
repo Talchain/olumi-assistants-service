@@ -1369,15 +1369,68 @@ export function createAgentCapabilities(
                */
               rangesNotAttached = [...framed];
               const savedSomething = landed.length > 0;
-              failures.push({
-                factor: 'scale_frame',
-                detail: code === 'GRAPH_STALE'
-                  ? (savedSomething
-                    ? 'the model changed while the range was being attached. The approved values WERE saved and are unchanged; only the range was not attached, so the analysis is still blocked for ' +
-                      `${rangesNotAttached.map((f) => f.factor).join(', ')}. Do not re-enter the values — ask for a range instead.`
-                    : 'the model changed while this was being prepared, so no range was attached and nothing was written — read it again and propose afresh')
-                  : `could not attach a range: http ${reg.status}`,
-              });
+              if (code === 'GRAPH_STALE') {
+                /**
+                 * ⛔⛔ THE REFUSAL ESTABLISHES ONE THING ONLY: *THIS* FRAME WRITE
+                 * DID NOT LAND. It establishes nothing about the current model.
+                 *
+                 * ⚠ CHANGES_REQUIRED on a6dc18be, accepted in full. My previous
+                 * wording asserted that the approved values were "unchanged",
+                 * that "only the range" was missing, and that the analysis was
+                 * "still blocked" — then told the user not to re-enter anything.
+                 * But GRAPH_STALE means a COMPETING WRITER moved the canonical
+                 * graph after the `afterSet` read. That writer may have changed a
+                 * value, attached a range, or removed the factor. Every one of
+                 * those sentences was authority the stale read cannot support,
+                 * and the last one is advice that could lose the user's work.
+                 *
+                 * So: RE-READ, and describe only what the fresh read shows. When
+                 * the read is unavailable, report the HISTORICAL EVENT and say
+                 * the current state is unknown — never advise on a state we could
+                 * not observe.
+                 */
+                const fresh = await readGraph(ctx.scenario_id);
+                if (fresh === null) {
+                  failures.push({
+                    factor: 'scale_frame',
+                    detail: savedSomething
+                      ? 'the model changed while the range was being attached, and it could not be read back afterwards. What is certain: this turn saved values earlier, and its range write was refused. The CURRENT state of those values, their ranges and whether the analysis can run is UNKNOWN — read the model again before advising anything.'
+                      : 'the model changed while this was being prepared and could not be read back. No range was attached by this turn; the current state is unknown — read it again and propose afresh.',
+                  });
+                } else {
+                  // Derived from the FRESH read, never from what we intended:
+                  // a competing writer may already have supplied a range.
+                  /**
+                   * ⚠ KEYED ON `label`, NOT `id`. `framed.push({ factor: n.label … })`
+                   * stores the LABEL (`:1324`), so an id-keyed lookup misses every
+                   * entry, `frameOf(undefined)` is null, and EVERY factor reads as
+                   * still-unranged — the exact false claim this repair exists to
+                   * remove. Caught by the competing-writer control, which is what a
+                   * discriminating control is for.
+                   */
+                  const byLabel = new Map<string, GraphRead['nodes'][number]>();
+                  for (const n of fresh.nodes) {
+                    const label = String((n as { label?: unknown }).label ?? '');
+                    if (label !== '') byLabel.set(label, n);
+                  }
+                  const stillUnranged = rangesNotAttached.filter((f) => frameOf(byLabel.get(f.factor)) === null);
+                  rangesNotAttached = stillUnranged;
+                  failures.push({
+                    factor: 'scale_frame',
+                    detail: savedSomething
+                      ? 'the model changed while the range was being attached, so this turn attached none. Read back afterwards, ' +
+                        (stillUnranged.length > 0
+                          ? `these still have no range: ${stillUnranged.map((f) => f.factor).join(', ')}. Describe the values from that read, not from what was approved — someone else may have changed them.`
+                          : 'every factor now has a range, so someone else supplied one. Describe the model from that read before advising anything.')
+                      : 'the model changed while this was being prepared, so this turn attached no range. Read the model as it now stands before proposing again.',
+                  });
+                }
+              } else {
+                failures.push({
+                  factor: 'scale_frame',
+                  detail: `could not attach a range: http ${reg.status}`,
+                });
+              }
               framed.length = 0;
             }
           }
@@ -1414,6 +1467,11 @@ export function createAgentCapabilities(
               // A factor whose amount has no range cannot be read against
               // anything, so the analysis stays blocked for it whatever else
               // landed. Named, so the Agent cannot report a clean success.
+              // ⚠ DERIVED FROM THE FRESH READ, not from what this turn intended.
+              // On GRAPH_STALE `rangesNotAttached` has already been filtered to
+              // the factors a re-read shows STILL have no range; when the read
+              // failed it is the unfiltered intent and the detail above says the
+              // current state is unknown, so nothing here claims otherwise.
               analysis_still_blocked_for: rangesNotAttached.map((f) => f.factor),
             }
             : {}),
@@ -1422,10 +1480,11 @@ export function createAgentCapabilities(
             'no mark distinguishing the two \u2014 so say so when you describe what changed' +
             (rescaled.length > 0 ? ', and state every value the model stored differently from the one approved.' : '.') +
             (rangesNotAttached.length > 0
-              ? ' \u26a0 The approved values were saved and are unchanged, but the range could not be attached to ' +
+              ? ' \u26a0 This turn could not attach a range to ' +
                 rangesNotAttached.map((f) => f.factor).join(', ') +
-                ', so the analysis is still blocked for those. Say that plainly: the values are safe and do NOT need ' +
-                're-entering, and what is needed is a range.'
+                ' because the model changed underneath it. Describe those factors from the model as it now stands — ' +
+                'another person may have changed a value or supplied a range — and do not tell the user their figures ' +
+                'are safe or unchanged unless the current model shows it.'
               : '') +
             (framed.length > 0
               ? ' Some of them had no range to be read against, which would have stopped the analysis running ' +
