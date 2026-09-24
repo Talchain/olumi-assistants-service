@@ -171,6 +171,52 @@ else
 fi
 say ""
 
+# ⭐ RELOAD PRESERVES CURRENTNESS — a named item on RC's shared test gate that
+# nothing here tested until now. Read from the PERSISTED graph, not the turn:
+# `analysis_ready`/`may_run` are computed per turn and never stored, but
+# `analysis_result` and `analysis_state` ARE, and they carry the currentness
+# instruments the product uses itself.
+say "6b) reload — the analysis is still current against the model"
+RELOAD=$(post "/assist/v1/scenarios/$SCEN/graph" '{}')
+R_STATE=$(jqv "$RELOAD" '.analysis_state.run_state.kind // "absent"')
+R_RERUN=$(jqv "$RELOAD" '.analysis_state.requires_rerun')
+R_AGAINST=$(jqv "$RELOAD" '.analysis_result.computed_against_hash // ""')
+R_HASH=$(jqv "$RELOAD" '.graph_hash // ""')
+say "   run_state=$R_STATE requires_rerun=$R_RERUN computed_against=${R_AGAINST:0:16} graph_hash=${R_HASH:0:16}"
+gate "reload: the run persisted" "$(jqv "$RELOAD" 'has("analysis_result") and (.analysis_result != null)|if . then 1 else 0 end')" "analysis_result survives a reload"
+gate "reload: run_state is complete_current" "$([ "$R_STATE" = "complete_current" ] && echo 1 || echo 0)" "got $R_STATE"
+gate "reload: no rerun required" "$([ "$R_RERUN" = "false" ] && echo 1 || echo 0)" "requires_rerun=$R_RERUN"
+# ⛔ THE ACTUAL CURRENTNESS INVARIANT, not a proxy: the analysis records which model
+# it was computed against. If that drifts from the live hash the result is stale,
+# whatever run_state says.
+gate "reload: analysis was computed against THIS model" \
+  "$([ -n "$R_AGAINST" ] && [ "$R_AGAINST" = "$R_HASH" ] && echo 1 || echo 0)" \
+  "computed_against_hash must equal graph_hash"
+
+# ⭐ CLAIM SAFETY: the structured gate and the prose must not disagree.
+# Measured on served 6dfb56f: `leader_claim` came back
+# {permitted: false, withheld_reason: "options_do_not_separate", separation: "near_tie"}
+# while `analysis_result.leading_option_id` WAS populated. A surface that renders
+# the leading option without consulting `leader_claim.permitted` would show a winner
+# the gate withheld — the leak shape this estate has hit before (a producer sending
+# "robust" while the same panel forbade the word). So when the claim is withheld,
+# the words the user reads must carry the hedge, not drop it silently.
+PERMITTED=$(jqv "$RELOAD" '.analysis_state.leader_claim.permitted')
+WITHHELD=$(jqv "$RELOAD" '.analysis_state.leader_claim.withheld_reason // "-"')
+LEADING=$(jqv "$RELOAD" '.analysis_result.leading_option_id // "-"')
+SUMMARY=$(jqv "$RELOAD" '.analysis_result.summary // ""')
+say "   leader_claim.permitted=$PERMITTED withheld=$WITHHELD leading_option_id=$LEADING"
+if [ "$PERMITTED" = "false" ]; then
+  HEDGED=$(printf '%s %s' "$SUMMARY" "$RTXT" | grep -ciE "close call|not (yet )?robust|near tie|could flip|too fragile|do(es)? not separate|not a meaningful ordering|fragile|not enough confidence" || true)
+  gate "claim safety: a WITHHELD leader is hedged in the words, not dropped" \
+    "$([ "${HEDGED:-0}" -gt 0 ] && echo 1 || echo 0)" \
+    "leader withheld ($WITHHELD) while leading_option_id=$LEADING — the prose must say so"
+  say "   summary: $(printf '%s' "$SUMMARY" | head -c 150)"
+else
+  say "   leader claim permitted, so no withholding to communicate"
+fi
+say ""
+
 if [ "$FP3" = "yes" ]; then
   say "7) the same Run through FP3's typed chip (FP3 is on the served build)"
   T0=$(date +%s); RUN=$(post /agent/v1/turn "$(jq -nc --arg s "$SCEN" '{scenario_id:$s,message:"Run the analysis.",chip:{id:"agent-run-analysis",action_type:"run_analysis"}}')"); EL=$(( $(date +%s) - T0 ))
