@@ -40,16 +40,16 @@
  *   P7b P7 with a foreign write landing BETWEEN the retry's base read and its
  *       append: the patch's `before` (the start-of-turn read) now differs from
  *       the stored value, so `after` = the stored value proves a reply-time
- *       re-read, not a copy of the start-of-turn state. P8b is the same for P8.
- *   P8  a REUSED turn_id carrying a DIFFERENT request (`priorTurnConflict`) on an
+ *       re-read, not a copy of the start-of-turn state. P10b is the same for P10.
+ *   P10  a REUSED turn_id carrying a DIFFERENT request (`priorTurnConflict`) on an
  *       owned scenario: the store hands back the PRIOR operation's version
  *       receipt (it shares the turn id, so `source_turn_id === MINE` cannot tell
  *       them apart) and the reply must not carry it; the patch is `noop` at the
- *       stored value; nothing is written. P8 likewise claims the receipt and the
+ *       stored value; nothing is written. P10 likewise claims the receipt and the
  *       patch block only.
  *
  * ⚠ TRACKED FINDING — NOT PINNED, NOT ASSERTED (production fix first). On a
- *   replay (P7) AND on a conflict (P8), the SAME reply still carries a
+ *   replay (P7) AND on a conflict (P10), the SAME reply still carries a
  *   `draft_graph` and a `graph_hash` built from the retry's UNWRITTEN bytes,
  *   while the store holds something else. Measured 24 Sep on these exact
  *   fixtures at 5662723c, as RED runs of the assertions this rule demands
@@ -58,7 +58,7 @@
  *     P7: draft_graph f-budget = 50,000 while the store holds 70,000 and the
  *         prose says "currently £70k"; graph_hash 2a88e26c7126bd0d = hash of the
  *         retry's unwritten bytes (stored graph: 09d5c5d0448d70b6).
- *     P8: draft_graph f-budget = 70,000 while the store holds 50,000 and the
+ *     P10: draft_graph f-budget = 70,000 while the store holds 50,000 and the
  *         prose says "Nothing was written. … currently £50k"; graph_hash
  *         09d5c5d0448d70b6 = hash of the unwritten bytes (stored: 2a88e26c7126bd0d).
  *   By `expectNoCommitEvidence`'s own definition that `draft_graph` is commit
@@ -104,7 +104,7 @@
  *     postimage or receipt); they are forward guards for F2's typed 409 body.
  *     What P3 excludes today is a design where a lost CAS answers 200 with an
  *     honest refusal;
- *   - the status CODE of a conflict (200 today) — P8 asserts the receipt and the
+ *   - the status CODE of a conflict (200 today) — P10 asserts the receipt and the
  *     patch block, not the code;
  *   - what the UI renders, or how the reload route / freshness read the result;
  *   - ⚠ OPEN DESIGN QUESTION, "idempotent replay": whether a replay of an
@@ -869,9 +869,9 @@ describe('POST /orchestrate/v2/turn — factor_value_edit: what proves THIS oper
     expect(patches[0]?.after).toEqual(storedBudget);
   });
 
-  // ── P8 — a reused turn_id carrying a DIFFERENT request ───────────────────
+  // ── P10 — a reused turn_id carrying a DIFFERENT request ───────────────────
 
-  it('P8: a reused turn_id carrying a DIFFERENT request writes nothing, and the reply carries NO version receipt — not even the prior operation\'s — and a noop patch at the stored value (receipt and patch block only)', async () => {
+  it('P10: a reused turn_id carrying a DIFFERENT request writes nothing, and the reply carries NO version receipt — not even the prior operation\'s — and a noop patch at the stored value (receipt and patch block only)', async () => {
     fake.owned = true;
     const first = await send(SET_BUDGET_50K, MINE);
     expect(first.status).toBe(200);
@@ -923,8 +923,8 @@ describe('POST /orchestrate/v2/turn — factor_value_edit: what proves THIS oper
     // TRACKED FINDING — deliberately not asserted either way here.
   });
 
-  it('P8b: on a reused turn_id, when a foreign write lands BETWEEN the base read and the append, the noop patch\'s after is the value stored at reply time — a re-read, not the start-of-turn before', async () => {
-    // P8's start-of-turn read and its reply-time read both see 50,000. Here a
+  it('P10b: on a reused turn_id, when a foreign write lands BETWEEN the base read and the append, the noop patch\'s after is the value stored at reply time — a re-read, not the start-of-turn before', async () => {
+    // P10's start-of-turn read and its reply-time read both see 50,000. Here a
     // foreign writer moves f-budget to 90,000 right after the base read.
     fake.owned = true;
     const first = await send(SET_BUDGET_50K, MINE);
