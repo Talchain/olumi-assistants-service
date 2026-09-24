@@ -54,6 +54,8 @@ import { narrateWriteOutcome, withWriteOutcome } from '../orchestrator-v5/agent-
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
+import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
+import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
 import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
@@ -115,9 +117,13 @@ type OfferedAction = SuggestedAction;
  * the Run offer only when today's canonical readiness admits a run and no current analysis exists.
  * Nothing is inferred from the words.
  *
- * ⚠ Process-local, on purpose and bounded: the proposals an approve chip names live in this
- * process too (`ProposalStore`), so a chip could not outlive them. After a restart a replay
- * offers nothing — failing closed — rather than guessing whether the original approval applied.
+ * ⚠ TWO CARRIERS, BECAUSE THE TWO CHIPS HAVE DIFFERENT LIFETIMES (Codex 5806428423). An approve
+ * chip names a proposal that lives in THIS process (`ProposalStore`), so it is remembered here and
+ * fails closed after a restart. The Run offer does not depend on any proposal once the approval has
+ * landed, so it is ALSO persisted durably, as the same `run_analysis` pending action a conventional
+ * Run chip persists, atomically with the answer row, and re-read from that exact row on replay
+ * (bounded by the pending action's own 10-minute lifetime). Neither is ever reconstructed from
+ * present readiness alone: a Run is re-offered only if the ORIGINAL turn offered it.
  */
 const OFFERED_ACTIONS_MAX = 500;
 const offeredActions = new Map<string, readonly OfferedAction[]>();
@@ -877,7 +883,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /** The response a replay returns: the ORIGINAL words, on today's state, with no model call. */
     const replayed = async (prior: CommittedTurnRecord) => {
       const state = await readBackState(dispatch, scenarioId);
-      const offered = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) ?? [] : [];
+      const remembered = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) ?? [] : [];
+      // The durable carrier: this exact row's persisted Run offer, still within its lifetime.
+      const durableRun = (prior.pending_actions ?? []).some((pa) =>
+        pa.chip_id === RUN_OFFER_CHIP.id && pa.action.kind === 'run_analysis' && !isPendingActionExpired(pa, Date.now()));
+      const offered = durableRun && !remembered.some((a) => a.id === RUN_OFFER_CHIP.id) ? [...remembered, RUN_OFFER_CHIP] : remembered;
       const composedReplay = composeDirectAnswerResponse({
         assistant_text: prior.assistant_message ?? 'That request was already completed.',
         stage: 'frame',
@@ -1271,6 +1281,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           handler_facts: [],
           userMessage: message,
           assistantMessage: String((finalised as { assistant_text?: unknown }).assistant_text ?? text),
+          // The Run offer, durably, with THIS answer row — so a replay after a restart can re-offer it.
+          ...(offerRun
+            ? { pending_actions: derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: new Date().toISOString(), ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) }
+            : {}),
           },
         });
         if (outcome.priorTurnConflict === true) {

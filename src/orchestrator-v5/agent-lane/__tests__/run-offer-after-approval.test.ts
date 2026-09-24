@@ -16,13 +16,15 @@ let n = 0;
 let SCENARIO = '';
 const nextScenario = () => { n += 1; SCENARIO = `5e0d1c2b-3a4f-4e5d-8c6b-7a8f9e0d1c${String(n).padStart(2, '0')}`; };
 /** Records committed answer rows by (scenario, turn), so a same-turn_id retry takes the REAL replay path. */
-const rows = new Map<string, { id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number }>();
+// The durable row carries `pending_actions` exactly as the store persists them, JSON round-tripped
+// the way the JSONB column would be.
+const rows = new Map<string, { id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number; pending_actions: unknown[] }>();
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (sid: string, turnId: string) => rows.get(`${sid}:${turnId}`) ?? null),
-  append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number }) => {
+  append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; pending_actions?: unknown[] }) => {
     const k = `${w.scenario_id}:${w.turn_id}`;
-    if (!rows.has(k)) rows.set(k, { id: `row-${rows.size + 1}`, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0 });
+    if (!rows.has(k)) rows.set(k, { id: `row-${rows.size + 1}`, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0, pending_actions: JSON.parse(JSON.stringify(w.pending_actions ?? [])) });
     return { id: rows.get(k)!.id };
   }),
 };
@@ -42,6 +44,28 @@ describe('the explicit Run is offered after a change the canonical readiness adm
   let modelBodies: Record<string, unknown>[] = [];
   let proposeNext = true;
   let lastApproveId = '';
+  let analysisState: Record<string, unknown> = {};
+  /** A route instance on FRESH modules: an empty process cache and an empty proposal store. */
+  async function buildRouteApp(): Promise<FastifyInstance> {
+    vi.resetModules();
+    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+    const a = Fastify({ logger: false });
+    a.post('/assist/v1/scenarios/:id/graph', async () => ({
+      graph: { nodes: [{ id: 'f1', kind: 'factor', label: 'Team size' }, { id: 'o1', kind: 'outcome', label: 'Velocity' }], edges },
+      graph_hash: `h${edges.length}`,
+      analysis_ready: readiness,
+      analysis_state: analysisState,
+    }));
+    a.post('/orchestrate/v2/turn', async (req) => {
+      const b = req.body as { kind?: string; event?: { from: string; to: string }; chip?: { action_type?: string } };
+      if (b.kind === 'system_event' && b.event) edges = [...edges, { from: b.event.from, to: b.event.to }];
+      if (b.chip?.action_type === 'run_analysis') runs += 1;
+      return { assistant_text: 'ok', blocks: b.chip?.action_type === 'run_analysis' ? [{ type: 'analysis_result', data: {} }] : [], analysis_ready: readiness };
+    });
+    await a.register(agentV1TurnRoute);
+    await a.ready();
+    return a;
+  }
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
@@ -55,27 +79,12 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       }
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'In the current model, the link matters.' }] }] }), { status: 200 });
     }));
-    vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
-    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
-    app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: { nodes: [{ id: 'f1', kind: 'factor', label: 'Team size' }, { id: 'o1', kind: 'outcome', label: 'Velocity' }], edges },
-      graph_hash: `h${edges.length}`,
-      analysis_ready: readiness,
-    }));
-    app.post('/orchestrate/v2/turn', async (req) => {
-      const b = req.body as { kind?: string; event?: { from: string; to: string }; chip?: { action_type?: string } };
-      if (b.kind === 'system_event' && b.event) edges = [...edges, { from: b.event.from, to: b.event.to }];
-      if (b.chip?.action_type === 'run_analysis') runs += 1;
-      return { assistant_text: 'ok', blocks: b.chip?.action_type === 'run_analysis' ? [{ type: 'analysis_result', data: {} }] : [], analysis_ready: readiness };
-    });
-    await app.register(agentV1TurnRoute);
-    await app.ready();
+    app = await buildRouteApp();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { edges = []; runs = 0; modelBodies = []; proposeNext = true; nextScenario(); });
+  beforeEach(() => { edges = []; runs = 0; modelBodies = []; proposeNext = true; analysisState = {}; nextScenario(); });
 
   /** Propose (one Agent turn), then approve through the typed chip (fast path 2). */
   async function proposeThenApprove(approveTurnId?: string): Promise<{ suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string } }> {
@@ -222,6 +231,82 @@ describe('the explicit Run is offered after a change the canonical readiness adm
         .toEqual([approve.id, amend.id, RUN_OFFER_CHIP.id]);
       expect(stillValidOffers(all, { outstandingProposalIds: new Set(), analysisReady: { may_run: true }, analysisState: { run_state: { kind: 'complete_current' } } })).toEqual([]);
       expect(stillValidOffers([], { outstandingProposalIds: new Set(['prop_abc123']), analysisReady: { may_run: true }, analysisState: {} }), 'nothing is invented').toEqual([]);
+    });
+  });
+  /**
+   * ⛔ Independent review of #1792 (5806428423): the same-process cache cannot carry a replay
+   * across a restart or another worker. The Run offer is persisted WITH the answer row and read
+   * back from that exact row; these replays run on a FRESH route instance (empty cache, empty
+   * proposal store), so only the durable record can supply the offer.
+   */
+  describe('a replay in a FRESH process recovers the Run offer from the committed row', () => {
+    const approveBody = (T: string) => ({ kind: 'message', scenario_id: SCENARIO, message: 'Yes, make that change.', source: 'chip', chip: { id: lastApproveId }, turn_id: T });
+    const onFresh = async (payload: Record<string, unknown>) => {
+      const fresh = await buildRouteApp();
+      try {
+        const r = await fresh.inject({ method: 'POST', url: '/agent/v1/turn', payload });
+        expect(r.statusCode).toBe(200);
+        return r.json() as { suggested_actions: Chip[]; _agent: { replayed?: boolean } };
+      } finally { await fresh.close(); }
+    };
+
+    it('RED: approve, lose the response, the process restarts, retry → the SAME Run offer from the durable row; 0 runs, 0 model calls, 0 writes', async () => {
+      readiness = { status: 'needs_user_input', may_run: true };
+      const T = '61111111-2222-4333-8444-555555555555';
+      await proposeThenApprove(T);
+      const row = rows.get(`${SCENARIO}:${T}`)!;
+      expect(row.pending_actions, 'the offer was persisted with the answer row').toEqual([expect.objectContaining({ chip_id: 'agent-run-analysis', action: { kind: 'run_analysis' } })]);
+      const writes = edges.length; const calls = modelBodies.length;
+      const again = await onFresh(approveBody(T));
+      expect(again._agent.replayed, 'the real replay path, on a fresh instance').toBe(true);
+      expect(again.suggested_actions.filter((c) => c.action_type === 'run_analysis')).toEqual([expect.objectContaining({ id: 'agent-run-analysis' })]);
+      expect(runs).toBe(0);
+      expect(modelBodies.length - calls).toBe(0);
+      expect(edges.length - writes).toBe(0);
+    });
+
+    it('CONTRAST: today\'s readiness no longer admits a run → the durable offer is NOT re-offered', async () => {
+      readiness = { status: 'needs_user_input', may_run: true };
+      const T = '71111111-2222-4333-8444-555555555555';
+      await proposeThenApprove(T);
+      readiness = { status: 'ready', may_run: false };
+      expect((await onFresh(approveBody(T))).suggested_actions.some((c) => c.action_type === 'run_analysis')).toBe(false);
+    });
+
+    it('CONTRAST: a current analysis already exists → not re-offered', async () => {
+      readiness = { status: 'ready', may_run: true };
+      const T = '81111111-2222-4333-8444-555555555555';
+      await proposeThenApprove(T);
+      analysisState = { run_state: { kind: 'complete_current' } };
+      expect((await onFresh(approveBody(T))).suggested_actions.some((c) => c.action_type === 'run_analysis')).toBe(false);
+    });
+
+    it('CONTRAST: the ORIGINAL turn offered no Run (not admitted then) and the model became ready since → none; a historical absence confers nothing', async () => {
+      readiness = { status: 'needs_user_input', may_run: false };
+      const T = '91111111-2222-4333-8444-555555555555';
+      await proposeThenApprove(T);
+      expect(rows.get(`${SCENARIO}:${T}`)!.pending_actions).toEqual([]);
+      readiness = { status: 'ready', may_run: true };
+      expect((await onFresh(approveBody(T))).suggested_actions.some((c) => c.action_type === 'run_analysis')).toBe(false);
+    });
+
+    it('CONTRAST: the persisted offer has expired (its own 10-minute lifetime) → none', async () => {
+      readiness = { status: 'ready', may_run: true };
+      const T = 'a1111111-2222-4333-8444-555555555555';
+      await proposeThenApprove(T);
+      const row = rows.get(`${SCENARIO}:${T}`)!;
+      row.pending_actions = row.pending_actions.map((pa) => ({ ...(pa as Record<string, unknown>), expires_at_iso: '2020-01-01T00:00:00.000Z' }));
+      expect((await onFresh(approveBody(T))).suggested_actions.some((c) => c.action_type === 'run_analysis')).toBe(false);
+    });
+
+    it('CONTRAST: an approve chip fails closed after a restart — its proposal lived in the old process', async () => {
+      readiness = { status: 'needs_user_input', may_run: false };
+      const T = 'b1111111-2222-4333-8444-555555555555';
+      const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Should team size drive velocity?', turn_id: T } });
+      expect((first.json() as { suggested_actions: Chip[] }).suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:')), 'the control: offered originally').toBe(true);
+      const again = await onFresh({ kind: 'message', scenario_id: SCENARIO, message: 'Should team size drive velocity?', turn_id: T });
+      expect(again._agent.replayed).toBe(true);
+      expect(again.suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:')), 'never an approval for a proposal this process does not hold').toBe(false);
     });
   });
 });
