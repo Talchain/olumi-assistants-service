@@ -169,7 +169,11 @@ describe('authorisation applies the STORED proposal', () => {
  */
 describe('an unknown proposal is never told as "nothing was changed"', () => {
   const said = (refusal: string) => {
-    const n = narrateWriteOutcome('Done.', [{ name: 'authorise_change', ok: false, mutated: false, refusal }], [{ ok: false, mutated: false, refusal }]);
+    // `toolCalls` is typed `readonly { name: string }[]` and `narrateWriteOutcome` reads
+    // ONLY `.name` from it — the outcome comes from `toolResults`. Repeating ok/mutated/
+    // refusal here tripped the full-tsc excess-property check (TS2353) and implied the
+    // function reads fields it does not.
+    const n = narrateWriteOutcome('Done.', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal }]);
     return withWriteOutcome(n.text, n.status);
   };
 
