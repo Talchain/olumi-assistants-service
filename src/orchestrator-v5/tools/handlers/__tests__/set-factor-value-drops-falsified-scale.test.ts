@@ -215,6 +215,48 @@ describe('set_factor_value — a value outside the declared scale withdraws the 
     }
   });
 
+  /**
+   * ⛔⛔ A NEGATIVE VALUE FALSIFIES *EVERY* DECLARED SCALE — the half the first fix missed.
+   *
+   * The contract's vocabulary is a three-member enum and every member's admissible
+   * domain starts at ZERO (`schemas/graph.ts`, quoted at
+   * `cee/factor-extraction/display-value.ts:321-331`):
+   *   unit_interval "Admissible [0, 1]" · ratio "[0, +inf)" · raw_count "[0, +inf)"
+   *
+   * So `unit_interval` is the only member a LARGE value can falsify, but a NEGATIVE
+   * value is inadmissible under all three. MEASURED on served `1e7e08a` by driving the
+   * real writer at each declaration with an edit to -5: `unit_interval` was cleared,
+   * `ratio` and `raw_count` were RETAINED — falsified and left standing.
+   */
+  it('⛔⛔ a NEGATIVE value clears a `ratio` declaration', async () => {
+    const result = await edit(-5, { declared: 'ratio', unit: null });
+    for (const node of committed(result)) {
+      const os = node.observed_state ?? {};
+      expect(os.value).toBe(-5);
+      expect('declared_scale' in os).toBe(false);
+    }
+  });
+
+  it('⛔⛔ a NEGATIVE value clears a `raw_count` declaration', async () => {
+    const result = await edit(-5, { declared: 'raw_count', unit: null });
+    for (const node of committed(result)) {
+      expect('declared_scale' in (node.observed_state ?? {})).toBe(false);
+    }
+  });
+
+  it('⭐ CONTRAST: a POSITIVE large value leaves `ratio` and `raw_count` ALONE', async () => {
+    // The discriminator, and the reason the magnitude arm stays scoped to
+    // `unit_interval`. Both of these admit [0, +inf), so 40 is perfectly legal —
+    // clearing them would destroy a true declaration.
+    for (const declared of ['ratio', 'raw_count']) {
+      const result = await edit(40, { declared, unit: null });
+      for (const node of committed(result)) {
+        expect((node.observed_state ?? {}).declared_scale,
+          `${declared} was cleared by a value it admits`).toBe(declared);
+      }
+    }
+  });
+
   it('⭐ a factor with NO declaration gains none', async () => {
     // Nothing is authored here in either direction.
     const result = await edit(40, { declared: null });
