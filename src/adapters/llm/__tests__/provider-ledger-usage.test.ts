@@ -108,3 +108,83 @@ describe('usage attaches to the call it belongs to', () => {
     });
   });
 });
+
+describe('duration is measured here, and belongs to one request only', () => {
+  it('a recorded call carries a non-negative duration_ms', () => {
+    runWithProviderPolicy(OPENAI_ONLY('test'), () => {
+      const h = assertProviderAllowed('openai', 'site.one', { model: 'm', purpose: 'conversation' });
+      expect(recordedProviderCalls()[0], 'absent until the response closes it — the wire shape is unchanged').not.toHaveProperty('duration_ms');
+      recordProviderUsage(h, { input_tokens: 10 });
+      const d = recordedProviderCalls()[0]?.duration_ms;
+      expect(typeof d).toBe('number');
+      expect(d).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  /**
+   * ⭐ THE ONE THAT CAUGHT A BUG I WROTE. My first version kept start stamps in a
+   * MODULE-GLOBAL Map keyed by `route + handle`. Every agent request runs under the
+   * same route, so two concurrent requests both write handle 0 under one key and
+   * overwrite each other — one would silently report the other's duration, only
+   * under load.
+   *
+   * Here the second policy never stamps anything (no `assertProviderAllowed`), so
+   * a correct implementation has nothing to close and attaches NO duration. The
+   * global-map version would find the FIRST request's stamp under the identical
+   * key and attach a duration measured from another request's clock.
+   */
+  /**
+   * ⭐ THE ONE THAT CAUGHT A BUG I WROTE, and it took two attempts to aim.
+   *
+   * My first implementation kept start stamps in a MODULE-GLOBAL Map keyed by
+   * `route + handle`. Every agent request runs under the same route, so two
+   * requests both use the key `agent_v1_turn\0 0`.
+   *
+   * I first tested the wrong direction — request two inheriting request one's
+   * stamp. That cannot happen: `assertProviderAllowed` always stamps before the
+   * row exists, so request two OVERWRITES the key. Both of my first two versions
+   * of this test passed against the buggy implementation.
+   *
+   * The real hazard is the reverse: A stamps, B stamps (clobbering A's key), then
+   * A's response lands and A reads B's stamp — reporting a duration far shorter
+   * than the call actually took, silently, and only under concurrency. Nesting the
+   * policies reproduces exactly that interleaving.
+   */
+  it('an EARLIER request\u2019s duration is not clobbered by a later one on the same route', () => {
+    const spin = (ms: number): void => { const t = Date.now(); while (Date.now() - t < ms) { /* hold */ } };
+    runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), () => {
+      const a = assertProviderAllowed('openai', 'site.a', { model: 'm', purpose: 'conversation' });
+      spin(40);
+      // request B arrives mid-flight and takes handle 0 in ITS OWN ledger
+      runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), () => {
+        const b = assertProviderAllowed('openai', 'site.b', { model: 'm', purpose: 'construction' });
+        expect(b, 'B has its own ledger, so its first handle is also 0').toBe(0);
+      });
+      // now A's response lands
+      recordProviderUsage(a, { input_tokens: 7 });
+      const d = recordedProviderCalls()[0]?.duration_ms;
+      expect(typeof d).toBe('number');
+      expect(d, `A's call spanned the 40ms spin; a clobbered stamp reports ~0. got ${d}`).toBeGreaterThanOrEqual(35);
+    });
+  });
+
+  it('a REFUSED call carries no duration — no network happened', () => {
+    runWithProviderPolicy(OPENAI_ONLY('test'), () => {
+      try { assertProviderAllowed('anthropic', 'site.blocked', { model: 'claude', purpose: 'conversation' }); } catch { /* refused before the network */ }
+      recordProviderUsage(0, { input_tokens: 9 });
+      const call = recordedProviderCalls()[0];
+      expect(call?.outcome).toBe('refused_before_network');
+      expect(call).not.toHaveProperty('duration_ms');
+    });
+  });
+
+  it('duration attaches to the handle given, not the newest row', () => {
+    runWithProviderPolicy(OPENAI_ONLY('test'), () => {
+      const first = assertProviderAllowed('openai', 'site.one', { model: 'm', purpose: 'p' });
+      assertProviderAllowed('openai', 'site.two', { model: 'm', purpose: 'p' });
+      recordProviderUsage(first, { input_tokens: 1 });
+      expect(recordedProviderCalls()[0]).toHaveProperty('duration_ms');
+      expect(recordedProviderCalls()[1], 'the second call has not responded yet').not.toHaveProperty('duration_ms');
+    });
+  });
+});

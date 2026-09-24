@@ -40,6 +40,12 @@ export interface ProviderPolicy {
    * longer proves "no anthropic attempt", so the wire must say so (review of #1749).
    */
   truncated: boolean;
+  /**
+   * Monotonic start stamps, index-parallel to {@link ProviderPolicy.calls}. Held
+   * here because the policy is PER REQUEST; see the note above `monotonicNow`.
+   * Never serialised — `recordedProviderCalls` copies `calls` only.
+   */
+  startedAt?: number[];
 }
 
 export interface GenerativeCall {
@@ -56,6 +62,23 @@ export interface GenerativeCall {
    * any caller that has not been wired yet.
    */
   usage?: ProviderUsage;
+  /**
+   * ⭐ HOW LONG THIS CALL TOOK, measured here rather than reported by anyone.
+   *
+   * Latency could not be attributed at all: `TurnTiming` is computed in
+   * `agent-loop.ts` and never reaches the response — measured on served 6dfb56f,
+   * NO timing field of any name appears in a turn payload. So a first turn is
+   * known to be ~50-70s over 5-6 calls, of which exactly one is `construction`,
+   * and there is no way to say how much of it is the construction and how much is
+   * the Agent's conversation loop. That is the number the fast-path decision turns
+   * on, and six briefs at 19% CV cannot separate call count from brief complexity.
+   *
+   * Stamped by {@link assertProviderAllowed} and closed by
+   * {@link recordProviderUsage}, so the SAME one-line call site gives both cost
+   * and duration — no extra wiring. Monotonic, so a clock adjustment cannot
+   * produce a negative or absurd figure.
+   */
+  duration_ms?: number;
 }
 
 /**
@@ -95,6 +118,26 @@ export interface ProviderUsage {
 
 /** Bounds one `raw` object so a ledger on the wire cannot be inflated by a provider. */
 const MAX_RAW_USAGE_KEYS = 24;
+
+/**
+ * A MONOTONIC clock. `Date.now()` can step backwards across an NTP adjustment and
+ * would then report a negative duration, which reads as a broken instrument rather
+ * than a corrected clock.
+ */
+const monotonicNow = (): number =>
+  typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Number(process.hrtime.bigint() / 1000n) / 1000;
+
+/**
+ * ⛔ START STAMPS LIVE ON THE POLICY, WHICH IS PER REQUEST.
+ *
+ * My first version kept them in a module-global `Map` keyed by `route + handle`.
+ * Every agent request runs under the SAME route (`agent_v1_turn`), so two
+ * concurrent requests both write handle 0 under the same key and overwrite each
+ * other — one would report the other's duration, silently, and only under load.
+ * The ledger is already per-request through `AsyncLocalStorage`; the stamps have
+ * to be too. Parallel to `calls` and never serialised, so the wire shape is
+ * unchanged until a duration is closed.
+ */
 
 const numberAt = (o: Record<string, unknown>, path: readonly string[]): number | undefined => {
   let cur: unknown = o;
@@ -156,6 +199,12 @@ export function recordProviderUsage(handle: ProviderCallHandle, raw: unknown): v
   const policy = store.getStore();
   const call = policy?.calls[handle];
   if (call === undefined || call.outcome !== 'allowed') return;
+  const began = policy?.startedAt?.[handle];
+  if (began !== undefined) {
+    // Never negative, and rounded: a sub-millisecond provider call is not a thing,
+    // so fractional precision here would only imply an accuracy we do not have.
+    call.duration_ms = Math.max(0, Math.round(monotonicNow() - began));
+  }
   const usage = normaliseProviderUsage(raw);
   if (usage !== undefined) call.usage = usage;
 }
@@ -205,6 +254,7 @@ export function assertProviderAllowed(
   let handle: ProviderCallHandle;
   if (policy.calls.length < MAX_RECORDED_CALLS) {
     handle = policy.calls.length;
+    (policy.startedAt ??= [])[handle] = monotonicNow();
     policy.calls.push({
       site: site ?? 'unspecified',
       provider,
