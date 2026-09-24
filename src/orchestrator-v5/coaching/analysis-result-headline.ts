@@ -639,6 +639,8 @@ export interface AnalysisResultHeadlineInput {
    * Omitted / false ⇒ no change (byte-identical).
    */
   readonly intake_options_missing?: boolean;
+  /** Saved option lineage cannot establish coverage of the explicit brief. */
+  readonly intake_identity_unverified?: boolean;
 }
 
 /**
@@ -707,6 +709,7 @@ export type HeadlineFallbackReason =
   // the INTAKE, not about the run's evidence, and conflating them on the
   // dashboard would hide a drafter defect inside a producer statistic.
   | 'intake_options_missing'
+  | 'intake_identity_unverified'
   // SEPARABILITY: the win-probability field does not separate the options, so
   // the bare Case E leader assertion is withheld (see `option-separability.ts`
   // for the question this answers and the five neighbouring questions it does
@@ -829,12 +832,13 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // disclosure AND the intake disclosure independently, so a turn that is both
   // constraint-gapped and intake-incomplete still tells the user both things.
   // Only the single `reason` code has to choose.
-  if (input.intake_options_missing === true) {
+  if (input.intake_options_missing === true || input.intake_identity_unverified === true) {
     return {
       text: null,
       descriptor: {
         case: null,
-        reason: 'intake_options_missing',
+        reason: input.intake_options_missing === true
+          ? 'intake_options_missing' : 'intake_identity_unverified',
         has_leading_option: true,
         has_clean_label: true,
         has_driver: false,

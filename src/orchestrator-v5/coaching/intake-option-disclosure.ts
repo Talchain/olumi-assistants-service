@@ -1,62 +1,10 @@
 /**
- * ROADMAP 2.579 — THE WITHHELD-RANKING DISCLOSURE FOR AN INCOMPLETE INTAKE.
- *
- * ONE ENTRY POINT, {@link buildIntakeOptionDisclosure}, taking the whole
- * {@link IntakeOptionReconciliation}. Speaks on exactly one state
- * (`options_missing`) and returns `''` on every other, so the pairing between
- * evidence and sentence is made HERE, in the module that owns the copy, rather
- * than at a caller that will not be re-read.
- *
- * ═══════════════════════════════════════════════════════════════════════════
- * WHAT THE COPY MUST DO, AND WHY EACH CLAUSE IS THE WEAKEST TRUE ONE.
- *
- * The ruling on 2.579 is BLOCK THE RANKING, NOT THE ANALYSIS: the per-option
- * numbers computed on the options that WERE captured are real and stay on
- * screen; what is withheld is the claim about which one is best. So the copy has
- * three jobs and no more:
- *
- *   1. NAME THE GAP. "One option from your brief is missing" without saying
- *      which one is a hedge, and a hedge is what the user cannot act on. The
- *      producer guarantees `missing` is non-empty on this state precisely so
- *      this sentence can never be written without its subject.
- *   2. STATE THE CONSEQUENCE, scoped to the ranking. "No option can be put
- *      forward from this result" — NOT "this analysis is invalid", which would
- *      be false about numbers that were computed correctly.
- *   3. OFFER THE REPAIR, and offer BOTH halves of it. "Add it" is one valid
- *      resolution; "confirm you meant to leave it out" is the other, and it is
- *      the one a user who deliberately dropped an option needs. A repair step
- *      that admits only the first would tell half of all affected users to undo
- *      a decision they made on purpose.
- *
- * ⚠ THE COPY MAY NOT ASSERT THE PRODUCT KNOWS WHY THE OPTION IS ABSENT. It
- * does not. `deriveIntakeOptionReconciliation` compares two pieces of persisted
- * state; it cannot distinguish "the drafter dropped it" from "the user removed
- * it afterwards" from "the drafter folded it into another option under a name
- * this module could not reconcile". Every sentence below is therefore about the
- * OBSERVATION ("is not in the model") and never about the CAUSE.
- *
- * ⚠ AND IT MAY NOT TRIP THE LEADER VOCABULARY. This suffix ships on turns whose
- * leading-option claim is withheld, so copy reaching for the natural word ("…so
- * the option that leads cannot be named") would be replaced wholesale by
- * `projectExplanationAnswerForWithheldClaim` on exactly the turns it exists to
- * serve. {@link INTAKE_DISCLOSURE_SURVIVES_LEADER_VOCABULARY} is the build-time
- * probe that fails the module rather than letting that ship silently — the same
- * plumbing `withheld-reason-tail.ts` carries, for the same reason.
- *
- * ═══════════════════════════════════════════════════════════════════════════
- * THE THREE PIECES OF PLUMBING ANY run_analysis SUFFIX NEEDS. A disclosure
- * without all three is inert in production — it composes correctly, fails the
- * registry-side egress allowlist, and the user silently receives the locked
- * template instead. They are:
- *
- *   - {@link INTAKE_OPTION_DISCLOSURE_RE_SRC} — the grammar the allowlist
- *     admits, built by escaping THE VERY CONSTANTS the builder emits, so a copy
- *     edit breaks the probe loudly instead of the wire silently;
- *   - {@link INTAKE_OPTION_DISCLOSURE_MAX_CHARS} — the length budget, DERIVED
- *     from the builder's own worst case, never hand-estimated;
- *   - {@link survivesEgress} — the per-call survival check, compiled from the
- *     same RE_SRC the allowlist compiles, which degrades a label-naming form to
- *     the count-only form rather than losing the whole disclosure.
+ * Explain a withheld comparison using the reconciliation's actual evidence.
+ * Validated bindings can prove absence from the analysed set, not absence from
+ * the entire model: a saved option may have been excluded from this run. No
+ * disclosure therefore instructs the user to add a potentially duplicate node.
+ * Unverified lineage gets uncertainty copy rather than an omission claim.
+ * Grammar, length budget and survival checks share the emitted constants.
  */
 
 import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
@@ -81,18 +29,22 @@ const MAX_NAMED_OPTIONS = 3;
  */
 export const INTAKE_OPTION_LABEL_MAX_CHARS = 60;
 
-const LEAD_IN = ' Your brief lists an option that is not in the model';
-const LEAD_IN_PLURAL = ' Your brief lists options that are not in the model';
+const IDENTITY_UNVERIFIED_DISCLOSURE =
+  ' The saved model does not establish which options correspond to every option in your brief.' +
+  ' No option can be put forward from this result until that correspondence is confirmed.';
+
+const LEAD_IN = ' Your brief lists an option that is not included in this comparison';
+const LEAD_IN_PLURAL = ' Your brief lists options that are not included in this comparison';
 
 const CONSEQUENCE_SINGULAR =
-  ' Because a candidate is missing, no option can be put forward from this result.';
+  ' Because a candidate is missing from the comparison, no option can be put forward from this result.';
 const CONSEQUENCE_PLURAL =
-  ' Because candidates are missing, no option can be put forward from this result.';
+  ' Because candidates are missing from the comparison, no option can be put forward from this result.';
 
 const REPAIR_SINGULAR =
-  ' Add it to the model, or confirm you meant to leave it out, and run the analysis again.';
+  ' Check whether it should be included, or confirm you meant to leave it out, and run the analysis again.';
 const REPAIR_PLURAL =
-  ' Add them to the model, or confirm you meant to leave them out, and run the analysis again.';
+  ' Check whether they should be included, or confirm you meant to leave them out, and run the analysis again.';
 
 /** `A` · `A and B` · `A, B and C`. Mirrored EXACTLY by {@link JOINED_LABELS}. */
 function joinLabels(labels: readonly string[]): string {
@@ -120,7 +72,7 @@ function composeDisclosure(count: number, named: readonly string[]): string {
 }
 
 /**
- * ⭐ THE builder. Returns `''` on every state but `options_missing`.
+ * Build a comparison-gap or identity-uncertainty suffix; permitting states are silent.
  *
  * Claim-safety posture: the quoted text is the USER'S OWN BRIEF WORDS, passed
  * through the same `sanitiseLabel` every other user-label surface uses and
@@ -133,6 +85,7 @@ function composeDisclosure(count: number, named: readonly string[]): string {
 export function buildIntakeOptionDisclosure(
   reconciliation: IntakeOptionReconciliation,
 ): string {
+  if (reconciliation.state === 'identity_unverified') return IDENTITY_UNVERIFIED_DISCLOSURE;
   if (reconciliation.state !== 'options_missing') return '';
   const missing = reconciliation.missing;
   // Defensive, not decorative: the producer guarantees this is non-empty on
@@ -199,6 +152,7 @@ const JOINED_LABELS = `${LABEL_SLOT}(?:(?:, ${LABEL_SLOT})* and ${LABEL_SLOT})?`
  */
 export const INTAKE_OPTION_DISCLOSURE_RE_SRC =
   '(?:' +
+  escapeForRegex(IDENTITY_UNVERIFIED_DISCLOSURE) + '|' +
   // Singular: count-only, or naming exactly one label.
   `${escapeForRegex(LEAD_IN)}(?::\\u0020${LABEL_SLOT})?\\.` +
   escapeForRegex(CONSEQUENCE_SINGULAR) +
@@ -219,10 +173,13 @@ export const INTAKE_OPTION_DISCLOSURE_RE_SRC =
  * Worst case: the plural, three-label form with every label at the cap and a
  * three-digit count.
  */
-export const INTAKE_OPTION_DISCLOSURE_MAX_CHARS = composeDisclosure(
-  999,
-  Array.from({ length: MAX_NAMED_OPTIONS }, () => 'x'.repeat(INTAKE_OPTION_LABEL_MAX_CHARS)),
-).length;
+export const INTAKE_OPTION_DISCLOSURE_MAX_CHARS = Math.max(
+  IDENTITY_UNVERIFIED_DISCLOSURE.length,
+  composeDisclosure(
+    999,
+    Array.from({ length: MAX_NAMED_OPTIONS }, () => 'x'.repeat(INTAKE_OPTION_LABEL_MAX_CHARS)),
+  ).length,
+);
 
 /**
  * BUILD-TIME PROBE — this module's copy must survive its own egress AND the
@@ -239,6 +196,7 @@ export const INTAKE_OPTION_DISCLOSURE_MAX_CHARS = composeDisclosure(
  */
 export const INTAKE_DISCLOSURE_SURVIVES_LEADER_VOCABULARY: true = (() => {
   const shapes: readonly string[] = [
+    IDENTITY_UNVERIFIED_DISCLOSURE,
     composeDisclosure(1, []),
     composeDisclosure(1, ['a new retail concession']),
     composeDisclosure(2, []),
