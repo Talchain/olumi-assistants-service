@@ -1146,7 +1146,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const out = (resp.output ?? []) as { type?: string; content?: { type?: string; text?: string }[] }[];
         const answer = out.filter((o) => o.type === 'message').flatMap((o) => o.content ?? [])
           .filter((c) => c.type === 'output_text').map((c) => c.text ?? '').join('');
-        if (answer.trim().length > 0) interpreted = { answer, messages: out.filter((o) => o.type === 'message') as Record<string, unknown>[] };
+        // ⛔ THE REASONING ITEM TRAVELS WITH ITS MESSAGE (served `f828a61`, witness c9: every turn after a
+        // Run was refused "Item 'msg_…' of type 'message' was provided without its required 'reasoning'
+        // item", HTTP 502). Kept in output order, exactly as the Agent loop keeps its whole output.
+        if (answer.trim().length > 0) interpreted = { answer, messages: out.filter((o) => o.type === 'reasoning' || o.type === 'message') as Record<string, unknown>[] };
         else log.warn({ scenario_id: scenarioId }, 'agent-lane: fast-path interpretation was empty — answering from the run itself');
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: fast-path interpretation failed — answering from the run itself');
