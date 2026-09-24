@@ -56,11 +56,29 @@ export function buildCandidateSchema(): Record<string, unknown> {
     type: 'object', additionalProperties: false, properties, required,
   });
   return obj({
+    /**
+     * ⛔ AN UNSTATED TARGET MUST BE SAYABLE. `value` used to be a bare
+     * `{ type: 'number' }` in `required`, so the schema made "the brief names no
+     * numeric target" IMPOSSIBLE to express: the model had to emit a number, and for
+     * "increase productivity" it emitted 0. Admission then wrote
+     * `goal_threshold_raw: 0, unit: '%'` and stamped it `from_brief`, so the product
+     * told the user THEY had asked for a 0% increase. Measured on Paul's hiring brief
+     * (#63 5811781699): "Goal productivity_increase is stamped from_brief,
+     * threshold_raw 0, unit %, frame level; admission says goal_target_stated=true.
+     * Brief states no numeric target."
+     *
+     * ⭐ THE FIX IS THE PATTERN THIS SCHEMA ALREADY USES FOR FACTORS, not a new one:
+     * `baseline_known: boolean` beside a nullable `baseline_value`, so a factor can
+     * say "no baseline was given". The goal had no equivalent. It does now.
+     * `target_stated` stays in `required` so the key must be emitted — an absent
+     * flag is how this estate gets silent defaults.
+     */
     goal: obj({
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
-      value: { type: 'number' }, unit: { type: 'string' },
+      target_stated: { type: 'boolean' },
+      value: { anyOf: [{ type: 'number' }, { type: 'null' }] }, unit: { type: 'string' },
       horizon_months: { anyOf: [{ type: 'integer' }, { type: 'null' }] }, provenance,
-    }, ['metric', 'operator', 'value', 'unit', 'horizon_months', 'provenance']),
+    }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance']),
     constraints: { type: 'array', items: obj({
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
       value: { type: 'number' }, unit: { type: 'string' }, provenance,
@@ -105,7 +123,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
     risks: { type: 'array', items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
     outcomes: { type: 'array', items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
     links: { type: 'array', description:
-      'Causal links, stated as hypotheses. Every factor you keep needs at least one link FROM it toward the goal metric (directly, or via a kept outcome that links to the goal).',
+      'Causal links, stated as hypotheses. Every factor you keep needs at least one link FROM it toward the goal metric (directly, or via a kept outcome that links to the goal). Never link an option directly to a risk \u2014 link the option to the factor it changes and the factor to the risk, because a bare option-to-risk link cannot be analysed.',
       items: obj({
       from: { type: 'string' }, to: { type: 'string' },
       direction: { type: 'string', enum: ['positive', 'negative', 'unknown'], description:
@@ -146,6 +164,13 @@ export const BUILD_INSTRUCTIONS = [
   + 'Anything you judge material but that does not meet that bar belongs in `unknowns` as a question, NOT as a node \u2014 it can become a proposal later. '
   + `Stay within ${COMPACT_LIMITS.maxNodes} nodes and ${COMPACT_LIMITS.maxEdges} links in total, counting one link from the decision to each option. Correct, connected items beat a comprehensive map: an oversized first model is refused before it reaches the canvas.`,
   'Mark provenance honestly on EVERY item: "explicit" only for what the user stated, "inferred" for what you read out of the brief, "ai_proposed" for anything you added beyond it.',
+  /*
+   * ⛔ THE COMPANION INSTRUCTION TO `target_stated`. The schema now lets the model say
+   * "no target was given"; nothing yet told it WHEN to. Without this the nullable field
+   * is a capability no caller uses — and a 0 attributed to the user is the worst of the
+   * available wrong answers, because it reads as a deliberate choice they made.
+   */
+  'A GOAL TARGET THE BRIEF DOES NOT STATE MUST BE LEFT UNSTATED. If the user named a number to reach \u2014 "to 40%", "by \u00a33m", "under 4 weeks" \u2014 set `target_stated: true` and put that number in `goal.value`. If they only named a DIRECTION \u2014 "increase productivity", "cut churn", "improve velocity" \u2014 then set `target_stated: false` and `goal.value: null`. Never substitute 0, never invent a plausible target, and never treat the absence of a number as a target of zero: a direction with no number is a complete and ordinary goal, and the analysis compares options against it perfectly well. Getting this wrong tells the user they asked for something they did not ask for.',
   'THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like "X Improvement" for a goal called "X change", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all.',
   // ⛔ THE LINK CONTRACT (#63 ruling 5793252993). There is NO default-positive
   // factor->goal repair in admission, by ruling: a sign nobody stated would be a
@@ -153,7 +178,8 @@ export const BUILD_INSTRUCTIONS = [
   // goal as a HYPOTHESIS with a direction, or say it cannot and ask. The measured
   // failure it answers: served 553254d, option->factor links only, goal orphaned.
   'EVERY RISK AND EVERY FACTOR MUST BE WIRED IN. A node with no link, or with links that dead-end before the goal, is not merely decorative \u2014 it stops the ENTIRE model being analysed. Measured on a real model: 8 of 20 nodes were unreachable, all five risks among them, and the analysis refused outright. '
-  + 'EVERY FACTOR YOU KEEP NEEDS ITS OWN LINK TOWARD THE GOAL in `links`: straight to the goal metric (its EXACT label), or to a kept outcome that itself links to the goal metric. An option naming a factor in `changes` connects the option TO the factor; it does NOT connect the factor to anything, so a factor that only receives links from options dead-ends. Measured on a real first model: two factors, both fed only by options, neither linked on, the goal orphaned and the analysis refused. Give every risk a link to what it threatens.',
+  + 'EVERY FACTOR YOU KEEP NEEDS ITS OWN LINK TOWARD THE GOAL in `links`: straight to the goal metric (its EXACT label), or to a kept outcome that itself links to the goal metric. An option naming a factor in `changes` connects the option TO the factor; it does NOT connect the factor to anything, so a factor that only receives links from options dead-ends. Measured on a real first model: two factors, both fed only by options, neither linked on, the goal orphaned and the analysis refused. Give every risk a link to what it threatens. '
+  + 'AND NEVER LINK AN OPTION STRAIGHT TO A RISK. An option changes a FACTOR, and it is the factor that raises or lowers the risk, so state it as `option -> factor` (through `changes`/`interventions`) and then `factor -> risk` with its own direction, and the risk on to what it threatens. A bare option -> risk link is the one shape that LOOKS connected and cannot be analysed at all: Olumi has to stop and ask how that option changes that risk before ANY of the model can run. Measured: ONE such link refuses the whole analysis, and a real first model carried four of them. If you cannot name the factor in between, do not draw the link: ask which factor carries it in `unknowns`.',
   'EACH LINK IS A CAUSAL HYPOTHESIS, AND ITS DIRECTION MUST BE STATED, NOT DEFAULTED. Take the direction from the brief where it says so; otherwise from the causal reasoning you could state in one line ("more delivery capacity raises velocity"; "a higher price raises churn"; "higher churn lowers recurring revenue"). '
   + 'Such a link is Olumi\'s hypothesis, not the user\'s claim: provenance "inferred" when it is read out of the brief, "ai_proposed" when it is your own reasoning, and "explicit" ONLY when the user stated that relationship. '
   + 'WHICH option is better is the question the analysis answers \u2014 it is never a reason to mark a factor\'s link to the goal "unknown": more capacity raises velocity whichever option supplies it. '
@@ -271,7 +297,13 @@ export function retrySchemaPinningGoal(goal: CandidateModel['goal']): Record<str
   goalSchema['properties'] = {
     metric: { type: 'string', enum: [goal.metric] },
     operator: { type: 'string', enum: [goal.operator] },
-    value: { type: 'number', enum: [goal.value] },
+    // A pinned `null` must stay expressible: `{type:'number', enum:[null]}` is
+    // unsatisfiable, so the compaction retry could never return the goal it was
+    // pinned to and every unstated-target brief would lose its retry.
+    target_stated: { type: 'boolean', enum: [goal.target_stated !== false] },
+    value: goal.value === null || typeof goal.value !== 'number'
+      ? { type: 'null' }
+      : { type: 'number', enum: [goal.value] },
     unit: { type: 'string', enum: [goal.unit] },
     horizon_months: goal.horizon_months === null ? { type: 'null' } : { type: 'integer', enum: [goal.horizon_months] },
     provenance: { type: 'string', enum: [goal.provenance] },
@@ -564,7 +596,7 @@ export async function buildModelFromBrief(
       // `quantified_provisional` — figures shown against a deadline the analysis never
       // received. Saying it is the only honest option while the projection cannot hold it.
       ...admitted.loss
-        .filter((l) => /\.(horizon_months|goal_operator)$/.test(l.field_path))
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing)$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

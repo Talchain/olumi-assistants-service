@@ -169,8 +169,16 @@ describe('authorise_change applies the STORED assumptions', () => {
     const prop = await caps.proposeAssumptions(ctx, ASK);
     const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
     expect(applied.must_disclose_rescaling).toBe(true);
+    // ⚠ UPDATED — this list used to hold ONE entry, and that was the defect.
+    // `Pro subscribers` was approved as 400 and the model computes with 0.4 (a
+    // derived 0-to-1000 frame), but `rescaled_by_the_model` was built from the read
+    // taken BEFORE the frame write, so the translation was invisible and the reply
+    // said the approved figures were "stored unchanged". CHANGES_REQUIRED at
+    // `4c2d40b6`, accepted: the person authored 400, and 0.4 is the product's
+    // encoding of it — authorship requires BOTH to be legible.
     expect(applied.rescaled_by_the_model).toEqual([
       { factor: 'Monthly churn rate', requested: 3.5, recorded: 0.035 },
+      { factor: 'Pro subscribers', requested: 400, recorded: 0.4 },
     ]);
     expect(String(applied.not_represented)).toMatch(/stored differently from the one approved/);
   });
@@ -182,8 +190,11 @@ describe('authorise_change applies the STORED assumptions', () => {
     const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
     expect(applied.adopted_count).toBe(1);
     expect(applied.requested_count).toBe(2);
+    // ⚠ `recorded` is now the FINAL stored value, not the pre-frame one: 3.5 on a
+    // derived 0-to-10 frame is 0.35. `null` still means the write did not land,
+    // which is the distinction this test exists to pin and it is unchanged.
     expect(applied.values).toEqual([
-      { factor: 'Monthly churn rate', requested: 3.5, recorded: 3.5 },
+      { factor: 'Monthly churn rate', requested: 3.5, recorded: 0.35 },
       { factor: 'Pro subscribers', requested: 400, recorded: null },
     ]);
     // Not marked applied, so a retry can still complete the rest.

@@ -344,10 +344,27 @@ export function createAgentCapabilities(
       const o = valueOps[i];
       const v = (o.value ?? {}) as { value?: number; unit?: string };
       if (typeof v.value !== 'number') return notApplied('no_value_on_proposal', `No value was stored on the proposal for ${o.path}. Nothing was written.`);
+      /**
+       * ⛔ `raw_value` WAS DROPPED HERE (Codex 5810763729 items 3 and 5). The proposal
+       * carries the user's NATIVE figure, so on a framed factor (`cap: 100`) the event
+       * arrived as a bare `value: 50` and `factor-value-edit` — which inverts a bare
+       * value with the factor's own stored cap — read it as 50 × 100.
+       *
+       * ⚠ ONLY WHEN THE FACTOR ALREADY HAS A CAP. An uncapped input is passed through
+       * untouched: dividing or clamping it here would invent a frame the canonical
+       * scale writer owns, and the block below is what gives an unframed amount its
+       * range. This turns no relative change into an absolute set — `v.value` is
+       * already the absolute figure the user approved.
+       */
+      const targetOs = ((((working as { nodes?: GraphRead['nodes'] }).nodes ?? [])
+        .find((n) => n.id === o.path)?.observed_state) ?? {}) as { cap?: unknown };
+      const targetCap = typeof targetOs.cap === 'number' && targetOs.cap > 0 ? targetOs.cap : undefined;
       const event = {
         kind: 'factor_value_edit' as const,
         target_id: o.path,
-        value: v.value,
+        ...(targetCap !== undefined
+          ? { value: v.value / targetCap, raw_value: v.value }
+          : { value: v.value }),
         ...(v.unit !== undefined && v.unit !== '' ? { unit: v.unit } : {}),
       };
       const res = await applyFactorValueEdit({
@@ -696,20 +713,63 @@ export function createAgentCapabilities(
       const notAFactor: { label: string; kind: string }[] = [];
       const occupied: { label: string; current_value: number }[] = [];
       const seen = new Set<string>();
-      const adopted: { id: string; label: string; value: number; unit: string; basis: string }[] = [];
+      const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number }[] = [];
 
       for (const a of input) {
         const node = find(String(a?.factor_label ?? ''));
         if (node === undefined) { unresolved.push(String(a?.factor_label ?? '')); continue; }
         if (!writable(node)) { notAFactor.push({ label: node.label, kind: String(node.kind) }); continue; }
-        const existing = node.observed_state?.value;
-        if (typeof existing === 'number') { occupied.push({ label: node.label, current_value: existing }); continue; }
+        /**
+         * ⛔ THE APPROVAL MUST SHOW THE USER'S OWN NUMBER, NOT THE MODEL'S DIVISOR
+         * (Codex 5810763729 item 1). `observed_state.value` is the number read against
+         * the factor's frame — on a `cap: 100` factor the user's 70 is stored as 0.7.
+         * Carried straight into `replaces`, the approval chip read "0.7 → 50", which is
+         * not a sentence about anything the user said. The native figure is `raw_value`
+         * when the frame recorded one, else the model value multiplied back up by the
+         * cap, else the value itself (an unframed factor stores native already).
+         */
+        const os = (node.observed_state ?? {}) as { value?: unknown; raw_value?: unknown; cap?: unknown };
+        const existingModel = typeof os.value === 'number' ? os.value : undefined;
+        const existingCap = typeof os.cap === 'number' && os.cap > 0 ? os.cap : undefined;
+        const existing =
+          typeof os.raw_value === 'number'
+            ? os.raw_value
+            : existingModel !== undefined && existingCap !== undefined
+              ? existingModel * existingCap
+              : existingModel;
+        /**
+         * ⭐ THE ONE CASE THE BLANKET REFUSAL WAS NEVER MEANT TO CATCH.
+         *
+         * The refusal above this exists to stop the MODEL replacing somebody's
+         * number with a guess "under cover of adopting assumptions". That is
+         * still refused and the wording of that rule has not moved.
+         *
+         * But the product's whole sensitivity loop asks the user to do exactly
+         * the opposite act: the analysis names the assumption the ordering turns
+         * on and invites them to change it and see how much it matters. An
+         * assumption the ordering is sensitive to ALWAYS already holds a value —
+         * otherwise it could not drive an ordering — so every such request landed
+         * on the blanket refusal and the invitation could never be honoured.
+         *
+         * `revise` is opt-in PER FACTOR and the tool tells the model it may set
+         * it only when the user has just asked for that factor to be changed and
+         * named the number. The old value is carried into `replaces` so the
+         * approval the user is shown says what it is replacing: consent stays
+         * informed, and the write still goes through authorise_change like any
+         * other. Nothing here writes.
+         */
+        const userNamedThisChange = a?.revise === true;
+        if (typeof existing === 'number' && !userNamedThisChange) {
+          occupied.push({ label: node.label, current_value: existing });  // native, per item 1
+          continue;
+        }
         if (!Number.isFinite(Number(a?.value))) { unresolved.push(node.label); continue; }
         if (seen.has(node.id)) continue;
         seen.add(node.id);
         adopted.push({
           id: node.id, label: node.label,
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
+          ...(typeof existing === 'number' ? { replaces: existing } : {}),
         });
       }
 
@@ -732,17 +792,47 @@ export function createAgentCapabilities(
         path: a.id,
         value: { value: a.value, unit: a.unit, basis: a.basis },
       }));
+      /**
+       * ⛔ THE APPROVAL MUST SAY WHAT IT REPLACES.
+       *
+       * A revision and an adoption are different acts and the user is agreeing to
+       * a different thing in each case. "Churn = 6%" hides that a number was
+       * already there; "Churn: 4% to 6%" does not. The receipt quotes this label,
+       * so what was consented to stays legible after the fact.
+       */
+      const revisions = ordered.filter((a) => typeof a.replaces === 'number');
+      const fresh = ordered.filter((a) => typeof a.replaces !== 'number');
+      const withUnit = (a: { value: number; unit: string }) => `${a.value}${a.unit !== '' ? ' ' + a.unit : ''}`;
+      const describe = (a: { label: string; value: number; unit: string; replaces?: number }) =>
+        typeof a.replaces === 'number'
+          ? `${a.label}: ${a.replaces}${a.unit !== '' ? ' ' + a.unit : ''} \u2192 ${withUnit(a)}`
+          : `${a.label} = ${withUnit(a)}`;
+      const heading =
+        revisions.length === 0
+          ? `Adopt ${fresh.length} starting assumption${fresh.length === 1 ? '' : 's'}: `
+          : fresh.length === 0
+            ? `Revise ${revisions.length} value${revisions.length === 1 ? '' : 's'} you asked to change: `
+            : `Revise ${revisions.length} value${revisions.length === 1 ? '' : 's'} and adopt ${fresh.length} starting assumption${fresh.length === 1 ? '' : 's'}: `;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
         operations,
-        provenance: { authored_by: 'model_proposed', basis: 'starting assumptions offered for the user to adopt or correct' },
+        provenance: {
+          // A revision the user named is theirs, not the model's. Only a proposal
+          // made entirely of those may claim it.
+          authored_by: fresh.length === 0 && revisions.length > 0 ? 'user_stated' : 'model_proposed',
+          basis:
+            revisions.length > 0 && fresh.length === 0
+              ? 'values the user asked to change, at the figures they gave'
+              : 'starting assumptions offered for the user to adopt or correct',
+        },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label:
-          `Adopt ${ordered.length} starting assumption${ordered.length === 1 ? '' : 's'}: ` +
-          ordered.map((a) => `${a.label} = ${a.value}${a.unit !== '' ? ' ' + a.unit : ''}`).join('; ') +
-          leftOutClause(notAFactor),
+        // The heading distinguishes a revision the user asked for from an assumption
+        // offered to them; `leftOutClause` is staging’s disclosure of the labels that
+        // were not factors. Both are required — the heading alone drops the disclosure,
+        // and staging’s label alone calls a revision an adoption.
+        public_label: heading + ordered.map(describe).join('; ') + leftOutClause(notAFactor),
       });
       proposals.put(proposal);
       return {
@@ -750,7 +840,10 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        assumptions: ordered.map((a) => ({ factor: a.label, value: a.value, unit: a.unit, basis: a.basis })),
+        assumptions: ordered.map((a) => ({
+          factor: a.label, value: a.value, unit: a.unit, basis: a.basis,
+          ...(typeof a.replaces === 'number' ? { replaces: a.replaces } : {}),
+        })),
         ...(unresolved.length > 0 ? { unresolved_labels: unresolved } : {}),
         ...(occupied.length > 0 ? { left_alone_already_valued: occupied } : {}),
         // Named, but not something a value can be set on (a risk, an outcome, an option): left out,
@@ -1376,7 +1469,23 @@ export function createAgentCapabilities(
              * a missing hash to `''`. Omitting it there preserves today's
              * behaviour rather than turning a degraded read into a hard failure.
              */
-            const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+            /**
+             * ⛔ NO WRITE AT ALL WHEN THE RE-READ LEFT NOTHING TO DO — the docblock
+             * above promised exactly this and it was false.
+             *
+             * ⚠ Accepted from independent review of #1743. The gate was
+             * `frameById.size`, computed BEFORE the re-read. When a competing writer
+             * had already framed every factor, `stillNeeds` was empty, `patched`
+             * equalled `base.nodes`, and a byte-identical WHOLE-GRAPH register still
+             * went out — minting a model version the user did not cause and taking
+             * the overwrite risk this block exists to remove, for nothing.
+             *
+             * Skipping is honest rather than synthetic: no HTTP call is made and
+             * nothing downstream claims a write, because none was made.
+             */
+            const reg: { status: number; json: Record<string, unknown> } = stillNeeds.size === 0
+              ? { status: 200, json: {} }
+              : await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
               // ⛔⛔ SPREAD THE WHOLE GRAPH. This sent only `{ nodes, edges }`, so
               // every other top-level key was DELETED by a write whose purpose is
               // to stop the model being overwritten. They are not cosmetic:
@@ -1525,6 +1634,35 @@ export function createAgentCapabilities(
         const applied: { factor: string; requested: number; recorded: number | null }[] = [];
         const failures: { factor: string; detail: string }[] = [];
         const receipts: ReceiptSummary[] = [];
+        /**
+         * Did THIS approval's own write for that factor actually land? See item 4 below.
+         *
+         * ⛔ A RECEIPT ALONE IS NOT A SUFFICIENT SIGNAL, and keying only on it would turn a
+         * real save into "not saved" — the opposite of the defect item 4 fixes, and worse.
+         * `model_version_receipt` is the single `DEGRADABLE_EGRESS_FIELD`
+         * (`validators/b1.ts:128`): when it is the ONLY field that fails egress validation,
+         * it is DELETED and the rest of the response passes. That is reachable today — its
+         * own docblock says the durable fix (not minting >200-character labels) has not
+         * landed. So a committed write can answer 200 with no receipt.
+         *
+         * Hence TWO independent signals, either of which is sufficient: this op's receipt,
+         * or the canonical graph hash moving across this op's own dispatch. The hash is read
+         * per op, which also keeps the chain accurate when one approval carries several.
+         *
+         * ⚠ The `priorTurnConflict` path in `commit.ts:1746-1766` also strips the receipt,
+         * but there the write genuinely did not happen for THIS request, and the hash will
+         * not have moved either — so both signals correctly read false and that case stays
+         * reported as not saved, which is what that branch exists to say.
+         */
+        const ownWrite = new Map<string, boolean>();
+        /** The frame the factor already carries, read from the pre-write state. */
+        const beforeById = new Map((before.nodes ?? []).map((n) => [n.id, n]));
+        /** The canonical revision this loop has advanced to, so each op's own move is visible. */
+        let carriedHash = before.graph_hash;
+        const capOf = (id: string): number | undefined => {
+          const c = ((beforeById.get(id)?.observed_state ?? {}) as { cap?: unknown }).cap;
+          return typeof c === 'number' && c > 0 ? c : undefined;
+        };
         for (let i = 0; i < ops.length; i += 1) {
           const o = ops[i];
           const v = (o.value ?? {}) as { value?: number; unit?: string };
@@ -1537,7 +1675,11 @@ export function createAgentCapabilities(
             event: {
               kind: 'factor_value_edit',
               target_id: o.path,
-              value: v.value,
+              // Same coherent {model, native} pair as the compound path — see the note
+              // there. Only when the factor already carries a cap.
+              ...(capOf(o.path) !== undefined
+                ? { value: v.value / (capOf(o.path) as number), raw_value: v.value }
+                : { value: v.value }),
               ...(v.unit !== undefined && v.unit !== '' ? { unit: v.unit } : {}),
             },
           });
@@ -1545,6 +1687,12 @@ export function createAgentCapabilities(
           const rc = receiptSummaryOf(r.json);
           if (rc.summary !== null) receipts.push(rc.summary);
           if (rc.unreadable) failures.push({ factor: o.path, detail: 'a receipt arrived but could not be read' });
+          // ⛔ OWN-WRITE EVIDENCE, PER OP (Codex 5810763729 item 4). A later read alone
+          // cannot tell "my write landed" from "the old number was already there".
+          const afterOp = await readGraph(ctx.scenario_id);
+          const moved = afterOp !== null && afterOp.graph_hash !== carriedHash;
+          if (afterOp !== null) carriedHash = afterOp.graph_hash;
+          ownWrite.set(o.path, r.status === 200 && (rc.summary !== null || moved));
         }
 
         // ⛔ CONFIRMED FROM STATE. The handler may rescale what it was sent
@@ -1555,12 +1703,45 @@ export function createAgentCapabilities(
         const byId = new Map((afterSet?.nodes ?? []).map((n) => [n.id, n]));
         for (const o of ops) {
           const node = byId.get(o.path);
-          const stored = node?.observed_state?.value;
+          const sos = (node?.observed_state ?? {}) as { value?: unknown; raw_value?: unknown; cap?: unknown };
+          const sCap = typeof sos.cap === 'number' && sos.cap > 0 ? sos.cap : undefined;
+          /**
+           * ⛔ READ BACK THE NATIVE FIGURE, AND ONLY CALL IT SAVED IF THIS WRITE PUT IT
+           * THERE (Codex 5810763729 item 4).
+           *
+           * The old line was `recorded: typeof stored === 'number' ? stored : null` over
+           * `observed_state.value`, and `landed` was every row whose `recorded` was not
+           * null. Both halves were wrong in the same direction: a factor that ALREADY
+           * held 0.7 still reads a number back after a refused write, so the refusal was
+           * reported as "Saved", and the number shown was the model's divisor rather than
+           * the user's own. So: read the native figure (`raw_value`, else the model value
+           * scaled back up by the cap), and require this approval's own receipt.
+           *
+           * ⚠ A RESCALE IS STILL REPORTED, NOT SUPPRESSED. When the handler stores a
+           * different number from the one approved, `recorded` carries what is actually
+           * in the model and the caller names the difference — that behaviour is the
+           * point of reading state back and it is deliberately unchanged. What is new is
+           * that a row with NO write behind it can no longer count as landed.
+           */
+          const storedNative =
+            typeof sos.raw_value === 'number'
+              ? sos.raw_value
+              : typeof sos.value === 'number' && sCap !== undefined
+                ? sos.value * sCap
+                : typeof sos.value === 'number'
+                  ? sos.value
+                  : undefined;
           const req = ((o.value ?? {}) as { value?: number }).value;
           applied.push({
             factor: node?.label ?? o.path,
             requested: typeof req === 'number' ? req : Number.NaN,
-            recorded: typeof stored === 'number' ? stored : null,
+            // ⛔ NO EXTRA KEY ON THIS ROW. An earlier version added `no_write_recorded: true`
+            // to rows with no own-write evidence, and `adopt-assumptions.test.ts` — a
+            // DIFFERENT file, whose reader set I had not derived — asserts this row's exact
+            // shape: "expected [{…(3)},{…(4)}] to deeply equal [{…(3)},{…(3)}]". `recorded:
+            // null` already carries the whole meaning, so the diagnostic key is dropped
+            // rather than the contract widened.
+            recorded: ownWrite.get(o.path) === true && storedNative !== undefined ? storedNative : null,
           });
         }
         const landed = applied.filter((a) => a.recorded !== null);
@@ -1606,11 +1787,33 @@ export function createAgentCapabilities(
           if (typeof n.scale_frame === 'number' && n.scale_frame > 1) return false;
           return typeof os.value === 'number' && Math.abs(os.value) > 1 && typeof os.cap !== 'number';
         });
-        const framed: { factor: string; value: number; range: number }[] = [];
+        /**
+         * ⛔⛔ CARRIES THE STABLE NODE ID, and the id is the load-bearing part.
+         *
+         * ⚠ CHANGES_REQUIRED from independent review of #1743, accepted. This list
+         * held only the visible `label`, and the post-refusal readback joined the
+         * fresh canonical nodes by `Map<label, node>` — where the LAST duplicate
+         * label wins. Production-shaped counterexample: factors A and B both
+         * display "Revenue"; A's frame is still absent after GRAPH_STALE, B is
+         * framed by another writer and appears later in the fresh list. The map
+         * resolved A's "Revenue" to B, dropped A, and told the user every factor
+         * now has a range — while A still blocked the analysis. A label is a value
+         * another object can satisfy; binding a claim to one is the estate's own
+         * named trap, and I walked into it while fixing the rename case.
+         *
+         * ⭐ An id join also subsumes the rename case for free: the node is found,
+         * and its CURRENT label is what the user is shown.
+         *
+         * `id` is internal only — it is stripped before the wire (`toWire` below)
+         * so the emitted payload shape is unchanged, byte for byte.
+         */
+        type IntendedFrame = { id: string; factor: string; value: number; range: number };
+        const toWire = (f: IntendedFrame) => ({ factor: f.factor, value: f.value, range: f.range });
+        const framed: IntendedFrame[] = [];
         /** The ranges this turn INTENDED to attach but could not — kept so a
          *  failure can name which factors still have no range, instead of the
          *  reply implying nothing was written at all. */
-        let rangesNotAttached: { factor: string; value: number; range: number }[] = [];
+        let rangesNotAttached: IntendedFrame[] = [];
         /**
          * ⛔ THE FIELD NAME MUST CARRY ITS OWN GUARANTEE. A consumer cannot tell a
          * verified absence from an intended one, so `ranges_not_attached` is
@@ -1692,7 +1895,7 @@ export function createAgentCapabilities(
               stillNeeds.set(id, range);
               // ⭐ Reported only now, from the FRESH node, so the sentence the user
               // reads and the bytes that were written are the same fact.
-              framed.push({ factor: node.label, value: freshRaw, range });
+              framed.push({ id: node.id, factor: node.label, value: freshRaw, range });
             }
             const patched = base.nodes.map((n) => {
               const range = stillNeeds.get(n.id);
@@ -1712,7 +1915,24 @@ export function createAgentCapabilities(
              * into a commit message and a PR body while only the first site had
              * changed. Fixed now, and the guard below counts BOTH.
              */
-            const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+            /**
+             * ⛔ NO WRITE AT ALL WHEN THE RE-READ LEFT NOTHING TO DO — the docblock
+             * above promised exactly this and it was false at BOTH sites.
+             *
+             * ⚠ Accepted from independent review of #1743. The gate was
+             * `frameById.size`, computed BEFORE the re-read. When a competing writer
+             * had already framed every factor, `stillNeeds` was empty, `patched`
+             * equalled `base.nodes`, and a byte-identical WHOLE-GRAPH register still
+             * went out — minting a model version the user did not cause and taking
+             * the overwrite risk this block exists to remove, for nothing.
+             *
+             * Skipping is honest rather than synthetic: `framed` is now built inside
+             * the `stillNeeds` loop, so it is empty here and
+             * `ranges_added_for_analysis` is omitted. No claim, because no write.
+             */
+            const reg: { status: number; json: Record<string, unknown> } = stillNeeds.size === 0
+              ? { status: 200, json: {} }
+              : await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
               // ⛔⛔ SPREAD THE WHOLE GRAPH. This sent only `{ nodes, edges }`, so
               // every other top-level key was DELETED by a write whose purpose is
               // to stop the model being overwritten. They are not cosmetic:
@@ -1801,17 +2021,21 @@ export function createAgentCapabilities(
                   // Derived from the FRESH read, never from what we intended:
                   // a competing writer may already have supplied a range.
                   /**
-                   * ⚠ KEYED ON `label`, NOT `id`. `framed.push({ factor: n.label … })`
-                   * stores the LABEL (`:1324`), so an id-keyed lookup misses every
-                   * entry, `frameOf(undefined)` is null, and EVERY factor reads as
-                   * still-unranged — the exact false claim this repair exists to
-                   * remove. Caught by the competing-writer control, which is what a
-                   * discriminating control is for.
+                   * ⭐⭐ KEYED ON `id`, WHICH IS THE ONLY KEY THAT CANNOT COLLIDE.
+                   *
+                   * A label join silently resolved one factor to a DIFFERENT factor
+                   * sharing its label (see the `IntendedFrame` note above), and it
+                   * could not find a renamed one at all. An id join answers both:
+                   * present-and-framed, present-and-still-unranged, or absent.
+                   *
+                   * ⚠ And the message is built from the FRESH node's label, not the
+                   * one this turn remembered — after a rename the user is shown the
+                   * name the model now uses, not a name that no longer exists.
                    */
-                  const byLabel = new Map<string, GraphRead['nodes'][number]>();
+                  const byId = new Map<string, GraphRead['nodes'][number]>();
                   for (const n of fresh.nodes) {
-                    const label = String((n as { label?: unknown }).label ?? '');
-                    if (label !== '') byLabel.set(label, n);
+                    const id = String((n as { id?: unknown }).id ?? '');
+                    if (id !== '') byId.set(id, n);
                   }
                   /**
                    * ⛔⛔ AND A LABEL THAT IS NOT IN THE FRESH READ PROVES NOTHING.
@@ -1828,10 +2052,12 @@ export function createAgentCapabilities(
                    * dropped from the named list and disclosed as unaccounted for,
                    * without asserting anything about it.
                    */
-                  const unaccounted = rangesNotAttached.filter((f) => byLabel.get(f.factor) === undefined);
-                  const stillUnranged = rangesNotAttached.filter(
-                    (f) => byLabel.get(f.factor) !== undefined && frameOf(byLabel.get(f.factor)) === null,
-                  );
+                  const unaccounted = rangesNotAttached.filter((f) => byId.get(f.id) === undefined);
+                  const stillUnranged = rangesNotAttached
+                    .filter((f) => byId.get(f.id) !== undefined && frameOf(byId.get(f.id)) === null)
+                    // ⭐ The CURRENT label, from the fresh read. A factor renamed by
+                    // a competing writer is named as the model now names it.
+                    .map((f) => ({ ...f, factor: String((byId.get(f.id) as { label?: unknown }).label ?? f.factor) }));
                   rangesNotAttached = stillUnranged;
                   failures.push({
                     factor: 'scale_frame',
@@ -1857,6 +2083,53 @@ export function createAgentCapabilities(
           }
         }
         if (landed.length === applied.length) proposals.markApplied(decision.proposal.proposal_id, receipts);
+        /**
+         * ⛔⛔ RE-DERIVE THE SUBSTITUTION FROM THE FINAL WRITE, NOT THE FIRST ONE.
+         *
+         * ⚠ CHANGES_REQUIRED at `4c2d40b6`, accepted in full, and it is the same
+         * shape as the disclosure defect one layer down: the READER was innocent
+         * and the PRODUCER was wrong.
+         *
+         * `applied` is built from `afterSet` — the read taken BEFORE the scale
+         * frame is attached. So for an approved bare amount of 40 with no prior
+         * range: the frame write below registers `{value: 0.4, raw_value: 40,
+         * cap: 100}`, but `rescaled` was computed from the earlier row (40 → 40)
+         * and came out EMPTY. The model then computes with 0.4 while the reply
+         * said the approved figures were "stored unchanged".
+         *
+         * That is the authorship failure this lane exists to prevent: the person
+         * approved 40, the analysis uses 0.4, and the translation was invisible.
+         * No consumer could recover it, because the fact was never emitted.
+         *
+         * So the recorded side is re-read from the bytes that actually landed. A
+         * failed re-read does not fabricate one: it falls back to the arithmetic
+         * we know we sent (`raw / range`, on a register that returned 200) and
+         * `frame_derivation_unread` records that it was derived rather than
+         * observed.
+         */
+        let recordedUnread = false;
+        if (framed.length > 0) {
+          const finalRead = await readGraph(ctx.scenario_id);
+          const finalById = new Map((finalRead?.nodes ?? []).map((n) => [n.id, n]));
+          const framedRangeByLabel = new Map(framed.map((f) => [f.factor, f.range]));
+          if (finalRead === null) recordedUnread = true;
+          for (let i = 0; i < ops.length; i += 1) {
+            const row = applied[i];
+            if (row === undefined || row.recorded === null) continue;
+            const node = finalById.get(ops[i].path);
+            const finalValue = node?.observed_state?.value;
+            if (typeof finalValue === 'number') {
+              row.recorded = finalValue;
+              continue;
+            }
+            // Fresh read unusable for this node: derive from what we sent.
+            const range = framedRangeByLabel.get(row.factor);
+            if (typeof range === 'number' && range > 1 && typeof row.requested === 'number') {
+              row.recorded = row.requested / range;
+              recordedUnread = true;
+            }
+          }
+        }
         const rescaled = landed.filter((a) => a.recorded !== a.requested);
         return {
           ok: true, mutated: true, applied: true,
@@ -1871,7 +2144,7 @@ export function createAgentCapabilities(
           ...(rescaled.length > 0
             ? { rescaled_by_the_model: rescaled, must_disclose_rescaling: true }
             : {}),
-          ...(framed.length > 0 ? { ranges_added_for_analysis: framed } : {}),
+          ...(framed.length > 0 ? { ranges_added_for_analysis: framed.map(toWire) } : {}),
           /**
            * ⭐ THE PARTIAL OUTCOME, STATED RATHER THAN IMPLIED. A value write and
            * a frame write are two registrations; the first can land and the
@@ -1888,7 +2161,7 @@ export function createAgentCapabilities(
           ...(rangesNotAttached.length > 0
             ? {
               partially_applied: true,
-              ranges_not_attached: rangesNotAttached,
+              ranges_not_attached: rangesNotAttached.map(toWire),
               // A factor whose amount has no range cannot be read against
               // anything, so the analysis stays blocked for it whatever else
               // landed. Named, so the Agent cannot report a clean success.
@@ -1915,8 +2188,21 @@ export function createAgentCapabilities(
               ? ' Some of them had no range to be read against, which would have stopped the analysis running ' +
                 'at all, so a range was taken from the figure itself: ' +
                 framed.map((f) => `${f.factor} 0 to ${f.range}`).join(', ') +
-                '. That is a unit of measurement rather than a forecast or a limit, the approved figures are ' +
-                'stored unchanged, and the user should be told and invited to correct any range that is wrong.'
+                '. That is a unit of measurement rather than a forecast or a limit. ' +
+                // ⛔ "the approved figures are stored unchanged" WAS FALSE, and it was the
+                // sentence that hid the whole translation. The user's figure is preserved
+                // as the raw value, but the number the analysis computes with is that
+                // figure divided by the range — 40 on a 0-to-100 range is 0.4. Both
+                // representations must be named, because only then is the authorship
+                // legible: the person authored 40, and 0.4 is the product's encoding of it.
+                'The figure each person approved is kept exactly as they gave it, and the ' +
+                'number the analysis computes with is that figure measured against its range ' +
+                '— state BOTH when you describe what changed, never only one. ' +
+                (recordedUnread
+                  ? 'One or more of those computed figures could not be read back and was derived ' +
+                    'from the range instead, so describe it as derived rather than as observed. '
+                  : '') +
+                'The user should be told and invited to correct any range that is wrong.'
               : ''),
         };
       }
