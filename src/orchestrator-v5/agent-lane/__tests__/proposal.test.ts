@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { narrateWriteOutcome, withWriteOutcome } from '../write-outcome.js';
 import {
   ProposalStore, createProposal, computeProposalId, MAX_PROPOSALS,
   type ProposalContent,
@@ -157,6 +158,46 @@ describe('authorisation applies the STORED proposal', () => {
     for (let i = 0; i < MAX_PROPOSALS + 5; i++) s.put(createProposal(content({ public_label: 'filler ' + i })));
     expect(s.authorise(req(neverApproved.proposal_id)).status, 'the fix must not work by never evicting').toBe('unknown_proposal');
     expect(s.size(), 'memory must stay bounded').toBeLessThanOrEqual(MAX_PROPOSALS);
+  });
+});
+
+/**
+ * ⛔ THE CORNER THE EVICTION ORDER CANNOT REACH (Codex 5807661105): when EVERY entry is applied, the
+ * oldest applied proposal is still evicted, and a process restart forgets every proposal at once. So
+ * `unknown_proposal` can name a change that WAS saved. What the user reads for it must therefore never
+ * say nothing was changed, nor invite a blind second approval.
+ */
+describe('an unknown proposal is never told as "nothing was changed"', () => {
+  const said = (refusal: string) => {
+    const n = narrateWriteOutcome('Done.', [{ name: 'authorise_change', ok: false, mutated: false, refusal }], [{ ok: false, mutated: false, refusal }]);
+    return withWriteOutcome(n.text, n.status);
+  };
+
+  it('RED: 200 applied proposals plus one more → the evicted applied id reads as possibly saved, never as unchanged', () => {
+    const s = new ProposalStore();
+    const first = s.put(createProposal(content({ public_label: 'applied 0' })));
+    s.markApplied(first.proposal_id, [{ version: 1, scenario_id: SCENARIO, label: 'v1' } as never]);
+    for (let i = 1; i < MAX_PROPOSALS; i++) {
+      const p = s.put(createProposal(content({ public_label: 'applied ' + i })));
+      s.markApplied(p.proposal_id);
+    }
+    s.put(createProposal(content({ public_label: 'one more' })));
+    const d = s.authorise(req(first.proposal_id));
+    expect(d.status, 'the control: this IS the all-applied corner, where the applied record goes too').toBe('unknown_proposal');
+
+    const text = said(d.status);
+    expect(text).not.toMatch(/nothing was changed/i);
+    expect(text, 'it may already be saved: say so').toMatch(/may already be in the model/i);
+    expect(text, 'no blind second approval').toMatch(/check the model before/i);
+  });
+
+  it('CONTRAST: a retained applied proposal still returns already_applied with its original receipt', () => {
+    const s = new ProposalStore();
+    const p = s.put(createProposal(content({ public_label: 'kept' })));
+    s.markApplied(p.proposal_id, [{ version: 4, scenario_id: SCENARIO, label: 'v4' } as never]);
+    const d = s.authorise(req(p.proposal_id));
+    expect(d.status).toBe('already_applied');
+    if (d.status === 'already_applied') expect(d.receipts.map((r) => (r as { version?: number }).version)).toEqual([4]);
   });
 });
 

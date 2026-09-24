@@ -121,7 +121,7 @@ describe('fast path 2: a typed approval chip applies its exact proposal with zer
     expect(commits.length, 'B was NOT applied').toBe(commitsBefore);
     expect(b._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: false, refusal: 'unknown_proposal' })]);
     expect(b._diagnostic_trace.fast_path).toBe('approve');
-    expect(b.assistant_text).toMatch(/no longer available, so nothing was changed/);
+    expect(b.assistant_text).toMatch(/I no longer hold that proposal, so nothing was applied just now/);
   });
 
   it('CONTROL (Codex 2): one turn_id + the same words for A then B is refused as a different request; the exact A retry replays', async () => {

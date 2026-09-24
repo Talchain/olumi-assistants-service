@@ -54,7 +54,9 @@ const versionPhrase = (vs: number[]): string =>
 
 const REFUSAL_WORDS: Record<string, string> = {
   superseded: 'the model changed after this was proposed, so it was not applied — ask me to propose it again',
-  unknown_proposal: 'that proposal is no longer available, so nothing was changed — ask me to suggest it again and approve the new one',
+  // ⛔ NEVER "nothing was changed" (Codex #1803 5807661105): the store is in-memory and bounded, so an id
+  // it no longer holds may name a change that WAS saved (all-applied eviction, or any restart).
+  unknown_proposal: 'I no longer hold that proposal, so nothing was applied just now — if it was approved earlier it may already be in the model, so check the model before asking me to suggest it again',
   not_authorised: 'that proposal belongs to a different conversation',
   integrity_failed: 'the stored proposal could not be verified',
   partially_applied: 'only part of it was saved',

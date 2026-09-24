@@ -186,7 +186,7 @@ export class ProposalStore {
    * been applied came back as "no longer available".
    *
    * The user-visible cost is not a wrong code. `REFUSAL_WORDS.unknown_proposal`
-   * reads "that proposal is no longer available, so nothing was changed — ask me
+   * USED TO read "that proposal is no longer available, so nothing was changed — ask me
    * to suggest it again and approve the new one", so the user is told nothing was
    * saved when it WAS, and invited to apply the same change a second time.
    *
