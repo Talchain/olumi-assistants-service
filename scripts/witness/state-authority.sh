@@ -86,10 +86,18 @@ done
 echo "  → EXPECTED: envelope 200 · null 409/absence · stale 409/identity"
 
 # ── 3. the edit, then the reload. This is the goal's own journey step.
+# ⭐ PREFER a factor that actually carries a unit_interval claim, so the
+#   falsified-declaration clause is TESTABLE rather than vacuous. Fall back to an
+#   unframed factor, then to any factor — and the check below states which case it got.
 FID=$(python3 -c "
 import json;g=json.load(open('/tmp/w_reg.json'))['graph']
-c=[n for n in g['nodes'] if n.get('kind')=='factor' and (n.get('observed_state') or {}).get('cap') is None and n.get('scale_frame') is None]
-print(c[0]['id'] if c else (([n for n in g['nodes'] if n.get('kind')=='factor'][0])['id']))")
+fac=[n for n in g['nodes'] if n.get('kind')=='factor']
+def claim(n):
+    os_=n.get('observed_state') or {}
+    return os_.get('declared_scale')=='unit_interval' or os_.get('unit')=='unit_interval'
+best=[n for n in fac if claim(n)]
+unframed=[n for n in fac if (n.get('observed_state') or {}).get('cap') is None and n.get('scale_frame') is None]
+print((best or unframed or fac)[0]['id'])")
 echo "--- editing factor $FID to 40 ---"
 TID2=$(python3 -c "import uuid;print(uuid.uuid4())")
 curl -s --max-time 120 -X POST "$BASE/orchestrate/v2/turn" \
@@ -124,8 +132,28 @@ for n in ((d.get('graph') or {}).get('nodes') or []):
         ds=os_.get('declared_scale'); val=os_.get('value'); cap=os_.get('cap')
         print("--- CLAUSE: no self-contradictory stored data (PR #1832) ---")
         print("  value=%s raw_value=%s cap=%s declared_scale=%s" % (val, os_.get('raw_value'), cap, ds))
-        falsified = ds=='unit_interval' and cap is None and isinstance(val,(int,float)) and abs(val)>1
-        print("  →", "DEFECT PRESENT: declares unit_interval while holding %s" % val if falsified else "SATISFIED: no false declaration")
+        # ⛔⛔ THE PRECONDITION MUST BE STATED, OR "SATISFIED" IS UNEARNED.
+        #
+        # This printed "SATISFIED: no false declaration" on served 31847a8 while
+        # PR #1832 was still UNMERGED — because that brief's factors carried
+        # `scale_frame`, never `declared_scale`, so there was no declaration to
+        # falsify in the first place. A pass with no precondition is a VACUOUS pass,
+        # and an instrument that can emit one is worse than no instrument.
+        pre = json.load(open('/tmp/w_reg.json'))['graph']
+        prenode = next((x for x in pre.get('nodes') or [] if x.get('id')==fid), {}) or {}
+        preos = prenode.get('observed_state') or {}
+        predecl = preos.get('declared_scale')
+        preunit = preos.get('unit')
+        print("  PRE-EDIT: declared_scale=%r unit=%r" % (predecl, preunit))
+        testable = predecl == 'unit_interval' or preunit == 'unit_interval'
+        falsified = (ds=='unit_interval' or os_.get('unit')=='unit_interval') and cap is None                     and isinstance(val,(int,float)) and abs(val)>1
+        if not testable:
+            print("  → NOT TESTABLE on this brief: the factor carried no unit_interval claim")
+            print("    before the edit, so there was nothing to falsify. This is NOT a pass.")
+        elif falsified:
+            print("  → DEFECT PRESENT: declares unit_interval while holding %s" % val)
+        else:
+            print("  → SATISFIED: the claim was present before the edit and is gone after it")
         if aa.get('admitted') and falsified:
             print("  ⛔ AND readiness ADMITS it (#63 item 3) — mode=%s" % aa.get('permitted_analysis_mode'))
 PY
