@@ -1530,7 +1530,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // THIS response admits a run. A first analysis stopped only by the turn's time was admitted on
     // this same revision, so the same readiness offers Run beside Olumi's sentence.
     const offerRun = result.mutated
-      && !result.tool_calls.some((c) => c.name === 'run_analysis')
+      // A Run the server refused because this request's approval applied a change analysed nothing:
+      // it must not suppress the Run the refusal tells the user to press.
+      && !result.tool_calls.some((c) => c.name === 'run_analysis' && c.refusal !== 'run_not_requested')
       && !firstAnalysisExists
       && admitsRunOffer(analysisReady);
 
