@@ -16,7 +16,9 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { enforceLeadingOptionClaimsAtWire } from '../leading-option-wire-enforcement.js';
+// The Agent lane's wire gate — the fail-closed ranking drop, then the shared gate — which is what
+// `routes/agent-v1-turn.ts` calls. (Retargeted from the shared gate by OpenAI Runtime; assertions unchanged.)
+import { enforceAgentLaneLeaderClaimsAtWire } from '../../agent-lane/withheld-leader-fail-closed.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 type LeaderClaim = { permitted: boolean; separation?: string; withheld_reason?: string };
@@ -35,7 +37,7 @@ const norm = (t: string): string => t.replace(/\*\*/g, '').replace(/[‘’]/g, 
 function gate(text: string, permitted: boolean) {
   const state = permitted ? permittedState : withheldState;
   const claim: LeaderClaim = state.leader_claim;
-  return enforceLeadingOptionClaimsAtWire(
+  return enforceAgentLaneLeaderClaimsAtWire(
     { assistant_text: text, blocks: [], suggested_actions: [], analysis_state: state } as unknown as OlumiResponse,
     {
       requestId: 'leader-gate-real-replies', exitPath: 'agent_lane_v1', mayNameLeadingOption: claim.permitted === true,

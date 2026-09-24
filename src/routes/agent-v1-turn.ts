@@ -61,7 +61,7 @@ import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compo
 import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
 import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
-import { enforceLeadingOptionClaimsAtWire } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
+import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runTurnCoaching, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import {
@@ -1665,6 +1665,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * analysis, `leader_claim.permitted` from the SAME readback is the entitlement, conjoined inside
      * the gate with the admission's `permitted_analysis_mode`. PERMIT-WINS: a permitted turn is
      * returned by reference, byte-identical.
+     *
+     * ⛔ FAIL-CLOSED ON A WITHHELD TURN (AI Quality corpus #63 5823028488; Codex 5823210765): the
+     * shared gate needs the EXACT option label and caught 1 of 13 real paraphrased leaks. So on a
+     * withheld turn every sentence that ranks options is dropped first, whatever it calls the
+     * option, and one deterministic no-leader sentence is appended; then the shared gate runs on
+     * what remains. See `agent-lane/withheld-leader-fail-closed.ts`.
      */
     const analysisBearing = analysisResult !== undefined
       || fa !== undefined
@@ -1672,7 +1678,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let leaderClaimEnforced = false;
     if (analysisBearing) {
       const claim = (analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
-      const enforced = enforceLeadingOptionClaimsAtWire(wireBody, {
+      const enforced = enforceAgentLaneLeaderClaimsAtWire(wireBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1',
         mayNameLeadingOption: claim?.permitted === true,
