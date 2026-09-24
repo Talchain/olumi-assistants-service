@@ -62,14 +62,23 @@ import { isPendingActionExpired } from '../orchestrator-v5/session/pending-actio
 import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { enforceLeadingOptionClaimsAtWire } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
+import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import {
+  bindRunBlocksToReadback,
   firstAnalysisDeadline,
   firstAnalysisSentence,
   runFirstAnalysisAfterConstruction,
   type FirstAnalysisOutcome,
 } from '../orchestrator-v5/agent-lane/first-analysis.js';
-import type { GraphV3T } from '../schemas/cee-v3.js';
+import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
+
+/** The egress sanitiser resolves labels against a PARSED graph; an unparseable read gives it none. */
+function parsedGraphOrNull(raw: unknown): GraphV3T | null {
+  if (raw === undefined || raw === null) return null;
+  const parsed = GraphV3.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
@@ -1201,8 +1210,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       firstAnalysis = { outcome, ms: Date.now() - t0, constructionTurnId: input.constructionTurnId, revision: input.revisionHash };
       return outcome;
     };
+    /**
+     * The blocks of the LAST analysis this turn ran (first analysis, the Agent's own run, or the typed
+     * Run). Carried to the user ONLY when bound to the final readback — see `bindRunBlocksToReadback`.
+     */
+    let lastRunBlocks: readonly unknown[] = [];
     const capabilities = createAgentCapabilities(
-      countingDispatch, proposals, callStructured, mode, undefined,
+      countingDispatch, proposals, callStructured, mode,
+      (payload) => { lastRunBlocks = Array.isArray(payload.blocks) ? payload.blocks : []; },
       { firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }) },
     );
     // A session whose in-process history holds no user message (a restart, a
@@ -1526,6 +1541,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         : []),
     ];
 
+    const coachingBound = bindRunBlocksToReadback(lastRunBlocks, { graphHash, analysisState, analysisResult });
+    const coachingBlocks: unknown[] = coachingBound.length === 0
+      ? []
+      : sanitiseOlumiResponseForEgress(
+        // A carrier for the blocks only — not an answer, so not a compose site: nothing here speaks.
+        { response_version: 2, assistant_text: '', blocks: coachingBound as OlumiResponse['blocks'], suggested_actions: [], insights: [], stage_indicator: 'frame' } as OlumiResponse,
+        {
+          graph: parsedGraphOrNull(readbackGraph), requestId: String(req.id), exitPath: 'agent_lane_v1', userMessage: null,
+          // Vestigial on this function (see its docblock); the readback's own typed verdict, never a literal.
+          mayNameLeadingOption: (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted === true,
+        },
+      ).blocks;
+
     // A Run writes nothing: its interpretation is never passed through the WRITE narrator, whose
     // completion-claim stripper would delete a sentence and append a false write-status line
     // (finding 3 on #1786, 5807230197).
@@ -1543,6 +1571,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       answerKind: 'substantive',
       // One click approves the ONE proposal just offered — the same words as typing "yes".
       suggested_actions: offeredNow,
+      // The run's coaching, ONLY when bound to this readback, through the same egress sanitiser the
+      // conventional exit uses — built INTO the finalised response, never appended raw.
+      blocks: coachingBlocks as OlumiResponse['blocks'],
     });
     const finalised = finaliseV5Response(composed, { scenarioId });
 
@@ -1559,7 +1590,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // The FINAL readback's bound result block — never the tool run's own blocks. See
       // `analysisResult` in readBackState. The Agent's text still reports what its run
       // found and, if the model has since changed, that it has.
-      ...(analysisResult !== undefined ? { blocks: [...existingBlocks, analysisResult] } : {}),
+      ...(analysisResult !== undefined ? { blocks: [analysisResult, ...existingBlocks] } : {}),
       ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
       // Readiness of the graph this response returns — the final readback's only.
       ...(analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
@@ -1695,6 +1726,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               construction_turn_id: firstAnalysis.constructionTurnId,
               revision: firstAnalysis.revision,
               ms: firstAnalysis.ms,
+              coaching_blocks: coachingBlocks.length,
             },
           }
           : {}),

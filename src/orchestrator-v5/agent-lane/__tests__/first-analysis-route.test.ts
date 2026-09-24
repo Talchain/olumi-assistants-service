@@ -336,6 +336,21 @@ describe('the Agent route runs the first analysis itself, once', () => {
     const b = await turn(app, { message: 'What does the analysis say?' });
     expect(b.assistant_text).toBe(prose);
   });
+
+  it('RED: the run’s coaching block is shown when bound to the readback revision and a current run (test 7)', async () => {
+    const b = await buildTurn(app);
+    expect((b.blocks ?? []).map((x) => x.type)).toEqual(['analysis_result', 'review_card']);
+  });
+
+  it.each([
+    ['a different revision', () => { knobs.coachingHash = 'other'; }],
+    ['a run that is not current', () => { knobs.runStateKind = 'complete_stale'; }],
+  ])('CONTRAST: a coaching block from %s is not shown (test 7)', async (_l, set) => {
+    set();
+    const b = await buildTurn(app);
+    expect(st(SID).inProcessRuns, 'control: the run happened').toHaveLength(1);
+    expect((b.blocks ?? []).some((x) => x.type === 'review_card')).toBe(false);
+  });
 });
 
 describe('RED: no time left in the proxy budget → skip, say so, offer Run (test 5)', () => {

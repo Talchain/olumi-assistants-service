@@ -2361,6 +2361,7 @@ export function createAgentCapabilities(
           revisionHash: after.graph_hash,
           requestId: ctx.request_id,
         });
+        if (outcome.ran) onAnalysis?.({ analysis_ready: outcome.analysisReady, blocks: [...outcome.blocks] });
         // What the Agent narrates from: the READBACK after the run — its confined summary and the
         // typed leader permission — never the run's own receipt. A failed read describes nothing.
         const postRun = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph`, {}).catch(() => null);
