@@ -52,7 +52,8 @@ import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { narrateWriteOutcome, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
-import { approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { AMEND_CHIP, approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
@@ -103,6 +104,46 @@ export const AGENT_TURN_CLAIM_WAIT = {
 /** The conversation of record stays Olumi's; this is a per-process cache. */
 const histories = new HistoryStore();
 const proposals = new ProposalStore();
+
+type OfferedAction = SuggestedAction;
+/**
+ * ⛔ A REPLAY RE-OFFERS THE ORIGINAL TYPED ACTIONS, RE-VALIDATED ON TODAY'S STATE (independent
+ * review of #1792, 5806213240). The durable row keeps the words only, so a retry of the same
+ * `turn_id` after a lost response answered with no Run and no approve control — at exactly the
+ * moment a replay matters. What a turn offered is remembered here, per scenario and turn, and a
+ * replay offers only what is STILL true: an approve chip whose proposal is still outstanding, and
+ * the Run offer only when today's canonical readiness admits a run and no current analysis exists.
+ * Nothing is inferred from the words.
+ *
+ * ⚠ Process-local, on purpose and bounded: the proposals an approve chip names live in this
+ * process too (`ProposalStore`), so a chip could not outlive them. After a restart a replay
+ * offers nothing — failing closed — rather than guessing whether the original approval applied.
+ */
+const OFFERED_ACTIONS_MAX = 500;
+const offeredActions = new Map<string, readonly OfferedAction[]>();
+function rememberOffered(key: string, actions: readonly OfferedAction[]): void {
+  offeredActions.delete(key);
+  if (offeredActions.size >= OFFERED_ACTIONS_MAX) {
+    const oldest = offeredActions.keys().next().value;
+    if (oldest !== undefined) offeredActions.delete(oldest);
+  }
+  offeredActions.set(key, actions);
+}
+
+/** The originally offered actions that are still valid on the CURRENT state, in their original order. */
+export function stillValidOffers(
+  offered: readonly OfferedAction[],
+  now: { outstandingProposalIds: ReadonlySet<string>; analysisReady: unknown; analysisState: unknown },
+): OfferedAction[] {
+  const approvals = offered.filter((a) => {
+    const id = typedApprovalOf({ chip: { id: a.id } });
+    return id !== undefined && now.outstandingProposalIds.has(id);
+  });
+  const runKind = (now.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
+  const run = offered.some((a) => a.id === RUN_OFFER_CHIP.id)
+    && admitsRunOffer(now.analysisReady) && runKind !== 'complete_current';
+  return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : [])];
+}
 const sessions = new SessionBindingRegistry();
 
 /**
@@ -835,12 +876,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const requestHash = agentTurnRequestHash(scenarioId, userId, message, approvedProposal !== undefined ? `approve:${approvedProposal}` : undefined);
     /** The response a replay returns: the ORIGINAL words, on today's state, with no model call. */
     const replayed = async (prior: CommittedTurnRecord) => {
+      const state = await readBackState(dispatch, scenarioId);
+      const offered = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) ?? [] : [];
       const composedReplay = composeDirectAnswerResponse({
         assistant_text: prior.assistant_message ?? 'That request was already completed.',
         stage: 'frame',
         answerKind: 'substantive',
+        suggested_actions: stillValidOffers(offered, {
+          outstandingProposalIds: new Set(proposals.outstanding(scenarioId, userId).map((o) => o.proposal_id)),
+          analysisReady: state.analysisReady,
+          analysisState: state.analysisState,
+        }),
       });
-      const state = await readBackState(dispatch, scenarioId);
       return {
         ...finaliseV5Response(composedReplay, { scenarioId }),
         ...(state.graphHash !== undefined ? { graph_hash: state.graphHash } : {}),
@@ -1173,6 +1220,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && !result.tool_calls.some((c) => c.name === 'run_analysis')
       && admitsRunOffer(analysisReady);
 
+    const offeredNow: OfferedAction[] = [...approvalChipsFor(result.tool_calls), ...(offerRun ? [RUN_OFFER_CHIP] : [])];
+    if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
+
     const narration = narrateWriteOutcome(text, result.tool_calls, result.tool_results);
     const composed = composeDirectAnswerResponse({
       // ⛔ A proposal id is a binding for authorise_change, never text a user reads or
@@ -1182,7 +1232,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       stage: 'frame',
       answerKind: 'substantive',
       // One click approves the ONE proposal just offered — the same words as typing "yes".
-      suggested_actions: [...approvalChipsFor(result.tool_calls), ...(offerRun ? [RUN_OFFER_CHIP] : [])],
+      suggested_actions: offeredNow,
     });
     const finalised = finaliseV5Response(composed, { scenarioId });
 
