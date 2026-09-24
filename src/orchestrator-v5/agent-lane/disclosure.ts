@@ -134,11 +134,51 @@ export function valueChangeDisclosures(facts: {
    * what let a claim slip through, so nothing is composed at all.
    */
   if (facts.current_state_unknown === true) {
-    return [
+    /**
+     * ⛔⛔ BUT A VERIFIED PAST SUBSTITUTION IS NOT A PRESENT-STATE CLAIM, AND
+     * SUPPRESSING IT LOSES PROVENANCE EXACTLY WHEN IT MATTERS MOST.
+     *
+     * ⚠ CHANGES_REQUIRED carried forward to `cdd91175` by independent review,
+     * accepted. My repair was too broad: it returned ONLY the unknown notice, so
+     * a turn where the person approved **Churn rate 40** and the graph recorded
+     * **0.4** told them nothing about the substitution. The counterexample is
+     * reachable from one operation — `agent-capabilities.ts` can return a
+     * specific `rescaled_by_the_model` pair from the write's OWN RESULT and then
+     * fail the readback — and the previous spec asserted that neither the factor
+     * name nor the figure appeared.
+     *
+     * ⭐ THE DISTINCTION THE FIRST FIX MISSED. `requested → recorded` is a fact
+     * about an EVENT, established by the write that reported it; a failed
+     * readback cannot unmake it. "Those stored figures are the ones it will
+     * compute with" is a fact about the CURRENT MODEL, which nothing verified.
+     * The first is owed in the PAST TENSE; only the second must be withheld.
+     *
+     * So: name the substitution, date it to this turn, and refuse in the same
+     * breath to say the stored figure is current or safe to act on. Nothing else
+     * is composed — no range offer, no present-state gap list, no advice.
+     */
+    const past = (facts.rescaled ?? []).map((r) => {
+      const where = typeof r.option === 'string' && r.option !== '' ? `${r.factor} for ${r.option}` : r.factor;
+      const req = r.requested === null ? 'the value you approved' : String(r.requested);
+      const rec = r.recorded === null ? 'a different value' : String(r.recorded);
+      return `${where} (you approved ${req}, it was stored as ${rec})`;
+    });
+    const unknown =
       'Note: this turn recorded changes to your model and then could not read it back, because it changed '
       + 'underneath the write. Those writes were accepted AT THE TIME. What the model now holds — the values, '
       + 'their ranges, and whether the analysis can run — is NOT KNOWN. Ask me to re-read it before changing '
-      + 'anything, and do not treat any figure as current until then.',
+      + 'anything, and do not treat any figure as current until then.';
+    if (past.length === 0) return [unknown];
+    return [
+      unknown,
+      // ⚠ PAST TENSE THROUGHOUT, and it says outright that it is not a statement
+      // about the model now. Without that second sentence this paragraph would
+      // read as the present-state claim the block above exists to withhold.
+      within(past, (shown, hidden) =>
+        'Note: when those writes went in, the model did not store some values exactly as you approved them — ' +
+        `${shown.join('; ')}.${andMore(hidden)} `
+        + 'That is what happened at the time. It is NOT a statement about what the model holds now, which could '
+        + 'not be read — so do not act on those figures until I have re-read it.'),
     ];
   }
 

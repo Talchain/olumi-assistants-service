@@ -295,20 +295,59 @@ describe('⛔ unknown-state precedence over EVERY present-state claim', () => {
     'as it now stands',
   ];
 
-  it('⛔ rescaled + unknown: no figure is named as current and no advice is given', () => {
+  /**
+   * ⛔⛔ THIS TEST USED TO ASSERT THE DEFECT. It required that neither 'Churn rate'
+   * nor '0.4' appear — i.e. it pinned the LOSS OF PROVENANCE as correct behaviour.
+   * Independent review carried a CHANGES_REQUIRED forward to `cdd91175` on exactly
+   * this counterexample and it is accepted in full.
+   *
+   * ⭐ THE DISTINCTION. `requested → recorded` is a fact about an EVENT, reported
+   * by the write's own result; a failed readback cannot unmake it. "Those stored
+   * figures are the ones it will compute with" is a fact about the CURRENT MODEL,
+   * which nothing verified. The first is OWED, in the past tense. Only the second
+   * must be withheld. Suppressing both meant the person lost a verified past
+   * substitution precisely when its provenance mattered most.
+   */
+  it('⭐ rescaled + unknown: the PAST substitution is named, in past tense, and nothing is claimed about now', () => {
     const owed = valueChangeDisclosures({
       rescaled: [{ factor: 'Churn rate', requested: 40, recorded: 0.4 }],
       ranges_added: [],
       current_state_unknown: true,
     });
+    expect(owed).toHaveLength(2);
+    const [unknown, historical] = owed;
+    // The unknown notice is unchanged and still first.
+    expect(unknown).toContain('NOT KNOWN');
+    expect(unknown).toContain('AT THE TIME');
+    // ⭐ THE REPAIR: the verified event IS disclosed, with both figures.
+    expect(historical).toContain('Churn rate');
+    expect(historical).toContain('40');
+    expect(historical).toContain('0.4');
+    // ⛔ AND IT IS PAST TENSE, and says so explicitly. Without this the paragraph
+    // would read as the present-state claim the unknown branch exists to withhold.
+    expect(historical).toContain('when those writes went in');
+    expect(historical).toContain('what happened at the time');
+    expect(historical).toContain('NOT a statement about what the model holds now');
+    // No present-state claim and no advice to act, in EITHER paragraph.
+    for (const f of FORBIDDEN_WHEN_UNKNOWN) {
+      expect(unknown, `asserted "${f}" with state unknown`).not.toContain(f);
+      expect(historical, `asserted "${f}" with state unknown`).not.toContain(f);
+    }
+  });
+
+  it('⛔ CONTRAST: unknown with NO verified substitution names no value at all', () => {
+    // The discriminator for the test above. If the repair leaked a figure from
+    // anywhere other than a verified `rescaled` pair, this fails.
+    const owed = valueChangeDisclosures({
+      rescaled: [],
+      ranges_added: [],
+      ranges_not_attached: [{ factor: 'Churn rate' }],
+      current_state_unknown: true,
+    } as unknown as Parameters<typeof valueChangeDisclosures>[0]);
     expect(owed).toHaveLength(1);
-    const text = owed[0];
-    expect(text).toContain('NOT KNOWN');
-    expect(text).toContain('AT THE TIME');
-    // The specific stored figure must NOT be presented as current.
-    expect(text).not.toContain('0.4');
-    expect(text).not.toContain('Churn rate');
-    for (const f of FORBIDDEN_WHEN_UNKNOWN) expect(text, `asserted "${f}" with state unknown`).not.toContain(f);
+    expect(owed[0]).toContain('NOT KNOWN');
+    expect(owed[0]).not.toContain('Churn rate');
+    expect(owed[0]).not.toMatch(/\b40\b|0\.4/);
   });
 
   it('⛔ ranges_added + unknown: the chosen range is not offered for replacement', () => {
@@ -323,16 +362,29 @@ describe('⛔ unknown-state precedence over EVERY present-state claim', () => {
     for (const f of FORBIDDEN_WHEN_UNKNOWN) expect(owed[0]).not.toContain(f);
   });
 
-  it('⛔ ALL THREE at once + unknown still yields exactly one past-tense disclosure', () => {
+  it('⭐ ALL THREE at once + unknown: ONLY the verified substitution survives, and only in past tense', () => {
+    // ⚠ This test also used to require a single paragraph naming nothing. It now
+    // discriminates between the three inputs, which is the whole point: one of
+    // them is a verified EVENT and the other two are present-state claims.
     const owed = valueChangeDisclosures({
       rescaled: [{ factor: 'Churn rate', requested: 40, recorded: 0.4 }],
       ranges_added: [{ factor: 'Headcount', range: 500 }],
       ranges_not_attached: [{ factor: 'Seats', range: 200 }],
       current_state_unknown: true,
     });
-    expect(owed).toHaveLength(1);
-    for (const leak of ['Churn rate', 'Headcount', 'Seats', '0.4', '500', '200']) {
-      expect(owed[0], `leaked "${leak}" as current`).not.toContain(leak);
+    expect(owed).toHaveLength(2);
+    const all = owed.join('\n');
+    // ⭐ The verified approved→recorded pair IS disclosed.
+    expect(all).toContain('Churn rate');
+    expect(all).toContain('0.4');
+    // ⛔ And the two PRESENT-STATE inputs are not. `ranges_added` would offer a
+    // range for replacement and `ranges_not_attached` would assert a current gap
+    // — neither is supported by a read that failed.
+    for (const leak of ['Headcount', 'Seats', '500', '200']) {
+      expect(all, `leaked "${leak}" as current`).not.toContain(leak);
+    }
+    for (const f of FORBIDDEN_WHEN_UNKNOWN) {
+      expect(all, `asserted "${f}" with state unknown`).not.toContain(f);
     }
   });
 
