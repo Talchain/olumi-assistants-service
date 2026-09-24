@@ -261,7 +261,18 @@ describe('value batch chip click — one approval, one commit', () => {
     expect(appendCalls).toHaveLength(1);
     const write = appendCalls[0]!;
     expect(write.graph).toBeDefined();
-    expect(write.pending_actions).toEqual([]);
+    // ⚠ WAS `toEqual([])`, AND THAT PINNED THE DEAD END. The applied turn used
+    // to offer nothing, so it minted nothing. It now offers the run, and an
+    // EXECUTABLE chip is pre-authorised by a pending action — that is the
+    // estate's existing mechanism for chip clicks, not new machinery.
+    //
+    // ⭐ BOUND BY IDENTITY, not by "non-empty": exactly one pending, and it is
+    // the run offer for the chip this turn emitted. A value predicate would be
+    // satisfied by any stray pending and would not notice the wrong one.
+    expect(write.pending_actions).toHaveLength(1);
+    const pending = (write.pending_actions as Array<{ chip_id?: string; action?: { kind?: string } }>)[0];
+    expect(pending?.chip_id).toBe('chip_action_run_analysis_post_apply');
+    expect(pending?.action?.kind).toBe('run_analysis');
     expect((write.handler_facts as Array<{ fact_type?: string }>)[0]?.fact_type).toBe('edit_graph');
 
     // ⭐ BOUND BY IDENTITY: each cell's own option_id/factor_id, never "a node
@@ -275,6 +286,34 @@ describe('value batch chip click — one approval, one commit', () => {
       expect(stored!.source).toBe(VALUE_BATCH_INTERVENTION_SOURCE);
     }
     expect(result.response.draft_graph).toBeDefined();
+  });
+
+  /**
+   * ⭐⭐ THE PAYOFF TURN OFFERS THE NEXT ACT — ASSERTED AT THE ROUTE.
+   *
+   * The turn that applies the user's values built its response with a literal
+   * `suggested_actions: []` and then `return finalizeRun()`, and every
+   * `generateChips(...)` site is far below that return — so the empty list was
+   * FINAL. The user supplied exactly what Olumi asked for, was told the model
+   * now passes, and was offered nothing to do next.
+   *
+   * ⚠ ASSERTED ON THE RESPONSE THE EXECUTOR RETURNS, not on the helper. A unit
+   * test of `buildPostApplyChips` would pass while this call site still sent
+   * `[]` — which is precisely the failure being closed.
+   */
+  it('⭐ the applied turn offers the next act, instead of dead-ending', async () => {
+    const result = await runTurnExecutor(payload(), 'req-value-batch-chips', {
+      routingAdapter: throwingRoutingAdapter(),
+    });
+    const chips = result.response.suggested_actions ?? [];
+    expect(chips.length, 'the payoff turn must not dead-end').toBeGreaterThan(0);
+    // CONTRAST CONTROL: the response itself is real — it carries the applied
+    // narration — so an empty chip list would be a genuine absence, not an
+    // empty response.
+    expect(result.response.assistant_text).toMatch(/Confirmed/i);
+    // Whatever is offered must be renderable by the client, which drops
+    // anything past the third entry.
+    expect(chips.length).toBeLessThanOrEqual(3);
   });
 
   /**

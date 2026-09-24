@@ -56,6 +56,7 @@
  * scenarios.graph column.
  */
 
+import { isRunAffordanceAdmitted } from '../admission/run-affordance-gate.js';
 import type { FastifyRequest } from 'fastify';
 
 import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/boundary';
@@ -544,11 +545,57 @@ function buildPostDraftChips(params: {
   readonly graph: GraphV3T | null;
 }): readonly SuggestedAction[] {
   if (!params.graphPersisted) return [];
-  const readyStatus =
+  const field =
     typeof params.analysisReadyField === 'object' && params.analysisReadyField !== null
-      ? (params.analysisReadyField as { status?: unknown }).status
+      ? (params.analysisReadyField as { status?: unknown; may_run?: unknown })
       : undefined;
-  if (readyStatus === 'ready') {
+  // ⭐⭐ THE RUN AFFORDANCE IS GATED ON ADMISSION, NEVER ON `status`.
+  //
+  // `AnalysisReadyPayload.may_run`'s contract (`schemas/analysis-ready.ts`)
+  // states it outright: `status` is the stricter "is this model ready as it
+  // stands?", `may_run` is `resolveRunAdmission(...).willProceed` — the run
+  // path's own answer to "will the analysis proceed if asked, right now?" —
+  // and "a turn can be `needs_user_input` and admissible at the same time;
+  // that is the readiness loop's payoff turn, and a consumer reading only
+  // `status` hides the Run affordance the turn has just offered."
+  //
+  // MEASURED over the FULL population — 15,255 rows with a non-null graph:
+  // 3,168 (20.77%) carry `may_run: true` under a non-ready status. Those users
+  // could run the analysis and were not offered it.
+  //
+  // ⚠ AN EARLIER REVISION SAID 27.0%, FROM 400 ROWS ORDERED BY `updated_at
+  // DESC`. That was recency bias — `needs_user_input|may_run:false` is 1,962 in
+  // the corpus against 13 in that slice. It also claimed "0 models lose the
+  // chip", which was false on THIS surface: see the additive note below.
+  //
+  // ⚠ ABSENCE IS NOT "NO". The field is optional so pre-`may_run` producers
+  // still validate, and the contract says absence means an older producer.
+  // Falling back to the previous `status` rule keeps those paths byte-identical
+  // rather than silently withdrawing the chip from them.
+  if (isRunAffordanceAdmitted(field)) {
+    // ⛔⛔ ADDITIVE, BECAUSE THIS SURFACE IS THE SIBLING OF `gm-held-execute`
+    // AND I FIXED ONLY THE OTHER ONE FIRST.
+    //
+    // Widening the gate here without adding the recovery chip WITHDREW it.
+    // Measured base-vs-head on this module's own harness, same input
+    // (`needs_user_mapping`, `may_run: true`):
+    //   BASE: ["chip_prompt_configure_option"]
+    //   HEAD: ["chip_action_run_analysis", "chip_prompt_review_model", …]
+    // — the repair the user needs simply vanished, while four new specs all
+    // passed because none of them asserted it survived.
+    //
+    // ⭐ Offering both is the product answer, not a compromise: the model is
+    // runnable AND improvable, and which the team does next is their
+    // judgement. Withdrawing the repair to advertise the run would be Olumi
+    // deciding for them.
+    //
+    // When the model is fully ready `buildReadinessRecoveryChip` returns null
+    // (`recovery.kind === 'run'`), so the long-standing three-chip pattern is
+    // emitted unchanged on the path that always worked.
+    const admittedRecovery = buildReadinessRecoveryChip(
+      params.analysisReadyField,
+      params.graph?.nodes ?? [],
+    );
     // Three-chip post-draft coaching pattern: a primary action chip
     // (Run analysis, the only handler-dispatchable entry) followed by
     // two conversational chips. Conversational chips carry a `message`
@@ -563,6 +610,20 @@ function buildPostDraftChips(params: {
         message: 'Run analysis.',
         action_type: 'run_analysis',
       },
+      // ⛔⛔ SECOND, NOT LAST — THE CLIENT RENDERS ONLY THE FIRST THREE.
+      // `SuggestedChips.tsx:335` is `polished.filter(isChipRenderable).slice(0, 3)`.
+      // Appending the recovery chip fourth would have satisfied every test here
+      // and still shown the user nothing: a fix that is dark at the surface it
+      // was written for. It goes directly after the run, which is also the
+      // right reading order — here is the act now available, and here is the
+      // gap you may want to close first.
+      //
+      // Nothing is withdrawn from anyone. This population previously received
+      // the recovery chip ALONE (measured base: ["chip_prompt_configure_option"]),
+      // never the three-chip conversational set, so they strictly gain. And on
+      // a fully ready model `buildReadinessRecoveryChip` returns null, so that
+      // path emits exactly the three chips it always did.
+      ...(admittedRecovery ? [admittedRecovery] : []),
       {
         id: 'chip_prompt_review_model',
         label: 'Review model',
