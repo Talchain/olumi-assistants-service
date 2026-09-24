@@ -275,6 +275,82 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
           };
         }
 
+/**
+ * ⛔ A NAME SHARED BY TWO ACCEPTABLE TARGETS NAMES NEITHER.
+ *
+ * Every proposer resolved the Agent's label with a first match — `pool.find(writable)
+ * ?? pool[0]` for values, `nodes.find(...)` for levels and links — so when two
+ * factors share a label, the one that happens to come first in the stored node list
+ * got the user's number, and the approval they were shown named only the label.
+ * Nothing about the user's words chose it; array order did.
+ *
+ * The tool schemas carry labels only (`agent-tools.ts`: `factor_label`,
+ * `option_label`, `from_label`, `to_label`; `additionalProperties: false`), but
+ * `get_canonical_state` shows every entity's `id` (see `projectEntity`). So:
+ *
+ *   1. A string that IS a node id makes that node a candidate — the one way to
+ *      address two entities that read alike (ids are unique; labels are not).
+ *   2. An exact visible LABEL wins over a description match (unchanged).
+ *   3. Among all candidates, exactly one acceptable node → it. MORE THAN ONE (two
+ *      same-label factors, or an id that is also another factor's label) →
+ *      `ambiguous`, with every candidate, and the caller proposes NOTHING for it.
+ *   4. None acceptable → `other` (named, but e.g. a risk), or `none`.
+ *
+ * A label shared by a factor and a risk still resolves to the factor: only ONE of
+ * them is acceptable, so nothing is guessed.
+ */
+type Resolution =
+  | { readonly kind: 'one'; readonly node: GraphRead['nodes'][number] }
+  | { readonly kind: 'ambiguous'; readonly candidates: GraphRead['nodes'] }
+  | { readonly kind: 'other'; readonly node: GraphRead['nodes'][number] }
+  | { readonly kind: 'none' };
+
+function resolveNamed(
+  g: Pick<GraphRead, 'nodes'>,
+  requested: string,
+  accept: (n: GraphRead['nodes'][number]) => boolean,
+): Resolution {
+  const byLabel = g.nodes.filter((n) => norm(n.label) === norm(requested));
+  const pool = byLabel.length > 0 ? byLabel : g.nodes.filter((n) => norm(n.description) === norm(requested));
+  const idHit = g.nodes.find((n) => n.id === requested);
+  const candidates = idHit === undefined ? pool : [idHit, ...pool.filter((n) => n.id !== idHit.id)];
+  const acceptable = candidates.filter(accept);
+  if (acceptable.length > 1) return { kind: 'ambiguous', candidates: acceptable };
+  if (acceptable.length === 1) return { kind: 'one', node: acceptable[0] };
+  return candidates.length > 0 ? { kind: 'other', node: candidates[0] } : { kind: 'none' };
+}
+
+/** One name that matched more than one acceptable entity, with every candidate. */
+type AmbiguousTarget = { readonly requested: string; readonly candidates: readonly Record<string, unknown>[] };
+
+/** One ambiguous request, with what tells its candidates apart — the SAME projection as every other tool. */
+function describeAmbiguity(g: Pick<GraphRead, 'nodes' | 'edges'>, requested: string, candidates: GraphRead['nodes']): AmbiguousTarget {
+  const labelOf = new Map(g.nodes.map((n) => [n.id, n.label]));
+  return {
+    requested,
+    candidates: candidates.map((n) => ({
+      ...projectEntity(n),
+      connected_to: [...new Set(g.edges.flatMap((e) =>
+        e.from === n.id ? [labelOf.get(e.to)] : e.to === n.id ? [labelOf.get(e.from)] : []))]
+        .filter((l): l is string => typeof l === 'string' && l !== '')
+        .sort(),
+    })),
+  };
+}
+
+/** What the Agent is told to do about a name that matched more than one entity. */
+const AMBIGUOUS_NOTE =
+  'More than one entity in the model carries each name in ambiguous_targets, so NOTHING was proposed for it and no ' +
+  'guess was made. Ask the user which one they mean, describing each candidate by what tells it apart (its full ' +
+  'label, current value, what it is connected to), never by its id. Then propose again, passing that entity’s ' +
+  '`id` exactly as given here in place of its label.';
+
+/** The approval-facing disclosure of a name left out as ambiguous (empty when none was). */
+function ambiguousClause(ambiguous: readonly AmbiguousTarget[]): string {
+  if (ambiguous.length === 0) return '';
+  return ` (left out, more than one entity is called this, so the user must say which: ${ambiguous.map((a) => `"${a.requested}"`).join('; ')})`;
+}
+
 export function createAgentCapabilities(
   dispatch: InternalDispatch,
   proposals: ProposalStore,
@@ -743,9 +819,23 @@ export function createAgentCapabilities(
       if (readOnly) return refuseReadOnly();
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const find = (l: string) => g.nodes.find((n) => norm(n.label) === norm(l) || norm(n.description) === norm(l));
-      const from = find(args.from_label);
-      const to = find(args.to_label);
+      // ⛔ Two entities answering to one name: nothing is proposed, and the Agent asks
+      // (`resolveNamed`). An id is identity; a label beats a description.
+      const fromRes = resolveNamed(g, String(args.from_label ?? ''), () => true);
+      const toRes = resolveNamed(g, String(args.to_label ?? ''), () => true);
+      const ambiguousEnds = [
+        ...(fromRes.kind === 'ambiguous' ? [describeAmbiguity(g, String(args.from_label ?? ''), fromRes.candidates)] : []),
+        ...(toRes.kind === 'ambiguous' ? [describeAmbiguity(g, String(args.to_label ?? ''), toRes.candidates)] : []),
+      ];
+      if (ambiguousEnds.length > 0) {
+        return {
+          ok: false, mutated: false, refusal: 'ambiguous_entity',
+          ambiguous_targets: ambiguousEnds, ambiguous_note: AMBIGUOUS_NOTE,
+          detail: 'Nothing was proposed: more than one entity carries that name.',
+        };
+      }
+      const from = fromRes.kind === 'one' ? fromRes.node : undefined;
+      const to = toRes.kind === 'one' ? toRes.node : undefined;
       if (from === undefined || to === undefined) {
         return {
           ok: false, mutated: false, refusal: 'unresolved_entity',
@@ -814,22 +904,26 @@ export function createAgentCapabilities(
        */
       const writable = (n: { kind?: unknown }) => SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS.includes(String(n.kind));
       // An exact visible LABEL wins over a description match (a factor's description must never
-      // take a value the user named for a risk); among equal matches, the writable kind wins.
-      const find = (l: string) => {
-        const byLabel = g.nodes.filter((n) => norm(n.label) === norm(l));
-        const pool = byLabel.length > 0 ? byLabel : g.nodes.filter((n) => norm(n.description) === norm(l));
-        return pool.find(writable) ?? pool[0];
-      };
+      // take a value the user named for a risk); among equal matches, the ONE writable kind wins —
+      // and two writable matches are AMBIGUOUS, never "the first" (see `resolveNamed`).
       const unresolved: string[] = [];
       const notAFactor: { label: string; kind: string }[] = [];
+      const ambiguous: AmbiguousTarget[] = [];
       const occupied: { label: string; current_value: number }[] = [];
       const seen = new Set<string>();
       const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number }[] = [];
 
       for (const a of input) {
-        const node = find(String(a?.factor_label ?? ''));
-        if (node === undefined) { unresolved.push(String(a?.factor_label ?? '')); continue; }
-        if (!writable(node)) { notAFactor.push({ label: node.label, kind: String(node.kind) }); continue; }
+        const requested = String(a?.factor_label ?? '');
+        const res = resolveNamed(g, requested, writable);
+        if (res.kind === 'none') { unresolved.push(requested); continue; }
+        // ⛔ Two writable factors answer to this name: no op for it, and the Agent asks.
+        if (res.kind === 'ambiguous') {
+          if (!ambiguous.some((x) => x.requested === requested)) ambiguous.push(describeAmbiguity(g, requested, res.candidates));
+          continue;
+        }
+        if (res.kind === 'other') { notAFactor.push({ label: res.node.label, kind: String(res.node.kind) }); continue; }
+        const node = res.node;
         /**
          * ⛔ THE APPROVAL MUST SHOW THE USER'S OWN NUMBER, NOT THE MODEL'S DIVISOR
          * (Codex 5810763729 item 1). `observed_state.value` is the number read against
@@ -889,6 +983,7 @@ export function createAgentCapabilities(
           ok: false, mutated: false, refusal: 'nothing_to_adopt',
           unresolved_labels: unresolved, already_valued: occupied,
           ...(notAFactor.length > 0 ? { not_a_factor: notAFactor } : {}),
+          ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
           detail:
             'None of those could be adopted. Read the state again and use the labels exactly as they appear; ' +
             'factors that already hold a value are left alone.',
@@ -943,7 +1038,7 @@ export function createAgentCapabilities(
         // offered to them; `leftOutClause` is staging’s disclosure of the labels that
         // were not factors. Both are required — the heading alone drops the disclosure,
         // and staging’s label alone calls a revision an adoption.
-        public_label: heading + ordered.map(describe).join('; ') + leftOutClause(notAFactor),
+        public_label: heading + ordered.map(describe).join('; ') + leftOutClause(notAFactor) + ambiguousClause(ambiguous),
       });
       proposals.put(proposal);
       return {
@@ -960,6 +1055,7 @@ export function createAgentCapabilities(
         // Named, but not something a value can be set on (a risk, an outcome, an option): left out,
         // so the user is never asked to approve a value that cannot be saved.
         ...(notAFactor.length > 0 ? { not_a_factor: notAFactor, not_a_factor_note: NOT_A_FACTOR_NOTE } : {}),
+        ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
         note:
           'Nothing has changed. Show the user each value and what it rests on, say plainly that these are ' +
           'assumptions to adopt or correct and NOT measurements, and call authorise_change with this ' +
@@ -1010,6 +1106,10 @@ export function createAgentCapabilities(
       };
       const made = [a, b].filter((r): r is ToolResult => r !== null && r.ok === true && typeof r.proposal_id === 'string');
       if (made.length === 0) return { ok: false, mutated: false, refusal: 'nothing_to_propose', ...refused };
+      // ⛔ A name that matched two entities travels to the joined result from EITHER half,
+      // so the starting point never looks complete at the moment of consent.
+      const ambiguousTargets = [a, b].flatMap((r) => (r !== null && Array.isArray(r.ambiguous_targets) ? r.ambiguous_targets : []));
+      const ambiguity = ambiguousTargets.length > 0 ? { ambiguous_targets: ambiguousTargets, ambiguous_note: AMBIGUOUS_NOTE } : {};
       // Only one half could be proposed: it is an ordinary proposal already.
       if (made.length === 1) {
         const only = proposals.get(made[0].proposal_id as string);
@@ -1021,10 +1121,10 @@ export function createAgentCapabilities(
             assumptions: a?.assumptions ?? [], option_levels: b?.interventions ?? [],
             ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked } : {}),
             ...(b !== null && Array.isArray(b.levels_not_accepted) ? { levels_not_accepted: b.levels_not_accepted } : {}),
-            ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor } : {}), ...refused,
+            ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor } : {}), ...ambiguity, ...refused,
           });
         }
-        return { ...made[0], ...refused };
+        return { ...made[0], ...ambiguity, ...refused };
       }
       const halves = made.map((r) => proposals.get(r.proposal_id as string)).filter((p): p is StructuredProposal => p !== undefined);
       if (halves.length !== 2 || halves[0].base_graph_identity_hash !== halves[1].base_graph_identity_hash) {
@@ -1039,7 +1139,7 @@ export function createAgentCapabilities(
           assumptions: a?.assumptions ?? [], option_levels: b?.interventions ?? [],
           ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked } : {}),
           ...(b !== null && Array.isArray(b.levels_not_accepted) ? { levels_not_accepted: b.levels_not_accepted } : {}),
-          ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor } : {}), ...refused,
+          ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor } : {}), ...ambiguity, ...refused,
         });
       }
       const compound = createProposal({
@@ -1069,6 +1169,7 @@ export function createAgentCapabilities(
         // review of #1800, 5806926323): when both halves succeed, the value half's omission otherwise
         // never reached the Agent, and the starting point looked complete at the moment of consent.
         ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor, not_a_factor_note: NOT_A_FACTOR_NOTE } : {}),
+        ...ambiguity,
         ...refused,
         note:
           'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +
@@ -1085,8 +1186,13 @@ export function createAgentCapabilities(
       if (input.length === 0) {
         return { ok: false, mutated: false, refusal: 'empty_proposal', detail: 'No interventions were given.' };
       }
-      const byLabel = (l: string, kind: string) =>
-        g.nodes.find((n) => n.kind === kind && (norm(n.label) === norm(l) || norm(n.description) === norm(l)));
+      // Resolved within the kind first (a label on a node of another kind never shadows the
+      // right one), then by `resolveNamed`: an id is identity, a label beats a description,
+      // and two nodes of the kind answering to one name are AMBIGUOUS, never "the first".
+      const optionNodes = { nodes: g.nodes.filter((n) => n.kind === 'option') };
+      const factorNodes = { nodes: g.nodes.filter((n) => n.kind === 'factor') };
+      const ambiguous: AmbiguousTarget[] = [];
+      const ambiguousSeen = new Set<string>();
       const held = heldStatusQuoPairs(g);
 
       const unresolved: string[] = [];
@@ -1110,9 +1216,28 @@ export function createAgentCapabilities(
       }[] = [];
 
       for (const i of input) {
-        const option = byLabel(String(i?.option_label ?? ''), 'option');
-        const factor = byLabel(String(i?.factor_label ?? ''), 'factor');
         const asGiven = { option: String(i?.option_label ?? ''), factor: String(i?.factor_label ?? ''), value: i?.value };
+        const optionRes = resolveNamed(optionNodes, asGiven.option, () => true);
+        const factorRes = resolveNamed(factorNodes, asGiven.factor, () => true);
+        if (optionRes.kind === 'ambiguous' || factorRes.kind === 'ambiguous') {
+          // ⛔ No level for this pair, and no guess at which entity was meant.
+          const which: string[] = [];
+          for (const [kind, requested, res] of [['option', asGiven.option, optionRes], ['factor', asGiven.factor, factorRes]] as const) {
+            if (res.kind !== 'ambiguous') continue;
+            which.push(`${kind} "${requested}"`);
+            if (!ambiguousSeen.has(`${kind}\u0000${requested}`)) {
+              ambiguousSeen.add(`${kind}\u0000${requested}`);
+              ambiguous.push(describeAmbiguity(g, requested, res.candidates));
+            }
+          }
+          notAccepted.push({
+            ...asGiven,
+            reason: `More than one ${which.join(' and more than one ')} is in the model, so this level was left out. Ask the user which one they mean, then propose it again passing that entity\u2019s id in place of its label.`,
+          });
+          continue;
+        }
+        const option = optionRes.kind === 'one' ? optionRes.node : undefined;
+        const factor = factorRes.kind === 'one' ? factorRes.node : undefined;
         if (option === undefined) {
           unresolved.push(`option "${asGiven.option}"`);
           notAccepted.push({ ...asGiven, reason: `No option in the model is labelled "${asGiven.option}". Use an option label exactly as get_canonical_state gives it.` });
@@ -1245,6 +1370,7 @@ export function createAgentCapabilities(
           ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
           ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
           ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
+          ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
           detail: 'Nothing could be recorded. Tell the user exactly which of these it was and why.',
         };
       }
@@ -1264,7 +1390,8 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'model_proposed', basis: 'what each option does, for the user to confirm or correct' },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label:
-          ordered.map((i) => `${i.option.label} sets ${i.factor.label} to ${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`).join('; '),
+          ordered.map((i) => `${i.option.label} sets ${i.factor.label} to ${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`).join('; ') +
+          ambiguousClause(ambiguous),
       });
       proposals.put(proposal);
       return {
@@ -1289,6 +1416,7 @@ export function createAgentCapabilities(
         ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
         ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
         ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
+        ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
         note:
           'Nothing has changed. Show the user the value in THEIR units and what it rests on, then call ' +
           'authorise_change with this proposal_id once they agree.',
