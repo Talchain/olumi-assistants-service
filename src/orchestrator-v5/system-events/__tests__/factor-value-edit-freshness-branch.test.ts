@@ -27,7 +27,7 @@ import type { SystemEventTurnPayload } from '@talchain/schemas/boundary';
 
 const mocks = vi.hoisted(() => ({
   applyFactorValueEdit: vi.fn(),
-  loadPriorFactsWithReadState: vi.fn(),
+  loadScenarioAnalysisFactsForRead: vi.fn(),
   loadPersistedGraphStrict: vi.fn(),
   commitDirectAnswer: vi.fn(),
 }));
@@ -39,7 +39,7 @@ vi.mock('../factor-value-edit.js', async (importOriginal) => ({
 
 vi.mock('../../build-turn-context.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../build-turn-context.js')>()),
-  loadPriorFactsWithReadState: mocks.loadPriorFactsWithReadState,
+  loadScenarioAnalysisFactsForRead: mocks.loadScenarioAnalysisFactsForRead,
   loadPersistedGraphStrict: mocks.loadPersistedGraphStrict,
 }));
 
@@ -49,6 +49,7 @@ vi.mock('../../commit.js', async (importOriginal) => ({
 }));
 
 import { dispatchSystemEvent } from '../dispatch.js';
+import { reconcileScenarioAnalysisFacts } from '../../context/reconcile-scenario-analysis-facts.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -74,12 +75,27 @@ function payload(): SystemEventTurnPayload {
   } as unknown as SystemEventTurnPayload;
 }
 
+/**
+ * The dispatch now reads through `loadScenarioAnalysisFactsForRead`. The durable
+ * carrier is held DEGRADED here (no durable port), so the reload route's rule
+ * falls back to the hot window and this file keeps testing the window's own
+ * ok/degraded branch, exactly as before.
+ */
+const durableDegraded = () =>
+  reconcileScenarioAnalysisFacts({ scenarioId: SCENARIO_ID, hotWindowFacts: [] });
 /** A read that SUCCEEDED and carries no analysis — a real verdict, not an evasion. */
-const healthyEmpty = () => ({ status: 'ok' as const, facts: [] as never[] });
+const healthyEmpty = () => ({
+  hotWindow: { status: 'ok' as const, facts: [] as never[] },
+  factSet: durableDegraded(),
+});
+const degradedWindow = () => ({
+  hotWindow: { status: 'degraded' as const, facts: [] as never[] },
+  factSet: durableDegraded(),
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.loadPriorFactsWithReadState.mockResolvedValue(healthyEmpty());
+  mocks.loadScenarioAnalysisFactsForRead.mockResolvedValue(healthyEmpty());
   mocks.loadPersistedGraphStrict.mockResolvedValue(GRAPH);
   mocks.commitDirectAnswer.mockResolvedValue({ persistedAnalysisGraphHash: 'committed-hash' });
   mocks.applyFactorValueEdit.mockResolvedValue({
@@ -111,7 +127,7 @@ describe('dispatchFactorValueEdit — freshness branches on the READ STATE', () 
     // returns a bare `[]` for both cases, and `deriveAnalysisFreshness([], hash)` answers
     // `none` — so without this branch a failed read would publish an absence nobody
     // observed.
-    mocks.loadPriorFactsWithReadState.mockResolvedValue({ status: 'degraded', facts: [] });
+    mocks.loadScenarioAnalysisFactsForRead.mockResolvedValue(degradedWindow());
     const r = await dispatchSystemEvent({ payload: payload(), requestId: 'req-b2' });
     expect(r.freshness?.freshness).toBe('unknown');
     expect(r.freshness?.freshness).not.toBe('none');
@@ -121,9 +137,9 @@ describe('dispatchFactorValueEdit — freshness branches on the READ STATE', () 
   it('⭐ the two are DISTINCT on an otherwise identical run', async () => {
     // Identical payload, identical writer, identical graph — only the read state
     // differs. Any path that collapsed them fails here.
-    mocks.loadPriorFactsWithReadState.mockResolvedValue(healthyEmpty());
+    mocks.loadScenarioAnalysisFactsForRead.mockResolvedValue(healthyEmpty());
     const ok = await dispatchSystemEvent({ payload: payload(), requestId: 'req-b3a' });
-    mocks.loadPriorFactsWithReadState.mockResolvedValue({ status: 'degraded', facts: [] });
+    mocks.loadScenarioAnalysisFactsForRead.mockResolvedValue(degradedWindow());
     const bad = await dispatchSystemEvent({ payload: payload(), requestId: 'req-b3b' });
     expect(ok.freshness?.freshness).not.toBe(bad.freshness?.freshness);
   });
@@ -131,7 +147,7 @@ describe('dispatchFactorValueEdit — freshness branches on the READ STATE', () 
   it('⚠ a degraded read does NOT cost the user their edit', async () => {
     // Fact history is observational. Refusing the write on a failed read would lose
     // work the user already did — a worse failure than an unknown verdict.
-    mocks.loadPriorFactsWithReadState.mockResolvedValue({ status: 'degraded', facts: [] });
+    mocks.loadScenarioAnalysisFactsForRead.mockResolvedValue(degradedWindow());
     const r = await dispatchSystemEvent({ payload: payload(), requestId: 'req-b4' });
     expect(r.commitPerformed).toBe(true);
   });
