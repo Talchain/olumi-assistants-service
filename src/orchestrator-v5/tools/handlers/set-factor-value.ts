@@ -752,6 +752,29 @@ export function createSetFactorValueHandler(): HandlerFn {
        */
       if (declarationFalsified) {
         delete (merged as { declared_scale?: unknown }).declared_scale;
+        /**
+         * ⛔⛔ AND THE SAME FALSEHOOD SPELLED AS A `unit`. WIRE-WITNESSED on served
+         * `389051f`: the node carried `unit: "unit_interval"` AS WELL AS
+         * `declared_scale: "unit_interval"`, and after an edit to 55 BOTH survived
+         * on a value of 55 with no cap — two false claims, not one.
+         *
+         * ⚠ NARROW ON PURPOSE, and this is the whole care of it: a `unit` is
+         * normally a DIMENSION ("GBP", "%", "customers") and a magnitude change does
+         * NOT falsify a dimension — 40 customers is as much "customers" as 0 was.
+         * Clearing a real unit would destroy information and strip the £ from every
+         * later render (`currencyPrefix` matches `unit === "GBP"` exactly). So this
+         * fires ONLY when the unit is the literal scale-class token
+         * `'unit_interval'`, which is not a dimension at all: it is the same claim
+         * as `declared_scale` wearing the other field's name, and it is false for
+         * exactly the same reason and under exactly the same condition.
+         *
+         * Any other unit — including the `'scale'` seen on a sibling factor in the
+         * same witness — is left untouched. Judging those is construction's business,
+         * not this edit's.
+         */
+        if (String((merged as { unit?: unknown }).unit ?? '') === 'unit_interval') {
+          delete (merged as { unit?: unknown }).unit;
+        }
       }
 
       node.observed_state = merged;

@@ -142,6 +142,30 @@ describe('set_factor_value — a value outside the declared scale withdraws the 
       expect('declared_scale' in os).toBe(false);
       // ⛔ And nothing was invented in its place: no cap is fabricated.
       expect('cap' in os).toBe(false);
+      /**
+       * ⛔⛔ AND THE SAME FALSEHOOD SPELLED AS A `unit`. WIRE-WITNESSED on served
+       * `389051f`: the node carried `unit: "unit_interval"` as well, and after an
+       * edit to 55 BOTH survived on a value of 55 with no cap — two false claims.
+       * `unit_interval` is not a dimension; it is `declared_scale`'s claim wearing
+       * the other field's name.
+       */
+      expect('unit' in os).toBe(false);
+    }
+  });
+
+  it('⛔ CONTRAST: a REAL unit is never stripped, even when the declaration is', async () => {
+    // The discriminator, and the one that matters most. A unit is normally a
+    // DIMENSION and a magnitude change does not falsify a dimension — 40 customers
+    // is as much "customers" as 0 was. Clearing a real unit would destroy
+    // information, and `currencyPrefix` matches `unit === "GBP"` EXACTLY, so
+    // stripping it would silently remove the £ from every later render.
+    const result = await edit(40, { unit: 'customers' });
+    for (const node of committed(result)) {
+      const os = node.observed_state ?? {};
+      // The false declaration still goes...
+      expect('declared_scale' in os).toBe(false);
+      // ...and the true dimension stays.
+      expect(os.unit).toBe('customers');
     }
   });
 
