@@ -106,6 +106,17 @@ export type InternalDispatch = (path: string, body: unknown) => Promise<{ status
 interface GraphRead {
   readonly graph_hash: string;
   /**
+   * ⭐ THE IDENTITY-SPACE HASH OF THE SAME READ — "is this the same graph
+   * object?" — kept so a write can assert the identity it actually read.
+   *
+   * ⛔ NOT INTERCHANGEABLE WITH `graph_hash`, which is the ANALYSIS projection
+   * and excludes labels. That exclusion is the whole defect: a rename landing
+   * between our read and our write passes an analysis-space comparison and is
+   * then overwritten by our stale copy of the node. `''` when the read did not
+   * supply one — an expectation is then simply not sent, never fabricated.
+   */
+  readonly graph_identity_hash: string;
+  /**
    * Declared, not cast. `readGraph` passes the persisted node through verbatim,
    * so these are the carriers the stored graph really holds — counted across
    * every stored graph on 22 Sep 2026: `provenance` 209,115, `display_value`
@@ -230,6 +241,9 @@ export function createAgentCapabilities(
     const g = (r.json.graph ?? {}) as Record<string, unknown>;
     return {
       graph_hash: String(r.json.graph_hash ?? ''),
+      // The read route supplies it beside `graph_hash`
+      // (`assist.v1.scenario-graph.ts:536`); it was being discarded here.
+      graph_identity_hash: String(r.json.graph_identity_hash ?? ''),
       nodes: (g.nodes as GraphRead['nodes']) ?? [],
       edges: (g.edges as GraphRead['edges']) ?? [],
       analysis_state: r.json.analysis_state,
@@ -1183,6 +1197,21 @@ export function createAgentCapabilities(
               // write at `:367` had it right all along — same spread, same reason.
               graph: { ...base.raw, nodes: patched, edges: base.edges },
               ...(base.graph_hash !== '' ? { expected_graph_hash: base.graph_hash } : {}),
+              /**
+               * ⭐ AND THE IDENTITY EXPECTATION, from the SAME read these bytes
+               * come from. Patching fresh nodes preserves an intervening rename;
+               * this REFUSES outright if one lands in the window between that
+               * read and the route's own — which the analysis-space hash cannot
+               * see, because its projection excludes labels.
+               *
+               * ⚠ The route enforces this only once CEE #1810 lands. Until then
+               * it is an unknown top-level field and is ignored (the register
+               * route has no body schema), so sending it early is safe and makes
+               * the two land in either order.
+               */
+              ...(base.graph_identity_hash !== ''
+                ? { expected_graph_identity_hash: base.graph_identity_hash }
+                : {}),
             });
             if (reg.status !== 200) {
               const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
@@ -1484,6 +1513,21 @@ export function createAgentCapabilities(
               // write at `:367` had it right all along — same spread, same reason.
               graph: { ...base.raw, nodes: patched, edges: base.edges },
               ...(base.graph_hash !== '' ? { expected_graph_hash: base.graph_hash } : {}),
+              /**
+               * ⭐ AND THE IDENTITY EXPECTATION, from the SAME read these bytes
+               * come from. Patching fresh nodes preserves an intervening rename;
+               * this REFUSES outright if one lands in the window between that
+               * read and the route's own — which the analysis-space hash cannot
+               * see, because its projection excludes labels.
+               *
+               * ⚠ The route enforces this only once CEE #1810 lands. Until then
+               * it is an unknown top-level field and is ignored (the register
+               * route has no body schema), so sending it early is safe and makes
+               * the two land in either order.
+               */
+              ...(base.graph_identity_hash !== ''
+                ? { expected_graph_identity_hash: base.graph_identity_hash }
+                : {}),
             });
             if (reg.status !== 200) {
               const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');

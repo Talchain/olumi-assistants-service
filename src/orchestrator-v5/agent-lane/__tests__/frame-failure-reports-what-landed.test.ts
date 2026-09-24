@@ -340,3 +340,86 @@ describe('⛔ LIMB 1 (caller half) — an intervening rename is NOT overwritten'
     expect(os?.cap, 'the range was not attached').toBeGreaterThan(1);
   });
 });
+
+/**
+ * ⭐⭐ LIMB 1, THE OTHER HALF: the caller must ASSERT the identity it read.
+ *
+ * Patching fresh bytes (above) preserves an intervening rename. This asserts the
+ * complementary property — the write also CARRIES an identity-space expectation,
+ * so a rename landing in the window between the caller's read and the route's own
+ * is REFUSED rather than silently absorbed.
+ *
+ * ⛔ WITHOUT THIS THE ROUTE-SIDE CHECK IS DEAD. CEE #1810 makes the register route
+ * compare `expected_graph_identity_hash`; if no caller sends one, that comparison
+ * never runs and the field is decoration. I split the two halves across PRs and
+ * lost this one — the route accepted a field nothing sent.
+ */
+describe('⛔ LIMB 1 (the assertion half) — the frame write carries the identity it read', () => {
+  function identityProduct() {
+    const registered: Record<string, unknown>[] = [];
+    let nodes: Node[] = BASE.map((n) => ({ ...n }));
+    let rev = 0;
+    const d: InternalDispatch = async (path, body) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      if (path.endsWith('/graph/register')) {
+        registered.push(b);
+        const g = (b as { graph: { nodes: Node[] } }).graph;
+        nodes = g.nodes;
+        rev += 1;
+        return { status: 200, json: {} };
+      }
+      if (path === '/orchestrate/v2/turn' && b.kind === 'system_event') {
+        const ev = b.event as { target_id: string; value: number };
+        nodes = nodes.map((n) => (n.id === ev.target_id
+          ? { ...n, observed_state: { ...n.observed_state, value: ev.value, raw_value: ev.value } }
+          : n));
+        rev += 1;
+        return { status: 200, json: { assistant_text: 'Updated.' } };
+      }
+      // The read route supplies BOTH hashes; the identity one moves on any edit,
+      // including a rename that leaves the analysis hash alone.
+      return { status: 200, json: { graph: { nodes, edges: [] }, graph_hash: `analysis-h${rev}`, graph_identity_hash: `identity-h${rev}` } };
+    };
+    return { d, registered };
+  }
+
+  it('⭐ the frame write sends expected_graph_identity_hash, from the read it patched', async () => {
+    const p = identityProduct();
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const prop = await caps.proposeAssumptions(ctx as never, ASK as never);
+    await caps.authoriseChange(ctx as never, { proposal_id: String(prop.proposal_id) } as never);
+
+    const frame = p.registered[p.registered.length - 1];
+    expect(frame, 'no register happened — control would be vacuous').toBeDefined();
+    expect(frame.expected_graph_identity_hash, 'the write asserts no identity, so a rename cannot be refused').toMatch(/^identity-h\d+$/);
+    // Bound to the SAME read as the analysis expectation, not an older one.
+    const n = String(frame.expected_graph_hash).replace('analysis-h', '');
+    expect(frame.expected_graph_identity_hash).toBe(`identity-h${n}`);
+  });
+
+  it('⛔ it is OMITTED, never fabricated, when the read supplies none', async () => {
+    // A hash this code could not read is one it must not assert. Older CEE builds
+    // and any degraded read return no identity hash.
+    const registered: Record<string, unknown>[] = [];
+    let nodes: Node[] = BASE.map((n) => ({ ...n }));
+    let rev = 0;
+    const d: InternalDispatch = async (path, body) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      if (path.endsWith('/graph/register')) { registered.push(b); nodes = (b as { graph: { nodes: Node[] } }).graph.nodes; rev += 1; return { status: 200, json: {} }; }
+      if (path === '/orchestrate/v2/turn' && b.kind === 'system_event') {
+        const ev = b.event as { target_id: string; value: number };
+        nodes = nodes.map((x) => (x.id === ev.target_id ? { ...x, observed_state: { ...x.observed_state, value: ev.value, raw_value: ev.value } } : x));
+        rev += 1; return { status: 200, json: { assistant_text: 'ok' } };
+      }
+      return { status: 200, json: { graph: { nodes, edges: [] }, graph_hash: `analysis-h${rev}` } };
+    };
+    const caps = createAgentCapabilities(d, new ProposalStore());
+    const prop = await caps.proposeAssumptions(ctx as never, ASK as never);
+    await caps.authoriseChange(ctx as never, { proposal_id: String(prop.proposal_id) } as never);
+    const frame = registered[registered.length - 1];
+    expect(frame).toBeDefined();
+    expect('expected_graph_identity_hash' in frame, 'fabricated an identity the read never supplied').toBe(false);
+    // The analysis expectation still goes, so the write stays conditional.
+    expect(frame.expected_graph_hash).toBeDefined();
+  });
+});
