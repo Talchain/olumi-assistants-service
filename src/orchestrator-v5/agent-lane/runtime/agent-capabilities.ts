@@ -663,9 +663,30 @@ export function createAgentCapabilities(
       if (readOnly) return refuseReadOnly();
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const byLabel = (l: string, kind: string) => g.nodes.find((n) => n.kind === kind && (norm(n.label) === norm(l) || norm(n.description) === norm(l)));
-      const option = byLabel(String(args?.option_label ?? ''), 'option');
-      const risk = byLabel(String(args?.risk_label ?? ''), 'risk');
+      /**
+       * ⛔ THE ENDPOINTS ARE THE ONES THE USER NAMED (Codex #1816, CHANGES_REQUIRED at df304a57): a first
+       * label-OR-description match let an option DESCRIBED as the name beat the one LABELLED it. An exact
+       * visible label wins, a description is only a fallback, and a match must be UNIQUE for its kind —
+       * anything else refuses before a proposal exists, so an approval can only ever remove the named link.
+       */
+      const resolve = (l: string, kind: string): { node?: (typeof g.nodes)[number]; ambiguous?: string[] } => {
+        const ofKind = g.nodes.filter((n) => n.kind === kind);
+        const byExactLabel = ofKind.filter((n) => norm(n.label) === norm(l));
+        const pool = byExactLabel.length > 0 ? byExactLabel : ofKind.filter((n) => norm(n.description) === norm(l));
+        return pool.length > 1 ? { ambiguous: pool.map((n) => String(n.id)) } : { node: pool[0] };
+      };
+      const o = resolve(String(args?.option_label ?? ''), 'option');
+      const k = resolve(String(args?.risk_label ?? ''), 'risk');
+      const ambiguous = [...(o.ambiguous !== undefined ? [`${o.ambiguous.length} options match "${String(args?.option_label ?? '')}"`] : []),
+        ...(k.ambiguous !== undefined ? [`${k.ambiguous.length} risks match "${String(args?.risk_label ?? '')}"`] : [])];
+      if (ambiguous.length > 0) {
+        return {
+          ok: false, mutated: false, refusal: 'ambiguous_label',
+          detail: `Nothing is proposed: ${ambiguous.join('; ')}. Ask the user which one they mean, then use a label that names exactly one.`,
+        };
+      }
+      const option = o.node;
+      const risk = k.node;
       if (option === undefined) {
         return { ok: false, mutated: false, refusal: 'unresolved_entity', detail: `No option is labelled "${String(args?.option_label ?? '')}". Use a label exactly as get_canonical_state gives it.` };
       }

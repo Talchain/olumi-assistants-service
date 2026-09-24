@@ -113,6 +113,65 @@ describe('the Agent can propose removing a direct option→risk link, and one ap
 });
 
 /**
+ * ⛔ THE LINK REMOVED IS THE ONE THE USER NAMED (Codex #1816, CHANGES_REQUIRED at df304a57): the first
+ * label-OR-description match won, so an earlier option DESCRIBED as "Contract Assembly" could beat the option
+ * LABELLED it, and two same-labelled risks resolved arbitrarily. An exact visible label wins; a description
+ * is only a fallback; any ambiguity refuses before a proposal exists.
+ */
+describe('the endpoints are the ones the user named', () => {
+  const productWith = (nodes: { id: string; kind: string; label: string; description?: string }[], edges: ReturnType<typeof edge>[]) => {
+    const events: Record<string, unknown>[] = [];
+    const d: InternalDispatch = async (path, body) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      if (path === '/orchestrate/v2/turn' && b.kind === 'system_event') { events.push(b.event as Record<string, unknown>); return { status: 200, json: { graph_hash: 'h1' } }; }
+      return { status: 200, json: { graph: { nodes, edges }, graph_hash: 'h0' } };
+    };
+    return { d, events };
+  };
+  const base = [{ id: 'margin', kind: 'goal', label: 'Gross margin' }, { id: 'supplier_failure', kind: 'risk', label: 'Contract supplier failure' }];
+
+  it('RED: an earlier option DESCRIBED as the name never steals it from the option LABELLED it', async () => {
+    const nodes = [...base,
+      { id: 'decoy', kind: 'option', label: 'Outsource everything', description: 'Contract Assembly' },
+      { id: 'contract', kind: 'option', label: 'Contract Assembly' }];
+    const p = productWith(nodes, [edge('decoy', 'supplier_failure'), edge('contract', 'supplier_failure')]);
+    const store = new ProposalStore();
+    const r = await createAgentCapabilities(p.d, store).proposeRemoveRiskLink(ctx, { option_label: 'Contract Assembly', risk_label: 'Contract supplier failure', rationale: 'x' });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(store.get(String(r.proposal_id))?.operations).toEqual([{ op: 'remove_edge', path: 'contract::supplier_failure' }]);
+  });
+
+  it('RED: two risks with the same label → refused as ambiguous, nothing stored', async () => {
+    const nodes = [...base, { id: 'supplier_failure_2', kind: 'risk', label: 'Contract supplier failure' }, { id: 'contract', kind: 'option', label: 'Contract Assembly' }];
+    const p = productWith(nodes, [edge('contract', 'supplier_failure'), edge('contract', 'supplier_failure_2')]);
+    const store = new ProposalStore();
+    const r = await createAgentCapabilities(p.d, store).proposeRemoveRiskLink(ctx, { option_label: 'Contract Assembly', risk_label: 'Contract supplier failure', rationale: 'x' });
+    expect(r.ok).toBe(false);
+    expect(r.refusal).toBe('ambiguous_label');
+    expect(store.outstanding(SCENARIO, USER)).toEqual([]);
+  });
+
+  it('RED: two options with the same label → refused as ambiguous, nothing stored', async () => {
+    const nodes = [...base, { id: 'contract', kind: 'option', label: 'Contract Assembly' }, { id: 'contract_2', kind: 'option', label: 'Contract Assembly' }];
+    const p = productWith(nodes, [edge('contract', 'supplier_failure'), edge('contract_2', 'supplier_failure')]);
+    const store = new ProposalStore();
+    const r = await createAgentCapabilities(p.d, store).proposeRemoveRiskLink(ctx, { option_label: 'Contract Assembly', risk_label: 'Contract supplier failure', rationale: 'x' });
+    expect(r.ok).toBe(false);
+    expect(r.refusal).toBe('ambiguous_label');
+    expect(store.outstanding(SCENARIO, USER)).toEqual([]);
+  });
+
+  it('CONTRAST: a description still resolves when no visible label matches, and it is unique', async () => {
+    const nodes = [...base, { id: 'contract', kind: 'option', label: 'Option C', description: 'Contract Assembly' }];
+    const p = productWith(nodes, [edge('contract', 'supplier_failure')]);
+    const store = new ProposalStore();
+    const r = await createAgentCapabilities(p.d, store).proposeRemoveRiskLink(ctx, { option_label: 'Contract Assembly', risk_label: 'Contract supplier failure', rationale: 'x' });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(store.get(String(r.proposal_id))?.operations).toEqual([{ op: 'remove_edge', path: 'contract::supplier_failure' }]);
+  });
+});
+
+/**
  * ⭐ THE REMOVAL IS WHAT UNBLOCKS — proven with the product's OWN readiness builder, not a restatement of it.
  * The same graph, with and without the one direct option→risk link: the first is `needs_user_mapping`, the
  * second is `ready`. Nothing else differs.
