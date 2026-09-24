@@ -846,6 +846,7 @@ export function createAgentCapabilities(
       const unframed: { factor: string; detail: string }[] = [];
       const unchanged: string[] = [];
       const notLinked: { option: string; factor: string; acts_on: string[] }[] = [];
+      const unreadableCell: { option: string; factor: string }[] = [];
       /**
        * ⛔ EVERY SUPPLIED LEVEL THAT IS NOT ACCEPTED, WITH ITS OPTION AND WHY.
        * MEASURED on served d1829c5 (journey J1): the starting point was refused
@@ -965,6 +966,50 @@ export function createAgentCapabilities(
           unchanged.push(`${option.label} already sets ${factor.label} to ${String(currentValue)}`);
           continue;
         }
+        // ⚠ ORDER MATTERS, and an existing spec proved it: the NO-OP check runs
+        // FIRST. A restatement of the level the option already sets needs no write
+        // at all, so an unreadable cell cannot poison anything — reporting it as
+        // blocked would be a false alarm and would lose the `already_set` answer
+        // the user should get. (`option-interventions.test.ts` — 'refuses a
+        // restatement of what the option already does'.)
+        /**
+         * ⛔ AN EXISTING CELL THE WRITER CANNOT READ POISONS THE WHOLE APPROVAL.
+         *
+         * MEASURED on served `a693ba6` (acceptance run A2, scenario 2a5c229f):
+         * construction had written this option's cell as a bare `{ value: 0.1 }`
+         * with no `source`. `prepareOptionInterventionEdit` reads an existing cell
+         * through `ExistingInterventionRead`, where `source` is a NON-OPTIONAL
+         * enum, so it refused `invalid_existing_intervention` — and because a
+         * compound's level chain stops at its first refusal, **every other level
+         * in that approval was discarded too**. The user was told, honestly, that
+         * no option levels from the bundle were recorded.
+         *
+         * `de9db856` stops new cells being written that way. It does nothing for a
+         * model that ALREADY holds one, and 268 persisted models do. For those, one
+         * unreadable cell still costs the user every level they approved.
+         *
+         * So this is checked HERE, at proposal time, in exactly the way the
+         * `notLinked` guard above already is and for exactly the same reason: the
+         * proposer must not bundle a level whose write will refuse. The pair is
+         * excluded and named, so the Agent can say which option cannot be set and
+         * the rest of the approval still lands.
+         *
+         * ⚠ The check is deliberately the WRITER'S rule, not a re-spelling of it:
+         * an object cell must carry a `source`. A bare number carries no cell to
+         * be unreadable, and is left alone.
+         */
+        if (current !== undefined && typeof current === 'object' && current !== null
+            && (current as { source?: unknown }).source === undefined) {
+          unreadableCell.push({ option: option.label, factor: factor.label });
+          notAccepted.push({
+            option: option.label, factor: factor.label, value: raw,
+            reason:
+              `The level "${option.label}" already records for "${factor.label}" is stored in a form this `
+              + 'writer cannot read, so setting it would refuse and discard every other level in the same '
+              + 'approval. Propose the others and tell the user this one cannot be changed here.',
+          });
+          continue;
+        }
         const key = `${option.id}::${factor.id}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -981,6 +1026,7 @@ export function createAgentCapabilities(
           ok: false, mutated: false, refusal: 'nothing_to_set',
           ...(unresolved.length > 0 ? { unresolved } : {}),
           ...(notLinked.length > 0 ? { not_linked: notLinked } : {}),
+          ...(unreadableCell.length > 0 ? { unreadable_existing_cell: unreadableCell } : {}),
           ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
           ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
           ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
@@ -1021,6 +1067,7 @@ export function createAgentCapabilities(
           basis: i.basis,
         })),
         ...(unresolved.length > 0 ? { unresolved } : {}),
+        ...(unreadableCell.length > 0 ? { unreadable_existing_cell: unreadableCell } : {}),
         ...(notLinked.length > 0 ? {
           not_linked: notLinked,
           not_linked_note: 'These levels were LEFT OUT: the option is not connected to that factor, so no level can be recorded there. Propose a level on one of the factors each option acts on (listed in acts_on), or say the option needs a link first.',
