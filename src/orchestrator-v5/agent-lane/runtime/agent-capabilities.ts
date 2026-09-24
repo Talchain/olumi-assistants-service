@@ -87,6 +87,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 }
 
 import { planNewOption, newOptionFollowUp } from '../propose-new-option.js';
+import { selectGroundedCounterCase } from '../../coaching/grounded-counter-case.js';
 import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
@@ -654,20 +655,46 @@ export function createAgentCapabilities(
       const notAFactor: { label: string; kind: string }[] = [];
       const occupied: { label: string; current_value: number }[] = [];
       const seen = new Set<string>();
-      const adopted: { id: string; label: string; value: number; unit: string; basis: string }[] = [];
+      const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number }[] = [];
 
       for (const a of input) {
         const node = find(String(a?.factor_label ?? ''));
         if (node === undefined) { unresolved.push(String(a?.factor_label ?? '')); continue; }
         if (!writable(node)) { notAFactor.push({ label: node.label, kind: String(node.kind) }); continue; }
         const existing = node.observed_state?.value;
-        if (typeof existing === 'number') { occupied.push({ label: node.label, current_value: existing }); continue; }
+        /**
+         * ⭐ THE ONE CASE THE BLANKET REFUSAL WAS NEVER MEANT TO CATCH.
+         *
+         * The refusal above this exists to stop the MODEL replacing somebody's
+         * number with a guess "under cover of adopting assumptions". That is
+         * still refused and the wording of that rule has not moved.
+         *
+         * But the product's whole sensitivity loop asks the user to do exactly
+         * the opposite act: the analysis names the assumption the ordering turns
+         * on and invites them to change it and see how much it matters. An
+         * assumption the ordering is sensitive to ALWAYS already holds a value —
+         * otherwise it could not drive an ordering — so every such request landed
+         * on the blanket refusal and the invitation could never be honoured.
+         *
+         * `revise` is opt-in PER FACTOR and the tool tells the model it may set
+         * it only when the user has just asked for that factor to be changed and
+         * named the number. The old value is carried into `replaces` so the
+         * approval the user is shown says what it is replacing: consent stays
+         * informed, and the write still goes through authorise_change like any
+         * other. Nothing here writes.
+         */
+        const userNamedThisChange = a?.revise === true;
+        if (typeof existing === 'number' && !userNamedThisChange) {
+          occupied.push({ label: node.label, current_value: existing });
+          continue;
+        }
         if (!Number.isFinite(Number(a?.value))) { unresolved.push(node.label); continue; }
         if (seen.has(node.id)) continue;
         seen.add(node.id);
         adopted.push({
           id: node.id, label: node.label,
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
+          ...(typeof existing === 'number' ? { replaces: existing } : {}),
         });
       }
 
@@ -690,17 +717,46 @@ export function createAgentCapabilities(
         path: a.id,
         value: { value: a.value, unit: a.unit, basis: a.basis },
       }));
+      /**
+       * ⛔ THE APPROVAL MUST SAY WHAT IT REPLACES.
+       *
+       * A revision and an adoption are different acts and the user is agreeing to
+       * a different thing in each case. "Churn = 6%" hides that a number was
+       * already there; "Churn: 4% to 6%" does not. The receipt quotes this label,
+       * so what was consented to stays legible after the fact.
+       */
+      const revisions = ordered.filter((a) => typeof a.replaces === 'number');
+      const fresh = ordered.filter((a) => typeof a.replaces !== 'number');
+      const withUnit = (a: { value: number; unit: string }) => `${a.value}${a.unit !== '' ? ' ' + a.unit : ''}`;
+      const describe = (a: { label: string; value: number; unit: string; replaces?: number }) =>
+        typeof a.replaces === 'number'
+          ? `${a.label}: ${a.replaces}${a.unit !== '' ? ' ' + a.unit : ''} \u2192 ${withUnit(a)}`
+          : `${a.label} = ${withUnit(a)}`;
+      const heading =
+        revisions.length === 0
+          ? `Adopt ${fresh.length} starting assumption${fresh.length === 1 ? '' : 's'}: `
+          : fresh.length === 0
+            ? `Revise ${revisions.length} value${revisions.length === 1 ? '' : 's'} you asked to change: `
+            : `Revise ${revisions.length} value${revisions.length === 1 ? '' : 's'} and adopt ${fresh.length} starting assumption${fresh.length === 1 ? '' : 's'}: `;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
         operations,
-        provenance: { authored_by: 'model_proposed', basis: 'starting assumptions offered for the user to adopt or correct' },
+        provenance: {
+          // A revision the user named is theirs, not the model's. Only a proposal
+          // made entirely of those may claim it.
+          authored_by: fresh.length === 0 && revisions.length > 0 ? 'user_stated' : 'model_proposed',
+          basis:
+            revisions.length > 0 && fresh.length === 0
+              ? 'values the user asked to change, at the figures they gave'
+              : 'starting assumptions offered for the user to adopt or correct',
+        },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label:
-          `Adopt ${ordered.length} starting assumption${ordered.length === 1 ? '' : 's'}: ` +
-          ordered.map((a) => `${a.label} = ${a.value}${a.unit !== '' ? ' ' + a.unit : ''}`).join('; ') +
-          leftOutClause(notAFactor),
+        // ⭐ BOTH sides are needed: the revise-aware heading (so an approval says
+        // "Revise 1 value" rather than hiding that a number was already there) AND
+        // the left-out clause (so a label the model does not hold is named).
+        public_label: heading + ordered.map(describe).join('; ') + leftOutClause(notAFactor),
       });
       proposals.put(proposal);
       return {
@@ -708,7 +764,10 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        assumptions: ordered.map((a) => ({ factor: a.label, value: a.value, unit: a.unit, basis: a.basis })),
+        assumptions: ordered.map((a) => ({
+          factor: a.label, value: a.value, unit: a.unit, basis: a.basis,
+          ...(typeof a.replaces === 'number' ? { replaces: a.replaces } : {}),
+        })),
         ...(unresolved.length > 0 ? { unresolved_labels: unresolved } : {}),
         ...(occupied.length > 0 ? { left_alone_already_valued: occupied } : {}),
         // Named, but not something a value can be set on (a risk, an outcome, an option): left out,
@@ -846,6 +905,7 @@ export function createAgentCapabilities(
       const unframed: { factor: string; detail: string }[] = [];
       const unchanged: string[] = [];
       const notLinked: { option: string; factor: string; acts_on: string[] }[] = [];
+      const unreadableCell: { option: string; factor: string }[] = [];
       /**
        * ⛔ EVERY SUPPLIED LEVEL THAT IS NOT ACCEPTED, WITH ITS OPTION AND WHY.
        * MEASURED on served d1829c5 (journey J1): the starting point was refused
@@ -965,6 +1025,50 @@ export function createAgentCapabilities(
           unchanged.push(`${option.label} already sets ${factor.label} to ${String(currentValue)}`);
           continue;
         }
+        // ⚠ ORDER MATTERS, and an existing spec proved it: the NO-OP check runs
+        // FIRST. A restatement of the level the option already sets needs no write
+        // at all, so an unreadable cell cannot poison anything — reporting it as
+        // blocked would be a false alarm and would lose the `already_set` answer
+        // the user should get. (`option-interventions.test.ts` — 'refuses a
+        // restatement of what the option already does'.)
+        /**
+         * ⛔ AN EXISTING CELL THE WRITER CANNOT READ POISONS THE WHOLE APPROVAL.
+         *
+         * MEASURED on served `a693ba6` (acceptance run A2, scenario 2a5c229f):
+         * construction had written this option's cell as a bare `{ value: 0.1 }`
+         * with no `source`. `prepareOptionInterventionEdit` reads an existing cell
+         * through `ExistingInterventionRead`, where `source` is a NON-OPTIONAL
+         * enum, so it refused `invalid_existing_intervention` — and because a
+         * compound's level chain stops at its first refusal, **every other level
+         * in that approval was discarded too**. The user was told, honestly, that
+         * no option levels from the bundle were recorded.
+         *
+         * `de9db856` stops new cells being written that way. It does nothing for a
+         * model that ALREADY holds one, and 268 persisted models do. For those, one
+         * unreadable cell still costs the user every level they approved.
+         *
+         * So this is checked HERE, at proposal time, in exactly the way the
+         * `notLinked` guard above already is and for exactly the same reason: the
+         * proposer must not bundle a level whose write will refuse. The pair is
+         * excluded and named, so the Agent can say which option cannot be set and
+         * the rest of the approval still lands.
+         *
+         * ⚠ The check is deliberately the WRITER'S rule, not a re-spelling of it:
+         * an object cell must carry a `source`. A bare number carries no cell to
+         * be unreadable, and is left alone.
+         */
+        if (current !== undefined && typeof current === 'object' && current !== null
+            && (current as { source?: unknown }).source === undefined) {
+          unreadableCell.push({ option: option.label, factor: factor.label });
+          notAccepted.push({
+            option: option.label, factor: factor.label, value: raw,
+            reason:
+              `The level "${option.label}" already records for "${factor.label}" is stored in a form this `
+              + 'writer cannot read, so setting it would refuse and discard every other level in the same '
+              + 'approval. Propose the others and tell the user this one cannot be changed here.',
+          });
+          continue;
+        }
         const key = `${option.id}::${factor.id}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -981,6 +1085,7 @@ export function createAgentCapabilities(
           ok: false, mutated: false, refusal: 'nothing_to_set',
           ...(unresolved.length > 0 ? { unresolved } : {}),
           ...(notLinked.length > 0 ? { not_linked: notLinked } : {}),
+          ...(unreadableCell.length > 0 ? { unreadable_existing_cell: unreadableCell } : {}),
           ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
           ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
           ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
@@ -1021,6 +1126,7 @@ export function createAgentCapabilities(
           basis: i.basis,
         })),
         ...(unresolved.length > 0 ? { unresolved } : {}),
+        ...(unreadableCell.length > 0 ? { unreadable_existing_cell: unreadableCell } : {}),
         ...(notLinked.length > 0 ? {
           not_linked: notLinked,
           not_linked_note: 'These levels were LEFT OUT: the option is not connected to that factor, so no level can be recorded there. Propose a level on one of the factors each option acts on (listed in acts_on), or say the option needs a link first.',
@@ -1730,6 +1836,48 @@ export function createAgentCapabilities(
       const blocks = (r.json.blocks as { type: string }[] | undefined) ?? [];
       const result = blocks.find((b) => b.type === 'analysis_result');
       onAnalysis?.({ analysis_ready: r.json.analysis_ready, blocks });
+      /**
+       * ⭐ DSK-P-003 (Consider-the-Opposite / disconfirmation) ON THE OPENAI PATH.
+       *
+       * RC's fast-path directive asks that an explicit Run end in ONE useful next
+       * reasoning action, and names this intervention. It was never reachable here:
+       * `selectGroundedCounterCase` is called only from `orchestrator-v5/compose.ts`,
+       * the CONVENTIONAL pipeline. The Agent lane imports neither it nor
+       * `lens-selector.ts` — measured, zero references across `agent-v1-turn.ts` and
+       * `agent-lane/**`. On the OpenAI journey the exercise simply never existed.
+       *
+       * ⭐ IT IS ELIGIBLE, not merely importable. Measured on a real Agent-lane run
+       * against served `16d868a`: the enrichment arrives at
+       * `blocks[0].enrichment.robustness` with 12 fragile edges, and the real
+       * selector returns `refusalReason: null` with a counter case naming the actual
+       * link ("Revenue Growth" -> "Revenue Is Flat and Churn Is Rising").
+       *
+       * ⛔ ITS INPUT IS IN-FLIGHT ONLY, which is why it is read HERE. The enrichment
+       * is persisted NOWHERE — 0 rows carrying `fragile_edges` across
+       * `scenarios.analysis`, `latest_analysis_summary`, `analysis_provenance`,
+       * `scenario_snapshots.analysis` and `v5_conversation_turns.coaching_state`.
+       * Once this turn returns, the data is gone.
+       *
+       * ⚠ The text is the selector's own `counterCase`; nothing is re-worded and no
+       * second model call is made. `composeGroundedCounterCase` is deliberately NOT
+       * called — it takes three scalars, and the decision already carries the
+       * finished string. Passing it the decision renders "[object Object]".
+       */
+      const enrichment = (blocks as { enrichment?: unknown }[])
+        .map((b) => b?.enrichment)
+        .find((e) => e !== undefined && e !== null);
+      let considerOpposite: string | undefined;
+      if (enrichment !== undefined) {
+        try {
+          const decision = selectGroundedCounterCase(enrichment);
+          const grounded = decision?.grounded;
+          if (grounded && typeof grounded.counterCase === 'string' && grounded.counterCase !== '') {
+            considerOpposite = grounded.counterCase;
+          }
+        } catch {
+          // A reasoning prompt is an offer, never a gate on the user's answer.
+        }
+      }
       return {
         ok: r.status === 200,
         mutated: false,
@@ -1740,6 +1888,7 @@ export function createAgentCapabilities(
         blockers: ready.blockers ?? [],
         options: ready.options ?? [],
         ...(result !== undefined ? { result } : {}),
+        ...(considerOpposite !== undefined ? { consider_the_opposite: considerOpposite } : {}),
       };
     },
   };
