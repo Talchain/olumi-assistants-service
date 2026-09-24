@@ -132,8 +132,9 @@ describe('(v) a node id disambiguates, and the write goes to exactly that node',
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const r = await caps.proposeAssumptions(ctx, {
+      // `revise` is a tool argument the capability type does not declare yet (see agent-tools.ts).
       assumptions: [{ factor_label: 'churn_support', value: 0.07, unit: '', basis: 'the user chose support churn', revise: true }],
-    });
+    } as never);
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(store.get(String(r.proposal_id))!.operations.map((o) => o.path)).toEqual(['churn_support']);
     const applied = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
