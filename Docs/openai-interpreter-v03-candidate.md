@@ -12,7 +12,7 @@ Paul's live test exposed a 321-word construction answer and a 282-word analysis 
 
 The interpretation omits routine internal-normalisation and save/version notices while retaining relevant save failures or uncertainty. It must not assume a result card rendered: presentation evidence is required before relying on an existing card to avoid duplication. Native values, explicit incomplete assessment and currentness remain essential. HTTP success is explicitly distinct from a completed analysis, and next-step guidance must not promise unsupported edits, controls or reruns.
 
-A later write conflict also limits what earlier receipts establish. A successful value save remains a historical event when a subsequent range write is refused; the refusal neither rolls it back nor proves that its value remains current. Current values, ranges and readiness require authoritative readback after the conflict. Without that readback, the explanation must leave current state unknown and avoid repair advice based on the earlier snapshot.
+A later write conflict also limits what earlier receipts establish. A successful value save remains a historical event when a subsequent range write is refused; the refusal neither rolls it back nor proves that its value remains current. Current values, ranges and readiness require authoritative readback after the conflict. Without that readback, the explanation must leave current state unknown and avoid repair advice based on the earlier snapshot. A contradictory positive blocker field cannot supply the missing authority or relax claim permissions. A factor removed in an authoritative reread is distinct from a present factor lacking a range.
 
 ## Existing seam and ownership
 
@@ -28,9 +28,9 @@ The candidate retains model-relative claims and human judgement; separate metric
 
 ## Evidence and remaining work
 
-- Static implementation: the focused suite now contains 18 profile/comparison-preparation/fixture-integrity tests, delegated to the targeted cloud workflow below. The previous 17-test suite passed on cloud head `c33e7b2d242b49086c6b98618a49bda6fd9fa4f9`; that earlier result is not execution evidence for the added post-conflict contrast. Use the latest exact-head check on the PR. These checks do not establish generated-answer quality.
+- Static implementation: the focused suite now contains 19 profile/comparison-preparation/fixture-integrity tests, delegated to the targeted cloud workflow below. The previous 18-test suite passed on cloud head `7b8edbb7029d79bcc32bd015ea014681da6fa2a1`; that earlier result is not execution evidence for the added contradictory-blocker contrast. Use the latest exact-head check on the PR. These checks do not establish generated-answer quality.
 - v0.2 remains 2,929 characters with SHA-256 `3d979e8406693be42d3b340fd245d76a501c4b1c191d5ffaa1353f2f0380ba32`.
-- Refined candidate: 4,125 characters with SHA-256 `75ac5f6e70b14151b2032cd881caadbdc57b0522c723e0d488b38db94d168922`. The temporal-grounding addition is 281 characters; the profile is 1,196 characters longer than v0.2. The intended reduction is in answer length, not instruction length. Character length is not measured token usage or latency.
+- Refined candidate: 4,276 characters with SHA-256 `55b7f37b0fb0b97704c939d28a9c8fd0f8680b97ea54b6865624b0bf0b69f4ee`. The contradictory-blocker clarification adds 151 characters; the profile is 1,347 characters longer than v0.2. The intended reduction is in answer length, not instruction length. Character length is not measured token usage or latency.
 - No paid model calls or generated-answer evaluation were performed for this candidate. The v0.2 benchmark does not establish v0.3 quality.
 
 The existing six PJ cases should be combined with controls where the withheld reason has no supplied cause, a constraint actually fails, no constraints were requested, metric-only permission is denied, or one edge flip is the sole investigation evidence. Preserve positive controls for legitimate metric-only findings and useful inspection grounded in supplied sensitivity plus uncertainty. Retain all before/after and existing v0.2 regression cases.
@@ -39,7 +39,7 @@ The principal quality risks are over-cautious language around missing permission
 
 ## Real-journey semantic contrasts
 
-`Docs/evals/interpreter/paul-concision-contrasts-20260924.json` contains sixteen authored cases in eight pairs. They are conceptual semantic fixtures, **not captured FP3 requests**, observed model answers or a new runtime contract:
+`Docs/evals/interpreter/paul-concision-contrasts-20260924.json` contains nineteen authored cases in nine contrast sets (eight pairs and one three-case set). They are conceptual semantic fixtures, **not captured FP3 requests**, observed model answers or a new runtime contract:
 
 | Pair | What changes while relevant facts stay fixed |
 |---|---|
@@ -51,10 +51,13 @@ The principal quality risks are over-cautious language around missing permission
 | Unsupported edit / supported guidance | Same requested edit and current result; different available product actions |
 | Unknown card / confirmed visible card | Same analysis and question; different presentation evidence |
 | Saved write then conflict / authoritative reread | Same historical save and range-write refusal; current state unknown versus a changed value, an attached range and available analysis |
+| Contradictory blocker / removed factor / verified unranged factor | Same positive blocker field; failed readback versus authoritative absence versus a present factor with a verified missing range |
 
-Send only `case.input` as context when a later evaluation is authorised. Keep expected behaviour, scoring limits and contrast labels outside the model request. Word limits are soft: retaining a material caveat and answering an explicit request for detail are more important than a short answer. The new static tests verify that the pairs actually differ in the intended evidence and that scoring fields are separate; they do not score language-model behaviour.
+Send only `case.input` as context when a later evaluation is authorised. Keep expected behaviour, scoring limits and contrast labels outside the model request. Word limits are soft: retaining a material caveat and answering an explicit request for detail are more important than a short answer. The new static tests verify that the contrasts actually differ in the intended evidence and that scoring fields are separate; they do not score language-model behaviour.
 
 `PC15_saved_then_conflict_unknown` and `PC16_saved_then_conflict_refreshed` derive from the [independent #1743 review](https://github.com/Talchain/olumi-assistants-service/pull/1743#issuecomment-5806305332). Both record a save of 50 followed by a refused range write. The first has no post-conflict readback; the second supplies an authoritative later value of 40, a 0–100 range and readiness to analyse, while analysis itself remains unrun. The static check verifies the ordering and a genuinely different later state. It does not execute competing writers, repair the runtime race or establish how a model will describe it.
+
+`PC17`–`PC19` cover the [follow-up finding at #1743 head b9317037](https://github.com/Talchain/olumi-assistants-service/pull/1743#issuecomment-5807098268): a positive `analysis_still_blocked_for` field contradicts failed current readback. The field stays identical across all three cases. Failed readback leaves current state unknown; authoritative removal proves the factor is absent, not unranged, while overall readiness remains unknown; an authoritative read that actually finds the factor present and unranged permits that specific blocker claim. The historical save and withheld leader permission remain intact. These are authored semantic inputs, not captured runtime requests or generated-answer evidence.
 
 ## Repeatable offline comparison
 

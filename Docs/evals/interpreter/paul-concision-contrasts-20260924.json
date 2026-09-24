@@ -11,7 +11,8 @@
     "observed_initial_answer_words": 321,
     "observed_analysis_answer_words": 282,
     "scope_limit": "The Interpreter profile affects post-analysis explanation, not first-brief construction or runtime action availability.",
-    "additional_regression_source": "Independent review of CEE #1743 at a6dc18bea0b398ced01a32f9ea2feb168ecef986; issuecomment-5806305332. These are authored temporal controls, not executed runtime race tests."
+    "additional_regression_source": "Independent review of CEE #1743 at a6dc18bea0b398ced01a32f9ea2feb168ecef986; issuecomment-5806305332. These are authored temporal controls, not executed runtime race tests.",
+    "additional_structured_conflict_source": "Independent review of CEE #1743 at b9317037dd7a6b7d5767290fe4ea4532b3397154; issuecomment-5807098268. Authored contradictory-input contrasts only, not live captures or runtime race tests."
   },
   "cases": [
     {
@@ -1322,6 +1323,404 @@
           "The old value remains unchanged, a range still needs adding, or analysis is still blocked.",
           "A claim that this refused range operation attached the range, that the historical save never happened, or that readiness means analysis completed.",
           "Unsupported control or mutation promises."
+        ],
+        "soft_max_words": 90
+      }
+    },
+    {
+      "id": "PC17_conflicting_blocker_unknown",
+      "contrast_group": "contradictory_current_blocker",
+      "input": {
+        "question": "Did my change save, and what should I do next?",
+        "run_result": {
+          "ok": true,
+          "ran": false,
+          "status": "blocked",
+          "result": null,
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "never_run"
+              },
+              "leader_claim": {
+                "permitted": false,
+                "withheld_reason": "not_run"
+              }
+            }
+          },
+          "what_is_missing": "The earlier analysis attempt was blocked by a missing factor range.",
+          "blockers": [
+            "missing_factor_range"
+          ]
+        },
+        "context": {
+          "constraints": {
+            "requested": false,
+            "items": []
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 70,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [],
+          "presentation": {
+            "result_card": "unknown"
+          },
+          "transport_status": 200,
+          "analysis_snapshot_sequence": 1,
+          "write_history": [
+            {
+              "sequence": 2,
+              "operation": "set_factor_value",
+              "outcome": "saved",
+              "receipt": {
+                "revision": "r8",
+                "factor": "Feature value perception",
+                "before": 70,
+                "after": 50,
+                "unit": "out of 100"
+              }
+            },
+            {
+              "sequence": 3,
+              "operation": "read_canonical_state",
+              "revision": "r8"
+            },
+            {
+              "sequence": 4,
+              "operation": "set_factor_range",
+              "outcome": "refused",
+              "error": "GRAPH_STALE",
+              "applied": false
+            }
+          ],
+          "pre_conflict_snapshot": {
+            "observed_at_sequence": 3,
+            "revision": "r8",
+            "factor": {
+              "label": "Feature value perception",
+              "raw_value": 50,
+              "unit": "out of 100",
+              "range": null
+            },
+            "analysis_ready": {
+              "may_run": false,
+              "blockers": [
+                "missing_factor_range"
+              ]
+            }
+          },
+          "post_conflict_readback": {
+            "status": "unavailable"
+          },
+          "frame_write_result": {
+            "observed_at_sequence": 5,
+            "outcome": "refused",
+            "error": "GRAPH_STALE",
+            "analysis_still_blocked_for": [
+              "Feature value perception"
+            ],
+            "current_state_detail": "Values were accepted at the time. Whether they remain, carry a range or allow analysis is ALL UNKNOWN because the model could not be read."
+          }
+        }
+      },
+      "expected": {
+        "must": [
+          "Retain the historical save and later refusal, but keep current values, range and readiness unknown.",
+          "Treat the positive analysis_still_blocked_for field as unverified because it conflicts with failed current readback.",
+          "Retain withheld leader permission; unknown readiness is not permission to analyse or claim a leader."
+        ],
+        "avoid": [
+          "Selecting the positive blocker field as proof analysis is currently blocked.",
+          "Reassuring the user the old value is safe or advising range entry from the old snapshot.",
+          "Dropping the historical save because present state is unknown."
+        ],
+        "soft_max_words": 90
+      }
+    },
+    {
+      "id": "PC18_removed_factor_not_unranged",
+      "contrast_group": "contradictory_current_blocker",
+      "input": {
+        "question": "Did my change save, and what should I do next?",
+        "run_result": {
+          "ok": true,
+          "ran": false,
+          "status": "blocked",
+          "result": null,
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "never_run"
+              },
+              "leader_claim": {
+                "permitted": false,
+                "withheld_reason": "not_run"
+              }
+            }
+          },
+          "what_is_missing": "The earlier analysis attempt was blocked by a missing factor range.",
+          "blockers": [
+            "missing_factor_range"
+          ]
+        },
+        "context": {
+          "constraints": {
+            "requested": false,
+            "items": []
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 70,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [],
+          "presentation": {
+            "result_card": "unknown"
+          },
+          "transport_status": 200,
+          "analysis_snapshot_sequence": 1,
+          "write_history": [
+            {
+              "sequence": 2,
+              "operation": "set_factor_value",
+              "outcome": "saved",
+              "receipt": {
+                "revision": "r8",
+                "factor": "Feature value perception",
+                "before": 70,
+                "after": 50,
+                "unit": "out of 100"
+              }
+            },
+            {
+              "sequence": 3,
+              "operation": "read_canonical_state",
+              "revision": "r8"
+            },
+            {
+              "sequence": 4,
+              "operation": "set_factor_range",
+              "outcome": "refused",
+              "error": "GRAPH_STALE",
+              "applied": false
+            }
+          ],
+          "pre_conflict_snapshot": {
+            "observed_at_sequence": 3,
+            "revision": "r8",
+            "factor": {
+              "label": "Feature value perception",
+              "raw_value": 50,
+              "unit": "out of 100",
+              "range": null
+            },
+            "analysis_ready": {
+              "may_run": false,
+              "blockers": [
+                "missing_factor_range"
+              ]
+            }
+          },
+          "post_conflict_readback": {
+            "status": "available",
+            "authoritative": true,
+            "observed_at_sequence": 6,
+            "revision": "r9",
+            "factor_presence": "removed",
+            "factor": null,
+            "analysis_ready": {
+              "status": "unknown",
+              "may_run": null,
+              "blockers": []
+            },
+            "analysis_state": {
+              "run_state": {
+                "kind": "never_run"
+              },
+              "leader_claim": {
+                "permitted": false,
+                "withheld_reason": "not_run"
+              }
+            }
+          },
+          "frame_write_result": {
+            "observed_at_sequence": 5,
+            "outcome": "refused",
+            "error": "GRAPH_STALE",
+            "analysis_still_blocked_for": [
+              "Feature value perception"
+            ],
+            "current_state_detail": "Values were accepted at the time. Whether they remain, carry a range or allow analysis is ALL UNKNOWN because the model could not be read."
+          }
+        }
+      },
+      "expected": {
+        "must": [
+          "Report the historical save and refusal separately from the authoritative later removal of the factor.",
+          "Do not treat an absent factor as an existing factor missing a range.",
+          "Keep overall analysis readiness unknown because no current readiness verdict was supplied; retain withheld leader permission."
+        ],
+        "avoid": [
+          "Analysis is still blocked for this factor because its range is missing.",
+          "Advice to add a range to the absent factor, recreating the factor or undoing the removal without instruction.",
+          "Claiming the whole model is ready merely because this factor is absent."
+        ],
+        "soft_max_words": 90
+      }
+    },
+    {
+      "id": "PC19_verified_present_unranged",
+      "contrast_group": "contradictory_current_blocker",
+      "input": {
+        "question": "Did my change save, and what should I do next?",
+        "run_result": {
+          "ok": true,
+          "ran": false,
+          "status": "blocked",
+          "result": null,
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "never_run"
+              },
+              "leader_claim": {
+                "permitted": false,
+                "withheld_reason": "not_run"
+              }
+            }
+          },
+          "what_is_missing": "The earlier analysis attempt was blocked by a missing factor range.",
+          "blockers": [
+            "missing_factor_range"
+          ]
+        },
+        "context": {
+          "constraints": {
+            "requested": false,
+            "items": []
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 70,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [],
+          "presentation": {
+            "result_card": "unknown"
+          },
+          "transport_status": 200,
+          "analysis_snapshot_sequence": 1,
+          "write_history": [
+            {
+              "sequence": 2,
+              "operation": "set_factor_value",
+              "outcome": "saved",
+              "receipt": {
+                "revision": "r8",
+                "factor": "Feature value perception",
+                "before": 70,
+                "after": 50,
+                "unit": "out of 100"
+              }
+            },
+            {
+              "sequence": 3,
+              "operation": "read_canonical_state",
+              "revision": "r8"
+            },
+            {
+              "sequence": 4,
+              "operation": "set_factor_range",
+              "outcome": "refused",
+              "error": "GRAPH_STALE",
+              "applied": false
+            }
+          ],
+          "pre_conflict_snapshot": {
+            "observed_at_sequence": 3,
+            "revision": "r8",
+            "factor": {
+              "label": "Feature value perception",
+              "raw_value": 50,
+              "unit": "out of 100",
+              "range": null
+            },
+            "analysis_ready": {
+              "may_run": false,
+              "blockers": [
+                "missing_factor_range"
+              ]
+            }
+          },
+          "post_conflict_readback": {
+            "status": "available",
+            "authoritative": true,
+            "observed_at_sequence": 6,
+            "revision": "r9",
+            "factor_presence": "present",
+            "factor": {
+              "label": "Feature value perception",
+              "raw_value": 50,
+              "unit": "out of 100",
+              "range": null
+            },
+            "analysis_ready": {
+              "status": "blocked",
+              "may_run": false,
+              "blockers": [
+                {
+                  "factor": "Feature value perception",
+                  "reason": "missing_factor_range"
+                }
+              ]
+            },
+            "analysis_state": {
+              "run_state": {
+                "kind": "never_run"
+              },
+              "leader_claim": {
+                "permitted": false,
+                "withheld_reason": "not_run"
+              }
+            }
+          },
+          "frame_write_result": {
+            "observed_at_sequence": 5,
+            "outcome": "refused",
+            "error": "GRAPH_STALE",
+            "analysis_still_blocked_for": [
+              "Feature value perception"
+            ],
+            "current_state_detail": "Values were accepted at the time. Whether they remain, carry a range or allow analysis is ALL UNKNOWN because the model could not be read."
+          }
+        }
+      },
+      "expected": {
+        "must": [
+          "Report that authoritative later readback confirms the factor exists at 50 without a range and analysis is blocked for that verified reason.",
+          "Preserve the historical accepted value write and refused frame write."
+        ],
+        "avoid": [
+          "Blanket refusal to report a blocker despite a fresh authoritative verdict.",
+          "Treating all null ranges as removed factors.",
+          "Claiming the refused range write succeeded or promising an unsupported repair control."
         ],
         "soft_max_words": 90
       }

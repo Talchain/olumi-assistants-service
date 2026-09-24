@@ -35,10 +35,12 @@ interface FixtureInput {
       status: string;
       authoritative?: boolean;
       observed_at_sequence?: number;
-      factor?: { raw_value: number; range: { min: number; max: number } };
-      analysis_ready?: { may_run: boolean };
-      analysis_state?: { run_state: { kind: string } };
+      factor_presence?: 'present' | 'removed';
+      factor?: { raw_value: number; range: { min: number; max: number } | null } | null;
+      analysis_ready?: { may_run: boolean | null };
+      analysis_state?: { run_state: { kind: string }; leader_claim?: { permitted: boolean } };
     };
+    frame_write_result?: { observed_at_sequence: number; analysis_still_blocked_for: string[] };
   };
 }
 interface FixtureCase {
@@ -58,7 +60,7 @@ const find = (id: string): FixtureCase => {
 
 // Fixture integrity only: no assertion here evaluates a generated answer.
 describe('Interpreter refinement contrasts remain discriminating', () => {
-  it('keeps unique pairs and scoring instructions outside the model input', () => {
+  it('keeps unique contrast sets and scoring instructions outside the model input', () => {
     expect(new Set(fixture.cases.map((item) => item.id)).size).toBe(fixture.cases.length);
     const pairs = new Map<string, number>();
     for (const item of fixture.cases) {
@@ -68,7 +70,7 @@ describe('Interpreter refinement contrasts remain discriminating', () => {
       expect(item.input).not.toHaveProperty('expected');
       expect(item.input).not.toHaveProperty('soft_max_words');
     }
-    expect([...pairs.values()]).toEqual(Array(8).fill(2));
+    expect([...pairs.values()]).toEqual([...Array(8).fill(2), 3]);
   });
 
   it('changes the requested detail, not the analysis, in the concision pair', () => {
@@ -144,7 +146,7 @@ describe('Interpreter refinement contrasts remain discriminating', () => {
     expect(unknownContext).toEqual(visibleContext);
   });
 
-  it('distinguishes historical write success from current state after a real competing change', () => {
+  it('distinguishes historical write success from a supplied later competing change', () => {
     const unknown = find('PC15_saved_then_conflict_unknown').input;
     const refreshed = find('PC16_saved_then_conflict_refreshed').input;
     expect(unknown.run_result).toEqual(refreshed.run_result);
@@ -165,5 +167,29 @@ describe('Interpreter refinement contrasts remain discriminating', () => {
     expect(readback.factor).toMatchObject({ raw_value: 40, range: { min: 0, max: 100 } });
     expect(readback.analysis_ready?.may_run).toBe(true);
     expect(readback.analysis_state?.run_state.kind).toBe('never_run');
+  });
+
+  it('does not let the same positive blocker imply unknown, absent and verified-unranged states are equivalent', () => {
+    const unknown = find('PC17_conflicting_blocker_unknown').input.context;
+    const removed = find('PC18_removed_factor_not_unranged').input.context;
+    const present = find('PC19_verified_present_unranged').input.context;
+    expect(unknown.frame_write_result?.analysis_still_blocked_for).toEqual(['Feature value perception']);
+    expect(removed.frame_write_result).toEqual(unknown.frame_write_result);
+    expect(present.frame_write_result).toEqual(unknown.frame_write_result);
+    expect(removed.write_history).toEqual(unknown.write_history);
+    expect(present.write_history).toEqual(unknown.write_history);
+    expect(unknown.post_conflict_readback).toEqual({ status: 'unavailable' });
+    expect(removed.post_conflict_readback).toMatchObject({
+      authoritative: true, factor_presence: 'removed', factor: null,
+      analysis_ready: { may_run: null }, analysis_state: { leader_claim: { permitted: false } },
+    });
+    expect(present.post_conflict_readback).toMatchObject({
+      authoritative: true, factor_presence: 'present', factor: { raw_value: 50, range: null },
+      analysis_ready: { may_run: false }, analysis_state: { leader_claim: { permitted: false } },
+    });
+    for (const context of [removed, present]) {
+      expect(context.post_conflict_readback?.observed_at_sequence)
+        .toBeGreaterThan(context.frame_write_result!.observed_at_sequence);
+    }
   });
 });
