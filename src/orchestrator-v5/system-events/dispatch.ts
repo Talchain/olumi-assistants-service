@@ -1849,6 +1849,37 @@ async function dispatchFactorValueEdit(
     persistedGraphBytes = commitResult.persistedGraph;
     committedResponse = commitResult.response;
   } catch (err) {
+    // ⭐ ANOTHER WRITER COMMITTED AFTER THIS EDIT'S BASE READ. The atomic CAS
+    // refused the write, so nothing of this edit landed. That is a KNOWN
+    // outcome, not an unconfirmed one, so it gets the typed conflict the
+    // structural writers already return, never the retryable 500 below. That
+    // 500 told a caller "we do not know whether your value was saved" about a
+    // write we DO know was refused, and invited a blind retry over the other
+    // writer's change.
+    if (err instanceof GraphStaleWriteError) {
+      log.warn(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          target_id: event.target_id,
+          conflict_category: err.conflict_category,
+        },
+        'V5 factor_value_edit — atomic graph CAS conflict; refresh and reconfirm',
+      );
+      return {
+        response: result.response,
+        commitPerformed: false,
+        graph: null,
+        graphConflict: {
+          recovery_action: 'refresh_and_reconfirm',
+          conflict_category: err.conflict_category,
+          // Analysis-space (16-hex), from a FRESH read, never the 64-hex
+          // identity hash the error carries. See readClientRecoverableBaseHash.
+          expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
+        },
+      };
+    }
     log.error(
       {
         request_id: requestId,
