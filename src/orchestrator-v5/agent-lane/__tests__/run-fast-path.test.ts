@@ -26,6 +26,9 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
   let runs = 0;
   // How the ONE interpreting call behaves: answers, fails with an HTTP error, or says nothing.
   let interp: 'ok' | 'throw' | 'empty' = 'ok';
+  // A BLOCKED Run: HTTP 200, no analysis_result, Olumi's own explanation (the real recoverable shape).
+  let blocked = false;
+  const BLOCKED_WORDS = 'I can\'t run the analysis yet: no option has a path to the goal.';
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
@@ -45,6 +48,10 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => {
       runs += 1;
+      if (blocked) {
+        return { response_version: 2, assistant_text: BLOCKED_WORDS, suggested_actions: [], insights: [], graph_hash: 'h1',
+          blocks: [], analysis_ready: { status: 'blocked', options: [], blockers: [{ code: 'NO_PATH_TO_GOAL' }] } };
+      }
       return { response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: 'h1',
         blocks: [{ type: 'analysis_result', data: { marker: 'the-run' } }], analysis_ready: { status: 'ready', options: [], blockers: [] } };
     });
@@ -58,7 +65,7 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { modelBodies = []; runs = 0; interp = 'ok'; });
+  beforeEach(() => { modelBodies = []; runs = 0; interp = 'ok'; blocked = false; });
 
   it('RED: a typed Run chip → the analysis runs once, and exactly ONE model call interprets it with tool_choice none', async () => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
@@ -117,7 +124,7 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
       expect(b._diagnostic_trace.fast_path).toBe('run');
       expect(b._agent.tool_calls, 'the run is the turn\'s own, successful result').toEqual([expect.objectContaining({ name: 'run_analysis', ok: true })]);
       const { interpretationUnavailableText } = await import('../../../routes/agent-v1-turn.js');
-      expect(b.assistant_text, 'truthful: it ran, the interpretation is what is missing').toBe(interpretationUnavailableText({ ok: true }));
+      expect(b.assistant_text, 'truthful: it ran, the interpretation is what is missing').toBe(interpretationUnavailableText({ ok: true, ran: true }));
       // The NEXT turn's history still carries the run — the pair was not dropped.
       const sid = (r.json() as { _agent: { session_id?: string } })._agent.session_id;
       expect(typeof sid).toBe('string');
@@ -129,9 +136,32 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
       expect(next, 'and so is what the user was told').toContain('could not write an interpretation');
     });
   }
-  it('the unavailable wording never claims an interpretation, and a refused run says it did not run', async () => {
+  /**
+   * ⛔ Independent review of #1786 (5805649773): `ok` is the HTTP status, not a completed
+   * analysis. A BLOCKED Run answers HTTP 200 with no result; under a failed or empty
+   * interpretation it must never be told "the analysis ran".
+   */
+  for (const mode of ['throw', 'empty'] as const) {
+    it(`RED: a BLOCKED Run (HTTP 200, no result) with the interpreter ${mode === 'throw' ? 'failing' : 'silent'} → never claims a run, passes Olumi's own reason through`, async () => {
+      interp = mode;
+      blocked = true;
+      const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+      } });
+      expect(r.statusCode).toBe(200);
+      const b = r.json() as { assistant_text: string; suggested_actions?: unknown[]; _diagnostic_trace: { fast_path?: string } };
+      expect(runs, 'exactly one attempted run').toBe(1);
+      expect(modelBodies.filter((m) => m['tool_choice'] !== 'none'), 'no tool-enabled call').toHaveLength(0);
+      expect(b._diagnostic_trace.fast_path).toBe('run');
+      expect(b.assistant_text).not.toMatch(/analysis ran|results are shown/i);
+      expect(b.assistant_text).toBe(`The analysis did not run. ${BLOCKED_WORDS}`);
+    });
+  }
+  it('the unavailable wording is derived from the DOMAIN outcome, never from HTTP success', async () => {
     const { interpretationUnavailableText } = await import('../../../routes/agent-v1-turn.js');
-    expect(interpretationUnavailableText({ ok: true })).toMatch(/^The analysis ran, but I could not write an interpretation/);
+    expect(interpretationUnavailableText({ ok: true, ran: true })).toMatch(/^The analysis ran, but I could not write an interpretation/);
+    expect(interpretationUnavailableText({ ok: true, ran: true }), 'no visibility claim it cannot back').not.toMatch(/shown/);
+    expect(interpretationUnavailableText({ ok: true, ran: false, status: 'blocked', what_is_missing: '' })).toBe('The analysis did not run this time (blocked). Nothing in the model was changed — ask me what it still needs.');
     expect(interpretationUnavailableText({ ok: false, refusal: 'analysis_not_ready' })).toBe('The analysis did not run this time (analysis not ready). Nothing in the model was changed — ask me what it still needs.');
   });
 

@@ -273,15 +273,25 @@ export const INTERPRETER_V02_BANKED: string = "Explain the current **model-relat
 
 /** The UI's Run control: a typed `run_analysis` chip. Words alone never take fast path 3. */
 /**
- * What the user reads when the run happened but its one interpreting call failed or said
- * nothing: composed from the run's own result, never from a model, and never claiming an
- * interpretation that was not made.
+ * What the user reads when the run was ATTEMPTED but its one interpreting call failed or said
+ * nothing: composed from the run's own DOMAIN outcome, never from a model.
+ *
+ * ⛔ `ok` is the HTTP status of the attempt, NOT a completed analysis (independent review of
+ * #1786, 5805649773): a blocked Run answers HTTP 200 with no `analysis_result`, so `ok:true`
+ * would have told that user "the analysis ran". `ran` is the presence of a result; when it
+ * is absent, Olumi's own explanation (`what_is_missing`) is passed through, not re-worded.
+ * No visibility claim is made about results the reply does not carry.
  */
-export function interpretationUnavailableText(ran: { ok?: unknown; refusal?: unknown }): string {
-  if (ran.ok === true) {
-    return 'The analysis ran, but I could not write an interpretation of it this time. The results are shown with the model — ask me to explain them.';
+export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown; refusal?: unknown; status?: unknown; what_is_missing?: unknown }): string {
+  if (ran.ran === true) {
+    return 'The analysis ran, but I could not write an interpretation of it this time — ask me to explain the result.';
   }
-  const why = typeof ran.refusal === 'string' && ran.refusal !== '' ? ` (${ran.refusal.replace(/_/g, ' ')})` : '';
+  const missing = typeof ran.what_is_missing === 'string' ? ran.what_is_missing.trim() : '';
+  if (missing !== '') return `The analysis did not run. ${missing}`;
+  const code = typeof ran.refusal === 'string' && ran.refusal !== ''
+    ? ran.refusal
+    : typeof ran.status === 'string' && ran.status !== '' && ran.status !== 'unknown' ? ran.status : '';
+  const why = code !== '' ? ` (${code.replace(/_/g, ' ')})` : '';
   return `The analysis did not run this time${why}. Nothing in the model was changed — ask me what it still needs.`;
 }
 
