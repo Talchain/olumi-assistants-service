@@ -148,7 +148,10 @@ export function stillValidOffers(
   const runKind = (now.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
   const run = offered.some((a) => a.id === RUN_OFFER_CHIP.id)
     && admitsRunOffer(now.analysisReady) && runKind !== 'complete_current';
-  return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : [])];
+  // The next step after a blocked Run stays offered while the model still cannot run (process-local,
+  // like the approve chip: after a restart the replay carries the words only).
+  const nextStep = offered.some((a) => a.id === NEXT_STEP_AFTER_BLOCKED_RUN_CHIP.id) && !admitsRunOffer(now.analysisReady);
+  return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : [])];
 }
 const sessions = new SessionBindingRegistry();
 
@@ -302,6 +305,18 @@ const AGENT_INSTRUCTIONS = [
  * shape as the product's own Run chip (`edit-graph-dispatch.ts` RUN_ANALYSIS_CHIP), so the UI
  * echoes `{ id, action_type }` and the click takes fast path 3.
  */
+/**
+ * ⭐ A BLOCKED RUN OFFERS THE NEXT STEP (finding 5807064442). A typed Run keeps its turn, and its one
+ * interpreting call may not call tools — so a Run pressed before the model is ready ended on Olumi's
+ * reason with no action at all. This plain chip (no `action_type`: never another Run) makes the next
+ * step one click: an ordinary Agent turn that proposes what the model still needs, for approval.
+ */
+export const NEXT_STEP_AFTER_BLOCKED_RUN_CHIP = {
+  id: 'agent-suggest-what-it-needs',
+  label: 'Suggest what it still needs',
+  message: 'Suggest what this model still needs before the analysis can run, so I can approve it.',
+} as const;
+
 export const RUN_OFFER_CHIP = {
   id: 'agent-run-analysis',
   label: 'Run analysis',
@@ -1238,7 +1253,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && !result.tool_calls.some((c) => c.name === 'run_analysis')
       && admitsRunOffer(analysisReady);
 
-    const offeredNow: OfferedAction[] = [...approvalChipsFor(result.tool_calls), ...(offerRun ? [RUN_OFFER_CHIP] : [])];
+    // A typed Run that answered but did not complete (blocked) offers the next step instead.
+    const runBlocked = fastPath === 'run'
+      && (result.tool_results[0] as { ok?: unknown; ran?: unknown } | undefined)?.ok === true
+      && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran !== true;
+    const offeredNow: OfferedAction[] = [
+      ...approvalChipsFor(result.tool_calls),
+      ...(offerRun ? [RUN_OFFER_CHIP] : []),
+      ...(runBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
+    ];
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
 
     const narration = narrateWriteOutcome(text, result.tool_calls, result.tool_results);
