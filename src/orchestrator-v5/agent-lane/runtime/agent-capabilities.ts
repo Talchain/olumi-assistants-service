@@ -1918,6 +1918,53 @@ export function createAgentCapabilities(
           }
         }
         if (landed.length === applied.length) proposals.markApplied(decision.proposal.proposal_id, receipts);
+        /**
+         * ⛔⛔ RE-DERIVE THE SUBSTITUTION FROM THE FINAL WRITE, NOT THE FIRST ONE.
+         *
+         * ⚠ CHANGES_REQUIRED at `4c2d40b6`, accepted in full, and it is the same
+         * shape as the disclosure defect one layer down: the READER was innocent
+         * and the PRODUCER was wrong.
+         *
+         * `applied` is built from `afterSet` — the read taken BEFORE the scale
+         * frame is attached. So for an approved bare amount of 40 with no prior
+         * range: the frame write below registers `{value: 0.4, raw_value: 40,
+         * cap: 100}`, but `rescaled` was computed from the earlier row (40 → 40)
+         * and came out EMPTY. The model then computes with 0.4 while the reply
+         * said the approved figures were "stored unchanged".
+         *
+         * That is the authorship failure this lane exists to prevent: the person
+         * approved 40, the analysis uses 0.4, and the translation was invisible.
+         * No consumer could recover it, because the fact was never emitted.
+         *
+         * So the recorded side is re-read from the bytes that actually landed. A
+         * failed re-read does not fabricate one: it falls back to the arithmetic
+         * we know we sent (`raw / range`, on a register that returned 200) and
+         * `frame_derivation_unread` records that it was derived rather than
+         * observed.
+         */
+        let recordedUnread = false;
+        if (framed.length > 0) {
+          const finalRead = await readGraph(ctx.scenario_id);
+          const finalById = new Map((finalRead?.nodes ?? []).map((n) => [n.id, n]));
+          const framedRangeByLabel = new Map(framed.map((f) => [f.factor, f.range]));
+          if (finalRead === null) recordedUnread = true;
+          for (let i = 0; i < ops.length; i += 1) {
+            const row = applied[i];
+            if (row === undefined || row.recorded === null) continue;
+            const node = finalById.get(ops[i].path);
+            const finalValue = node?.observed_state?.value;
+            if (typeof finalValue === 'number') {
+              row.recorded = finalValue;
+              continue;
+            }
+            // Fresh read unusable for this node: derive from what we sent.
+            const range = framedRangeByLabel.get(row.factor);
+            if (typeof range === 'number' && range > 1 && typeof row.requested === 'number') {
+              row.recorded = row.requested / range;
+              recordedUnread = true;
+            }
+          }
+        }
         const rescaled = landed.filter((a) => a.recorded !== a.requested);
         return {
           ok: true, mutated: true, applied: true,
@@ -1976,8 +2023,21 @@ export function createAgentCapabilities(
               ? ' Some of them had no range to be read against, which would have stopped the analysis running ' +
                 'at all, so a range was taken from the figure itself: ' +
                 framed.map((f) => `${f.factor} 0 to ${f.range}`).join(', ') +
-                '. That is a unit of measurement rather than a forecast or a limit, the approved figures are ' +
-                'stored unchanged, and the user should be told and invited to correct any range that is wrong.'
+                '. That is a unit of measurement rather than a forecast or a limit. ' +
+                // ⛔ "the approved figures are stored unchanged" WAS FALSE, and it was the
+                // sentence that hid the whole translation. The user's figure is preserved
+                // as the raw value, but the number the analysis computes with is that
+                // figure divided by the range — 40 on a 0-to-100 range is 0.4. Both
+                // representations must be named, because only then is the authorship
+                // legible: the person authored 40, and 0.4 is the product's encoding of it.
+                'The figure each person approved is kept exactly as they gave it, and the ' +
+                'number the analysis computes with is that figure measured against its range ' +
+                '— state BOTH when you describe what changed, never only one. ' +
+                (recordedUnread
+                  ? 'One or more of those computed figures could not be read back and was derived ' +
+                    'from the range instead, so describe it as derived rather than as observed. '
+                  : '') +
+                'The user should be told and invited to correct any range that is wrong.'
               : ''),
         };
       }
