@@ -75,8 +75,9 @@
  * optional method (mocks do not), and it reconstructs by JOIN a fact the
  * producer already states directly. `enrichment.run_provenance.initiated_by` is
  * written by the dispatch itself, is inside `z.record(z.unknown())` at every
- * published contract version (so no schemas change and no version bump), and
- * travels with the fact through commit and read-back.
+ * published contract version, and travels with the fact through commit and
+ * read-back. (Schemas 0.57.0 TYPES it — `AnalysisEnrichmentSchema.run_provenance`
+ * — and keep-lists it for the browser; the carrier itself is unchanged.)
  */
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
@@ -88,12 +89,13 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
  * Same carrier pattern as the decision_review enricher (a freshly-cloned record,
  * PLoT keys preserved). NO schema change: `enrichment` is `z.record(z.unknown())`
  * at every published contract version, so the stamp validates at the UI's
- * deployed pin and at 0.48.0 alike. It is NOT on the wire transport keep-list
- * (`P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` — which must stay element-for-element
- * equal to the schemas package's `CEE_UI_ENRICHMENT_KEEP_LIST`), so today's UI
- * sees an ordinary completed analysis: the graceful-degradation posture R2
- * requires. Surfacing it to the browser is a schemas-train keep-list change,
- * deliberately not made here.
+ * deployed pin and at 0.48.0 alike. ⚠ UPDATED (schemas 0.57.0): it IS now on
+ * the wire transport keep-list (`P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP`, which
+ * must stay element-for-element equal to the schemas package's
+ * `CEE_UI_ENRICHMENT_KEEP_LIST`), so it reaches the browser on the
+ * `analysis_result` block of both the Agent turn and the scenario-graph reload
+ * read. A UI that does not read it still sees an ordinary completed analysis:
+ * the graceful-degradation posture R2 requires.
  */
 export const RUN_PROVENANCE_ENRICHMENT_KEY = 'run_provenance';
 

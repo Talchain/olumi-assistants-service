@@ -410,7 +410,7 @@ const R_VOI_NOT_COACH_NARRATED =
 const R_COACHING_SIGNAL =
   'CEE-injected coaching-signal marker for the next turn coaching-cache reader (coaching-signal-application.ts) — routing metadata, not analysis content.';
 const R_RUN_PROVENANCE =
-  'CEE-injected run-initiation marker (context/run-initiator.ts) — provenance, not analysis content. Its readers are the initiation/delivery predicates in run-initiator.ts (coaching first-vs-rerun, unrequested-analysis confinement), never the analysis→LLM derivers.';
+  'CEE-injected run-initiation marker (context/run-initiator.ts) — provenance, not analysis content. Its readers are the initiation/delivery predicates in run-initiator.ts (coaching first-vs-rerun, unrequested-analysis confinement), never the analysis→LLM derivers; it is also transported to the UI (P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP, schemas 0.57.0) for the provisional label.';
 const R_LEGACY_COMPACT =
   'Legacy V1 inbound-tolerance array — not emitted by the live /v2/run producer; consumed by the shared compactAnalysis projection (results[].factor_sensitivity / results[].robustness), not the row-#2 enrichment derivers.';
 

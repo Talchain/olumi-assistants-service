@@ -19,8 +19,10 @@
  *     { initiated_by:'auto_post_draft', provisional:true, draft_turn_id }.
  *     No schema change: `enrichment` is `z.record(z.unknown())` at every
  *     published contract version, so this validates at 0.43.0 and 0.46.0
- *     alike and the UI's transport keep-list simply strips it — the feature
- *     degrades to an ordinary completed analysis exactly as required.
+ *     alike. (Schemas 0.57.0 keep-lists and types it, so it now reaches the
+ *     browser; a UI that does not read it still sees an ordinary completed
+ *     analysis, exactly as required.) The construction trigger
+ *     (`{ constructionTurnId }`) stamps `auto_post_construction` instead.
  *
  *  3. PROVISIONAL LABELLING, user-visible: the committed assistant answer
  *     opens with the provisional-disclosure sentence, so the conversation

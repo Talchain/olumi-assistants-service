@@ -7,7 +7,43 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.55.0.tgz` ← **THE CURRENT PIN**
+### `talchain-schemas-0.57.0.tgz` ← **THE CURRENT PIN**
+
+> **⚠ A LOCAL SOURCE-PACK OF AN UNMERGED, UNPUBLISHED RELEASE — NOT A REGISTRY
+> ARTEFACT.** Packed with `rm -rf dist && npm run build && npm pack` from
+> `olumi-schemas` branch `feat/run-provenance-typed-keep` at commit
+> **`2622a85b193dbd28d6cab55319be57f891a4bbe4`** (parent `7cee4fc5` = tag
+> `v0.56.0` = `main` at pack time), on 2026-09-24.
+>
+> **584,603 bytes.**
+>
+> ```
+> npm shasum (sha1)  aef846a1f0ee07c4d0b40774e20d9a3bf722feab
+> integrity (sha512) sha512-MBCxpp5JwG3ciWG9YV4cfJJSjmJoLRKu/W6Huud8lhZEdryd+oOHTIflD8UnVJp5yVV/RPSdYpWz3rEG4hBV2g==
+> sha256             43a5b375ab59411677458d810a7654585a76fc3bd4f05a3784b3c7e7f1611f9b
+> ```
+>
+> `pnpm install` wrote the same sha512 into `pnpm-lock.yaml` from the file on
+> disk, so the lockfile and the pack agree independently.
+>
+> **⛔ REPLACE BEFORE THIS REACHES `staging`.** When `olumi-schemas` merges the
+> branch and `publish.yml` publishes 0.57.0, re-vendor the DOWNLOADED registry
+> artefact (the 0.55.0 procedure below) and expect a different sha256: CI packs
+> after `rm -f package-lock.json && npm install`, so its `dist/` can differ.
+> ⚠ Three other open `olumi-schemas` PRs (#62, #63, #65) also claim 0.57.0.
+> Whichever merges second must re-number, and `publish.yml` SKIPS a version
+> that already exists, so a collision publishes nothing and says so only in
+> the job log.
+>
+> **What it adds over the previous pin (0.55.0):** everything in 0.56.0
+> (`analysis_participation_withheld`, `observed_state.raw_value` / `.cap` —
+> regenerated `contracts/orchestrator-turn-payload.schema.json` accordingly)
+> plus 0.57.0: `EnrichmentRunProvenanceSchema`,
+> `AnalysisEnrichmentSchema.run_provenance`, and `'run_provenance'` on
+> `CEE_UI_ENRICHMENT_KEEP_LIST`, paired with the same key on
+> `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` in this commit.
+
+### `talchain-schemas-0.55.0.tgz` (historical — no longer vendored as of 0.57.0)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
 >

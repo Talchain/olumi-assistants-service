@@ -79,6 +79,11 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
   it('pins the top-level OlumiResponseSchema surface (strict)', () => {
     const top = unwrapToObject(OlumiResponseSchema)
     expect(Object.keys(top.shape).sort()).toEqual([
+      // 0.56.0-new (arrives with the 0.57.0 re-vendor): the participation
+      // guard's two counts, typed. DECLARED by the re-vendor; optional, so its
+      // declaration is additive to the wire surface. Whether CEE emits it is the
+      // participation lane's producer PR, not this re-vendor.
+      'analysis_participation_withheld',
       'analysis_ready',
       // 0.46.0-new: ONE composed analysis-state verdict per turn — the seven-branch
       // `run_state` (including the new `refused`), readiness, leader_claim,
