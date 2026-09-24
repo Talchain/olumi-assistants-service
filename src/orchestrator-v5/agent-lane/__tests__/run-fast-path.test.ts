@@ -24,10 +24,14 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
   let app: FastifyInstance;
   let modelBodies: Record<string, unknown>[] = [];
   let runs = 0;
+  // How the ONE interpreting call behaves: answers, fails with an HTTP error, or says nothing.
+  let interp: 'ok' | 'throw' | 'empty' = 'ok';
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       modelBodies.push(body);
+      if (body['tool_choice'] === 'none' && interp === 'throw') return new Response(JSON.stringify({ error: { message: 'boom' } }), { status: 400 });
+      if (body['tool_choice'] === 'none' && interp === 'empty') return new Response(JSON.stringify({ output: [] }), { status: 200 });
       if (body['tool_choice'] !== 'none' && modelBodies.length === 1) {
         // The Agent path: it would first decide to call run_analysis.
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'run_analysis', call_id: 'c1', arguments: JSON.stringify({ reason: 'asked' }) }] }), { status: 200 });
@@ -54,7 +58,7 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { modelBodies = []; runs = 0; });
+  beforeEach(() => { modelBodies = []; runs = 0; interp = 'ok'; });
 
   it('RED: a typed Run chip → the analysis runs once, and exactly ONE model call interprets it with tool_choice none', async () => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
@@ -91,6 +95,44 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
     const input = JSON.stringify(modelBodies[0]!['input']);
     expect(input, 'the withheld leader reaches the interpreter').toContain('constraint_verdict_withheld');
     expect(input).toContain('leader_claim');
+  });
+
+  /**
+   * ⛔ Independent review of #1786 (5805279370): a failed or empty interpretation fell
+   * through to the tool-enabled Agent with the original message, losing the run it had
+   * just made. Each control: the analysis ran ONCE, no tool-enabled call was made, and the
+   * turn keeps the run as its own result and history.
+   */
+  for (const mode of ['throw', 'empty'] as const) {
+    it(`RED: the interpreting call ${mode === 'throw' ? 'fails' : 'returns nothing'} → one analysis, no Agent, the run's own result is kept`, async () => {
+      interp = mode;
+      const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+      } });
+      expect(r.statusCode).toBe(200);
+      const b = r.json() as { assistant_text: string; _diagnostic_trace: { fast_path?: string }; _agent: { tool_calls: { name: string; ok: boolean }[] } };
+      expect(runs, 'the analysis ran exactly once').toBe(1);
+      expect(modelBodies.filter((m) => m['tool_choice'] !== 'none'), 'no tool-enabled call — the Agent never took the turn').toHaveLength(0);
+      expect(modelBodies, 'only the one interpreting call').toHaveLength(1);
+      expect(b._diagnostic_trace.fast_path).toBe('run');
+      expect(b._agent.tool_calls, 'the run is the turn\'s own, successful result').toEqual([expect.objectContaining({ name: 'run_analysis', ok: true })]);
+      const { interpretationUnavailableText } = await import('../../../routes/agent-v1-turn.js');
+      expect(b.assistant_text, 'truthful: it ran, the interpretation is what is missing').toBe(interpretationUnavailableText({ ok: true }));
+      // The NEXT turn's history still carries the run — the pair was not dropped.
+      const sid = (r.json() as { _agent: { session_id?: string } })._agent.session_id;
+      expect(typeof sid).toBe('string');
+      interp = 'ok';
+      await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, agent_session_id: sid, message: 'What did it show?' } });
+      const next = JSON.stringify(modelBodies[1]?.['input']);
+      expect(next, 'the run call and its output are in the next turn\'s history').toContain('function_call_output');
+      expect(next).toContain('fast_run_');
+      expect(next, 'and so is what the user was told').toContain('could not write an interpretation');
+    });
+  }
+  it('the unavailable wording never claims an interpretation, and a refused run says it did not run', async () => {
+    const { interpretationUnavailableText } = await import('../../../routes/agent-v1-turn.js');
+    expect(interpretationUnavailableText({ ok: true })).toMatch(/^The analysis ran, but I could not write an interpretation/);
+    expect(interpretationUnavailableText({ ok: false, refusal: 'analysis_not_ready' })).toBe('The analysis did not run this time (analysis not ready). Nothing in the model was changed — ask me what it still needs.');
   });
 
 });

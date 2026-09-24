@@ -272,6 +272,19 @@ const STARTING_POINT_CHIP = {
 export const INTERPRETER_V02_BANKED: string = "Explain the current **model-relative** analysis. Do not make the user's decision.\n\n**Finding first.** State the most useful conclusion supported by the supplied analysis, then briefly: why it appears, what is not settled, and at most one next reasoning step when justified.\n\n### Hard grounding rules\n\n- Use only supplied canonical analysis, provenance, currentness and claim permissions. Unknown stays unknown.\n- Keep comparison/outcomes, sensitivity, robustness, constraint satisfaction, before/after deltas and evidence provenance as different meanings. Never substitute one for another.\n- Never call an option objectively best, the winner, the right decision or Olumi's recommendation merely because it leads in the model.\n- Never convert a point result into a probability or invert a local switch/perturbation probability into overall stability.\n- Never claim an edit was tested unless the analysed revision/inputs include it.\n- Identical analytical inputs producing the same result show repeatability under those settings, **not** new validation or increased confidence.\n- A changed input may produce no material output change. Report that without inventing an effect.\n- For before/after comparisons, use only **precomputed supplied deltas**. Do not calculate new differences, ratios, annualisations, margins or unit conversions in prose.\n- Attribute a delta to one edit only when the supplied comparison is explicitly compatible and the relevant units, option identities, analysis/projection semantics and engine settings are held constant. Otherwise say the isolated effect is not established.\n- Preserve exact constraint operators and units. Equality does not satisfy a strict `<` or `>` condition.\n- If only a subset of options was analysed, keep conclusions inside that subset and name exclusions.\n- If the result is stale, present it only as historical. If rerun/action eligibility is unknown, do not imply a current control is available; say a current analysis would be needed.\n- If sensitivity or a flip threshold was not computed, do not invent it.\n- **A first-tested assumption that flips an ordering establishes only that this tested change can flip that ordering. It does NOT establish validation priority, importance, largest effect or best next investigation. Never say \"validate X first\" or equivalent on that basis alone.** If comparable effect size, uncertainty and evidence cost/value are absent, say investigation priority is not established.\n- One edge's perturbation/switch metric is not aggregate stability or factor sensitivity.\n- If a method is declined or applicability is unknown, answer the user's question without starting or completing the method.\n- Do not invent exercise horizons, required counts, missing business dimensions, benchmarks, operating assumptions or retrospective rationales.\n\nKeep the response compact: finding first, then 1–3 grounded points/caveats. Do not force a next step.\n";
 
 /** The UI's Run control: a typed `run_analysis` chip. Words alone never take fast path 3. */
+/**
+ * What the user reads when the run happened but its one interpreting call failed or said
+ * nothing: composed from the run's own result, never from a model, and never claiming an
+ * interpretation that was not made.
+ */
+export function interpretationUnavailableText(ran: { ok?: unknown; refusal?: unknown }): string {
+  if (ran.ok === true) {
+    return 'The analysis ran, but I could not write an interpretation of it this time. The results are shown with the model — ask me to explain them.';
+  }
+  const why = typeof ran.refusal === 'string' && ran.refusal !== '' ? ` (${ran.refusal.replace(/_/g, ' ')})` : '';
+  return `The analysis did not run this time${why}. Nothing in the model was changed — ask me what it still needs.`;
+}
+
 export function typedRunOf(body: Record<string, unknown>): boolean {
   const chip = body['chip'] as { action_type?: unknown } | null | undefined;
   return (body['kind'] === undefined || body['kind'] === 'message') && chip?.action_type === 'run_analysis';
@@ -1078,8 +1091,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         { type: 'function_call', name: 'run_analysis', call_id: callId, arguments: JSON.stringify({ reason: 'the user pressed Run' }) },
         { type: 'function_call_output', call_id: callId, output: JSON.stringify(runForInterpreter) },
       ];
+      /**
+       * ⛔ THE RUN IS NEVER HANDED TO THE AGENT AFTER IT HAS HAPPENED (independent review of
+       * #1786, 5805279370). A failed or empty interpretation used to fall through to the
+       * ordinary tool-enabled turn with the ORIGINAL message and history — dropping the run
+       * it had just made, so the Agent could run the analysis a SECOND time, or act. The run
+       * stands, and only its explanation is missing: the user is told exactly that, from
+       * the run's own result, and nothing else is called.
+       */
+      const providerStartedAt = Date.now();
+      let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       try {
-        const providerStartedAt = Date.now();
         const resp = await callModel({
           instructions: `${AGENT_INSTRUCTIONS}\n\n${INTERPRETER_V02_BANKED}`,
           input: priorAndRun,
@@ -1087,29 +1109,28 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           max_output_tokens: budget.max_output_tokens,
           tool_choice: 'none',
         } as never);
-        const providerMs = Date.now() - providerStartedAt;
         const out = (resp.output ?? []) as { type?: string; content?: { type?: string; text?: string }[] }[];
         const answer = out.filter((o) => o.type === 'message').flatMap((o) => o.content ?? [])
           .filter((c) => c.type === 'output_text').map((c) => c.text ?? '').join('');
-        if (answer.trim().length > 0) {
-          fastPath = 'run';
-          const ms = Date.now() - fastStartedAt;
-          result = {
-            assistant_text: answer,
-            items: [...priorAndRun, ...out.filter((o) => o.type === 'message')],
-            tool_calls: [{ name: 'run_analysis', ok: ran.ok === true, mutated: false, ...(typeof ran.refusal === 'string' ? { refusal: ran.refusal } : {}) }],
-            tool_results: [ran],
-            mutated: false,
-            hops: 1,
-            stopped_reason: 'answered',
-            timing: { total_ms: ms, provider_ms: providerMs, tool_ms: Math.max(0, ms - providerMs), overhead_ms: 0, tool_provider_ms: 0, provider_calls: 1, tool_calls: 1, hops: 1 },
-          };
-        }
+        if (answer.trim().length > 0) interpreted = { answer, messages: out.filter((o) => o.type === 'message') as Record<string, unknown>[] };
+        else log.warn({ scenario_id: scenarioId }, 'agent-lane: fast-path interpretation was empty — answering from the run itself');
       } catch (err) {
-        // The run already happened; only its interpretation failed. The Agent takes the
-        // turn (it will read the fresh result), rather than the user losing the answer.
-        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: fast-path interpretation failed — handing the turn to the Agent');
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: fast-path interpretation failed — answering from the run itself');
       }
+      fastPath = 'run';
+      const ms = Date.now() - fastStartedAt;
+      const providerMs = Math.min(Date.now() - providerStartedAt, ms);
+      const text = interpreted?.answer ?? interpretationUnavailableText(ran);
+      result = {
+        assistant_text: text,
+        items: [...priorAndRun, ...(interpreted?.messages ?? [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }])],
+        tool_calls: [{ name: 'run_analysis', ok: ran.ok === true, mutated: false, ...(typeof ran.refusal === 'string' ? { refusal: ran.refusal } : {}) }],
+        tool_results: [ran],
+        mutated: false,
+        hops: 1,
+        stopped_reason: 'answered',
+        timing: { total_ms: ms, provider_ms: providerMs, tool_ms: Math.max(0, ms - providerMs), overhead_ms: 0, tool_provider_ms: 0, provider_calls: 1, tool_calls: 1, hops: 1 },
+      };
     }
     if (result === undefined) try {
       result = await runAgentTurn(
