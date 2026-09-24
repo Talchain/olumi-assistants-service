@@ -50,8 +50,9 @@ import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
-import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { narrateWriteOutcome, notAdoptedLine, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
+import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
@@ -1358,7 +1359,43 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ OLUMI OWES THE DISCLOSURE, NOT THE AGENT. When a write had to carry a
     // placeholder strength the user never gave, the user is told — whether or
     // not the model chose to mention it.
-    const owed = disclosuresFor(result.tool_results);
+    /**
+     * ⭐ THE SERVER STATES WHAT IT CHANGED, rather than asking the model to.
+     *
+     * A value the person APPROVED can be stored differently, and a factor's
+     * range can be chosen BY THE PRODUCT so the analysis can run at all. Both
+     * were told only to the model, carried on `must_disclose_rescaling` — a
+     * field that occurs at exactly ONE site in the tree, the one that sets it.
+     * Nothing read it and nothing verified it, so whether the person was told
+     * depended on the model electing to say so.
+     *
+     * This does not replace that obligation; the model should still say it in
+     * its own words. It removes the DEPENDENCE on it.
+     */
+    const stateFacts = collectTurnStateFacts(result.tool_results);
+    /**
+     * ⛔⛔ `current_state_unknown` MUST WIN OVER EVERY PRESENT-STATE CLAIM, AND
+     * THE ORDER HERE IS WHAT DECIDES THAT — not the early return inside
+     * `valueChangeDisclosures`.
+     *
+     * ⚠ CHANGES_REQUIRED on 044fe50c, accepted, and it RECURRED one level up:
+     * that early return governs only the disclosures the module composes. This
+     * route concatenated `disclosuresFor(...)` FIRST, so a single turn could say
+     * "the model … is holding a placeholder … Tell me how strong … and I will
+     * replace it" and then "What the model now holds … is NOT KNOWN … do not
+     * treat any figure as current". The second sentence is the true one; the
+     * first is authority a failed readback cannot support.
+     *
+     * So when the readback failed, the unknown disclosure is the ONLY one owed.
+     * `PLACEHOLDER_STRENGTH_DISCLOSURE` describes what the model NOW HOLDS, which
+     * is precisely the thing we could not observe.
+     */
+    const owed = stateFacts.current_state_unknown === true
+      ? [...valueChangeDisclosures(stateFacts)]
+      : [
+        ...disclosuresFor(result.tool_results),
+        ...valueChangeDisclosures(stateFacts),
+      ];
     /**
      * ⛔ WHAT WAS SAVED IS STATED BY OLUMI, FROM THE TOOL RESULTS (RC #63
      * 5788648244). A model-authored "Saved…" survived here on a turn that wrote
@@ -1550,6 +1587,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * empty list is reported honestly rather than filled in.
          */
         receipts: collectTurnReceipts(result.tool_results),
+        /**
+         * The structured twin of the prose disclosure above. Prose is readable;
+         * structure is reliable. Omitted entirely when nothing changed, so its
+         * presence is itself the signal.
+         */
+        // ⛔ THE GATE OMITTED THE TWO FACTS THAT MATTER MOST. On the turn a
+        // reconciling surface most needs to read — a frame write refused and the
+        // readback failed, nothing rescaled, nothing added — `_agent` carried NO
+        // `state_facts` at all, so the channel this module calls "reliable" was
+        // silent exactly when the prose was saying the state is unknown. A
+        // consumer would read that as "nothing happened".
+        ...(stateFacts.rescaled.length > 0
+          || stateFacts.ranges_added.length > 0
+          || (stateFacts.ranges_not_attached ?? []).length > 0
+          || stateFacts.current_state_unknown === true
+          ? { state_facts: stateFacts }
+          : {}),
       },
       /**
        * ⭐ EVERY GENERATIVE ATTEMPT THIS TURN MADE, off the provider policy's ledger
