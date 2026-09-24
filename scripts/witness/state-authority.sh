@@ -11,7 +11,13 @@ set -uo pipefail
 
 BASE=${BASE:-https://cee-staging.onrender.com}
 ENVF=${ENVF:-olumi-assistants-service/.env.staging.local}
-[ -f "$ENVF" ] || { echo "FATAL: no $ENVF"; exit 2; }
+if [ ! -f "$ENVF" ]; then
+  echo "FATAL: no $ENVF (resolved relative to \$PWD=$PWD)"
+  echo "  This script reads ASSIST_API_KEY from the CEE repo's staging env file."
+  echo "  Run it from the estate root, or point ENVF at the file:"
+  echo "      ENVF=/path/to/olumi-assistants-service/.env.staging.local bash \$0"
+  exit 2
+fi
 K=$(grep -m1 '^ASSIST_API_KEY=' "$ENVF" | cut -d= -f2- | tr -d '"'"'"'' | tr -d '\r\n')
 [ ${#K} -gt 20 ] || { echo "FATAL: key looks wrong (len ${#K})"; exit 2; }
 echo "key len=${#K} (value never printed)"
@@ -32,13 +38,32 @@ echo "AUTH CONTROL (fabricated path, expect 404): $CTRL"
 # ── 1. a draft turn. NOTE the enums: stage/turn_class lowercase, source=composer.
 curl -s --max-time 300 -X POST "$BASE/orchestrate/v2/turn" \
   -H "X-Olumi-Assist-Key: $K" -H 'content-type: application/json' \
-  -d "{\"kind\":\"message\",\"scenario_id\":\"$SC\",\"turn_id\":\"$TID\",\"stage\":\"frame\",\"turn_class\":\"frame\",\"source\":\"composer\",\"user_id\":\"$USR\",\"message\":\"Decide whether to launch a paid Enterprise tier. Enterprise customers is currently 0, plausibly up to 500. Options: launch at 89 per seat, or hold.\"}" \
+  -d "{\"kind\":\"message\",\"scenario_id\":\"$SC\",\"turn_id\":\"$TID\",\"stage\":\"frame\",\"turn_class\":\"frame\",\"source\":\"composer\",\"user_id\":\"$USR\",\"message\":\"We want to maximise retained annual revenue. Decide whether to launch a paid Enterprise tier. Enterprise sales effort is currently 0, plausibly up to 200. Enterprise customers is currently 0, plausibly up to 500. Options: launch at 89 per seat, or hold.\"}" \
   -o /tmp/w_turn.json -w 'TURN HTTP %{http_code} in %{time_total}s\n'
 
 python3 - <<'PY'
-import json
+import json, sys
 d=json.load(open('/tmp/w_turn.json'))
-g=d.get('draft_graph') or {}
+g=d.get('draft_graph')
+# ⛔⛔ ABORT IF THERE IS NO DRAFT. Do NOT proceed and report fabricated defects.
+#
+# Measured on served `1e7e08a`: this brief produced NO `draft_graph` at all — the
+# product asked a clarifying question instead ("I could not tell what they should be
+# judged against"). That is CORRECT behaviour: it declined to build a model that would
+# not hold together. But the script then posted `{graph: null}`, the register correctly
+# returned 422 GRAPH_SHAPE_INVALID, and every downstream clause printed a DEFECT that
+# did not exist — "provenance envelope MISSING", "freshness DEFECT PRESENT", a KeyError.
+#
+# A probe that cries wolf gets ignored, so this exits non-zero with the reason instead.
+if not isinstance(g, dict) or not isinstance(g.get('nodes'), list) or len(g['nodes']) == 0:
+    print()
+    print("⛔ ABORTED — this turn produced NO draft_graph, so nothing downstream is testable.")
+    print("   That is NOT a defect: the product asked a clarifying question rather than")
+    print("   building an incoherent model. Its reply began:")
+    print("     " + (str(d.get('assistant_text')) or '')[:160].replace("\n", " "))
+    print("   Re-run with a brief that states the GOAL explicitly, e.g. 'we want to")
+    print("   maximise retained revenue', so the constructor has an objective to build against.")
+    sys.exit(3)
 json.dump({'graph': g}, open('/tmp/w_reg.json','w'))
 print("\n--- CLAUSE: consistent values at CONSTRUCTION (#63 item 1) ---")
 bad=[]
@@ -62,7 +87,15 @@ curl -s --max-time 60 -X POST "$BASE/assist/v1/scenarios/$SC/graph/register" \
   -H "X-Olumi-Assist-Key: $K" -H 'content-type: application/json' -d @/tmp/w_reg.json \
   -o /tmp/w_r.json -w 'REGISTER HTTP %{http_code}\n'
 python3 -c "
-import json;d=json.load(open('/tmp/w_r.json'));gih=d.get('graph_identity_hash')
+import json,sys
+d=json.load(open('/tmp/w_r.json'))
+if d.get('registered') is not True:
+    det=(d.get('details') or {}).get('code')
+    print('  ⛔ ABORTED — the register did not succeed (details.code=%s): %s' % (det, str(d.get('message'))[:120]))
+    print('     Nothing downstream is testable, so no clause verdict is printed. This is a')
+    print('     PROBE precondition failure, not a product defect.')
+    sys.exit(3)
+gih=d.get('graph_identity_hash')
 print('  identity on the wire is a', type(gih).__name__, '- kind=', (gih or {}).get('kind') if isinstance(gih,dict) else None)
 print('  → provenance envelope', 'PRESENT' if isinstance(gih,dict) else 'MISSING')
 import json as j; j.dump(gih, open('/tmp/w_gih.json','w'))"
