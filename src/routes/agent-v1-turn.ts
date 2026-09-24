@@ -767,7 +767,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    * (see BANKED_BUDGETS role 'whole'), not the conversation budget.
    */
   const callStructured: CallStructuredModel = async (reqBody) => onceMoreOnTransportFailure('construction', async () => {
-    assertProviderAllowed('openai', 'agent-v1-turn.callStructured', { model: reqBody.model, purpose: 'construction' });
+    /**
+     * ⭐ THE MOST EXPENSIVE CALL IN THE PRODUCT, AND IT WAS THE ONE NOT MEASURED.
+     *
+     * #1825 wired `callModel` and left this handle discarded, so the caching witness on
+     * served `c2ef0b8` read: 4 conversation calls with usage (9,441 of 14,638 input
+     * tokens cached, 64.5%) and `call 3 construction: (no usage)`. Construction is
+     * banked at ~54s with in 838 / out 3404 incl. 2070 reasoning — by far the largest
+     * single call — so leaving it dark meant the aggregate cache figure could never be
+     * trusted and the obvious optimisation target could not be ranked.
+     *
+     * ⚠ `j.usage` was ALREADY parsed and returned by this function; only the ledger
+     * write was missing. Nothing new is fetched or computed here.
+     */
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', { model: reqBody.model, purpose: 'construction' });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
@@ -805,6 +818,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (item.type !== 'message') continue;
       for (const c of item.content ?? []) if (c.type === 'output_text') text += c.text ?? '';
     }
+    // Same contract as the conversation path: never throws, and records nothing for a
+    // malformed payload, so measuring a call cannot turn a successful one into a failure.
+    recordProviderUsage(usageHandle, j.usage);
     return { text, usage: j.usage };
   }, (call, err) => log.warn({ err, call }, 'agent-lane transport failure, retrying once'));
 

@@ -883,9 +883,136 @@ export function admitCandidateModel(
     if (userStated?.provenance !== undefined) t.provenance = { source: userStated.provenance.source };
   }
   const causalEdges = linkResult.edges.filter((e) => !duplicatePairs.has(`${e.from}::${e.to}`));
+
+  /**
+   * ⛔ AN OPTION LINKED STRAIGHT TO A RISK MAKES THE WHOLE MODEL UNANALYSABLE —
+   * AND IT IS OLUMI'S OWN HYPOTHESIS THAT BLOCKS OLUMI'S OWN ANALYSIS.
+   *
+   * MEASURED on the banked live capture (`__tests__/fixtures/live-hiring-envelope-candidate-20260923.json`,
+   * gpt-5.6-terra, Paul's hiring brief) plus the one link Paul's own draw added:
+   * `optionsNeedingMapping` went 0 -> 1 and readiness raised
+   *
+   *     OPTION_NEEDS_MAPPING  "How does Hire a Tech Lead change Hiring delay?
+   *                            The proposed relationship is retained, but its
+   *                            mechanism and value still need clarification."
+   *
+   * on an edge carrying `provenance.source: "cee_hypothesis"`, `defaulted: true`.
+   * The rule is `cee/transforms/analysis-ready.ts`, in `buildAnalysisReadyPayload`'s
+   * prologue: ANY directed `option -> risk` edge forces that option to
+   * `needs_user_mapping`, so one machine-authored shortcut stops the ENTIRE model
+   * being run.
+   *
+   * ⚠ WHY THE DRAFTER EMITS IT. Nothing in the construction contract forbade it.
+   * "THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path
+   * that ends at the goal metric" makes `option -> risk -> goal` the SHORTEST
+   * compliant path, and the risk clause only says "Give every risk a link to what
+   * it threatens" — a rule about what leaves a risk, silent on what enters it.
+   * So `build-model.ts` now forbids the shape at the producer. This is the
+   * deterministic backstop, because an instruction alone has already been proved
+   * insufficient for the wiring rules directly above.
+   *
+   * ⛔ AND THE BACKSTOP IS NOT MEDIATOR SYNTHESIS. Inventing the missing
+   * `factor -> risk` link means choosing a direction nobody stated — forbidden by
+   * Release Control #63 5793252993, the same ruling that removed the
+   * `factor -> goal` repair documented below. Nor is it a deletion: the
+   * hypothesis and its uncertainty are the author's to keep.
+   *
+   * So exactly two outcomes, decided by what the model ALREADY says:
+   *
+   * 1. THE MECHANISM IS ALREADY THERE. The drafter itself stated
+   *    `Tech leads hired -> Hiring delay` and the option acts on
+   *    `Tech leads hired`, so the direct edge is that same belief stated twice —
+   *    the case the "ONE CONNECTION, ONE EDGE" repair above already handles for
+   *    `option -> factor`. The shortcut is folded onto the mechanism and the fold
+   *    is recorded. The risk keeps its incoming link and still reaches the goal.
+   * 2. THERE IS NO MECHANISM. The edge is KEPT — nothing is deleted, no sign is
+   *    invented, `may_run` is not forced — and an explicit actionable repair
+   *    proposal is recorded. `build-model.ts` surfaces it in `not_represented`,
+   *    the channel the Agent is already expected to say out loud.
+   *
+   * ⚠ ONLY A MACHINE-AUTHORED SHORTCUT IS FOLDED. A shortcut the USER stated is
+   * their claim about their own decision, and folding it would strip the
+   * authorship that `brief_stated_keys.edges` and `keepsEveryUserStatedIdentity`
+   * read (Panel review 5793954535, B2). It gets the proposal instead.
+   *
+   * ⚠ REACHABILITY IS COMPUTED WITH **EVERY** SHORTCUT REMOVED, not just the one
+   * under examination, so no shortcut can be its own mechanism (or another
+   * shortcut's) and the verdict cannot depend on evaluation order.
+   */
+  const kindById = new Map(nodes.map((n) => [n.id, n.kind]));
+  const labelById = new Map(nodes.map((n) => [n.id, n.label]));
+  const shortcutEdges = causalEdges.filter((e) =>
+    kindById.get(e.from) === 'option'
+    && kindById.get(e.to) === 'risk'
+    && !USER_AUTHORED_EDGE_SOURCES.has(String(e.provenance?.source ?? '')));
+  const shortcutPairs = new Set(shortcutEdges.map((e) => `${e.from}\u0000${e.to}`));
+  const mechanismAdjacency = new Map<string, string[]>();
+  for (const e of [...topologyEdges, ...causalEdges]) {
+    if (shortcutPairs.has(`${e.from}\u0000${e.to}`)) continue;
+    mechanismAdjacency.set(e.from, [...(mechanismAdjacency.get(e.from) ?? []), e.to]);
+  }
+  /** The shortest mechanism from `from` to `to` using no shortcut, or null. */
+  const mechanismPath = (from: string, to: string): readonly string[] | null => {
+    const queue: string[][] = [[from]];
+    const seen = new Set([from]);
+    while (queue.length > 0) {
+      const path = queue.shift()!;
+      const head = path[path.length - 1]!;
+      if (head === to) return path;
+      for (const next of mechanismAdjacency.get(head) ?? []) {
+        if (seen.has(next)) continue;
+        seen.add(next);
+        queue.push([...path, next]);
+      }
+    }
+    return null;
+  };
+  const foldedShortcutPairs = new Set<string>();
+  for (const s of shortcutEdges) {
+    const optionLabel = labelById.get(s.from) ?? s.from;
+    const riskLabel = labelById.get(s.to) ?? s.to;
+    const path = mechanismPath(s.from, s.to);
+    if (path !== null) {
+      foldedShortcutPairs.add(`${s.from}::${s.to}`);
+      const chain = path.map((id) => `"${labelById.get(id) ?? id}"`).join(' \u2192 ');
+      const mediatorLabel = labelById.get(path[1] ?? '') ?? String(path[1] ?? '');
+      loss.push({
+        code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
+        layer: 'cee',
+        field_path: `edges[${s.from}::${s.to}].mechanism`,
+        before: s.effect_direction,
+        after: 'mechanism',
+        reason:
+          `The link straight from "${optionLabel}" to "${riskLabel}" is a shortcut over a mechanism `
+          + `this model already states: ${chain}. A bare option-to-risk link cannot be analysed at all `
+          + `\u2014 Olumi would have to ask how that option changes that risk before ANY of the model could `
+          + `run \u2014 so the belief is kept once, on the mechanism, and the shortcut is not drawn. Nothing `
+          + `was removed: "${riskLabel}" keeps its own link, and "${optionLabel}" still reaches it through `
+          + `"${mediatorLabel}".`,
+        severity: 'info',
+      });
+      continue;
+    }
+    loss.push({
+      code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
+      layer: 'cee',
+      field_path: `edges[${s.from}::${s.to}].mechanism_missing`,
+      before: null,
+      after: s.effect_direction,
+      reason:
+        `Olumi's own hypothesis that "${optionLabel}" changes "${riskLabel}" is kept, but nothing in the `
+        + `model says HOW \u2014 and a bare option-to-risk link stops the WHOLE model being analysed, not `
+        + `just that option. It has not been deleted, and no mediator or strength has been invented for `
+        + `it. Say which factor "${optionLabel}" changes that drives "${riskLabel}" and the link can be `
+        + `redrawn through it \u2014 or say the link should go.`,
+      severity: 'warn',
+    });
+  }
+  const mechanismEdges = causalEdges.filter((e) => !foldedShortcutPairs.has(`${e.from}::${e.to}`));
+
   const causalLoss = linkResult.loss.filter((l) => {
     const m = /^edges\[(.+?)\]\./.exec(String(l.field_path ?? ''));
-    return m === null || !duplicatePairs.has(m[1]!);
+    return m === null || !(duplicatePairs.has(m[1]!) || foldedShortcutPairs.has(m[1]!));
   });
   for (const pair of duplicatePairs) {
     const [from, to] = pair.split('::');
@@ -927,7 +1054,7 @@ export function admitCandidateModel(
    * link travels in `withheld`, and the construction contract (`build-model.ts`)
    * is what makes the drafter state the link in the first place.
    */
-  const allEdges = [...topologyEdges, ...causalEdges];
+  const allEdges = [...topologyEdges, ...mechanismEdges];
 
   /**
    * ⭐ A NODE THAT CANNOT REACH THE GOAL BLOCKS THE WHOLE ANALYSIS.
