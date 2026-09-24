@@ -35,6 +35,7 @@ import {
 } from '../structural-add-edge.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { BASE_HASH_DIVERGED } from '../../graph-management/reason-codes.js';
+import { STRUCTURAL_EDGE_DEFAULTS } from '../../../orchestrator/context/constants.js';
 
 const SCENARIO_ID = '33333333-3333-4333-8333-333333333333';
 const TURN_ID = '44444444-4444-4444-8444-444444444444';
@@ -331,5 +332,64 @@ describe('the receipt', () => {
     const result = (r.handlerFacts[0] as { result: Record<string, unknown> }).result
     expect(result.safe_summary).toContain('Customer churn')
     expect(result.safe_summary).toContain('Grow revenue')
+  })
+})
+
+/**
+ * ⛔ A DECISION → OPTION LINK IS TOPOLOGY, NOT A CAUSAL BELIEF (served `52453d3`, witness c14,
+ * scenario 8efc70af). An option added by the Agent was not linked from the decision, so readiness
+ * blocked with OPTION_NOT_LINKED_TO_DECISION; the user's recovery ("connect the decision to it")
+ * reached this writer, which persisted the link as a CAUSAL edge — `{mean 0.5, std 0.1}`,
+ * `exists_probability 0.8` — while every constructor-built decision → option edge carries
+ * `STRUCTURAL_EDGE_DEFAULTS`. Asserted BY REFERENCE to the constant, never as literals.
+ */
+describe('a decision → option link lands as canonical topology', () => {
+  function withDecisionAndNewOption(): Record<string, unknown> {
+    const g = persistedGraph() as { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] }
+    g.nodes = [
+      ...g.nodes,
+      { id: 'dec_launch', kind: 'decision', label: 'When to launch' },
+      { id: 'opt_wait', kind: 'option', label: 'Wait a quarter' },
+    ]
+    return g as unknown as Record<string, unknown>
+  }
+  const runOn = (g: Record<string, unknown>, overrides: Record<string, unknown>) =>
+    run({ base_graph_hash: baseHashOf(g), ...overrides }, g)
+
+  it('RED: decision → option is written with STRUCTURAL_EDGE_DEFAULTS, whatever magnitude the wire carried', () => {
+    const g = withDecisionAndNewOption()
+    for (const [magnitude, direction] of [[0.5, 'positive'], [0.3, 'negative']] as const) {
+      const r = runOn(g, { from: 'dec_launch', to: 'opt_wait', magnitude, effect_direction: direction })
+      const edge = landedEdge(r, 'dec_launch', 'opt_wait')
+      expect(edge.strength.mean).toBe(STRUCTURAL_EDGE_DEFAULTS.strength.mean)
+      expect(edge.strength.std).toBe(STRUCTURAL_EDGE_DEFAULTS.strength.std)
+      expect(edge.exists_probability).toBe(STRUCTURAL_EDGE_DEFAULTS.exists_probability)
+      expect(edge.effect_direction).toBe(STRUCTURAL_EDGE_DEFAULTS.effect_direction)
+      // The user still asked for this link, so the origin claim stays true.
+      expect(((edge as Record<string, unknown>).provenance as Record<string, unknown>).source).toBe('user_specified')
+      // The result reports the mean that LANDED — dispatch.ts compares the committed edge against it.
+      if (r.kind === 'mutated') {
+        expect(r.signedMean).toBe(STRUCTURAL_EDGE_DEFAULTS.strength.mean)
+        expect(r.structuralLink).toBe(true)
+      }
+    }
+  })
+
+  it('CONTRAST: option → factor on the same graph is unchanged — the user\u2019s magnitude and the causal defaults', () => {
+    const g = withDecisionAndNewOption()
+    const r = runOn(g, { from: 'opt_wait', to: 'fac_churn', magnitude: 0.5, effect_direction: 'negative' })
+    const edge = landedEdge(r, 'opt_wait', 'fac_churn')
+    expect(edge.strength.mean).toBe(-0.5)
+    expect(edge.strength.std).toBe(DEFAULT_STD)
+    expect(edge.exists_probability).toBe(DEFAULT_EXISTS_PROBABILITY)
+    expect(edge.effect_direction).toBe('negative')
+    if (r.kind === 'mutated') expect(r.structuralLink).toBe(false)
+  })
+
+  it('CONTRAST: the reverse, option → decision, is not topology and keeps the causal defaults', () => {
+    const g = withDecisionAndNewOption()
+    const edge = landedEdge(runOn(g, { from: 'opt_wait', to: 'dec_launch', magnitude: 0.7, effect_direction: 'positive' }), 'opt_wait', 'dec_launch')
+    expect(edge.strength.mean).toBe(0.7)
+    expect(edge.exists_probability).toBe(DEFAULT_EXISTS_PROBABILITY)
   })
 })

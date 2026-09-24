@@ -86,7 +86,9 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
   }
 }
 
-import { planNewOption, newOptionFollowUp } from '../propose-new-option.js';
+import { planNewOption, newOptionFollowUp, decisionGapNote, type DecisionLinkGap } from '../propose-new-option.js';
+import { STRUCTURAL_EDGE_DEFAULTS } from '../../../orchestrator/context/constants.js';
+import { isStructuralDecisionOptionLink } from '../../system-events/structural-add-edge.js';
 import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
@@ -1124,7 +1126,10 @@ export function createAgentCapabilities(
        */
       if (ops[0]?.op === 'add_node' && ops.slice(1).every((o) => o.op === 'add_edge')) {
         const optionId = String(ops[0].path);
-        const nodeValue = (ops[0].value ?? {}) as { label?: unknown };
+        const nodeValue = (ops[0].value ?? {}) as { label?: unknown; decision_gap?: unknown };
+        const decisionGap: DecisionLinkGap | null =
+          nodeValue.decision_gap === 'no_decision_in_model' || nodeValue.decision_gap === 'several_decisions'
+            ? nodeValue.decision_gap : null;
         const operationId = authorisationTurnId(decision.proposal.proposal_id);
         /**
          * ⛔ A RETRY CONTINUES FROM THIS PROPOSAL'S OWN RECORDED PROGRESS (independent review of
@@ -1183,32 +1188,47 @@ export function createAgentCapabilities(
         }
 
         const linked: string[] = [];
+        /** The decision this option is now selected by, once THIS proposal's link to it is confirmed. */
+        let decisionLinked: string | null = null;
         const notLinked: { factor: string; detail: string }[] = [];
         const landedNow: string[] = [optionId];
         for (const edgeOp of ops.slice(1)) {
-          const [, factorId] = String(edgeOp.path).split('::');
-          const factorNode = (afterAdd?.nodes ?? []).find((n) => n.id === factorId);
-          const factorLabel = String(factorNode?.label ?? factorId);
+          const [fromId, toId] = String(edgeOp.path).split('::');
+          // ⭐ The decision → option link, identified by what the proposal STORED — never inferred here.
+          const isDecisionLink = (edgeOp.value as { link?: unknown } | undefined)?.link === 'decision' && toId === optionId;
+          const otherId = isDecisionLink ? fromId : toId;
+          const otherNode = (afterAdd?.nodes ?? []).find((n) => n.id === otherId);
+          const otherLabel = String(otherNode?.label ?? otherId);
+          // How the link is named when it did not land — `write-outcome.ts` reads `factor` for every missing link.
+          const missingName = isDecisionLink ? `the decision "${otherLabel}"` : otherLabel;
           // Landed by THIS proposal's earlier partial write: kept, never written twice.
-          if (landedBefore.has(String(edgeOp.path))) { linked.push(factorLabel); landedNow.push(String(edgeOp.path)); continue; }
-          if (interleaved) {
-            notLinked.push({ factor: factorLabel, detail: 'not attempted: the model changed while this was being saved' });
+          if (landedBefore.has(String(edgeOp.path))) {
+            if (isDecisionLink) decisionLinked = otherLabel; else linked.push(otherLabel);
+            landedNow.push(String(edgeOp.path));
             continue;
           }
-          const direction = (edgeOp.value as { direction?: unknown } | undefined)?.direction === 'negative' ? 'negative' : 'positive';
+          if (interleaved) {
+            notLinked.push({ factor: missingName, detail: 'not attempted: the model changed while this was being saved' });
+            continue;
+          }
+          const direction = isDecisionLink
+            ? STRUCTURAL_EDGE_DEFAULTS.effect_direction
+            : (edgeOp.value as { direction?: unknown } | undefined)?.direction === 'negative' ? 'negative' : 'positive';
           const edgeRes = await dispatch('/orchestrate/v2/turn', {
-            kind: 'system_event', turn_id: authorisationTurnId(`${decision.proposal.proposal_id}:${factorId}`),
+            kind: 'system_event', turn_id: authorisationTurnId(`${decision.proposal.proposal_id}:${otherId}`),
             scenario_id: ctx.scenario_id, stage: 'frame',
-            event: { kind: 'structural_add_edge', from: optionId, to: factorId,
-              // ⚠ The projection default, exactly as the edge route above records:
-              // the wire requires a magnitude and this is not the user's claim.
-              magnitude: 0.5, effect_direction: direction, base_graph_hash: ownRevision },
+            event: { kind: 'structural_add_edge', from: fromId, to: toId,
+              // ⚠ Option → factor: the projection default, exactly as the edge route above records —
+              // the wire requires a magnitude and this is not the user's claim. Decision → option:
+              // the structural value, which `structural_add_edge` writes as topology regardless.
+              magnitude: isDecisionLink ? STRUCTURAL_EDGE_DEFAULTS.strength.mean : 0.5,
+              effect_direction: direction, base_graph_hash: ownRevision },
           });
           const committed = committedHashOf(edgeRes);
           afterAdd = await readGraph(ctx.scenario_id);
-          const present = (afterAdd?.edges ?? []).some((e) => e.from === optionId && e.to === factorId);
+          const present = (afterAdd?.edges ?? []).some((e) => e.from === fromId && e.to === toId);
           if (present && committed !== undefined) {
-            linked.push(factorLabel);
+            if (isDecisionLink) decisionLinked = otherLabel; else linked.push(otherLabel);
             landedNow.push(String(edgeOp.path));
             ownRevision = committed;
             if (afterAdd?.graph_hash !== committed) interleaved = true; // ours landed; someone edited after it
@@ -1216,7 +1236,7 @@ export function createAgentCapabilities(
             if (r.summary !== null) receipts.push(r.summary);
             if (r.unreadable) receiptUnreadable = true;
           } else {
-            notLinked.push({ factor: factorLabel, detail: String(edgeRes.json.assistant_text ?? 'not linked') });
+            notLinked.push({ factor: missingName, detail: String(edgeRes.json.assistant_text ?? 'not linked') });
             if (afterAdd?.graph_hash !== ownRevision) interleaved = true; // refused, and the model moved: not ours
           }
         }
@@ -1249,21 +1269,23 @@ export function createAgentCapabilities(
           applied: complete,
           operation_id: operationId,
           option: { label: String(nodeValue.label ?? ''), linked_to: linked },
+          ...(decisionLinked !== null
+            ? { decision_link: `Connected from the decision "${decisionLinked}", so the decision can choose it.` }
+            : decisionGap !== null ? { decision_link: decisionGapNote(decisionGap) } : {}),
           ...(notLinked.length > 0 ? {
             not_linked: notLinked,
             failures: notLinked.map((n) => `${n.factor}: ${n.detail}`),
             detail:
               `"${String(nodeValue.label ?? '')}" was added, but ${notLinked.length} of `
-              + `${linked.length + notLinked.length} links were not recorded: `
+              + `${linked.length + (decisionLinked !== null ? 1 : 0) + notLinked.length} links were not recorded: `
               + `${notLinked.map((n) => n.factor).join(', ')}. The option is in the model and `
               + 'incomplete. Approving the same change again will try only the missing links — it will not add the option twice; '
               + 'if the model has changed since, it will be refused and you will be asked to confirm again.',
           } : {}),
           receipts,
           ...(receiptUnreadable ? { receipt_unreadable: true } : {}),
-          ...(complete ? { follow_up: newOptionFollowUp({ ok: true, optionId, label: String(nodeValue.label ?? ''),
-            actsOn: linked.map((l) => ({ id: '', label: l, direction: 'positive' as const })),
-            publicLabel: decision.proposal.public_label }) } : {}),
+          ...(complete ? { follow_up: newOptionFollowUp({ label: String(nodeValue.label ?? ''),
+            actsOn: linked.map((l) => ({ id: '', label: l, direction: 'positive' as const })) }, decisionGap) } : {}),
         };
       }
 
@@ -1980,19 +2002,28 @@ export function createAgentCapabilities(
       const edgeReceipt = receiptSummaryOf(res.json);
       const edgeReceipts = edgeReceipt.summary !== null ? [edgeReceipt.summary] : [];
       proposals.markApplied(decision.proposal.proposal_id, edgeReceipts);
+      /**
+       * ⛔ A DECISION → OPTION LINK CARRIES NO PLACEHOLDER (served `52453d3`, witness c14): the writer
+       * lands it as `STRUCTURAL_EDGE_DEFAULTS` topology, so disclosing "a placeholder strength" there
+       * told the user something false. Same predicate the writer uses, over the same node kinds.
+       */
+      const kindOf = (id: string): unknown => (after?.nodes ?? before.nodes).find((n) => n.id === id)?.kind;
+      const structuralLink = isStructuralDecisionOptionLink(kindOf(fromId), kindOf(toId));
       return {
         ok: true, mutated: true, applied: true,
         receipts: edgeReceipts,
         ...(edgeReceipt.unreadable ? { receipt_unreadable: true } : {}),
         // Olumi discloses this to the user deterministically; see disclosure.ts.
-        placeholder_strength: true,
+        ...(structuralLink ? {} : { placeholder_strength: true }),
         proposal_id: decision.proposal.proposal_id,
         operation_id: operationId,
         revision_before: confirmation.revision_before,
         revision_after: confirmation.revision_after,
-        not_represented:
-          'The direction was recorded. No strength was stated by the user, so the model carries a ' +
-          'placeholder strength that is not a measurement — say so if you describe the change.',
+        not_represented: structuralLink
+          ? 'This link says the decision can choose this option. It is structure and carries no strength, ' +
+            'so there is nothing here the user needs to supply.'
+          : 'The direction was recorded. No strength was stated by the user, so the model carries a ' +
+            'placeholder strength that is not a measurement — say so if you describe the change.',
       };
     },
 
@@ -2091,12 +2122,23 @@ export function createAgentCapabilities(
           ...(plan.unresolved_labels ? { unresolved_labels: plan.unresolved_labels } : {}) };
       }
       /**
-       * ⚠ `add_node` FIRST, THEN ONE `add_edge` PER FACTOR — the order is the
-       * write's, not a preference: `structural_add_edge` cannot reference a node
-       * that does not exist yet. The applier below walks them in this order.
+       * ⚠ `add_node` FIRST, THEN THE DECISION → OPTION LINK, THEN ONE `add_edge` PER
+       * FACTOR — the order is the write's, not a preference: `structural_add_edge`
+       * cannot reference a node that does not exist yet. The applier below walks
+       * them in this order.
+       *
+       * ⛔ The decision link is part of the ONE approval (served `52453d3`, witness c14):
+       * without it the option the user just approved is refused by readiness with
+       * OPTION_NOT_LINKED_TO_DECISION. It is marked `link: 'decision'` so the applier
+       * identifies it by what was STORED, and writes it as topology. No decision (or
+       * several) → no link, and the gap is stored on the node op so the result says so.
        */
       const operations: ProposalOperation[] = [
-        { op: 'add_node', path: plan.optionId, value: { kind: 'option', label: plan.label } },
+        { op: 'add_node', path: plan.optionId,
+          value: { kind: 'option', label: plan.label, ...(plan.decisionGap !== null ? { decision_gap: plan.decisionGap } : {}) } },
+        ...(plan.decision !== null
+          ? [{ op: 'add_edge' as const, path: `${plan.decision.id}::${plan.optionId}`, value: { link: 'decision' } }]
+          : []),
         ...plan.actsOn.map((f) => ({ op: 'add_edge' as const, path: `${plan.optionId}::${f.id}`, value: { direction: f.direction } })),
       ];
       const proposal = createProposal({
@@ -2115,6 +2157,9 @@ export function createAgentCapabilities(
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
         option: { label: plan.label, acts_on: plan.actsOn.map((a) => a.label) },
+        decision_link: plan.decision !== null
+          ? `The option will be connected from the decision "${plan.decision.label}", so the decision can choose it. That link is structure, not a strength anyone states.`
+          : decisionGapNote(plan.decisionGap ?? 'no_decision_in_model'),
         note:
           'Nothing has changed yet. Show the user the option and what it will be linked to, never the id, '
           + 'and call authorise_change with this proposal_id once they agree.',

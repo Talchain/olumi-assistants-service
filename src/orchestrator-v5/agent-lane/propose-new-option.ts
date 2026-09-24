@@ -30,6 +30,15 @@
  * harmless: `get_canonical_state` reports it in `options_that_change_nothing`, and
  * such an option blocks the comparison for EVERY option, not only itself. So the
  * result says plainly that levels are still needed.
+ *
+ * ⛔ AND THE DECISION SELECTS IT (served `52453d3`, witness c14, scenario 8efc70af).
+ * The option and its factor links landed and NOTHING linked it from the decision,
+ * so readiness blocked with OPTION_NOT_LINKED_TO_DECISION straight after the user
+ * approved. Every constructor-built option carries a decision → option edge; that
+ * edge is topology ("the decision can choose this"), not a value anyone states, so
+ * it is part of creating the option rather than a second thing to ask for. The
+ * plan resolves the decision here; a model with no decision — or with more than
+ * one, where picking would be a guess — keeps the old behaviour and SAYS SO.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -52,6 +61,9 @@ export interface NewOptionRefusal {
   readonly unresolved_labels?: readonly string[];
 }
 
+/** Why an added option is NOT linked from a decision — the model gives nothing unambiguous to link from. */
+export type DecisionLinkGap = 'no_decision_in_model' | 'several_decisions';
+
 export interface NewOptionPlan {
   readonly ok: true;
   readonly optionId: string;
@@ -59,6 +71,10 @@ export interface NewOptionPlan {
   /** Factor ids this option will be linked to, in the order given. */
   readonly actsOn: readonly { readonly id: string; readonly label: string; readonly direction: 'positive' | 'negative' }[];
   readonly publicLabel: string;
+  /** The decision that will select this option — the model's ONLY decision, or null. */
+  readonly decision: { readonly id: string; readonly label: string } | null;
+  /** Set exactly when `decision` is null: why no decision → option link will be written. */
+  readonly decisionGap: DecisionLinkGap | null;
 }
 
 interface GraphNodeLike { readonly id: string; readonly kind?: string; readonly label?: string; readonly description?: string }
@@ -142,13 +158,25 @@ export function planNewOption(
   }
 
   const taken = new Set(nodes.map((n) => n.id));
+  // ⚠ EXACTLY ONE decision, or none linked: with several, choosing one would be a guess.
+  const decisions = nodes.filter((n) => n.kind === 'decision');
+  const only = decisions.length === 1 ? decisions[0] : undefined;
   return {
     ok: true,
     optionId: mintOptionId(taken),
     label,
     actsOn,
     publicLabel: `Add the option "${label}", acting on ${actsOn.map((a) => a.label).join(', ')}`,
+    decision: only !== undefined ? { id: only.id, label: String(only.label ?? only.id) } : null,
+    decisionGap: only !== undefined ? null : decisions.length === 0 ? 'no_decision_in_model' : 'several_decisions',
   };
+}
+
+/** What the Agent (and the user) is told when no decision → option link is written, and why. */
+export function decisionGapNote(gap: DecisionLinkGap): string {
+  return gap === 'no_decision_in_model'
+    ? 'The model has no decision to connect this option from, so it is added without that link.'
+    : 'The model has more than one decision, so this option is not connected from any of them. Say which decision it belongs to and that link can be added.';
 }
 
 /**
@@ -158,12 +186,17 @@ export function planNewOption(
  * cannot be compared until each link carries a level — so the copy says that
  * rather than implying the model is ready.
  */
-export function newOptionFollowUp(plan: NewOptionPlan): string {
+export function newOptionFollowUp(
+  plan: Pick<NewOptionPlan, 'label' | 'actsOn'>,
+  decisionGap: DecisionLinkGap | null = null,
+): string {
   const one = plan.actsOn.length === 1;
   return (
     `"${plan.label}" is in the model and linked to ${plan.actsOn.map((a) => a.label).join(', ')}. `
     + `It does not yet say what it does to ${one ? 'that factor' : 'those factors'}, so it cannot be compared yet `
     + '— and until it can, it holds up the comparison for every option. '
     + 'Say what it would change and by how much, in your own units, and it can be set.'
+    // ⚠ Only the GAP is said: a written decision link is structure, and naming it would be noise.
+    + (decisionGap !== null ? ` ${decisionGapNote(decisionGap)}` : '')
   );
 }

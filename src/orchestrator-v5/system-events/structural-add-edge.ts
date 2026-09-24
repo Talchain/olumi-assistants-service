@@ -86,6 +86,17 @@
  * nodes is a causal belief by construction, so borrowing the structural
  * constants would assert certainty nobody expressed.
  *
+ * ⛔ EXCEPT A DECISION → OPTION LINK, which is topology whoever asks for it
+ * (served `52453d3`, witness c14, scenario 8efc70af). Asking the Agent to
+ * "connect the decision to" an option it had just added landed here and was
+ * persisted as a CAUSAL edge — mean 0.5, std 0.1, p 0.8 — beside constructor-
+ * built siblings that all carry `STRUCTURAL_EDGE_DEFAULTS`. That link says "the
+ * decision can choose this option"; it has no strength for anyone to state, so
+ * the wire's magnitude is not a claim about it. Identified by the endpoints'
+ * KINDS in the persisted graph (`isStructuralDecisionOptionLink`), never by the
+ * number the wire carried. Option → factor is deliberately NOT widened here:
+ * that link's strength is what the canvas lets a user draw and edit.
+ *
  * ──────────────────────────────────────────────────────────────────────────
  * ⭐⭐ THE TWO GATES THE APPLIER ALREADY ENFORCES, PRE-CHECKED HERE ANYWAY.
  *
@@ -123,6 +134,7 @@ import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { mergeAppliedGraphForPersistence } from '../handlers/edit-graph-dispatch.js';
 import { applyPatchOperations, PatchApplyError } from '../../orchestrator/patch-applier.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
+import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 
 type StructuralAddEdgeEvent = Extract<
   SystemEventTurnPayload['event'],
@@ -153,7 +165,10 @@ export type StructuralAddEdgeResult =
       readonly baseGraph: unknown;
       readonly from: string;
       readonly to: string;
+      /** The mean that LANDED — `STRUCTURAL_EDGE_DEFAULTS.strength.mean` for a structural link. */
       readonly signedMean: number;
+      /** True when this was a decision → option link written as canonical topology. */
+      readonly structuralLink: boolean;
     }
   | {
       readonly kind: 'refused';
@@ -221,6 +236,15 @@ export function buildAddEdgeSafeSummary(fromLabel: string, toLabel: string): str
 
 export function signedMeanFor(magnitude: number, direction: 'positive' | 'negative'): number {
   return direction === 'negative' ? -Math.abs(magnitude) : Math.abs(magnitude);
+}
+
+/**
+ * A decision → option link is TOPOLOGY ("the decision can choose this option"), never a causal
+ * belief — the one spelling of that predicate, shared with the Agent lane so the writer and the
+ * disclosure cannot disagree about which links carry a placeholder strength.
+ */
+export function isStructuralDecisionOptionLink(fromKind: unknown, toKind: unknown): boolean {
+  return fromKind === 'decision' && toKind === 'option';
 }
 
 export function applyStructuralAddEdge(
@@ -331,13 +355,23 @@ export function applyStructuralAddEdge(
   }
 
   // ── 5. the canonical PatchOperation train ────────────────────────────────
-  const signedMean = signedMeanFor(event.magnitude, event.effect_direction);
+  // A decision → option link lands as canonical topology — see the ⛔ at the head of this file.
+  const structuralLink = isStructuralDecisionOptionLink(
+    baseGraph.nodes.find((n) => n.id === event.from)?.kind,
+    baseGraph.nodes.find((n) => n.id === event.to)?.kind,
+  );
+  const signedMean = structuralLink
+    ? STRUCTURAL_EDGE_DEFAULTS.strength.mean
+    : signedMeanFor(event.magnitude, event.effect_direction);
+  const landedDirection = structuralLink ? STRUCTURAL_EDGE_DEFAULTS.effect_direction : event.effect_direction;
   const addedEdge = {
     from: event.from,
     to: event.to,
-    strength: { mean: signedMean, std: DEFAULT_STD },
-    exists_probability: DEFAULT_EXISTS_PROBABILITY,
-    effect_direction: event.effect_direction,
+    strength: structuralLink
+      ? { mean: signedMean, std: STRUCTURAL_EDGE_DEFAULTS.strength.std }
+      : { mean: signedMean, std: DEFAULT_STD },
+    exists_probability: structuralLink ? STRUCTURAL_EDGE_DEFAULTS.exists_probability : DEFAULT_EXISTS_PROBABILITY,
+    effect_direction: landedDirection,
     // ⭐ THE EDGE-LEVEL ORIGIN CLAIM, AND IT IS TRUE: the user drew this link.
     // Derived, not inherited — see the amended note at the head of this file.
     // Only `source` is written: `provenance_display` is recomputed from it by
@@ -439,7 +473,7 @@ export function applyStructuralAddEdge(
   if (
     landed === undefined ||
     landed.strength.mean !== signedMean ||
-    landed.effect_direction !== event.effect_direction
+    landed.effect_direction !== landedDirection
   ) {
     log.error(
       {
@@ -545,5 +579,6 @@ export function applyStructuralAddEdge(
     from: event.from,
     to: event.to,
     signedMean,
+    structuralLink,
   };
 }
