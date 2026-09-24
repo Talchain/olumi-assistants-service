@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import Ajv from 'ajv';
+import { Ajv } from 'ajv';
+import { readFileSync } from 'node:fs';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
-import { buildCandidateSchema, buildModelFromBrief, prepareProvisionalCandidate } from '../runtime/build-model.js';
+import { BUILD_INSTRUCTIONS, buildCandidateSchema, buildModelFromBrief, prepareProvisionalCandidate } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 
 // Paul's 24 September hiring brief, reconstructed as a corrected producer candidate.
@@ -11,9 +12,9 @@ function hiring() {
     goal: { metric: 'Productivity', operator: '>=', target_stated: false, value: null, unit: '%', horizon_months: null, provenance: 'explicit' },
     constraints: [],
     options: [
-      { label: 'Hire a tech lead', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Tech leads', value: 1, value_kind: 'absolute', unit: 'people', provenance: 'explicit' }] },
+      { label: 'Hire a tech lead', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Tech leads', value: 1, value_kind: 'additional', unit: 'people', provenance: 'explicit' }] },
       { label: 'Hire two developers', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Developers', value: 2, value_kind: 'additional', unit: 'people', provenance: 'explicit' }] },
-      { label: 'Keep current team', provenance: 'ai_proposed', changes: [], interventions: [{ factor_label: 'Developers', value: 5, value_kind: 'absolute', unit: 'people', provenance: 'ai_proposed' }] },
+      { label: 'Maintain current staffing', provenance: 'ai_proposed', changes: [], interventions: [] as { factor_label: string; value: number; value_kind: string; unit: string; provenance: string }[] },
     ],
     factors: [
       { label: 'Tech leads', role: 'controllable' as const, baseline_known: false, baseline_value: 0, unit: 'people', plausible_max: 5, provenance: 'ai_proposed' },
@@ -61,6 +62,8 @@ describe('provisional hiring construction uses real admission and registration p
     expect(prepared.issues).toEqual([]);
     expect(prepared.candidate.factors[1]).toMatchObject({ baseline_known: false, baseline_value: 5, provenance: 'ai_proposed' });
     expect(prepared.candidate.options[1].interventions?.[0]).toMatchObject({ value: 7, provenance: 'ai_proposed' });
+    // RC fix (3): "hire a tech lead" is ONE MORE on an estimated baseline of 0 — a total of 1, and Olumi's.
+    expect(prepared.candidate.options[0].interventions?.[0]).toMatchObject({ value: 1, value_kind: 'absolute', provenance: 'ai_proposed' });
     expect(prepareProvisionalCandidate(prepared.candidate).candidate).toEqual(prepared.candidate);
     const { result, graph, calls } = await construct(hiring());
     expect(result.ok, JSON.stringify(result)).toBe(true);
@@ -68,15 +71,37 @@ describe('provisional hiring construction uses real admission and registration p
     const option = graph?.nodes.find((n) => n.label === 'Hire two developers');
     expect(option?.interventions).toEqual({ developers: { value: 0.35, source: 'cee_hypothesis' } });
     expect(graph?.nodes.find((n) => n.kind === 'goal')).not.toHaveProperty('goal_threshold_raw');
+    // RC fix (1): the current-state option carries NO levels — it is held (#1838), not set to the baselines.
+    expect(graph?.nodes.find((n) => n.id === 'maintain_current_staffing')).not.toHaveProperty('interventions');
+    // RC fix (4): #1838's disclosure reaches the Agent, verbatim.
+    expect(result.not_represented).toContain(
+      "'Maintain current staffing' reads as carrying on as now, so I connected it to Tech leads and Developers with no level of its own; "
+      + 'the analysis holds each at its starting value, which may be an estimate rather than a figure you gave. '
+      + 'If carrying on as now would itself change any of them, say how.',
+    );
+  });
+
+  it('RC fix (1): the construction contract no longer tells the producer to give the current-state option levels', () => {
+    expect(BUILD_INSTRUCTIONS).not.toMatch(/current-state option/i);
+    expect(JSON.stringify(buildCandidateSchema())).not.toMatch(/current-state option/i);
+  });
+
+  it('RC fix (3): an explicit ABSOLUTE level on a factor with no known baseline is demoted to ai_proposed', () => {
+    const c = hiring();
+    c.options[1].interventions[0].value_kind = 'absolute';
+    expect(prepareProvisionalCandidate(c).candidate.options[1].interventions?.[0]).toMatchObject({ value: 2, provenance: 'ai_proposed' });
+    // …and the level cell admission writes for it is Olumi's hypothesis, not the brief's.
+    const admitted = admitCandidateModel(prepareProvisionalCandidate(c).candidate, {});
+    expect(admitted.nodes.find((n) => n.id === 'hire_two_developers')?.interventions?.developers?.source).toBe('cee_hypothesis');
   });
 
   it('keeps true user-supplied totals and distinguishes an absolute two from an additional two', () => {
     const c = hiring();
     c.options[1].interventions[0].value_kind = 'absolute';
-    expect(prepareProvisionalCandidate(c).candidate.options[1].interventions?.[0]).toMatchObject({ value: 2, provenance: 'explicit' });
-    c.options[1].interventions[0].value_kind = 'additional';
     c.factors[1].baseline_known = true;
     c.factors[1].provenance = 'explicit';
+    expect(prepareProvisionalCandidate(c).candidate.options[1].interventions?.[0]).toMatchObject({ value: 2, provenance: 'explicit' });
+    c.options[1].interventions[0].value_kind = 'additional';
     const prepared = prepareProvisionalCandidate(c).candidate;
     expect(prepared.options[1].interventions?.[0]).toMatchObject({ value: 7, provenance: 'explicit' });
     expect(admitCandidateModel(prepared, {}).nodes.find((n) => n.label === 'Developers')?.observed_state).toMatchObject({ raw_value: 5, source: 'brief_extraction' });
@@ -100,12 +125,42 @@ describe('provisional hiring construction uses real admission and registration p
     expect(graph?.edges.some((e) => e.from === 'onboarding_disruption' && e.to === 'productivity')).toBe(true);
   });
 
-  it.each(['strand risk', 'reverse risk'])('rejects a repair that retains risk nodes but changes the hypothesis: %s', async (fault) => {
+  it.each(['strand risk', 'reverse risk'])('does not adopt a repair that changes the hypothesis; #1830 keeps and discloses the original: %s', async (fault) => {
     const c = hiring();
     if (fault === 'strand risk') c.links = c.links.filter((l) => l.to !== 'Onboarding disruption');
     else c.links = c.links.map((l) => l.from === 'Onboarding disruption' ? { ...l, direction: 'positive' } : l);
-    const { result, graph } = await construct(invalidRisk(), c);
-    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_semantic_repair' });
-    expect(graph).toBeUndefined();
+    const { result, graph, calls } = await construct(invalidRisk(), c);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(calls).toBe(2);
+    // The ORIGINAL was kept: its option -> risk hypothesis survives, no sign invented …
+    const kept = graph?.edges.find((e) => e.from === 'hire_two_developers' && e.to === 'onboarding_disruption');
+    expect(kept?.effect_direction).toBe('positive');
+    // … and the repair proposal reaches the Agent.
+    expect((result.not_represented as string[]).filter((x) => x.includes('Hire two developers') && x.includes('Onboarding disruption'))).toHaveLength(1);
+  });
+
+  it('RC fix (2): a machine shortcut OVER an existing mechanism is never an issue — admission folds it (#1830), with no retry', async () => {
+    const c = hiring();
+    c.links.push({ from: 'Hire two developers', to: 'Onboarding disruption', direction: 'positive', provenance: 'ai_proposed' });
+    expect(prepareProvisionalCandidate(c).mechanism_issues).toEqual([]);
+    const { result, graph, calls } = await construct(c);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(calls).toBe(1);
+    expect(graph?.edges.find((e) => e.from === 'hire_two_developers' && e.to === 'onboarding_disruption')).toBeUndefined();
+  });
+
+  it('RC fix (2), joint RED: the live hiring capture plus ONE user-stated option -> risk link builds first time and keeps the user edge', async () => {
+    const live = JSON.parse(readFileSync(new URL('./fixtures/live-hiring-envelope-candidate-20260923.json', import.meta.url), 'utf8')).candidate as CandidateModel;
+    // A link with NO mechanism in the capture ("Maintain Current Staffing" acts only on
+    // "Existing team continuity", which never reaches "Hiring delay"), so only the
+    // user's authorship — not a mechanism — can keep it from being an issue.
+    const withUserLink = { ...live, links: [...live.links, { from: 'Maintain Current Staffing', to: 'Hiring delay', direction: 'negative' as const, provenance: 'explicit' }] } as CandidateModel;
+    const { result, graph, calls } = await construct(withUserLink);
+    expect(result.ok, JSON.stringify(result).slice(0, 400)).toBe(true);
+    expect(calls).toBe(1);
+    const userEdge = graph?.edges.find((e) => e.from === 'maintain_current_staffing' && e.to === 'hiring_delay');
+    expect(userEdge?.provenance).toMatchObject({ source: 'brief_extraction' });
+    expect(userEdge?.effect_direction).toBe('negative');
+    expect(prepareProvisionalCandidate(withUserLink).mechanism_issues).toEqual([]);
   });
 });

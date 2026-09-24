@@ -34,7 +34,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
+import { admitCandidateModel, findMechanismPath, type CandidateModel } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -109,7 +109,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
         'Factor labels this option changes when it states no level \u2014 e.g. an option that phases, grandfathers or tests something. Use the factor labels exactly. An option that names nothing here and has no interventions is unreachable from the decision and cannot be analysed.',
         items: { type: 'string' } },
       interventions: { type: 'array', description:
-        'The factor level this option sets, or a signed addition to its baseline. Distinguish these meanings with value_kind. Preserve user numbers; an estimated level is ai_proposed, never explicit. Include the unchanged levels for the current-state option.',
+        'The factor level this option sets, or a signed addition to its baseline. Distinguish these meanings with value_kind. Preserve user numbers; an estimated level is ai_proposed, never explicit.',
         items: obj({ factor_label: { type: 'string' }, value: { type: 'number' }, value_kind: { type: 'string', enum: ['absolute', 'additional'] }, unit: { type: 'string' }, provenance },
           ['factor_label', 'value', 'value_kind', 'unit', 'provenance']) },
     }, ['label', 'provenance', 'changes', 'interventions']) },
@@ -138,7 +138,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
 export const BUILD_INSTRUCTIONS = [
   'Produce a complete causal decision model from the brief in ONE pass.',
   'Preserve exact user facts, numbers, constraint semantics and time horizon. The first model must support a PROVISIONAL calculation before user adoption: provide defensible starting estimates where the brief gives no baseline, mark those factors ai_proposed with baseline_known:false, and explain the uncertainty in unknowns. These are modelling assumptions, never measurements or user-validated facts. If no defensible estimate is possible, leave it null and name the specific unresolved input.',
-  'For each option fill `interventions` with its factor settings. value_kind:"absolute" means the resulting total or level; value_kind:"additional" means a signed change from the same factor baseline. For hiring, adding two to a proposed baseline of five means total seven, never total two. Record the user-stated addition as explicit but keep an estimated resulting level ai_proposed. Keep one unit and plausible_max frame per factor across all baselines and options; the current-state option explicitly keeps those baseline levels.',
+  'For each option fill `interventions` with its factor settings. value_kind:"absolute" means the resulting total or level; value_kind:"additional" means a signed change from the same factor baseline. For hiring, adding two to a proposed baseline of five means total seven, never total two. Record the user-stated addition as explicit but keep an estimated resulting level ai_proposed. Keep one unit and plausible_max frame per factor across all baselines and options.',
   'Connect options to the controllable factors they change, then through supported causal mechanisms to risks and the goal. Never emit a direct option-to-risk link: it cannot be interpreted as an option setting a risk value. Retain each meaningful risk hypothesis, its sign and its downstream path; express its exposure through a causal factor or mediator, rather than deleting the risk or claiming equal exposure.',
   'EVERY OPTION MUST SAY WHAT IT DOES. An option with no `interventions` AND no `changes` is inert: it can never be compared with another option, whatever values are supplied later, and the whole decision becomes unanswerable. If the brief does not say what an option changes, still name the factors it ACTS ON in `changes` \u2014 that is a structural claim, not a numeric one. '
   + 'EVERY option must also list, in `changes`, the factors it acts on WITHOUT a stated level. An option that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping.',
@@ -313,19 +313,51 @@ export function retrySchemaPinningGoal(goal: CandidateModel['goal']): Record<str
   return schema;
 }
 
-/** Resolve declared additions before admission's absolute-level contract. */
-export function prepareProvisionalCandidate(model: CandidateModel): { candidate: CandidateModel; issues: string[] } {
+/**
+ * Resolve declared additions before admission's absolute-level contract.
+ *
+ * Two kinds of finding, and they are NOT the same weight:
+ *
+ * - `issues` — a total that cannot be made coherent (an addition with no finite
+ *   baseline, or across units). The build refuses on these if a retry cannot
+ *   clear them: admitting "hire two" as a total of two would misstate the option.
+ * - `mechanism_issues` — a MACHINE-AUTHORED option→risk link with NO
+ *   option→factor→…→risk mechanism in the candidate. It asks the retry to route
+ *   the hypothesis through a factor, and NOTHING MORE: if the retry cannot, the
+ *   original is kept and admission's own ruling (#1830) applies — the edge is kept,
+ *   no sign is invented, and the repair proposal reaches the user through
+ *   `not_represented`. A link the USER stated (`explicit`) is their claim and is
+ *   never an issue; a shortcut over an existing mechanism is folded by admission
+ *   and is never an issue either, so this can never pre-empt that fold. The
+ *   mechanism test is admission's own (`findMechanismPath`), over the same edges
+ *   admission searches: option→factor from `changes`/`interventions`, every
+ *   directed link, and no machine shortcut.
+ *
+ * ⛔ An EXPLICIT absolute level on a factor whose baseline is NOT known is
+ * demoted to `ai_proposed`: with no known starting point, a resulting total was
+ * derived from Olumi's estimate, and stamping it as the user's would exempt a
+ * modelling guess from the money invariant's brief audit.
+ */
+export function prepareProvisionalCandidate(model: CandidateModel): { candidate: CandidateModel; issues: string[]; mechanism_issues: string[] } {
   const issues: string[] = [];
+  const mechanism_issues: string[] = [];
+  const factorsByLabel = (label: string) => model.factors.filter((f) => f.label === label);
   const options = model.options.map((option) => ({
     ...option,
     interventions: option.interventions?.map((intervention) => {
       const kind = (intervention as typeof intervention & { value_kind?: string }).value_kind;
-      if (kind === undefined || kind === 'absolute') return intervention; // Existing stored candidates.
+      if (kind === undefined || kind === 'absolute') {
+        const factors = factorsByLabel(intervention.factor_label);
+        const unknownBaseline = factors.length === 1 && factors[0]!.baseline_known !== true;
+        return intervention.provenance === 'explicit' && unknownBaseline
+          ? { ...intervention, provenance: 'ai_proposed' }
+          : intervention; // Existing stored candidates.
+      }
       if (kind !== 'additional') {
         issues.push(`${option.label}: unknown value_kind for ${intervention.factor_label}`);
         return intervention;
       }
-      const factors = model.factors.filter((f) => f.label === intervention.factor_label);
+      const factors = factorsByLabel(intervention.factor_label);
       const factor = factors.length === 1 ? factors[0] : undefined;
       if (factor === undefined || typeof factor.baseline_value !== 'number' || !Number.isFinite(factor.baseline_value)
         || !Number.isFinite(intervention.value) || !Number.isFinite(factor.baseline_value + intervention.value)
@@ -342,12 +374,21 @@ export function prepareProvisionalCandidate(model: CandidateModel): { candidate:
   }));
   const optionLabels = new Set(model.options.map((o) => o.label));
   const riskLabels = new Set(model.risks.map((r) => r.label));
-  for (const link of model.links) {
-    if (optionLabels.has(link.from) && riskLabels.has(link.to)) {
-      issues.push(`${link.from} -> ${link.to}: retain this risk hypothesis through a causal factor or mediator, not a direct option-risk setting`);
-    }
+  const factorLabels = new Set(model.factors.map((f) => f.label));
+  const pair = (l: { from: string; to: string }) => `${l.from}\u0000${l.to}`;
+  const shortcuts = model.links.filter((l) => optionLabels.has(l.from) && riskLabels.has(l.to) && l.provenance !== 'explicit');
+  const shortcutPairs = new Set(shortcuts.map(pair));
+  const mechanismGraph = [
+    ...model.options.flatMap((o) => [...(o.changes ?? []), ...(o.interventions ?? []).map((i) => i.factor_label)]
+      .filter((f) => factorLabels.has(f))
+      .map((f) => ({ from: o.label, to: f }))),
+    ...model.links.filter((l) => l.direction !== 'unknown' && !shortcutPairs.has(pair(l))),
+  ];
+  for (const link of shortcuts) {
+    if (findMechanismPath(mechanismGraph, link.from, link.to) !== null) continue;
+    mechanism_issues.push(`${link.from} -> ${link.to}: retain this risk hypothesis through a causal factor or mediator, not a direct option-risk setting`);
   }
-  return { candidate: { ...model, options }, issues };
+  return { candidate: { ...model, options }, issues, mechanism_issues };
 }
 
 /** A repair may replace an invalid direct edge, but must preserve its signed path. */
@@ -439,7 +480,9 @@ export async function buildModelFromBrief(
   // them — otherwise an option the model mislabelled as its own vanishes unseen.
   let leftOut: { kind: string; label: string }[] = [];
   const needsSizeRetry = !size.within && !size.user_material_exceeds_limit;
-  if (needsSizeRetry || preparation.issues.length > 0) {
+  // Both kinds of finding ask the retry to repair; only an incoherent total can refuse (below).
+  const repairIssues = (p: typeof preparation): string[] => [...p.issues, ...p.mechanism_issues];
+  if (needsSizeRetry || repairIssues(preparation).length > 0) {
     sizeRetried = needsSizeRetry;
     constructionRetried = true;
     try {
@@ -448,8 +491,8 @@ export async function buildModelFromBrief(
         // The delta is APPENDED, so every rule the first pass obeyed still holds —
         // provenance, wiring, plausible_max and clearly labelled estimates.
         instructions: `${BUILD_INSTRUCTIONS} ${needsSizeRetry ? retryInstruction(size) : ''} Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
-        input: preparation.issues.length > 0
-          ? `${brief}\n\nConstruction issues: ${JSON.stringify(preparation.issues)}\nCandidate to repair: ${JSON.stringify(candidate)}`
+        input: repairIssues(preparation).length > 0
+          ? `${brief}\n\nConstruction issues: ${JSON.stringify(repairIssues(preparation))}\nCandidate to repair: ${JSON.stringify(candidate)}`
           : brief,
         max_output_tokens: budget.max_output_tokens,
         reasoning_effort: budget.reasoning_effort,
@@ -474,8 +517,8 @@ export async function buildModelFromBrief(
         const keepsUserMaterial = keepsEveryUserStatedIdentity(size, retrySize);
         if (
           (needsSizeRetry ? retrySize.nodes <= size.nodes && retrySize.edges <= size.edges : retrySize.within || retrySize.user_material_exceeds_limit) &&
-          keepsUserMaterial && retryPreparation.issues.length === 0 &&
-          (!preparation.issues.length || retainsRiskHypotheses(candidate, retryCandidate))
+          keepsUserMaterial && repairIssues(retryPreparation).length === 0 &&
+          (repairIssues(preparation).length === 0 || retainsRiskHypotheses(candidate, retryCandidate))
         ) {
           const kept = new Set(retryAdmitted.nodes.map(nodeIdentity));
           leftOut = admitted.nodes
@@ -495,7 +538,7 @@ export async function buildModelFromBrief(
 
   if (preparation.issues.length > 0) {
     return { ok: false, mutated: false, refusal: 'construction_needs_semantic_repair',
-      detail: 'The model could not preserve a supported risk mechanism or a coherent option total. Nothing was saved.',
+      detail: 'The model could not make a coherent total for every option level. Nothing was saved.',
       issues: preparation.issues, retried: constructionRetried };
   }
 
