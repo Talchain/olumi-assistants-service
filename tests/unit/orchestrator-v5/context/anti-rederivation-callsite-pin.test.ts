@@ -318,7 +318,8 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // guidance above ("read the value from the CanonicalContextFrame / turn
     // context you already hold, or thread it from build-turn-context") has no
     // referent here: there is no turn, no frame and no context to thread from.
-    // The seam is a pure composition over `loadPriorFactsWithReadState` +
+    // The seam is a pure composition over `loadScenarioAnalysisFactsForRead`
+    // (the turn path's own hot-window + durable readers, reconciled) +
     // `computeAnalysisAffectingGraphHash(the graph this response is returning)`
     // — the SAME hash function the run path stamps as `graph_hash_at_run`, so
     // `fresh` on this leg means bit-for-bit what it means on a turn. It is NOT
