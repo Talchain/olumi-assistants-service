@@ -9,7 +9,22 @@
 #
 #   bash scripts/witness/morning-check.sh
 #
-# Needs ASSIST_API_KEY in olumi-assistants-service/.env.staging.local.
+# ⭐ OR, WITHOUT CHECKING THIS BRANCH OUT — the invocation to use on a machine
+# where iCloud has evicted part of the repo, because `git fetch` HANGS on a
+# dataless object (measured: it hung indefinitely in the working tree at
+# ~/Documents/GitHub/olumi-assistants-service). `gh api` needs no local git:
+#
+#   gh api "repos/Talchain/olumi-assistants-service/contents/scripts/witness/morning-check.sh?ref=morning-check" \
+#     --jq .content | base64 -d > /tmp/olumi-morning-check.sh
+#   ENVF=/Users/<you>/Documents/GitHub/olumi-assistants-service/.env.staging.local \
+#     bash /tmp/olumi-morning-check.sh
+#
+# Both forms are tested end to end against served 6dfb56f. `ENVF` must be passed
+# explicitly in the second form: `$0` is the temp path, so the default relative
+# lookup below would miss.
+#
+# Needs ASSIST_API_KEY in olumi-assistants-service/.env.staging.local, plus `gh`
+# and `jq`.
 # NOTE: `set -a; . .env.staging.local` does NOT export on this machine — the
 # key is parsed explicitly below.
 set -uo pipefail
