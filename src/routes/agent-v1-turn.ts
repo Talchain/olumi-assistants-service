@@ -27,7 +27,7 @@ import { withRunStateFreshness } from '../orchestrator-v5/agent-lane/analysis-re
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
-import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
+import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
@@ -57,7 +57,7 @@ import { AMEND_CHIP, approvalChipsFor, typedApprovalOf } from '../orchestrator-v
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
 import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
-import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
 
@@ -137,10 +137,46 @@ function rememberOffered(key: string, actions: readonly OfferedAction[]): void {
   offeredActions.set(key, actions);
 }
 
+/**
+ * ⛔ PRESSING RUN MUST NOT DELETE THE WAY TO APPROVE WHAT IS STILL WAITING (Technical Architecture, #63
+ * 5808759682, served `4fd2703`): a fresh brief offered approve AND Run; the Run turn's chips were derived
+ * from its own tool calls, `run_analysis` carries no proposal, so the approve chip vanished beside a
+ * provisional answer it would have grounded. The approve chip last offered per scenario and subject is
+ * remembered here, and a Run turn carries it forward only while the store would still execute it.
+ */
+const LAST_APPROVE_MAX = 500;
+const lastApproveOffer = new Map<string, OfferedAction>();
+function rememberApprove(key: string, offered: readonly OfferedAction[]): void {
+  const approve = offered.find((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined);
+  if (approve === undefined) return;
+  lastApproveOffer.delete(key);
+  if (lastApproveOffer.size >= LAST_APPROVE_MAX) {
+    const oldest = lastApproveOffer.keys().next().value;
+    if (oldest !== undefined) lastApproveOffer.delete(oldest);
+  }
+  lastApproveOffer.set(key, approve);
+}
+
+/**
+ * THE ONE PREDICATE for "may an approve chip be shown now": the ONE proposal still awaiting a yes for this
+ * subject, when the store would EXECUTE it on the revision read back this turn — else nothing (a missing
+ * readback fails closed). Used by the fresh Run carry AND by every replay (Codex #1807 5810816841: a
+ * replay checked only id membership, so after the model moved a retried Run showed a chip that could not
+ * commit).
+ */
+function executableWaitingProposal(scenarioId: string, userId: string | null, graphHash: string | undefined): string | undefined {
+  if (graphHash === undefined) return undefined;
+  const waiting = proposals.outstanding(scenarioId, userId);
+  if (waiting.length !== 1) return undefined;
+  const id = waiting[0]!.proposal_id;
+  const decision = proposals.authorise({ proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash });
+  return decision.status === 'execute' ? id : undefined;
+}
+
 /** The originally offered actions that are still valid on the CURRENT state, in their original order. */
 export function stillValidOffers(
   offered: readonly OfferedAction[],
-  now: { outstandingProposalIds: ReadonlySet<string>; analysisReady: unknown; analysisState: unknown },
+  now: { outstandingProposalIds: ReadonlySet<string>; analysisReady: unknown; analysisState: unknown; modelExists: boolean },
 ): OfferedAction[] {
   const approvals = offered.filter((a) => {
     const id = typedApprovalOf({ chip: { id: a.id } });
@@ -149,7 +185,12 @@ export function stillValidOffers(
   const runKind = (now.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
   const run = offered.some((a) => a.id === RUN_OFFER_CHIP.id)
     && admitsRunOffer(now.analysisReady) && runKind !== 'complete_current';
-  return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : [])];
+  // The next step after a blocked Run stays offered while the model still cannot run (process-local,
+  // like the approve chip: after a restart the replay carries the words only).
+  const nextStep = offered.some((a) => a.id === NEXT_STEP_AFTER_BLOCKED_RUN_CHIP.id) && !admitsRunOffer(now.analysisReady);
+  // A rebuild stays offered only while there is still no model to build over.
+  const rebuild = offered.some((a) => a.id === REBUILD_AFTER_TOO_LARGE_CHIP.id) && !now.modelExists;
+  return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : [])];
 }
 const sessions = new SessionBindingRegistry();
 
@@ -325,6 +366,30 @@ const AGENT_INSTRUCTIONS = [
  * shape as the product's own Run chip (`edit-graph-dispatch.ts` RUN_ANALYSIS_CHIP), so the UI
  * echoes `{ id, action_type }` and the click takes fast path 3.
  */
+/**
+ * ⭐ A BLOCKED RUN OFFERS THE NEXT STEP (finding 5807064442). A typed Run keeps its turn, and its one
+ * interpreting call may not call tools — so a Run pressed before the model is ready ended on Olumi's
+ * reason with no action at all. This plain chip (no `action_type`: never another Run) makes the next
+ * step one click: an ordinary Agent turn that proposes what the model still needs, for approval.
+ */
+export const NEXT_STEP_AFTER_BLOCKED_RUN_CHIP = {
+  id: 'agent-suggest-what-it-needs',
+  label: 'Suggest what it still needs',
+  message: 'Suggest what this model still needs before the analysis can run, so I can approve it.',
+} as const;
+
+/**
+ * ⭐ A FIRST BUILD REFUSED AS TOO LARGE OFFERS THE REBUILD ITS OWN REPLY NAMES (witness `g6` on served
+ * `6dfb56f`: 40 links against the 30-link first-model limit; the reply said "ask me to build it again"
+ * with no chip, and the same brief built 13 nodes at the first attempt on a fresh scenario). Plain text
+ * (no `action_type`): the click is an ordinary Agent turn that builds from the brief again.
+ */
+export const REBUILD_AFTER_TOO_LARGE_CHIP = {
+  id: 'agent-rebuild-model',
+  label: 'Build it again',
+  message: 'Build the model again from my brief.',
+} as const;
+
 export const RUN_OFFER_CHIP = {
   id: 'agent-run-analysis',
   label: 'Run analysis',
@@ -354,6 +419,17 @@ export function admitsRunOffer(analysisReady: unknown): boolean {
  * call."). Prompt text is owned by Paul + ChatGPT; this file only carries it. When CEE #1787
  * (the packaged profile) lands, this constant is replaced by its import.
  */
+/**
+ * ⛔ THE INTERPRETING CALL CAN ONLY EXPLAIN (finding 8 on #1786, 5807230197). It receives the whole
+ * Agent instruction block — which tells the Agent to call tools and make proposals — on a call that
+ * may not act, so it could promise a proposal it cannot make. This route-authored line, placed
+ * BEFORE the banked Interpreter v0.2 text (which stays last and byte-identical), says so plainly.
+ */
+export const INTERPRET_ONLY_CONSTRAINT =
+  'IN THIS REPLY you are explaining a result only. You cannot call tools, change the model or create a proposal, '
+  + 'so never promise one or describe one as made. If the analysis did not run, say in plain words what it still '
+  + 'needs; the user can ask you to suggest it.';
+
 export const INTERPRETER_V02_BANKED: string = "Explain the current **model-relative** analysis. Do not make the user's decision.\n\n**Finding first.** State the most useful conclusion supported by the supplied analysis, then briefly: why it appears, what is not settled, and at most one next reasoning step when justified.\n\n### Hard grounding rules\n\n- Use only supplied canonical analysis, provenance, currentness and claim permissions. Unknown stays unknown.\n- Keep comparison/outcomes, sensitivity, robustness, constraint satisfaction, before/after deltas and evidence provenance as different meanings. Never substitute one for another.\n- Never call an option objectively best, the winner, the right decision or Olumi's recommendation merely because it leads in the model.\n- Never convert a point result into a probability or invert a local switch/perturbation probability into overall stability.\n- Never claim an edit was tested unless the analysed revision/inputs include it.\n- Identical analytical inputs producing the same result show repeatability under those settings, **not** new validation or increased confidence.\n- A changed input may produce no material output change. Report that without inventing an effect.\n- For before/after comparisons, use only **precomputed supplied deltas**. Do not calculate new differences, ratios, annualisations, margins or unit conversions in prose.\n- Attribute a delta to one edit only when the supplied comparison is explicitly compatible and the relevant units, option identities, analysis/projection semantics and engine settings are held constant. Otherwise say the isolated effect is not established.\n- Preserve exact constraint operators and units. Equality does not satisfy a strict `<` or `>` condition.\n- If only a subset of options was analysed, keep conclusions inside that subset and name exclusions.\n- If the result is stale, present it only as historical. If rerun/action eligibility is unknown, do not imply a current control is available; say a current analysis would be needed.\n- If sensitivity or a flip threshold was not computed, do not invent it.\n- **A first-tested assumption that flips an ordering establishes only that this tested change can flip that ordering. It does NOT establish validation priority, importance, largest effect or best next investigation. Never say \"validate X first\" or equivalent on that basis alone.** If comparable effect size, uncertainty and evidence cost/value are absent, say investigation priority is not established.\n- One edge's perturbation/switch metric is not aggregate stability or factor sensitivity.\n- If a method is declined or applicability is unknown, answer the user's question without starting or completing the method.\n- Do not invent exercise horizons, required counts, missing business dimensions, benchmarks, operating assumptions or retrospective rationales.\n\nKeep the response compact: finding first, then 1–3 grounded points/caveats. Do not force a next step.\n";
 
 /** The UI's Run control: a typed `run_analysis` chip. Words alone never take fast path 3. */
@@ -640,7 +716,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
   const callModel: CallModel = async (req) => onceMoreOnTransportFailure('conversation', async () => {
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
-    assertProviderAllowed('openai', 'agent-v1-turn.callModel', { model: budget.model, purpose: 'conversation' });
+    /**
+     * ⭐ THE HANDLE IS KEPT SO CACHING CAN BE MEASURED AT ALL.
+     *
+     * This return value was discarded, and with it the only way to answer "is the
+     * instruction prefix being cached, and by how much" on a real turn. The prefix is
+     * structurally cacheable — `AGENT_INSTRUCTIONS` is a pure constant with zero
+     * interpolations and `AGENT_TOOLS` is a module-level readonly array — but
+     * "structurally cacheable" is a claim about the SOURCE, not a measurement of the
+     * PROVIDER. `normaliseProviderUsage` reads `input_tokens_details.cached_tokens`,
+     * the Responses API's own cache field, so this turns an assumption into a number
+     * on every turn.
+     *
+     * ⚠ Bound BY HANDLE, never to "the last call": this route makes 4-6
+     * conversation calls per turn, and attributing a cache hit to the wrong one is the
+     * quietest possible way to make the measurement wrong.
+     */
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', { model: budget.model, purpose: 'conversation' });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
@@ -661,7 +753,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const text = await r.text();
       throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
     }
-    return (await r.json()) as { output: Record<string, unknown>[] };
+    const j = (await r.json()) as { output: Record<string, unknown>[]; usage?: unknown };
+    // Never throws, and records nothing for a malformed payload, so a successful call
+    // cannot be turned into a failed one by the measurement of it.
+    recordProviderUsage(usageHandle, j.usage);
+    // The usage sidecar is read above and is not part of the transport contract.
+    return { output: j.output };
   });
 
   /**
@@ -922,9 +1019,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         stage: 'frame',
         answerKind: 'substantive',
         suggested_actions: stillValidOffers(offered, {
-          outstandingProposalIds: new Set(proposals.outstanding(scenarioId, userId).map((o) => o.proposal_id)),
+          outstandingProposalIds: ((id) => new Set(id !== undefined ? [id] : []))(executableWaitingProposal(scenarioId, userId, state.graphHash)),
           analysisReady: state.analysisReady,
           analysisState: state.analysisState,
+          // `draft_graph` is read back only when the graph has content.
+          modelExists: state.draftGraph !== undefined,
         }),
       });
       return {
@@ -1165,9 +1264,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       try {
         const resp = await callModel({
-          instructions: `${AGENT_INSTRUCTIONS}\n\n${INTERPRETER_V02_BANKED}`,
+          instructions: `${AGENT_INSTRUCTIONS}\n\n${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
           input: priorAndRun,
-          tools: toolsFor(mode),
+          // No tools at all: acting is structurally impossible on this call (and no schema tokens
+          // are spent on tools it may not use). Measured against the live API: accepted with the
+          // server-recorded run pair in history.
+          tools: [],
           max_output_tokens: budget.max_output_tokens,
           tool_choice: 'none',
         } as never);
@@ -1270,10 +1372,38 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && !result.tool_calls.some((c) => c.name === 'run_analysis')
       && admitsRunOffer(analysisReady);
 
-    const offeredNow: OfferedAction[] = [...approvalChipsFor(result.tool_calls), ...(offerRun ? [RUN_OFFER_CHIP] : [])];
+    // A typed Run that answered but did not complete (blocked) offers the next step instead.
+    const runBlocked = fastPath === 'run'
+      && (result.tool_results[0] as { ok?: unknown; ran?: unknown } | undefined)?.ok === true
+      && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran !== true;
+    // The turn's LAST build was refused as too large and nothing was saved: offer the rebuild the reply names.
+    const lastBuild = result.tool_calls.filter((c) => c.name === 'build_model_from_brief').at(-1);
+    const offerRebuild = lastBuild?.refusal === 'model_too_large' && !result.mutated;
+    // A Run changes no graph: the ONE proposal still awaiting a yes keeps its chip if the store would still
+    // execute it on this revision (never on a guess — two outstanding, or a moved model, carry nothing).
+    const approveKey = `${scenarioId}:${userId ?? ''}`;
+    const carriedApproval = ((): OfferedAction[] => {
+      if (fastPath !== 'run') return [];
+      const chip = lastApproveOffer.get(approveKey);
+      const id = executableWaitingProposal(scenarioId, userId, graphHash);
+      return chip !== undefined && id !== undefined && typedApprovalOf({ chip: { id: chip.id } }) === id ? [chip, AMEND_CHIP] : [];
+    })();
+    const offeredNow: OfferedAction[] = [
+      ...approvalChipsFor(result.tool_calls),
+      ...carriedApproval,
+      ...(offerRun ? [RUN_OFFER_CHIP] : []),
+      ...(runBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
+      ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
+    ];
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
+    rememberApprove(approveKey, offeredNow);
 
-    const narration = narrateWriteOutcome(text, result.tool_calls, result.tool_results);
+    // A Run writes nothing: its interpretation is never passed through the WRITE narrator, whose
+    // completion-claim stripper would delete a sentence and append a false write-status line
+    // (finding 3 on #1786, 5807230197).
+    const narration = fastPath === 'run'
+      ? { text, status: null as string | null, stripped: [] as string[] }
+      : narrateWriteOutcome(text, result.tool_calls, result.tool_results);
     const composed = composeDirectAnswerResponse({
       // ⛔ A proposal id is a binding for authorise_change, never text a user reads or
       // types (display-ids.ts). Applied here, before the answer row is written, so a

@@ -25,7 +25,8 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
   let modelBodies: Record<string, unknown>[] = [];
   let runs = 0;
   // How the ONE interpreting call behaves: answers, fails with an HTTP error, or says nothing.
-  let interp: 'ok' | 'throw' | 'empty' = 'ok';
+  let interp: 'ok' | 'throw' | 'empty' | 'claims' = 'ok';
+  const CLAIMING = 'Your starting assumptions were applied before this run. In the current model, Hire a tech lead leads, but only weakly.';
   // A BLOCKED Run: HTTP 200, no analysis_result, Olumi's own explanation (the real recoverable shape).
   let blocked = false;
   const BLOCKED_WORDS = 'I can\'t run the analysis yet: no option has a path to the goal.';
@@ -35,6 +36,7 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
       modelBodies.push(body);
       if (body['tool_choice'] === 'none' && interp === 'throw') return new Response(JSON.stringify({ error: { message: 'boom' } }), { status: 400 });
       if (body['tool_choice'] === 'none' && interp === 'empty') return new Response(JSON.stringify({ output: [] }), { status: 200 });
+      if (body['tool_choice'] === 'none' && interp === 'claims') return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: CLAIMING }] }] }), { status: 200 });
       if (body['tool_choice'] !== 'none' && modelBodies.length === 1) {
         // The Agent path: it would first decide to call run_analysis.
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'run_analysis', call_id: 'c1', arguments: JSON.stringify({ reason: 'asked' }) }] }), { status: 200 });
@@ -98,6 +100,10 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
     expect(modelBodies).toHaveLength(1);
     const instructions = String(modelBodies[0]!['instructions']);
     expect(instructions.endsWith(INTERPRETER_V02_BANKED), 'appended, not replacing').toBe(true);
+    // Finding 8 (5807230197): the call can only explain — no tools at all, and it is told so.
+    const { INTERPRET_ONLY_CONSTRAINT } = await import('../../../routes/agent-v1-turn.js');
+    expect(modelBodies[0]!['tools'], 'no tools: acting is structurally impossible').toEqual([]);
+    expect(instructions).toContain(`${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`);
     expect(instructions.length).toBeGreaterThan(INTERPRETER_V02_BANKED.length + 1000);
     const input = JSON.stringify(modelBodies[0]!['input']);
     expect(input, 'the withheld leader reaches the interpreter').toContain('constraint_verdict_withheld');
@@ -165,4 +171,55 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
     expect(interpretationUnavailableText({ ok: false, refusal: 'analysis_not_ready' })).toBe('The analysis didn’t run this time (analysis not ready). Nothing in the model was changed — ask me what it still needs.');
   });
 
+  /**
+   * ⭐ A BLOCKED RUN OFFERS THE NEXT STEP (finding on #1786/#1792, 5807064442). The typed Run keeps
+   * the turn and its one interpreting call is forbidden from calling tools, so when the run did not
+   * complete the reply carried Olumi's reason but NO action — pressing Run before approving is the
+   * ordinary pre-approval state. It now offers one deterministic next step; the click is an ordinary
+   * Agent turn (tools allowed) that proposes what the model still needs. Nothing runs again.
+   */
+  it('RED: a BLOCKED Run with a WORKING interpreter offers one next-step chip, and runs nothing again', async () => {
+    interp = 'ok';
+    blocked = true;
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+    } });
+    const b = r.json() as { suggested_actions: { id: string; label: string; message: string; action_type?: string }[]; _diagnostic_trace: { fast_path?: string } };
+    expect(b._diagnostic_trace.fast_path).toBe('run');
+    expect(runs, 'one attempted run').toBe(1);
+    expect(b.suggested_actions).toEqual([expect.objectContaining({ id: 'agent-suggest-what-it-needs', label: 'Suggest what it still needs' })]);
+    expect(b.suggested_actions[0]!.action_type, 'a plain Agent turn, never another Run').toBeUndefined();
+  });
+
+  it('CONTRAST: a COMPLETED Run offers no remedy chip', async () => {
+    interp = 'ok';
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+    } });
+    const b = r.json() as { suggested_actions: { id: string }[] };
+    expect(b.suggested_actions.some((c) => c.id === 'agent-suggest-what-it-needs')).toBe(false);
+  });
+  it('the next-step chip replays only while the model still cannot run', async () => {
+    const { stillValidOffers, NEXT_STEP_AFTER_BLOCKED_RUN_CHIP } = await import('../../../routes/agent-v1-turn.js');
+    const offered = [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP];
+    expect(stillValidOffers(offered, { outstandingProposalIds: new Set(), analysisReady: { status: 'needs_user_input', may_run: false }, analysisState: {}, modelExists: true }).map((a) => a.id))
+      .toEqual(['agent-suggest-what-it-needs']);
+    expect(stillValidOffers(offered, { outstandingProposalIds: new Set(), analysisReady: { status: 'ready', may_run: true }, analysisState: {}, modelExists: true }), 'runnable now: no stale remedy').toEqual([]);
+  });
+  /**
+   * ⛔ Finding 3 on #1786 (5807230197): the Run's interpretation — a turn that writes NOTHING — was
+   * passed through the WRITE narrator, whose completion-claim stripper deletes a sentence such as
+   * "…were applied before this run" and appends "Nothing was saved this turn." to an analysis
+   * explanation. There is no write on this path for the stripper to protect.
+   */
+  it('RED: the interpretation reaches the user intact — no sentence stripped, no write-status line appended', async () => {
+    interp = 'claims';
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+    } });
+    const b = r.json() as { assistant_text: string; _diagnostic_trace: { fast_path?: string } };
+    expect(b._diagnostic_trace.fast_path).toBe('run');
+    expect(b.assistant_text).toContain(CLAIMING);
+    expect(b.assistant_text).not.toContain('Nothing was saved this turn');
+  });
 });

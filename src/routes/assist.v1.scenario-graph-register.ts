@@ -294,6 +294,104 @@ export default async function route(app: FastifyInstance) {
       }
       const callerExpectedGraphHash =
         typeof body.expected_graph_hash === "string" ? body.expected_graph_hash : undefined;
+      /**
+       * ⭐⭐ THE IDENTITY-SPACE EXPECTATION. Additive, optional, and it closes a
+       * counterexample the analysis-space one provably cannot.
+       *
+       * ⛔ THE GAP, MEASURED. `expected_graph_hash` is compared in ANALYSIS space
+       * (`computeAnalysisAffectingGraphHash`), whose projection EXCLUDES labels.
+       * So a caller that reads a graph, thinks, and writes a whole-graph snapshot
+       * back can have an intervening RENAME pass the comparison and be silently
+       * overwritten by its stale copy of that node. Reviewed counterexample on
+       * CEE #1743: "caller reads label L, another writer renames it, frame update
+       * follows — retain the new label or refuse, never restore L."
+       *
+       * ⭐ EVERY PIECE ALREADY EXISTED; only the comparison was missing. The read
+       * route returns `graph_identity_hash` (`assist.v1.scenario-graph.ts:536`),
+       * this route already COMPUTES `expectedGraphIdentityHash` from its own base
+       * read (the `store.loadGraph` + `computeExpectedGraphCasHashes` block below)
+       * and hands it to the atomic RPC in the `append` call — it simply never
+       * checked it against anything the caller claimed. ⚠ Line numbers are
+       * deliberately NOT cited: two earlier drafts of this docblock shipped
+       * staging line numbers that pointed at unrelated code in this same file.
+       *
+       * ⚠ IT IS A SEPARATE FIELD, NOT A WIDENING OF THE OTHER. The two hashes
+       * answer different questions over different projections and must never be
+       * substituted (see the read route's own warning at `:551`). A caller may
+       * send either, both, or neither; sending nothing is unaffected, byte for
+       * byte.
+       */
+      /**
+       * ⛔⛔ THE SHAPE IS THE identity.v1 ENVELOPE, NOT A BARE STRING — and the
+       * first cut of this field got that wrong in a way no test could see.
+       *
+       * The only documented source for a caller's expectation is the read route,
+       * and it emits the PRODUCER'S OWN RETURN VALUE:
+       * `graph_identity_hash: computeGraphIdentityHash(graph)`
+       * (`assist.v1.scenario-graph.ts:536-538`), whose type is
+       * `GraphIdentityHash | null` = `{ kind, value, algorithm, projection_version,
+       * graph_schema_version, normaliser_version }` (`context/graph-identity.ts:84-91`).
+       * Internally this route compares the 64-hex `.value`, because
+       * `hashesForRawGraph` extracts it (`context/graph-cas-conflict.ts:186`).
+       *
+       * So "a caller echoes back what it read" — the one workflow this field
+       * exists for — produced a 422, and a caller that stringified it produced
+       * the literal `"[object Object]"`. Measured on CEE #1743, whose `readGraph`
+       * did exactly that: once this route enforced the field, EVERY Agent frame
+       * write would have been refused 409 and the user told a competing writer
+       * had moved the model when none had. A fabricated concurrency claim at
+       * industrial scale, from two halves of one seam that never met.
+       *
+       * Both spellings are therefore accepted and normalised to the `.value`:
+       * the envelope (what the wire carries) and a bare 64-hex string (what an
+       * internal caller holding a `.value` already has). Neither is invented
+       * here — the envelope's `.value` IS the comparison space.
+       *
+       * ⭐ AND EXPLICIT `null` MEANS SOMETHING, distinct from omitting the key.
+       * `computeExpectedGraphCasHashes` maps an absent, unparseable or
+       * identity-empty graph to `null`, so `null` is exactly what the read route
+       * returns for the EMPTY scenario this route exists to populate. Without
+       * this branch a caller could not express "I expect there to be no graph",
+       * and — worse — sending the `null` it had just read silently disabled the
+       * check and took an unconditional write. Explicit `null` now asserts
+       * absence; omitting the key still means "do not check", byte for byte.
+       */
+      const identityKeySupplied = Object.prototype.hasOwnProperty.call(
+        body,
+        "expected_graph_identity_hash",
+      );
+      const rawExpectedIdentity: unknown = body.expected_graph_identity_hash;
+      /** A 64-hex value to compare, once normalised out of either spelling. */
+      let callerExpectedIdentityHash: string | undefined;
+      /** The caller asserts the scenario holds NO hashable graph. */
+      let callerExpectsNoGraph = false;
+      if (identityKeySupplied && rawExpectedIdentity !== undefined) {
+        if (rawExpectedIdentity === null) {
+          callerExpectsNoGraph = true;
+        } else if (typeof rawExpectedIdentity === "string") {
+          if (rawExpectedIdentity.length === 0) {
+            return invalid(
+              "EXPECTED_GRAPH_IDENTITY_HASH_INVALID",
+              "`expected_graph_identity_hash` must be a non-empty hash, the `graph_identity_hash` object the read route returned, or null to assert there is no graph.",
+            );
+          }
+          callerExpectedIdentityHash = rawExpectedIdentity;
+        } else if (typeof rawExpectedIdentity === "object" && !Array.isArray(rawExpectedIdentity)) {
+          const envelopeValue = (rawExpectedIdentity as { value?: unknown }).value;
+          if (typeof envelopeValue !== "string" || envelopeValue.length === 0) {
+            return invalid(
+              "EXPECTED_GRAPH_IDENTITY_HASH_INVALID",
+              "`expected_graph_identity_hash` was an object without a non-empty string `value`; send the `graph_identity_hash` the read route returned, unaltered.",
+            );
+          }
+          callerExpectedIdentityHash = envelopeValue;
+        } else {
+          return invalid(
+            "EXPECTED_GRAPH_IDENTITY_HASH_INVALID",
+            "`expected_graph_identity_hash` must be a hash string, the `graph_identity_hash` object the read route returned, or null to assert there is no graph.",
+          );
+        }
+      }
       const brief = normaliseBriefText(body.brief_text);
       if (brief.truncated) {
         return invalid("BRIEF_INVALID", "`brief_text` exceeds the supported brief length.");
@@ -483,7 +581,157 @@ export default async function route(app: FastifyInstance) {
               buildErrorV1(
                 "BAD_INPUT",
                 "This model changed since it was read. Nothing was written — read it again first.",
-                { code: "GRAPH_STALE", expected_graph_hash: callerExpectedGraphHash, current_graph_hash: expectedGraphAnalysisHash ?? null },
+                {
+                  code: "GRAPH_STALE",
+                  // ⭐ WHICH expectation failed, and BOTH pairs, always. A caller
+                  // that sent both could previously not tell which one refused it,
+                  // and read `undefined` from the pair it had not been told about —
+                  // so it could not resync. Both hashes are in scope at both sites.
+                  failed_expectation: "analysis",
+                  expected_graph_hash: callerExpectedGraphHash,
+                  current_graph_hash: expectedGraphAnalysisHash ?? null,
+                  expected_graph_identity_hash: callerExpectedIdentityHash ?? null,
+                  current_graph_identity_hash: expectedGraphIdentityHash ?? null,
+                },
+                requestId,
+              ),
+            );
+        }
+      }
+
+      /**
+       * The identity-space half of the same rule, and it refuses the case the
+       * block above cannot see. Same failure mode on an unreadable base: a read
+       * we could not perform cannot adjudicate an expectation, so it is our
+       * outage (503) rather than a write we cannot justify.
+       *
+       * ⚠ `GRAPH_STALE` is kept as the code because it is the same fact to a
+       * caller — the model moved, nothing was written — and callers already
+       * branch on it. The identity fields distinguish WHICH expectation failed
+       * for anyone who needs to know.
+       */
+      if (callerExpectsNoGraph) {
+        // The caller read an empty scenario and is writing the first graph into
+        // it. `null` is a real expectation, and this is the one place it can be
+        // adjudicated: if a graph has appeared since, the caller's whole premise
+        // ("there is nothing here yet") is false and its write would be the
+        // overwrite this route exists to prevent.
+        if (expectedGraphIdentityHash === undefined) {
+          return unavailable();
+        }
+        /**
+         * ⛔⛔ AND "no hashable graph" IS NOT "no graph". Accepted from independent
+         * review of #1810.
+         *
+         * `hashesForRawGraph` maps a graph that is PRESENT BUT UNPARSEABLE to
+         * `identity: null`, exactly as it maps an absent one
+         * (`context/graph-cas-conflict.ts` — a failed `GraphStateIngressSchema`
+         * safeParse returns `{parseFailed: true, identity: null}`). So an absence
+         * assertion would have passed against stored malformed bytes and REPLACED
+         * them — the very overwrite this field exists to prevent, and flatly
+         * contrary to the wording of the refusal below.
+         *
+         * `baseGraphForInvariants` is the RAW read, so raw presence is decidable
+         * independently of hashability. A genuinely absent graph may proceed; a
+         * present one that cannot be hashed must refuse, because we cannot show it
+         * is safe to discard and a caller asserting emptiness has not asked to.
+         */
+        const rawGraphPresent = baseGraphForInvariants !== null && baseGraphForInvariants !== undefined;
+        if (expectedGraphIdentityHash === null && rawGraphPresent) {
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.expected_absent_graph_unhashable",
+              request_id: requestId,
+              scenario_id: scenarioId,
+            },
+            "Graph registration — the caller expected no graph and one exists that could not be hashed; nothing written",
+          );
+          return reply
+            .code(409)
+            .send(
+              buildErrorV1(
+                "BAD_INPUT",
+                "This model already holds content that could not be read, and this was written expecting it to be empty. Nothing was written — read it again first.",
+                {
+                  code: "GRAPH_STALE",
+                  failed_expectation: "absence",
+                  expected_graph_identity_hash: null,
+                  // ⚠ NOT a hash: there is none, and saying so is the honest answer
+                  // rather than reporting `null` as though the model were empty.
+                  current_graph_identity_hash: null,
+                  current_graph_unhashable: true,
+                  expected_graph_hash: callerExpectedGraphHash ?? null,
+                  current_graph_hash: expectedGraphAnalysisHash ?? null,
+                },
+                requestId,
+              ),
+            );
+        }
+        if (expectedGraphIdentityHash !== null) {
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.expected_absent_graph_present",
+              request_id: requestId,
+              scenario_id: scenarioId,
+              current: expectedGraphIdentityHash,
+            },
+            "Graph registration — the caller expected no graph and one exists; nothing written",
+          );
+          return reply
+            .code(409)
+            .send(
+              buildErrorV1(
+                "BAD_INPUT",
+                "This model already has content, and this was written expecting it to be empty. Nothing was written — read it again first.",
+                {
+                  code: "GRAPH_STALE",
+                  failed_expectation: "absence",
+                  expected_graph_identity_hash: null,
+                  current_graph_identity_hash: expectedGraphIdentityHash,
+                  expected_graph_hash: callerExpectedGraphHash ?? null,
+                  current_graph_hash: expectedGraphAnalysisHash ?? null,
+                },
+                requestId,
+              ),
+            );
+        }
+      }
+      if (callerExpectedIdentityHash !== undefined) {
+        if (expectedGraphIdentityHash === undefined) {
+          return unavailable();
+        }
+        if (expectedGraphIdentityHash !== callerExpectedIdentityHash) {
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.expected_graph_identity_hash_stale",
+              request_id: requestId,
+              scenario_id: scenarioId,
+              expected: callerExpectedIdentityHash,
+              current: expectedGraphIdentityHash ?? null,
+            },
+            "Graph registration — the model's identity changed since the caller read it (a rename or another non-analysis edit); nothing written",
+          );
+          return reply
+            .code(409)
+            .send(
+              buildErrorV1(
+                "BAD_INPUT",
+                // ⛔ NOT "someone edited it". The evidence is only that the
+                // server's identity hash is not the caller's — which is also true
+                // when the persisted graph became UNPARSEABLE and nobody touched
+                // it (`hashesForRawGraph` returns `identity: null` on a failed
+                // parse, `context/graph-cas-conflict.ts:179-181`), and when the
+                // graph was deleted. Naming a cause we have not established is
+                // the same fabrication as claiming a competing writer.
+                "The model on the server is not the one this was based on. Nothing was written — read it again first.",
+                {
+                  code: "GRAPH_STALE",
+                  failed_expectation: "identity",
+                  expected_graph_identity_hash: callerExpectedIdentityHash,
+                  current_graph_identity_hash: expectedGraphIdentityHash ?? null,
+                  expected_graph_hash: callerExpectedGraphHash ?? null,
+                  current_graph_hash: expectedGraphAnalysisHash ?? null,
+                },
                 requestId,
               ),
             );

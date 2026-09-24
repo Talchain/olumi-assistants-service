@@ -80,11 +80,39 @@ describe('SupabaseDecisionRecordStore.createRecord', () => {
     const { client } = makeClient({ data: OK_ENVELOPE });
     const store = new SupabaseDecisionRecordStore(client);
     const outcome = await store.createRecord(WRITE);
-    expect(outcome).toEqual({
+    expect(outcome).toStrictEqual({
       record_id: WRITE.record_id,
       deduped: false,
       event_id: WRITE.event_id,
+      // The row's own decision, echoed — what the commit route confirms
+      // stored texts against (never the request).
+      stored_decision: WRITE.decision,
     });
+  });
+
+  it('an envelope whose record carries no decision object yields NO stored_decision (never a guess)', async () => {
+    const { decision: _d, ...recordWithoutDecision } = OK_ENVELOPE.record;
+    const { client } = makeClient({ data: { ...OK_ENVELOPE, record: recordWithoutDecision } });
+    const store = new SupabaseDecisionRecordStore(client);
+    const outcome = await store.createRecord(WRITE);
+    expect(outcome).not.toHaveProperty('stored_decision');
+    expect(outcome.record_id).toBe(WRITE.record_id);
+  });
+
+  it('a NOT-READY write sends p_prediction: null EXPLICITLY (the key is present — p_prediction has no DEFAULT)', async () => {
+    const notReady: CreateDecisionRecordWrite = {
+      ...WRITE,
+      decision: { position: 'not_ready', graph_hash: WRITE.decision.graph_hash, committed_by_user: true },
+      prediction: null,
+    };
+    const { client, rpc } = makeClient({ data: OK_ENVELOPE });
+    const store = new SupabaseDecisionRecordStore(client);
+    await store.createRecord(notReady);
+    const args = rpc.mock.calls[0]![1] as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(args, 'p_prediction')).toBe(true);
+    expect(args.p_prediction).toBeNull();
+    // JSON on the wire carries the key as null, not an omission.
+    expect(JSON.stringify(args)).toContain('"p_prediction":null');
   });
 
   it('same-scenario replay (deduped: true, event_id null) parses as deduped', async () => {
@@ -251,6 +279,22 @@ describe('SupabaseDecisionRecordStore.retrieveRecords (scenario-scoped read)', (
     const page = await store.retrieveRecords('scen-target');
     expect(page.records).toHaveLength(1);
     expect(page.records.every((r) => r.scenario_id === 'scen-target')).toBe(true);
+  });
+
+  it('KEEPS a not-ready row whose prediction is NULL (it makes no forecast), and drops a NULL prediction on any other row', async () => {
+    const notReadyRow = {
+      ...READ_ROW,
+      record_id: 'nr',
+      decision: { position: 'not_ready', graph_hash: 'aag_v1:sha256:x', committed_by_user: true },
+      prediction: null,
+    };
+    const chosenWithNull = { ...READ_ROW, record_id: 'bad', prediction: null };
+    const { client } = makeReadClient({ data: [notReadyRow, chosenWithNull], count: 2 });
+    const store = new SupabaseDecisionRecordStore(client);
+    const page = await store.retrieveRecords('scen-target');
+    expect(page.records.map((r) => r.record_id)).toEqual(['nr']);
+    expect(page.records[0]!.prediction).toBeNull();
+    expect(page.records[0]!.decision.position).toBe('not_ready');
   });
 
   it('drops malformed rows (missing decision/prediction) without throwing', async () => {

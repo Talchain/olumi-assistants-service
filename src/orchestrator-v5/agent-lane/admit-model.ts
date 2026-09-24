@@ -71,7 +71,17 @@ export type CandidateNodeKind =
  */
 
 export interface CandidateModel {
-  readonly goal: { metric: string; operator: string; value: number; unit: string; horizon_months: number | null; provenance: string };
+  readonly goal: {
+    metric: string; operator: string; unit: string; horizon_months: number | null; provenance: string;
+    /**
+     * `false` means the brief named a DIRECTION and no number. Optional because the
+     * originally banked candidate contract has no such field: a candidate from before
+     * it is treated as stating a target when `value` is a finite number, which is
+     * exactly what it used to mean.
+     */
+    target_stated?: boolean;
+    value: number | null;
+  };
   readonly constraints: readonly CandidateConstraint[];
   readonly options: readonly {
     label: string;
@@ -464,7 +474,32 @@ export function admitCandidateModel(
         // number. Writing 20000 into it was out of range by four orders of
         // magnitude. The cap rule is reused, never re-derived:
         // `resolveGoalThresholdCapWithProvenance` owns it.
+        /**
+         * ⛔ NO THRESHOLD AT ALL WHEN THE USER NAMED NO NUMBER (#63 5811781699).
+         * `raw` was written unconditionally, so a goal the brief stated only as a
+         * DIRECTION arrived as `goal_threshold_raw: 0` with the goal's own
+         * `from_brief` provenance — the product telling the user they had asked for a
+         * 0% increase. The trio is now written only when a target really was stated.
+         *
+         * ⭐ NOTHING DOWNSTREAM NEEDS A CHANGE, and that is checked rather than hoped:
+         * `goalTargetStated` (`admission/analysis-admission.ts:776-786`) is
+         * `'goal_threshold_raw' in pickGoalThresholdTrio(carrier)` — KEY PRESENCE. So
+         * omitting the trio makes `semantic_signals.goal_target_stated` read `false`
+         * on its own, which is the truth, instead of `true` about a fabricated 0.
+         *
+         * ⚠ BACKWARD COMPATIBLE BY DESIGN: `target_stated` absent plus a finite
+         * `value` still writes the trio, so a candidate built before this field
+         * behaves exactly as it did. Only an explicit `false`, or a non-finite value,
+         * withholds it.
+         */
         const raw = model.goal.value;
+        const stated = model.goal.target_stated !== false && typeof raw === 'number' && Number.isFinite(raw);
+        if (!stated) {
+          return {
+            ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
+            goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
+          };
+        }
         const resolved = resolveGoalThresholdCapWithProvenance(
           undefined, raw, model.goal.unit, undefined,
         );

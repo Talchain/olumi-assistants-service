@@ -107,6 +107,17 @@ export type InternalDispatch = (path: string, body: unknown) => Promise<{ status
 interface GraphRead {
   readonly graph_hash: string;
   /**
+   * ⭐ THE IDENTITY-SPACE HASH OF THE SAME READ — "is this the same graph
+   * object?" — kept so a write can assert the identity it actually read.
+   *
+   * ⛔ NOT INTERCHANGEABLE WITH `graph_hash`, which is the ANALYSIS projection
+   * and excludes labels. That exclusion is the whole defect: a rename landing
+   * between our read and our write passes an analysis-space comparison and is
+   * then overwritten by our stale copy of the node. `''` when the read did not
+   * supply one — an expectation is then simply not sent, never fabricated.
+   */
+  readonly graph_identity_hash: string;
+  /**
    * Declared, not cast. `readGraph` passes the persisted node through verbatim,
    * so these are the carriers the stored graph really holds — counted across
    * every stored graph on 22 Sep 2026: `provenance` 209,115, `display_value`
@@ -225,12 +236,43 @@ export function createAgentCapabilities(
     ok: false, mutated: false, refusal: 'read_only_preview',
     detail: 'This preview cannot change the model. Nothing has been altered.',
   });
+  /**
+   * Normalise the read route's `graph_identity_hash` to the 64-hex value the
+   * register route compares. `''` means "no identity to anchor to" — the route
+   * returns `null` for an absent, unparseable or identity-empty graph — and
+   * every caller below treats `''` as "send no expectation".
+   *
+   * A bare string is tolerated so this keeps working if the wire is ever
+   * flattened; nothing is invented either way, because the envelope's `.value`
+   * IS the comparison space.
+   */
+  const identityHashOf = (raw: unknown): string => {
+    if (typeof raw === 'string') return raw;
+    if (raw !== null && typeof raw === 'object') {
+      const v = (raw as { value?: unknown }).value;
+      if (typeof v === 'string') return v;
+    }
+    return '';
+  };
+
   const readGraph = async (scenarioId: string): Promise<GraphRead | null> => {
     const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
     if (r.status !== 200) return null;
     const g = (r.json.graph ?? {}) as Record<string, unknown>;
     return {
       graph_hash: String(r.json.graph_hash ?? ''),
+      // ⛔⛔ IT IS AN ENVELOPE OBJECT, NOT A STRING. The read route emits the
+      // producer's own return value — `computeGraphIdentityHash(graph)`, type
+      // `GraphIdentityHash | null` = `{kind, value, algorithm, ...}` — so the
+      // `String(...)` this line used to do produced the literal
+      // `"[object Object]"`, and once the register route enforced the field
+      // EVERY frame write below would have been refused 409 and the user told a
+      // competing writer had moved their model when none had. That is the exact
+      // fabricated-concurrency claim this PR exists to remove, so it is fixed
+      // here rather than tolerated. The register route compares the 64-hex
+      // `.value` (`context/graph-cas-conflict.ts` extracts it), and accepts
+      // either spelling; we send the value.
+      graph_identity_hash: identityHashOf(r.json.graph_identity_hash),
       nodes: (g.nodes as GraphRead['nodes']) ?? [],
       edges: (g.edges as GraphRead['edges']) ?? [],
       analysis_state: r.json.analysis_state,
@@ -1345,8 +1387,46 @@ export function createAgentCapabilities(
           if (typeof f === 'number' && f > 1) frames.set(o.path.split('::')[1], f);
         }
         if (frames.size > 0) {
-          const patched = before.nodes.map((n) => {
-            const range = frames.get(n.id);
+          /**
+           * ⭐⭐ PATCH THE MODEL AS IT IS NOW, NOT AS IT WAS WHEN WE READ IT.
+           *
+           * ⛔ THE COUNTEREXAMPLE THIS CLOSES (owner note 5799139118, limb 1):
+           * this write sends a WHOLE graph built from an earlier read. The
+           * route's expectation is compared in ANALYSIS space, which EXCLUDES
+           * labels — so a rename landing between our read and this write passes
+           * the comparison and is then overwritten by our stale copy of the node.
+           *
+           * ⚠ I previously reported limb 1 as wholly uncloseable caller-side and
+           * left it to the atomic-writer lease. That was too broad. A caller
+           * cannot express an IDENTITY-space expectation — that part is true and
+           * still belongs at the write boundary — but it CAN stop replaying stale
+           * bytes, which is the other half the owner note named: *"a targeted
+           * atomic patch … can avoid replaying the whole stale graph."*
+           *
+           * So: re-read, patch the FRESH nodes, and send those. An intervening
+           * edit is preserved BY CONSTRUCTION rather than by a comparison that
+           * cannot see it. The residual window shrinks from "user think-time plus
+           * a model call" to the milliseconds between this read and the route's
+           * own — and the route's CAS already covers its own read-to-write gap.
+           *
+           * ⛔ AND IT NEVER CLOBBERS A RANGE SOMEONE ELSE SUPPLIED: a factor that
+           * already carries a usable frame in the fresh read is left alone. If
+           * that leaves nothing to do, no write is attempted at all.
+           *
+           * A failed re-read falls back to the earlier read: degrading to
+           * today's behaviour is right, because refusing the whole authorisation
+           * because a READ failed would lose work the user already approved.
+           */
+          const nowRead = await readGraph(ctx.scenario_id);
+          const base = nowRead ?? before;
+          const stillNeeds = new Map<string, number>();
+          for (const [id, range] of frames) {
+            const node = base.nodes.find((n) => n.id === id);
+            if (node !== undefined && frameOf(node) !== null) continue;
+            stillNeeds.set(id, range);
+          }
+          const patched = base.nodes.map((n) => {
+            const range = stillNeeds.get(n.id);
             if (range === undefined) return n;
             const os = (n.observed_state ?? {}) as { value?: number; raw_value?: number };
             const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
@@ -1365,11 +1445,80 @@ export function createAgentCapabilities(
             return { ...n, observed_state: { ...os, value: raw / range, raw_value: raw, cap: range, declared_scale: 'unit_interval' } };
           });
           if (framedHere.length > 0) {
-            const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
-              graph: { nodes: patched, edges: before.edges },
+            /**
+             * ⛔⛔ CAS-GATED, AND IT WAS NOT. This write asserts
+             * `edges: before.edges` — the WHOLE edge set as it was at the read
+             * on entry to this capability — so without an expected hash it does
+             * not merely lose a node change: any edge written in between is
+             * silently restored to its old value, the user is told nothing, and
+             * the Agent reports the frame as attached.
+             *
+             * ⚠ THE PROPOSAL CHECK IS NOT THE WRITE CHECK, and it is tempting to
+             * think it covers this. `proposals.authorise` is bound to
+             * `before.graph_hash`, but that is an in-memory comparison against a
+             * hash THIS process read; the register call is the only thing that
+             * can refuse ATOMICALLY at the row. Between them another writer can
+             * land.
+             *
+             * The values write below already does this (`expected_graph_hash:
+             * carried`), which is what made the omission a gap rather than a
+             * design. Same shape, same honest refusal.
+             *
+             * ⚠ SENT ONLY WHEN NON-EMPTY: the route rejects an empty string
+             * outright (`EXPECTED_GRAPH_HASH_INVALID`), and `readGraph` coerces
+             * a missing hash to `''`. Omitting it there preserves today's
+             * behaviour rather than turning a degraded read into a hard failure.
+             */
+            /**
+             * ⛔ NO WRITE AT ALL WHEN THE RE-READ LEFT NOTHING TO DO — the docblock
+             * above promised exactly this and it was false.
+             *
+             * ⚠ Accepted from independent review of #1743. The gate was
+             * `frameById.size`, computed BEFORE the re-read. When a competing writer
+             * had already framed every factor, `stillNeeds` was empty, `patched`
+             * equalled `base.nodes`, and a byte-identical WHOLE-GRAPH register still
+             * went out — minting a model version the user did not cause and taking
+             * the overwrite risk this block exists to remove, for nothing.
+             *
+             * Skipping is honest rather than synthetic: no HTTP call is made and
+             * nothing downstream claims a write, because none was made.
+             */
+            const reg: { status: number; json: Record<string, unknown> } = stillNeeds.size === 0
+              ? { status: 200, json: {} }
+              : await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+              // ⛔⛔ SPREAD THE WHOLE GRAPH. This sent only `{ nodes, edges }`, so
+              // every other top-level key was DELETED by a write whose purpose is
+              // to stop the model being overwritten. They are not cosmetic:
+              // `computeAnalysisAffectingGraphHashSha256` (`context/graph-hash.ts:149-162`)
+              // hashes `options`, `goal_node_id` and `goal_constraints` too, so the
+              // frame write destroyed analysis-affecting content. The value-batch
+              // write at `:367` had it right all along — same spread, same reason.
+              graph: { ...base.raw, nodes: patched, edges: base.edges },
+              ...(base.graph_hash !== '' ? { expected_graph_hash: base.graph_hash } : {}),
+              /**
+               * ⭐ AND THE IDENTITY EXPECTATION, from the SAME read these bytes
+               * come from. Patching fresh nodes preserves an intervening rename;
+               * this REFUSES outright if one lands in the window between that
+               * read and the route's own — which the analysis-space hash cannot
+               * see, because its projection excludes labels.
+               *
+               * ⚠ The route enforces this only once CEE #1810 lands. Until then
+               * it is an unknown top-level field and is ignored (the register
+               * route has no body schema), so sending it early is safe and makes
+               * the two land in either order.
+               */
+              ...(base.graph_identity_hash !== ''
+                ? { expected_graph_identity_hash: base.graph_identity_hash }
+                : {}),
             });
             if (reg.status !== 200) {
-              failures.push({ path: 'scale_frame', detail: `could not attach a range: http ${reg.status}` });
+              const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
+              failures.push({
+                path: 'scale_frame',
+                detail: code === 'GRAPH_STALE'
+                  ? 'the model changed while this was being prepared, so no range was attached and nothing was written — read it again and propose afresh'
+                  : `could not attach a range: http ${reg.status}`,
+              });
               framedHere.length = 0;
             }
           }
@@ -1388,10 +1537,29 @@ export function createAgentCapabilities(
             stage: 'frame',
             event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: baseHash },
           });
-          if (r.status !== 200) failures.push({ path: o.path, detail: `http ${r.status}` });
           const rc = receiptSummaryOf(r.json);
           if (rc.summary !== null) receipts.push(rc.summary);
           if (rc.unreadable) failures.push({ path: o.path, detail: 'a receipt arrived but could not be read' });
+          if (r.status !== 200) {
+            failures.push({ path: o.path, detail: `http ${r.status}` });
+            // ⛔⛔ DO NOT ADVANCE THE BASE AFTER A REFUSED EDIT.
+            //
+            // This used to re-read the graph and reassign `baseHash`
+            // UNCONDITIONALLY, which made the claim at the head of this block —
+            // "a moved graph refuses the WHOLE authorisation, not half of it" —
+            // false for every multi-op proposal. A stale base survived exactly
+            // ONE iteration: op 0 was refused at the row, then `baseHash` became
+            // the CONCURRENT writer's hash and ops 1..N passed the
+            // `base_graph_hash` gate, landing on a model the user never approved
+            // while the result still reported the approval as applied.
+            //
+            // A refusal means the graph moved because someone ELSE wrote. Keeping
+            // the approved base means every remaining op is refused too, which is
+            // the whole-or-nothing property this authorisation is supposed to
+            // have. Advancing after a SUCCESS is different and still correct: the
+            // graph moved because WE moved it, within this same authorisation.
+            continue;
+          }
           const mid = await readGraph(ctx.scenario_id);
           if (mid !== null) baseHash = mid.graph_hash;
         }
@@ -1619,7 +1787,47 @@ export function createAgentCapabilities(
           if (typeof n.scale_frame === 'number' && n.scale_frame > 1) return false;
           return typeof os.value === 'number' && Math.abs(os.value) > 1 && typeof os.cap !== 'number';
         });
-        const framed: { factor: string; value: number; range: number }[] = [];
+        /**
+         * ⛔⛔ CARRIES THE STABLE NODE ID, and the id is the load-bearing part.
+         *
+         * ⚠ CHANGES_REQUIRED from independent review of #1743, accepted. This list
+         * held only the visible `label`, and the post-refusal readback joined the
+         * fresh canonical nodes by `Map<label, node>` — where the LAST duplicate
+         * label wins. Production-shaped counterexample: factors A and B both
+         * display "Revenue"; A's frame is still absent after GRAPH_STALE, B is
+         * framed by another writer and appears later in the fresh list. The map
+         * resolved A's "Revenue" to B, dropped A, and told the user every factor
+         * now has a range — while A still blocked the analysis. A label is a value
+         * another object can satisfy; binding a claim to one is the estate's own
+         * named trap, and I walked into it while fixing the rename case.
+         *
+         * ⭐ An id join also subsumes the rename case for free: the node is found,
+         * and its CURRENT label is what the user is shown.
+         *
+         * `id` is internal only — it is stripped before the wire (`toWire` below)
+         * so the emitted payload shape is unchanged, byte for byte.
+         */
+        type IntendedFrame = { id: string; factor: string; value: number; range: number };
+        const toWire = (f: IntendedFrame) => ({ factor: f.factor, value: f.value, range: f.range });
+        const framed: IntendedFrame[] = [];
+        /** The ranges this turn INTENDED to attach but could not — kept so a
+         *  failure can name which factors still have no range, instead of the
+         *  reply implying nothing was written at all. */
+        let rangesNotAttached: IntendedFrame[] = [];
+        /**
+         * ⛔ THE FIELD NAME MUST CARRY ITS OWN GUARANTEE. A consumer cannot tell a
+         * verified absence from an intended one, so `ranges_not_attached` is
+         * emitted ONLY when a post-refusal readback confirmed the factor still has
+         * no range. When the readback fails this is set instead, and the consumer
+         * says the present state is unknown rather than advising.
+         *
+         * CHANGES_REQUIRED on #1751 `f028650d`: the deterministic consumer turned
+         * that event field into a present-state claim ("unchanged", "still needs a
+         * range", "do not re-enter") with no readback between the refusal and the
+         * sentence. Fixing only the consumer would leave the next consumer free to
+         * make the same mistake; the contract is fixed here.
+         */
+        let currentStateUnknown = false;
         if (needsFrame.length > 0 && afterSet !== null) {
           const frameById = new Map<string, number>();
           for (const n of needsFrame) {
@@ -1628,21 +1836,248 @@ export function createAgentCapabilities(
             const range = defaultFrameFor(raw);
             if (range <= 1) continue;
             frameById.set(n.id, range);
-            framed.push({ factor: n.label, value: raw, range });
+            // ⛔ `framed` is NOT built here. It is the list reported back to the
+            // user as `ranges_added_for_analysis`, and it must describe what the
+            // write ACTUALLY DID — which is only knowable after the re-read
+            // below decides which factors still need a frame. Building it here
+            // meant a 200 reported ranges added for factors the code had
+            // deliberately skipped because a competing writer already framed them.
           }
           if (frameById.size > 0) {
-            const patched = afterSet.nodes.map((n) => {
-              const range = frameById.get(n.id);
+          /**
+             * ⭐⭐ PATCH THE MODEL AS IT IS NOW, NOT AS IT WAS WHEN WE READ IT.
+             *
+             * ⛔ THE COUNTEREXAMPLE THIS CLOSES (owner note 5799139118, limb 1):
+             * this write sends a WHOLE graph built from an earlier read. The
+             * route's expectation is compared in ANALYSIS space, which EXCLUDES
+             * labels — so a rename landing between our read and this write passes
+             * the comparison and is then overwritten by our stale copy of the node.
+             *
+             * ⚠ I previously reported limb 1 as wholly uncloseable caller-side and
+             * left it to the atomic-writer lease. That was too broad. A caller
+             * cannot express an IDENTITY-space expectation — that part is true and
+             * still belongs at the write boundary — but it CAN stop replaying stale
+             * bytes, which is the other half the owner note named: *"a targeted
+             * atomic patch … can avoid replaying the whole stale graph."*
+             *
+             * So: re-read, patch the FRESH nodes, and send those. An intervening
+             * edit is preserved BY CONSTRUCTION rather than by a comparison that
+             * cannot see it. The residual window shrinks from "user think-time plus
+             * a model call" to the milliseconds between this read and the route's
+             * own — and the route's CAS already covers its own read-to-write gap.
+             *
+             * ⛔ AND IT NEVER CLOBBERS A RANGE SOMEONE ELSE SUPPLIED: a factor that
+             * already carries a usable frame in the fresh read is left alone. If
+             * that leaves nothing to do, no write is attempted at all.
+             *
+             * A failed re-read falls back to the earlier read: degrading to
+             * today's behaviour is right, because refusing the whole authorisation
+             * because a READ failed would lose work the user already approved.
+             */
+            const nowRead = await readGraph(ctx.scenario_id);
+            const base = nowRead ?? afterSet;
+            const stillNeeds = new Map<string, number>();
+            for (const [id, range] of frameById) {
+              const node = base.nodes.find((n) => n.id === id);
+              if (node !== undefined && frameOf(node) !== null) continue;
+              /**
+               * ⛔ AND IT MUST STILL HAVE A VALUE IN THE FRESH BYTES. `needsFrame`
+               * validated `typeof os.value === 'number'` against the EARLIER read;
+               * `patched` maps over the fresh one. A competing writer that cleared
+               * a value therefore yielded `raw === undefined` and put `value: NaN`
+               * on the wire — a number the selection filter never validated, on
+               * bytes it never saw. The first site has this guard; this one did not.
+               * A factor with no value is left without one rather than framed.
+               */
+              const freshOs = (node?.observed_state ?? {}) as { value?: unknown; raw_value?: unknown };
+              const freshRaw = typeof freshOs.raw_value === 'number' ? freshOs.raw_value : freshOs.value;
+              if (node === undefined || typeof freshRaw !== 'number' || !Number.isFinite(freshRaw)) continue;
+              stillNeeds.set(id, range);
+              // ⭐ Reported only now, from the FRESH node, so the sentence the user
+              // reads and the bytes that were written are the same fact.
+              framed.push({ id: node.id, factor: node.label, value: freshRaw, range });
+            }
+            const patched = base.nodes.map((n) => {
+              const range = stillNeeds.get(n.id);
               if (range === undefined) return n;
               const os = (n.observed_state ?? {}) as { value: number; raw_value?: number };
               const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
               return { ...n, observed_state: { ...os, value: raw / range, raw_value: raw, cap: range, declared_scale: 'unit_interval' } };
             });
-            const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
-              graph: { nodes: patched, edges: afterSet.edges },
+            /**
+             * ⛔ THE SIBLING OF THE FRAME WRITE ABOVE, and it carried the same
+             * omission. `afterSet` is a re-read, so it is fresher — but a read
+             * is still a read, and this asserts `edges: afterSet.edges`, the
+             * whole edge set as it was at that moment. Without an expected hash
+             * a write landing in between is silently restored to its old value.
+             *
+             * ⚠ I CLAIMED THIS WAS FIXED ONCE AND IT WAS NOT. The claim went
+             * into a commit message and a PR body while only the first site had
+             * changed. Fixed now, and the guard below counts BOTH.
+             */
+            /**
+             * ⛔ NO WRITE AT ALL WHEN THE RE-READ LEFT NOTHING TO DO — the docblock
+             * above promised exactly this and it was false at BOTH sites.
+             *
+             * ⚠ Accepted from independent review of #1743. The gate was
+             * `frameById.size`, computed BEFORE the re-read. When a competing writer
+             * had already framed every factor, `stillNeeds` was empty, `patched`
+             * equalled `base.nodes`, and a byte-identical WHOLE-GRAPH register still
+             * went out — minting a model version the user did not cause and taking
+             * the overwrite risk this block exists to remove, for nothing.
+             *
+             * Skipping is honest rather than synthetic: `framed` is now built inside
+             * the `stillNeeds` loop, so it is empty here and
+             * `ranges_added_for_analysis` is omitted. No claim, because no write.
+             */
+            const reg: { status: number; json: Record<string, unknown> } = stillNeeds.size === 0
+              ? { status: 200, json: {} }
+              : await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+              // ⛔⛔ SPREAD THE WHOLE GRAPH. This sent only `{ nodes, edges }`, so
+              // every other top-level key was DELETED by a write whose purpose is
+              // to stop the model being overwritten. They are not cosmetic:
+              // `computeAnalysisAffectingGraphHashSha256` (`context/graph-hash.ts:149-162`)
+              // hashes `options`, `goal_node_id` and `goal_constraints` too, so the
+              // frame write destroyed analysis-affecting content. The value-batch
+              // write at `:367` had it right all along — same spread, same reason.
+              graph: { ...base.raw, nodes: patched, edges: base.edges },
+              ...(base.graph_hash !== '' ? { expected_graph_hash: base.graph_hash } : {}),
+              /**
+               * ⭐ AND THE IDENTITY EXPECTATION, from the SAME read these bytes
+               * come from. Patching fresh nodes preserves an intervening rename;
+               * this REFUSES outright if one lands in the window between that
+               * read and the route's own — which the analysis-space hash cannot
+               * see, because its projection excludes labels.
+               *
+               * ⚠ The route enforces this only once CEE #1810 lands. Until then
+               * it is an unknown top-level field and is ignored (the register
+               * route has no body schema), so sending it early is safe and makes
+               * the two land in either order.
+               */
+              ...(base.graph_identity_hash !== ''
+                ? { expected_graph_identity_hash: base.graph_identity_hash }
+                : {}),
             });
             if (reg.status !== 200) {
-              failures.push({ factor: 'scale_frame', detail: `could not attach a range: http ${reg.status}` });
+              const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
+              /**
+               * ⛔⛔ "NOTHING WAS WRITTEN" WAS UNTRUE HERE, AND IT IS THE WORST
+               * KIND OF UNTRUE: the values were already saved, in their own
+               * registration, BEFORE this frame write was attempted. Telling the
+               * user nothing landed invites them to redo a write that succeeded.
+               *
+               * The two outcomes are now reported SEPARATELY — what was saved,
+               * and what was not attached — because they are separately true.
+               * The unattached list is captured before `framed` is cleared;
+               * clearing it was itself losing the only record of which factors
+               * still have no range.
+               */
+              rangesNotAttached = [...framed];
+              const savedSomething = landed.length > 0;
+              if (code === 'GRAPH_STALE') {
+                /**
+                 * ⛔⛔ THE REFUSAL ESTABLISHES ONE THING ONLY: *THIS* FRAME WRITE
+                 * DID NOT LAND. It establishes nothing about the current model.
+                 *
+                 * ⚠ CHANGES_REQUIRED on a6dc18be, accepted in full. My previous
+                 * wording asserted that the approved values were "unchanged",
+                 * that "only the range" was missing, and that the analysis was
+                 * "still blocked" — then told the user not to re-enter anything.
+                 * But GRAPH_STALE means a COMPETING WRITER moved the canonical
+                 * graph after the `afterSet` read. That writer may have changed a
+                 * value, attached a range, or removed the factor. Every one of
+                 * those sentences was authority the stale read cannot support,
+                 * and the last one is advice that could lose the user's work.
+                 *
+                 * So: RE-READ, and describe only what the fresh read shows. When
+                 * the read is unavailable, report the HISTORICAL EVENT and say
+                 * the current state is unknown — never advise on a state we could
+                 * not observe.
+                 */
+                const fresh = await readGraph(ctx.scenario_id);
+                if (fresh === null) {
+                  // Nothing here is verified, so nothing is claimed: the list is
+                  // dropped and the unknown marker travels in its place.
+                  rangesNotAttached = [];
+                  currentStateUnknown = true;
+                  failures.push({
+                    factor: 'scale_frame',
+                    detail: savedSomething
+                      ? /**
+                       * ⚠ THE HISTORICAL FACT IS BOUND TO ITS OWN TENSE. I asked
+                       * the reviewer whether to withhold it entirely; on
+                       * reflection that is my call, and withholding it is worse —
+                       * it is the one thing that stops a user redoing a write
+                       * that was accepted. What matters is that it cannot be
+                       * READ as a current-state claim, so the sentence says the
+                       * writes were accepted AT THE TIME and that whether those
+                       * values are still in the model is unknown, rather than
+                       * stating a fact and an UNKNOWN side by side.
+                       */
+                      'the model changed while the range was being attached, and it could not be read back afterwards. This turn\u2019s value writes were accepted AT THE TIME, and its range write was refused. Whether those values are still in the model, whether they now carry a range, and whether the analysis can run are ALL UNKNOWN, because the model could not be read. Read it again before describing or advising anything \u2014 and do not tell the user their figures are safe.'
+                      : 'the model changed while this was being prepared and could not be read back. No range was attached by this turn; the current state is unknown — read it again and propose afresh.',
+                  });
+                } else {
+                  // Derived from the FRESH read, never from what we intended:
+                  // a competing writer may already have supplied a range.
+                  /**
+                   * ⭐⭐ KEYED ON `id`, WHICH IS THE ONLY KEY THAT CANNOT COLLIDE.
+                   *
+                   * A label join silently resolved one factor to a DIFFERENT factor
+                   * sharing its label (see the `IntendedFrame` note above), and it
+                   * could not find a renamed one at all. An id join answers both:
+                   * present-and-framed, present-and-still-unranged, or absent.
+                   *
+                   * ⚠ And the message is built from the FRESH node's label, not the
+                   * one this turn remembered — after a rename the user is shown the
+                   * name the model now uses, not a name that no longer exists.
+                   */
+                  const byId = new Map<string, GraphRead['nodes'][number]>();
+                  for (const n of fresh.nodes) {
+                    const id = String((n as { id?: unknown }).id ?? '');
+                    if (id !== '') byId.set(id, n);
+                  }
+                  /**
+                   * ⛔⛔ AND A LABEL THAT IS NOT IN THE FRESH READ PROVES NOTHING.
+                   * The join is on `label`, so a factor a competing writer RENAMED
+                   * — the exact case GRAPH_STALE fires for — is simply absent from
+                   * `byLabel`. `frameOf(undefined)` is null, so it survived the
+                   * filter and was then printed BY ITS OLD LABEL as "still has no
+                   * range": a present-state claim about a name the model no longer
+                   * uses, from a read that never saw it. That is the same
+                   * fabrication as the refusal copy this block was written to fix.
+                   *
+                   * So the three cases are separated. Found and unranged → named.
+                   * Found and framed → dropped, someone supplied one. NOT FOUND →
+                   * dropped from the named list and disclosed as unaccounted for,
+                   * without asserting anything about it.
+                   */
+                  const unaccounted = rangesNotAttached.filter((f) => byId.get(f.id) === undefined);
+                  const stillUnranged = rangesNotAttached
+                    .filter((f) => byId.get(f.id) !== undefined && frameOf(byId.get(f.id)) === null)
+                    // ⭐ The CURRENT label, from the fresh read. A factor renamed by
+                    // a competing writer is named as the model now names it.
+                    .map((f) => ({ ...f, factor: String((byId.get(f.id) as { label?: unknown }).label ?? f.factor) }));
+                  rangesNotAttached = stillUnranged;
+                  failures.push({
+                    factor: 'scale_frame',
+                    detail: savedSomething
+                      ? 'the model changed while the range was being attached, so this turn attached none. Read back afterwards, ' +
+                        (stillUnranged.length > 0
+                          ? `these still have no range: ${stillUnranged.map((f) => f.factor).join(', ')}. Describe the values from that read, not from what was approved — someone else may have changed them.`
+                          : 'every factor that could be found now has a range, so someone else supplied one. Describe the model from that read before advising anything.')
+                        + (unaccounted.length > 0
+                          ? ` ⚠ ${unaccounted.length} factor(s) this turn tried to frame could not be found in that read at all — they may have been renamed or removed, so nothing is claimed about them; read the model as it now stands.`
+                          : '')
+                      : 'the model changed while this was being prepared, so this turn attached no range. Read the model as it now stands before proposing again.',
+                  });
+                }
+              } else {
+                failures.push({
+                  factor: 'scale_frame',
+                  detail: `could not attach a range: http ${reg.status}`,
+                });
+              }
               framed.length = 0;
             }
           }
@@ -1662,11 +2097,46 @@ export function createAgentCapabilities(
           ...(rescaled.length > 0
             ? { rescaled_by_the_model: rescaled, must_disclose_rescaling: true }
             : {}),
-          ...(framed.length > 0 ? { ranges_added_for_analysis: framed } : {}),
+          ...(framed.length > 0 ? { ranges_added_for_analysis: framed.map(toWire) } : {}),
+          /**
+           * ⭐ THE PARTIAL OUTCOME, STATED RATHER THAN IMPLIED. A value write and
+           * a frame write are two registrations; the first can land and the
+           * second refuse. Reporting only aggregate success let the reply claim
+           * "applied" while the analysis was still blocked.
+           *
+           * `partially_applied` is this file's existing word for it (`:395`,
+           * `:463`). Present only when it is true, so its presence is the signal.
+           */
+          // ⚠ PRESENT-STATE UNKNOWN, stated rather than implied by an absence.
+          // Travels even when `ranges_not_attached` is empty, which is exactly
+          // when a consumer must not advise.
+          ...(currentStateUnknown ? { partially_applied: true, current_state_unknown: true } : {}),
+          ...(rangesNotAttached.length > 0
+            ? {
+              partially_applied: true,
+              ranges_not_attached: rangesNotAttached.map(toWire),
+              // A factor whose amount has no range cannot be read against
+              // anything, so the analysis stays blocked for it whatever else
+              // landed. Named, so the Agent cannot report a clean success.
+              // ⚠ DERIVED FROM THE FRESH READ, not from what this turn intended.
+              // On GRAPH_STALE `rangesNotAttached` has already been filtered to
+              // the factors a re-read shows STILL have no range; when the read
+              // failed it is the unfiltered intent and the detail above says the
+              // current state is unknown, so nothing here claims otherwise.
+              analysis_still_blocked_for: rangesNotAttached.map((f) => f.factor),
+            }
+            : {}),
           not_represented:
             'These values are the user\u2019s adopted assumptions, not measurements, and the model records ' +
             'no mark distinguishing the two \u2014 so say so when you describe what changed' +
             (rescaled.length > 0 ? ', and state every value the model stored differently from the one approved.' : '.') +
+            (rangesNotAttached.length > 0
+              ? ' \u26a0 This turn could not attach a range to ' +
+                rangesNotAttached.map((f) => f.factor).join(', ') +
+                ' because the model changed underneath it. Describe those factors from the model as it now stands — ' +
+                'another person may have changed a value or supplied a range — and do not tell the user their figures ' +
+                'are safe or unchanged unless the current model shows it.'
+              : '') +
             (framed.length > 0
               ? ' Some of them had no range to be read against, which would have stopped the analysis running ' +
                 'at all, so a range was taken from the figure itself: ' +

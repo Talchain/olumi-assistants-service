@@ -205,6 +205,20 @@ function labelOf(graph: GraphV3T, nodeId: string): string {
  * twice — or differently from the canvas — is how one datum acquires two
  * spellings.
  */
+/**
+ * `safe_summary` is `.max(80)` in `EditGraphHandlerFactSchema`. Unbounded, a long label made this writer
+ * refuse its own receipt (`fact_invalid`) — served `8b2495e`, witness c12: "Connected Bring in an
+ * experienced contractor for six months to Implementation capacity" (86 chars), and the user's approved
+ * option landed with no link. Same bound and fallback as `buildAddSafeSummary` / `buildRenameSafeSummary`.
+ */
+const SAFE_SUMMARY_MAX_CHARS = 80;
+export function buildAddEdgeSafeSummary(fromLabel: string, toLabel: string): string {
+  const full = `Connected ${fromLabel} to ${toLabel}`;
+  if (full.length <= SAFE_SUMMARY_MAX_CHARS) return full;
+  const short = `Connected to ${toLabel}`;
+  return short.length <= SAFE_SUMMARY_MAX_CHARS ? short : short.slice(0, SAFE_SUMMARY_MAX_CHARS);
+}
+
 export function signedMeanFor(magnitude: number, direction: 'positive' | 'negative'): number {
   return direction === 'negative' ? -Math.abs(magnitude) : Math.abs(magnitude);
 }
@@ -491,7 +505,7 @@ export function applyStructuralAddEdge(
       affected_entities: [{ kind: 'edge', label: `${fromLabel} → ${toLabel}` }],
       graph_hash_before: currentBaseHash,
       graph_hash_after: postAddHash,
-      safe_summary: `Connected ${fromLabel} to ${toLabel}`,
+      safe_summary: buildAddEdgeSafeSummary(fromLabel, toLabel),
       impact: 'high' as const,
       rerun_recommended: true,
     },

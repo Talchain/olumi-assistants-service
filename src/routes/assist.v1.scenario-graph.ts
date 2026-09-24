@@ -223,6 +223,7 @@ import { log } from "../utils/telemetry.js";
 // ROADMAP 2.1271 — the additive analysis payload. All composition lives in the
 // helper; this route contributes the security ladder and the graph it read.
 import { readScenarioAnalysis } from "./scenario-graph-analysis-read.js";
+import { projectAnalysisAdmission } from './analysis-admission-projection.js';
 
 /** Wire schema discriminator. Frozen — the UI lane builds against this. */
 export const SCENARIO_GRAPH_SCHEMA = "scenario_graph.v1" as const;
@@ -602,6 +603,17 @@ export default async function route(app: FastifyInstance) {
         // questions).
         analysis_state: analysis.analysis_state,
         analysis_result: analysis.analysis_result,
+        /**
+         * ⭐ MAY A RUN BE ADMITTED RIGHT NOW — the question `analysis_state`
+         * does not answer. It reports whether a FACT HAS LANDED for this graph;
+         * this reports whether one COULD BE STARTED, and what stands in the way.
+         * Without it a reload can only learn admissibility by taking a turn.
+         *
+         * Machine codes only — every user-facing string is dropped in the
+         * projection, because this route ships no enforceable prose. `null` when
+         * there is no graph to judge: "this leg did not answer", never a state.
+         */
+        analysis_admission: projectAnalysisAdmission(graph, graphPresent),
         request_id: requestId,
       });
     },
