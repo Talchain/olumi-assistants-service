@@ -54,12 +54,42 @@ export interface AnalysisAdmissionProjection {
   readonly permitted_analysis_mode: PermittedAnalysisMode;
   /** Whether the model represents the brief well enough to carry a confidence claim. */
   readonly semantic_quality_sufficient: boolean;
-  /** Why, as machine codes. De-duplicated, order preserved. Empty when admitted. */
+  /**
+   * Why, as machine codes. De-duplicated, order preserved.
+   *
+   * ⛔ NOT "empty when admitted" — that was this field's original contract and it
+   * is false. On a fully runnable model the authority pushes at least three:
+   * `RUN_WILL_EXCLUDE_OPTIONS` or `READY_TO_COMPARE`, then the
+   * `semantic_quality_sufficient` reason and the `permitted_analysis_mode`
+   * reason, both UNCONDITIONALLY. A consumer implementing the old contract would
+   * have shown a blocker on every healthy scenario. Read `admitted` for the
+   * verdict; these codes are the reasoning behind it, present either way.
+   */
   readonly reason_codes: readonly AdmissionReasonCode[];
   /** The machine codes of what is missing — never the `why_it_matters` prose,
    *  and never the user's own option/factor LABELS, which are their words and
-   *  already travel with the graph. */
+   *  already travel with the graph.
+   *
+   *  ⚠ DE-DUPLICATED ON `code`, so N distinct gaps on N different factors
+   *  collapse to one entry. That is deliberate for a reload's "what kind of thing
+   *  is missing" question, and it is the reason `missing_input_count` exists
+   *  beside it — a consumer that needs cardinality must read that, never
+   *  `missing_input_codes.length`. */
   readonly missing_input_codes: readonly string[];
+  /** How many distinct gaps there are, by `issue_id`, BEFORE the collapse above.
+   *  `missing_input_codes` answers "what kind"; this answers "how many". */
+  readonly missing_input_count: number;
+  /**
+   * ⭐ THE DISCRIMINATOR A CODE ALONE CANNOT CARRY. The authority separates "N
+   * inputs are still needed FROM YOU" from "Olumi filled in the gaps here itself;
+   * nothing is required of you" purely in the MESSAGE under one shared
+   * `MODEL_HAS_BLOCKERS` code. Both are machine values, not prose, and a reload
+   * that cannot tell them apart will either nag a user who owes nothing or go
+   * silent on one who owes something.
+   */
+  readonly inputs_demanded_of_user: number;
+  /** Gaps the engine closed by excluding an option rather than asking the user. */
+  readonly inputs_waived_by_exclusion: number;
   /** The 64-hex subject this verdict is about; `null` when it could not be read. */
   readonly graph_hash: string | null;
 }
@@ -90,7 +120,23 @@ export function projectAnalysisAdmission(
   // missing". Checked against the interface at `analysis-admission.ts:448-458`.
   const seenCode = new Set<string>();
   const missing_input_codes: string[] = [];
+  const seenIssue = new Set<string>();
+  let inputs_demanded_of_user = 0;
+  let inputs_waived_by_exclusion = 0;
   for (const m of a.missing_important_inputs) {
+    const issue = typeof (m as { issue_id?: unknown }).issue_id === 'string'
+      ? (m as { issue_id: string }).issue_id
+      : '';
+    if (issue !== '' && !seenIssue.has(issue)) {
+      seenIssue.add(issue);
+      // ⭐ Counted per DISTINCT GAP, which is what `issue_id` identifies — the
+      // code recurs legitimately across factors, so counting codes undercounts.
+      if ((m as { waived_by_exclusion?: unknown }).waived_by_exclusion === true) {
+        inputs_waived_by_exclusion += 1;
+      } else {
+        inputs_demanded_of_user += 1;
+      }
+    }
     const c = m.code;
     if (typeof c !== 'string' || c === '' || seenCode.has(c)) continue;
     seenCode.add(c);
@@ -103,6 +149,9 @@ export function projectAnalysisAdmission(
     semantic_quality_sufficient: a.semantic_quality_sufficient,
     reason_codes,
     missing_input_codes,
+    missing_input_count: seenIssue.size,
+    inputs_demanded_of_user,
+    inputs_waived_by_exclusion,
     graph_hash: a.graph_hash,
   };
 }

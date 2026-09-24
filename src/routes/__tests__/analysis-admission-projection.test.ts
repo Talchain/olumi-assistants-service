@@ -114,3 +114,37 @@ describe('the read route actually ships it', () => {
     expect(send).not.toContain('analysis_ready:');
   });
 });
+
+/**
+ * ⛔ THE CONTRACT SAID "Empty when admitted" AND IT NEVER IS — a consumer
+ * implementing it would have shown a blocker on every healthy scenario.
+ * `analysisAdmissionFrom` pushes the `semantic_quality_sufficient` reason and the
+ * `permitted_analysis_mode` reason UNCONDITIONALLY, plus one of
+ * `RUN_WILL_EXCLUDE_OPTIONS` / `READY_TO_COMPARE`.
+ *
+ * And a code alone cannot say whether the user OWES anything: the authority
+ * separates "N inputs are still needed from you" from "Olumi filled in the gaps
+ * here itself" purely in the message, under one shared `MODEL_HAS_BLOCKERS` code.
+ */
+describe('the projection does not promise a contract the authority breaks', () => {
+  it('⛔ reason_codes is NON-EMPTY on an admitted model — the old docblock was false', () => {
+    const p = projectAnalysisAdmission(ANALYSABLE, true);
+    expect(p).not.toBeNull();
+    // ⚠ Bound to the FIELD, not to a particular verdict: the point is that
+    // `reason_codes` is populated whatever `admitted` says, so a consumer must
+    // never read its emptiness as "no blockers".
+    expect(p!.reason_codes.length).toBeGreaterThan(0);
+  });
+
+  it('⭐ cardinality survives the code collapse, and obligation is discriminated', () => {
+    const p = projectAnalysisAdmission(ANALYSABLE, true);
+    expect(p).not.toBeNull();
+    // `missing_input_codes` answers "what kind"; `missing_input_count` "how many".
+    // A consumer reading `.length` for cardinality undercounts whenever one code
+    // recurs across factors, which is legitimate and common.
+    expect(p!.missing_input_count).toBeGreaterThanOrEqual(p!.missing_input_codes.length);
+    // Every distinct gap is either demanded of the user or waived by exclusion —
+    // nothing is silently in neither bucket.
+    expect(p!.inputs_demanded_of_user + p!.inputs_waived_by_exclusion).toBe(p!.missing_input_count);
+  });
+});
