@@ -269,10 +269,24 @@ function isNonEmptyArray(value: unknown): value is unknown[] {
  * byte-identical on the degenerate all-empty-arrays case (they never compare to
  * each other — different purposes); returning `null` for an empty graph is the
  * safe identity outcome and drives the CAS evaluator's `unavailable` result.
+ *
+ * ⛔ THIS IS ALSO THE ONE "EMPTY MODEL" PREDICATE FOR A CALLER'S KNOWN-EMPTY
+ * ASSERTION (independent review of #1786, 5807034398). `expected_model_empty`
+ * is judged by it at graph registration's preflight
+ * (`assist.v1.scenario-graph-register.ts`) and, under the row lock, by its SQL
+ * mirror in migration 20260924030000 (`v_current_identity_bearing`). Emptiness
+ * had three meanings across one write — nodes-only at the route, all four
+ * fields here, nodes-only again in SQL — so an options-, edges- or goal-only
+ * model was called empty and replaced. It accepts the RAW stored graph
+ * (`loadGraph` returns `scenarios.graph` unparsed) because that is what the SQL
+ * reads: no ingress parse, so an unparseable graph whose identity hash is NULL
+ * is still judged by its content, never by its hash. The four fields and their
+ * semantics are pinned against the SQL by
+ * `append-turn-atomic-v5-strict-expected-empty-static-guards.test.ts`
+ * (CORRESPONDENCE): change `isIdentityEmpty` and that test tells you the SQL
+ * must change with it.
  */
-export function isIdentityEmptyGraph(
-  graph: GraphStateIngress | null | undefined,
-): boolean {
+export function isIdentityEmptyGraph(graph: unknown): boolean {
   return !graph || isIdentityEmpty(graph);
 }
 
@@ -304,7 +318,7 @@ export function orderGraphEntriesForComparison(graph: unknown): unknown {
   return out;
 }
 
-function isIdentityEmpty(graph: GraphStateIngress): boolean {
+function isIdentityEmpty(graph: unknown): boolean {
   const g = graph as Record<string, unknown>;
   const nodes = g.nodes;
   const edges = g.edges;

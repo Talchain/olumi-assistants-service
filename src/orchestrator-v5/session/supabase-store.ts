@@ -36,6 +36,7 @@ import {
 import type { SessionLRUCache } from './cache.js';
 import type { InvalidationResult, InvalidationScope } from './invalidation.js';
 import {
+  AtomicPreconditionUnenforceableError,
   GraphStaleWriteError,
   SessionReadError,
   StateCommitFailedError,
@@ -289,6 +290,17 @@ export class SupabaseSessionStore implements SessionStore {
    * harms. A non-graph turn pays no extra read.
    */
   async append(write: SessionTurnWrite): Promise<SessionAppendOutcome> {
+    // ⛔ A caller's precondition is enforced atomically or refused — before ANY read or
+    // write (see `SessionTurnWrite.requireAtomicExpectedBase`). Only the versioned v5
+    // append can hold a known-absent base inside its transaction.
+    if (write.requireAtomicExpectedBase === true) {
+      if (write.modelVersion === undefined) {
+        throw new AtomicPreconditionUnenforceableError('no versioned atomic path for this write');
+      }
+      if (write.expectedGraphIdentityHash === undefined) {
+        throw new AtomicPreconditionUnenforceableError('no expected base was read');
+      }
+    }
     const prior = write.graph == null ? 'new' : await this.classifyPriorTurn(write);
     const outcome = await this.appendThroughRpc(write);
     if (prior === 'replay') return { ...outcome, replayedPriorTurn: true };
@@ -1410,6 +1422,18 @@ export class SupabaseSessionStore implements SessionStore {
     // fact permanently false on three live paths.
     const expectedBaseKnown = write.expectedGraphIdentityHash !== undefined;
 
+    // ⛔ STRICT EXPECTED-EMPTY — ONE KIND OF WRITE, AND OTHERWISE NO KEY AT ALL (independent
+    // review of #1786, 5806044132). The guard at 20260920210000:263-276 exempts
+    // `incoming = current` as a content-idempotent retry, so when a DIFFERENT operation saved
+    // byte-identical bytes after this caller read the model as empty, the write was admitted
+    // and committed with no version receipt. `p_require_expected_empty` (migration
+    // 20260924030000) refuses ANY graph presence for this write, with no such exemption.
+    // Sent ONLY for a caller precondition on a KNOWN-EMPTY base. Every other write sends the
+    // exact pre-migration argument object: PostgREST matches named arguments by KEY, so even
+    // `false` would make a pre-install database answer PGRST202 for every versioned write.
+    const requireExpectedEmpty =
+      write.requireAtomicExpectedBase === true && write.expectedGraphIdentityHash === null;
+
     const { data, error } = await this.client.rpc('append_turn_atomic_v5', {
       ...baseRpcArgs,
       p_expected_graph_identity_hash: trustedExpectedHash,
@@ -1424,7 +1448,10 @@ export class SupabaseSessionStore implements SessionStore {
       // contract is "no write is ever rejected"; promoting the versioned path
       // to enforce unilaterally would make that false and is "a later
       // explicit, Paul-gated step".
-      p_cas_enforce: rpcMode === 'enforce',
+      // ⛔ A caller's explicit precondition is enforced for THIS write whatever the global
+      // posture — the SQL guard (20260920210000:263-276) runs only under this switch, and
+      // replay is still decided first. Every other write keeps the derived mode.
+      p_cas_enforce: rpcMode === 'enforce' || write.requireAtomicExpectedBase === true,
       p_fence_generation: generation,
       p_version_mutation_id: version.mutation_id,
       p_version_analysis_affecting_hash: version.analysis_affecting_hash,
@@ -1436,6 +1463,7 @@ export class SupabaseSessionStore implements SessionStore {
       p_version_authored_by: version.authored_by,
       p_version_creation_kind: version.creation_kind,
       p_version_source_turn_id: version.source_turn_id,
+      ...(requireExpectedEmpty ? { p_require_expected_empty: true } : {}),
     });
 
     if (error) {
@@ -1484,7 +1512,14 @@ export class SupabaseSessionStore implements SessionStore {
             'because the turn, graph, version, head and event must share one transaction. ' +
             'Execute migration 20260824200000_c8_atomic_model_version_restore BEFORE this build ' +
             'serves traffic, or set CEE_MODEL_VERSIONS_ENABLED=false to disable versioning ' +
-            'without a deploy.',
+            'without a deploy.' +
+            // Only a strict write names the new argument, so only it can be the one PostgREST
+            // could not match; nothing was written either way (fail closed).
+            (requireExpectedEmpty
+              ? ' This write sent p_require_expected_empty, which needs migration ' +
+                '20260924030000_v5_append_v5_strict_expected_empty installed (and the PostgREST ' +
+                'schema cache reloaded) before a build that sends it serves traffic.'
+              : ''),
           { cause: error, rpc_code: errCode(error) },
         );
       }

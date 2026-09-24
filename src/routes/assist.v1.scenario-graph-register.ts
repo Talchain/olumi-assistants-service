@@ -145,7 +145,7 @@ import {
   CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
   resolveVerifiedIdentityOrRefuse,
 } from "../orchestrator/route-v2-preflight.js";
-import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
+import { computeGraphIdentityHash, isIdentityEmptyGraph } from "../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
 import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
@@ -153,7 +153,7 @@ import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
 import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { registrationRequestHash, registrationTurnId } from "../orchestrator-v5/graph-registration/registration-identity.js";
-import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
+import { AtomicPreconditionUnenforceableError, GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
 import { runWithPendingTurnFence, TurnFenceRejectedError } from "../orchestrator-v5/session/turn-fence.js";
 import { admitCurrentTurnFence } from "../orchestrator/turn-fence-prehandler.js";
 import { normaliseBriefText } from "../orchestrator-v5/session/normalise-brief-text.js";
@@ -294,6 +294,12 @@ export default async function route(app: FastifyInstance) {
       }
       const callerExpectedGraphHash =
         typeof body.expected_graph_hash === "string" ? body.expected_graph_hash : undefined;
+      // An OPTIONAL caller assertion that the model is still EMPTY — the precondition a
+      // FIRST construction was built on. Validated before any database work.
+      if (body.expected_model_empty != null && body.expected_model_empty !== true) {
+        return invalid("EXPECTED_MODEL_EMPTY_INVALID", "`expected_model_empty` must be `true` when supplied.");
+      }
+      const callerExpectsEmptyModel = body.expected_model_empty === true;
       const brief = normaliseBriefText(body.brief_text);
       if (brief.truncated) {
         return invalid("BRIEF_INVALID", "`brief_text` exceeds the supported brief length.");
@@ -490,6 +496,59 @@ export default async function route(app: FastifyInstance) {
         }
       }
 
+      /**
+       * ⛔ A FIRST CONSTRUCTION NEVER LANDS ON A MODEL SOMEONE ELSE SAVED (independent
+       * review of #1786, 5805279370). A construction reads the model as empty, then spends
+       * ~20 s generating. Without this, the CAS base above is the server's read NOW — so a
+       * graph another author committed in that window became the base, and the
+       * construction replaced it. The caller's precondition is checked against the same
+       * server read; when it holds, that read is an ABSENT/empty base, which the atomic
+       * RPC then enforces as known-absent (`p_expected_base_known`), closing the
+       * read→write window too. A populated model is refused with nothing written — the
+       * caller recovers its OWN earlier commit by its operation's version, never by
+       * adopting the newer state.
+       *
+       * ⛔ "EMPTY" IS THE CANONICAL IDENTITY RULE, `isIdentityEmptyGraph` — not "no nodes"
+       * (independent review of #1786, 5807034398). This check used to admit any base whose
+       * `nodes` was absent or empty, while the identity rule counts nodes, edges, options
+       * AND goal_node_id and the ingress schema admits an options-only graph. So an
+       * options-, edges- or goal-only model passed as empty: its identity hash is non-NULL,
+       * the store sent no strict flag, and the construction replaced it as a "first" model.
+       * The predicate reads the raw server bytes, never the hash, so an unparseable graph
+       * (identity hash NULL) is judged by its content too. The SAME four fields are the
+       * SQL's `v_current_identity_bearing` under the row lock (migration 20260924030000);
+       * the correspondence is pinned by
+       * `append-turn-atomic-v5-strict-expected-empty-static-guards.test.ts`. A base that
+       * passes here therefore has a NULL identity hash, which is what makes the store send
+       * `p_require_expected_empty`.
+       */
+      if (callerExpectsEmptyModel) {
+        if (expectedGraphIdentityHash === undefined) {
+          return unavailable();
+        }
+        if (!isIdentityEmptyGraph(baseGraphForInvariants)) {
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.expected_model_empty_stale",
+              request_id: requestId,
+              scenario_id: scenarioId,
+              current: expectedGraphAnalysisHash ?? null,
+            },
+            "Graph registration — a model was saved since the caller read it as empty; nothing written",
+          );
+          return reply
+            .code(409)
+            .send(
+              buildErrorV1(
+                "BAD_INPUT",
+                "A model was saved for this decision after it was read as empty. Nothing was written.",
+                { code: "MODEL_NOT_EMPTY", current_graph_hash: expectedGraphAnalysisHash ?? null },
+                requestId,
+              ),
+            );
+        }
+      }
+
       // ── 5. Project, then hash, then write — in that order ────────────────
       // `projectGraphForPersistence` is the single definition of "the form in
       // which a graph is persisted". Hashing before it would advertise an
@@ -644,6 +703,10 @@ export default async function route(app: FastifyInstance) {
             ...(brief.value === undefined ? {} : { briefText: brief.value }),
             expectedGraphIdentityHash,
             expectedGraphAnalysisHash,
+            // The caller's empty-model precondition is held INSIDE the atomic write, whatever
+            // the global CAS posture: the empty read above can go stale before the fence
+            // claim and the append (independent review of #1786, 5805649773).
+            ...(callerExpectsEmptyModel ? { requireAtomicExpectedBase: true as const } : {}),
           },
           });
         });
@@ -707,6 +770,29 @@ export default async function route(app: FastifyInstance) {
               })),
             },
           );
+        }
+        if (err instanceof AtomicPreconditionUnenforceableError) {
+          // The writer could not hold the caller's precondition atomically, so it wrote
+          // nothing. Refused as OUR limitation (503), never downgraded to an unconditional write.
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.precondition_unenforceable",
+              request_id: requestId,
+              scenario_id: scenarioId,
+              err: err.message,
+            },
+            "Graph registration — the caller's precondition cannot be enforced atomically; nothing written",
+          );
+          return reply
+            .code(503)
+            .send(
+              buildErrorV1(
+                "INTERNAL",
+                "This model could not be saved safely right now. Nothing was written.",
+                { code: "PRECONDITION_UNENFORCEABLE" },
+                requestId,
+              ),
+            );
         }
         if (err instanceof GraphStaleWriteError) {
           // Atomic in-transaction CAS refused: the whole turn rolled back and

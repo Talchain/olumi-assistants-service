@@ -78,7 +78,7 @@ vi.mock("../../orchestrator/user-identity.js", async (importOriginal) => {
 });
 
 import registerRoute from "../assist.v1.scenario-graph-register.js";
-import { computeGraphIdentityHash } from "../../orchestrator-v5/context/graph-identity.js";
+import { computeGraphIdentityHash, isIdentityEmptyGraph } from "../../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../../orchestrator-v5/persisted-graph-projection.js";
 import { GraphStaleWriteError } from "../../orchestrator-v5/session/store.js";
@@ -1292,6 +1292,227 @@ describe("register — an optional caller expectation makes the write conditiona
     const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_hash: current() });
     expect(res.statusCode).toBe(503);
     expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
+
+/**
+ * ⛔ A FIRST CONSTRUCTION NEVER LANDS ON A MODEL SOMEONE ELSE SAVED (independent review
+ * of #1786, 5805279370). The constructor reads the model as empty, then spends ~20 s
+ * generating; the route's CAS base was its own read at write time, so a graph another
+ * author committed in that window became the base and was replaced. `expected_model_empty`
+ * carries the constructor's precondition into the write.
+ */
+describe("register — expected_model_empty makes a first construction conditional on an empty model", () => {
+  it("RED: a POPULATED base is refused 409 MODEL_NOT_EMPTY — no fence claim, and NOTHING reaches the atomic writer", async () => {
+    const claim = vi.fn(async (scenarioId: string, turnId: string) => ({ scenarioId, turnId, generation: 7 }));
+    (store as Record<string, unknown>).claimTurnFence = claim;
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_model_empty: true });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().details.code).toBe("MODEL_NOT_EMPTY");
+    expect(claim).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    delete (store as Record<string, unknown>).claimTurnFence;
+    await app.close();
+  });
+
+  /**
+   * ⛔ "EMPTY" IS THE IDENTITY RULE, NOT "NO NODES" (independent review of #1786, 5807034398).
+   * The canonical rule (`isIdentityEmptyGraph`, graph-identity.ts) calls a graph non-empty
+   * when ANY of nodes, edges, options or goal_node_id carries content, and the ingress schema
+   * admits an options-only graph. A nodes-only preflight admitted each base below as empty:
+   * the first three carry a NON-null identity hash, so the store never sent the strict flag
+   * and the construction replaced them; the fourth fails the ingress parse, so its hash is
+   * NULL — emptiness inferred from the hash alone would admit it too.
+   */
+  it.each([
+    ["options only", { nodes: [], edges: [], options: [{ id: "opt_contractor", label: "Hire a contractor" }] }, "hashed"],
+    ["edges only", { nodes: [], edges: [{ from: "fac_capacity", to: "out_velocity" }] }, "hashed"],
+    ["a goal id only", { nodes: [], edges: [], goal_node_id: "goal_velocity" }, "hashed"],
+    ["options only, no entry arrays (unparseable: identity hash NULL)", { options: [{ id: "opt_contractor" }] }, "unhashed"],
+  ])("RED: an identity-bearing base with NO nodes (%s) is refused 409 MODEL_NOT_EMPTY — nothing reaches the atomic writer", async (_l, base, hashed) => {
+    // PRECONDITION PINS — this base discriminates: a nodes-only reading calls it empty, the
+    // canonical rule does not, and the hash column says what a hash-only reading would.
+    const nodes = (base as { nodes?: readonly unknown[] }).nodes;
+    expect(nodes === undefined || nodes.length === 0, "no nodes: a nodes-only predicate admits it").toBe(true);
+    expect(isIdentityEmptyGraph(base), "the canonical identity rule calls it NON-empty").toBe(false);
+    const { expectedGraphIdentityHash } = computeExpectedGraphCasHashes(base);
+    if (hashed === "hashed") expect(expectedGraphIdentityHash).toMatch(/^[0-9a-f]{64}$/);
+    else expect(expectedGraphIdentityHash).toBeNull();
+
+    loadGraph.mockResolvedValue(base);
+    const claim = vi.fn(async (scenarioId: string, turnId: string) => ({ scenarioId, turnId, generation: 7 }));
+    (store as Record<string, unknown>).claimTurnFence = claim;
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_model_empty: true });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().details.code).toBe("MODEL_NOT_EMPTY");
+    expect(claim).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    delete (store as Record<string, unknown>).claimTurnFence;
+    await app.close();
+  });
+
+  it.each([
+    ["absent (null)", null],
+    ["present but empty", { nodes: [], edges: [] }],
+    ["empty entry arrays, options included", { nodes: [], edges: [], options: [] }],
+  ])(
+    "an EMPTY base (%s) writes, carrying a KNOWN-absent base to the atomic RPC", async (_l, base) => {
+      expect(isIdentityEmptyGraph(base), "CONTRAST: the canonical rule calls this base empty").toBe(true);
+      loadGraph.mockResolvedValue(base);
+      const app = await buildApp();
+      const res = await post(app, SCENARIO, { graph: IMPORTED, expected_model_empty: true });
+      expect(res.statusCode).toBe(200);
+      expect(append).toHaveBeenCalledTimes(1);
+      // null (not undefined) is the fact the RPC enforces as `p_expected_base_known`.
+      expect(append.mock.calls[0][0].expectedGraphIdentityHash).toBeNull();
+      await app.close();
+    });
+
+  it("the precondition travels INTO the atomic write (requireAtomicExpectedBase), and only when asked", async () => {
+    loadGraph.mockResolvedValue(null);
+    const app = await buildApp();
+    await post(app, SCENARIO, { graph: IMPORTED, expected_model_empty: true });
+    await post(app, SCENARIO, { graph: IMPORTED });
+    expect(append.mock.calls[0][0].requireAtomicExpectedBase).toBe(true);
+    expect(append.mock.calls[1][0]).not.toHaveProperty("requireAtomicExpectedBase");
+    await app.close();
+  });
+
+  it("a writer that cannot hold the precondition atomically → 503 PRECONDITION_UNENFORCEABLE, never an unconditional write", async () => {
+    loadGraph.mockResolvedValue(null);
+    const { AtomicPreconditionUnenforceableError } = await import("../../orchestrator-v5/session/store.js");
+    append.mockRejectedValue(new AtomicPreconditionUnenforceableError("no versioned atomic path for this write"));
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_model_empty: true });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().details.code).toBe("PRECONDITION_UNENFORCEABLE");
+    await app.close();
+  });
+
+  it("CONTRAST: with NO precondition a populated base is written exactly as before", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED });
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it.each([["false", false], ["a string", "yes"], ["a number", 1]])("a malformed precondition (%s) is refused before any database work", async (_l, v) => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_model_empty: v });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.code).toBe("EXPECTED_MODEL_EMPTY_INVALID");
+    expect(ensureScenarioExists).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("a base that cannot be read cannot adjudicate emptiness: 503, never an unconditional write", async () => {
+    loadGraph.mockRejectedValue(new Error("db blip"));
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_model_empty: true });
+    expect(res.statusCode).toBe(503);
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
+
+/**
+ * THE RACE ITSELF, through the REAL constructor and the REAL route: B reads empty and
+ * starts generating; A commits a graph; B resumes and registers. A's graph must survive,
+ * B must write nothing and say so. Contrasts: a model that stayed empty, and B's OWN
+ * construction already committed by a concurrent call of the same brief.
+ */
+describe("construction race — pause B after its empty read, commit A, resume B", async () => {
+  const { buildModelFromBrief, constructionOperationId } = await import("../../orchestrator-v5/agent-lane/runtime/build-model.js");
+  const BRIEF = "Should we hire a tech lead or two developers to increase delivery velocity this year?";
+  const A_GRAPH = SERVER_PRE_IMPORT;
+  const candidateText = JSON.stringify({
+    goal: { metric: "Velocity", operator: ">=", value: 20, unit: "points", horizon_months: 6, provenance: "explicit" },
+    constraints: [],
+    options: [
+      { label: "Hire a tech lead", provenance: "explicit", changes: ["Delivery capacity"], interventions: [] },
+      { label: "Hire two developers", provenance: "explicit", changes: ["Delivery capacity"], interventions: [] },
+    ],
+    factors: [{ label: "Delivery capacity", role: "observable", baseline_known: false, baseline_value: null, unit: null, provenance: "inferred", plausible_max: 100 }],
+    risks: [],
+    outcomes: [{ label: "Velocity", provenance: "inferred" }],
+    links: [{ from: "Delivery capacity", to: "Velocity", direction: "positive", provenance: "inferred" }],
+    unknowns: [],
+  });
+
+  function harness(app: FastifyInstance, versions: Array<Record<string, unknown>>) {
+    const registers: number[] = [];
+    const dispatch = async (path: string, body: Record<string, unknown>) => {
+      if (path.endsWith("/versions")) return { status: 200, json: { versions } };
+      const res = await app.inject({ method: "POST", url: path, payload: body });
+      if (path.endsWith("/graph/register")) registers.push(res.statusCode);
+      return { status: res.statusCode, json: res.json() as Record<string, unknown> };
+    };
+    return { dispatch, registers };
+  }
+  /** B's one structured call — during which A commits (or nothing happens). */
+  const generating = (duringGeneration: () => void) => (async () => {
+    duringGeneration();
+    return { text: candidateText };
+  }) as never;
+
+  it("RED: A commits while B generates → B writes NOTHING, A's graph stands, and B says so truthfully", async () => {
+    loadGraph.mockResolvedValue(null); // B's empty read
+    const app = await buildApp();
+    const h = harness(app, [{ version_id: "v-a", sequence: 1, creation: { kind: "committed_mutation", source_turn_id: "someone-elses-turn" } }]);
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, h.dispatch as never, generating(() => loadGraph.mockResolvedValue(A_GRAPH)));
+    expect(append, "B created no write and no version over A").not.toHaveBeenCalled();
+    expect(h.registers).toEqual([409]);
+    expect(out).toMatchObject({ ok: false, mutated: false, refusal: "model_changed_during_build" });
+    expect(await loadGraph(SCENARIO), "A's graph is still the model").toBe(A_GRAPH);
+    await app.close();
+  });
+
+  it("RED (the SECOND window): registration reads EMPTY, A commits before the append → the write must hold the precondition atomically", async () => {
+    // Registration's own server read sees an empty model; A commits straight after it,
+    // before the fence claim and the append. The atomic writer refuses a write whose
+    // requested precondition no longer holds (store + v5 SQL guard: proven in
+    // supabase-store-atomic-version-v5.test.ts), and applies an unflagged one — shadow.
+    let aCommitted = false;
+    loadGraph.mockImplementation(async () => { const g = aCommitted ? A_GRAPH : null; aCommitted = true; return g; });
+    append.mockImplementation(async (w: { requireAtomicExpectedBase?: true; expectedGraphIdentityHash?: string | null }) => {
+      if (aCommitted && w.requireAtomicExpectedBase === true && w.expectedGraphIdentityHash === null) {
+        throw new GraphStaleWriteError("append_turn_atomic_v5: stale graph write", { conflict_category: "analysis_affecting_conflict" });
+      }
+      return { id: "turn-b-overwrote-a" };
+    });
+    const app = await buildApp();
+    const h = harness(app, [{ version_id: "v-a", sequence: 1, creation: { kind: "committed_mutation", source_turn_id: "someone-elses-turn" } }]);
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, h.dispatch as never, generating(() => undefined));
+    expect(h.registers, "refused as a conflict, nothing applied").toEqual([409]);
+    expect(await append.mock.results[0]?.value.catch((e: unknown) => e)).toBeInstanceOf(GraphStaleWriteError);
+    expect(out).toMatchObject({ ok: false, mutated: false, refusal: "model_changed_during_build" });
+    await app.close();
+  });
+
+  it("CONTRAST: the model stayed empty → B's construction is written once", async () => {
+    loadGraph.mockResolvedValue(null);
+    const app = await buildApp();
+    const h = harness(app, []);
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, h.dispatch as never, generating(() => undefined));
+    expect(h.registers).toEqual([200]);
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(out).toMatchObject({ ok: true, mutated: true });
+    await app.close();
+  });
+
+  it("CONTRAST: B's OWN construction was committed meanwhile (same brief) → its receipt is recovered, nothing written twice", async () => {
+    loadGraph.mockResolvedValue(null);
+    const app = await buildApp();
+    const ownTurn = registrationTurnId(SCENARIO, constructionOperationId(SCENARIO, BRIEF));
+    const h = harness(app, [{ version_id: "v-b1", sequence: 1, creation: { kind: "committed_mutation", mutation_id: "m-b1", source_turn_id: ownTurn } }]);
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, h.dispatch as never, generating(() => loadGraph.mockResolvedValue(A_GRAPH)));
+    expect(append).not.toHaveBeenCalled();
+    expect(out).toMatchObject({ ok: true, mutated: false, replayed: true, model_version: { version_id: "v-b1" } });
     await app.close();
   });
 });

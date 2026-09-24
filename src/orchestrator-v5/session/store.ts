@@ -258,6 +258,18 @@ export interface SessionTurnWrite {
   readonly expectedGraphAnalysisHash?: string | null;
   /** Present only for an accepted persisted semantic graph mutation. */
   readonly modelVersion?: AtomicCommittedModelVersionWrite;
+  /**
+   * ⛔ THE EXPECTED BASE ON THIS WRITE IS THE CALLER'S PRECONDITION, NOT AN OBSERVATION.
+   *
+   * Set when a caller has asserted the state its write was built on (graph registration's
+   * `expected_model_empty`: a first construction onto an empty model). The global CAS
+   * posture (`CEE_V5_GRAPH_CAS_RPC`, default `shadow`: "no write is ever rejected") must
+   * not weaken an explicit per-request contract, so a writer MUST either enforce
+   * `expectedGraphIdentityHash` inside its atomic transaction for THIS write, or refuse
+   * before any write with {@link AtomicPreconditionUnenforceableError}. Never a silent
+   * downgrade. Independent review of #1786 (5805649773).
+   */
+  readonly requireAtomicExpectedBase?: true;
 }
 
 /** What {@link SessionStore.readCommittedTurn} returns — the durable facts a replay is answered from. */
@@ -853,6 +865,19 @@ export class StateCommitFailedError extends Error {
  * shape change. This is app-side, best-effort blocking with a
  * SELECT-then-write TOCTOU window, NOT an atomicity guarantee.
  */
+/**
+ * A write carried `requireAtomicExpectedBase`, and this writer cannot enforce its expected
+ * base inside the atomic transaction (no versioned v5 path for the write, or no base was
+ * read). Thrown BEFORE any read or write — the caller's precondition is refused, never
+ * silently weakened.
+ */
+export class AtomicPreconditionUnenforceableError extends StateCommitFailedError {
+  constructor(reason: string) {
+    super(`atomic precondition cannot be enforced for this write: ${reason}`);
+    this.name = 'AtomicPreconditionUnenforceableError';
+  }
+}
+
 export class GraphStaleWriteError extends StateCommitFailedError {
   /** Closed-enum conflict category from graph-cas-conflict.ts. */
   readonly conflict_category: string;

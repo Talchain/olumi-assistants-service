@@ -439,8 +439,25 @@ export async function buildModelFromBrief(
     graph,
     brief_text: brief,
     operation_id: constructionOperationId(scenarioId, brief),
+    // A construction is only ever built on an empty model, and is only written onto one.
+    expected_model_empty: true,
   });
-  if (reg.status === 409 && (reg.json.details as { code?: unknown } | undefined)?.code === 'OPERATION_ID_REUSED') {
+  const conflict = reg.status === 409 ? (reg.json.details as { code?: unknown } | undefined)?.code : undefined;
+  if (conflict === 'MODEL_NOT_EMPTY' || conflict === 'GRAPH_STALE') {
+    /**
+     * ⛔ THE MODEL WAS SAVED WHILE THIS ONE WAS BEING BUILT (independent review of #1786,
+     * 5805279370). Either it is THIS construction, committed by a concurrent call of the
+     * same brief — recover its receipt — or it is someone else's model, which is kept:
+     * nothing was written, and the result says so rather than adopting that state.
+     */
+    const prior = await findConstructionVersion(dispatch, scenarioId, brief);
+    if (prior !== null) return { ok: true, mutated: false, replayed: true, model_version: prior };
+    return {
+      ok: false, mutated: false, refusal: 'model_changed_during_build',
+      detail: 'A model was saved for this decision while this one was being built. That model was kept and nothing was written over it.',
+    };
+  }
+  if (conflict === 'OPERATION_ID_REUSED') {
     /**
      * ⭐ A CONCURRENT BUILD OF THE SAME CONSTRUCTION ALREADY WON. Both calls passed
      * the empty-graph guard and generated a model — generation is not

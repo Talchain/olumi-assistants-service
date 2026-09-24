@@ -53,7 +53,7 @@ import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/d
 import { narrateWriteOutcome, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
-import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
 
@@ -242,6 +242,70 @@ const AGENT_INSTRUCTIONS = [
  * replayed answer is shown against the SAME current state a fresh one would be.
  */
 /** @internal Exported for testing. */
+/**
+ * A message that can be a brief: typed into the composer (no product chip), and long
+ * enough to describe a decision. The EMPTY-MODEL test that makes it the brief is done
+ * against the persisted graph, never guessed from the words.
+ */
+/**
+ * The next step after a fast-path build: the Agent proposes the starting values (the
+ * model authors them, so a model call is right here), and its approve chip is then
+ * applied with no model call (fast path 2).
+ */
+const STARTING_POINT_CHIP = {
+  id: 'agent-suggest-starting-point',
+  label: 'Suggest starting assumptions',
+  message: 'Suggest starting values for everything this model still needs, so I can approve them.',
+} as const;
+
+/**
+ * ⭐ INTERPRETER v0.2 — THE ARCHITECTURE OWNER'S BANKED TEXT, VERBATIM (RC #63 5803995225:
+ * "Interpreter v0.2 is the current prompt candidate"). Source: Talchain/olumi-programme-docs
+ * `openai/capability-v01/ANALYSIS_INTERPRETER_PROFILE_v0_2.md` lines 9-33, blob
+ * 344896ef92177b7308c1d632699bd98bae10c6b7 (programme-docs main 4961b2d1); sha256 of this
+ * string begins 3d979e8406693be4 (pinned by test). APPENDED to the Agent instructions on
+ * fast path 3's single interpreting call, as the profile specifies ("appended only for the
+ * existing Agent final-response path when explaining canonical analysis. No extra model
+ * call."). Prompt text is owned by Paul + ChatGPT; this file only carries it. When CEE #1787
+ * (the packaged profile) lands, this constant is replaced by its import.
+ */
+export const INTERPRETER_V02_BANKED: string = "Explain the current **model-relative** analysis. Do not make the user's decision.\n\n**Finding first.** State the most useful conclusion supported by the supplied analysis, then briefly: why it appears, what is not settled, and at most one next reasoning step when justified.\n\n### Hard grounding rules\n\n- Use only supplied canonical analysis, provenance, currentness and claim permissions. Unknown stays unknown.\n- Keep comparison/outcomes, sensitivity, robustness, constraint satisfaction, before/after deltas and evidence provenance as different meanings. Never substitute one for another.\n- Never call an option objectively best, the winner, the right decision or Olumi's recommendation merely because it leads in the model.\n- Never convert a point result into a probability or invert a local switch/perturbation probability into overall stability.\n- Never claim an edit was tested unless the analysed revision/inputs include it.\n- Identical analytical inputs producing the same result show repeatability under those settings, **not** new validation or increased confidence.\n- A changed input may produce no material output change. Report that without inventing an effect.\n- For before/after comparisons, use only **precomputed supplied deltas**. Do not calculate new differences, ratios, annualisations, margins or unit conversions in prose.\n- Attribute a delta to one edit only when the supplied comparison is explicitly compatible and the relevant units, option identities, analysis/projection semantics and engine settings are held constant. Otherwise say the isolated effect is not established.\n- Preserve exact constraint operators and units. Equality does not satisfy a strict `<` or `>` condition.\n- If only a subset of options was analysed, keep conclusions inside that subset and name exclusions.\n- If the result is stale, present it only as historical. If rerun/action eligibility is unknown, do not imply a current control is available; say a current analysis would be needed.\n- If sensitivity or a flip threshold was not computed, do not invent it.\n- **A first-tested assumption that flips an ordering establishes only that this tested change can flip that ordering. It does NOT establish validation priority, importance, largest effect or best next investigation. Never say \"validate X first\" or equivalent on that basis alone.** If comparable effect size, uncertainty and evidence cost/value are absent, say investigation priority is not established.\n- One edge's perturbation/switch metric is not aggregate stability or factor sensitivity.\n- If a method is declined or applicability is unknown, answer the user's question without starting or completing the method.\n- Do not invent exercise horizons, required counts, missing business dimensions, benchmarks, operating assumptions or retrospective rationales.\n\nKeep the response compact: finding first, then 1–3 grounded points/caveats. Do not force a next step.\n";
+
+/** The UI's Run control: a typed `run_analysis` chip. Words alone never take fast path 3. */
+/**
+ * What the user reads when the run was ATTEMPTED but its one interpreting call failed or said
+ * nothing: composed from the run's own DOMAIN outcome, never from a model.
+ *
+ * ⛔ `ok` is the HTTP status of the attempt, NOT a completed analysis (independent review of
+ * #1786, 5805649773): a blocked Run answers HTTP 200 with no `analysis_result`, so `ok:true`
+ * would have told that user "the analysis ran". `ran` is the presence of a result; when it
+ * is absent, Olumi's own explanation (`what_is_missing`) is passed through, not re-worded.
+ * No visibility claim is made about results the reply does not carry.
+ */
+export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown; refusal?: unknown; status?: unknown; what_is_missing?: unknown }): string {
+  if (ran.ran === true) {
+    return 'The analysis ran, but I could not write an interpretation of it this time — ask me to explain the result.';
+  }
+  const missing = typeof ran.what_is_missing === 'string' ? ran.what_is_missing.trim() : '';
+  if (missing !== '') return `The analysis did not run. ${missing}`;
+  const code = typeof ran.refusal === 'string' && ran.refusal !== ''
+    ? ran.refusal
+    : typeof ran.status === 'string' && ran.status !== '' && ran.status !== 'unknown' ? ran.status : '';
+  const why = code !== '' ? ` (${code.replace(/_/g, ' ')})` : '';
+  return `The analysis did not run this time${why}. Nothing in the model was changed — ask me what it still needs.`;
+}
+
+export function typedRunOf(body: Record<string, unknown>): boolean {
+  const chip = body['chip'] as { action_type?: unknown } | null | undefined;
+  return (body['kind'] === undefined || body['kind'] === 'message') && chip?.action_type === 'run_analysis';
+}
+
+export function isFirstBriefCandidate(body: Record<string, unknown>, message: string): boolean {
+  if (body['kind'] !== undefined && body['kind'] !== 'message') return false;
+  if (body['chip'] !== undefined && body['chip'] !== null) return false;
+  return message.trim().split(/\s+/).filter((w) => w.length > 0).length >= 5;
+}
+
 export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
@@ -501,6 +565,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         instructions: req.instructions,
         input: req.input,
         tools: req.tools,
+        // Fast path 3 answers over a run Olumi already made: it may interpret, never act.
+        ...((req as { tool_choice?: unknown }).tool_choice === 'none' ? { tool_choice: 'none' } : {}),
         max_output_tokens: req.max_output_tokens,
       }),
     });
@@ -906,7 +972,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * status the user reads is composed from the result (`write-outcome`). Zero model
      * calls, no implicit analysis. Words alone never take this path.
      */
-    let fastPath: 'approve' | undefined;
+    let fastPath: 'approve' | 'first_brief' | 'run' | undefined;
     let result: AgentTurnResult | undefined;
     if (approvedProposal !== undefined) {
       const fastStartedAt = Date.now();
@@ -955,6 +1021,134 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           timing: { total_ms: ms, provider_ms: 0, tool_ms: ms, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 1, hops: 0 },
         };
       }
+    }
+    /**
+     * ⭐ FAST PATH 1 — A FRESH BRIEF GOES STRAIGHT TO THE CONSTRUCTOR (RC #63 5803960423 /
+     * 5803995225). Measured in Paul's staging test: the first turn took ~59 s, 5 provider
+     * calls and 3 tool hops — the Agent read the empty state, decided to build, built, then
+     * narrated. The product's own rule already says an empty model plus a message IS the
+     * brief (DecisionGuideAI `streamedDraftEligible`: 0 nodes and a first message is the
+     * draft turn), so the model has nothing to decide. The SAME `build_model_from_brief`
+     * capability runs (its replay recovery, its populated-graph refusal and admission all
+     * unchanged), and the user reads Olumi's status composed from the result — ONE provider
+     * call. Anything else (a populated model, a very short message, a capability refusal
+     * that the Agent can resolve) keeps the Agent.
+     */
+    if (result === undefined && approvedProposal === undefined && isFirstBriefCandidate(body, message)) {
+      const fastStartedAt = Date.now();
+      let empty = false;
+      try {
+        const now = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
+        const g = now.json?.graph as { nodes?: unknown[] } | null | undefined;
+        empty = now.status === 200 && (g == null || !Array.isArray(g.nodes) || g.nodes.length === 0);
+      } catch { empty = false; }
+      if (empty) {
+        const built = await dispatchTool(
+          'build_model_from_brief', JSON.stringify({ brief: message }),
+          { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }, capabilities, mode,
+        );
+        // The Agent can talk the user through these; Olumi's status could not.
+        const agentResolves = ['model_already_exists', 'empty_brief', 'construction_unavailable', 'not_found', 'read_only_preview'];
+        if (!agentResolves.includes(String(built.refusal ?? ''))) {
+          fastPath = 'first_brief';
+          const call = {
+            name: 'build_model_from_brief', ok: built.ok === true, mutated: built.mutated === true,
+            ...(typeof built.refusal === 'string' ? { refusal: built.refusal } : {}),
+          };
+          const said = narrateWriteOutcome('', [call], [built]).status ?? '';
+          const ms = Date.now() - fastStartedAt;
+          const providerMs = typeof built.provider_ms === 'number' ? Math.min(built.provider_ms, ms) : 0;
+          result = {
+            assistant_text: '',
+            items: [
+              ...(history ?? []),
+              { role: 'user', content: [{ type: 'input_text', text: message }] },
+              { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: said }] },
+            ],
+            tool_calls: [call],
+            tool_results: [built],
+            mutated: built.mutated === true,
+            hops: 0,
+            stopped_reason: 'answered',
+            timing: { total_ms: ms, provider_ms: providerMs, tool_ms: ms - providerMs, overhead_ms: 0, tool_provider_ms: providerMs, provider_calls: 1, tool_calls: 1, hops: 0 },
+          };
+        }
+      }
+    }
+    /**
+     * ⭐ FAST PATH 3 — AN EXPLICIT RUN IS RUN, THEN INTERPRETED ONCE (RC #63 5803960423 /
+     * 5803995225). Measured in Paul's staging test: an explicit analysis took ~18 s, 3
+     * provider calls and 2 tool hops — the Agent decided to call the analysis the user had
+     * just asked for. The Run control is a TYPED chip (`action_type: 'run_analysis'`), so
+     * the SAME `run_analysis` capability runs (deterministic PLoT/ISL, no model), and ONE
+     * model call interprets its result with `tool_choice: 'none'` — it can explain, never
+     * act. A refused run is explained by that same one call. The pair is kept in history
+     * so the Agent's next turn knows the run happened.
+     */
+    if (result === undefined && approvedProposal === undefined && typedRunOf(body)) {
+      const fastStartedAt = Date.now();
+      const ran = await dispatchTool('run_analysis', JSON.stringify({ reason: 'the user pressed Run' }),
+        { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }, capabilities, mode);
+      /**
+       * ⛔ THE INTERPRETER IS GIVEN THE CLAIM PERMISSIONS, NOT LEFT TO INFER THEM. v0.2 says
+       * "use only supplied … currentness and claim permissions", and the run's own tool result
+       * carries no `analysis_state`, so `leader_claim` (and a withheld reason) never reached the
+       * call. The canonical state is read back from the persisted graph after the run — the
+       * SAME reader the response's final readback uses — and handed over beside the run.
+       */
+      let canonicalAfterRun: { analysis_state?: unknown; analysis_ready?: unknown } = {};
+      try {
+        const st = await readBackState(dispatch, scenarioId);
+        canonicalAfterRun = { ...(st.analysisState !== undefined ? { analysis_state: st.analysisState } : {}), ...(st.analysisReady !== undefined ? { analysis_ready: st.analysisReady } : {}) };
+      } catch { canonicalAfterRun = {}; }
+      const runForInterpreter = { ...ran, canonical_state: canonicalAfterRun };
+      const callId = `fast_run_${req.id}`.replace(/[^A-Za-z0-9_-]/g, '_');
+      const priorAndRun = [
+        ...(history ?? []),
+        { role: 'user', content: [{ type: 'input_text', text: message }] },
+        { type: 'function_call', name: 'run_analysis', call_id: callId, arguments: JSON.stringify({ reason: 'the user pressed Run' }) },
+        { type: 'function_call_output', call_id: callId, output: JSON.stringify(runForInterpreter) },
+      ];
+      /**
+       * ⛔ THE RUN IS NEVER HANDED TO THE AGENT AFTER IT HAS HAPPENED (independent review of
+       * #1786, 5805279370). A failed or empty interpretation used to fall through to the
+       * ordinary tool-enabled turn with the ORIGINAL message and history — dropping the run
+       * it had just made, so the Agent could run the analysis a SECOND time, or act. The run
+       * stands, and only its explanation is missing: the user is told exactly that, from
+       * the run's own result, and nothing else is called.
+       */
+      const providerStartedAt = Date.now();
+      let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
+      try {
+        const resp = await callModel({
+          instructions: `${AGENT_INSTRUCTIONS}\n\n${INTERPRETER_V02_BANKED}`,
+          input: priorAndRun,
+          tools: toolsFor(mode),
+          max_output_tokens: budget.max_output_tokens,
+          tool_choice: 'none',
+        } as never);
+        const out = (resp.output ?? []) as { type?: string; content?: { type?: string; text?: string }[] }[];
+        const answer = out.filter((o) => o.type === 'message').flatMap((o) => o.content ?? [])
+          .filter((c) => c.type === 'output_text').map((c) => c.text ?? '').join('');
+        if (answer.trim().length > 0) interpreted = { answer, messages: out.filter((o) => o.type === 'message') as Record<string, unknown>[] };
+        else log.warn({ scenario_id: scenarioId }, 'agent-lane: fast-path interpretation was empty — answering from the run itself');
+      } catch (err) {
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: fast-path interpretation failed — answering from the run itself');
+      }
+      fastPath = 'run';
+      const ms = Date.now() - fastStartedAt;
+      const providerMs = Math.min(Date.now() - providerStartedAt, ms);
+      const text = interpreted?.answer ?? interpretationUnavailableText(ran);
+      result = {
+        assistant_text: text,
+        items: [...priorAndRun, ...(interpreted?.messages ?? [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }])],
+        tool_calls: [{ name: 'run_analysis', ok: ran.ok === true, mutated: false, ...(typeof ran.refusal === 'string' ? { refusal: ran.refusal } : {}) }],
+        tool_results: [ran],
+        mutated: false,
+        hops: 1,
+        stopped_reason: 'answered',
+        timing: { total_ms: ms, provider_ms: providerMs, tool_ms: Math.max(0, ms - providerMs), overhead_ms: 0, tool_provider_ms: 0, provider_calls: 1, tool_calls: 1, hops: 1 },
+      };
     }
     if (result === undefined) try {
       result = await runAgentTurn(
@@ -1016,7 +1210,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       stage: 'frame',
       answerKind: 'substantive',
       // One click approves the ONE proposal just offered — the same words as typing "yes".
-      suggested_actions: approvalChipsFor(result.tool_calls),
+      suggested_actions: fastPath === 'first_brief' && result.mutated ? [STARTING_POINT_CHIP] : approvalChipsFor(result.tool_calls),
     });
     const finalised = finaliseV5Response(composed, { scenarioId });
 
@@ -1065,7 +1259,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           handler_id: null,
           request_hash: requestHash,
           response_emitted: true,
-          llm_calls_used: fastPath !== undefined ? 0 : result.hops + 1,
+          llm_calls_used: fastPath === 'approve' ? 0 : fastPath === 'first_brief' || fastPath === 'run' ? 1 : result.hops + 1,
           duration_ms: Date.now() - startedAt,
           handler_facts: [],
           userMessage: message,
