@@ -6,7 +6,6 @@ on:
   push:
     branches:
       - main
-      - feat/**
     paths:
       - 'openapi.yaml'
       - 'src/**/*.ts'
@@ -16,6 +15,12 @@ on:
 permissions:
   contents: read
   packages: read
+
+# Feature updates are checked by the PR trigger above. Cancel only obsolete
+# runs of that same PR; keep main pushes and manual runs in separate groups.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   validate:

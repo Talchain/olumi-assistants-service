@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, staging, feat/**]
+    # Feature branches use a PR (draft is enough) for CI. Running the same
+    # workflow on both their push and PR events duplicates the expensive suites.
+    branches: [main, staging]
   pull_request:
     branches: [main, staging]
 
@@ -284,6 +286,9 @@ jobs:
   # new test failures or a coverage drop — not a stale aspiration.
   full-test-suite:
     name: Full Test Suite (advisory)
+    # Keep full coverage on the integrated tree, once per protected-branch push.
+    # PRs retain the required in-process suite and the separate integration job.
+    if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

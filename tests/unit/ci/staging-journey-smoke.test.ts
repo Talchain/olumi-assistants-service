@@ -510,7 +510,8 @@ describe("Core/Drafting release hold is bounded and restores without a push", ()
     expect(findVarGatedConditions(ci, "ci")).toEqual([`ci.jobs.live-tests.if = ${ci.jobs["live-tests"].if}`]);
     expect(ci.jobs["unit-tests"].if).toBeUndefined();
     expect(ci.jobs["unit-tests"].steps.some((step: any) => step.run === "pnpm test:required")).toBe(true);
-    expect(ci.on.push.branches).toEqual(["main", "staging", "feat/**"]);
+    // Feature branches receive CI through draft/open PRs targeting main or staging.
+    expect(ci.on.push.branches).toEqual(["main", "staging"]);
     expect(ci.on.pull_request.branches).toEqual(["main", "staging"]);
   });
 
