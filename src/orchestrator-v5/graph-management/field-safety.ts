@@ -245,13 +245,23 @@ export interface FieldSafetyResult {
 }
 
 function isPipelineOwned(field: string): boolean {
-  const f = field.toLowerCase();
+  const segs = field.toLowerCase().split(/[./]/);
+  /**
+   * ⛔ THE ONE SEGMENT DIRECTLY AFTER `interventions` IS A FACTOR ID — DATA, NEVER
+   * VOCABULARY. The payload screen already says so (`factor_map`, below); the path screen
+   * did not, so an option level on factor `pro_feature_value` was refused because the
+   * marker `e_value` substring-matched it (served `3f412be1`, 24 Sep: an approved starting
+   * point wrote 0/3 levels). Only that segment is exempt: the contract key AFTER it
+   * (`…/<factor_id>/source`) is screened exactly as before. The marker test is per segment,
+   * which is equivalent for every marker (none contains a separator).
+   */
+  const screened = segs.filter((_, i) => !(i > 0 && segs[i - 1] === 'interventions'));
   // Segment-wise (review hardening): the owned set is screened on EVERY path
   // segment, not just the root — `observed_state.provenance` and `data/origin`
   // are as owned as their bare spellings. Exact-segment match preserved (a
   // hypothetical `origin_label` still passes).
-  if (f.split(/[./]/).some((seg) => PIPELINE_OWNED_ROOTS.has(seg))) return true;
-  return PIPELINE_OWNED_MARKERS.some((m) => f.includes(m));
+  if (screened.some((seg) => PIPELINE_OWNED_ROOTS.has(seg))) return true;
+  return screened.some((seg) => PIPELINE_OWNED_MARKERS.some((m) => seg.includes(m)));
 }
 
 /** Depth-1 keys of an object value, lowercased (arrays and non-objects → empty). */

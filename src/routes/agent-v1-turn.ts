@@ -1063,10 +1063,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(typeof applied.outcome === 'string' ? { outcome: applied.outcome } : {}),
           ...(typeof applied.refusal === 'string' ? { refusal: applied.refusal } : {}),
         };
-        const said = narrateWriteOutcome('', [call], [applied]).status ?? '';
+        /**
+         * The capability's own next-step sentence rides with the status (#1788's add-option returns
+         * one: the option "cannot be compared yet"). Nothing reads the tool result on this path, so
+         * without this the user read "Saved" and nothing about what still blocks the comparison.
+         * Server-authored text only — never model prose.
+         */
+        const followUp = typeof applied.follow_up === 'string' ? applied.follow_up.trim() : '';
+        const said = [narrateWriteOutcome('', [call], [applied]).status ?? '', followUp].filter((x) => x !== '').join(' ');
         const ms = Date.now() - fastStartedAt;
         result = {
-          assistant_text: '',
+          // The reply the user reads is composed from this text plus Olumi's status line.
+          assistant_text: followUp,
           // The Agent's next turn sees the approval and what Olumi said about it.
           items: [
             ...(history ?? []),
