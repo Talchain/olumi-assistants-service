@@ -157,6 +157,22 @@ function rememberApprove(key: string, offered: readonly OfferedAction[]): void {
   lastApproveOffer.set(key, approve);
 }
 
+/**
+ * THE ONE PREDICATE for "may an approve chip be shown now": the ONE proposal still awaiting a yes for this
+ * subject, when the store would EXECUTE it on the revision read back this turn — else nothing (a missing
+ * readback fails closed). Used by the fresh Run carry AND by every replay (Codex #1807 5810816841: a
+ * replay checked only id membership, so after the model moved a retried Run showed a chip that could not
+ * commit).
+ */
+function executableWaitingProposal(scenarioId: string, userId: string | null, graphHash: string | undefined): string | undefined {
+  if (graphHash === undefined) return undefined;
+  const waiting = proposals.outstanding(scenarioId, userId);
+  if (waiting.length !== 1) return undefined;
+  const id = waiting[0]!.proposal_id;
+  const decision = proposals.authorise({ proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash });
+  return decision.status === 'execute' ? id : undefined;
+}
+
 /** The originally offered actions that are still valid on the CURRENT state, in their original order. */
 export function stillValidOffers(
   offered: readonly OfferedAction[],
@@ -961,7 +977,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         stage: 'frame',
         answerKind: 'substantive',
         suggested_actions: stillValidOffers(offered, {
-          outstandingProposalIds: new Set(proposals.outstanding(scenarioId, userId).map((o) => o.proposal_id)),
+          outstandingProposalIds: ((id) => new Set(id !== undefined ? [id] : []))(executableWaitingProposal(scenarioId, userId, state.graphHash)),
           analysisReady: state.analysisReady,
           analysisState: state.analysisState,
           // `draft_graph` is read back only when the graph has content.
@@ -1325,13 +1341,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // execute it on this revision (never on a guess — two outstanding, or a moved model, carry nothing).
     const approveKey = `${scenarioId}:${userId ?? ''}`;
     const carriedApproval = ((): OfferedAction[] => {
-      if (fastPath !== 'run' || graphHash === undefined) return [];
+      if (fastPath !== 'run') return [];
       const chip = lastApproveOffer.get(approveKey);
-      const id = chip !== undefined ? typedApprovalOf({ chip: { id: chip.id } }) : undefined;
-      const waiting = proposals.outstanding(scenarioId, userId);
-      if (chip === undefined || id === undefined || waiting.length !== 1 || waiting[0]!.proposal_id !== id) return [];
-      const decision = proposals.authorise({ proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash });
-      return decision.status === 'execute' ? [chip, AMEND_CHIP] : [];
+      const id = executableWaitingProposal(scenarioId, userId, graphHash);
+      return chip !== undefined && id !== undefined && typedApprovalOf({ chip: { id: chip.id } }) === id ? [chip, AMEND_CHIP] : [];
     })();
     const offeredNow: OfferedAction[] = [
       ...approvalChipsFor(result.tool_calls),
