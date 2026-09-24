@@ -340,7 +340,21 @@ function framedObservedState(f: {
   // Already a proportion, or no usable range: leave it exactly as it was. A
   // cap that is not strictly above the value would encode a frame of 1 or less,
   // which `recoverScaleFrame` refuses and which would misstate the magnitude.
-  if (typeof cap !== 'number' || !Number.isFinite(cap) || cap <= 1 || raw <= 0 || raw > cap) {
+  //
+  // ⛔⛔ `raw <= 0` USED TO DROP THE FRAME, AND A BASELINE OF ZERO IS ORDINARY.
+  //
+  // Measured on Paul's live journey (#63 item 1): "Enterprise customers" came out
+  // as `{ value: 0, unit: 'customers' }` — no cap, no frame — because the builder's
+  // `plausible_max` was thrown away here and `:524` below only wrote `scale_frame`
+  // when NO baseline was known. So the one factor shape a user is most likely to
+  // start from, a count that is currently zero, was permanently unanalysable:
+  // `baseline_scale_unresolved` refuses it and no later edit can set a frame.
+  //
+  // Zero is a perfectly good baseline on a 0..cap frame — `0 / cap === 0` — so the
+  // only genuinely unusable cases are a missing/non-finite cap, a cap that is not
+  // strictly above 1, a NEGATIVE baseline (which a 0..cap frame cannot express),
+  // and a baseline above the cap.
+  if (typeof cap !== 'number' || !Number.isFinite(cap) || cap <= 1 || raw < 0 || raw > cap) {
     return { value: raw, ...base };
   }
   return { value: raw / cap, raw_value: raw, cap, declared_scale: 'unit_interval', ...base };
@@ -520,10 +534,29 @@ export function admitCandidateModel(
         // Written only when there is NO baseline. A baselined factor carries
         // its frame inside `observed_state` (above), and a second carrier
         // there could disagree with an unframed pair.
+        //
+        // ⛔⛔ AND ALSO WHEN A BASELINE IS KNOWN BUT `framedObservedState` COULD NOT
+        // FRAME IT. The condition used to be "no baseline", which left a whole class
+        // of factor with NEITHER carrier — a known baseline the framer rejected
+        // (negative, or above the cap) got no `observed_state.cap` and no
+        // `scale_frame`, so the Run refused it forever and no later edit could
+        // repair it. #63 item 1.
+        //
+        // The invariant the old comment was protecting still holds and is now
+        // enforced rather than approximated: `scale_frame` is written ONLY when the
+        // observed state does not already carry a frame, so the two carriers can
+        // never disagree. It is derived from the SAME cap the framer was given, so
+        // nothing new is invented here.
         ...((): Record<string, number> => {
-          if (f.baseline_known && typeof f.baseline_value === 'number') return {};
           const c = capFor(f.label) ?? f.plausible_max;
-          return typeof c === 'number' && Number.isFinite(c) && c > 1 ? { scale_frame: c } : {};
+          if (!(typeof c === 'number' && Number.isFinite(c) && c > 1)) return {};
+          if (f.baseline_known && typeof f.baseline_value === 'number') {
+            const os = framedObservedState({ ...f, plausible_max: c }) as { cap?: unknown };
+            // Already framed inside `observed_state` — a second carrier could
+            // disagree with it, so do not write one.
+            if (typeof os.cap === 'number') return {};
+          }
+          return { scale_frame: c };
         })(),
       },
     })),

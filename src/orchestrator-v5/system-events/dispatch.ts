@@ -1731,7 +1731,16 @@ async function dispatchFactorValueEdit(
     };
   }
 
-  const priorFacts = await loadPriorFactsQuietly(payload.scenario_id, requestId);
+  /**
+   * ⛔ READ THE FACTS *WITH* THEIR READ STATE. `loadPriorFactsQuietly` discards it
+   * and returns a bare array, so a DEGRADED read is indistinguishable from a
+   * genuinely empty one — and `deriveAnalysisFreshness([], hash)` would then report
+   * `none` ("no run has happened") from a read that simply failed. That is the
+   * estate's own named trap: an absence that was never observed reported as an
+   * observed absence. The existing `priorFacts` consumer below is unchanged.
+   */
+  const priorFactsRead = await loadPriorFactsWithReadState(payload.scenario_id, requestId);
+  const priorFacts = priorFactsRead.facts;
 
   const result = await applyFactorValueEdit({
     payload,
@@ -1913,10 +1922,44 @@ async function dispatchFactorValueEdit(
   // "advertised state != persisted state" class as the hash defect above.
   // Falls back to the merged graph only if the projected bytes fail to re-parse,
   // which would itself mean the store holds something we cannot model.
+  /**
+   * ⛔⛔ AND THE FRESHNESS, WHICH THIS WRITER OMITTED. #63 item 15.
+   *
+   * Measured on Paul's live journey: a factor-value edit returned `analysisReady`
+   * with NO freshness, so a surface that clears its "stale" mark only on that field
+   * looked clean immediately after an edit that had just invalidated the analysis.
+   * The edge-strength writer in this same file already derives it; the value writer
+   * — by far the commoner edit — did not.
+   *
+   * Same derivation, same honesty rule as that sibling: a healthy read yields a real
+   * verdict, a degraded read yields `unknown` with `derivation_failed` rather than
+   * fabricating `none`. Fact history is observational only and never authorises or
+   * blocks the write, so a failed read cannot lose the user's edit.
+   */
+  const freshness: FreshnessDerivation =
+    priorFactsRead.status === 'ok'
+      ? deriveAnalysisFreshness(priorFactsRead.facts, persistedAnalysisGraphHash)
+      : {
+          freshness: 'unknown',
+          reason: 'derivation_failed',
+          selected_fact_index: null,
+          graph_hash_at_run: null,
+          current_graph_hash: persistedAnalysisGraphHash,
+          computed_at: null,
+        };
+  emitFreshnessTelemetry(
+    freshness,
+    {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      dispatch_path: 'system_event.factor_value_edit',
+    },
+  );
   return {
     response,
     commitPerformed: true,
     analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForReadiness),
+    freshness,
     // Still the full graph: the egress id-leak scrub resolves ids to labels
     // against it, independently of the hash above.
     graph: graphForReadiness,

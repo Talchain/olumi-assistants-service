@@ -46,6 +46,7 @@ import {
   type CanonicalReadinessRepairProposal,
 } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
+import { findScaleIncoherentBaselineFactorIds } from '../plot-intervention-scale.js';
 import {
   computeScaffoldPlan,
   PLOT_MIN_COMPARISON_OPTIONS,
@@ -701,6 +702,54 @@ function resolveRunAdmissionTerms(
         waivedOptionIds: [],
         canonicalGraph: strict.canonicalGraph,
       };
+    }
+    /**
+     * ⛔⛔ THE SCALE GATE, SO READINESS AND THE RUN SHARE ONE AUTHORITY. #63 item 3.
+     *
+     * Measured on Paul's live journey: readiness said `may_run: true` and the Run
+     * then refused the same model with `baseline_scale_unresolved`. The gate
+     * (`findScaleIncoherentBaselineFactorIds`) was called ONLY from
+     * `run-analysis.ts`, so the two disagreed by construction — and a user was
+     * invited to press Run on a model that could not run.
+     *
+     * ⭐ THE SAME PREDICATE, IMPORTED, NOT A SECOND ONE. `set-factor-value.ts`
+     * already calls it with exactly these two arguments; a reimplementation here
+     * would be a seventh magnitude ladder for the estate to keep in step.
+     *
+     * ⛔ DIRECTION, and it is the argument the dedup floor above already makes: this
+     * can only convert a FALSE ADMISSION into a refusal, and every case it converts
+     * is one the Run refuses anyway. It cannot cost a run that would have succeeded.
+     *
+     * ⚠ FAIL OPEN WHEN THE CARRIER CANNOT BE READ, exactly as `set-factor-value.ts`
+     * does: if there are options but not one of them exposes a readable intervention
+     * bundle, the question is unanswerable here and today's admission stands. A
+     * wrong refusal costs the user a turn.
+     */
+    const scaleNodes = (strict.canonicalGraph as { nodes?: unknown } | null)?.nodes;
+    if (Array.isArray(scaleNodes)) {
+      const optionNodes = scaleNodes.filter(
+        (n) => n !== null && typeof n === 'object' && (n as { kind?: unknown }).kind === 'option',
+      );
+      const optionInterventionObjects = optionNodes.map((n) => {
+        const interventions = (n as { interventions?: unknown }).interventions;
+        return interventions !== null && typeof interventions === 'object'
+          ? (interventions as Record<string, unknown>)
+          : {};
+      });
+      const carrierReadable =
+        optionNodes.length === 0
+        || optionInterventionObjects.some((o) => Object.keys(o).length > 0);
+      if (carrierReadable
+        && findScaleIncoherentBaselineFactorIds(scaleNodes, optionInterventionObjects).length > 0) {
+        return {
+          strict,
+          assessment,
+          plan: empty,
+          willProceed: false,
+          waivedOptionIds: [],
+          canonicalGraph: strict.canonicalGraph,
+        };
+      }
     }
     return {
       strict,
