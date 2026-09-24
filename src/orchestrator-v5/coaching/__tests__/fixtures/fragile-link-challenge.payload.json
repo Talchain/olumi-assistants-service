@@ -1,0 +1,141 @@
+{
+  "_provenance": {
+    "generated_by": "src/orchestrator-v5/coaching/__tests__/fragile-link-challenge.test.ts (golden payload test)",
+    "producer": "runTurnCoaching (agent-lane/analysis-coaching-pass-through.ts) -> buildFragileLinkChallenge (coaching/fragile-link-challenge.ts)",
+    "served_build": "CEE 8428207aa3e5524bb7c2ca482b9694af4b40f246 (staging)",
+    "route": "POST /agent/v1/turn",
+    "inputs": {
+      "explicit_run": {
+        "fixture": "c19-8428207-B.run-turns.trimmed.json",
+        "turn": "t2",
+        "trigger": "explicit_run",
+        "source": "output/paul-test-20260923/construction-witness/raw/c19-8428207-B.json",
+        "source_sha256": "6b472c0f2ac0dc4a22937b5b1a2a79d568da4c2fe7f61e37e99d1781ac7d34a3"
+      },
+      "auto_first_pass": {
+        "fixture": "c19-8428207-B.run-turns.trimmed.json",
+        "turn": "t2",
+        "trigger": "auto_first_pass",
+        "source": "output/paul-test-20260923/construction-witness/raw/c19-8428207-B.json",
+        "source_sha256": "6b472c0f2ac0dc4a22937b5b1a2a79d568da4c2fe7f61e37e99d1781ac7d34a3"
+      },
+      "permitted_explicit_run": {
+        "fixture": "c19-8428207-A.run-turns.trimmed.json",
+        "turn": "t5",
+        "trigger": "explicit_run",
+        "source": "output/paul-test-20260923/construction-witness/raw/c19-8428207-A.json",
+        "source_sha256": "faf531b7fd71985df6fcbeca3209a5292d82d16e13f7cadef30fd941276c8351"
+      }
+    },
+    "capture_note": "Each capture is reconstructed from the same served turn (see fragile-link-challenge-fixtures.ts)."
+  },
+  "contract_version": "run-turn-coaching/v1",
+  "explicit_run": {
+    "blocks": [
+      {
+        "block_id": "23150107-6583-5c5a-92d4-548775ea50da",
+        "signal_id": "coach:fragile_link:pro_subscriber_base→mrr:2cac03f2a47449be:2026-09-24T16:47:26.848Z:explicit_run",
+        "created_at": "2026-09-24T16:47:26.848Z",
+        "source_handler": "run_analysis",
+        "graph_hash_at_generation": "2cac03f2a47449be",
+        "freshness": "fresh",
+        "type": "coaching",
+        "coaching_kind": "assumption_check",
+        "title": "Pressure-test a sensitive link",
+        "body": "The robustness check found the result sensitive to the link from Pro subscriber base to MRR — worth checking what the estimate of how strongly Pro subscriber base drives MRR rests on.",
+        "source": "deterministic_signal",
+        "target_refs": [
+          {
+            "id": "pro_subscriber_base→mrr",
+            "label": "Pro subscriber base → MRR",
+            "kind": "edge"
+          }
+        ],
+        "priority_rank": 15,
+        "action_label": "Pressure-test this link",
+        "action_prompt": "Talk me through what would change if the link from Pro subscriber base to MRR were weaker or stronger. Don't change the model or re-run anything yet.",
+        "dsk_claim_provenance": {
+          "claim_id": "DSK-T-003",
+          "claim_title": "Consider-the-opposite as a debiasing strategy",
+          "evidence_strength": "medium",
+          "protocol_id": "DSK-P-003"
+        }
+      }
+    ],
+    "eligibility": {
+      "eligible": true
+    }
+  },
+  "auto_first_pass": {
+    "blocks": [
+      {
+        "block_id": "31365171-6695-5cbb-83ad-13da141e47c5",
+        "signal_id": "coach:fragile_link:pro_subscriber_base→mrr:2cac03f2a47449be:2026-09-24T16:47:26.848Z:auto_first_pass",
+        "created_at": "2026-09-24T16:47:26.848Z",
+        "source_handler": "run_analysis",
+        "graph_hash_at_generation": "2cac03f2a47449be",
+        "freshness": "fresh",
+        "type": "coaching",
+        "coaching_kind": "assumption_check",
+        "title": "Pressure-test a sensitive link",
+        "body": "Before relying on this first pass on Olumi's estimates, note that the robustness check found the result sensitive to the link from Pro subscriber base to MRR — worth checking what the estimate of how strongly Pro subscriber base drives MRR rests on.",
+        "source": "deterministic_signal",
+        "target_refs": [
+          {
+            "id": "pro_subscriber_base→mrr",
+            "label": "Pro subscriber base → MRR",
+            "kind": "edge"
+          }
+        ],
+        "priority_rank": 15,
+        "action_label": "Pressure-test this link",
+        "action_prompt": "Talk me through what would change if the link from Pro subscriber base to MRR were weaker or stronger. Don't change the model or re-run anything yet.",
+        "dsk_claim_provenance": {
+          "claim_id": "DSK-T-003",
+          "claim_title": "Consider-the-opposite as a debiasing strategy",
+          "evidence_strength": "medium",
+          "protocol_id": "DSK-P-003"
+        }
+      }
+    ],
+    "eligibility": {
+      "eligible": true
+    }
+  },
+  "permitted_explicit_run": {
+    "blocks": [
+      {
+        "block_id": "38c99945-4b82-57e9-ae75-eb80e715e5a3",
+        "signal_id": "coach:fragile_link:developer_capacity→velocity:6f1ec70c62fa6733:2026-09-24T16:45:25.249Z:explicit_run",
+        "created_at": "2026-09-24T16:45:25.249Z",
+        "source_handler": "run_analysis",
+        "graph_hash_at_generation": "6f1ec70c62fa6733",
+        "freshness": "fresh",
+        "type": "coaching",
+        "coaching_kind": "assumption_check",
+        "title": "Pressure-test a sensitive link",
+        "body": "The robustness check found the result sensitive to the link from Developer capacity to Velocity — worth checking what the estimate of how strongly Developer capacity drives Velocity rests on.",
+        "source": "deterministic_signal",
+        "target_refs": [
+          {
+            "id": "developer_capacity→velocity",
+            "label": "Developer capacity → Velocity",
+            "kind": "edge"
+          }
+        ],
+        "priority_rank": 15,
+        "action_label": "Pressure-test this link",
+        "action_prompt": "Talk me through what would change if the link from Developer capacity to Velocity were weaker or stronger. Don't change the model or re-run anything yet.",
+        "dsk_claim_provenance": {
+          "claim_id": "DSK-T-003",
+          "claim_title": "Consider-the-opposite as a debiasing strategy",
+          "evidence_strength": "medium",
+          "protocol_id": "DSK-P-003"
+        }
+      }
+    ],
+    "eligibility": {
+      "eligible": true
+    }
+  }
+}
