@@ -249,6 +249,23 @@ export function createAgentCapabilities(
    */
   let firstAnalysisThisRequest: { readonly revisionHash: string; readonly result: ToolResult } | undefined;
   /**
+   * ⛔ AN APPROVAL RUNS NOTHING — held here, by the server, not by the prompt.
+   *
+   * Paul's ruling (#63 5812069638): later edits and approvals never re-run unless
+   * the user asks. Witnessed on served 8428207 (c19w, 5818452655): an approval in
+   * words became `authorise_change` then `run_analysis` in ONE turn, and the reply
+   * named a leader the typed claim withheld. Removing the prompt instruction was
+   * not enough (re-gate of #1854: a reworded regression survived every test).
+   *
+   * Set when an approval in THIS request applied (or recovered) a change; read by
+   * `runAnalysis`. Per request, like `firstAnalysisThisRequest`, so the NEXT
+   * turn's explicit Run is never suppressed. ⚠ Known cost, priced: a user who
+   * says "apply it and run it" in one message gets the approval plus a Run to
+   * press, never an unrequested run — deciding "did they ask?" from their words
+   * is a natural-language predicate this guard deliberately does not make.
+   */
+  let approvalAppliedThisRequest = false;
+  /**
    * Normalise the read route's `graph_identity_hash` to the 64-hex value the
    * register route compares. `''` means "no identity to anchor to" — the route
    * returns `null` for an absent, unparseable or identity-empty graph — and
@@ -2460,6 +2477,15 @@ export function createAgentCapabilities(
     },
 
     async runAnalysis(ctx, args): Promise<ToolResult> {
+      if (approvalAppliedThisRequest) {
+        return {
+          ok: false, mutated: false, ran: false, refusal: 'run_not_requested',
+          detail:
+            'The approved change is saved. An analysis runs only when the user asks for one, never as part ' +
+            'of an approval. Nothing was analysed: do not describe any result, and tell the user they can ' +
+            'run the analysis when they are ready.',
+        };
+      }
       /**
        * The model asked again on the build turn itself: the first analysis of THIS revision already ran in
        * this request, so it is returned rather than run twice. Verified against a fresh read — if the
@@ -2504,5 +2530,13 @@ export function createAgentCapabilities(
       };
     },
   };
-  return caps;
+  return {
+    ...caps,
+    // The approval guard's writer: every return path of `authoriseChange`, one place.
+    async authoriseChange(ctx, args): Promise<ToolResult> {
+      const r = await caps.authoriseChange(ctx, args);
+      if (r.applied === true || r.mutated === true) approvalAppliedThisRequest = true;
+      return r;
+    },
+  };
 }

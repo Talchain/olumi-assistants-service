@@ -295,6 +295,57 @@ describe('the Agent route runs the first analysis itself, once', () => {
     expect(st(SID).injectRuns).toBe(0);
   });
 
+  /**
+   * ⛔ AN APPROVAL IN WORDS RUNS NOTHING — enforced by the SERVER, not the prompt.
+   *
+   * Witnessed on served 8428207 (c19w, #63 5818452655): the user approved in
+   * words, the Agent called authorise_change and then run_analysis in the same
+   * turn, and the reply named a leader the typed claim withheld. PR-B removed
+   * the prompt instruction, but the re-gate at 0603c7de showed a reworded
+   * regression (M9p) survived every test: the rule was prompt-only. Here the
+   * model is SCRIPTED to do exactly what c19w did; the capability refuses the
+   * run and nothing reaches the analysis.
+   */
+  it('RED: authorise_change then run_analysis in ONE turn — the run is refused, 0 analyses (the c19w shape)', async () => {
+    await buildTurn(app);
+    script = [callTool('propose_model_change', { from_label: 'Option A', to_label: 'Outcome', direction: 'positive', rationale: 'It moves the outcome directly.' })];
+    const proposed = await turn(app, { message: 'Should Option A drive the outcome directly?' });
+    const approve = proposed.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
+    expect(approve, 'control: a real proposal was offered').toBeDefined();
+    const proposalId = approve!.id.slice('agent-approve-proposal:'.length);
+    script = [callTool('authorise_change', { proposal_id: proposalId }), callTool('run_analysis', { reason: 'Check the comparison after the change.' })];
+    const b = await turn(app, { message: 'Yes, go ahead with that.' });
+    expect(b._diagnostic_trace.fast_path, 'the words path, not a chip').toBeUndefined();
+    expect(st(SID).extraEdges, 'control: the approval really applied').toHaveLength(1);
+    const calls = b._agent.tool_calls as { name: string; ok: boolean; refusal?: string }[];
+    expect(calls.map((c) => c.name)).toEqual(['authorise_change', 'run_analysis']);
+    expect(calls[1]).toMatchObject({ ok: false, refusal: 'run_not_requested' });
+    expect(st(SID).injectRuns, 'no analysis ran').toBe(0);
+    expect(st(SID).inProcessRuns, 'only the construction’s own first analysis').toHaveLength(1);
+  });
+
+  it('CONTRAST: the NEXT turn’s explicit Run is not suppressed by the earlier approval', async () => {
+    await buildTurn(app);
+    script = [callTool('propose_model_change', { from_label: 'Option A', to_label: 'Outcome', direction: 'positive', rationale: 'It moves the outcome directly.' })];
+    const proposed = await turn(app, { message: 'Should Option A drive the outcome directly?' });
+    const proposalId = proposed.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'))!.id.slice('agent-approve-proposal:'.length);
+    script = [callTool('authorise_change', { proposal_id: proposalId }), callTool('run_analysis', { reason: 'r' })];
+    await turn(app, { message: 'Yes, go ahead with that.' });
+    expect(st(SID).injectRuns).toBe(0);
+    script = [callTool('run_analysis', { reason: 'The user asked to run it.' })];
+    const next = await turn(app, { message: 'Now run the analysis.' });
+    const calls = next._agent.tool_calls as { name: string; ok: boolean; refusal?: string }[];
+    expect(calls[0]).toMatchObject({ name: 'run_analysis', ok: true });
+    expect(st(SID).injectRuns, 'the requested run ran').toBe(1);
+  });
+
+  it('CONTRAST: a run_analysis with NO approval in the turn runs (the guard is keyed on the approval, not blanket)', async () => {
+    await buildTurn(app);
+    script = [callTool('run_analysis', { reason: 'The user asked to run it.' })];
+    await turn(app, { message: 'Run the analysis please.' });
+    expect(st(SID).injectRuns).toBe(1);
+  });
+
   it('RED: the Agent is no longer told to run the analysis after an approval, and is told how the first analysis works (test 4)', async () => {
     await buildTurn(app);
     const instructions = String(modelBodies[0]!['instructions']);
