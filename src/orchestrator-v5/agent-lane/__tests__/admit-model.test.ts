@@ -130,3 +130,99 @@ describe('admitCandidateModel — captured candidate', () => {
     expect(slugId('!!!')).toBe('node');
   });
 });
+
+/**
+ * ⭐⭐ A BASELINE OF ZERO IS ORDINARY, AND IT USED TO COME OUT UNANALYSABLE.
+ *
+ * Panel measured this on Paul's live OpenAI journey (#63 item 1): "Enterprise
+ * customers" was admitted as `{ value: 0, unit: 'customers' }` — **no cap and no
+ * frame** — because `framedObservedState` dropped the frame on `raw <= 0` and the
+ * node-level `scale_frame` was written only when NO baseline was known. So the one
+ * factor shape a user is most likely to start from, a count that is currently
+ * zero, was permanently unanalysable: the Run refuses it with
+ * `baseline_scale_unresolved` and a frame can only be set at CONSTRUCTION.
+ *
+ * Zero is a perfectly good baseline on a 0..cap frame — `0 / cap === 0`.
+ */
+describe('a KNOWN baseline always leaves construction with a scale', () => {
+  const candidate = (baseline: number, plausibleMax: number): CandidateModel => ({
+    ...faithful,
+    factors: [{
+      label: 'Enterprise customers',
+      role: 'controllable',
+      provenance: 'explicit',
+      unit: 'customers',
+      baseline_known: true,
+      baseline_value: baseline,
+      plausible_max: plausibleMax,
+    }],
+  } as unknown as CandidateModel);
+
+  const factorNode = (baseline: number, max: number) => {
+    const m = admitCandidateModel(candidate(baseline, max));
+    const n = m.nodes.find((x) => x.label === 'Enterprise customers');
+    expect(n, 'the factor must be admitted at all').toBeDefined();
+    return n as unknown as {
+      scale_frame?: number;
+      observed_state?: { value?: number; raw_value?: number; cap?: number };
+    };
+  };
+
+  it('⛔⛔ THE DEFECT: a baseline of ZERO now carries a frame', () => {
+    const n = factorNode(0, 500);
+    const framed = typeof n.scale_frame === 'number' || typeof n.observed_state?.cap === 'number';
+    expect(framed, 'a zero baseline left construction with no scale at all').toBe(true);
+    // ⭐ And the value is still zero — nothing was invented to make it analysable.
+    expect(n.observed_state?.value).toBe(0);
+    /**
+     * ⛔ AND IT MUST BE THE `observed_state` CARRIER, NOT ONLY THE NODE ONE.
+     *
+     * ⚠ My first version of this test accepted EITHER carrier, and the mutant that
+     * restores `raw <= 0` in `framedObservedState` SURVIVED it — because the node
+     * fallback then supplied a `scale_frame` and the test passed. So the assertion
+     * could not distinguish "a baselined factor is coherently framed" from "a frame
+     * exists somewhere on the node".
+     *
+     * The distinction is load-bearing: the value writer and the Run read the PAIR
+     * (`value`, `raw_value`, `cap`). A baselined factor whose frame lives only at
+     * node level has a value of 0 with no `raw_value` and no `cap`, so nothing
+     * records what the 0 is 0 OF. `0 / cap === 0`, so there is no reason to withhold
+     * the coherent pair.
+     */
+    expect(n.observed_state?.cap).toBe(500);
+    expect(n.observed_state?.raw_value).toBe(0);
+    expect(n.scale_frame, 'a framed observed_state must not also carry a node frame').toBeUndefined();
+  });
+
+  it('⭐ POSITIVE CONTROL: a non-zero baseline inside its range is framed in `observed_state`', () => {
+    // Without this the assertion above could be satisfied by framing everything
+    // at the node level and abandoning the observed_state carrier.
+    const n = factorNode(400, 500);
+    expect(n.observed_state?.cap).toBe(500);
+    expect(n.observed_state?.raw_value).toBe(400);
+    expect(n.observed_state?.value).toBeCloseTo(0.8, 12);
+  });
+
+  it('⛔ EXACTLY ONE CARRIER — the two can never disagree', () => {
+    // The invariant the original comment was protecting. A framed observed_state
+    // must NOT also get a node-level `scale_frame`.
+    const n = factorNode(400, 500);
+    expect(typeof n.observed_state?.cap).toBe('number');
+    expect(n.scale_frame).toBeUndefined();
+  });
+
+  it('⭐ a baseline the framer cannot express falls back to the node carrier', () => {
+    // Above the cap: a 0..cap frame cannot hold it, so `observed_state` is left
+    // unframed — and THAT is the case that previously got neither carrier.
+    const n = factorNode(900, 500);
+    expect(n.observed_state?.cap).toBeUndefined();
+    expect(n.scale_frame).toBe(500);
+  });
+
+  it('⛔ CONTRAST: no usable range means no fabricated frame', () => {
+    // Nothing is invented when the builder supplied no range worth the name.
+    const n = factorNode(0, 1);
+    expect(n.scale_frame).toBeUndefined();
+    expect(n.observed_state?.cap).toBeUndefined();
+  });
+});

@@ -246,10 +246,22 @@ describe('POST /orchestrate/v2/turn — factor_value_edit (the value-carrying in
     expect(body.graph_hash).toBe(computeAnalysisAffectingGraphHash(committedGraph() as never));
 
     expect(body.analysis_ready).toBeDefined();
-    // Honest absence: no freshness derivation is threaded on this path, so the
-    // block must NOT assert a freshness verdict. Claiming `fresh` here would
-    // recreate the exact lie the change exists to remove.
-    expect(body.analysis_ready.freshness).toBeUndefined();
+    // ⚠ UPDATED — this used to assert the ABSENCE, and the absence was the defect.
+    //
+    // The comment it replaced said "no freshness derivation is threaded on this
+    // path, so the block must NOT assert a freshness verdict". That was true and
+    // it was the bug: programme #63 item 15 measured that a surface which clears
+    // its "stale" mark only on this field looked CLEAN immediately after an edit
+    // that had just invalidated the analysis. Honest absence is only honest when
+    // the answer is genuinely unavailable; here it was simply never derived.
+    //
+    // `dispatchFactorValueEdit` now derives it the same way the edge_strength_edit
+    // writer in the same file does. Bound to the FIELD being present and to the
+    // honesty rule, NOT to a particular verdict — the verdict depends on prior
+    // facts this fixture does not control, and pinning one would be brittle.
+    expect(body.analysis_ready.freshness).toBeDefined();
+    // ⭐ And it must be one of the real verdicts, never a fabricated `fresh`.
+    expect(['fresh', 'stale', 'none', 'unknown']).toContain(body.analysis_ready.freshness);
 
     // The receipt is real prose, which is what makes the egress scrub matter.
     expect(body.assistant_text).toContain('Marketing budget');
