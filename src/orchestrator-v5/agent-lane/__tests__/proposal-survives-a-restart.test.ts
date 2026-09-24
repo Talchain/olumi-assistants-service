@@ -131,6 +131,14 @@ describe('a pending approval survives a restart', () => {
     expect(t2._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: false, refusal: 'unknown_proposal' })]);
     expect(edges).toEqual([]);
   }, 60_000);
+
+  it('CONTRAST: the model moved after the offer → the rehydrated proposal is refused as superseded, nothing written', async () => {
+    const approve = await propose();
+    edges = [{ from: 'o1', to: 'f1' }];
+    const t2 = await approveOnFreshProcess(approve);
+    expect(t2._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: false, refusal: 'superseded' })]);
+    expect(edges).toEqual([{ from: 'o1', to: 'f1' }]);
+  }, 60_000);
 });
 
 describe('the persisted carrier satisfies the production parser', () => {
@@ -144,5 +152,40 @@ describe('the persisted carrier satisfies the production parser', () => {
     const parsed = parsePendingAction(JSON.parse(JSON.stringify(pa)));
     expect(parsed, 'the production read would otherwise drop the carrier').not.toBeNull();
     expect(parsed?.preconditions).toEqual({ graph_hash: 'hash-base' });
+  });
+});
+
+describe('rehydrateProposals restores only this subject\'s own, unexpired, unaltered proposal', () => {
+  const build = async (over: { scenario?: string; user?: string | null; expiresInMs?: number } = {}) => {
+    const { proposalPendingAction } = await import('../durable-proposal.js');
+    const { createProposal } = await import('../proposal.js');
+    const p = createProposal({ scenario_id: over.scenario ?? 'scn', user_id: over.user === undefined ? 'u1' : over.user, base_graph_identity_hash: 'hash-base',
+      operations: [{ op: 'add_edge', path: 'a::b' }], provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Connect a to b' });
+    const pa = proposalPendingAction(p, { id: `agent-approve-proposal:${p.proposal_id}`, label: 'Make this change', message: 'Yes, make that change.' }, { scenario_id: 'scn', emitted_at_iso: new Date().toISOString() });
+    return { p, pa: JSON.parse(JSON.stringify(over.expiresInMs === undefined ? pa : { ...pa, expires_at_iso: new Date(Date.now() + over.expiresInMs).toISOString() })) as unknown };
+  };
+  const restore = async (pending: unknown[], subject = { scenario_id: 'scn', user_id: 'u1' as string | null }) => {
+    const { rehydrateProposals } = await import('../durable-proposal.js');
+    const { ProposalStore } = await import('../proposal.js');
+    const store = new ProposalStore();
+    return { n: rehydrateProposals(pending, store, subject), store };
+  };
+  it('the control: its own proposal is restored, exactly once', async () => {
+    const { p, pa } = await build();
+    const { n, store } = await restore([pa, pa]);
+    expect(n).toBe(1);
+    expect(store.get(p.proposal_id)?.proposal_id).toBe(p.proposal_id);
+  });
+  it('another user\'s proposal on the same scenario is never restored', async () => {
+    const { pa } = await build({ user: 'someone-else' });
+    expect((await restore([pa])).n).toBe(0);
+  });
+  it('a proposal made for another scenario is never restored', async () => {
+    const { pa } = await build({ scenario: 'other-scn' });
+    expect((await restore([pa])).n).toBe(0);
+  });
+  it('an expired carrier is never restored', async () => {
+    const { pa } = await build({ expiresInMs: -1 });
+    expect((await restore([pa])).n).toBe(0);
   });
 });
