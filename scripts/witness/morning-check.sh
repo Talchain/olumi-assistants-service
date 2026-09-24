@@ -256,6 +256,51 @@ if [ -n "$A_ERR" ]; then
 fi
 say ""
 
+# ⛔ THE RUN MUST NOT DESTROY THE APPROVE CHIP.
+#
+# #1792 offers `agent-run-analysis` on the BRIEF turn, before anything has been approved,
+# so this is a click the product itself invites as the very first move. Measured on served
+# 4fd2703 and again on d2afc2c: pressing it returns 200 with a fragile PROVISIONAL answer
+# and `suggested_actions: []` — the approve chip that would have grounded that answer is
+# gone. The run was not even blocked; `may_run` was already true. So the product invites a
+# click that removes the way to improve its own caveated answer.
+#
+# NOT fixed by #1809 (that was the 502 on the FOLLOWING turn). This is the
+# invited-act-is-a-dead-end shape, and it is a gate rather than a note because I found this
+# defect, specified a fix, and a finding without a measure is exactly how the P0 passed a
+# 24/24 run.
+#
+# Fresh scenario deliberately: pressing Run mid-journey would consume the approval the gates
+# above exist to test.
+#
+# `approvalChipsFor` derives chips from the TURN's own tool calls, and a `run_analysis`-only
+# turn carries no `proposal_id`, so it yields []. The fix carries the outstanding proposal
+# forward when EXACTLY ONE is outstanding — `offered.size !== 1` exists so a "yes" can never
+# bind ambiguously.
+say "9) pressing Run before approving must not remove the approve chip"
+SCEN2=$(uuidgen | tr 'A-Z' 'a-z')
+R9A=$(post /agent/v1/turn "$(jq -nc --arg s "$SCEN2" --arg m "$BRIEF" '{scenario_id:$s,message:$m}')")
+C9A=$(jqv "$R9A" '[.suggested_actions[]?|.id]|join(",")')
+HAS_APPROVE=$(jqv "$R9A" '[.suggested_actions[]?|select(.id|startswith("agent-approve-proposal:"))]|length')
+HAS_RUN=$(jqv "$R9A" '[.suggested_actions[]?|select(.id=="agent-run-analysis")]|length')
+say "   brief chips: ${C9A:-none}"
+if [ "${HAS_RUN:-0}" -gt 0 ] && [ "${HAS_APPROVE:-0}" -gt 0 ]; then
+  R9B=$(post /agent/v1/turn "$(jq -nc --arg s "$SCEN2" '{scenario_id:$s,message:"Run the analysis.",chip:{id:"agent-run-analysis",action_type:"run_analysis"}}')")
+  C9B=$(jqv "$R9B" '[.suggested_actions[]?|.id]|join(",")')
+  KEPT=$(jqv "$R9B" '[.suggested_actions[]?|select(.id|startswith("agent-approve-proposal:"))]|length')
+  say "   chips after the premature Run: ${C9B:-NONE}"
+  gate "Run before approving: the approve chip survives" "$([ "${KEPT:-0}" -gt 0 ] && echo 1 || echo 0)" \
+    "the product offered Run first; losing the approve chip strands its own provisional answer"
+  if [ "${KEPT:-0}" -eq 0 ]; then
+    say "   ⛔ the user keeps a provisional answer with no offered way to ground it."
+    say "      Fix: on fastPath=='run', carry the outstanding proposal forward when"
+    say "      ProposalStore.outstanding(scenario,user).length === 1 — agent-v1-turn.ts:1205 (leased)."
+  fi
+else
+  say "   Run is not offered alongside an outstanding approval on the brief turn — nothing to test"
+fi
+say ""
+
 say "==== $pass passed · $fail failed · served $SERVED ===="
 say "scenario for follow-up: $SCEN"
 [ "$fail" = "0" ] || exit 1
