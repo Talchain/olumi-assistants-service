@@ -106,3 +106,20 @@ describe('a starting value is only proposed for a node the value writer accepts'
     expect(SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS).toEqual(['factor']);
   });
 });
+
+describe('an INCOMPLETE starting point (both halves proposed) still reports what it left out', () => {
+  const LEVEL = { option_label: 'Hire two developers', factor_label: 'Onboarding load', value: 60, basis: 'more onboarding' };
+  it('both halves succeed but a level is missing → incomplete, and not_a_factor travels with it (Codex 5807008891)', async () => {
+    // hire_two now acts on TWO factors, and only one level is given → incomplete.
+    const edges = [...EDGES, edge('hire_two', 'team_size')];
+    const rd: InternalDispatch = async () => ({ status: 200, json: { graph: { nodes: NODES, edges }, graph_hash: 'h0' } });
+    const c = createAgentCapabilities(rd, new ProposalStore(), undefined, 'full');
+    const r = await c.proposeStartingPoint(ctx, { assumptions: [
+      { factor_label: 'Hiring ramp-up delay', value: 3, unit: 'months', basis: 'typical' },
+      { factor_label: 'Onboarding load', value: 40, unit: '', basis: 'typical' },
+    ], option_levels: [LEVEL] } as never);
+    expect(r.ok).toBe(false);
+    expect(String(r.refusal)).toBe('incomplete_starting_point');
+    expect(r['not_a_factor']).toEqual([{ label: 'Hiring ramp-up delay', kind: 'risk' }]);
+  });
+});

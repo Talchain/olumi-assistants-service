@@ -791,7 +791,8 @@ export function createAgentCapabilities(
         return incompleteStartingPoint(missing, {
           assumptions: a?.assumptions ?? [], option_levels: b?.interventions ?? [],
           ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked } : {}),
-          ...(b !== null && Array.isArray(b.levels_not_accepted) ? { levels_not_accepted: b.levels_not_accepted } : {}), ...refused,
+          ...(b !== null && Array.isArray(b.levels_not_accepted) ? { levels_not_accepted: b.levels_not_accepted } : {}),
+          ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor } : {}), ...refused,
         });
       }
       const compound = createProposal({
