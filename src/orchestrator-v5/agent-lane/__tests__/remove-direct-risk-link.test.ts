@@ -138,7 +138,7 @@ describe('the endpoints are the ones the user named', () => {
     const store = new ProposalStore();
     const r = await createAgentCapabilities(p.d, store).proposeRemoveRiskLink(ctx, { option_label: 'Contract Assembly', risk_label: 'Contract supplier failure', rationale: 'x' });
     expect(r.ok, JSON.stringify(r)).toBe(true);
-    expect(store.get(String(r.proposal_id))?.operations).toEqual([{ op: 'remove_edge', path: 'contract::supplier_failure' }]);
+    expect(store.get(String(r.proposal_id))?.operations).toEqual([{ op: 'remove_edge', path: 'contract::supplier_failure', value: { option_label: 'Contract Assembly', risk_label: 'Contract supplier failure' } }]);
   });
 
   it('RED: two risks with the same label → refused as ambiguous, nothing stored', async () => {
@@ -167,7 +167,62 @@ describe('the endpoints are the ones the user named', () => {
     const store = new ProposalStore();
     const r = await createAgentCapabilities(p.d, store).proposeRemoveRiskLink(ctx, { option_label: 'Contract Assembly', risk_label: 'Contract supplier failure', rationale: 'x' });
     expect(r.ok, JSON.stringify(r)).toBe(true);
-    expect(store.get(String(r.proposal_id))?.operations).toEqual([{ op: 'remove_edge', path: 'contract::supplier_failure' }]);
+    expect(store.get(String(r.proposal_id))?.operations).toEqual([{ op: 'remove_edge', path: 'contract::supplier_failure', value: { option_label: 'Option C', risk_label: 'Contract supplier failure' } }]);
+  });
+});
+
+/**
+ * ⛔ THE NAMES THE USER APPROVED ARE THE NAMES AT THE WRITE (Codex #1816, CHANGES_REQUIRED at 1ab2194e): the
+ * proposal's base is the ANALYSIS hash, which excludes labels, so a risk renamed or swapped after the proposal
+ * left it "unchanged" — and approving "remove the link to R" could delete the link to what is now called S.
+ * The approved endpoint labels ride in the proposal (hashed into its id) and approval refuses if the stored
+ * ids no longer bear them.
+ */
+describe('approval refuses when the named endpoints were renamed or swapped since the proposal', () => {
+  const twoRisks = () => {
+    let nodes = [
+      { id: 'margin', kind: 'goal', label: 'Gross margin' },
+      { id: 'r1', kind: 'risk', label: 'Contract supplier failure' },
+      { id: 'r2', kind: 'risk', label: 'Quality escapes' },
+      { id: 'contract', kind: 'option', label: 'Contract Assembly' },
+    ];
+    let edges = [edge('contract', 'r1'), edge('contract', 'r2'), edge('r1', 'margin'), edge('r2', 'margin')];
+    const events: Record<string, unknown>[] = [];
+    const d: InternalDispatch = async (path, body) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      if (path === '/orchestrate/v2/turn' && b.kind === 'system_event') {
+        const ev = b.event as { removed_edges: { from: string; to: string }[] };
+        events.push(ev as unknown as Record<string, unknown>);
+        edges = edges.filter((e) => !ev.removed_edges.some((r) => r.from === e.from && r.to === e.to));
+        return { status: 200, json: { graph_hash: 'h0' } };
+      }
+      // The ANALYSIS hash ignores labels: a rename leaves it unchanged, exactly as in production.
+      return { status: 200, json: { graph: { nodes, edges }, graph_hash: 'h0' } };
+    };
+    const swapLabels = () => { nodes = nodes.map((n) => n.id === 'r1' ? { ...n, label: 'Quality escapes' } : n.id === 'r2' ? { ...n, label: 'Contract supplier failure' } : n); };
+    return { d, events, swapLabels, edges: () => edges };
+  };
+
+  it('RED: the two risks swap names after the proposal → approval refuses, nothing is deleted', async () => {
+    const p = twoRisks();
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const proposed = await caps.proposeRemoveRiskLink(ctx, { option_label: 'Contract Assembly', risk_label: 'Contract supplier failure', rationale: 'x' });
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    p.swapLabels();
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    expect(out.ok).toBe(false);
+    expect(out.mutated).toBe(false);
+    expect(p.events, 'no delete was sent').toEqual([]);
+    expect(p.edges().filter((e) => e.from === 'contract').map((e) => e.to).sort()).toEqual(['r1', 'r2']);
+  });
+
+  it('CONTRAST: names unchanged → exactly the named link is removed', async () => {
+    const p = twoRisks();
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const proposed = await caps.proposeRemoveRiskLink(ctx, { option_label: 'Contract Assembly', risk_label: 'Contract supplier failure', rationale: 'x' });
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(p.edges().filter((e) => e.from === 'contract').map((e) => e.to)).toEqual(['r2']);
   });
 });
 

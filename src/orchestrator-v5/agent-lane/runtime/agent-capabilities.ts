@@ -702,7 +702,9 @@ export function createAgentCapabilities(
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
-        operations: [{ op: 'remove_edge', path: `${option.id}::${risk.id}` }],
+        // The labels the user is shown ride in the (hashed) proposal, so approval can refuse a rename or swap
+        // the label-blind analysis hash cannot see (Codex #1816, CHANGES_REQUIRED at 1ab2194e).
+        operations: [{ op: 'remove_edge', path: `${option.id}::${risk.id}`, value: { option_label: option.label, risk_label: risk.label } }],
         provenance: { authored_by: 'model_proposed', basis: String(args?.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: `Remove the direct link from "${option.label}" to the risk "${risk.label}"`,
@@ -1348,6 +1350,21 @@ export function createAgentCapabilities(
          * removal through the canonical patch train and commits once, so a partial removal cannot land.
          */
         const removed = ops.map((o) => { const [from, to] = o.path.split('::'); return { from, to }; });
+        // ⛔ The ids must still bear the names the user approved: the analysis hash excludes labels, so a
+        // rename or a swap of two risks since the proposal would otherwise delete a link now shown under
+        // another name. Refuse with nothing written, and ask for a fresh look.
+        const labelOf = (id: string) => before.nodes.find((n) => n.id === id)?.label;
+        const renamed = ops.some((o) => {
+          const v = (o.value ?? {}) as { option_label?: unknown; risk_label?: unknown };
+          const [from, to] = o.path.split('::');
+          return labelOf(from) !== v.option_label || labelOf(to) !== v.risk_label;
+        });
+        if (renamed) {
+          return {
+            ok: false, mutated: false, applied: false, refusal: 'superseded',
+            detail: 'The option or risk in this change has been renamed since it was proposed, so nothing was removed. Look at the model again and propose it once more.',
+          };
+        }
         const r = await dispatch('/orchestrate/v2/turn', {
           kind: 'system_event',
           turn_id: authorisationTurnId(decision.proposal.proposal_id),
