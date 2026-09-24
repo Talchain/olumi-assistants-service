@@ -21,6 +21,7 @@ import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, retrySchemaPinningGoal, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
+import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 const GOAL = 'monthly_recurring_revenue';
@@ -132,11 +133,33 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
     }
   });
 
-  it('CONTROL (meaning): the same figures on a goal to reach or exceed DO carry the baseline', async () => {
-    for (const operator of ['>=', '>']) {
+  it('CONTROL (meaning): the same figures on an "at least" goal DO carry the baseline', async () => {
+    for (const operator of ['>=']) {
       const { goal } = await registeredGoal(pricing({ operator, value: 5, unit: '%', baseline_known: true, baseline_value: 4 }));
       expect(goal.observed_state, operator).toMatchObject({ baseline: 0.04, raw_value: 4, source: 'brief_extraction' });
     }
+  });
+
+  it('RED (meaning, strict >): "grow MRR ABOVE £20k; £20k now" carries no baseline to admission or to the analysis input', async () => {
+    const { goal, graph, out } = await registeredGoal(pricing({ operator: '>', baseline_known: true, baseline_value: 20000 }));
+    expect(goal).not.toHaveProperty('observed_state');
+    const said = (out.not_represented as string[]).filter((x) => x.includes('strictly above'));
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain('say the goal is "at least 20000"');
+    // Through the Run admission: the graph the analysis receives has no goal baseline,
+    // so no Goal fit can count equality as meeting a strict goal.
+    const run = resolveRunAdmission(graph);
+    expect(run.canonicalGraph, 'the comparison itself still runs').not.toBeNull();
+    const analysed = (run.canonicalGraph as { nodes: { id: string; observed_state?: unknown }[] }).nodes.find((n) => n.id === GOAL);
+    expect(analysed).toBeDefined();
+    expect(analysed).not.toHaveProperty('observed_state');
+  });
+
+  it('CONTROL (equality on "at least"): £20k now against "at least £20k" reaches the analysis input as a baseline', async () => {
+    const { graph } = await registeredGoal(pricing({ operator: '>=', baseline_known: true, baseline_value: 20000 }));
+    const run = resolveRunAdmission(graph);
+    const analysed = (run.canonicalGraph as { nodes: { id: string; observed_state?: Record<string, unknown> }[] }).nodes.find((n) => n.id === GOAL);
+    expect(analysed?.observed_state).toMatchObject({ baseline: 0.8, raw_value: 20000, source: 'brief_extraction' });
   });
 
   it('RED (efficacy): the production schema REQUIRES the goal\u2019s current level, and the retry pins it', () => {

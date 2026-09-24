@@ -672,18 +672,31 @@ export function admitCandidateModel(
           } as RepairEntry);
         };
         /**
-         * ⛔ ONLY A GOAL TO REACH OR EXCEED IS SCORED CORRECTLY TODAY. The level
-         * consumer scores P(level >= threshold) whatever the operator says, so for
-         * "keep churn at or below 5%; it is 4% now" a baseline would buy a Goal-fit
-         * figure for the WRONG tail. Withheld, and said, until the consumer honours
-         * the operator. The target itself is kept as before.
+         * ⛔ ONLY "AT LEAST" IS SCORED CORRECTLY TODAY. The operator has no GraphV3
+         * carrier (see the `goal_operator` loss below), and the level consumer scores
+         * P(level >= threshold) whatever the brief said (ISL
+         * `robustness_analyzer_v2.py`, `compared >= threshold`). So a baseline is
+         * written ONLY for `>=`:
+         *  · `<=` / `<` ("keep churn at or below 5%; 4% now") would be scored on the
+         *    WRONG tail;
+         *  · `>` ("grow MRR above £20k; £20k now") would count equality as met — a
+         *    held status quo would score 100% on a goal it has not reached.
+         * Withheld, and said with the shortest truthful repair, until the comparator
+         * is carried and honoured end to end. The target itself is kept as before.
          */
-        const scoresTheRightTail = model.goal.operator === '>=' || model.goal.operator === '>';
+        const scoresTheRightTail = model.goal.operator === '>=';
         if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)) {
           const admission = scoresTheRightTail
             ? admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap })
             : null;
-          if (admission === null) {
+          if (admission === null && model.goal.operator === '>') {
+            withheld(
+              `"${model.goal.metric}" is a goal to get strictly above ${raw}, and the chance of meeting it ` +
+              `cannot be calculated exactly yet: reaching ${raw} itself would be counted as success. So its ` +
+              `current level (${baselineRaw}) was not used for that, and no chance of meeting the goal will be ` +
+              `shown. If reaching ${raw} is enough, say the goal is "at least ${raw}" and it can be shown.`,
+            );
+          } else if (admission === null) {
             withheld(
               `"${model.goal.metric}" is a goal to stay at or below ${raw}, and the chance of meeting a ` +
               'goal of that kind cannot be calculated correctly yet, so its current level ' +
