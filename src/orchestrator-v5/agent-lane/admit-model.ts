@@ -24,6 +24,9 @@ import {
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import type { InterventionV3T } from '../../schemas/cee-v3.js';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
+import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
+import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
+import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import {
   admitCandidateConstraints,
@@ -470,6 +473,50 @@ export function demoteUnreachedLevers<N extends { id: string; kind?: string; lab
     return { ...n, category: 'external' };
   });
   return { nodes: out, demoted };
+}
+
+/**
+ * ⛔ AN INERT STATUS QUO IS A HELD BASELINE, NOT A BROKEN OPTION (Paul's ruling;
+ * the conventional lane already does this in `status-quo-fix.ts`).
+ *
+ * "Maintain current staffing", given no `changes` and no `interventions`, got no
+ * option→factor edge, so readiness raised `OPTION_NO_FACTOR_EDGES` — a blocker
+ * that is not waivable by exclusion — and the WHOLE model was refused. It caused
+ * 4 of 9 hiring builds to fail in an earlier witness. Yet "carry on as now" needs
+ * no level: holding every factor at its starting value IS its specification.
+ *
+ * So the ONE option whose label reads as the status quo (`labelMatchesBaseline`,
+ * the readiness authority's own idiom list) is connected to the factors the
+ * OTHER options set levels on — falling back to the factors they connect to —
+ * with deterministic repair edges. Readiness excludes exactly those edges from
+ * its mapping count (`isRepairAuthoredOptionFactorEdge`), so the option is held,
+ * not asked for a level it cannot have. Pure: it only DECIDES; the caller mints.
+ *
+ * Returns null — the option stays inert, named, and refused — when no label or
+ * TWO labels match (ambiguity is not resolved by guessing), when the matching
+ * option already has any option→factor edge, or when the basis is empty.
+ */
+export function wireInertStatusQuo(
+  nodes: readonly { id: string; kind?: string; label?: string }[],
+  edges: readonly { from: string; to: string }[],
+  interventionsByOption: ReadonlyMap<string, Readonly<Record<string, unknown>>>,
+): { optionId: string; factorIds: string[] } | null {
+  const options = nodes.filter((n) => n.kind === 'option');
+  const matches = options.filter((o) => labelMatchesBaseline(o.label ?? ''));
+  if (matches.length !== 1) return null;
+  const statusQuo = matches[0]!;
+  const factorIds = new Set(nodes.filter((n) => n.kind === 'factor').map((n) => n.id));
+  if (edges.some((e) => e.from === statusQuo.id && factorIds.has(e.to))) return null;
+  const others = options.filter((o) => o.id !== statusQuo.id);
+  const basis = new Set<string>();
+  for (const o of others) {
+    for (const fid of Object.keys(interventionsByOption.get(o.id) ?? {})) if (factorIds.has(fid)) basis.add(fid);
+  }
+  if (basis.size === 0) {
+    const otherIds = new Set(others.map((o) => o.id));
+    for (const e of edges) if (otherIds.has(e.from) && factorIds.has(e.to)) basis.add(e.to);
+  }
+  return basis.size === 0 ? null : { optionId: statusQuo.id, factorIds: [...basis] };
 }
 
 export function admitCandidateModel(
@@ -1137,7 +1184,43 @@ export function admitCandidateModel(
    * link travels in `withheld`, and the construction contract (`build-model.ts`)
    * is what makes the drafter state the link in the first place.
    */
-  const allEdges = [...topologyEdges, ...mechanismEdges];
+  /**
+   * ⭐ THE HELD STATUS QUO (`wireInertStatusQuo`). Minted with the SAME stamps the
+   * conventional lane's connectivity repair uses — `origin: 'repair'`, the
+   * `cee_hypothesis` provenance and its "no effect value is implied" reasoning —
+   * because `origin` is the one discriminator readiness reads to hold the option
+   * rather than ask for a level. No level, no intervention, no `is_baseline`
+   * stamp and no user authority are written: the only claim made is the one
+   * disclosed below, and it is correctable.
+   */
+  const heldStatusQuo = wireInertStatusQuo(nodes, [...topologyEdges, ...mechanismEdges], interventionsByOption);
+  const heldStatusQuoEdges = (heldStatusQuo?.factorIds ?? []).map((factorId) => ({
+    ...topo(heldStatusQuo!.optionId, factorId),
+    origin: REPAIR_AUTHORED_ORIGIN,
+    provenance: { source: 'cee_hypothesis', reasoning: CONNECTIVITY_REPAIR_WIRING_REASON },
+  }));
+  if (heldStatusQuo !== null) {
+    const optionLabel = labelById.get(heldStatusQuo.optionId) ?? heldStatusQuo.optionId;
+    const names = heldStatusQuo.factorIds.map((id) => labelById.get(id) ?? id);
+    const factorList = names.length === 1 ? names[0]! : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+    // The option is no longer inert, so it is no longer reported as one.
+    for (let i = unresolved.length - 1; i >= 0; i--) {
+      const w = unresolved[i]!;
+      if (w.reason === 'option_changes_nothing' && ids.get(w.from) === heldStatusQuo.optionId) unresolved.splice(i, 1);
+    }
+    loss.push({
+      field_path: `nodes[${heldStatusQuo.optionId}].status_quo_held`,
+      before: null,
+      after: heldStatusQuo.factorIds,
+      reason:
+        `'${optionLabel}' reads as carrying on as now, so I connected it to ${factorList} with no level of its own; ` +
+        'the analysis holds each at its starting value, which may be an estimate rather than a figure you gave. ' +
+        'If carrying on as now would itself change any of them, say how.',
+      severity: 'info',
+    } as RepairEntry);
+  }
+
+  const allEdges = [...topologyEdges, ...heldStatusQuoEdges, ...mechanismEdges];
 
   /**
    * ⭐ A NODE THAT CANNOT REACH THE GOAL BLOCKS THE WHOLE ANALYSIS.
