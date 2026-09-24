@@ -379,6 +379,26 @@ export interface ComposeToolCallInput {
    * never gains a wrong one.
    */
   readonly flipFocusFactorId?: string;
+
+  /**
+   * Report the lens THIS turn's current-turn run_analysis fact selected, so the
+   * caller can RECORD it on the fact it is about to commit
+   * (`compose/selected-lens-record.ts`). Called exactly ONCE per current-turn
+   * run_analysis fact that reaches the Phase-3 rebuild, with `null` when the
+   * selector recommended nothing — a first-class outcome, reported rather than
+   * swallowed, so absence is never mistaken for "this code did not run".
+   *
+   * ⭐ OBSERVATION ONLY. It is invoked AFTER the selection, reads nothing back
+   * into the build, and its absence changes no byte of the composed response —
+   * this reports a decision that already happens, it does not make one.
+   *
+   * Scoped to the CURRENT-TURN branch, exactly like `previousAnalysisLens` and
+   * `judgementSignals` and for the same reason: the prior-fact lifecycle branch
+   * RE-PRESENTS an analysis the user has already seen and selects WITHOUT the
+   * lens history, so its lens is not that analysis's original selection and
+   * must never be recorded as one.
+   */
+  readonly onLensSelected?: (lens: LensId | null) => void;
 }
 
 export function composeToolCallResponse(input: ComposeToolCallInput): OlumiResponse {
@@ -398,6 +418,7 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
     input.flipFocusFactorId,
     input.analysisReadyStatus,
     input.analysisReady,
+    input.onLensSelected,
   );
 
   return {
@@ -461,6 +482,8 @@ function buildBlocksFromFacts(
   flipFocusFactorId?: string,
   analysisReadyStatus?: NonNullable<GraphPatchBlockData['analysis_ready']>['status'],
   analysisReady?: unknown,
+  /** See {@link ComposeToolCallInput.onLensSelected}. Observation only. */
+  onLensSelected?: (lens: LensId | null) => void,
 ): OlumiResponse['blocks'] {
   const blocks: OlumiResponse['blocks'] = [];
   let currentTurnRunAnalysisHandled = false;
@@ -564,6 +587,7 @@ function buildBlocksFromFacts(
           analysisReadyStatus,
           previousAnalysisLens,
           judgementSignals,
+          onLensSelected,
         );
         blocks.push(...freshBlocks);
 
@@ -1414,6 +1438,12 @@ function rebuildPhase3BlocksFresh(
    * build.
    */
   judgementSignals?: JudgementSignals,
+  /**
+   * See {@link ComposeToolCallInput.onLensSelected}. Passed by the current-turn
+   * branch ONLY — the prior-fact lifecycle branch passes nothing, so a
+   * re-presentation can never overwrite the original turn's record.
+   */
+  onLensSelected?: (lens: LensId | null) => void,
 ): OlumiResponse['blocks'] {
   const ctx: BlockBuildCtx = {
     created_at: new Date().toISOString(),
@@ -1453,6 +1483,14 @@ function rebuildPhase3BlocksFresh(
   // before reaching this helper, so a lens is never suggested off stale signals).
   // `selectLens` returns at most one, and null when nothing is justified.
   const lensSurface = buildLensSurface(fact, ctx, previousAnalysisLens, judgementSignals);
+  // Report the selection to the caller so it can be RECORDED on the fact this
+  // turn commits. The lens id is inside the block identity
+  // (`coach:lens:${selection.lens}` → `block_id`), and the selection's
+  // `previousAnalysisLens` input is not recoverable at rebuild time, so a later
+  // turn can only read what was chosen — it cannot re-derive it. One
+  // derivation, two read points; never two derivations of one fact (trap 12/16).
+  // `null` is reported explicitly: "nothing was justified" is an outcome.
+  onLensSelected?.(lensSurface?.selection.lens ?? null);
   const evidenceBlocks = buildEvidenceBlocks(
     fact,
     lookup,
