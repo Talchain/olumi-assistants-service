@@ -505,6 +505,22 @@ export async function buildModelFromBrief(
       leftOut.length > 0
         ? `${leftOut.length} item(s) from the first draft were left out to keep the model compact: ${leftOut.map((x) => x.label).join('; ')}.`
         : undefined,
+      // ⭐ THE GOAL'S DEADLINE AND DIRECTION, WHICH GraphV3 CANNOT HOLD. `admit-model.ts`
+      // already records each as a warn-level loss with the reason written out; until now
+      // only `projected_field_count` travelled, and a NUMBER is not something the Agent
+      // can turn into a sentence. Measured on served 3f412be across the six estate briefs
+      // in `Docs/v5/evidence/records-v11-cause-not-option-2026-08-30/briefs`: 0 of 6
+      // carried the values OR the loss records anywhere, while `goal_threshold_raw`,
+      // `goal_constraints`, `scale_frame` and `provenance` all did.
+      //
+      // ⛔ The cost is not thinness, it is a disagreement. The Agent narrates from the
+      // brief, so on B2 its prose said "the goal of £3m new ARR within 18 months" while
+      // the model held no horizon at all and `permitted_analysis_mode` was
+      // `quantified_provisional` — figures shown against a deadline the analysis never
+      // received. Saying it is the only honest option while the projection cannot hold it.
+      ...admitted.loss
+        .filter((l) => /\.(horizon_months|goal_operator)$/.test(l.field_path))
+        .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
 }
