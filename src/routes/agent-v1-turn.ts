@@ -58,6 +58,9 @@ import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
 import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
 import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import { approvalChipsFor } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { isRunAffordanceAdmitted } from '../orchestrator-v5/admission/run-affordance-gate.js';
+import { POST_APPLY_RUN_CHIP } from '../orchestrator-v5/handlers/post-apply-chips.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
 
@@ -1378,6 +1381,43 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           suggested_actions: [
             ...existing,
             { id: 'agent-consider-the-opposite', label: 'Challenge this result', message: counter },
+       * ⭐ FP2 REMOVED THE IMPLICIT ANALYSIS — SO SOMETHING MUST OFFER THE EXPLICIT ONE.
+       *
+       * ⛔ MEASURED IN SERVED CODE, not inferred. `approvalChipsFor`
+       * (`approval-chips.ts:18`) opens with
+       * `if (toolCalls.some((c) => c.name === 'authorise_change')) return []`.
+       * FP2's deterministic approval calls exactly that, so after an approval the
+       * OpenAI route emits **zero** suggested actions — not a missing Run chip, no
+       * chips at all. The user approves their starting values, FP2 correctly declines
+       * to run an analysis nobody asked for, and then nothing tells them they can.
+       *
+       * ⚠ THE CONVENTIONAL FIX DOES NOT REACH HERE. #1739 adds the same offer to the
+       * post-apply chip builders in `turn-executor.ts`; FP2 composes its own response
+       * through `narrateWriteOutcome` and never reaches them. RC said as much —
+       * "#1739 alone does not fix the OpenAI route" — and this is why.
+       *
+       * ⭐ GATED ON THE ADMISSION, NOT ON `status`. `isRunAffordanceAdmitted` is the
+       * one predicate that matches the deployed UI's own rule
+       * (`status === 'ready' || may_run === true`), and absence means an older
+       * producer rather than "no". Offering a Run that CEE would refuse is worse than
+       * offering none, so the chip is appended only when the admission says it lands.
+       *
+       * ⚠ Appended, never replacing: whatever the composer already chose stays, and
+       * the client renders the first three, so this must not push a live chip out.
+       * It is added only when the list is short enough to keep it visible.
+       */
+      ...(((): Record<string, unknown> => {
+        const applied = result.tool_calls.some((c) => c.name === 'authorise_change' && c.ok === true);
+        if (!applied || !isRunAffordanceAdmitted(analysisReady as never)) return {};
+        const existing = (finalised as { suggested_actions?: unknown[] }).suggested_actions ?? [];
+        if (existing.some((a) => (a as { id?: string })?.id === POST_APPLY_RUN_CHIP.id)) return {};
+        if (existing.length >= 3) return {};
+        return {
+          suggested_actions: [
+            ...existing,
+            // ⭐ THE SAME CHIP #1739 OFFERS CONVENTIONALLY — one shape, one id, so the
+            // two routes cannot drift into offering the user two different Runs.
+            { ...POST_APPLY_RUN_CHIP },
           ],
         };
       })()),
