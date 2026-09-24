@@ -619,6 +619,54 @@ export default async function route(app: FastifyInstance) {
         if (expectedGraphIdentityHash === undefined) {
           return unavailable();
         }
+        /**
+         * ⛔⛔ AND "no hashable graph" IS NOT "no graph". Accepted from independent
+         * review of #1810.
+         *
+         * `hashesForRawGraph` maps a graph that is PRESENT BUT UNPARSEABLE to
+         * `identity: null`, exactly as it maps an absent one
+         * (`context/graph-cas-conflict.ts` — a failed `GraphStateIngressSchema`
+         * safeParse returns `{parseFailed: true, identity: null}`). So an absence
+         * assertion would have passed against stored malformed bytes and REPLACED
+         * them — the very overwrite this field exists to prevent, and flatly
+         * contrary to the wording of the refusal below.
+         *
+         * `baseGraphForInvariants` is the RAW read, so raw presence is decidable
+         * independently of hashability. A genuinely absent graph may proceed; a
+         * present one that cannot be hashed must refuse, because we cannot show it
+         * is safe to discard and a caller asserting emptiness has not asked to.
+         */
+        const rawGraphPresent = baseGraphForInvariants !== null && baseGraphForInvariants !== undefined;
+        if (expectedGraphIdentityHash === null && rawGraphPresent) {
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.expected_absent_graph_unhashable",
+              request_id: requestId,
+              scenario_id: scenarioId,
+            },
+            "Graph registration — the caller expected no graph and one exists that could not be hashed; nothing written",
+          );
+          return reply
+            .code(409)
+            .send(
+              buildErrorV1(
+                "BAD_INPUT",
+                "This model already holds content that could not be read, and this was written expecting it to be empty. Nothing was written — read it again first.",
+                {
+                  code: "GRAPH_STALE",
+                  failed_expectation: "absence",
+                  expected_graph_identity_hash: null,
+                  // ⚠ NOT a hash: there is none, and saying so is the honest answer
+                  // rather than reporting `null` as though the model were empty.
+                  current_graph_identity_hash: null,
+                  current_graph_unhashable: true,
+                  expected_graph_hash: callerExpectedGraphHash ?? null,
+                  current_graph_hash: expectedGraphAnalysisHash ?? null,
+                },
+                requestId,
+              ),
+            );
+        }
         if (expectedGraphIdentityHash !== null) {
           log.warn(
             {

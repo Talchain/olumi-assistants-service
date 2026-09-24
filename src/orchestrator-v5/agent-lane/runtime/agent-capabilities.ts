@@ -1376,7 +1376,23 @@ export function createAgentCapabilities(
              * a missing hash to `''`. Omitting it there preserves today's
              * behaviour rather than turning a degraded read into a hard failure.
              */
-            const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+            /**
+             * ⛔ NO WRITE AT ALL WHEN THE RE-READ LEFT NOTHING TO DO — the docblock
+             * above promised exactly this and it was false.
+             *
+             * ⚠ Accepted from independent review of #1743. The gate was
+             * `frameById.size`, computed BEFORE the re-read. When a competing writer
+             * had already framed every factor, `stillNeeds` was empty, `patched`
+             * equalled `base.nodes`, and a byte-identical WHOLE-GRAPH register still
+             * went out — minting a model version the user did not cause and taking
+             * the overwrite risk this block exists to remove, for nothing.
+             *
+             * Skipping is honest rather than synthetic: no HTTP call is made and
+             * nothing downstream claims a write, because none was made.
+             */
+            const reg: { status: number; json: Record<string, unknown> } = stillNeeds.size === 0
+              ? { status: 200, json: {} }
+              : await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
               // ⛔⛔ SPREAD THE WHOLE GRAPH. This sent only `{ nodes, edges }`, so
               // every other top-level key was DELETED by a write whose purpose is
               // to stop the model being overwritten. They are not cosmetic:
@@ -1606,11 +1622,33 @@ export function createAgentCapabilities(
           if (typeof n.scale_frame === 'number' && n.scale_frame > 1) return false;
           return typeof os.value === 'number' && Math.abs(os.value) > 1 && typeof os.cap !== 'number';
         });
-        const framed: { factor: string; value: number; range: number }[] = [];
+        /**
+         * ⛔⛔ CARRIES THE STABLE NODE ID, and the id is the load-bearing part.
+         *
+         * ⚠ CHANGES_REQUIRED from independent review of #1743, accepted. This list
+         * held only the visible `label`, and the post-refusal readback joined the
+         * fresh canonical nodes by `Map<label, node>` — where the LAST duplicate
+         * label wins. Production-shaped counterexample: factors A and B both
+         * display "Revenue"; A's frame is still absent after GRAPH_STALE, B is
+         * framed by another writer and appears later in the fresh list. The map
+         * resolved A's "Revenue" to B, dropped A, and told the user every factor
+         * now has a range — while A still blocked the analysis. A label is a value
+         * another object can satisfy; binding a claim to one is the estate's own
+         * named trap, and I walked into it while fixing the rename case.
+         *
+         * ⭐ An id join also subsumes the rename case for free: the node is found,
+         * and its CURRENT label is what the user is shown.
+         *
+         * `id` is internal only — it is stripped before the wire (`toWire` below)
+         * so the emitted payload shape is unchanged, byte for byte.
+         */
+        type IntendedFrame = { id: string; factor: string; value: number; range: number };
+        const toWire = (f: IntendedFrame) => ({ factor: f.factor, value: f.value, range: f.range });
+        const framed: IntendedFrame[] = [];
         /** The ranges this turn INTENDED to attach but could not — kept so a
          *  failure can name which factors still have no range, instead of the
          *  reply implying nothing was written at all. */
-        let rangesNotAttached: { factor: string; value: number; range: number }[] = [];
+        let rangesNotAttached: IntendedFrame[] = [];
         /**
          * ⛔ THE FIELD NAME MUST CARRY ITS OWN GUARANTEE. A consumer cannot tell a
          * verified absence from an intended one, so `ranges_not_attached` is
@@ -1692,7 +1730,7 @@ export function createAgentCapabilities(
               stillNeeds.set(id, range);
               // ⭐ Reported only now, from the FRESH node, so the sentence the user
               // reads and the bytes that were written are the same fact.
-              framed.push({ factor: node.label, value: freshRaw, range });
+              framed.push({ id: node.id, factor: node.label, value: freshRaw, range });
             }
             const patched = base.nodes.map((n) => {
               const range = stillNeeds.get(n.id);
@@ -1712,7 +1750,24 @@ export function createAgentCapabilities(
              * into a commit message and a PR body while only the first site had
              * changed. Fixed now, and the guard below counts BOTH.
              */
-            const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
+            /**
+             * ⛔ NO WRITE AT ALL WHEN THE RE-READ LEFT NOTHING TO DO — the docblock
+             * above promised exactly this and it was false at BOTH sites.
+             *
+             * ⚠ Accepted from independent review of #1743. The gate was
+             * `frameById.size`, computed BEFORE the re-read. When a competing writer
+             * had already framed every factor, `stillNeeds` was empty, `patched`
+             * equalled `base.nodes`, and a byte-identical WHOLE-GRAPH register still
+             * went out — minting a model version the user did not cause and taking
+             * the overwrite risk this block exists to remove, for nothing.
+             *
+             * Skipping is honest rather than synthetic: `framed` is now built inside
+             * the `stillNeeds` loop, so it is empty here and
+             * `ranges_added_for_analysis` is omitted. No claim, because no write.
+             */
+            const reg: { status: number; json: Record<string, unknown> } = stillNeeds.size === 0
+              ? { status: 200, json: {} }
+              : await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
               // ⛔⛔ SPREAD THE WHOLE GRAPH. This sent only `{ nodes, edges }`, so
               // every other top-level key was DELETED by a write whose purpose is
               // to stop the model being overwritten. They are not cosmetic:
@@ -1801,17 +1856,21 @@ export function createAgentCapabilities(
                   // Derived from the FRESH read, never from what we intended:
                   // a competing writer may already have supplied a range.
                   /**
-                   * ⚠ KEYED ON `label`, NOT `id`. `framed.push({ factor: n.label … })`
-                   * stores the LABEL (`:1324`), so an id-keyed lookup misses every
-                   * entry, `frameOf(undefined)` is null, and EVERY factor reads as
-                   * still-unranged — the exact false claim this repair exists to
-                   * remove. Caught by the competing-writer control, which is what a
-                   * discriminating control is for.
+                   * ⭐⭐ KEYED ON `id`, WHICH IS THE ONLY KEY THAT CANNOT COLLIDE.
+                   *
+                   * A label join silently resolved one factor to a DIFFERENT factor
+                   * sharing its label (see the `IntendedFrame` note above), and it
+                   * could not find a renamed one at all. An id join answers both:
+                   * present-and-framed, present-and-still-unranged, or absent.
+                   *
+                   * ⚠ And the message is built from the FRESH node's label, not the
+                   * one this turn remembered — after a rename the user is shown the
+                   * name the model now uses, not a name that no longer exists.
                    */
-                  const byLabel = new Map<string, GraphRead['nodes'][number]>();
+                  const byId = new Map<string, GraphRead['nodes'][number]>();
                   for (const n of fresh.nodes) {
-                    const label = String((n as { label?: unknown }).label ?? '');
-                    if (label !== '') byLabel.set(label, n);
+                    const id = String((n as { id?: unknown }).id ?? '');
+                    if (id !== '') byId.set(id, n);
                   }
                   /**
                    * ⛔⛔ AND A LABEL THAT IS NOT IN THE FRESH READ PROVES NOTHING.
@@ -1828,10 +1887,12 @@ export function createAgentCapabilities(
                    * dropped from the named list and disclosed as unaccounted for,
                    * without asserting anything about it.
                    */
-                  const unaccounted = rangesNotAttached.filter((f) => byLabel.get(f.factor) === undefined);
-                  const stillUnranged = rangesNotAttached.filter(
-                    (f) => byLabel.get(f.factor) !== undefined && frameOf(byLabel.get(f.factor)) === null,
-                  );
+                  const unaccounted = rangesNotAttached.filter((f) => byId.get(f.id) === undefined);
+                  const stillUnranged = rangesNotAttached
+                    .filter((f) => byId.get(f.id) !== undefined && frameOf(byId.get(f.id)) === null)
+                    // ⭐ The CURRENT label, from the fresh read. A factor renamed by
+                    // a competing writer is named as the model now names it.
+                    .map((f) => ({ ...f, factor: String((byId.get(f.id) as { label?: unknown }).label ?? f.factor) }));
                   rangesNotAttached = stillUnranged;
                   failures.push({
                     factor: 'scale_frame',
@@ -1871,7 +1932,7 @@ export function createAgentCapabilities(
           ...(rescaled.length > 0
             ? { rescaled_by_the_model: rescaled, must_disclose_rescaling: true }
             : {}),
-          ...(framed.length > 0 ? { ranges_added_for_analysis: framed } : {}),
+          ...(framed.length > 0 ? { ranges_added_for_analysis: framed.map(toWire) } : {}),
           /**
            * ⭐ THE PARTIAL OUTCOME, STATED RATHER THAN IMPLIED. A value write and
            * a frame write are two registrations; the first can land and the
@@ -1888,7 +1949,7 @@ export function createAgentCapabilities(
           ...(rangesNotAttached.length > 0
             ? {
               partially_applied: true,
-              ranges_not_attached: rangesNotAttached,
+              ranges_not_attached: rangesNotAttached.map(toWire),
               // A factor whose amount has no range cannot be read against
               // anything, so the analysis stays blocked for it whatever else
               // landed. Named, so the Agent cannot report a clean success.
