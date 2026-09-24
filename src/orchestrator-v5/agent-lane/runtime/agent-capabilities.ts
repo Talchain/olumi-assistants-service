@@ -86,6 +86,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
   }
 }
 
+import { planNewOption, newOptionFollowUp } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
@@ -1064,6 +1065,166 @@ export function createAgentCapabilities(
       // The STORED operations are applied. Nothing is regenerated here.
       const ops = decision.proposal.operations;
 
+      /**
+       * ⭐ ADD AN OPTION — its own route, BEFORE the compound gate.
+       *
+       * `applyCompound` accepts only `set_factor_value` and
+       * `set_option_intervention` and refuses everything else as
+       * `unsupported_compound`. Creating an entity is a different write family, so
+       * widening that gate would dissolve the property that makes it safe. This
+       * route handles exactly `add_node` + `add_edge` and nothing else.
+       *
+       * ⛔ THE HASH IS RE-READ BETWEEN EVERY WRITE. `structural_add_edge` refuses
+       * `BASE_HASH_DIVERGED` against a stale base, and the node write moves the
+       * hash — so reusing the proposal's base hash for the edges would refuse
+       * every one of them AFTER the user approved. That is the exact shape of the
+       * failure this lane has already met twice.
+       */
+      if (ops[0]?.op === 'add_node' && ops.slice(1).every((o) => o.op === 'add_edge')) {
+        const optionId = String(ops[0].path);
+        const nodeValue = (ops[0].value ?? {}) as { label?: unknown };
+        const operationId = authorisationTurnId(decision.proposal.proposal_id);
+        /**
+         * ⛔ A RETRY CONTINUES FROM THIS PROPOSAL'S OWN RECORDED PROGRESS (independent review of
+         * #1788, 5806071796) — never from "a node with that id exists", which does not prove the
+         * proposal owns it. `ProposalStore.authorise` admits a continuation only when the model is
+         * still at the revision this proposal's own partial write left; the operations it already
+         * landed are skipped, the rest are applied from that revision, and its receipts carry over.
+         */
+        const cont = decision.continuation;
+        const landedBefore = new Set(cont?.landed ?? []);
+        // The revision this pass was authorised at: the proposal's base, or its own recorded progress.
+        const authorisedRevision = cont !== undefined ? before.graph_hash : decision.proposal.base_graph_identity_hash;
+        /**
+         * ⛔ OWNERSHIP IS PROVEN, NEVER OBSERVED (independent review of #1788, 5807353449 / 5807492503).
+         * `ownRevision` is the last revision this proposal can PROVE it produced: the authorised one, or
+         * the `graph_hash` a write of OURS reports it committed (the served system-event response carries
+         * the persisted graph's analysis hash — the same space as the read route) — and only while a
+         * readback agrees with it. A readback that differs means someone else edited in between: the pass
+         * STOPS dispatching, nothing is written on the observed revision, and progress stays at the last
+         * proven revision, so the next approval is superseded instead of applied to a model the user
+         * never saw. Presence of a link alone never proves this proposal wrote it.
+         */
+        let ownRevision = authorisedRevision;
+        let interleaved = false;
+        const committedHashOf = (res: { json: Record<string, unknown> } | null): string | undefined =>
+          (typeof res?.json.graph_hash === 'string' ? res.json.graph_hash : undefined);
+        const receipts: ReceiptSummary[] = [...(cont?.receipts ?? [])];
+        let receiptUnreadable = false;
+        let addRes: { status: number; json: Record<string, unknown> } | null = null;
+        if (!landedBefore.has(optionId)) {
+          addRes = await dispatch('/orchestrate/v2/turn', {
+            kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
+            event: { kind: 'structural_add', node_id: optionId, node_kind: 'option',
+              label: String(nodeValue.label ?? ''), base_graph_hash: ownRevision },
+          });
+        }
+        let afterAdd = await readGraph(ctx.scenario_id);
+        const optionExists = (afterAdd?.nodes ?? []).some((n) => n.id === optionId);
+        const nodeCommitted = committedHashOf(addRes);
+        if (!optionExists || (addRes !== null && nodeCommitted === undefined)) {
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied',
+            detail: String(addRes?.json.assistant_text ?? 'The option was not added, so nothing else was attempted.'),
+            http: addRes?.status ?? 0, operation_id: operationId };
+        }
+        if (addRes !== null) {
+          const addReceipt = receiptSummaryOf(addRes.json);
+          if (addReceipt.summary !== null) receipts.push(addReceipt.summary);
+          if (addReceipt.unreadable) receiptUnreadable = true;
+          ownRevision = nodeCommitted as string;
+          if (afterAdd?.graph_hash !== ownRevision) interleaved = true;
+        } else if (afterAdd?.graph_hash !== authorisedRevision) {
+          // A continuation whose model moved after it was authorised: nothing is written.
+          return { ok: false, mutated: false, applied: false, refusal: 'superseded',
+            expected: authorisedRevision, actual: afterAdd?.graph_hash ?? null,
+            detail: 'The model changed after this was approved, so nothing more was written. Look at it again and approve once more.' };
+        }
+
+        const linked: string[] = [];
+        const notLinked: { factor: string; detail: string }[] = [];
+        const landedNow: string[] = [optionId];
+        for (const edgeOp of ops.slice(1)) {
+          const [, factorId] = String(edgeOp.path).split('::');
+          const factorNode = (afterAdd?.nodes ?? []).find((n) => n.id === factorId);
+          const factorLabel = String(factorNode?.label ?? factorId);
+          // Landed by THIS proposal's earlier partial write: kept, never written twice.
+          if (landedBefore.has(String(edgeOp.path))) { linked.push(factorLabel); landedNow.push(String(edgeOp.path)); continue; }
+          if (interleaved) {
+            notLinked.push({ factor: factorLabel, detail: 'not attempted: the model changed while this was being saved' });
+            continue;
+          }
+          const direction = (edgeOp.value as { direction?: unknown } | undefined)?.direction === 'negative' ? 'negative' : 'positive';
+          const edgeRes = await dispatch('/orchestrate/v2/turn', {
+            kind: 'system_event', turn_id: authorisationTurnId(`${decision.proposal.proposal_id}:${factorId}`),
+            scenario_id: ctx.scenario_id, stage: 'frame',
+            event: { kind: 'structural_add_edge', from: optionId, to: factorId,
+              // ⚠ The projection default, exactly as the edge route above records:
+              // the wire requires a magnitude and this is not the user's claim.
+              magnitude: 0.5, effect_direction: direction, base_graph_hash: ownRevision },
+          });
+          const committed = committedHashOf(edgeRes);
+          afterAdd = await readGraph(ctx.scenario_id);
+          const present = (afterAdd?.edges ?? []).some((e) => e.from === optionId && e.to === factorId);
+          if (present && committed !== undefined) {
+            linked.push(factorLabel);
+            landedNow.push(String(edgeOp.path));
+            ownRevision = committed;
+            if (afterAdd?.graph_hash !== committed) interleaved = true; // ours landed; someone edited after it
+            const r = receiptSummaryOf(edgeRes.json);
+            if (r.summary !== null) receipts.push(r.summary);
+            if (r.unreadable) receiptUnreadable = true;
+          } else {
+            notLinked.push({ factor: factorLabel, detail: String(edgeRes.json.assistant_text ?? 'not linked') });
+            if (afterAdd?.graph_hash !== ownRevision) interleaved = true; // refused, and the model moved: not ours
+          }
+        }
+
+        /**
+         * ⛔ AN APPROVED PROPOSAL IS COMPLETE ONLY WHEN THE WHOLE STORED OPERATION SET
+         * IS CONFIRMED FROM READBACK (Codex, exact head 5c908d1a). Three repairs here:
+         *
+         * 1. `markApplied` on completion, so a retry returns `already_applied` with the
+         *    ORIGINAL receipts instead of `superseded`. `ProposalStore.authorise`
+         *    (`proposal.ts:216`) checks the applied map BEFORE the base hash — and this
+         *    write moves that hash — so without this a user who retried was told their
+         *    own completed change was stale, and `outstanding()` kept offering it.
+         * 2. `receipts` is the ARRAY the narration path consumes. It was a single
+         *    OBJECT from `receiptSummaryOf`, and `write-outcome.ts:48-50` reads only an
+         *    array — so `:153-157` said "Saved. No version number was recorded" even
+         *    when the write minted one.
+         * 3. A partial reports through the standard failure shape, never an unqualified
+         *    "Saved". `ok`/`applied` are false and the unlinked factors are named, so
+         *    the status line cannot claim a completion the user did not get.
+         */
+        const complete = notLinked.length === 0;
+        if (complete) proposals.markApplied(decision.proposal.proposal_id, receipts);
+        // A partial records what THIS proposal landed and the revision it left, so approving the
+        // SAME proposal again continues from there and adds only what is missing.
+        else proposals.markPartial(decision.proposal.proposal_id, { revision: ownRevision, landed: landedNow, receipts });
+        return {
+          ok: complete,
+          mutated: true,
+          applied: complete,
+          operation_id: operationId,
+          option: { label: String(nodeValue.label ?? ''), linked_to: linked },
+          ...(notLinked.length > 0 ? {
+            not_linked: notLinked,
+            failures: notLinked.map((n) => `${n.factor}: ${n.detail}`),
+            detail:
+              `"${String(nodeValue.label ?? '')}" was added, but ${notLinked.length} of `
+              + `${linked.length + notLinked.length} links were not recorded: `
+              + `${notLinked.map((n) => n.factor).join(', ')}. The option is in the model and `
+              + 'incomplete. Approving the same change again will try only the missing links — it will not add the option twice; '
+              + 'if the model has changed since, it will be refused and you will be asked to confirm again.',
+          } : {}),
+          receipts,
+          ...(receiptUnreadable ? { receipt_unreadable: true } : {}),
+          ...(complete ? { follow_up: newOptionFollowUp({ ok: true, optionId, label: String(nodeValue.label ?? ''),
+            actsOn: linked.map((l) => ({ id: '', label: l, direction: 'positive' as const })),
+            publicLabel: decision.proposal.public_label }) } : {}),
+        };
+      }
+
       // A starting point mixes kinds; each single-kind path below handles one.
       if (new Set(ops.map((o) => o.op)).size > 1) return applyCompound(ctx, decision.proposal, before);
 
@@ -1492,6 +1653,62 @@ export function createAgentCapabilities(
         // The SAME projection get_canonical_state uses — see projectEntity.
         entities: after.nodes.map(projectEntity),
         structure: structuralFacts(after.nodes, after.edges),
+      };
+    },
+
+    /**
+     * ⭐ ADD AN OPTION THE USER PICKED — the act RC named as missing.
+     *
+     * Proposal only, exactly like every other write on this lane: nothing changes
+     * until `authorise_change`. The plan is computed by `planNewOption`, a pure
+     * function, so the refusals are testable without a graph round trip.
+     */
+    async proposeNewOption(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const plan = planNewOption(g.nodes as never, {
+        label: String(args?.label ?? ''),
+        acts_on: Array.isArray(args?.acts_on)
+          ? args.acts_on.map((x) => {
+              const a = (x ?? {}) as { factor_label?: unknown; direction?: unknown };
+              return { factor_label: String(a.factor_label ?? ''), direction: a.direction === 'negative' ? 'negative' as const : 'positive' as const };
+            })
+          : [],
+        rationale: String(args?.rationale ?? ''),
+      });
+      if (!plan.ok) {
+        return { ok: false, mutated: false, refusal: plan.refusal, detail: plan.detail,
+          ...(plan.unresolved_labels ? { unresolved_labels: plan.unresolved_labels } : {}) };
+      }
+      /**
+       * ⚠ `add_node` FIRST, THEN ONE `add_edge` PER FACTOR — the order is the
+       * write's, not a preference: `structural_add_edge` cannot reference a node
+       * that does not exist yet. The applier below walks them in this order.
+       */
+      const operations: ProposalOperation[] = [
+        { op: 'add_node', path: plan.optionId, value: { kind: 'option', label: plan.label } },
+        ...plan.actsOn.map((f) => ({ op: 'add_edge' as const, path: `${plan.optionId}::${f.id}`, value: { direction: f.direction } })),
+      ];
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash,
+        operations,
+        provenance: { authored_by: 'user_stated', basis: 'an option the user asked to add' },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: plan.publicLabel,
+      });
+      proposals.put(proposal);
+      return {
+        ok: true, mutated: false,
+        proposal_id: proposal.proposal_id,
+        public_label: proposal.public_label,
+        base_revision: g.graph_hash,
+        option: { label: plan.label, acts_on: plan.actsOn.map((a) => a.label) },
+        note:
+          'Nothing has changed yet. Show the user the option and what it will be linked to, never the id, '
+          + 'and call authorise_change with this proposal_id once they agree.',
       };
     },
 

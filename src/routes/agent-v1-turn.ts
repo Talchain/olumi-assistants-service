@@ -34,6 +34,7 @@ import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
+import { withCurrentGraphHash } from '../orchestrator-v5/agent-lane/analysis-freshness-stamp.js';
 import { BOARD_EDIT_PREFIX, HistoryStore, historyFromDurableTurns, needsDurableSeed } from '../orchestrator-v5/agent-lane/history-store.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
@@ -304,6 +305,7 @@ const AGENT_INSTRUCTIONS = [
    * ordering is sensitive to, and let the user change it and see how much it matters.
    */
   'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one; say which option leads in this model and how firmly. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding.',
+  'When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each — then authorise_change once they confirm. It adds the option and its links ONLY: say plainly that it cannot be compared until it states what it does to each factor, and offer propose_option_interventions for that. Never invent the direction; if you are not sure which way it pushes a factor, ask.',
   'History entries that begin \u201c(Board edit\u201d are changes the user made directly on the canvas. When the user asks about \u201cmy change\u201d, start from the most recent board edit, and read the current state before explaining what it did.',
   'British English. Concise but substantive.',
 ].join(' ');
@@ -594,6 +596,12 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       'agent-lane: could not read the current model back — the client will not learn this turn\u2019s revision, so a delete gesture stands down',
     );
   }
+
+  // ⭐ ONE AUTHORITATIVE STATE: `graphHash` and `analysisReady` come from the
+  // SAME dispatch above, so the stamp cannot describe a different model. See
+  // the helper's header for why `graph_hash_at_run` is never set here.
+  analysisReady = withCurrentGraphHash(analysisReady, graphHash);
+
   return { graphHash, analysisReady, draftGraph, analysisState, analysisResult };
 }
 
@@ -1210,7 +1218,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const out = (resp.output ?? []) as { type?: string; content?: { type?: string; text?: string }[] }[];
         const answer = out.filter((o) => o.type === 'message').flatMap((o) => o.content ?? [])
           .filter((c) => c.type === 'output_text').map((c) => c.text ?? '').join('');
-        if (answer.trim().length > 0) interpreted = { answer, messages: out.filter((o) => o.type === 'message') as Record<string, unknown>[] };
+        // ⛔ THE REASONING ITEM TRAVELS WITH ITS MESSAGE (served `f828a61`, witness c9: every turn after a
+        // Run was refused "Item 'msg_…' of type 'message' was provided without its required 'reasoning'
+        // item", HTTP 502). Kept in output order, exactly as the Agent loop keeps its whole output.
+        if (answer.trim().length > 0) interpreted = { answer, messages: out.filter((o) => o.type === 'reasoning' || o.type === 'message') as Record<string, unknown>[] };
         else log.warn({ scenario_id: scenarioId }, 'agent-lane: fast-path interpretation was empty — answering from the run itself');
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: fast-path interpretation failed — answering from the run itself');

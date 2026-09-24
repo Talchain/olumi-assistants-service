@@ -156,6 +156,21 @@ function statusLine(name: string, r: ToolResult): string {
     const head = vs.length > 0 ? `Saved${versionPhrase(vs)}.` : 'Saved. No version number was recorded for it.';
     return partial ? `${head} Some of it was not recorded — see above.` : head;
   }
+  /**
+   * ⛔ A PARTIALLY ADDED OPTION SAYS WHAT LANDED AND WHAT REMAINS (independent review of #1788,
+   * 5806071796). The generic line said "the change was refused (unknown reason)" and dropped the
+   * named missing link. Composed only from the capability's readback-confirmed fields.
+   */
+  const opt = r.option as { label?: unknown; linked_to?: unknown } | undefined;
+  if (r.ok !== true && r.mutated === true && opt !== undefined && Array.isArray(r.not_linked) && r.not_linked.length > 0) {
+    const label = String(opt.label ?? 'The option');
+    const linkedTo = Array.isArray(opt.linked_to) ? opt.linked_to.map(String) : [];
+    const missing = (r.not_linked as { factor?: unknown }[]).map((n) => String(n.factor ?? ''));
+    const vs = versionsOf(r);
+    return `Partly saved${versionPhrase(vs)}: "${label}" was added${linkedTo.length > 0 ? ` and linked to ${linkedTo.join(', ')}` : ''}, `
+      + `but not yet linked to ${missing.join(', ')}. Approving the same change again will try only the missing ${missing.length === 1 ? 'link' : 'links'}; `
+      + 'if the model has changed since, you will be asked to confirm again.';
+  }
   const code = String(r.refusal ?? '');
   const mutated = r.mutated === true;
   return `${mutated ? 'Partly saved' : 'Not saved'}: ${REFUSAL_WORDS[code] ?? `the change was refused (${code || 'unknown reason'})`}.`;
