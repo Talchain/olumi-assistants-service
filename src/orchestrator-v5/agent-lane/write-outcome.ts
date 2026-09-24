@@ -54,7 +54,7 @@ const versionPhrase = (vs: number[]): string =>
 
 const REFUSAL_WORDS: Record<string, string> = {
   superseded: 'the model changed after this was proposed, so it was not applied — ask me to propose it again',
-  unknown_proposal: 'there was no such proposal to apply',
+  unknown_proposal: 'that proposal is no longer available, so nothing was changed — ask me to suggest it again and approve the new one',
   not_authorised: 'that proposal belongs to a different conversation',
   integrity_failed: 'the stored proposal could not be verified',
   partially_applied: 'only part of it was saved',
@@ -62,6 +62,14 @@ const REFUSAL_WORDS: Record<string, string> = {
   model_changed_while_proposing: 'the model changed while it was being put together',
   model_already_exists: 'a model already exists for this decision',
   read_only_preview: 'this preview cannot change the model',
+  // ⛔ A REFUSED BUILD, IN WORDS WITH A NEXT STEP (served `785185b7`, scenario
+  // `03b93536`): the user read "it was refused (model_too_large)" — a code, no
+  // reason, nothing to do next. Every refusal `runtime/build-model.ts` returns.
+  model_too_large: 'it came back larger than a first model can be, even after one attempt to make it more compact — ask me to build it again, or tell me which options and factors matter most',
+  no_structured_output: 'the model builder returned nothing usable this time — ask me to try again',
+  construction_failed: 'the model builder could not produce a usable model this time — ask me to try again',
+  admitted_graph_invalid: 'what came back did not form a valid model, so nothing was saved — ask me to try again',
+  registration_refused: 'it could not be saved to this decision — ask me to try again',
 };
 
 const PART_NAMES: Record<string, string> = { values: 'starting values', option_levels: 'option levels' };
