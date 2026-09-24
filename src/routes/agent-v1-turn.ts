@@ -139,7 +139,7 @@ function rememberOffered(key: string, actions: readonly OfferedAction[]): void {
 /** The originally offered actions that are still valid on the CURRENT state, in their original order. */
 export function stillValidOffers(
   offered: readonly OfferedAction[],
-  now: { outstandingProposalIds: ReadonlySet<string>; analysisReady: unknown; analysisState: unknown },
+  now: { outstandingProposalIds: ReadonlySet<string>; analysisReady: unknown; analysisState: unknown; modelExists: boolean },
 ): OfferedAction[] {
   const approvals = offered.filter((a) => {
     const id = typedApprovalOf({ chip: { id: a.id } });
@@ -151,7 +151,9 @@ export function stillValidOffers(
   // The next step after a blocked Run stays offered while the model still cannot run (process-local,
   // like the approve chip: after a restart the replay carries the words only).
   const nextStep = offered.some((a) => a.id === NEXT_STEP_AFTER_BLOCKED_RUN_CHIP.id) && !admitsRunOffer(now.analysisReady);
-  return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : [])];
+  // A rebuild stays offered only while there is still no model to build over.
+  const rebuild = offered.some((a) => a.id === REBUILD_AFTER_TOO_LARGE_CHIP.id) && !now.modelExists;
+  return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : [])];
 }
 const sessions = new SessionBindingRegistry();
 
@@ -315,6 +317,18 @@ export const NEXT_STEP_AFTER_BLOCKED_RUN_CHIP = {
   id: 'agent-suggest-what-it-needs',
   label: 'Suggest what it still needs',
   message: 'Suggest what this model still needs before the analysis can run, so I can approve it.',
+} as const;
+
+/**
+ * ⭐ A FIRST BUILD REFUSED AS TOO LARGE OFFERS THE REBUILD ITS OWN REPLY NAMES (witness `g6` on served
+ * `6dfb56f`: 40 links against the 30-link first-model limit; the reply said "ask me to build it again"
+ * with no chip, and the same brief built 13 nodes at the first attempt on a fresh scenario). Plain text
+ * (no `action_type`): the click is an ordinary Agent turn that builds from the brief again.
+ */
+export const REBUILD_AFTER_TOO_LARGE_CHIP = {
+  id: 'agent-rebuild-model',
+  label: 'Build it again',
+  message: 'Build the model again from my brief.',
 } as const;
 
 export const RUN_OFFER_CHIP = {
@@ -922,6 +936,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           outstandingProposalIds: new Set(proposals.outstanding(scenarioId, userId).map((o) => o.proposal_id)),
           analysisReady: state.analysisReady,
           analysisState: state.analysisState,
+          // `draft_graph` is read back only when the graph has content.
+          modelExists: state.draftGraph !== undefined,
         }),
       });
       return {
@@ -1271,10 +1287,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const runBlocked = fastPath === 'run'
       && (result.tool_results[0] as { ok?: unknown; ran?: unknown } | undefined)?.ok === true
       && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran !== true;
+    // The turn's LAST build was refused as too large and nothing was saved: offer the rebuild the reply names.
+    const lastBuild = result.tool_calls.filter((c) => c.name === 'build_model_from_brief').at(-1);
+    const offerRebuild = lastBuild?.refusal === 'model_too_large' && !result.mutated;
     const offeredNow: OfferedAction[] = [
       ...approvalChipsFor(result.tool_calls),
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
       ...(runBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
+      ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
     ];
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
 

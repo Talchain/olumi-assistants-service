@@ -202,9 +202,9 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
   it('the next-step chip replays only while the model still cannot run', async () => {
     const { stillValidOffers, NEXT_STEP_AFTER_BLOCKED_RUN_CHIP } = await import('../../../routes/agent-v1-turn.js');
     const offered = [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP];
-    expect(stillValidOffers(offered, { outstandingProposalIds: new Set(), analysisReady: { status: 'needs_user_input', may_run: false }, analysisState: {} }).map((a) => a.id))
+    expect(stillValidOffers(offered, { outstandingProposalIds: new Set(), analysisReady: { status: 'needs_user_input', may_run: false }, analysisState: {}, modelExists: true }).map((a) => a.id))
       .toEqual(['agent-suggest-what-it-needs']);
-    expect(stillValidOffers(offered, { outstandingProposalIds: new Set(), analysisReady: { status: 'ready', may_run: true }, analysisState: {} }), 'runnable now: no stale remedy').toEqual([]);
+    expect(stillValidOffers(offered, { outstandingProposalIds: new Set(), analysisReady: { status: 'ready', may_run: true }, analysisState: {}, modelExists: true }), 'runnable now: no stale remedy').toEqual([]);
   });
   /**
    * ⛔ Finding 3 on #1786 (5807230197): the Run's interpretation — a turn that writes NOTHING — was
