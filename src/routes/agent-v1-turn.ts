@@ -54,6 +54,7 @@ import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/d
 import { narrateWriteOutcome, notAdoptedLine, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { proposalPendingAction, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
 import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
@@ -996,6 +997,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
       };
     };
+    /**
+     * ⛔ A RESTART MUST NOT FORGET WHAT THE USER IS ABOUT TO APPROVE (#63 5811981438: three redeploys inside
+     * Paul's session, his "yes" met `unknown_proposal`). The latest answer row carries the proposal it
+     * offered; put it back when this process does not hold it. Read BEFORE this turn's own claim row is
+     * written, or the latest row would be that claim, which carries nothing. A failed read degrades to today's behaviour.
+     */
+    if ((approvedProposal !== undefined && proposals.get(approvedProposal) === undefined)
+      || proposals.outstanding(scenarioId, userId).length === 0) {
+      if (typeof store.readMostRecentPendingActions === 'function') {
+        try {
+          rehydrateProposals(await store.readMostRecentPendingActions(scenarioId), proposals, { scenario_id: scenarioId, user_id: userId });
+        } catch (err) {
+          log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: pending proposals could not be read back — continuing without them');
+        }
+      }
+    }
     // Set only when THIS request owns the turn — used to release it if nothing ran.
     let claimHash: string | undefined;
     if (turnId !== undefined && typeof store.readCommittedTurn === 'function') {
@@ -1355,6 +1372,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     ];
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
     rememberApprove(approveKey, offeredNow);
+    // What this answer row persists: the Run offer, and the exact proposal behind any approve chip it offers.
+    const offeredApprove = offeredNow.find((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined);
+    const offeredProposal = offeredApprove !== undefined ? proposals.get(typedApprovalOf({ chip: { id: offeredApprove.id } }) as string) : undefined;
+    const emittedAtIso = new Date().toISOString();
+    const durablePending = [
+      ...(offerRun ? derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: emittedAtIso, ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) : []),
+      ...(offeredApprove !== undefined && offeredProposal !== undefined
+        ? [proposalPendingAction(offeredProposal, offeredApprove, { scenario_id: scenarioId, emitted_at_iso: emittedAtIso })]
+        : []),
+    ];
 
     // A Run writes nothing: its interpretation is never passed through the WRITE narrator, whose
     // completion-claim stripper would delete a sentence and append a false write-status line
@@ -1411,10 +1438,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           handler_facts: [],
           userMessage: message,
           assistantMessage: String((finalised as { assistant_text?: unknown }).assistant_text ?? text),
-          // The Run offer, durably, with THIS answer row — so a replay after a restart can re-offer it.
-          ...(offerRun
-            ? { pending_actions: derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: new Date().toISOString(), ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) }
-            : {}),
+          // The Run offer AND the offered approval, durably, with THIS answer row — so a replay, or an
+          // approval that reaches a restarted process, can still find them.
+          ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}),
           },
         });
         if (outcome.priorTurnConflict === true) {
