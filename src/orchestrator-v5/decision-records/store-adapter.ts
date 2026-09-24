@@ -100,22 +100,63 @@ export class DecisionRecordOutcomeConflictError extends Error {
  * `probability_of_goal` and `probability_of_joint_goal` (`:26-34,422-424,
  * 446-467`) — verified at the bytes, not inherited.
  */
-export interface CreateDecisionRecordWrite {
+/**
+ * The user's own reasoning text (schemas 0.57.0; migration
+ * 20260924120000). Optional on EITHER branch; when present a non-empty,
+ * trimmed string of at most `DECISION_RECORD_TEXT_MAX_CHARS` (user-commit.ts) chars.
+ * `rationale` is backward-looking justification and is NEVER the scored
+ * claim — that is `prediction.statement`.
+ */
+export interface DecisionRecordReasoningTextWrite {
+  readonly rationale?: string;
+  readonly key_assumption?: string;
+  /** The user's revisit trigger TEXT. A date is carried by `review_date`. */
+  readonly revisit_trigger?: string;
+  readonly next_action?: string;
+}
+
+/** A chosen option — every record written before 0.57.0 has this shape. */
+export interface ChosenOptionDecisionWrite extends DecisionRecordReasoningTextWrite {
+  readonly chosen_option_id: string;
+  readonly chosen_option_label: string;
+  /** `aag_v1:sha256:`-prefixed CEE analysis-affecting graph hash — the
+   *  agreed regime (seam memo PLATFORM-REPORT-2026-07-10-1 §2.1). NEVER
+   *  PLoT's response_hash / hashGraph, NEVER graph_identity_hash. */
+  readonly graph_hash: string;
+  readonly analysis_summary?: DecisionRecordAnalysisSummary;
+  /** true when the record was created by an explicit "record the decision"
+   *  action (0.16.0). Absent on ambient auto-capture — a disclosed
+   *  inference, never a fabricated `false`. Live on the RPC whitelist
+   *  (`…decision_records.sql:422-424`). */
+  readonly committed_by_user?: boolean;
+}
+
+/**
+ * "Not ready to choose" (schemas 0.57.0 `DecisionRecordNotReadyPositionSchema`).
+ * NOT a decision: it carries NO option keys — the RPC whitelist and the table
+ * CHECK both refuse one — and it is only ever written by an explicit user
+ * commit, so `committed_by_user` is the literal `true`.
+ */
+export interface NotReadyPositionDecisionWrite extends DecisionRecordReasoningTextWrite {
+  readonly position: 'not_ready';
+  /** Same regime as {@link ChosenOptionDecisionWrite.graph_hash}. */
+  readonly graph_hash: string;
+  readonly committed_by_user: true;
+}
+
+export type DecisionRecordDecisionWrite = ChosenOptionDecisionWrite | NotReadyPositionDecisionWrite;
+
+export interface CreateDecisionRecordWrite<
+  TDecision extends DecisionRecordDecisionWrite = DecisionRecordDecisionWrite,
+> {
   readonly scenario_id: string;
-  readonly decision: {
-    readonly chosen_option_id: string;
-    readonly chosen_option_label: string;
-    /** `aag_v1:sha256:`-prefixed CEE analysis-affecting graph hash — the
-     *  agreed regime (seam memo PLATFORM-REPORT-2026-07-10-1 §2.1). NEVER
-     *  PLoT's response_hash / hashGraph, NEVER graph_identity_hash. */
-    readonly graph_hash: string;
-    readonly analysis_summary?: DecisionRecordAnalysisSummary;
-    /** true when the record was created by an explicit "record the decision"
-     *  action (0.16.0). Absent on ambient auto-capture — a disclosed
-     *  inference, never a fabricated `false`. Live on the RPC whitelist
-     *  (`…decision_records.sql:422-424`). */
-    readonly committed_by_user?: boolean;
-  };
+  /**
+   * EITHER a chosen option OR (0.57.0) an explicit not-ready position. The
+   * ambient capture seam only ever builds the first
+   * (`CreateDecisionRecordWrite<ChosenOptionDecisionWrite>`); only the user
+   * commit can build the second.
+   */
+  readonly decision: TDecision;
   readonly prediction: {
     readonly statement: string;
     readonly confidence?: number;

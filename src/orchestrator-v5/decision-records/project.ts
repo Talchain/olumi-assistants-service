@@ -33,6 +33,13 @@ import { DECISION_RECORDS_HARD_CAP } from './store-adapter.js';
 const RATIONALE_LINE_CHAR_CAP = 220;
 
 /**
+ * The designation clause for a not-ready record (0.57.0) — the counterpart of
+ * `Chose "<option>": `. It names the ABSENCE of a choice, so the coach can
+ * never read the line as one.
+ */
+export const NOT_READY_DESIGNATION = 'Not ready to choose (no option chosen): ';
+
+/**
  * Headroom reserved below `charBudget` while accumulating lines, so the FINAL
  * text — body + the disclosure line + the JSON-serialisation wrapper the budget
  * emit measures (surrounding quotes + `\n`-escapes) — never exceeds `charBudget`.
@@ -97,9 +104,33 @@ function projectOneLine(
   record: DecisionRecordRead,
   mayNameLeadingOption: boolean,
 ): { line: string; cut: boolean } | null {
-  const option = readString(record.decision, 'chosen_option_label');
   const statement = readString(record.prediction, 'statement');
-  if (option === null || statement === null) return null; // never id-as-label / empty
+  if (statement === null) return null;
+  // 0.57.0 — "NOT READY TO CHOOSE" IS NOT A DECISION, and is never rendered
+  // as one. It carries no option (the RPC and the table CHECK refuse one), so
+  // there is nothing to designate; the line says outright that no option was
+  // chosen. Without this branch the missing label made the record
+  // unrenderable, and it would have been counted into the disclosure as a
+  // hidden DECISION — the one reading this record must never get. Its
+  // statement goes through the same withheld-claim projection as any other,
+  // because an expectation can still name the analysis leader.
+  if (readString(record.decision, 'position') === 'not_ready') {
+    const notReadyStatement = mayNameLeadingOption
+      ? statement
+      : projectDecisionRecordForWithheldClaim(statement).rationale;
+    let text = notReadyStatement.trim();
+    let notReadyCut = false;
+    if (text.length > RATIONALE_LINE_CHAR_CAP) {
+      text = `${text.slice(0, RATIONALE_LINE_CHAR_CAP)}…`;
+      notReadyCut = true;
+    }
+    return {
+      line: `- [${isoDate(record.created_at)}] ${NOT_READY_DESIGNATION}${text}`,
+      cut: notReadyCut,
+    };
+  }
+  const option = readString(record.decision, 'chosen_option_label');
+  if (option === null) return null; // never id-as-label / empty
   const projected = mayNameLeadingOption
     ? { optionLabel: option, rationale: statement }
     : projectDecisionRecordForWithheldClaim(statement);
@@ -118,6 +149,7 @@ function projectOneLine(
 }
 
 const SECTION_HEADER = 'Prior decisions recorded on this scenario (most recent first):';
+
 
 /**
  * The one disclosure line. It states BOTH numbers — the true total on record

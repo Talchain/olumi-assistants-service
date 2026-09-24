@@ -24,6 +24,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 
 import {
+  NOT_READY_DESIGNATION,
   projectDecisionRecords,
   loadOlderRelevantFactsSection,
 } from '../project.js';
@@ -140,6 +141,73 @@ describe('projectDecisionRecords — bounded, disclosed, provenance-stamped', ()
     expect(p.truncated).toBe(true);
     expect(p.text).toContain('…');
     expect(p.text.length).toBeLessThanOrEqual(3_000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0.57.0 — "NOT READY TO CHOOSE" is never rendered as a decision.
+// ---------------------------------------------------------------------------
+
+describe('projectDecisionRecords — a not-ready record (schemas 0.57.0)', () => {
+  const NOT_READY_DECISION = {
+    position: 'not_ready',
+    graph_hash: 'aag_v1:sha256:x',
+    committed_by_user: true,
+    next_action: 'Get the Q1 renewal answer before choosing.',
+  };
+  const NOT_READY_STATEMENT = 'We will know by November whether the pilot renews.';
+
+  it('renders with the NOT-READY designation, never `Chose "…"`, and is counted as SHOWN', () => {
+    const records = [
+      makeRecord({ decision: NOT_READY_DECISION, statement: NOT_READY_STATEMENT, date: '2026-09-24' }),
+      makeRecord({ option: 'Hire locally', statement: 'Local hiring leads on robustness.', date: '2026-09-20' }),
+    ];
+    const p = projectDecisionRecords(records, POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET, records.length, true)!;
+    const lines = p.text.split('\n');
+    // IDENTITY: the exact line, bound by its date stamp — not "some line
+    // contains the words".
+    expect(lines).toContain(`- [2026-09-24] ${NOT_READY_DESIGNATION}${NOT_READY_STATEMENT}`);
+    const notReadyLine = lines.find((l) => l.startsWith('- [2026-09-24]'))!;
+    expect(notReadyLine).not.toContain('Chose');
+    // The chosen record beside it is untouched.
+    expect(lines).toContain('- [2026-09-20] Chose "Hire locally": Local hiring leads on robustness.');
+    // Shown, not hidden: nothing is disclosed as omitted.
+    expect(p.includedCount).toBe(2);
+    expect(p.totalCount).toBe(2);
+    expect(p.truncated).toBe(false);
+    expect(p.text).not.toContain('INCOMPLETE');
+  });
+
+  it('CONTRAST — the same record with its position stripped is UNRENDERABLE (what the branch prevents)', () => {
+    const { position: _p, ...stripped } = NOT_READY_DECISION;
+    const p = projectDecisionRecords(
+      [makeRecord({ decision: stripped, statement: NOT_READY_STATEMENT })],
+      POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET,
+      1,
+      true,
+    )!;
+    expect(p.includedCount).toBe(0);
+    expect(p.text).toContain('the true total is 1');
+  });
+
+  it('a WITHHELD turn still gates the not-ready statement (an expectation can name the leader)', () => {
+    const leaderStatement =
+      'Double Down on SMB currently leads by 17 percentage points, so we will wait for the pilot.';
+    const p = projectDecisionRecords(
+      [makeRecord({ decision: NOT_READY_DECISION, statement: leaderStatement, date: '2026-09-24' })],
+      POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET,
+      1,
+      false,
+    )!;
+    expect(p.text).not.toContain('17 percentage points');
+    expect(p.text).toContain(WITHHELD_ANALYSIS_SUMMARY);
+    expect(p.text).toContain(`- [2026-09-24] ${NOT_READY_DESIGNATION}`);
+    expect(textNamesLeadingOption(p.text)).toBe(false);
+    expect(p.includedCount).toBe(1);
+  });
+
+  it('the designation itself is leader-free by the PRODUCTION alarm\'s vocabulary', () => {
+    expect(textNamesLeadingOption(NOT_READY_DESIGNATION)).toBe(false);
   });
 });
 

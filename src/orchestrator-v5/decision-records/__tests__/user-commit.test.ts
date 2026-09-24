@@ -431,6 +431,10 @@ describe('the commit builder refuses rather than fabricating', () => {
     const built = commit();
     if (built.kind !== 'write') throw new Error('expected a write');
     expect(auto.write.decision.chosen_option_id).toBe('opt_a');
+    // 0.57.0: a commit's decision is a union (chosen | not_ready); narrow by
+    // the branch the builder reports rather than reading through the union.
+    expect(built.position).toBe('chosen');
+    if (!('chosen_option_id' in built.write.decision)) throw new Error('expected the chosen branch');
     expect(built.write.decision.chosen_option_id).toBe('opt_b');
   });
 

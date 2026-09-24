@@ -711,3 +711,303 @@ describe('T8 — a record outlives its scenario and is still scoreable', () => {
     await app.close();
   });
 });
+
+// ---------------------------------------------------------------------------
+// 0.57.0 — "not ready to choose" + durable reasoning text
+// (schemas 0.57.0 DecisionRecordNotReadyPositionSchema; migration
+// 20260924120000). Every assertion reads the EXACT payload handed to the RPC.
+// ---------------------------------------------------------------------------
+
+const { deriveCommittedDecisionRecordId, DECISION_RECORD_TEXT_MAX_CHARS } = await import(
+  '../../orchestrator-v5/decision-records/user-commit.js'
+);
+
+const NINETY_DAYS_LATER = new Date(NOW.getTime() + 90 * 24 * 60 * 60 * 1000).toISOString();
+
+async function postCommit(payload: Record<string, unknown>, storeOverrides?: Partial<FakeStoreState>) {
+  const harness = makeStore(storeOverrides);
+  const app = await buildApp(harness.store);
+  const res = await app.inject({
+    method: 'POST',
+    url: '/assist/v1/decision-records/commit',
+    headers: { authorization: `Bearer ${token}` },
+    payload,
+  });
+  await app.close();
+  return { res, ...harness };
+}
+
+describe('0.57.0 (a) — TODAY\'S payload is unchanged, byte for byte', () => {
+  it('sends EXACTLY the pre-0.57.0 write: same keys, same values, no position, no reasoning keys', async () => {
+    const { res, createRecord } = await postCommit(COMMIT_BODY);
+    expect(res.statusCode).toBe(201);
+    const write = createRecord.mock.calls[0]![0];
+    const expectedId = deriveCommittedDecisionRecordId(SCENARIO_ID, GRAPH_HASH, OWNER_ID, 'commit-nonce-1');
+    // toStrictEqual: an extra key — even one set to undefined — fails.
+    expect(write).toStrictEqual({
+      scenario_id: SCENARIO_ID,
+      decision: {
+        chosen_option_id: 'opt_b',
+        chosen_option_label: 'Option B',
+        graph_hash: GRAPH_HASH,
+        committed_by_user: true,
+      },
+      prediction: {
+        statement: 'Runway holds above 9 months through Q1.',
+        confidence: 0.72,
+        confidence_source: 'user_stated',
+      },
+      review_date: NINETY_DAYS_LATER,
+      record_id: expectedId,
+      event_id: `decision_recorded_${expectedId}`,
+    });
+    // Key ORDER too: the RPC receives the same JSON text as before.
+    expect(Object.keys(write.decision)).toEqual([
+      'chosen_option_id',
+      'chosen_option_label',
+      'graph_hash',
+      'committed_by_user',
+    ]);
+  });
+
+  it('the response keeps every pre-0.57.0 key and ADDS position: "chosen"', async () => {
+    const { res } = await postCommit(COMMIT_BODY);
+    const body = res.json();
+    expect(body.position).toBe('chosen');
+    expect(body.review_date_source).toBe('default_horizon');
+    expect(body.confidence_source).toBe('user_stated');
+    expect(body.committed_by_user).toBe(true);
+    expect(body.deduped).toBe(false);
+  });
+
+  it('the revisit_trigger_or_date TEXT is still NOT persisted from today\'s payload (the live copy says it stays on this device)', async () => {
+    const { res, createRecord } = await postCommit({
+      ...COMMIT_BODY,
+      revisit_trigger_or_date: 'runway falls below 9 months',
+    });
+    expect(res.statusCode).toBe(201);
+    const write = createRecord.mock.calls[0]![0];
+    expect(write.decision).not.toHaveProperty('revisit_trigger');
+    expect(JSON.stringify(write)).not.toContain('runway falls below 9 months');
+  });
+
+  it('an explicit position "chosen" writes the SAME decision as no position at all', async () => {
+    const explicit = await postCommit({ ...COMMIT_BODY, position: 'chosen' });
+    const implicit = await postCommit(COMMIT_BODY);
+    expect(explicit.res.statusCode).toBe(201);
+    expect(explicit.createRecord.mock.calls[0]![0].decision).toStrictEqual(
+      implicit.createRecord.mock.calls[0]![0].decision,
+    );
+    expect(explicit.createRecord.mock.calls[0]![0].decision).not.toHaveProperty('position');
+  });
+});
+
+describe('0.57.0 (b) — "not ready to choose" is valid WITHOUT an option, and is never written as a decision', () => {
+  const NOT_READY_BODY = {
+    scenario_id: SCENARIO_ID,
+    position: 'not_ready',
+    confidence_0_100: 55,
+    expectation_statement: 'We will know by November whether the pilot renews.',
+    next_action: 'Call the pilot customer this week.',
+    client_commit_id: 'commit-nonce-nr',
+  };
+
+  it('writes position:not_ready, the SERVER-derived anchor, committed_by_user:true — and NO option key', async () => {
+    const { res, createRecord } = await postCommit(NOT_READY_BODY);
+    expect(res.statusCode).toBe(201);
+    const write = createRecord.mock.calls[0]![0];
+    expect(write.decision).toStrictEqual({
+      position: 'not_ready',
+      graph_hash: GRAPH_HASH,
+      committed_by_user: true,
+      next_action: 'Call the pilot customer this week.',
+    });
+    expect(write.decision).not.toHaveProperty('chosen_option_id');
+    expect(write.decision).not.toHaveProperty('chosen_option_label');
+    // The prediction is still the user's, and still what an outcome scores.
+    expect(write.prediction).toStrictEqual({
+      statement: 'We will know by November whether the pilot renews.',
+      confidence: 0.55,
+      confidence_source: 'user_stated',
+    });
+    const expectedId = deriveCommittedDecisionRecordId(SCENARIO_ID, GRAPH_HASH, OWNER_ID, 'commit-nonce-nr');
+    expect(write.record_id).toBe(expectedId);
+    expect(res.json().position).toBe('not_ready');
+    expect(res.json().record_id).toBe(expectedId);
+  });
+
+  it('keeps review_date semantics: the 90-day default when no date is given…', async () => {
+    const { res, createRecord } = await postCommit(NOT_READY_BODY);
+    expect(createRecord.mock.calls[0]![0].review_date).toBe(NINETY_DAYS_LATER);
+    expect(res.json().review_date_source).toBe('default_horizon');
+  });
+
+  it('…and the user\'s own date when one is given', async () => {
+    const { res, createRecord } = await postCommit({ ...NOT_READY_BODY, revisit_trigger_or_date: '2026-11-30' });
+    expect(createRecord.mock.calls[0]![0].review_date).toBe(new Date('2026-11-30').toISOString());
+    expect(res.json().review_date_source).toBe('user_set');
+  });
+
+  it('keeps graph_hash semantics: with no analysed graph it is REFUSED, never anchored to nothing', async () => {
+    const { res, createRecord } = await postCommit(NOT_READY_BODY, { anchor: null });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe('no_analysed_graph');
+    expect(createRecord).not.toHaveBeenCalled();
+  });
+
+  it('ignores a client-sent graph_hash on the not-ready branch too', async () => {
+    const { createRecord } = await postCommit({ ...NOT_READY_BODY, graph_hash: 'response_hash:forged' });
+    expect(createRecord.mock.calls[0]![0].decision.graph_hash).toBe(GRAPH_HASH);
+  });
+
+  it('still requires the expectation (the scored claim) on the not-ready branch', async () => {
+    const { res, createRecord } = await postCommit({ ...NOT_READY_BODY, expectation_statement: '' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('invalid_expectation');
+    expect(createRecord).not.toHaveBeenCalled();
+  });
+
+  it('empty-string option fields are "no option", not a contradiction', async () => {
+    const { res, createRecord } = await postCommit({
+      ...NOT_READY_BODY,
+      chosen_option_id: '',
+      chosen_option_label: '   ',
+    });
+    expect(res.statusCode).toBe(201);
+    expect(createRecord.mock.calls[0]![0].decision).not.toHaveProperty('chosen_option_id');
+  });
+
+  it('refuses an unknown position with a typed 400 and NO RPC', async () => {
+    for (const position of ['maybe', '', 7]) {
+      const { res, createRecord } = await postCommit({ ...COMMIT_BODY, position });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().code).toBe('invalid_position');
+      expect(createRecord).not.toHaveBeenCalled();
+    }
+  });
+});
+
+describe('0.57.0 (c) — rationale, key assumption, revisit trigger and next action are PERSISTED', () => {
+  it('on a chosen record: all four, trimmed, inside `decision`, after the pre-0.57.0 keys', async () => {
+    const { res, createRecord } = await postCommit({
+      ...COMMIT_BODY,
+      rationale: '  Cash runway is the binding constraint.  ',
+      key_assumption: 'The pilot customer renews in Q1.',
+      revisit_trigger: 'Runway falls below 9 months.',
+      next_action: 'Call the pilot customer this week.',
+    });
+    expect(res.statusCode).toBe(201);
+    const write = createRecord.mock.calls[0]![0];
+    expect(write.decision).toStrictEqual({
+      chosen_option_id: 'opt_b',
+      chosen_option_label: 'Option B',
+      graph_hash: GRAPH_HASH,
+      committed_by_user: true,
+      rationale: 'Cash runway is the binding constraint.',
+      key_assumption: 'The pilot customer renews in Q1.',
+      revisit_trigger: 'Runway falls below 9 months.',
+      next_action: 'Call the pilot customer this week.',
+    });
+    // The rationale is NEVER the scored claim.
+    expect(write.prediction.statement).toBe('Runway holds above 9 months through Q1.');
+  });
+
+  it('on a not-ready record: next_action + rationale persisted beside position', async () => {
+    const { createRecord } = await postCommit({
+      scenario_id: SCENARIO_ID,
+      position: 'not_ready',
+      confidence_0_100: 40,
+      expectation_statement: 'The renewal decides it.',
+      rationale: 'The pilot renewal is the fact that decides this.',
+      next_action: 'Call the pilot customer this week.',
+      client_commit_id: 'commit-nonce-nr2',
+    });
+    const write = createRecord.mock.calls[0]![0];
+    expect(write.decision).toStrictEqual({
+      position: 'not_ready',
+      graph_hash: GRAPH_HASH,
+      committed_by_user: true,
+      rationale: 'The pilot renewal is the fact that decides this.',
+      next_action: 'Call the pilot customer this week.',
+    });
+  });
+
+  it('whitespace-only / null reasoning text is OMITTED (never "" — the RPC would refuse the whole record)', async () => {
+    const { res, createRecord } = await postCommit({
+      ...COMMIT_BODY,
+      rationale: '   ',
+      next_action: null,
+    });
+    expect(res.statusCode).toBe(201);
+    const decision = createRecord.mock.calls[0]![0].decision;
+    expect(decision).not.toHaveProperty('rationale');
+    expect(decision).not.toHaveProperty('next_action');
+  });
+
+  it('a non-string reasoning field is refused, not coerced', async () => {
+    const { res, createRecord } = await postCommit({ ...COMMIT_BODY, next_action: 42 });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('invalid_text_field');
+    expect(res.json().message).toContain('next_action');
+    expect(createRecord).not.toHaveBeenCalled();
+  });
+});
+
+describe('0.57.0 (d) — over-length reasoning text is REJECTED, never truncated', () => {
+  it('pins the bound the migration enforces (1000)', () => {
+    expect(DECISION_RECORD_TEXT_MAX_CHARS).toBe(1000);
+  });
+
+  it.each(['rationale', 'key_assumption', 'revisit_trigger', 'next_action'])(
+    '%s at 1001 chars → 400 text_field_too_long naming the field, NO RPC',
+    async (field) => {
+      const { res, createRecord } = await postCommit({
+        ...COMMIT_BODY,
+        [field]: 'x'.repeat(DECISION_RECORD_TEXT_MAX_CHARS + 1),
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().code).toBe('text_field_too_long');
+      expect(res.json().message).toContain(field);
+      expect(createRecord).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['rationale', 'key_assumption', 'revisit_trigger', 'next_action'])(
+    'BOUNDARY — %s at exactly 1000 chars is accepted and stored whole',
+    async (field) => {
+      const value = 'x'.repeat(DECISION_RECORD_TEXT_MAX_CHARS);
+      const { res, createRecord } = await postCommit({ ...COMMIT_BODY, [field]: value });
+      expect(res.statusCode).toBe(201);
+      const decision = createRecord.mock.calls[0]![0].decision as unknown as Record<string, unknown>;
+      expect(decision[field]).toBe(value);
+    },
+  );
+
+  it('the length is measured AFTER trimming (padding cannot push a valid value over)', async () => {
+    const value = `  ${'x'.repeat(DECISION_RECORD_TEXT_MAX_CHARS)}  `;
+    const { res } = await postCommit({ ...COMMIT_BODY, rationale: value });
+    expect(res.statusCode).toBe(201);
+  });
+});
+
+describe('0.57.0 (e) — not_ready WITH an option is a CONTRADICTION, refused before any RPC', () => {
+  const NOT_READY_BASE = {
+    scenario_id: SCENARIO_ID,
+    position: 'not_ready',
+    confidence_0_100: 55,
+    expectation_statement: 'We will know by November.',
+    client_commit_id: 'commit-nonce-contra',
+  };
+
+  it.each([
+    ['an option id', { chosen_option_id: 'opt_b' }],
+    ['an option label', { chosen_option_label: 'Option B' }],
+    ['both', { chosen_option_id: 'opt_b', chosen_option_label: 'Option B' }],
+    ['a NON-STRING option id', { chosen_option_id: 7 }],
+  ])('not_ready + %s → 400 position_contradiction', async (_label, option) => {
+    const { res, createRecord } = await postCommit({ ...NOT_READY_BASE, ...option });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('position_contradiction');
+    expect(createRecord).not.toHaveBeenCalled();
+  });
+});
