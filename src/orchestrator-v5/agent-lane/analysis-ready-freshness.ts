@@ -40,13 +40,48 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export function withRunStateFreshness(analysisReady: unknown, analysisState: unknown): unknown {
+/**
+ * ⭐ THE ATTESTATION A RELOAD NEEDS (Panel, #63, after #1766). The UI's boot
+ * restore upgrades its "cannot confirm" hedge to current ONLY when the stored
+ * `analysis_ready` says `fresh` AND carries `graph_hash_at_run ===
+ * current_graph_hash` (DGAI `deriveRestoredFreshnessAttestation`). #1766 stated
+ * `fresh` without the hashes, so every reload on the OpenAI path said "We
+ * cannot confirm whether this analysis reflects the current model".
+ *
+ * Both hashes come from the SAME readback, and neither is manufactured:
+ *   · `graph_hash_at_run` ← the run's OWN `analysis_result.computed_against_hash`
+ *     (the hash its fact recorded when it ran);
+ *   · `current_graph_hash` ← the readback's `graph_hash`.
+ * Stamped only when they are EQUAL; a mismatch or an absent hash stamps none,
+ * so the UI stays at cannot-confirm rather than receive a false attestation.
+ */
+export interface ReadbackAttestation {
+  readonly graphHash?: unknown;
+  readonly analysisResult?: unknown;
+}
+
+function nonEmpty(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+export function withRunStateFreshness(
+  analysisReady: unknown,
+  analysisState: unknown,
+  readback: ReadbackAttestation = {},
+): unknown {
   if (!isPlainRecord(analysisReady)) return analysisReady;
   if (typeof analysisReady.freshness === 'string') return analysisReady;
   const runState = isPlainRecord(analysisState) ? analysisState.run_state : undefined;
   const kind = isPlainRecord(runState) ? runState.kind : undefined;
   if (kind === 'complete_current') {
-    return { ...analysisReady, freshness: 'fresh', freshness_reason: AGENT_READBACK_FRESHNESS_REASON.current };
+    const atRun = nonEmpty(isPlainRecord(readback.analysisResult) ? readback.analysisResult.computed_against_hash : undefined);
+    const current = nonEmpty(readback.graphHash);
+    const computedAt = nonEmpty(isPlainRecord(runState) ? runState.computed_at : undefined);
+    const attestation =
+      atRun !== null && atRun === current
+        ? { graph_hash_at_run: atRun, current_graph_hash: current, ...(computedAt !== null ? { computed_at: computedAt } : {}) }
+        : {};
+    return { ...analysisReady, freshness: 'fresh', freshness_reason: AGENT_READBACK_FRESHNESS_REASON.current, ...attestation };
   }
   if (kind === 'complete_stale') {
     return { ...analysisReady, freshness: 'stale', freshness_reason: AGENT_READBACK_FRESHNESS_REASON.stale };

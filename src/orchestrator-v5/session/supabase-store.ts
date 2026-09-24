@@ -1566,7 +1566,7 @@ export class SupabaseSessionStore implements SessionStore {
   async readCommittedTurn(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null> {
     const { data, error } = await this.client
       .from('v5_conversation_turns')
-      .select('id, request_hash, assistant_message, user_message, llm_calls_used')
+      .select('id, request_hash, assistant_message, user_message, llm_calls_used, pending_actions')
       .eq('scenario_id', scenarioId)
       .eq('turn_id', turnId)
       .limit(1);
@@ -1581,6 +1581,11 @@ export class SupabaseSessionStore implements SessionStore {
       assistant_message: typeof row.assistant_message === 'string' ? row.assistant_message : null,
       user_message: typeof row.user_message === 'string' ? row.user_message : null,
       llm_calls_used: typeof row.llm_calls_used === 'number' ? row.llm_calls_used : 0,
+      // The actions persisted WITH this exact turn, so a replay can re-offer them.
+      // Scoped to this scenario (a foreign-scenario entry is dropped) and tolerant.
+      pending_actions: (Array.isArray(row.pending_actions) ? row.pending_actions : [])
+        .map((pa) => parsePendingAction(pa))
+        .filter((pa): pa is NonNullable<typeof pa> => pa !== null && pa.scenario_id === scenarioId),
     };
   }
 
