@@ -1,0 +1,826 @@
+{
+  "schema": "olumi.agent-reply-acceptance-fixture.v1",
+  "half": "prompt_harness",
+  "note": "Real captured turns (ids removed) for the scorer’s classification self-test.",
+  "builds": [
+    "8428207"
+  ],
+  "cases": [
+    {
+      "id": "real-run-near-tie",
+      "source": {
+        "capture": "c19-8428207",
+        "build": "8428207",
+        "scenario": "A",
+        "turn": "A2r run (typed Run)"
+      },
+      "context": {
+        "user_action": "run",
+        "domain": "hiring",
+        "rerun_kind": null,
+        "next_approval_ran": null
+      },
+      "payload": {
+        "assistant_text": "**Finding:** the current model does **not** separate hiring a Tech Lead from hiring two developers. Two developers are marginally more likely to lead under the model’s simulations, but it is a near tie and the analysis marks the result **fragile**—so neither option can be put forward decisively.\n\n- The model’s average velocity outcome is slightly higher for a **Tech Lead** than for **two developers**, while two developers have a slightly higher chance of coming out ahead across the simulated assumptions. That difference reflects uncertainty rather than a settled advantage.\n- The ordering can change with small changes to the assumed relationship between **developer capacity and velocity**. Coordination efficiency and prioritisation quality are also major model drivers; their starting values were assumptions, not measurements.\n- The goal was treated as “more velocity is better”; that direction was not explicitly stated in the brief.\n\nThe useful conclusion is the uncertainty itself: whether your present bottleneck is leadership/coordination or hands-on delivery capacity is not yet established by this model.",
+        "suggested_actions": [],
+        "analysis_state": {
+          "run_state": {
+            "kind": "complete_current"
+          },
+          "leader_claim": {
+            "permitted": false,
+            "withheld_reason": "options_do_not_separate",
+            "separation": "near_tie"
+          },
+          "robustness": {
+            "aggregate_level": "very_low"
+          }
+        },
+        "analysis_ready": {
+          "analysis_admission": {
+            "permitted_analysis_mode": "comparative_leader",
+            "structurally_analysable": true
+          },
+          "options": [
+            {
+              "option_id": "hire_a_tech_lead",
+              "label": "Hire a Tech Lead",
+              "intervention_details": {
+                "tech_lead_capacity": {
+                  "raw_value": 1,
+                  "unit": "full-time Tech Leads",
+                  "display_value": "1 full-time Tech Leads"
+                }
+              }
+            },
+            {
+              "option_id": "hire_two_developers",
+              "label": "Hire Two Developers",
+              "intervention_details": {
+                "developer_capacity": {
+                  "raw_value": 6,
+                  "unit": "full-time developers",
+                  "display_value": "6 full-time developers"
+                }
+              }
+            },
+            {
+              "option_id": "maintain_current_team",
+              "label": "Maintain Current Team",
+              "intervention_details": {
+                "developer_capacity": {
+                  "raw_value": 4,
+                  "unit": "full-time developers",
+                  "display_value": "4 full-time developers"
+                },
+                "tech_lead_capacity": {
+                  "raw_value": 0,
+                  "unit": "full-time Tech Leads",
+                  "display_value": "0 full-time Tech Leads"
+                }
+              }
+            }
+          ]
+        },
+        "blocks": [
+          {
+            "type": "analysis_result",
+            "summary": "Hire Two Developers scored highest against your goal in 50% of runs of this model, but the analysis treats this as a close call. The result is not yet robust — small changes could flip it.",
+            "leading_option_id": "hire_two_developers",
+            "win_probabilities": {
+              "Hire a Tech Lead": 0.44543333333333346,
+              "Hire Two Developers": 0.49993333333333323,
+              "Maintain Current Team": 0.05463333333333327
+            },
+            "enrichment": {
+              "robustness": {
+                "level": "very_low",
+                "near_tie": {
+                  "is_tie": true
+                }
+              }
+            }
+          }
+        ],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "decision_velocity",
+              "kind": "decision",
+              "label": "Decision: Velocity",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "velocity",
+              "kind": "goal",
+              "label": "Velocity",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "hire_a_tech_lead",
+              "kind": "option",
+              "label": "Hire a Tech Lead",
+              "provenance": "from_brief",
+              "interventions": {
+                "tech_lead_capacity": {
+                  "value": 0.1,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "hire_two_developers",
+              "kind": "option",
+              "label": "Hire Two Developers",
+              "provenance": "from_brief",
+              "interventions": {
+                "developer_capacity": {
+                  "value": 0.3,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "maintain_current_team",
+              "kind": "option",
+              "label": "Maintain Current Team",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "developer_capacity": {
+                  "value": 0.2,
+                  "source": "user_specified"
+                },
+                "tech_lead_capacity": {
+                  "value": 0,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "tech_lead_capacity",
+              "kind": "factor",
+              "label": "Tech lead capacity",
+              "provenance": "user_set",
+              "display_value": "0 full-time Tech Leads",
+              "observed_state": {
+                "unit": "full-time Tech Leads",
+                "value": 0,
+                "raw_value": 0,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "developer_capacity",
+              "kind": "factor",
+              "label": "Developer capacity",
+              "provenance": "user_set",
+              "display_value": "4 full-time developers",
+              "observed_state": {
+                "unit": "full-time developers",
+                "value": 0.2,
+                "raw_value": 4,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "team_coordination_efficiency",
+              "kind": "factor",
+              "label": "Team coordination efficiency",
+              "provenance": "user_set",
+              "display_value": "60%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "work_prioritisation_quality",
+              "kind": "factor",
+              "label": "Work prioritisation quality",
+              "provenance": "user_set",
+              "display_value": "60%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            }
+          ]
+        },
+        "_agent": {
+          "mutated": false,
+          "tool_calls": [
+            {
+              "name": "run_analysis",
+              "ok": true,
+              "mutated": false
+            }
+          ]
+        },
+        "_diagnostic_trace": {
+          "exit_path": "agent_lane_v1",
+          "fast_path": "run",
+          "write_claims_removed": 0
+        },
+        "_provider_calls": [
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          }
+        ]
+      },
+      "class": "run_leader_withheld",
+      "expect": {
+        "max_words_default": 90,
+        "words_soft": true,
+        "max_questions": 1,
+        "leader_may_be_named": false,
+        "leader_withheld_reason": "options_do_not_separate",
+        "caveat_required": true,
+        "caveat_reasons": [
+          "robustness very_low",
+          "near tie",
+          "leader withheld: options_do_not_separate"
+        ],
+        "chips_shown": [],
+        "forbidden_claims": [
+          "names_or_hints_a_leading_option",
+          "claims_a_save_or_version",
+          "asks_to_approve_or_claims_a_pending_proposal",
+          "promises_the_analysis_will_run_on_approval",
+          "names_a_control_not_in_chips_shown",
+          "calls_a_brief_stated_or_measured_figure_an_estimate",
+          "calls_an_olumi_figure_the_users",
+          "renames_an_option",
+          "quotes_a_figure_without_its_unit"
+        ],
+        "next_move": "only_when_supported",
+        "notes": [
+          "A next move is offered only when the state supports it; the reply never asks the user to press a chip it was not shown.",
+          "Olumi states saves and versions beneath the reply; the model does not restate them."
+        ]
+      },
+      "served_reply_verdicts": {
+        "CONTROL_REFERENCE": "PASS",
+        "LEADER_HONESTY": "FAIL",
+        "ACTION_TRUTH": "PASS",
+        "OPTION_NAME_FIDELITY": "PASS",
+        "UNITS": "PASS",
+        "PROVENANCE_WORDING": "NOT_DECIDABLE",
+        "CAVEAT": "PASS"
+      }
+    },
+    {
+      "id": "real-run-blocked",
+      "source": {
+        "capture": "c19-8428207",
+        "build": "8428207",
+        "scenario": "O",
+        "turn": "O5 run after adding the option (typed Run)"
+      },
+      "context": {
+        "user_action": "run",
+        "domain": "hiring",
+        "rerun_kind": null,
+        "next_approval_ran": null
+      },
+      "payload": {
+        "assistant_text": "The analysis did not run: the model has four readiness issues.\n\n- **Contractor option:** it needs a level for **Development capacity**, currently **6 delivery-capacity points out of 20**. The model needs to know what level the six-month contractor would set.\n- **Carry On as Now:** it sets no factor, so it cannot be compared.\n- Two structural issues remain: an option has no factor connection, and an option is not linked from the decision. The tool did not identify which option for those two issues.\n\nThe existing Tech Lead, one-developer, and two-developer options are encoded with levels and are otherwise ready, but the model cannot run a whole comparison while these other options block it.",
+        "suggested_actions": [
+          {
+            "label": "Suggest what it still needs",
+            "id": "agent-suggest-what-it-needs"
+          }
+        ],
+        "analysis_state": {
+          "run_state": {
+            "kind": "never_run"
+          },
+          "leader_claim": {
+            "permitted": false,
+            "withheld_reason": "constraint_verdict_withheld"
+          },
+          "robustness": {}
+        },
+        "analysis_ready": {
+          "analysis_admission": {
+            "permitted_analysis_mode": "none",
+            "structurally_analysable": false
+          },
+          "options": [
+            {
+              "option_id": "hire_a_tech_lead",
+              "label": "Hire a Tech Lead",
+              "intervention_details": {
+                "technical_leadership_capacity": {
+                  "raw_value": 7,
+                  "unit": "out of 10",
+                  "display_value": "7 out of 10"
+                }
+              }
+            },
+            {
+              "option_id": "hire_two_developers",
+              "label": "Hire Two Developers",
+              "intervention_details": {
+                "development_capacity": {
+                  "raw_value": 8,
+                  "unit": "delivery-capacity points out of 20",
+                  "display_value": "8 delivery-capacity points out of 20"
+                }
+              }
+            },
+            {
+              "option_id": "carry_on_as_now",
+              "label": "Carry On as Now",
+              "intervention_details": {}
+            },
+            {
+              "option_id": "hire_one_developer",
+              "label": "Hire One Developer",
+              "intervention_details": {
+                "development_capacity": {
+                  "raw_value": 7,
+                  "unit": "delivery-capacity points out of 20",
+                  "display_value": "7 delivery-capacity points out of 20"
+                }
+              }
+            },
+            {
+              "option_id": "fbc4ca69",
+              "label": "Bring in an experienced contractor for six months",
+              "intervention_details": {}
+            }
+          ]
+        },
+        "blocks": [],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "decision_velocity",
+              "kind": "decision",
+              "label": "Decision: Velocity",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "velocity",
+              "kind": "goal",
+              "label": "Velocity",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "hire_a_tech_lead",
+              "kind": "option",
+              "label": "Hire a Tech Lead",
+              "provenance": "from_brief",
+              "interventions": {
+                "technical_leadership_capacity": {
+                  "value": 0.7,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "hire_two_developers",
+              "kind": "option",
+              "label": "Hire Two Developers",
+              "provenance": "from_brief",
+              "interventions": {
+                "development_capacity": {
+                  "value": 0.4,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "carry_on_as_now",
+              "kind": "option",
+              "label": "Carry On as Now",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "hire_one_developer",
+              "kind": "option",
+              "label": "Hire One Developer",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "development_capacity": {
+                  "value": 0.35,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "technical_leadership_capacity",
+              "kind": "factor",
+              "label": "Technical leadership capacity",
+              "provenance": "user_set",
+              "display_value": "3 out of 10",
+              "observed_state": {
+                "unit": "out of 10",
+                "value": 0.3,
+                "raw_value": 3,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "development_capacity",
+              "kind": "factor",
+              "label": "Development capacity",
+              "provenance": "user_set",
+              "display_value": "6 delivery-capacity points out of 20",
+              "observed_state": {
+                "unit": "delivery-capacity points out of 20",
+                "value": 0.3,
+                "raw_value": 6,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "work_prioritisation_quality",
+              "kind": "factor",
+              "label": "Work prioritisation quality",
+              "provenance": "user_set",
+              "display_value": "60 out of 100",
+              "observed_state": {
+                "unit": "out of 100",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "technical_decision_speed",
+              "kind": "factor",
+              "label": "Technical decision speed",
+              "provenance": "user_set",
+              "display_value": "55 out of 100",
+              "observed_state": {
+                "unit": "out of 100",
+                "value": 0.55,
+                "raw_value": 55,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "delivery_coordination_load",
+              "kind": "factor",
+              "label": "Delivery coordination load",
+              "provenance": "user_set",
+              "display_value": "50 out of 100",
+              "observed_state": {
+                "unit": "out of 100",
+                "value": 0.5,
+                "raw_value": 50,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "onboarding_load",
+              "kind": "factor",
+              "label": "Onboarding load",
+              "provenance": "user_set",
+              "display_value": "20 out of 100",
+              "observed_state": {
+                "unit": "out of 100",
+                "value": 0.2,
+                "raw_value": 20,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "delivery_slowdown_during_onboarding",
+              "kind": "risk",
+              "label": "Delivery slowdown during…",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "team_execution_effectiveness",
+              "kind": "outcome",
+              "label": "Team execution effectiveness",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "fbc4ca69",
+              "kind": "option",
+              "label": "Bring in an experienced contractor for six months",
+              "provenance": "user_set"
+            }
+          ]
+        },
+        "_agent": {
+          "mutated": false,
+          "tool_calls": [
+            {
+              "name": "run_analysis",
+              "ok": true,
+              "mutated": false
+            }
+          ]
+        },
+        "_diagnostic_trace": {
+          "exit_path": "agent_lane_v1",
+          "fast_path": "run",
+          "write_claims_removed": 0
+        },
+        "_provider_calls": [
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          }
+        ]
+      },
+      "class": "run_blocked",
+      "expect": {
+        "max_words_default": 90,
+        "words_soft": true,
+        "max_questions": 1,
+        "leader_may_be_named": false,
+        "leader_withheld_reason": "constraint_verdict_withheld",
+        "caveat_required": true,
+        "caveat_reasons": [
+          "blocked"
+        ],
+        "chips_shown": [
+          "Suggest what it still needs"
+        ],
+        "forbidden_claims": [
+          "names_or_hints_a_leading_option",
+          "claims_a_save_or_version",
+          "claims_the_analysis_ran_this_turn",
+          "asks_to_approve_or_claims_a_pending_proposal",
+          "promises_the_analysis_will_run_on_approval",
+          "names_a_control_not_in_chips_shown",
+          "calls_a_brief_stated_or_measured_figure_an_estimate",
+          "calls_an_olumi_figure_the_users",
+          "renames_an_option",
+          "quotes_a_figure_without_its_unit"
+        ],
+        "next_move": "only_when_supported",
+        "notes": [
+          "A next move is offered only when the state supports it; the reply never asks the user to press a chip it was not shown.",
+          "Olumi states saves and versions beneath the reply; the model does not restate them."
+        ]
+      },
+      "served_reply_verdicts": {
+        "CONTROL_REFERENCE": "PASS",
+        "LEADER_HONESTY": "PASS",
+        "ACTION_TRUTH": "PASS",
+        "OPTION_NAME_FIDELITY": "PASS",
+        "UNITS": "PASS",
+        "PROVENANCE_WORDING": "NOT_DECIDABLE",
+        "CAVEAT": "PASS"
+      }
+    },
+    {
+      "id": "real-approval-chip",
+      "source": {
+        "capture": "c19-8428207",
+        "build": "8428207",
+        "scenario": "A",
+        "turn": "A2 approve (typed chip)"
+      },
+      "context": {
+        "user_action": "approve_chip",
+        "domain": "hiring",
+        "rerun_kind": null,
+        "next_approval_ran": null
+      },
+      "payload": {
+        "assistant_text": "Saved 4 of 4 starting values. Saved 4 of 4 option levels.",
+        "suggested_actions": [
+          {
+            "label": "Run analysis",
+            "action_type": "run_analysis",
+            "id": "agent-run-analysis"
+          }
+        ],
+        "analysis_state": {
+          "run_state": {
+            "kind": "never_run"
+          },
+          "leader_claim": {
+            "permitted": false,
+            "withheld_reason": "constraint_verdict_withheld"
+          },
+          "robustness": {}
+        },
+        "analysis_ready": {
+          "analysis_admission": {
+            "permitted_analysis_mode": "comparative_leader",
+            "structurally_analysable": true
+          },
+          "options": [
+            {
+              "option_id": "hire_a_tech_lead",
+              "label": "Hire a Tech Lead",
+              "intervention_details": {
+                "tech_lead_capacity": {
+                  "raw_value": 1,
+                  "unit": "full-time Tech Leads",
+                  "display_value": "1 full-time Tech Leads"
+                }
+              }
+            },
+            {
+              "option_id": "hire_two_developers",
+              "label": "Hire Two Developers",
+              "intervention_details": {
+                "developer_capacity": {
+                  "raw_value": 6,
+                  "unit": "full-time developers",
+                  "display_value": "6 full-time developers"
+                }
+              }
+            },
+            {
+              "option_id": "maintain_current_team",
+              "label": "Maintain Current Team",
+              "intervention_details": {
+                "developer_capacity": {
+                  "raw_value": 4,
+                  "unit": "full-time developers",
+                  "display_value": "4 full-time developers"
+                },
+                "tech_lead_capacity": {
+                  "raw_value": 0,
+                  "unit": "full-time Tech Leads",
+                  "display_value": "0 full-time Tech Leads"
+                }
+              }
+            }
+          ]
+        },
+        "blocks": [],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "decision_velocity",
+              "kind": "decision",
+              "label": "Decision: Velocity",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "velocity",
+              "kind": "goal",
+              "label": "Velocity",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "hire_a_tech_lead",
+              "kind": "option",
+              "label": "Hire a Tech Lead",
+              "provenance": "from_brief",
+              "interventions": {
+                "tech_lead_capacity": {
+                  "value": 0.1,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "hire_two_developers",
+              "kind": "option",
+              "label": "Hire Two Developers",
+              "provenance": "from_brief",
+              "interventions": {
+                "developer_capacity": {
+                  "value": 0.3,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "maintain_current_team",
+              "kind": "option",
+              "label": "Maintain Current Team",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "developer_capacity": {
+                  "value": 0.2,
+                  "source": "user_specified"
+                },
+                "tech_lead_capacity": {
+                  "value": 0,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "tech_lead_capacity",
+              "kind": "factor",
+              "label": "Tech lead capacity",
+              "provenance": "user_set",
+              "display_value": "0 full-time Tech Leads",
+              "observed_state": {
+                "unit": "full-time Tech Leads",
+                "value": 0,
+                "raw_value": 0,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "developer_capacity",
+              "kind": "factor",
+              "label": "Developer capacity",
+              "provenance": "user_set",
+              "display_value": "4 full-time developers",
+              "observed_state": {
+                "unit": "full-time developers",
+                "value": 0.2,
+                "raw_value": 4,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "team_coordination_efficiency",
+              "kind": "factor",
+              "label": "Team coordination efficiency",
+              "provenance": "user_set",
+              "display_value": "60%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "work_prioritisation_quality",
+              "kind": "factor",
+              "label": "Work prioritisation quality",
+              "provenance": "user_set",
+              "display_value": "60%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            }
+          ]
+        },
+        "_agent": {
+          "mutated": true,
+          "tool_calls": [
+            {
+              "name": "authorise_change",
+              "ok": true,
+              "mutated": true
+            }
+          ]
+        },
+        "_diagnostic_trace": {
+          "exit_path": "agent_lane_v1",
+          "fast_path": "approve",
+          "write_claims_removed": 0
+        },
+        "_provider_calls": []
+      },
+      "class": "approval_chip",
+      "expect": {
+        "max_words_default": 90,
+        "words_soft": true,
+        "max_questions": 1,
+        "leader_may_be_named": false,
+        "leader_withheld_reason": "constraint_verdict_withheld",
+        "caveat_required": false,
+        "caveat_reasons": [],
+        "chips_shown": [
+          "Run analysis"
+        ],
+        "forbidden_claims": [
+          "names_or_hints_a_leading_option",
+          "claims_the_analysis_ran_this_turn",
+          "asks_to_approve_or_claims_a_pending_proposal",
+          "promises_the_analysis_will_run_on_approval",
+          "names_a_control_not_in_chips_shown",
+          "calls_a_brief_stated_or_measured_figure_an_estimate",
+          "calls_an_olumi_figure_the_users",
+          "renames_an_option",
+          "quotes_a_figure_without_its_unit"
+        ],
+        "next_move": "only_when_supported",
+        "notes": [
+          "A next move is offered only when the state supports it; the reply never asks the user to press a chip it was not shown.",
+          "Olumi states saves and versions beneath the reply; the model does not restate them.",
+          "Every word of this reply is server-authored (no model call); the prompt cannot change it."
+        ]
+      },
+      "served_reply_verdicts": {
+        "CONTROL_REFERENCE": "PASS",
+        "LEADER_HONESTY": "PASS",
+        "ACTION_TRUTH": "PASS",
+        "OPTION_NAME_FIDELITY": "PASS",
+        "UNITS": "PASS",
+        "PROVENANCE_WORDING": "NOT_DECIDABLE",
+        "CAVEAT": "PASS"
+      }
+    }
+  ]
+}
