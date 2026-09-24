@@ -277,6 +277,45 @@ say ""
 # turn carries no `proposal_id`, so it yields []. The fix carries the outstanding proposal
 # forward when EXACTLY ONE is outstanding — `offered.size !== 1` exists so a "yes" can never
 # bind ambiguously.
+# ⛔ THE PRODUCT MUST NOT TELL THE USER THEIR OWN FIGURE WAS NOT MODELLED.
+#
+# `not_modelled.quantities` is NOT a dark diagnostic — I checked that the wrong way
+# first (GitHub code search: 0 hits) and the sound method refuted it: `rg -a` over a
+# fresh DGAI clone finds `not_modelled` in 26 files, `notModelled` in 22. The pipeline
+# ends in `components/results/contextIntegrity/WhatIWasGivenSection.tsx`, mounted by
+# `AnalysisNewTabBody.tsx`, and `notModelledNotices.ts:151` filters rows
+# SPECIFICALLY for the `absent` outcome. So these verdicts are rendered, in a section
+# called "What I Was Given".
+#
+# And they are wrong. Measured over six briefs: `matched_node_id` was null on EVERY
+# item, and 7 of 8 `absent` verdicts were for quantities demonstrably in the graph —
+# because the agent lane emits `goal_constraints` WITHOUT the `source_quote` the
+# tracker's oracle requires (`not-modelled-manifest.ts:1601` skips any row lacking it),
+# so it never matches a constraint it could have matched.
+#
+# This brief states "Budget is £900k either way" and "£3m of new ARR", and both survive
+# into the model — £900k as a `goal_constraints` row, £3m as the goal threshold. So an
+# `absent` verdict here is a FALSE claim about the user's own input, on the one surface
+# whose purpose is honesty about what was received.
+#
+# Fix: carry `source_quote` on agent-lane constraints. `buildCandidateSchema()` never
+# asks the model for it — `build-model.ts`, leased. Free on the reload payload already
+# read above, so this gate costs nothing.
+say "8b) the fidelity manifest must not call the user's own figures absent"
+Q_TOTAL=$(jqv "$RELOAD" '.not_modelled.quantities.total // 0')
+Q_ABSENT=$(jqv "$RELOAD" '.not_modelled.quantities.absent // 0')
+Q_ANCHORED=$(jqv "$RELOAD" '[.not_modelled.quantities.items[]?|select(.matched_node_id != null)]|length')
+say "   quantities: total=${Q_TOTAL} absent=${Q_ABSENT} anchored=${Q_ANCHORED}"
+printf '%s' "$RELOAD" | jq -r '.not_modelled.quantities.items[]? | "     \(.literal) -> \(.verdict) (matched: \(.matched_node_id // "none"))"' 2>/dev/null | head -6
+gate "no stated figure is reported absent" "$([ "${Q_ABSENT:-0}" = "0" ] && echo 1 || echo 0)" \
+  "this brief's £900k and £3m both survive into the model, so absent>0 is a false claim shown in \"What I Was Given\""
+if [ "${Q_ABSENT:-0}" != "0" ] && [ "${Q_TOTAL:-0}" != "0" ]; then
+  say "   ⛔ rendered by WhatIWasGivenSection (mounted in AnalysisNewTabBody)."
+  say "      Cause: agent-lane goal_constraints carry no source_quote, so the tracker's"
+  say "      oracle skips every constraint row. Fix in build-model.ts's schema (leased)."
+fi
+say ""
+
 say "9) pressing Run before approving must not remove the approve chip"
 SCEN2=$(uuidgen | tr 'A-Z' 'a-z')
 R9A=$(post /agent/v1/turn "$(jq -nc --arg s "$SCEN2" --arg m "$BRIEF" '{scenario_id:$s,message:$m}')")
