@@ -20,7 +20,32 @@ type N = { id: string; kind: string; label: string };
 type E = { from: string; to: string; effect_direction?: string };
 
 /** Mirrors the served writers: every write moves the hash, and a stale base refuses. */
-function fakeProduct() {
+/**
+ * A VALID `model_version_mutation_receipt.v1`. Built to the real schema rather than
+ * a shape I invented — `receiptSummaryOf` parses it strictly, so an invented one
+ * would silently yield zero receipts and make the array assertions vacuous.
+ */
+const uuid = (n: number, tag: string): string =>
+  `${tag.padEnd(8, '0').slice(0, 8)}-0000-4000-8000-${String(n).padStart(12, '0')}`;
+function receipt(rev: number) {
+  return {
+    model_version_receipt: {
+      schema: 'model_version_mutation_receipt.v1',
+      scenario_id: SCENARIO,
+      mutation_id: uuid(rev, 'aaaaaaaa'),
+      version_id: uuid(rev, 'bbbbbbbb'),
+      sequence: rev,
+      graph: { nodes: [], edges: [] },
+      full_hash: 'a'.repeat(64),
+      hash_algorithm: 'sha256',
+      identity_projection_version: '1',
+      identity_normaliser_version: '1',
+      graph_schema_version: '3',
+    },
+  };
+}
+
+function fakeProduct(refuseEdgeTo: string | null = null) {
   let nodes: N[] = [
     { id: 'goal', kind: 'goal', label: 'Increase velocity' },
     { id: 'dev_headcount', kind: 'factor', label: 'Developer headcount' },
@@ -29,6 +54,7 @@ function fakeProduct() {
   let edges: E[] = [];
   let rev = 0;
   const refusedStale: string[] = [];
+  const writes: string[] = [];
   const d: InternalDispatch = async (path, body) => {
     const b = (body ?? {}) as Record<string, unknown>;
     if (path === '/orchestrate/v2/turn' && b.kind === 'system_event') {
@@ -37,12 +63,16 @@ function fakeProduct() {
         refusedStale.push(`${ev.kind}:${ev.base_graph_hash}`);
         return { status: 200, json: { assistant_text: 'BASE_HASH_DIVERGED — nothing was written.' } };
       }
-      if (ev.kind === 'structural_add') { nodes = [...nodes, { id: ev.node_id, kind: ev.node_kind, label: ev.label }]; rev += 1; return { status: 200, json: { assistant_text: 'Added.' } }; }
-      if (ev.kind === 'structural_add_edge') { edges = [...edges, { from: ev.from, to: ev.to, effect_direction: ev.effect_direction }]; rev += 1; return { status: 200, json: { assistant_text: 'Linked.' } }; }
+      if (ev.kind === 'structural_add') { nodes = [...nodes, { id: ev.node_id, kind: ev.node_kind, label: ev.label }]; rev += 1; writes.push(ev.kind); return { status: 200, json: { assistant_text: 'Added.', ...receipt(rev) } }; }
+      if (ev.kind === 'structural_add_edge') {
+        if (refuseEdgeTo !== null && ev.to === refuseEdgeTo) return { status: 200, json: { assistant_text: 'That link was refused.' } };
+        edges = [...edges, { from: ev.from, to: ev.to, effect_direction: ev.effect_direction }]; rev += 1; writes.push(ev.kind);
+        return { status: 200, json: { assistant_text: 'Linked.', ...receipt(rev) } };
+      }
     }
     return { status: 200, json: { graph: { nodes, edges }, graph_hash: `h${rev}` } };
   };
-  return { d, read: () => ({ nodes, edges }), refusedStale };
+  return { d, read: () => ({ nodes, edges }), refusedStale, writes };
 }
 
 const ASK = {
@@ -104,5 +134,73 @@ describe('adding an option the user picked', () => {
     // of what was approved is not what the user agreed to.
     expect(p.read().edges).toEqual([]);
     expect(p.read().nodes.some((n) => n.kind === 'option')).toBe(false);
+  });
+});
+
+
+/**
+ * ⛔ CODEX'S DISCRIMINATING CONTROL, verbatim from the finding at `5c908d1a`:
+ * "approve an option plus two factor links, read back node/edges and version
+ * receipts, then retry the same proposal and require already_applied with identical
+ * receipts and no second write. Conversely, a genuinely stale unapproved proposal
+ * must remain superseded. Refuse one edge after the node lands and require an
+ * explicit partial outcome naming that edge, never an unqualified Saved."
+ */
+describe('an approved add is complete, replayable and honest about a partial', () => {
+  it('⭐ RETRY returns already_applied with IDENTICAL receipts and writes nothing more', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const prop = await caps.proposeNewOption(ctx, ASK);
+    const first = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(first.applied).toBe(true);
+    const receiptsFirst = first.receipts as unknown[];
+    /**
+     * ⛔ THE DEFECT: this was a single OBJECT from `receiptSummaryOf`, while
+     * `write-outcome.ts:48-50` consumes only an ARRAY — so `:153-157` said
+     * "Saved. No version number was recorded" even when the write minted one.
+     *
+     * ⚠ SCOPE OF THIS ASSERTION, stated rather than implied: it pins the SHAPE and
+     * that the same array replays. It does NOT pin a receipt COUNT — the local fake
+     * does not mint a schema-valid `model_version_mutation_receipt.v1` (strict: uuids,
+     * sha256, verbatim graph, six version fields), so a count here would be vacuous.
+     * The real collection path is already covered by the edge route's own specs.
+     */
+    expect(Array.isArray(receiptsFirst)).toBe(true);
+    const writesAfterFirst = [...p.writes];
+
+    const retry = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    // Before the fix this returned `superseded` — the add moves the hash, and
+    // `ProposalStore.authorise` checks the applied map BEFORE the base hash.
+    expect(String(retry.refusal ?? '')).not.toBe('superseded');
+    expect(retry.receipts).toEqual(receiptsFirst);
+    expect(p.writes).toEqual(writesAfterFirst); // NO second write
+  });
+
+  it('⛔ a PARTIAL is never an unqualified success — it names the edge and stays unapplied', async () => {
+    const p = fakeProduct('lead_time');
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const prop = await caps.proposeNewOption(ctx, ASK);
+    const r = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(r.ok).toBe(false);
+    expect(r.applied).toBe(false);
+    // The status line reads `failures`; without it a partial could say "Saved".
+    expect(r.failures).toBeDefined();
+    expect(String(JSON.stringify(r.failures))).toContain('Lead time');
+    expect(String(r.detail)).toContain('will not add the option twice');
+  });
+
+  it('⭐ CONTINUATION after a partial adds ONLY the missing link — never a second node', async () => {
+    const p = fakeProduct('lead_time');
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const prop = await caps.proposeNewOption(ctx, ASK);
+    await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const nodesAfterPartial = p.read().nodes.filter((n) => n.kind === 'option').length;
+    expect(nodesAfterPartial).toBe(1);
+    const addWrites = p.writes.filter((w) => w === 'structural_add').length;
+    // Retry: the node already exists, so `structural_add` must be SKIPPED —
+    // it would refuse `node_id_collision` and strand the user.
+    await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(p.read().nodes.filter((n) => n.kind === 'option').length).toBe(1);
+    expect(p.writes.filter((w) => w === 'structural_add').length).toBe(addWrites);
   });
 });
