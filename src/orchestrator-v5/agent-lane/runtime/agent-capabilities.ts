@@ -1309,6 +1309,10 @@ export function createAgentCapabilities(
           return typeof os.value === 'number' && Math.abs(os.value) > 1 && typeof os.cap !== 'number';
         });
         const framed: { factor: string; value: number; range: number }[] = [];
+        /** The ranges this turn INTENDED to attach but could not — kept so a
+         *  failure can name which factors still have no range, instead of the
+         *  reply implying nothing was written at all. */
+        let rangesNotAttached: { factor: string; value: number; range: number }[] = [];
         if (needsFrame.length > 0 && afterSet !== null) {
           const frameById = new Map<string, number>();
           for (const n of needsFrame) {
@@ -1351,10 +1355,27 @@ export function createAgentCapabilities(
             });
             if (reg.status !== 200) {
               const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
+              /**
+               * ⛔⛔ "NOTHING WAS WRITTEN" WAS UNTRUE HERE, AND IT IS THE WORST
+               * KIND OF UNTRUE: the values were already saved, in their own
+               * registration, BEFORE this frame write was attempted. Telling the
+               * user nothing landed invites them to redo a write that succeeded.
+               *
+               * The two outcomes are now reported SEPARATELY — what was saved,
+               * and what was not attached — because they are separately true.
+               * The unattached list is captured before `framed` is cleared;
+               * clearing it was itself losing the only record of which factors
+               * still have no range.
+               */
+              rangesNotAttached = [...framed];
+              const savedSomething = landed.length > 0;
               failures.push({
                 factor: 'scale_frame',
                 detail: code === 'GRAPH_STALE'
-                  ? 'the model changed while this was being prepared, so no range was attached and nothing was written — read it again and propose afresh'
+                  ? (savedSomething
+                    ? 'the model changed while the range was being attached. The approved values WERE saved and are unchanged; only the range was not attached, so the analysis is still blocked for ' +
+                      `${rangesNotAttached.map((f) => f.factor).join(', ')}. Do not re-enter the values — ask for a range instead.`
+                    : 'the model changed while this was being prepared, so no range was attached and nothing was written — read it again and propose afresh')
                   : `could not attach a range: http ${reg.status}`,
               });
               framed.length = 0;
@@ -1377,10 +1398,35 @@ export function createAgentCapabilities(
             ? { rescaled_by_the_model: rescaled, must_disclose_rescaling: true }
             : {}),
           ...(framed.length > 0 ? { ranges_added_for_analysis: framed } : {}),
+          /**
+           * ⭐ THE PARTIAL OUTCOME, STATED RATHER THAN IMPLIED. A value write and
+           * a frame write are two registrations; the first can land and the
+           * second refuse. Reporting only aggregate success let the reply claim
+           * "applied" while the analysis was still blocked.
+           *
+           * `partially_applied` is this file's existing word for it (`:395`,
+           * `:463`). Present only when it is true, so its presence is the signal.
+           */
+          ...(rangesNotAttached.length > 0
+            ? {
+              partially_applied: true,
+              ranges_not_attached: rangesNotAttached,
+              // A factor whose amount has no range cannot be read against
+              // anything, so the analysis stays blocked for it whatever else
+              // landed. Named, so the Agent cannot report a clean success.
+              analysis_still_blocked_for: rangesNotAttached.map((f) => f.factor),
+            }
+            : {}),
           not_represented:
             'These values are the user\u2019s adopted assumptions, not measurements, and the model records ' +
             'no mark distinguishing the two \u2014 so say so when you describe what changed' +
             (rescaled.length > 0 ? ', and state every value the model stored differently from the one approved.' : '.') +
+            (rangesNotAttached.length > 0
+              ? ' \u26a0 The approved values were saved and are unchanged, but the range could not be attached to ' +
+                rangesNotAttached.map((f) => f.factor).join(', ') +
+                ', so the analysis is still blocked for those. Say that plainly: the values are safe and do NOT need ' +
+                're-entering, and what is needed is a range.'
+              : '') +
             (framed.length > 0
               ? ' Some of them had no range to be read against, which would have stopped the analysis running ' +
                 'at all, so a range was taken from the figure itself: ' +
