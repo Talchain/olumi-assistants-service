@@ -344,10 +344,27 @@ export function createAgentCapabilities(
       const o = valueOps[i];
       const v = (o.value ?? {}) as { value?: number; unit?: string };
       if (typeof v.value !== 'number') return notApplied('no_value_on_proposal', `No value was stored on the proposal for ${o.path}. Nothing was written.`);
+      /**
+       * ⛔ `raw_value` WAS DROPPED HERE (Codex 5810763729 items 3 and 5). The proposal
+       * carries the user's NATIVE figure, so on a framed factor (`cap: 100`) the event
+       * arrived as a bare `value: 50` and `factor-value-edit` — which inverts a bare
+       * value with the factor's own stored cap — read it as 50 × 100.
+       *
+       * ⚠ ONLY WHEN THE FACTOR ALREADY HAS A CAP. An uncapped input is passed through
+       * untouched: dividing or clamping it here would invent a frame the canonical
+       * scale writer owns, and the block below is what gives an unframed amount its
+       * range. This turns no relative change into an absolute set — `v.value` is
+       * already the absolute figure the user approved.
+       */
+      const targetOs = ((((working as { nodes?: GraphRead['nodes'] }).nodes ?? [])
+        .find((n) => n.id === o.path)?.observed_state) ?? {}) as { cap?: unknown };
+      const targetCap = typeof targetOs.cap === 'number' && targetOs.cap > 0 ? targetOs.cap : undefined;
       const event = {
         kind: 'factor_value_edit' as const,
         target_id: o.path,
-        value: v.value,
+        ...(targetCap !== undefined
+          ? { value: v.value / targetCap, raw_value: v.value }
+          : { value: v.value }),
         ...(v.unit !== undefined && v.unit !== '' ? { unit: v.unit } : {}),
       };
       const res = await applyFactorValueEdit({
@@ -696,20 +713,63 @@ export function createAgentCapabilities(
       const notAFactor: { label: string; kind: string }[] = [];
       const occupied: { label: string; current_value: number }[] = [];
       const seen = new Set<string>();
-      const adopted: { id: string; label: string; value: number; unit: string; basis: string }[] = [];
+      const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number }[] = [];
 
       for (const a of input) {
         const node = find(String(a?.factor_label ?? ''));
         if (node === undefined) { unresolved.push(String(a?.factor_label ?? '')); continue; }
         if (!writable(node)) { notAFactor.push({ label: node.label, kind: String(node.kind) }); continue; }
-        const existing = node.observed_state?.value;
-        if (typeof existing === 'number') { occupied.push({ label: node.label, current_value: existing }); continue; }
+        /**
+         * ⛔ THE APPROVAL MUST SHOW THE USER'S OWN NUMBER, NOT THE MODEL'S DIVISOR
+         * (Codex 5810763729 item 1). `observed_state.value` is the number read against
+         * the factor's frame — on a `cap: 100` factor the user's 70 is stored as 0.7.
+         * Carried straight into `replaces`, the approval chip read "0.7 → 50", which is
+         * not a sentence about anything the user said. The native figure is `raw_value`
+         * when the frame recorded one, else the model value multiplied back up by the
+         * cap, else the value itself (an unframed factor stores native already).
+         */
+        const os = (node.observed_state ?? {}) as { value?: unknown; raw_value?: unknown; cap?: unknown };
+        const existingModel = typeof os.value === 'number' ? os.value : undefined;
+        const existingCap = typeof os.cap === 'number' && os.cap > 0 ? os.cap : undefined;
+        const existing =
+          typeof os.raw_value === 'number'
+            ? os.raw_value
+            : existingModel !== undefined && existingCap !== undefined
+              ? existingModel * existingCap
+              : existingModel;
+        /**
+         * ⭐ THE ONE CASE THE BLANKET REFUSAL WAS NEVER MEANT TO CATCH.
+         *
+         * The refusal above this exists to stop the MODEL replacing somebody's
+         * number with a guess "under cover of adopting assumptions". That is
+         * still refused and the wording of that rule has not moved.
+         *
+         * But the product's whole sensitivity loop asks the user to do exactly
+         * the opposite act: the analysis names the assumption the ordering turns
+         * on and invites them to change it and see how much it matters. An
+         * assumption the ordering is sensitive to ALWAYS already holds a value —
+         * otherwise it could not drive an ordering — so every such request landed
+         * on the blanket refusal and the invitation could never be honoured.
+         *
+         * `revise` is opt-in PER FACTOR and the tool tells the model it may set
+         * it only when the user has just asked for that factor to be changed and
+         * named the number. The old value is carried into `replaces` so the
+         * approval the user is shown says what it is replacing: consent stays
+         * informed, and the write still goes through authorise_change like any
+         * other. Nothing here writes.
+         */
+        const userNamedThisChange = a?.revise === true;
+        if (typeof existing === 'number' && !userNamedThisChange) {
+          occupied.push({ label: node.label, current_value: existing });  // native, per item 1
+          continue;
+        }
         if (!Number.isFinite(Number(a?.value))) { unresolved.push(node.label); continue; }
         if (seen.has(node.id)) continue;
         seen.add(node.id);
         adopted.push({
           id: node.id, label: node.label,
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
+          ...(typeof existing === 'number' ? { replaces: existing } : {}),
         });
       }
 
@@ -732,17 +792,47 @@ export function createAgentCapabilities(
         path: a.id,
         value: { value: a.value, unit: a.unit, basis: a.basis },
       }));
+      /**
+       * ⛔ THE APPROVAL MUST SAY WHAT IT REPLACES.
+       *
+       * A revision and an adoption are different acts and the user is agreeing to
+       * a different thing in each case. "Churn = 6%" hides that a number was
+       * already there; "Churn: 4% to 6%" does not. The receipt quotes this label,
+       * so what was consented to stays legible after the fact.
+       */
+      const revisions = ordered.filter((a) => typeof a.replaces === 'number');
+      const fresh = ordered.filter((a) => typeof a.replaces !== 'number');
+      const withUnit = (a: { value: number; unit: string }) => `${a.value}${a.unit !== '' ? ' ' + a.unit : ''}`;
+      const describe = (a: { label: string; value: number; unit: string; replaces?: number }) =>
+        typeof a.replaces === 'number'
+          ? `${a.label}: ${a.replaces}${a.unit !== '' ? ' ' + a.unit : ''} \u2192 ${withUnit(a)}`
+          : `${a.label} = ${withUnit(a)}`;
+      const heading =
+        revisions.length === 0
+          ? `Adopt ${fresh.length} starting assumption${fresh.length === 1 ? '' : 's'}: `
+          : fresh.length === 0
+            ? `Revise ${revisions.length} value${revisions.length === 1 ? '' : 's'} you asked to change: `
+            : `Revise ${revisions.length} value${revisions.length === 1 ? '' : 's'} and adopt ${fresh.length} starting assumption${fresh.length === 1 ? '' : 's'}: `;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
         operations,
-        provenance: { authored_by: 'model_proposed', basis: 'starting assumptions offered for the user to adopt or correct' },
+        provenance: {
+          // A revision the user named is theirs, not the model's. Only a proposal
+          // made entirely of those may claim it.
+          authored_by: fresh.length === 0 && revisions.length > 0 ? 'user_stated' : 'model_proposed',
+          basis:
+            revisions.length > 0 && fresh.length === 0
+              ? 'values the user asked to change, at the figures they gave'
+              : 'starting assumptions offered for the user to adopt or correct',
+        },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label:
-          `Adopt ${ordered.length} starting assumption${ordered.length === 1 ? '' : 's'}: ` +
-          ordered.map((a) => `${a.label} = ${a.value}${a.unit !== '' ? ' ' + a.unit : ''}`).join('; ') +
-          leftOutClause(notAFactor),
+        // The heading distinguishes a revision the user asked for from an assumption
+        // offered to them; `leftOutClause` is staging’s disclosure of the labels that
+        // were not factors. Both are required — the heading alone drops the disclosure,
+        // and staging’s label alone calls a revision an adoption.
+        public_label: heading + ordered.map(describe).join('; ') + leftOutClause(notAFactor),
       });
       proposals.put(proposal);
       return {
@@ -750,7 +840,10 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        assumptions: ordered.map((a) => ({ factor: a.label, value: a.value, unit: a.unit, basis: a.basis })),
+        assumptions: ordered.map((a) => ({
+          factor: a.label, value: a.value, unit: a.unit, basis: a.basis,
+          ...(typeof a.replaces === 'number' ? { replaces: a.replaces } : {}),
+        })),
         ...(unresolved.length > 0 ? { unresolved_labels: unresolved } : {}),
         ...(occupied.length > 0 ? { left_alone_already_valued: occupied } : {}),
         // Named, but not something a value can be set on (a risk, an outcome, an option): left out,
@@ -1541,6 +1634,35 @@ export function createAgentCapabilities(
         const applied: { factor: string; requested: number; recorded: number | null }[] = [];
         const failures: { factor: string; detail: string }[] = [];
         const receipts: ReceiptSummary[] = [];
+        /**
+         * Did THIS approval's own write for that factor actually land? See item 4 below.
+         *
+         * ⛔ A RECEIPT ALONE IS NOT A SUFFICIENT SIGNAL, and keying only on it would turn a
+         * real save into "not saved" — the opposite of the defect item 4 fixes, and worse.
+         * `model_version_receipt` is the single `DEGRADABLE_EGRESS_FIELD`
+         * (`validators/b1.ts:128`): when it is the ONLY field that fails egress validation,
+         * it is DELETED and the rest of the response passes. That is reachable today — its
+         * own docblock says the durable fix (not minting >200-character labels) has not
+         * landed. So a committed write can answer 200 with no receipt.
+         *
+         * Hence TWO independent signals, either of which is sufficient: this op's receipt,
+         * or the canonical graph hash moving across this op's own dispatch. The hash is read
+         * per op, which also keeps the chain accurate when one approval carries several.
+         *
+         * ⚠ The `priorTurnConflict` path in `commit.ts:1746-1766` also strips the receipt,
+         * but there the write genuinely did not happen for THIS request, and the hash will
+         * not have moved either — so both signals correctly read false and that case stays
+         * reported as not saved, which is what that branch exists to say.
+         */
+        const ownWrite = new Map<string, boolean>();
+        /** The frame the factor already carries, read from the pre-write state. */
+        const beforeById = new Map((before.nodes ?? []).map((n) => [n.id, n]));
+        /** The canonical revision this loop has advanced to, so each op's own move is visible. */
+        let carriedHash = before.graph_hash;
+        const capOf = (id: string): number | undefined => {
+          const c = ((beforeById.get(id)?.observed_state ?? {}) as { cap?: unknown }).cap;
+          return typeof c === 'number' && c > 0 ? c : undefined;
+        };
         for (let i = 0; i < ops.length; i += 1) {
           const o = ops[i];
           const v = (o.value ?? {}) as { value?: number; unit?: string };
@@ -1553,7 +1675,11 @@ export function createAgentCapabilities(
             event: {
               kind: 'factor_value_edit',
               target_id: o.path,
-              value: v.value,
+              // Same coherent {model, native} pair as the compound path — see the note
+              // there. Only when the factor already carries a cap.
+              ...(capOf(o.path) !== undefined
+                ? { value: v.value / (capOf(o.path) as number), raw_value: v.value }
+                : { value: v.value }),
               ...(v.unit !== undefined && v.unit !== '' ? { unit: v.unit } : {}),
             },
           });
@@ -1561,6 +1687,12 @@ export function createAgentCapabilities(
           const rc = receiptSummaryOf(r.json);
           if (rc.summary !== null) receipts.push(rc.summary);
           if (rc.unreadable) failures.push({ factor: o.path, detail: 'a receipt arrived but could not be read' });
+          // ⛔ OWN-WRITE EVIDENCE, PER OP (Codex 5810763729 item 4). A later read alone
+          // cannot tell "my write landed" from "the old number was already there".
+          const afterOp = await readGraph(ctx.scenario_id);
+          const moved = afterOp !== null && afterOp.graph_hash !== carriedHash;
+          if (afterOp !== null) carriedHash = afterOp.graph_hash;
+          ownWrite.set(o.path, r.status === 200 && (rc.summary !== null || moved));
         }
 
         // ⛔ CONFIRMED FROM STATE. The handler may rescale what it was sent
@@ -1571,12 +1703,45 @@ export function createAgentCapabilities(
         const byId = new Map((afterSet?.nodes ?? []).map((n) => [n.id, n]));
         for (const o of ops) {
           const node = byId.get(o.path);
-          const stored = node?.observed_state?.value;
+          const sos = (node?.observed_state ?? {}) as { value?: unknown; raw_value?: unknown; cap?: unknown };
+          const sCap = typeof sos.cap === 'number' && sos.cap > 0 ? sos.cap : undefined;
+          /**
+           * ⛔ READ BACK THE NATIVE FIGURE, AND ONLY CALL IT SAVED IF THIS WRITE PUT IT
+           * THERE (Codex 5810763729 item 4).
+           *
+           * The old line was `recorded: typeof stored === 'number' ? stored : null` over
+           * `observed_state.value`, and `landed` was every row whose `recorded` was not
+           * null. Both halves were wrong in the same direction: a factor that ALREADY
+           * held 0.7 still reads a number back after a refused write, so the refusal was
+           * reported as "Saved", and the number shown was the model's divisor rather than
+           * the user's own. So: read the native figure (`raw_value`, else the model value
+           * scaled back up by the cap), and require this approval's own receipt.
+           *
+           * ⚠ A RESCALE IS STILL REPORTED, NOT SUPPRESSED. When the handler stores a
+           * different number from the one approved, `recorded` carries what is actually
+           * in the model and the caller names the difference — that behaviour is the
+           * point of reading state back and it is deliberately unchanged. What is new is
+           * that a row with NO write behind it can no longer count as landed.
+           */
+          const storedNative =
+            typeof sos.raw_value === 'number'
+              ? sos.raw_value
+              : typeof sos.value === 'number' && sCap !== undefined
+                ? sos.value * sCap
+                : typeof sos.value === 'number'
+                  ? sos.value
+                  : undefined;
           const req = ((o.value ?? {}) as { value?: number }).value;
           applied.push({
             factor: node?.label ?? o.path,
             requested: typeof req === 'number' ? req : Number.NaN,
-            recorded: typeof stored === 'number' ? stored : null,
+            // ⛔ NO EXTRA KEY ON THIS ROW. An earlier version added `no_write_recorded: true`
+            // to rows with no own-write evidence, and `adopt-assumptions.test.ts` — a
+            // DIFFERENT file, whose reader set I had not derived — asserts this row's exact
+            // shape: "expected [{…(3)},{…(4)}] to deeply equal [{…(3)},{…(3)}]". `recorded:
+            // null` already carries the whole meaning, so the diagnostic key is dropped
+            // rather than the contract widened.
+            recorded: ownWrite.get(o.path) === true && storedNative !== undefined ? storedNative : null,
           });
         }
         const landed = applied.filter((a) => a.recorded !== null);

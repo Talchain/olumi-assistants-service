@@ -323,6 +323,27 @@ const AGENT_INSTRUCTIONS = [
    */
   'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one; say which option leads in this model and how firmly. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding.',
   'When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each — then authorise_change once they confirm. It adds the option and its links ONLY: say plainly that it cannot be compared until it states what it does to each factor, and offer propose_option_interventions for that. Never invent the direction; if you are not sure which way it pushes a factor, ask.',
+  /*
+   * \u26d4 NO AUTOMATIC RUN AFTER A REVISION (Codex 5810763729, 24 Sep). This
+   * instruction used to end "after it applies, run_analysis in the same turn and
+   * say what moved", which spends a compute run the user never asked for. A
+   * revision and a Run are two decisions; the user makes both.
+   */
+  'When the user asks to change an assumption after an analysis \u2014 which is the whole point of naming the ones the ordering turns on \u2014 call propose_assumptions with `revise: true` on that factor and the number THEY gave, then authorise_change once they confirm. Show them the current value and the new one. Never set `revise` to push a figure of your own over theirs. After it applies, confirm what was saved and say that the earlier analysis now describes the previous model \u2014 then STOP: do NOT call run_analysis in the same turn. Offer to re-run it and wait for them to ask.',
+  /*
+   * \u26d4 NEVER ASSERT AN ARTEFACT THAT NO TOOL RETURNED (RC 5811851733; measured on
+   * served b53f098). On the suggest-starting-point chip the model answered "The model
+   * still needs starting values for three factors. THE PENDING PROPOSAL COVERS THEM",
+   * and on a second scenario "Here is the complete pending...", while `suggested_actions`
+   * was EMPTY and the only tool call in the turn was `get_canonical_state`. 5 of 6 turns.
+   * The user is told to approve something that was never created and has no control to do
+   * it with \u2014 a remedy in copy that is not a reachable control.
+   *
+   * \u26a0 This is NOT claimed as the sentence that caused the missing call, and a 5/6
+   * repeat is an observed failure rather than proof of determinism. It bounds the DAMAGE:
+   * when the model does not call the tool, it must say so instead of inventing the result.
+   */
+  'NEVER say a proposal, a saved change or a pending action exists unless a tool call in THIS turn returned it. If you did not call a proposing tool, do not describe a proposal, do not say one is pending or ready, and do not ask the user to approve or confirm anything \u2014 say what the model still needs and offer to propose it. If a tool refused, say what it refused and what you will do next. Your own intention is not a result: only a tool result is.',
   'History entries that begin \u201c(Board edit\u201d are changes the user made directly on the canvas. When the user asks about \u201cmy change\u201d, start from the most recent board edit, and read the current state before explaining what it did.',
   'British English. Concise but substantive.',
 ].join(' ');
