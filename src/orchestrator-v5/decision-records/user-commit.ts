@@ -84,16 +84,27 @@
  * keys at all (the RPC whitelist and the table CHECK both refuse one), and a
  * request that says not-ready while naming an option is refused as a
  * contradiction rather than resolved by guessing which half the user meant.
- * Everything else keeps its semantics: the graph anchor is server-derived,
- * `review_date` follows the same ladder, and the prediction (expectation +
- * stated confidence) is still required and still what an outcome is scored
- * against.
+ * The graph anchor is still server-derived and `review_date` follows the same
+ * ladder (the user's date, else the labelled 90-day default).
+ *
+ * ⭐ A NOT-READY POSITION MAKES NO PREDICTION (reconciled 2026-09-24, Paul's
+ * product semantics). The expectation and the stated confidence are claims
+ * about a CHOSEN option's outcome — the expectation is what that outcome is
+ * scored against — so without a choice both are claims about nothing. A
+ * not-ready commit therefore requires neither, and the write carries
+ * `prediction: null` (stored as NULL; the migration ties NULL to
+ * `position = 'not_ready'`). Sending either WITH `position: 'not_ready'` is
+ * refused as `position_contradiction`, exactly like naming an option: storing
+ * it would keep a forecast the user's own position says they have not made,
+ * and silently dropping it would discard something they sent.
  */
 
 import type {
+  ChosenOptionDecisionWrite,
   CreateDecisionRecordWrite,
   DecisionRecordDecisionWrite,
   DecisionRecordReasoningTextWrite,
+  NotReadyPositionDecisionWrite,
 } from './store-adapter.js';
 import {
   USER_COMMIT_RECORD_ID_NAMESPACE,
@@ -137,7 +148,10 @@ export type UserCommitRefusalCode =
   | 'invalid_expectation'
   /** 0.57.0: `position` present but not `'chosen'` / `'not_ready'`. */
   | 'invalid_position'
-  /** 0.57.0: `position: 'not_ready'` AND an option id or label. */
+  /**
+   * 0.57.0: `position: 'not_ready'` AND an option id or label, a confidence,
+   * or an expectation — each is a claim about a CHOSEN option.
+   */
   | 'position_contradiction'
   /** 0.57.0: a reasoning-text field present but not a string. */
   | 'invalid_text_field'
@@ -153,9 +167,16 @@ export type UserCommitPosition = 'chosen' | 'not_ready';
 export type BuiltUserCommit =
   | {
       readonly kind: 'write';
-      readonly write: CreateDecisionRecordWrite;
+      readonly position: 'chosen';
+      readonly write: CreateDecisionRecordWrite<ChosenOptionDecisionWrite>;
       readonly reviewDateSource: ReviewDateSource;
-      readonly position: UserCommitPosition;
+    }
+  | {
+      readonly kind: 'write';
+      readonly position: 'not_ready';
+      /** `prediction: null` — a not-ready position makes no forecast. */
+      readonly write: CreateDecisionRecordWrite<NotReadyPositionDecisionWrite>;
+      readonly reviewDateSource: ReviewDateSource;
     }
   | { readonly kind: 'refuse'; readonly code: UserCommitRefusalCode; readonly message: string };
 
@@ -188,10 +209,16 @@ export interface UserCommitInput {
   readonly position?: unknown;
   /** RAW reasoning text (0.57.0), keyed by the request/write field name. */
   readonly reasoningText?: Partial<Record<ReasoningTextField, unknown>>;
-  /** The user's raw 0–100 number. Normalised HERE, server-side. */
+  /** The user's raw 0–100 number. Normalised HERE, server-side. Required on
+   *  the chosen branch; must be ABSENT (or null / blank) on not-ready. */
   readonly confidence0to100: unknown;
-  /** The user's forward-looking claim ("What do you expect to happen?"). */
-  readonly expectationStatement: string;
+  /**
+   * The user's forward-looking claim ("What do you expect to happen?"), RAW.
+   * Required (a non-empty string) on the chosen branch — a non-string reads
+   * as empty there, exactly as before; must be ABSENT (or null / blank) on
+   * not-ready.
+   */
+  readonly expectationStatement: unknown;
   /** Free text from the modal's "Revisit trigger or date" field, if any. */
   readonly revisitTriggerOrDate?: string;
   /** `graph_hash_at_run` from CEE's own newest non-noop run_analysis fact —
@@ -322,17 +349,9 @@ function parseReasoningText(
  * payload, or a typed refusal. Pure.
  */
 export function buildUserCommitWrite(input: UserCommitInput): BuiltUserCommit {
-  const confidence = normaliseStatedConfidence(input.confidence0to100);
-  if (confidence === undefined) {
-    return {
-      kind: 'refuse',
-      code: 'invalid_confidence',
-      message: 'confidence_0_100 must be a number between 0 and 100 inclusive',
-    };
-  }
-
   // 0.57.0 — which branch. Absent / null is 'chosen': every client that
-  // predates the field keeps exactly its old behaviour.
+  // predates the field keeps exactly its old behaviour, INCLUDING the order
+  // in which its refusals are reported (confidence → option → expectation).
   let position: UserCommitPosition;
   if (input.position === undefined || input.position === null || input.position === 'chosen') {
     position = 'chosen';
@@ -346,12 +365,18 @@ export function buildUserCommitWrite(input: UserCommitInput): BuiltUserCommit {
     };
   }
 
-  let optionId = '';
-  let optionLabel = '';
+  // Set on the chosen branch only; `null` ⇔ not ready.
+  let chosen: {
+    readonly optionId: string;
+    readonly optionLabel: string;
+    readonly confidence: number;
+    readonly statement: string;
+  } | null = null;
   if (position === 'not_ready') {
-    // THE CONTRADICTION IS REFUSED, NOT RESOLVED. Keeping the option would
-    // record a decision the user said they had not made; dropping it would
-    // discard something they sent. Neither is ours to choose.
+    // THE CONTRADICTION IS REFUSED, NOT RESOLVED. Keeping the option — or a
+    // confidence or expectation about one — would record a decision (or a
+    // forecast) the user said they had not made; dropping it would discard
+    // something they sent. Neither is ours to choose.
     if (!namesNothing(input.chosenOptionId) || !namesNothing(input.chosenOptionLabel)) {
       return {
         kind: 'refuse',
@@ -360,9 +385,26 @@ export function buildUserCommitWrite(input: UserCommitInput): BuiltUserCommit {
           "position 'not_ready' cannot name an option — send chosen_option_id and chosen_option_label only for a chosen position",
       };
     }
+    if (!namesNothing(input.confidence0to100) || !namesNothing(input.expectationStatement)) {
+      return {
+        kind: 'refuse',
+        code: 'position_contradiction',
+        message:
+          "position 'not_ready' makes no prediction — send confidence_0_100 and expectation_statement only for a chosen position",
+      };
+    }
   } else {
-    optionId = typeof input.chosenOptionId === 'string' ? input.chosenOptionId.trim() : '';
-    optionLabel = typeof input.chosenOptionLabel === 'string' ? input.chosenOptionLabel.trim() : '';
+    const confidence = normaliseStatedConfidence(input.confidence0to100);
+    if (confidence === undefined) {
+      return {
+        kind: 'refuse',
+        code: 'invalid_confidence',
+        message: 'confidence_0_100 must be a number between 0 and 100 inclusive',
+      };
+    }
+    const optionId = typeof input.chosenOptionId === 'string' ? input.chosenOptionId.trim() : '';
+    const optionLabel =
+      typeof input.chosenOptionLabel === 'string' ? input.chosenOptionLabel.trim() : '';
     if (optionId === '' || optionLabel === '') {
       return {
         kind: 'refuse',
@@ -372,15 +414,16 @@ export function buildUserCommitWrite(input: UserCommitInput): BuiltUserCommit {
         message: 'chosen_option_id and chosen_option_label must both be non-empty',
       };
     }
-  }
-
-  const statement = input.expectationStatement.trim();
-  if (statement === '') {
-    return {
-      kind: 'refuse',
-      code: 'invalid_expectation',
-      message: 'expectation_statement must be non-empty — it is the claim the outcome is scored against',
-    };
+    const statement =
+      typeof input.expectationStatement === 'string' ? input.expectationStatement.trim() : '';
+    if (statement === '') {
+      return {
+        kind: 'refuse',
+        code: 'invalid_expectation',
+        message: 'expectation_statement must be non-empty — it is the claim the outcome is scored against',
+      };
+    }
+    chosen = { optionId, optionLabel, confidence, statement };
   }
 
   const reasoning = parseReasoningText(input.reasoningText);
@@ -408,39 +451,83 @@ export function buildUserCommitWrite(input: UserCommitInput): BuiltUserCommit {
     input.commitNonce,
   );
 
-  // Key order is deliberate: for a chosen commit with no reasoning text the
-  // object is byte-identical to the pre-0.57.0 write.
-  const decision: DecisionRecordDecisionWrite =
-    position === 'not_ready'
-      ? {
+  const common = {
+    scenario_id: input.scenarioId,
+  };
+  const tail = {
+    review_date: reviewDate.toISOString(),
+    record_id: recordId,
+    event_id: `decision_recorded_${recordId}`,
+  };
+
+  if (chosen === null) {
+    return {
+      kind: 'write',
+      reviewDateSource,
+      position: 'not_ready',
+      write: {
+        ...common,
+        decision: {
           position: 'not_ready',
           graph_hash: graphHash,
           committed_by_user: true,
           ...reasoning.text,
-        }
-      : {
-          chosen_option_id: optionId,
-          chosen_option_label: optionLabel,
-          graph_hash: graphHash,
-          committed_by_user: true,
-          ...reasoning.text,
-        };
+        },
+        // NO FORECAST: sent as JSON null → SQL NULL. The RPC refuses anything
+        // else on this branch, and the table CHECK ties NULL to not_ready.
+        prediction: null,
+        ...tail,
+      },
+    };
+  }
 
+  // Key order is deliberate: for a chosen commit with no reasoning text the
+  // whole write is byte-identical to the pre-0.57.0 write.
   return {
     kind: 'write',
     reviewDateSource,
-    position,
+    position: 'chosen',
     write: {
-      scenario_id: input.scenarioId,
-      decision,
+      ...common,
+      decision: {
+        chosen_option_id: chosen.optionId,
+        chosen_option_label: chosen.optionLabel,
+        graph_hash: graphHash,
+        committed_by_user: true,
+        ...reasoning.text,
+      },
       prediction: {
-        statement,
-        confidence,
+        statement: chosen.statement,
+        confidence: chosen.confidence,
         confidence_source: 'user_stated',
       },
-      review_date: reviewDate.toISOString(),
-      record_id: recordId,
-      event_id: `decision_recorded_${recordId}`,
+      ...tail,
     },
   };
+}
+
+/**
+ * Which reasoning texts the account now HOLDS, as the commit response's
+ * `stored_text_fields`. A field is listed only when the request carried it
+ * (trimmed, non-blank) AND the row the RPC returned holds exactly that text.
+ *
+ * Read from the RPC's own echo, never inferred from the request: on a replay
+ * (`deduped: true`) the returned row is the EARLIER one and may hold
+ * different text, and a UI that says "on your account" must be saying it
+ * about the words the user sees. Absent echo ⇒ `[]` — the truthful default,
+ * under which the UI keeps saying "on this device".
+ */
+export function confirmStoredTextFields(
+  sent: DecisionRecordDecisionWrite,
+  stored: Readonly<Record<string, unknown>> | undefined,
+): ReasoningTextField[] {
+  if (stored === undefined) return [];
+  const confirmed: ReasoningTextField[] = [];
+  for (const field of REASONING_TEXT_FIELDS) {
+    const sentText = sent[field];
+    if (typeof sentText === 'string' && sentText !== '' && stored[field] === sentText) {
+      confirmed.push(field);
+    }
+  }
+  return confirmed;
 }

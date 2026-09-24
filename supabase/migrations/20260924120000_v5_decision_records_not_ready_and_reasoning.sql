@@ -11,7 +11,8 @@
 --   that uses them (→ 502 store_error, nothing written), while TODAY'S payload
 --   is byte-identical and keeps working — see "Deploy ordering" below.
 --
--- WHAT CHANGES (forward-only, additive — no column, no row, no signature):
+-- WHAT CHANGES (forward-only, additive — no new column, no row rewritten, no
+-- signature change):
 --
 --   1. `dr_decision_shape` (table CHECK) is replaced. It used to require
 --      chosen_option_id + chosen_option_label + graph_hash. It now requires
@@ -22,10 +23,23 @@
 --        - not ready:     position = 'not_ready', NEITHER option key present.
 --      Any other `position` value is refused at the table, not just the RPC.
 --
+--   1b. A NOT-READY POSITION MAKES NO PREDICTION (reconciled 2026-09-24, Paul's
+--      product semantics: no option, no confidence, no expectation). The
+--      expectation and the stated confidence are claims about a CHOSEN
+--      option's outcome, so without a choice both are claims about nothing.
+--      `prediction` loses NOT NULL, and `dr_prediction_shape` is replaced by
+--      a CHECK that TIES the two: a not-ready row has `prediction IS NULL`;
+--      every other row has a non-NULL object with a `statement` — exactly the
+--      old requirement, so every existing row (all chosen, all with a
+--      statement under the old NOT NULL + CHECK) re-validates unchanged. The
+--      RPCs already return the record through jsonb_strip_nulls, so a
+--      not-ready record comes back with NO `prediction` key, which is the
+--      schemas 0.57.0 shape.
+--
 --   2. `create_decision_record` is replaced IN PLACE (same 8-parameter
 --      signature — CREATE OR REPLACE, so no overload is created, per the
 --      distinct-names/no-overloads rule in 20260710113000's header). Its body
---      is GENERATED from 20260710113000's function text by two asserted
+--      is GENERATED from 20260710113000's function text by three asserted
 --      transformations, never hand-copied; everything outside them is
 --      byte-identical (the static-guard test proves it):
 --        a. the p_decision guards branch on the PRESENCE of `position`:
@@ -42,10 +56,19 @@
 --           `'position', p_decision->>'position'` — NULL and therefore
 --           STRIPPED on a chosen record (byte-identical to today), and
 --           'not_ready' on a not-ready one (which carries no option keys).
+--        c. the p_prediction guard branches on the same PRESENCE of
+--           `position`: on a not-ready decision p_prediction must be NULL
+--           (SQL NULL, or a JSON null normalised to SQL NULL) and anything
+--           else is refused 22023; on a chosen decision the pre-0.57.0 guard
+--           runs unchanged (IF becomes ELSIF, nothing else), so a NULL
+--           p_prediction is still refused there by its first clause.
 --
---   `p_prediction`, `review_date`, `record_decision_outcome`, RLS and the
---   table grants are NOT touched. A not-ready record still carries a
---   prediction (the user's stated expectation) and is scored against it.
+--   `review_date`, `record_decision_outcome`, RLS and the table grants are
+--   NOT touched. A not-ready record keeps its server-derived graph anchor
+--   and its review date (the user's, or the labelled 90-day default); it has
+--   no prediction, so an outcome recorded against it is UNSCORED (CEE's
+--   scoring reads `prediction.confidence`, finds none, and omits
+--   brier_component — never 0).
 --
 -- WHY INSIDE `decision` AND NOT NEW COLUMNS. The table's own doctrine is
 --   pass-through: the JSONB sub-objects mirror the contract verbatim, and the
@@ -56,13 +79,19 @@
 --   Keeping the signature fixed means today's callers cannot be broken by any
 --   ordering of code deploy and migration apply.
 --
--- DEPLOY ORDERING (either order is safe for existing clients):
+-- DEPLOY ORDERING (either order is safe for TODAY'S clients):
 --   - code first, migration later: today's payload is byte-identical on the
 --     wire to the RPC; payloads using the new fields are refused by the live
 --     function's whitelist (22023 → the route's 502 store_error), so nothing
 --     partial is ever written.
 --   - migration first, code later: the widened function accepts everything
 --     the old one did; nothing sends the new keys yet.
+--   ⚠ BUT A CLIENT THAT SENDS THE NEW FIELDS (the UI's decision-record-v2,
+--   which sends `rationale` / `key_assumption` / `revisit_trigger` on EVERY
+--   option commit) turns "code first" into a REGRESSION: its option commits
+--   would 502 until this file is applied. So: apply this migration BEFORE the
+--   CEE route that forwards the new fields is deployed, and ship that UI only
+--   after both.
 --
 -- ROLLBACK: rollback/20260924120000_v5_decision_records_not_ready_and_reasoning_rollback.sql.do-not-apply
 --   restores 20260710113000's constraint and function body verbatim. ⚠ It
@@ -72,6 +101,10 @@
 -- Verification (after the separately-approved execution):
 --   SELECT pg_get_constraintdef(oid) FROM pg_constraint
 --     WHERE conname = 'dr_decision_shape';            -- contains 'not_ready'
+--   SELECT pg_get_constraintdef(oid) FROM pg_constraint
+--     WHERE conname = 'dr_prediction_shape';          -- contains 'not_ready'
+--   SELECT is_nullable FROM information_schema.columns
+--     WHERE table_name = 'decision_records' AND column_name = 'prediction';  -- YES
 --   SELECT count(*) FROM pg_proc WHERE proname = 'create_decision_record';  -- 1
 --   SELECT has_function_privilege('authenticated',
 --     'public.create_decision_record(uuid, jsonb, jsonb, timestamptz, uuid, text, uuid, text)',
@@ -108,9 +141,32 @@ ALTER TABLE public.decision_records
   );
 
 -- ------------------------------------------------------------
+-- 1b. prediction — NULL exactly on a not-ready position. Every existing
+--     row is a chosen row with a non-NULL prediction carrying `statement`
+--     (the old NOT NULL + dr_prediction_shape), so it satisfies the ELSE
+--     arm and re-validation cannot fail on existing data. The CASE is
+--     never NULL: `prediction IS [NOT] NULL` is boolean, and `?` /
+--     jsonb_typeof are only reached on a non-NULL prediction.
+-- ------------------------------------------------------------
+ALTER TABLE public.decision_records
+  ALTER COLUMN prediction DROP NOT NULL;
+ALTER TABLE public.decision_records
+  DROP CONSTRAINT IF EXISTS dr_prediction_shape;
+ALTER TABLE public.decision_records
+  ADD CONSTRAINT dr_prediction_shape CHECK (
+    CASE
+      WHEN COALESCE(decision->>'position', '') = 'not_ready'
+        THEN prediction IS NULL
+      ELSE prediction IS NOT NULL
+        AND jsonb_typeof(prediction) = 'object'
+        AND prediction ? 'statement'
+    END
+  );
+
+-- ------------------------------------------------------------
 -- 2. create_decision_record — SAME 8-parameter signature (CREATE OR
 --    REPLACE replaces in place; no overload is created). Body generated
---    from 20260710113000 by two asserted transformations.
+--    from 20260710113000 by three asserted transformations.
 -- ------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.create_decision_record(
   p_scenario_id  UUID,
@@ -260,10 +316,24 @@ BEGIN
         USING ERRCODE = '22023';
     END IF;
   END IF;
+  -- 0.57.0 amendment (reconciled 2026-09-24): a NOT-READY decision makes NO
+  -- prediction — no expectation, no confidence (schemas 0.57.0: the record
+  -- carries no `prediction`). p_prediction must be SQL NULL there; a JSON
+  -- null is normalised to SQL NULL so the row satisfies dr_prediction_shape;
+  -- anything else is refused rather than stored as a forecast the user's own
+  -- position says they have not made. The CHOSEN branch is the pre-0.57.0
+  -- guard below, unchanged but for IF → ELSIF, so a NULL p_prediction is
+  -- still refused there by its first clause.
+  IF p_decision ? 'position' THEN
+    IF p_prediction IS NOT NULL AND p_prediction <> 'null'::jsonb THEN
+      RAISE EXCEPTION 'create_decision_record: a not-ready decision makes no prediction — p_prediction must be NULL'
+        USING ERRCODE = '22023';
+    END IF;
+    p_prediction := NULL;
   -- 0.16.0 amendment: prediction whitelist widened; new keys value-guarded
   -- (confidence_source closed enum per DecisionRecordConfidenceSource; the
   -- two probabilities recorded verbatim but must be numbers in [0,1]).
-  IF p_prediction IS NULL OR jsonb_typeof(p_prediction) <> 'object'
+  ELSIF p_prediction IS NULL OR jsonb_typeof(p_prediction) <> 'object'
      OR p_prediction - 'statement' - 'confidence' - 'confidence_source'
         - 'probability_of_goal' - 'probability_of_joint_goal' <> '{}'::jsonb
      OR jsonb_typeof(p_prediction->'statement') IS DISTINCT FROM 'string'

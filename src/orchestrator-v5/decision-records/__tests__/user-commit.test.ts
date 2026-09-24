@@ -34,6 +34,7 @@ import {
 } from '../record-id.js';
 import {
   buildUserCommitWrite,
+  confirmStoredTextFields,
   deriveCommittedDecisionRecordId,
   normaliseStatedConfidence,
   parseRevisitDate,
@@ -183,7 +184,7 @@ describe('T1 — a user commit never lands in the auto-capture id space', () => 
 describe('T6 — confidence_source is the exact contract literal on each path', () => {
   it('the COMMIT path stamps exactly the contract\'s user_stated literal', () => {
     const built = commit();
-    if (built.kind !== 'write') throw new Error('expected a write');
+    if (built.kind !== 'write' || built.position !== 'chosen') throw new Error('expected a chosen write');
     const [modelDerived, userStated] = DecisionRecordConfidenceSource.options;
     expect(userStated).toBe('user_stated');
     expect(built.write.prediction.confidence_source).toBe(userStated);
@@ -210,7 +211,7 @@ describe('T6 — confidence_source is the exact contract literal on each path', 
 
   it('both sub-objects parse under the strict contract schemas', () => {
     const built = commit();
-    if (built.kind !== 'write') throw new Error('expected a write');
+    if (built.kind !== 'write' || built.position !== 'chosen') throw new Error('expected a chosen write');
     expect(DecisionRecordDecisionSchema.safeParse(built.write.decision).success).toBe(true);
     expect(DecisionRecordPredictionSchema.safeParse(built.write.prediction).success).toBe(true);
   });
@@ -246,7 +247,7 @@ describe('T7 — stated confidence is normalised server-side and out-of-range is
 
   it('the built write carries the NORMALISED value, and the [0,1] contract accepts it', () => {
     const built = commit({ confidence0to100: 72 });
-    if (built.kind !== 'write') throw new Error('expected a write');
+    if (built.kind !== 'write' || built.position !== 'chosen') throw new Error('expected a chosen write');
     expect(built.write.prediction.confidence).toBeCloseTo(0.72, 12);
     expect(built.write.prediction.confidence).not.toBe(72);
   });
@@ -450,5 +451,114 @@ describe('the commit builder refuses rather than fabricating', () => {
     const b = commit({ scenarioId: OTHER_SCENARIO_ID });
     if (a.kind !== 'write' || b.kind !== 'write') throw new Error('expected writes');
     expect(a.write.record_id).not.toBe(b.write.record_id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0.57.0 (reconciled 2026-09-24) — "not ready to choose" makes NO prediction.
+// Paul's product semantics: no option, no confidence, no expectation. Each of
+// the last two is a claim about a CHOSEN option's outcome.
+// ---------------------------------------------------------------------------
+
+describe('not ready to choose — no option, no confidence, no expectation', () => {
+  const NOT_READY = {
+    position: 'not_ready',
+    chosenOptionId: undefined,
+    chosenOptionLabel: undefined,
+    confidence0to100: undefined,
+    expectationStatement: undefined,
+  } as const;
+
+  it('builds a write with NO option keys and prediction: null (never a fabricated forecast)', () => {
+    const built = commit({ ...NOT_READY, reasoningText: { next_action: 'Call the pilot customer.' } });
+    if (built.kind !== 'write') throw new Error(`expected a write, got ${JSON.stringify(built)}`);
+    expect(built.position).toBe('not_ready');
+    expect(built.write.prediction).toBeNull();
+    expect(built.write.decision).toStrictEqual({
+      position: 'not_ready',
+      graph_hash: GRAPH_HASH,
+      committed_by_user: true,
+      next_action: 'Call the pilot customer.',
+    });
+    // Still anchored, still dated: the labelled 90-day default with no input.
+    expect(built.reviewDateSource).toBe('default_horizon');
+  });
+
+  it('a not-ready commit keeps the user\'s own review date', () => {
+    const built = commit({ ...NOT_READY, revisitTriggerOrDate: '2026-11-30' });
+    if (built.kind !== 'write') throw new Error('expected a write');
+    expect(built.reviewDateSource).toBe('user_set');
+    expect(built.write.review_date).toBe(new Date('2026-11-30').toISOString());
+  });
+
+  it.each([
+    ['null', null],
+    ['an empty string', ''],
+    ['whitespace', '   '],
+  ])('confidence / expectation sent as %s are "nothing", not a contradiction', (_label, empty) => {
+    const built = commit({ ...NOT_READY, confidence0to100: empty, expectationStatement: empty });
+    expect(built.kind).toBe('write');
+  });
+
+  it.each([
+    ['a confidence', { confidence0to100: 55 }],
+    ['a confidence of ZERO (a stated number, not an absence)', { confidence0to100: 0 }],
+    ['a confidence as a string', { confidence0to100: '55' }],
+    ['an expectation', { expectationStatement: 'We will know by November.' }],
+    ['a NON-STRING expectation', { expectationStatement: 42 }],
+  ])('not_ready + %s → refused position_contradiction (no write built)', (_label, extra) => {
+    const built = commit({ ...NOT_READY, ...extra });
+    expect(built.kind).toBe('refuse');
+    if (built.kind !== 'refuse') return;
+    expect(built.code).toBe('position_contradiction');
+    expect(built.message).toContain('makes no prediction');
+  });
+
+  it('the option contradiction is still reported as such (checked first)', () => {
+    const built = commit({ ...NOT_READY, chosenOptionId: 'opt_b', confidence0to100: 55 });
+    if (built.kind !== 'refuse') throw new Error('expected a refusal');
+    expect(built.code).toBe('position_contradiction');
+    expect(built.message).toContain('cannot name an option');
+  });
+
+  it('CONTRAST — the chosen branch still REQUIRES both (today\'s refusals, today\'s order)', () => {
+    const noConfidence = commit({ confidence0to100: undefined, expectationStatement: undefined });
+    if (noConfidence.kind !== 'refuse') throw new Error('expected a refusal');
+    expect(noConfidence.code).toBe('invalid_confidence');
+    const noExpectation = commit({ expectationStatement: undefined });
+    if (noExpectation.kind !== 'refuse') throw new Error('expected a refusal');
+    expect(noExpectation.code).toBe('invalid_expectation');
+  });
+});
+
+describe('confirmStoredTextFields — "on your account" only for text the ROW holds', () => {
+  const SENT = {
+    chosen_option_id: 'opt_b',
+    chosen_option_label: 'Option B',
+    graph_hash: GRAPH_HASH,
+    committed_by_user: true,
+    rationale: 'Cash runway binds.',
+    revisit_trigger: 'Runway below 9 months.',
+  } as const;
+
+  it('lists exactly the sent fields the echoed row holds verbatim, in canonical order', () => {
+    expect(confirmStoredTextFields(SENT, { ...SENT })).toEqual(['rationale', 'revisit_trigger']);
+  });
+
+  it('a REPLAY whose row holds DIFFERENT text does not confirm that field', () => {
+    expect(
+      confirmStoredTextFields(SENT, { ...SENT, rationale: 'An earlier rationale.' }),
+    ).toEqual(['revisit_trigger']);
+  });
+
+  it('never confirms a field the request did not send, even if the row has it', () => {
+    expect(confirmStoredTextFields(SENT, { ...SENT, next_action: 'Something older.' })).toEqual([
+      'rationale',
+      'revisit_trigger',
+    ]);
+  });
+
+  it('no echo ⇒ nothing confirmed (the truthful default: "on this device")', () => {
+    expect(confirmStoredTextFields(SENT, undefined)).toEqual([]);
   });
 });

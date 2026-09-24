@@ -57,6 +57,7 @@ export type {
   NotReadyPositionDecisionWrite,
   DecisionRecordDecisionWrite,
   DecisionRecordReasoningTextWrite,
+  DecisionRecordPredictionWrite,
   DecisionRecordWriteOutcome,
   DecisionRecordStorePort,
   DecisionRecordRead,

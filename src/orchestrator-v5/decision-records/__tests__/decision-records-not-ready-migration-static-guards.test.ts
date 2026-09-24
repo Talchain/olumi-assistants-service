@@ -15,7 +15,7 @@
  *   1. SIGNATURE PARITY — the function is replaced in place (same 8-parameter
  *      list), so no overload can be created.
  *   2. MINIMAL DIFF — the forward body is the original body with EXACTLY the
- *      two documented transformations; everything else byte-identical.
+ *      three documented transformations; everything else byte-identical.
  *   3. THE NOT-READY WHITELIST — admits position/graph_hash/committed_by_user
  *      and the four reasoning keys, and does NOT admit an option key or
  *      analysis_summary (the contradiction is refused at the store).
@@ -24,7 +24,11 @@
  *      REASONING_TEXT_FIELDS (the mirror cannot drift silently).
  *   5. THE TABLE CHECK — the not-ready disjunct exists, is COALESCE-guarded,
  *      and refuses option keys; the chosen disjunct still requires both.
- *   6. ROLLBACK — restores the original constraint and body verbatim.
+ *   6. NO PREDICTION ON NOT-READY (reconciled 2026-09-24) — p_prediction must
+ *      be NULL on the not-ready branch; the chosen branch keeps the original
+ *      guard verbatim; the column loses NOT NULL and dr_prediction_shape ties
+ *      NULL to not_ready and keeps the old requirement for every other row.
+ *   7. ROLLBACK — restores the original constraints, NOT NULL and body verbatim.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -102,15 +106,93 @@ describe('20260924120000 — create_decision_record is replaced IN PLACE', () =>
     expect(FIX_SQL.indexOf('CREATE OR REPLACE FUNCTION')).toBeLessThan(commit);
   });
 
-  it('does not touch record_decision_outcome, p_prediction or RLS', () => {
+  it('does not touch record_decision_outcome or RLS', () => {
     expect(FIX_SQL).not.toContain('FUNCTION public.record_decision_outcome');
     expect(FIX_SQL).not.toMatch(/POLICY/);
-    const predictionGuard = (body: string) => {
-      const a = body.indexOf('IF p_prediction IS NULL');
+  });
+
+  it('the CHOSEN-branch p_prediction guard is the original, byte for byte, but for IF → ELSIF', () => {
+    const predictionGuard = (body: string, opener: string) => {
+      const a = body.indexOf(`${opener} p_prediction IS NULL OR`);
+      expect(a, `${opener} p_prediction guard not found`).toBeGreaterThan(0);
       const b = body.indexOf('END IF;', a);
-      return body.slice(a, b);
+      return body.slice(a + opener.length, b);
     };
-    expect(predictionGuard(fixFn)).toBe(predictionGuard(originFn));
+    expect(predictionGuard(fixFn, '  ELSIF')).toBe(predictionGuard(originFn, '  IF'));
+  });
+});
+
+describe('20260924120000 — a not-ready decision makes NO prediction (discriminating)', () => {
+  const NOT_READY_PREDICTION_GUARD =
+    "  IF p_decision ? 'position' THEN\n" +
+    "    IF p_prediction IS NOT NULL AND p_prediction <> 'null'::jsonb THEN\n" +
+    "      RAISE EXCEPTION 'create_decision_record: a not-ready decision makes no prediction — p_prediction must be NULL'\n" +
+    "        USING ERRCODE = '22023';\n" +
+    '    END IF;\n' +
+    '    p_prediction := NULL;\n';
+
+  it('on the not-ready branch p_prediction must be NULL (a JSON null is normalised to SQL NULL)', () => {
+    expect(fixFn).toContain(NOT_READY_PREDICTION_GUARD);
+    // CONTRAST: the original required a prediction on EVERY record.
+    expect(originFn).not.toContain('p_prediction := NULL;');
+    expect(originFn).toContain('  IF p_prediction IS NULL OR jsonb_typeof(p_prediction)');
+  });
+
+  it('the not-ready prediction branch is decided by the SAME presence test as the decision guards', () => {
+    // Two occurrences of the branch test: decision guards (a), prediction guard (c).
+    expect(fixFn.split("  IF p_decision ? 'position' THEN\n").length - 1).toBe(2);
+    const decisionBranch = fixFn.indexOf("IF p_decision ? 'position' THEN");
+    const predictionBranch = fixFn.indexOf(NOT_READY_PREDICTION_GUARD);
+    expect(predictionBranch).toBeGreaterThan(decisionBranch);
+  });
+
+  it('the INSERT still writes p_prediction unchanged (the normalised NULL reaches the row)', () => {
+    const insert = (body: string) => body.slice(body.indexOf('INSERT INTO public.decision_records'), body.indexOf('RETURNING * INTO v_new;'));
+    expect(insert(fixFn)).toBe(insert(originFn));
+    expect(insert(fixFn)).toContain('p_decision, p_prediction,');
+  });
+});
+
+describe('20260924120000 — prediction column + dr_prediction_shape (the table CHECK)', () => {
+  const predictionCheckOf = (sql: string): string => {
+    const a = sql.indexOf('ADD CONSTRAINT dr_prediction_shape CHECK (');
+    expect(a, 'ADD CONSTRAINT dr_prediction_shape not found').toBeGreaterThan(0);
+    const b = sql.indexOf('  );', a);
+    return sql.slice(a, b);
+  };
+
+  it('drops NOT NULL on prediction, and drops then re-adds dr_prediction_shape', () => {
+    expect(FIX_SQL).toContain('ALTER TABLE public.decision_records\n  ALTER COLUMN prediction DROP NOT NULL;');
+    expect(FIX_SQL).toContain('DROP CONSTRAINT IF EXISTS dr_prediction_shape;');
+    // CONTRAST: the original declared it NOT NULL.
+    expect(ORIGIN_SQL).toContain('  prediction     JSONB NOT NULL,');
+  });
+
+  it('TIES NULL to not_ready: a not-ready row has NO prediction, every other row keeps the old requirement', () => {
+    const check = predictionCheckOf(FIX_SQL);
+    expect(check).toMatch(
+      /WHEN COALESCE\(decision->>'position', ''\) = 'not_ready'\s+THEN prediction IS NULL/,
+    );
+    expect(check).toMatch(
+      /ELSE prediction IS NOT NULL\s+AND jsonb_typeof\(prediction\) = 'object'\s+AND prediction \? 'statement'/,
+    );
+  });
+
+  it('CONTRAST — the original CHECK required a statement on every row and knew no position', () => {
+    const orig = ORIGIN_SQL.slice(
+      ORIGIN_SQL.indexOf('CONSTRAINT dr_prediction_shape CHECK ('),
+      ORIGIN_SQL.indexOf('CONSTRAINT dr_outcome_shape'),
+    );
+    expect(orig).toContain("AND prediction ? 'statement'");
+    expect(orig).not.toContain('not_ready');
+  });
+
+  it('lands in the same transaction as the function it constrains', () => {
+    const begin = FIX_SQL.indexOf('\nBEGIN;\n');
+    expect(FIX_SQL.indexOf('ALTER COLUMN prediction DROP NOT NULL')).toBeGreaterThan(begin);
+    expect(FIX_SQL.indexOf('ALTER COLUMN prediction DROP NOT NULL')).toBeLessThan(
+      FIX_SQL.indexOf('CREATE OR REPLACE FUNCTION'),
+    );
   });
 });
 
@@ -202,9 +284,17 @@ describe('20260924120000 — the journey event carries the position', () => {
 });
 
 describe('20260924120000 — MINIMAL DIFF: nothing else in the body moved', () => {
-  it('undoing the two documented transformations reproduces the ORIGINAL body byte for byte', () => {
+  it('undoing the three documented transformations reproduces the ORIGINAL body byte for byte', () => {
+    // Transformation (c): drop the not-ready prediction block, ELSIF → IF.
+    const cStart = fixFn.indexOf('  -- 0.57.0 amendment (reconciled 2026-09-24): a NOT-READY decision makes NO');
+    const cEnd = fixFn.indexOf('  -- 0.16.0 amendment: prediction whitelist widened;');
+    expect(cStart).toBeGreaterThan(0);
+    expect(cEnd).toBeGreaterThan(cStart);
+    let undone = fixFn.slice(0, cStart) + fixFn.slice(cEnd);
+    expect(undone.split('  ELSIF p_prediction IS NULL OR').length - 1).toBe(1);
+    undone = undone.replace('  ELSIF p_prediction IS NULL OR', '  IF p_prediction IS NULL OR');
     // Transformation (b): drop the added details comment + position line.
-    let undone = fixFn.replace(
+    undone = undone.replace(
       / {6}-- 0\.57\.0: `position` joins the details\.[\s\S]*?one, which carries no option keys — so a reader of the journey can\n {6}-- never mistake it for a choice\.\n/,
       '',
     );
@@ -271,6 +361,16 @@ describe('20260924120000 — dr_decision_shape (the table CHECK)', () => {
 describe('20260924120000 — the rollback restores the original verbatim', () => {
   it('the rollback function body IS the original body', () => {
     expect(rollbackFn).toBe(originFn);
+  });
+
+  it('the rollback restores dr_prediction_shape and prediction NOT NULL exactly as the original declared them', () => {
+    expect(ROLLBACK_SQL).toContain(
+      "ADD CONSTRAINT dr_prediction_shape CHECK (\n    jsonb_typeof(prediction) = 'object'\n    AND prediction ? 'statement'\n  );",
+    );
+    expect(ORIGIN_SQL).toContain(
+      "CONSTRAINT dr_prediction_shape CHECK (\n    jsonb_typeof(prediction) = 'object'\n    AND prediction ? 'statement'\n  ),",
+    );
+    expect(ROLLBACK_SQL).toContain('ALTER TABLE public.decision_records\n  ALTER COLUMN prediction SET NOT NULL;');
   });
 
   it('the rollback CHECK is the original presence-only CHECK', () => {

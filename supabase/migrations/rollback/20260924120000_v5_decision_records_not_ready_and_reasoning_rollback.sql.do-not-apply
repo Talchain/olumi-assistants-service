@@ -3,15 +3,18 @@
 -- Status: DO NOT APPLY as part of a forward migration.
 -- ============================================================
 --
--- Restores 20260710113000_v5_decision_records.sql's `dr_decision_shape`
--- CHECK and `create_decision_record` body VERBATIM (generated from that file,
--- asserted byte-equal), plus its column comment.
+-- Restores 20260710113000_v5_decision_records.sql's `dr_decision_shape` and
+-- `dr_prediction_shape` CHECKs, `prediction`'s NOT NULL, and the
+-- `create_decision_record` body VERBATIM (generated from that file, asserted
+-- byte-equal), plus its column comment.
 --
 -- ⚠ DATA NOTE — READ BEFORE RUNNING. decision_records is the long-horizon
 --   calibration asset (records OUTLIVE scenarios by design). Once ANY
---   not-ready record exists, the restored CHECK cannot validate it and the
---   ADD CONSTRAINT below FAILS, rolling the whole transaction back. That is
---   deliberate: this file will not silently drop or rewrite user records.
+--   not-ready record exists, the restored CHECK cannot validate it (and its
+--   NULL prediction cannot satisfy the restored NOT NULL), so the ADD
+--   CONSTRAINT / SET NOT NULL below FAILS, rolling the whole transaction back.
+--   That is deliberate: this file will not silently drop or rewrite user
+--   records.
 --   Check first:
 --     SELECT count(*) FROM public.decision_records
 --       WHERE decision ? 'position';
@@ -31,6 +34,16 @@ ALTER TABLE public.decision_records
     AND decision ? 'chosen_option_label'
     AND decision ? 'graph_hash'
   );
+
+ALTER TABLE public.decision_records
+  DROP CONSTRAINT IF EXISTS dr_prediction_shape;
+ALTER TABLE public.decision_records
+  ADD CONSTRAINT dr_prediction_shape CHECK (
+    jsonb_typeof(prediction) = 'object'
+    AND prediction ? 'statement'
+  );
+ALTER TABLE public.decision_records
+  ALTER COLUMN prediction SET NOT NULL;
 
 CREATE OR REPLACE FUNCTION public.create_decision_record(
   p_scenario_id  UUID,

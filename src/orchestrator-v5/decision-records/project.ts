@@ -33,11 +33,12 @@ import { DECISION_RECORDS_HARD_CAP } from './store-adapter.js';
 const RATIONALE_LINE_CHAR_CAP = 220;
 
 /**
- * The designation clause for a not-ready record (0.57.0) — the counterpart of
- * `Chose "<option>": `. It names the ABSENCE of a choice, so the coach can
- * never read the line as one.
+ * The whole body of a not-ready record's line (0.57.0) — the counterpart of
+ * `Chose "<option>": <expectation>`. It names the ABSENCE of a choice, so the
+ * coach can never read the line as one, and it carries no statement because
+ * a not-ready record makes no prediction (reconciled 2026-09-24).
  */
-export const NOT_READY_DESIGNATION = 'Not ready to choose (no option chosen): ';
+export const NOT_READY_DESIGNATION = 'Not ready to choose (no option chosen)';
 
 /**
  * Headroom reserved below `charBudget` while accumulating lines, so the FINAL
@@ -104,31 +105,20 @@ function projectOneLine(
   record: DecisionRecordRead,
   mayNameLeadingOption: boolean,
 ): { line: string; cut: boolean } | null {
-  const statement = readString(record.prediction, 'statement');
-  if (statement === null) return null;
   // 0.57.0 — "NOT READY TO CHOOSE" IS NOT A DECISION, and is never rendered
-  // as one. It carries no option (the RPC and the table CHECK refuse one), so
-  // there is nothing to designate; the line says outright that no option was
-  // chosen. Without this branch the missing label made the record
-  // unrenderable, and it would have been counted into the disclosure as a
-  // hidden DECISION — the one reading this record must never get. Its
-  // statement goes through the same withheld-claim projection as any other,
-  // because an expectation can still name the analysis leader.
+  // as one. It carries no option (the RPC and the table CHECK refuse one) and
+  // NO PREDICTION (prediction is NULL — reconciled 2026-09-24), so there is
+  // nothing to designate and no statement to project: the line says outright
+  // that no option was chosen, and nothing else. It is checked BEFORE the
+  // statement read, because without a statement the record would otherwise be
+  // unrenderable and counted into the disclosure as a hidden DECISION — the
+  // one reading this record must never get. The line carries no user text,
+  // so there is nothing for the withheld-claim projection to gate.
   if (readString(record.decision, 'position') === 'not_ready') {
-    const notReadyStatement = mayNameLeadingOption
-      ? statement
-      : projectDecisionRecordForWithheldClaim(statement).rationale;
-    let text = notReadyStatement.trim();
-    let notReadyCut = false;
-    if (text.length > RATIONALE_LINE_CHAR_CAP) {
-      text = `${text.slice(0, RATIONALE_LINE_CHAR_CAP)}…`;
-      notReadyCut = true;
-    }
-    return {
-      line: `- [${isoDate(record.created_at)}] ${NOT_READY_DESIGNATION}${text}`,
-      cut: notReadyCut,
-    };
+    return { line: `- [${isoDate(record.created_at)}] ${NOT_READY_DESIGNATION}`, cut: false };
   }
+  const statement = record.prediction === null ? null : readString(record.prediction, 'statement');
+  if (statement === null) return null;
   const option = readString(record.decision, 'chosen_option_label');
   if (option === null) return null; // never id-as-label / empty
   const projected = mayNameLeadingOption

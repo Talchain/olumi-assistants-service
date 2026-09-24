@@ -116,6 +116,13 @@ interface FakeStoreState {
     hasOutcome: boolean;
   } | null;
   createResult: { record_id: string; deduped: boolean; event_id: string | null };
+  /**
+   * The `record.decision` the fake RPC echoes back. `'echo'` (default) models
+   * the real function on a fresh insert — the row holds exactly the payload
+   * sent. An object models a REPLAY returning an earlier row; `undefined`
+   * models an envelope with no decision.
+   */
+  storedDecision: 'echo' | Record<string, unknown> | undefined;
   outcomeResult: { record_id: string; deduped: boolean; event_id: string | null };
   outcomeError: Error | null;
 }
@@ -131,17 +138,25 @@ function makeStore(overrides?: Partial<FakeStoreState>) {
       hasOutcome: false,
     },
     createResult: { record_id: 'new-record', deduped: false, event_id: 'evt' },
+    storedDecision: 'echo',
     outcomeResult: { record_id: RECORD_ID, deduped: false, event_id: 'evt-outcome' },
     outcomeError: null,
     ...overrides,
   };
 
-  const createRecord = vi.fn(async (write: CreateWrite) => ({
-    ...state.createResult,
-    record_id: state.createResult.record_id === 'new-record'
-      ? write.record_id
-      : state.createResult.record_id,
-  }));
+  const createRecord = vi.fn(async (write: CreateWrite) => {
+    const stored =
+      state.storedDecision === 'echo'
+        ? { ...write.decision }
+        : state.storedDecision;
+    return {
+      ...state.createResult,
+      record_id: state.createResult.record_id === 'new-record'
+        ? write.record_id
+        : state.createResult.record_id,
+      ...(stored !== undefined ? { stored_decision: stored } : {}),
+    };
+  });
   const recordOutcome = vi.fn(async (_write: OutcomeWrite) => {
     if (state.outcomeError !== null) throw state.outcomeError;
     return state.outcomeResult;
@@ -218,7 +233,7 @@ describe('T1 — a commit for an already-auto-captured graph writes a SECOND, di
     const autoId = deriveDecisionRecordId(SCENARIO_ID, GRAPH_HASH, COMPUTED_AT);
     expect(write.record_id).not.toBe(autoId);
 
-    expect(write.prediction.confidence_source).toBe('user_stated');
+    expect(write.prediction!.confidence_source).toBe('user_stated');
     expect(write.decision.committed_by_user).toBe(true);
     expect(write.decision.graph_hash).toBe(GRAPH_HASH);
 
@@ -443,7 +458,7 @@ describe('T7 — confidence_0_100 → [0,1] happens SERVER-side', () => {
       payload: { ...COMMIT_BODY, confidence_0_100: input },
     });
     const write = createRecord.mock.calls[0]![0];
-    expect(write.prediction.confidence!).toBeCloseTo(expected, 12);
+    expect(write.prediction!.confidence!).toBeCloseTo(expected, 12);
     await app.close();
   });
 
@@ -770,14 +785,28 @@ describe('0.57.0 (a) — TODAY\'S payload is unchanged, byte for byte', () => {
     ]);
   });
 
-  it('the response keeps every pre-0.57.0 key and ADDS position: "chosen"', async () => {
+  it('the response keeps every pre-0.57.0 key, in order, and ADDS exactly position + stored_text_fields', async () => {
     const { res } = await postCommit(COMMIT_BODY);
     const body = res.json();
+    expect(Object.keys(body)).toEqual([
+      'record_id',
+      'deduped',
+      'event_id',
+      'review_date',
+      'review_date_source',
+      'confidence_source',
+      'committed_by_user',
+      'position',
+      'stored_text_fields',
+      'request_id',
+    ]);
     expect(body.position).toBe('chosen');
     expect(body.review_date_source).toBe('default_horizon');
     expect(body.confidence_source).toBe('user_stated');
     expect(body.committed_by_user).toBe(true);
     expect(body.deduped).toBe(false);
+    // Today's payload sends no text, so nothing is claimed stored.
+    expect(body.stored_text_fields).toEqual([]);
   });
 
   it('the revisit_trigger_or_date TEXT is still NOT persisted from today\'s payload (the live copy says it stays on this device)', async () => {
@@ -802,17 +831,17 @@ describe('0.57.0 (a) — TODAY\'S payload is unchanged, byte for byte', () => {
   });
 });
 
-describe('0.57.0 (b) — "not ready to choose" is valid WITHOUT an option, and is never written as a decision', () => {
+describe('0.57.0 (b) — "not ready to choose" is valid WITHOUT an option, a confidence or an expectation, and is never written as a decision', () => {
+  // The body the UI sends (decision-record-v2): position + texts, and NO
+  // option, NO confidence, NO expectation.
   const NOT_READY_BODY = {
     scenario_id: SCENARIO_ID,
     position: 'not_ready',
-    confidence_0_100: 55,
-    expectation_statement: 'We will know by November whether the pilot renews.',
-    next_action: 'Call the pilot customer this week.',
     client_commit_id: 'commit-nonce-nr',
+    next_action: 'Call the pilot customer this week.',
   };
 
-  it('writes position:not_ready, the SERVER-derived anchor, committed_by_user:true — and NO option key', async () => {
+  it('201 — writes position:not_ready, the SERVER-derived anchor, committed_by_user:true, NO option key and prediction: null', async () => {
     const { res, createRecord } = await postCommit(NOT_READY_BODY);
     expect(res.statusCode).toBe(201);
     const write = createRecord.mock.calls[0]![0];
@@ -824,16 +853,17 @@ describe('0.57.0 (b) — "not ready to choose" is valid WITHOUT an option, and i
     });
     expect(write.decision).not.toHaveProperty('chosen_option_id');
     expect(write.decision).not.toHaveProperty('chosen_option_label');
-    // The prediction is still the user's, and still what an outcome scores.
-    expect(write.prediction).toStrictEqual({
-      statement: 'We will know by November whether the pilot renews.',
-      confidence: 0.55,
-      confidence_source: 'user_stated',
-    });
+    // NO FORECAST: not an empty object, not a statement — null.
+    expect(write.prediction).toBeNull();
     const expectedId = deriveCommittedDecisionRecordId(SCENARIO_ID, GRAPH_HASH, OWNER_ID, 'commit-nonce-nr');
     expect(write.record_id).toBe(expectedId);
-    expect(res.json().position).toBe('not_ready');
-    expect(res.json().record_id).toBe(expectedId);
+    const body = res.json();
+    expect(body.position).toBe('not_ready');
+    expect(body.record_id).toBe(expectedId);
+    // No confidence was stated, so no source is named (never 'user_stated').
+    expect(body).not.toHaveProperty('confidence_source');
+    expect(body.committed_by_user).toBe(true);
+    expect(body.stored_text_fields).toEqual(['next_action']);
   });
 
   it('keeps review_date semantics: the 90-day default when no date is given…', async () => {
@@ -860,11 +890,26 @@ describe('0.57.0 (b) — "not ready to choose" is valid WITHOUT an option, and i
     expect(createRecord.mock.calls[0]![0].decision.graph_hash).toBe(GRAPH_HASH);
   });
 
-  it('still requires the expectation (the scored claim) on the not-ready branch', async () => {
-    const { res, createRecord } = await postCommit({ ...NOT_READY_BODY, expectation_statement: '' });
+  it.each([
+    ['a confidence', { confidence_0_100: 55 }],
+    ['a confidence of 0', { confidence_0_100: 0 }],
+    ['an expectation', { expectation_statement: 'We will know by November.' }],
+    ['both', { confidence_0_100: 55, expectation_statement: 'We will know by November.' }],
+  ])('not_ready + %s → 400 position_contradiction, NO RPC (refused, never silently dropped)', async (_label, extra) => {
+    const { res, createRecord } = await postCommit({ ...NOT_READY_BODY, ...extra });
     expect(res.statusCode).toBe(400);
-    expect(res.json().code).toBe('invalid_expectation');
+    expect(res.json().code).toBe('position_contradiction');
     expect(createRecord).not.toHaveBeenCalled();
+  });
+
+  it('null / blank confidence and expectation are "nothing", not a contradiction', async () => {
+    const { res, createRecord } = await postCommit({
+      ...NOT_READY_BODY,
+      confidence_0_100: null,
+      expectation_statement: '   ',
+    });
+    expect(res.statusCode).toBe(201);
+    expect(createRecord.mock.calls[0]![0].prediction).toBeNull();
   });
 
   it('empty-string option fields are "no option", not a contradiction', async () => {
@@ -909,15 +954,13 @@ describe('0.57.0 (c) — rationale, key assumption, revisit trigger and next act
       next_action: 'Call the pilot customer this week.',
     });
     // The rationale is NEVER the scored claim.
-    expect(write.prediction.statement).toBe('Runway holds above 9 months through Q1.');
+    expect(write.prediction!.statement).toBe('Runway holds above 9 months through Q1.');
   });
 
   it('on a not-ready record: next_action + rationale persisted beside position', async () => {
     const { createRecord } = await postCommit({
       scenario_id: SCENARIO_ID,
       position: 'not_ready',
-      confidence_0_100: 40,
-      expectation_statement: 'The renewal decides it.',
       rationale: 'The pilot renewal is the fact that decides this.',
       next_action: 'Call the pilot customer this week.',
       client_commit_id: 'commit-nonce-nr2',
@@ -994,8 +1037,6 @@ describe('0.57.0 (e) — not_ready WITH an option is a CONTRADICTION, refused be
   const NOT_READY_BASE = {
     scenario_id: SCENARIO_ID,
     position: 'not_ready',
-    confidence_0_100: 55,
-    expectation_statement: 'We will know by November.',
     client_commit_id: 'commit-nonce-contra',
   };
 
@@ -1009,5 +1050,58 @@ describe('0.57.0 (e) — not_ready WITH an option is a CONTRADICTION, refused be
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('position_contradiction');
     expect(createRecord).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stored_text_fields — the response says which texts the ACCOUNT holds, per
+// field, from the RPC's own echo. The UI reads it to decide, per field,
+// between "on your account" and "on this device".
+// ---------------------------------------------------------------------------
+
+describe('0.57.0 (f) — stored_text_fields confirms the durable texts, from the row, never from the request', () => {
+  const WITH_TEXT = {
+    ...COMMIT_BODY,
+    rationale: '  Cash runway is the binding constraint.  ',
+    key_assumption: 'The pilot customer renews in Q1.',
+    revisit_trigger: 'Runway falls below 9 months.',
+    revisit_trigger_or_date: 'Runway falls below 9 months.',
+  };
+
+  it('lists every text the row holds verbatim, in canonical order (next_action absent: not sent)', async () => {
+    const { res } = await postCommit(WITH_TEXT);
+    expect(res.statusCode).toBe(201);
+    expect(res.json().stored_text_fields).toEqual(['rationale', 'key_assumption', 'revisit_trigger']);
+  });
+
+  it('the revisit TEXT is stored from revisit_trigger, while revisit_trigger_or_date still only drives review_date', async () => {
+    const { res, createRecord } = await postCommit(WITH_TEXT);
+    const write = createRecord.mock.calls[0]![0];
+    expect(write.decision).toHaveProperty('revisit_trigger', 'Runway falls below 9 months.');
+    expect(res.json().review_date_source).toBe('default_horizon_after_unparsed_trigger');
+  });
+
+  it('a REPLAY returning an earlier row with DIFFERENT text does not confirm that text', async () => {
+    const earlierRow = {
+      chosen_option_id: 'opt_b',
+      chosen_option_label: 'Option B',
+      graph_hash: GRAPH_HASH,
+      committed_by_user: true,
+      rationale: 'An earlier rationale.',
+      key_assumption: 'The pilot customer renews in Q1.',
+    };
+    const { res } = await postCommit(WITH_TEXT, {
+      createResult: { record_id: 'new-record', deduped: true, event_id: null },
+      storedDecision: earlierRow,
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().deduped).toBe(true);
+    expect(res.json().stored_text_fields).toEqual(['key_assumption']);
+  });
+
+  it('no decision echoed ⇒ [] (the client keeps saying "on this device")', async () => {
+    const { res } = await postCommit(WITH_TEXT, { storedDecision: undefined });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().stored_text_fields).toEqual([]);
   });
 });

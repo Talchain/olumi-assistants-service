@@ -135,7 +135,9 @@ export interface ChosenOptionDecisionWrite extends DecisionRecordReasoningTextWr
  * "Not ready to choose" (schemas 0.57.0 `DecisionRecordNotReadyPositionSchema`).
  * NOT a decision: it carries NO option keys — the RPC whitelist and the table
  * CHECK both refuse one — and it is only ever written by an explicit user
- * commit, so `committed_by_user` is the literal `true`.
+ * commit, so `committed_by_user` is the literal `true`. It makes NO
+ * prediction either: its write carries `prediction: null` (see
+ * {@link CreateDecisionRecordWrite.prediction}).
  */
 export interface NotReadyPositionDecisionWrite extends DecisionRecordReasoningTextWrite {
   readonly position: 'not_ready';
@@ -145,6 +147,29 @@ export interface NotReadyPositionDecisionWrite extends DecisionRecordReasoningTe
 }
 
 export type DecisionRecordDecisionWrite = ChosenOptionDecisionWrite | NotReadyPositionDecisionWrite;
+
+/**
+ * The `p_prediction` object — `DecisionRecordPredictionSchema` verbatim.
+ * Written on EVERY chosen-option record; NEVER on a not-ready one (see
+ * {@link CreateDecisionRecordWrite.prediction}).
+ */
+export interface DecisionRecordPredictionWrite {
+  readonly statement: string;
+  readonly confidence?: number;
+  /** Provenance of the prediction's model-side values (0.16.0, calibration
+   *  honesty §2 — the two populations are never blended). This seam only
+   *  ever produces 'model_derived'; 'user_stated' belongs to a future
+   *  elicitation lane. */
+  readonly confidence_source?: DecisionRecordConfidenceSourceLiteral;
+  /** Chosen option's P(single goal threshold met) — ISL via PLoT, recorded
+   *  VERBATIM (D-N Option-B derisk; 0.16.0). Absent when no goal target
+   *  existed at capture — never a fabricated 0. */
+  readonly probability_of_goal?: number;
+  /** Chosen option's P(ALL goal constraints jointly met) — ISL
+   *  constraint_analysis.joint_probability via PLoT, recorded VERBATIM
+   *  (D-N Option-B derisk; 0.16.0). Absent when unscored — never 0. */
+  readonly probability_of_joint_goal?: number;
+}
 
 export interface CreateDecisionRecordWrite<
   TDecision extends DecisionRecordDecisionWrite = DecisionRecordDecisionWrite,
@@ -157,23 +182,17 @@ export interface CreateDecisionRecordWrite<
    * commit can build the second.
    */
   readonly decision: TDecision;
-  readonly prediction: {
-    readonly statement: string;
-    readonly confidence?: number;
-    /** Provenance of the prediction's model-side values (0.16.0, calibration
-     *  honesty §2 — the two populations are never blended). This seam only
-     *  ever produces 'model_derived'; 'user_stated' belongs to a future
-     *  elicitation lane. */
-    readonly confidence_source?: DecisionRecordConfidenceSourceLiteral;
-    /** Chosen option's P(single goal threshold met) — ISL via PLoT, recorded
-     *  VERBATIM (D-N Option-B derisk; 0.16.0). Absent when no goal target
-     *  existed at capture — never a fabricated 0. */
-    readonly probability_of_goal?: number;
-    /** Chosen option's P(ALL goal constraints jointly met) — ISL
-     *  constraint_analysis.joint_probability via PLoT, recorded VERBATIM
-     *  (D-N Option-B derisk; 0.16.0). Absent when unscored — never 0. */
-    readonly probability_of_joint_goal?: number;
-  };
+  /**
+   * The scored claim — or, on a NOT-READY position, `null` (sent as SQL NULL
+   * and stored as NULL; schemas 0.57.0: the record carries no `prediction`).
+   * A not-ready position has no chosen option, so it has no expectation and
+   * no stated confidence for an outcome to be scored against; writing either
+   * would record a forecast the user never made. The type ties the two: a
+   * not-ready decision can only carry `null`, a chosen one only an object.
+   */
+  readonly prediction: TDecision extends NotReadyPositionDecisionWrite
+    ? null
+    : DecisionRecordPredictionWrite;
   /** ISO timestamptz. */
   readonly review_date: string;
   /** Deterministic UUID (idempotency key — the RPC's replay branch dedupes). */
@@ -187,6 +206,14 @@ export interface DecisionRecordWriteOutcome {
   /** true = p_record_id already existed; nothing was written. */
   readonly deduped: boolean;
   readonly event_id: string | null;
+  /**
+   * The `record.decision` object the RPC RETURNED — what the row actually
+   * holds (on a replay, the EXISTING row's decision, which may differ from
+   * the payload just sent). Absent when the envelope carried no decision
+   * object. The commit route reads it to confirm which reasoning texts are
+   * durable; it is never inferred from the request.
+   */
+  readonly stored_decision?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -266,7 +293,12 @@ export interface DecisionRecordRead {
   /** ISO timestamptz — the capture time (provenance anchor for the projection). */
   readonly created_at: string;
   readonly decision: Record<string, unknown>;
-  readonly prediction: Record<string, unknown>;
+  /**
+   * `null` ONLY on a not-ready position (schemas 0.57.0; migration
+   * 20260924120000 ties `prediction IS NULL` to `position = 'not_ready'`).
+   * Every chosen-option row carries an object.
+   */
+  readonly prediction: Record<string, unknown> | null;
 }
 
 export interface RetrieveDecisionRecordsOpts {
@@ -364,7 +396,15 @@ function parseReadRow(row: unknown): DecisionRecordRead | null {
   if (typeof record_id !== 'string' || record_id.length === 0) return null;
   if (typeof scenario_id !== 'string' || scenario_id.length === 0) return null;
   if (typeof created_at !== 'string' || created_at.length === 0) return null;
-  if (!isPlainObject(decision) || !isPlainObject(prediction)) return null;
+  if (!isPlainObject(decision)) return null;
+  // A not-ready position carries NO prediction (NULL column). Admitting it
+  // here keeps the row in the read — dropping it would still count it in
+  // `totalCount` and disclose a record as hidden that was never shown. A
+  // NULL prediction on any OTHER row is malformed and is dropped as before.
+  if (prediction === null && decision.position === 'not_ready') {
+    return { record_id, scenario_id, created_at, decision, prediction: null };
+  }
+  if (!isPlainObject(prediction)) return null;
   return { record_id, scenario_id, created_at, decision, prediction };
 }
 
@@ -396,6 +436,9 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
     const { data, error } = await this.client.rpc('create_decision_record', {
       p_scenario_id: write.scenario_id,
       p_decision: write.decision,
+      // `null` on a not-ready position is SENT, never omitted: p_prediction
+      // has no DEFAULT, so PostgREST resolves the function by this key's
+      // presence. JSON null reaches the function as SQL NULL.
       p_prediction: write.prediction,
       p_review_date: write.review_date,
       p_record_id: write.record_id,
@@ -620,10 +663,12 @@ function parseWriteOutcome(rpc: string, data: unknown): DecisionRecordWriteOutco
       `${rpc} returned malformed outcome (no record.record_id): ${JSON.stringify(data)}`,
     );
   }
+  const storedDecision = (record as Record<string, unknown>).decision;
   return {
     record_id: recordId,
     deduped: envelope.deduped === true,
     event_id: typeof envelope.event_id === 'string' ? envelope.event_id : null,
+    ...(isPlainObject(storedDecision) ? { stored_decision: storedDecision } : {}),
   };
 }
 

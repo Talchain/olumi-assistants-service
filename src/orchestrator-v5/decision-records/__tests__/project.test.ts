@@ -43,7 +43,9 @@ function makeRecord(overrides: Partial<DecisionRecordRead> & { option?: string; 
     scenario_id: rest.scenario_id ?? 'scen-1',
     created_at: rest.created_at ?? `${date}T10:00:00.000Z`,
     decision: rest.decision ?? { chosen_option_label: option, chosen_option_id: 'opt', graph_hash: 'aag_v1:sha256:x' },
-    prediction: rest.prediction ?? { statement, confidence_source: 'model_derived' },
+    // `!== undefined`, not `??`: a not-ready record's prediction is an explicit
+    // `null`, and `??` would silently replace it with a statement.
+    prediction: rest.prediction !== undefined ? rest.prediction : { statement, confidence_source: 'model_derived' },
   };
 }
 
@@ -155,18 +157,17 @@ describe('projectDecisionRecords — a not-ready record (schemas 0.57.0)', () =>
     committed_by_user: true,
     next_action: 'Get the Q1 renewal answer before choosing.',
   };
-  const NOT_READY_STATEMENT = 'We will know by November whether the pilot renews.';
 
-  it('renders with the NOT-READY designation, never `Chose "…"`, and is counted as SHOWN', () => {
+  it('renders with the NOT-READY designation, never `Chose "…"`, and is counted as SHOWN — with NO prediction', () => {
     const records = [
-      makeRecord({ decision: NOT_READY_DECISION, statement: NOT_READY_STATEMENT, date: '2026-09-24' }),
+      makeRecord({ decision: NOT_READY_DECISION, prediction: null, date: '2026-09-24' }),
       makeRecord({ option: 'Hire locally', statement: 'Local hiring leads on robustness.', date: '2026-09-20' }),
     ];
     const p = projectDecisionRecords(records, POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET, records.length, true)!;
     const lines = p.text.split('\n');
     // IDENTITY: the exact line, bound by its date stamp — not "some line
     // contains the words".
-    expect(lines).toContain(`- [2026-09-24] ${NOT_READY_DESIGNATION}${NOT_READY_STATEMENT}`);
+    expect(lines).toContain(`- [2026-09-24] ${NOT_READY_DESIGNATION}`);
     const notReadyLine = lines.find((l) => l.startsWith('- [2026-09-24]'))!;
     expect(notReadyLine).not.toContain('Chose');
     // The chosen record beside it is untouched.
@@ -181,7 +182,7 @@ describe('projectDecisionRecords — a not-ready record (schemas 0.57.0)', () =>
   it('CONTRAST — the same record with its position stripped is UNRENDERABLE (what the branch prevents)', () => {
     const { position: _p, ...stripped } = NOT_READY_DECISION;
     const p = projectDecisionRecords(
-      [makeRecord({ decision: stripped, statement: NOT_READY_STATEMENT })],
+      [makeRecord({ decision: stripped, prediction: null })],
       POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET,
       1,
       true,
@@ -190,18 +191,15 @@ describe('projectDecisionRecords — a not-ready record (schemas 0.57.0)', () =>
     expect(p.text).toContain('the true total is 1');
   });
 
-  it('a WITHHELD turn still gates the not-ready statement (an expectation can name the leader)', () => {
-    const leaderStatement =
-      'Double Down on SMB currently leads by 17 percentage points, so we will wait for the pilot.';
+  it('carries NO user text into the coach context (the line is the designation alone)', () => {
     const p = projectDecisionRecords(
-      [makeRecord({ decision: NOT_READY_DECISION, statement: leaderStatement, date: '2026-09-24' })],
+      [makeRecord({ decision: NOT_READY_DECISION, prediction: null, date: '2026-09-24' })],
       POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET,
       1,
       false,
     )!;
-    expect(p.text).not.toContain('17 percentage points');
-    expect(p.text).toContain(WITHHELD_ANALYSIS_SUMMARY);
-    expect(p.text).toContain(`- [2026-09-24] ${NOT_READY_DESIGNATION}`);
+    expect(p.text).not.toContain(NOT_READY_DECISION.next_action);
+    expect(p.text.split('\n')).toContain(`- [2026-09-24] ${NOT_READY_DESIGNATION}`);
     expect(textNamesLeadingOption(p.text)).toBe(false);
     expect(p.includedCount).toBe(1);
   });
