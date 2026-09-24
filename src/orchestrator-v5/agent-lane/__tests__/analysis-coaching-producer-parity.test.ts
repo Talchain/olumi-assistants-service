@@ -1,0 +1,31 @@
+import { expect, test, vi } from 'vitest';
+import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
+const readFactsFor = vi.fn();
+vi.mock('../../session/index.js', () => ({getSessionStore:()=>({readRecent:async()=>[{id:'row'}],readFactsFor,readAnalysisInvalidatedAt:async()=>null})}));
+import { buildAnalysisResultBlock, composeDirectAnswerResponse } from '../../compose.js';
+import { finaliseV5Response } from '../../response-finaliser.js';
+import { readScenarioAnalysis } from '../../../routes/scenario-graph-analysis-read.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { deriveAnalysisFreshness } from '../../context/freshness.js';
+import { canonicalStateFromFreshness } from '../../context/canonical-analysis-state.js';
+import { buildAutoRunProvenance } from '../../context/run-initiator.js';
+import { currentAnalysisCoaching } from '../analysis-coaching-pass-through.js';
+
+test('actual provisional producer/finaliser and canonical read may differ in summary for the same run', async()=>{
+ const scenarioId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+ const graph={nodes:[{id:'goal',kind:'goal',label:'Goal',goal_threshold:0.7}],edges:[]};
+ const hash=computeAnalysisAffectingGraphHash(graph as never)!;
+ const time='2026-09-24T10:00:00.000Z';
+ const fact=RunAnalysisHandlerFactSchema.parse({fact_type:'run_analysis',fact_version:1,noop:false,result:{scenario_id:scenarioId,computed_at:time,graph_hash_at_run:hash,leading_option_id:'option-a',summary:'The model contains unresolved assumptions.',constraint_verdict:{may_name_leading_option:true,constraint_verdict_state:'evaluated_feasible'},enrichment:{analysis_status:'completed',run_provenance:buildAutoRunProvenance('11111111-1111-4111-8111-111111111111')}}});
+ readFactsFor.mockResolvedValue([fact]);
+ const analysisReady={status:'ready' as const,goal_node_id:'goal',options:[],analysis_admission:{permitted_analysis_mode:'comparative_leader'}};
+ const card={type:'coaching' as const,coaching_kind:'assumption_check' as const,block_id:'00000000-0000-4000-8000-000000000001',signal_id:'fixture',created_at:time,source_handler:'run_analysis',graph_hash_at_generation:hash,freshness:'fresh' as const,title:'Check the assumption',body:'Which evidence supports this assumption?',source:'deterministic_signal' as const,target_refs:[],priority_rank:15};
+ const freshness=deriveAnalysisFreshness([fact],hash,undefined,{priorFactsReadOk:true});
+ const upstream=finaliseV5Response(composeDirectAnswerResponse({assistant_text:'Provisional result.',stage:'analyse',answerKind:'substantive',blocks:[buildAnalysisResultBlock(fact,analysisReady),card]}),{scenarioId,analysisReady:analysisReady as never,freshness,canonicalState:canonicalStateFromFreshness(freshness,{}),priorFacts:[fact],mayNameLeadingOption:false});
+ const canonical=await readScenarioAnalysis({scenarioId,graph,requestId:'coaching-parity'});
+ const before=upstream.blocks.find((b): b is Extract<typeof b,{type:'analysis_result'}>=>b.type==='analysis_result');
+ expect(before?.summary).not.toEqual((canonical.analysis_result as {summary?:unknown}|null)?.summary);
+ expect(upstream.analysis_state?.run_state).toEqual(canonical.analysis_state?.run_state);
+ expect(upstream.analysis_state?.leader_claim).toEqual(canonical.analysis_state?.leader_claim);
+ expect(currentAnalysisCoaching({scenario_id:scenarioId,status:200,analysis_state:upstream.analysis_state,blocks:upstream.blocks},{scenarioId,graphHash:hash,analysisState:canonical.analysis_state,analysisResult:canonical.analysis_result})).toEqual([card]);
+});
