@@ -27,9 +27,19 @@
 
 import { selectGroundedCounterCase } from './grounded-counter-case.js';
 
-/** `CoachingBlockSchema` caps, mirrored so the caller cannot exceed them. */
+/**
+ * `CoachingBlockSchema` caps, mirrored so the caller cannot exceed them.
+ *
+ * ⛔ `BODY_MAX` READ 400 AND THE REAL CAP IS 300 (`PHASE3_BODY_MAX`,
+ * `@talchain/schemas` 0.55.0 `boundary/blocks.js:485`, read by
+ * `CoachingBlockSchema.body` at `:612`). That was not an edge case: the shared
+ * counter-case's FIXED text is 313 characters on one branch and 320 on the other
+ * BEFORE a single label, so **every card this producer could emit was over the
+ * cap** — and a coaching block that fails the strict union does not degrade the
+ * turn, it DELETES it. The client discards the whole response.
+ */
 const TITLE_MAX = 80;
-const BODY_MAX = 400;
+const BODY_MAX = 300;
 const ACTION_LABEL_MAX = 40;
 const ACTION_PROMPT_MAX = 200;
 
@@ -65,8 +75,8 @@ export function disconfirmationCardFrom(enrichment: unknown): DisconfirmationCar
   }
   const g = decision?.grounded;
   if (g === null || g === undefined) return null;
-  const body = typeof g.counterCase === 'string' ? g.counterCase.trim() : '';
-  if (body === '') return null;
+  const counterCase = typeof g.counterCase === 'string' ? g.counterCase.trim() : '';
+  if (counterCase === '') return null;
 
   const fromLabel = typeof g.fromLabel === 'string' ? g.fromLabel : '';
   const toLabel = typeof g.toLabel === 'string' ? g.toLabel : '';
@@ -78,7 +88,22 @@ export function disconfirmationCardFrom(enrichment: unknown): DisconfirmationCar
     // ⚠ NO OPTION IS NAMED HERE, and that is the whole reason this card may be
     // shown when `strengthen` may not.
     title: truncate('A link worth arguing against', TITLE_MAX),
-    body: truncate(body, BODY_MAX),
+    /**
+     * ⚠ THE CARD AUTHORS ITS OWN BODY RATHER THAN TRUNCATING THE SHARED EXERCISE.
+     * `composeGroundedCounterCase`'s text is 313-320 chars and is also used by the
+     * DSK exercise block, whose field has no cap. Cutting it here would end the
+     * card mid-sentence ("…and note…"); the instruction survives intact in
+     * `action_prompt`, which the button dispatches verbatim.
+     *
+     * ⛔ It still names NO option — the same refusal as the selector it comes from.
+     */
+    body: truncate(
+      fromLabel !== '' && toLabel !== ''
+        ? `The robustness check flagged the link from ${fromLabel} to ${toLabel} as a priority to challenge. `
+          + 'Assume for a moment it does not hold: what would that change, and what evidence would settle it?'
+        : counterCase,
+      BODY_MAX,
+    ),
     source: 'deterministic_signal',
     // The edge the robustness check actually flagged — so the card points at a real
     // thing in the user's model rather than at the result.

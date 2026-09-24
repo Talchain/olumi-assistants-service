@@ -70,3 +70,36 @@ describe('the non-ranking coaching card', () => {
     expect(card.action_prompt.length).toBeLessThanOrEqual(200);
   });
 });
+
+/**
+ * ⛔ THE CAP THAT WOULD HAVE DELETED THE TURN.
+ *
+ * `BODY_MAX` read 400; the real cap is `PHASE3_BODY_MAX = 300`
+ * (`@talchain/schemas` 0.55.0 `boundary/blocks.js:485`, read by
+ * `CoachingBlockSchema.body` at `:612`). The shared counter-case's FIXED text is
+ * 313 chars on one branch and 320 on the other BEFORE any label — so EVERY card
+ * this producer could emit was over the cap, and a coaching block that fails the
+ * strict union does not degrade the turn, it DELETES it: the client discards the
+ * whole response.
+ */
+describe('the card fits the schema the boundary actually enforces', () => {
+  const PHASE3_BODY_MAX = 300;
+
+  it('⛔ body is within the REAL cap, on the real served enrichment', () => {
+    const card = disconfirmationCardFrom(SERVED)!;
+    expect(card.body.length).toBeLessThanOrEqual(PHASE3_BODY_MAX);
+  });
+
+  it('⛔ and it is not truncated mid-sentence — the card authors its own body', () => {
+    const card = disconfirmationCardFrom(SERVED)!;
+    // Truncation would end in the ellipsis `truncate` appends.
+    expect(card.body.endsWith('…')).toBe(false);
+    expect(card.body).toMatch(/[.?]$/);
+  });
+
+  it('⭐ the instruction survives intact in action_prompt, which the button dispatches verbatim', () => {
+    const card = disconfirmationCardFrom(SERVED)!;
+    expect(card.action_prompt).toMatch(/strongest case/i);
+    expect(card.action_prompt.endsWith('…')).toBe(false);
+  });
+});
