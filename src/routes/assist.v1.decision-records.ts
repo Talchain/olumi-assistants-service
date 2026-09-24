@@ -8,6 +8,24 @@
  *        stated. Writes `committed_by_user: true` +
  *        `confidence_source: 'user_stated'` — the first user-stated
  *        calibration population the product has ever had.
+ *        0.57.0 (schemas; migration 20260924120000), all OPTIONAL and
+ *        additive — a client sending the pre-0.57.0 body gets a
+ *        byte-identical write:
+ *          position         'chosen' (default) | 'not_ready'. A not-ready
+ *                           commit carries NO option, NO confidence and NO
+ *                           expectation (sending any of them is a 400
+ *                           `position_contradiction`); it is never written
+ *                           as a decision and makes no prediction
+ *                           (`prediction: null`). It still gets the
+ *                           server-derived graph anchor and a review date.
+ *          rationale, key_assumption, revisit_trigger, next_action
+ *                           free text, trimmed, <= 1000 chars each; stored
+ *                           durably inside `decision`. `revisit_trigger` is
+ *                           the revisit TEXT; `revisit_trigger_or_date` is
+ *                           still read ONLY to derive `review_date`.
+ *        The 201 response adds `position` and `stored_text_fields` — the
+ *        reasoning fields the returned row holds with exactly the text sent,
+ *        so a client can say "on your account" per field, and nothing more.
  *
  *   POST /assist/v1/decision-records/:record_id/outcome
  *        The other end of the loop: what actually happened, plus the first
@@ -63,7 +81,12 @@ import type {
   DecisionRecordStorePort,
   RecordDecisionOutcomeWrite,
 } from '../orchestrator-v5/decision-records/store-adapter.js';
-import { buildUserCommitWrite } from '../orchestrator-v5/decision-records/user-commit.js';
+import {
+  REASONING_TEXT_FIELDS,
+  buildUserCommitWrite,
+  confirmStoredTextFields,
+} from '../orchestrator-v5/decision-records/user-commit.js';
+import type { ReasoningTextField } from '../orchestrator-v5/decision-records/user-commit.js';
 import {
   computeBrierComponent,
   isDecisionOutcomeResult,
@@ -229,13 +252,27 @@ export default async function route(
       );
     }
 
+    // 0.57.0: the four reasoning fields travel under the SAME names they are
+    // stored under. Read RAW — the builder refuses a non-string rather than
+    // this route coercing one away.
+    const reasoningText: Partial<Record<ReasoningTextField, unknown>> = {};
+    for (const field of REASONING_TEXT_FIELDS) reasoningText[field] = body[field];
+
     const built = buildUserCommitWrite({
       scenarioId,
       userId,
-      chosenOptionId: readString(body, 'chosen_option_id'),
-      chosenOptionLabel: readString(body, 'chosen_option_label'),
+      // RAW (0.57.0): a not-ready commit that names an option in ANY form is
+      // a contradiction the builder must be able to see. The chosen branch
+      // reads a non-string as empty, exactly as `readString` did.
+      chosenOptionId: body.chosen_option_id,
+      chosenOptionLabel: body.chosen_option_label,
+      position: body.position,
+      reasoningText,
       confidence0to100: body.confidence_0_100,
-      expectationStatement: readString(body, 'expectation_statement'),
+      // RAW (reconciled 0.57.0): a not-ready commit that states an
+      // expectation in any form is a contradiction the builder must see. The
+      // chosen branch reads a non-string as empty, exactly as `readString` did.
+      expectationStatement: body.expectation_statement,
       revisitTriggerOrDate: typeof body.revisit_trigger_or_date === 'string'
         ? body.revisit_trigger_or_date
         : undefined,
@@ -261,8 +298,20 @@ export default async function route(
         // the date they see is the one they set or our 90-day default.
         review_date: built.write.review_date,
         review_date_source: built.reviewDateSource,
-        confidence_source: built.write.prediction.confidence_source,
+        // Absent on a not-ready position: no confidence was stated, so there
+        // is no source to name (never a fabricated 'user_stated').
+        ...(built.position === 'chosen'
+          ? { confidence_source: built.write.prediction.confidence_source }
+          : {}),
         committed_by_user: built.write.decision.committed_by_user,
+        // 0.57.0: what was recorded — 'chosen' for every client that does not
+        // say otherwise, 'not_ready' for "not ready to choose". Always
+        // present, so a reader never has to infer it from a missing key.
+        position: built.position,
+        // Which reasoning texts the ROW now holds, verbatim as sent — read
+        // from the RPC's own echo (a replay returns the earlier row). `[]`
+        // when none: the client then keeps saying "on this device".
+        stored_text_fields: confirmStoredTextFields(built.write.decision, outcome.stored_decision),
         request_id: getRequestId(req),
       });
     } catch (err) {

@@ -24,6 +24,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 
 import {
+  NOT_READY_DESIGNATION,
   projectDecisionRecords,
   loadOlderRelevantFactsSection,
 } from '../project.js';
@@ -42,7 +43,9 @@ function makeRecord(overrides: Partial<DecisionRecordRead> & { option?: string; 
     scenario_id: rest.scenario_id ?? 'scen-1',
     created_at: rest.created_at ?? `${date}T10:00:00.000Z`,
     decision: rest.decision ?? { chosen_option_label: option, chosen_option_id: 'opt', graph_hash: 'aag_v1:sha256:x' },
-    prediction: rest.prediction ?? { statement, confidence_source: 'model_derived' },
+    // `!== undefined`, not `??`: a not-ready record's prediction is an explicit
+    // `null`, and `??` would silently replace it with a statement.
+    prediction: rest.prediction !== undefined ? rest.prediction : { statement, confidence_source: 'model_derived' },
   };
 }
 
@@ -140,6 +143,69 @@ describe('projectDecisionRecords — bounded, disclosed, provenance-stamped', ()
     expect(p.truncated).toBe(true);
     expect(p.text).toContain('…');
     expect(p.text.length).toBeLessThanOrEqual(3_000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 0.57.0 — "NOT READY TO CHOOSE" is never rendered as a decision.
+// ---------------------------------------------------------------------------
+
+describe('projectDecisionRecords — a not-ready record (schemas 0.57.0)', () => {
+  const NOT_READY_DECISION = {
+    position: 'not_ready',
+    graph_hash: 'aag_v1:sha256:x',
+    committed_by_user: true,
+    next_action: 'Get the Q1 renewal answer before choosing.',
+  };
+
+  it('renders with the NOT-READY designation, never `Chose "…"`, and is counted as SHOWN — with NO prediction', () => {
+    const records = [
+      makeRecord({ decision: NOT_READY_DECISION, prediction: null, date: '2026-09-24' }),
+      makeRecord({ option: 'Hire locally', statement: 'Local hiring leads on robustness.', date: '2026-09-20' }),
+    ];
+    const p = projectDecisionRecords(records, POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET, records.length, true)!;
+    const lines = p.text.split('\n');
+    // IDENTITY: the exact line, bound by its date stamp — not "some line
+    // contains the words".
+    expect(lines).toContain(`- [2026-09-24] ${NOT_READY_DESIGNATION}`);
+    const notReadyLine = lines.find((l) => l.startsWith('- [2026-09-24]'))!;
+    expect(notReadyLine).not.toContain('Chose');
+    // The chosen record beside it is untouched.
+    expect(lines).toContain('- [2026-09-20] Chose "Hire locally": Local hiring leads on robustness.');
+    // Shown, not hidden: nothing is disclosed as omitted.
+    expect(p.includedCount).toBe(2);
+    expect(p.totalCount).toBe(2);
+    expect(p.truncated).toBe(false);
+    expect(p.text).not.toContain('INCOMPLETE');
+  });
+
+  it('CONTRAST — the same record with its position stripped is UNRENDERABLE (what the branch prevents)', () => {
+    const { position: _p, ...stripped } = NOT_READY_DECISION;
+    const p = projectDecisionRecords(
+      [makeRecord({ decision: stripped, prediction: null })],
+      POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET,
+      1,
+      true,
+    )!;
+    expect(p.includedCount).toBe(0);
+    expect(p.text).toContain('the true total is 1');
+  });
+
+  it('carries NO user text into the coach context (the line is the designation alone)', () => {
+    const p = projectDecisionRecords(
+      [makeRecord({ decision: NOT_READY_DECISION, prediction: null, date: '2026-09-24' })],
+      POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET,
+      1,
+      false,
+    )!;
+    expect(p.text).not.toContain(NOT_READY_DECISION.next_action);
+    expect(p.text.split('\n')).toContain(`- [2026-09-24] ${NOT_READY_DESIGNATION}`);
+    expect(textNamesLeadingOption(p.text)).toBe(false);
+    expect(p.includedCount).toBe(1);
+  });
+
+  it('the designation itself is leader-free by the PRODUCTION alarm\'s vocabulary', () => {
+    expect(textNamesLeadingOption(NOT_READY_DESIGNATION)).toBe(false);
   });
 });
 
