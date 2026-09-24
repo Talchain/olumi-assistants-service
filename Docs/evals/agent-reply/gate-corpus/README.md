@@ -1,5 +1,10 @@
 # Leader-claim corpus for the wire gate: real model replies, labelled from outside the author
 
+**v5 multi-domain (`corpus-v5-multidomain.json`, 25 Sep 2026):** 43 replies (20 leaking, 23 clean), each carrying its own SERVED state (9 states). All labels are blind.
+- **Engineering hiring and paid search:** 36 replies, run on #1854's FP3 stack.
+- **The live route on `caf7d1a`:** 7 visible replies, of which 6 leaked to the user.
+- **At `c933aabf`:** 20 of 20 leaks pass the gate. No clean reply loses a sentence; in `quantified_provisional` states the gate only APPENDS a provisional disclosure.
+
 **v4 (25 Sep 2026, #63 5823878422):** 65 withheld replies, 34 leaking and 31 clean.
 - **Added:** 12 replies at `714677d5` (reps 4–9) and 36 from the 2×2 on `7dd2e983`.
 - **Every label is blind:** a fresh-context classifier on shuffled replies, with the key held separately.

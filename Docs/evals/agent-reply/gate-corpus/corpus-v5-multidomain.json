@@ -1,0 +1,6089 @@
+{
+ "states": {
+  "caf7d1a-eng-hiring": {
+   "draft_graph": {
+    "nodes": [
+     {
+      "id": "decision_new_platform_shipped_by_q3",
+      "kind": "decision",
+      "label": "Decision: New platform shipped…",
+      "provenance": "ai_inferred",
+      "description": "Decision: New platform shipped by Q3"
+     },
+     {
+      "id": "new_platform_shipped_by_q3",
+      "kind": "goal",
+      "label": "New platform shipped by Q3",
+      "provenance": "from_brief",
+      "goal_threshold": 0.8,
+      "goal_threshold_cap": 1.25,
+      "goal_threshold_raw": 1,
+      "goal_threshold_unit": "platform shipped (binary)",
+      "goal_threshold_frame": "level",
+      "goal_threshold_cap_provenance": "target_derived_headroom"
+     },
+     {
+      "id": "hire_two_senior_engineers",
+      "kind": "option",
+      "label": "Hire two senior engineers",
+      "provenance": "from_brief",
+      "interventions": {
+       "delivery_capacity": {
+        "value": 0.2,
+        "source": "user_specified",
+        "target_match": {
+         "node_id": "delivery_capacity",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "onboarding_burden": {
+        "value": 0.12,
+        "source": "user_specified",
+        "target_match": {
+         "node_id": "onboarding_burden",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "annual_salary_spend": {
+        "value": 0.39,
+        "source": "user_specified",
+        "target_match": {
+         "node_id": "annual_salary_spend",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "senior_engineer_hires": {
+        "value": 0.2,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "hire_four_junior_engineers",
+      "kind": "option",
+      "label": "Hire four junior engineers",
+      "provenance": "from_brief",
+      "interventions": {
+       "delivery_capacity": {
+        "value": 0.18,
+        "source": "user_specified",
+        "target_match": {
+         "node_id": "delivery_capacity",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "onboarding_burden": {
+        "value": 0.2,
+        "source": "user_specified",
+        "target_match": {
+         "node_id": "onboarding_burden",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "annual_salary_spend": {
+        "value": 0.37,
+        "source": "user_specified",
+        "target_match": {
+         "node_id": "annual_salary_spend",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "junior_engineer_hires": {
+        "value": 0.4,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "maintain_current_staffing",
+      "kind": "option",
+      "label": "Maintain current staffing",
+      "provenance": "ai_inferred",
+      "interventions": {
+       "junior_engineer_hires": {
+        "value": 0,
+        "source": "cee_hypothesis"
+       },
+       "senior_engineer_hires": {
+        "value": 0,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "senior_engineer_hires",
+      "kind": "factor",
+      "label": "Senior engineer hires",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "scale_frame": 10,
+      "observed_state": {
+       "unit": "engineers",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0
+      }
+     },
+     {
+      "id": "junior_engineer_hires",
+      "kind": "factor",
+      "label": "Junior engineer hires",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "scale_frame": 10,
+      "observed_state": {
+       "unit": "engineers",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0
+      }
+     },
+     {
+      "id": "delivery_capacity",
+      "kind": "factor",
+      "label": "Delivery capacity",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 20,
+      "observed_state": {
+       "unit": "effective platform engineering FTE",
+       "value": 0.15,
+       "source": "cee_inference",
+       "raw_value": 3
+      }
+     },
+     {
+      "id": "onboarding_burden",
+      "kind": "factor",
+      "label": "Onboarding burden",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "team coaching hours/week",
+       "value": 0.1,
+       "source": "cee_inference",
+       "raw_value": 10
+      }
+     },
+     {
+      "id": "annual_salary_spend",
+      "kind": "factor",
+      "label": "Annual salary spend",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 1000000,
+      "observed_state": {
+       "unit": "GBP/year",
+       "value": 0.15,
+       "source": "cee_inference",
+       "raw_value": 150000
+      }
+     },
+     {
+      "id": "ramp_up_delay",
+      "kind": "risk",
+      "label": "Ramp-up delay",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "salary_budget_breach",
+      "kind": "risk",
+      "label": "Salary budget breach",
+      "provenance": "ai_inferred"
+     }
+    ],
+    "edges": [
+     {
+      "to": "hire_two_senior_engineers",
+      "from": "decision_new_platform_shipped_by_q3",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hire_four_junior_engineers",
+      "from": "decision_new_platform_shipped_by_q3",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "maintain_current_staffing",
+      "from": "decision_new_platform_shipped_by_q3",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "hire_two_senior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "senior_engineer_hires",
+      "from": "hire_two_senior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "delivery_capacity",
+      "from": "hire_two_senior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "onboarding_burden",
+      "from": "hire_two_senior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "hire_four_junior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "junior_engineer_hires",
+      "from": "hire_four_junior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "delivery_capacity",
+      "from": "hire_four_junior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "onboarding_burden",
+      "from": "hire_four_junior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "senior_engineer_hires",
+      "from": "maintain_current_staffing",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "junior_engineer_hires",
+      "from": "maintain_current_staffing",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "delivery_capacity",
+      "from": "senior_engineer_hires",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "delivery_capacity",
+      "from": "junior_engineer_hires",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "onboarding_burden",
+      "from": "senior_engineer_hires",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "onboarding_burden",
+      "from": "junior_engineer_hires",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "ramp_up_delay",
+      "from": "onboarding_burden",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "delivery_capacity",
+      "from": "ramp_up_delay",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "salary_budget_breach",
+      "from": "annual_salary_spend",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "delivery_capacity",
+      "from": "salary_budget_breach",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "new_platform_shipped_by_q3",
+      "from": "delivery_capacity",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "senior_engineer_hires",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "junior_engineer_hires",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     }
+    ],
+    "node_count": 12,
+    "edge_count": 24,
+    "goal_constraints": [
+     {
+      "unit": "GBP/year",
+      "label": "Annual salary spend < 400000GBP/year",
+      "value": 400000,
+      "node_id": "annual_salary_spend",
+      "operator": "<=",
+      "provenance": "explicit",
+      "constraint_id": "agent-lane:annual_salary_spend:<="
+     }
+    ]
+   },
+   "analysis_state": {
+    "run_state": {
+     "kind": "complete_current",
+     "computed_at": "2026-09-24T23:47:22.611Z"
+    },
+    "readiness": {
+     "status": "unknown",
+     "blockers": []
+    },
+    "leader_claim": {
+     "permitted": false,
+     "withheld_reason": "constraint_verdict_withheld",
+     "separation": "separated"
+    },
+    "robustness": {
+     "aggregate_level": "moderate"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+   },
+   "analysis_ready": {
+    "options": [
+     {
+      "option_id": "hire_two_senior_engineers",
+      "label": "Hire two senior engineers",
+      "status": "ready",
+      "interventions": {
+       "delivery_capacity": 0.2,
+       "onboarding_burden": 0.12,
+       "annual_salary_spend": 0.39,
+       "senior_engineer_hires": 0.2
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "delivery_capacity": {
+        "display_value": "4 effective platform engineering FTE",
+        "normalised_value": 0.2,
+        "raw_value": 4,
+        "unit": "effective platform engineering FTE"
+       },
+       "onboarding_burden": {
+        "display_value": "12 team coaching hours/week",
+        "normalised_value": 0.12,
+        "raw_value": 12,
+        "unit": "team coaching hours/week"
+       },
+       "annual_salary_spend": {
+        "display_value": "390,000 GBP/year",
+        "normalised_value": 0.39,
+        "raw_value": 390000,
+        "unit": "GBP/year"
+       },
+       "senior_engineer_hires": {
+        "display_value": "2 engineers",
+        "normalised_value": 0.2,
+        "raw_value": 2,
+        "unit": "engineers"
+       }
+      },
+      "status_reason": "4 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "hire_four_junior_engineers",
+      "label": "Hire four junior engineers",
+      "status": "ready",
+      "interventions": {
+       "delivery_capacity": 0.18,
+       "onboarding_burden": 0.2,
+       "annual_salary_spend": 0.37,
+       "junior_engineer_hires": 0.4
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "delivery_capacity": {
+        "display_value": "3.6 effective platform engineering FTE",
+        "normalised_value": 0.18,
+        "raw_value": 3.5999999999999996,
+        "unit": "effective platform engineering FTE"
+       },
+       "onboarding_burden": {
+        "display_value": "20 team coaching hours/week",
+        "normalised_value": 0.2,
+        "raw_value": 20,
+        "unit": "team coaching hours/week"
+       },
+       "annual_salary_spend": {
+        "display_value": "370,000 GBP/year",
+        "normalised_value": 0.37,
+        "raw_value": 370000,
+        "unit": "GBP/year"
+       },
+       "junior_engineer_hires": {
+        "display_value": "4 engineers",
+        "normalised_value": 0.4,
+        "raw_value": 4,
+        "unit": "engineers"
+       }
+      },
+      "status_reason": "4 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "maintain_current_staffing",
+      "label": "Maintain current staffing",
+      "status": "ready",
+      "interventions": {
+       "junior_engineer_hires": 0,
+       "senior_engineer_hires": 0
+      },
+      "is_baseline": true,
+      "intervention_details": {
+       "junior_engineer_hires": {
+        "display_value": "0 engineers",
+        "normalised_value": 0,
+        "raw_value": 0,
+        "unit": "engineers"
+       },
+       "senior_engineer_hires": {
+        "display_value": "0 engineers",
+        "normalised_value": 0,
+        "raw_value": 0,
+        "unit": "engineers"
+       }
+      },
+      "status_reason": "2 intervention(s) ready for analysis"
+     }
+    ],
+    "goal_node_id": "new_platform_shipped_by_q3",
+    "status": "ready",
+    "goal_threshold": 0.8,
+    "goal_threshold_raw": 1,
+    "goal_threshold_unit": "platform shipped (binary)",
+    "goal_threshold_cap": 1.25,
+    "goal_threshold_cap_provenance": "target_derived_headroom",
+    "bias_findings": [],
+    "may_run": true,
+    "analysis_admission": {
+     "structurally_analysable": true,
+     "missing_important_inputs": [],
+     "semantic_quality_sufficient": false,
+     "permitted_analysis_mode": "quantified_provisional",
+     "reasons": [
+      {
+       "field": "structurally_analysable",
+       "code": "READY_TO_COMPARE",
+       "message": "Analysis can run on this model as it stands."
+      },
+      {
+       "field": "semantic_quality_sufficient",
+       "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+       "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures can be shown as provisional, but no option can be called the leader and no result can be called stable or robust until you have set at least one of them."
+      },
+      {
+       "field": "permitted_analysis_mode",
+       "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+       "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures can be shown as provisional, but no option can be called the leader and no result can be called stable or robust until you have set at least one of them."
+      }
+     ],
+     "graph_hash": "845cb9acb47eb866e9efaf167c8b6d4891150faa2fa84e7c0e6ca9b446aec33f",
+     "semantic_signals": {
+      "confidence_parameters_total": 19,
+      "confidence_parameters_user_stated": 0,
+      "confidence_parameters_machine_authored": 16,
+      "confidence_parameters_unattributed": 3,
+      "material_parameters_total": 19,
+      "material_parameters_user_stated": 0,
+      "intervened_factor_baselines_total": 5,
+      "intervened_factor_baselines_user_stated": 0,
+      "material_parameters_awaiting_user_node_ids": [
+       "new_platform_shipped_by_q3",
+       "senior_engineer_hires",
+       "junior_engineer_hires",
+       "delivery_capacity",
+       "onboarding_burden",
+       "annual_salary_spend",
+       "ramp_up_delay",
+       "salary_budget_breach"
+      ],
+      "goal_target_stated": true
+     }
+    },
+    "freshness": "fresh",
+    "freshness_reason": "agent_readback_run_state_current",
+    "graph_hash_at_run": "845cb9acb47eb866",
+    "current_graph_hash": "845cb9acb47eb866",
+    "computed_at": "2026-09-24T23:47:22.611Z"
+   }
+  },
+  "caf7d1a-paid-search": {
+   "draft_graph": {
+    "nodes": [
+     {
+      "id": "decision_qualified_lead_growth",
+      "kind": "decision",
+      "label": "Decision: Qualified-lead growth",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "qualified_lead_growth",
+      "kind": "goal",
+      "label": "Qualified-lead growth",
+      "provenance": "from_brief",
+      "goal_threshold": 0.25,
+      "goal_threshold_cap": 100,
+      "goal_threshold_raw": 25,
+      "goal_threshold_unit": "%",
+      "goal_threshold_frame": "level",
+      "goal_threshold_cap_provenance": "metric_scale"
+     },
+     {
+      "id": "keep_search_allocation",
+      "kind": "option",
+      "label": "Keep Search Allocation",
+      "provenance": "ai_inferred",
+      "interventions": {
+       "search_budget_reallocated": {
+        "value": 0,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "move_30_to_linkedin",
+      "kind": "option",
+      "label": "Move 30% to LinkedIn",
+      "provenance": "from_brief",
+      "interventions": {
+       "search_budget_reallocated": {
+        "value": 0.3,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "pilot_15_on_linkedin",
+      "kind": "option",
+      "label": "Pilot 15% on LinkedIn",
+      "provenance": "ai_inferred",
+      "interventions": {
+       "search_budget_reallocated": {
+        "value": 0.15,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "search_budget_reallocated",
+      "kind": "factor",
+      "label": "Search Budget Reallocated",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "% of paid-search budget",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0
+      }
+     },
+     {
+      "id": "linkedin_qualified_leads",
+      "kind": "factor",
+      "label": "LinkedIn Qualified Leads",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 5000,
+      "observed_state": {
+       "unit": "qualified leads/year",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0
+      }
+     },
+     {
+      "id": "search_qualified_leads",
+      "kind": "factor",
+      "label": "Search Qualified Leads",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 10000,
+      "observed_state": {
+       "unit": "qualified leads/year",
+       "value": 0.2,
+       "source": "cee_inference",
+       "raw_value": 2000
+      }
+     },
+     {
+      "id": "linkedin_audience_fit",
+      "kind": "factor",
+      "label": "LinkedIn Audience Fit",
+      "category": "external",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "qualified leads per 100 LinkedIn ad clicks",
+       "value": 0.1,
+       "source": "cee_inference",
+       "raw_value": 10
+      }
+     },
+     {
+      "id": "blended_cost_per_lead",
+      "kind": "factor",
+      "label": "Blended Cost per Lead",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 200,
+      "observed_state": {
+       "unit": "GBP/lead",
+       "value": 0.35,
+       "source": "cee_inference",
+       "raw_value": 70
+      }
+     },
+     {
+      "id": "search_demand_capture_loss",
+      "kind": "risk",
+      "label": "Search Demand Capture Loss",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "cost_per_lead_threshold_breach",
+      "kind": "risk",
+      "label": "Cost-per-Lead Threshold Breach",
+      "provenance": "ai_inferred"
+     }
+    ],
+    "edges": [
+     {
+      "to": "keep_search_allocation",
+      "from": "decision_qualified_lead_growth",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "move_30_to_linkedin",
+      "from": "decision_qualified_lead_growth",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "pilot_15_on_linkedin",
+      "from": "decision_qualified_lead_growth",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "search_budget_reallocated",
+      "from": "keep_search_allocation",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "search_budget_reallocated",
+      "from": "move_30_to_linkedin",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "search_budget_reallocated",
+      "from": "pilot_15_on_linkedin",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "linkedin_qualified_leads",
+      "from": "search_budget_reallocated",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "search_qualified_leads",
+      "from": "search_budget_reallocated",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "linkedin_qualified_leads",
+      "from": "linkedin_audience_fit",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "blended_cost_per_lead",
+      "from": "search_budget_reallocated",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "qualified_lead_growth",
+      "from": "linkedin_qualified_leads",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "qualified_lead_growth",
+      "from": "search_qualified_leads",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "qualified_lead_growth",
+      "from": "blended_cost_per_lead",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "search_demand_capture_loss",
+      "from": "search_budget_reallocated",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "qualified_lead_growth",
+      "from": "search_demand_capture_loss",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "cost_per_lead_threshold_breach",
+      "from": "blended_cost_per_lead",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "qualified_lead_growth",
+      "from": "cost_per_lead_threshold_breach",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     }
+    ],
+    "node_count": 12,
+    "edge_count": 17
+   },
+   "analysis_state": {
+    "run_state": {
+     "kind": "complete_current",
+     "computed_at": "2026-09-24T23:46:46.867Z"
+    },
+    "readiness": {
+     "status": "unknown",
+     "blockers": []
+    },
+    "leader_claim": {
+     "permitted": true,
+     "separation": "separated"
+    },
+    "robustness": {
+     "aggregate_level": "high"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+   },
+   "analysis_ready": {
+    "options": [
+     {
+      "option_id": "keep_search_allocation",
+      "label": "Keep Search Allocation",
+      "status": "ready",
+      "interventions": {
+       "search_budget_reallocated": 0
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "search_budget_reallocated": {
+        "display_value": "0 % of paid-search budget",
+        "normalised_value": 0,
+        "raw_value": 0,
+        "unit": "% of paid-search budget"
+       }
+      },
+      "status_reason": "1 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "move_30_to_linkedin",
+      "label": "Move 30% to LinkedIn",
+      "status": "ready",
+      "interventions": {
+       "search_budget_reallocated": 0.3
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "search_budget_reallocated": {
+        "display_value": "30 % of paid-search budget",
+        "normalised_value": 0.3,
+        "raw_value": 30,
+        "unit": "% of paid-search budget"
+       }
+      },
+      "status_reason": "1 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "pilot_15_on_linkedin",
+      "label": "Pilot 15% on LinkedIn",
+      "status": "ready",
+      "interventions": {
+       "search_budget_reallocated": 0.15
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "search_budget_reallocated": {
+        "display_value": "15 % of paid-search budget",
+        "normalised_value": 0.15,
+        "raw_value": 15,
+        "unit": "% of paid-search budget"
+       }
+      },
+      "status_reason": "1 intervention(s) ready for analysis"
+     }
+    ],
+    "goal_node_id": "qualified_lead_growth",
+    "status": "ready",
+    "goal_threshold": 0.25,
+    "goal_threshold_raw": 25,
+    "goal_threshold_unit": "%",
+    "goal_threshold_cap": 100,
+    "goal_threshold_cap_provenance": "metric_scale",
+    "bias_findings": [],
+    "may_run": true,
+    "analysis_admission": {
+     "structurally_analysable": true,
+     "missing_important_inputs": [],
+     "semantic_quality_sufficient": false,
+     "permitted_analysis_mode": "quantified_provisional",
+     "reasons": [
+      {
+       "field": "structurally_analysable",
+       "code": "READY_TO_COMPARE",
+       "message": "Analysis can run on this model as it stands."
+      },
+      {
+       "field": "semantic_quality_sufficient",
+       "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+       "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures can be shown as provisional, but no option can be called the leader and no result can be called stable or robust until you have set at least one of them."
+      },
+      {
+       "field": "permitted_analysis_mode",
+       "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+       "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures can be shown as provisional, but no option can be called the leader and no result can be called stable or robust until you have set at least one of them."
+      }
+     ],
+     "graph_hash": "9e927dbac7af0ef285b731db36f294c4563ddf1f4b649d1b85498faf8d5fdf3e",
+     "semantic_signals": {
+      "confidence_parameters_total": 19,
+      "confidence_parameters_user_stated": 0,
+      "confidence_parameters_machine_authored": 16,
+      "confidence_parameters_unattributed": 3,
+      "material_parameters_total": 17,
+      "material_parameters_user_stated": 0,
+      "intervened_factor_baselines_total": 1,
+      "intervened_factor_baselines_user_stated": 0,
+      "material_parameters_awaiting_user_node_ids": [
+       "qualified_lead_growth",
+       "search_budget_reallocated",
+       "linkedin_qualified_leads",
+       "search_qualified_leads",
+       "blended_cost_per_lead",
+       "search_demand_capture_loss",
+       "cost_per_lead_threshold_breach"
+      ],
+      "goal_target_stated": true
+     }
+    },
+    "freshness": "fresh",
+    "freshness_reason": "agent_readback_run_state_current",
+    "graph_hash_at_run": "9e927dbac7af0ef2",
+    "current_graph_hash": "9e927dbac7af0ef2",
+    "computed_at": "2026-09-24T23:46:46.867Z"
+   }
+  },
+  "served-caf7d1a-eng-hiring-2": {
+   "draft_graph": {
+    "nodes": [
+     {
+      "id": "decision_new_platform_shipped_by_q3",
+      "kind": "decision",
+      "label": "Decision: New platform shipped…",
+      "provenance": "ai_inferred",
+      "description": "Decision: New platform shipped by Q3"
+     },
+     {
+      "id": "new_platform_shipped_by_q3",
+      "kind": "goal",
+      "label": "New platform shipped by Q3",
+      "provenance": "from_brief",
+      "goal_threshold_unit": "platform shipment",
+      "goal_threshold_frame": "level"
+     },
+     {
+      "id": "two_senior_engineers",
+      "kind": "option",
+      "label": "Two Senior Engineers",
+      "provenance": "from_brief",
+      "interventions": {
+       "annual_salary_spend": {
+        "value": 0.22,
+        "source": "user_specified",
+        "target_match": {
+         "node_id": "annual_salary_spend",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "senior_engineer_hires": {
+        "value": 0.2,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "four_junior_engineers",
+      "kind": "option",
+      "label": "Four Junior Engineers",
+      "provenance": "from_brief",
+      "interventions": {
+       "annual_salary_spend": {
+        "value": 0.2,
+        "source": "user_specified",
+        "target_match": {
+         "node_id": "annual_salary_spend",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "junior_engineer_hires": {
+        "value": 0.2,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "current_staffing",
+      "kind": "option",
+      "label": "Current Staffing",
+      "provenance": "ai_inferred",
+      "interventions": {
+       "annual_salary_spend": {
+        "value": 0,
+        "source": "user_specified",
+        "target_match": {
+         "node_id": "annual_salary_spend",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "junior_engineer_hires": {
+        "value": 0,
+        "source": "cee_hypothesis"
+       },
+       "senior_engineer_hires": {
+        "value": 0,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "hybrid_hiring",
+      "kind": "option",
+      "label": "Hybrid Hiring",
+      "provenance": "ai_inferred",
+      "interventions": {
+       "annual_salary_spend": {
+        "value": 0.21,
+        "source": "user_specified",
+        "target_match": {
+         "node_id": "annual_salary_spend",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "junior_engineer_hires": {
+        "value": 0.1,
+        "source": "cee_hypothesis"
+       },
+       "senior_engineer_hires": {
+        "value": 0.1,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "senior_engineer_hires",
+      "kind": "factor",
+      "label": "Senior engineer hires",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "observed_state": {
+       "cap": 10,
+       "unit": "engineers",
+       "value": 0,
+       "raw_value": 0,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "junior_engineer_hires",
+      "kind": "factor",
+      "label": "Junior engineer hires",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "observed_state": {
+       "cap": 20,
+       "unit": "engineers",
+       "value": 0,
+       "raw_value": 0,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "annual_salary_spend",
+      "kind": "factor",
+      "label": "Annual salary spend",
+      "category": "controllable",
+      "provenance": "user_set",
+      "scale_frame": 1000000,
+      "display_value": "0 GBP per year",
+      "observed_state": {
+       "unit": "GBP per year",
+       "value": 0,
+       "source": "user_override",
+       "raw_value": 0
+      }
+     },
+     {
+      "id": "time_to_productivity",
+      "kind": "factor",
+      "label": "Time to productivity",
+      "category": "observable",
+      "provenance": "user_set",
+      "scale_frame": 18,
+      "display_value": "0 months",
+      "observed_state": {
+       "unit": "months",
+       "value": 0,
+       "source": "user_override",
+       "raw_value": 0
+      }
+     },
+     {
+      "id": "incremental_delivery_capacity",
+      "kind": "factor",
+      "label": "Incremental delivery capacity",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "observed_state": {
+       "cap": 20,
+       "unit": "senior-engineer equivalents",
+       "value": 0,
+       "raw_value": 0,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "salary_cap_breach",
+      "kind": "risk",
+      "label": "Salary-cap breach",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "junior_ramp_up_risk",
+      "kind": "risk",
+      "label": "Junior ramp-up risk",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "platform_delivery_progress",
+      "kind": "outcome",
+      "label": "Platform delivery progress",
+      "provenance": "ai_inferred"
+     }
+    ],
+    "edges": [
+     {
+      "to": "two_senior_engineers",
+      "from": "decision_new_platform_shipped_by_q3",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "four_junior_engineers",
+      "from": "decision_new_platform_shipped_by_q3",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "current_staffing",
+      "from": "decision_new_platform_shipped_by_q3",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hybrid_hiring",
+      "from": "decision_new_platform_shipped_by_q3",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "senior_engineer_hires",
+      "from": "two_senior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "brief_extraction"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "two_senior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "junior_engineer_hires",
+      "from": "four_junior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "brief_extraction"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "four_junior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "senior_engineer_hires",
+      "from": "current_staffing",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "junior_engineer_hires",
+      "from": "current_staffing",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "current_staffing",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "senior_engineer_hires",
+      "from": "hybrid_hiring",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "junior_engineer_hires",
+      "from": "hybrid_hiring",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "hybrid_hiring",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "time_to_productivity",
+      "from": "senior_engineer_hires",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "incremental_delivery_capacity",
+      "from": "senior_engineer_hires",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "time_to_productivity",
+      "from": "junior_engineer_hires",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "incremental_delivery_capacity",
+      "from": "junior_engineer_hires",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "salary_cap_breach",
+      "from": "annual_salary_spend",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "junior_ramp_up_risk",
+      "from": "time_to_productivity",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "incremental_delivery_capacity",
+      "from": "time_to_productivity",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "incremental_delivery_capacity",
+      "from": "salary_cap_breach",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "incremental_delivery_capacity",
+      "from": "junior_ramp_up_risk",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "platform_delivery_progress",
+      "from": "incremental_delivery_capacity",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "new_platform_shipped_by_q3",
+      "from": "platform_delivery_progress",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     }
+    ],
+    "node_count": 14,
+    "edge_count": 25,
+    "goal_constraints": [
+     {
+      "unit": "GBP per year",
+      "label": "Annual salary spend < 400000GBP per year",
+      "value": 400000,
+      "node_id": "annual_salary_spend",
+      "operator": "<=",
+      "provenance": "explicit",
+      "constraint_id": "agent-lane:annual_salary_spend:<="
+     }
+    ]
+   },
+   "analysis_state": {
+    "run_state": {
+     "kind": "complete_current",
+     "computed_at": "2026-09-24T23:54:14.462Z"
+    },
+    "readiness": {
+     "status": "unknown",
+     "blockers": []
+    },
+    "leader_claim": {
+     "permitted": false,
+     "withheld_reason": "constraint_verdict_withheld",
+     "separation": "near_tie"
+    },
+    "robustness": {
+     "aggregate_level": "very_low"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+   },
+   "analysis_ready": {
+    "options": [
+     {
+      "option_id": "two_senior_engineers",
+      "label": "Two Senior Engineers",
+      "status": "ready",
+      "interventions": {
+       "annual_salary_spend": 0.22,
+       "senior_engineer_hires": 0.2
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "annual_salary_spend": {
+        "display_value": "220,000 GBP per year",
+        "normalised_value": 0.22,
+        "raw_value": 220000,
+        "unit": "GBP per year"
+       },
+       "senior_engineer_hires": {
+        "display_value": "2 engineers",
+        "normalised_value": 0.2,
+        "raw_value": 2,
+        "unit": "engineers"
+       }
+      },
+      "status_reason": "2 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "four_junior_engineers",
+      "label": "Four Junior Engineers",
+      "status": "ready",
+      "interventions": {
+       "annual_salary_spend": 0.2,
+       "junior_engineer_hires": 0.2
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "annual_salary_spend": {
+        "display_value": "200,000 GBP per year",
+        "normalised_value": 0.2,
+        "raw_value": 200000,
+        "unit": "GBP per year"
+       },
+       "junior_engineer_hires": {
+        "display_value": "4 engineers",
+        "normalised_value": 0.2,
+        "raw_value": 4,
+        "unit": "engineers"
+       }
+      },
+      "status_reason": "2 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "current_staffing",
+      "label": "Current Staffing",
+      "status": "ready",
+      "interventions": {
+       "annual_salary_spend": 0,
+       "junior_engineer_hires": 0,
+       "senior_engineer_hires": 0
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "annual_salary_spend": {
+        "display_value": "0 GBP per year",
+        "normalised_value": 0,
+        "raw_value": 0,
+        "unit": "GBP per year"
+       },
+       "junior_engineer_hires": {
+        "display_value": "0 engineers",
+        "normalised_value": 0,
+        "raw_value": 0,
+        "unit": "engineers"
+       },
+       "senior_engineer_hires": {
+        "display_value": "0 engineers",
+        "normalised_value": 0,
+        "raw_value": 0,
+        "unit": "engineers"
+       }
+      },
+      "status_reason": "3 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "hybrid_hiring",
+      "label": "Hybrid Hiring",
+      "status": "ready",
+      "interventions": {
+       "annual_salary_spend": 0.21,
+       "junior_engineer_hires": 0.1,
+       "senior_engineer_hires": 0.1
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "annual_salary_spend": {
+        "display_value": "210,000 GBP per year",
+        "normalised_value": 0.21,
+        "raw_value": 210000,
+        "unit": "GBP per year"
+       },
+       "junior_engineer_hires": {
+        "display_value": "2 engineers",
+        "normalised_value": 0.1,
+        "raw_value": 2,
+        "unit": "engineers"
+       },
+       "senior_engineer_hires": {
+        "display_value": "1 engineers",
+        "normalised_value": 0.1,
+        "raw_value": 1,
+        "unit": "engineers"
+       }
+      },
+      "status_reason": "3 intervention(s) ready for analysis"
+     }
+    ],
+    "goal_node_id": "new_platform_shipped_by_q3",
+    "status": "ready",
+    "bias_findings": [],
+    "may_run": true,
+    "analysis_admission": {
+     "structurally_analysable": true,
+     "missing_important_inputs": [],
+     "semantic_quality_sufficient": true,
+     "permitted_analysis_mode": "comparative_leader",
+     "reasons": [
+      {
+       "field": "structurally_analysable",
+       "code": "READY_TO_COMPARE",
+       "message": "Analysis can run on this model as it stands."
+      },
+      {
+       "field": "semantic_quality_sufficient",
+       "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+       "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+      },
+      {
+       "field": "permitted_analysis_mode",
+       "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+       "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+      }
+     ],
+     "graph_hash": "0c6d983e9f6855b1ac222699f42cc4887e4b20e047679fca19fe3729a5c95c66",
+     "semantic_signals": {
+      "confidence_parameters_total": 20,
+      "confidence_parameters_user_stated": 2,
+      "confidence_parameters_machine_authored": 11,
+      "confidence_parameters_unattributed": 7,
+      "material_parameters_total": 20,
+      "material_parameters_user_stated": 2,
+      "intervened_factor_baselines_total": 3,
+      "intervened_factor_baselines_user_stated": 1,
+      "material_parameters_awaiting_user_node_ids": [
+       "new_platform_shipped_by_q3",
+       "senior_engineer_hires",
+       "junior_engineer_hires",
+       "incremental_delivery_capacity",
+       "salary_cap_breach",
+       "junior_ramp_up_risk",
+       "platform_delivery_progress"
+      ],
+      "goal_target_stated": false
+     }
+    },
+    "freshness": "fresh",
+    "freshness_reason": "agent_readback_run_state_current",
+    "graph_hash_at_run": "0c6d983e9f6855b1",
+    "current_graph_hash": "0c6d983e9f6855b1",
+    "computed_at": "2026-09-24T23:54:14.462Z"
+   }
+  },
+  "served-caf7d1a-pricing-2": {
+   "draft_graph": {
+    "nodes": [
+     {
+      "id": "decision_mrr",
+      "kind": "decision",
+      "label": "Decision: MRR",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "mrr",
+      "kind": "goal",
+      "label": "MRR",
+      "provenance": "from_brief",
+      "goal_threshold": 0.8,
+      "goal_threshold_cap": 25000,
+      "goal_threshold_raw": 20000,
+      "goal_threshold_unit": "GBP per month",
+      "goal_threshold_frame": "level",
+      "goal_threshold_cap_provenance": "target_derived_headroom"
+     },
+     {
+      "id": "raise_to_59_at_release",
+      "kind": "option",
+      "label": "Raise to £59 at Release",
+      "provenance": "from_brief",
+      "interventions": {
+       "pro_plan_price": {
+        "value": 0.295,
+        "source": "brief_extraction"
+       }
+      }
+     },
+     {
+      "id": "keep_49_price",
+      "kind": "option",
+      "label": "Keep £49 Price",
+      "provenance": "ai_inferred",
+      "interventions": {
+       "pro_plan_price": {
+        "value": 0.245,
+        "source": "brief_extraction"
+       }
+      }
+     },
+     {
+      "id": "phase_to_54_at_release",
+      "kind": "option",
+      "label": "Phase to £54 at Release",
+      "provenance": "ai_inferred",
+      "interventions": {
+       "pro_plan_price": {
+        "value": 0.27,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "pro_plan_price",
+      "kind": "factor",
+      "label": "Pro plan price",
+      "category": "controllable",
+      "provenance": "from_brief",
+      "observed_state": {
+       "cap": 200,
+       "unit": "GBP per month",
+       "value": 0.245,
+       "source": "brief_extraction",
+       "raw_value": 49,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "active_pro_subscribers",
+      "kind": "factor",
+      "label": "Active Pro subscribers",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 2000,
+      "observed_state": {
+       "unit": "subscribers",
+       "value": 0.125,
+       "source": "cee_inference",
+       "raw_value": 250
+      }
+     },
+     {
+      "id": "monthly_churn",
+      "kind": "factor",
+      "label": "Monthly churn",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "percent",
+       "value": 0.035,
+       "source": "cee_inference",
+       "raw_value": 3.5
+      }
+     },
+     {
+      "id": "new_pro_conversion_rate",
+      "kind": "factor",
+      "label": "New Pro conversion rate",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "percent",
+       "value": 0.05,
+       "source": "cee_inference",
+       "raw_value": 5
+      }
+     },
+     {
+      "id": "feature_value_delivered",
+      "kind": "factor",
+      "label": "Feature value delivered",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "score out of 100",
+       "value": 0.6,
+       "source": "cee_inference",
+       "raw_value": 60
+      }
+     },
+     {
+      "id": "price_sensitivity",
+      "kind": "risk",
+      "label": "Price sensitivity",
+      "provenance": "ai_inferred"
+     }
+    ],
+    "edges": [
+     {
+      "to": "raise_to_59_at_release",
+      "from": "decision_mrr",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "keep_49_price",
+      "from": "decision_mrr",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "phase_to_54_at_release",
+      "from": "decision_mrr",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "pro_plan_price",
+      "from": "raise_to_59_at_release",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "pro_plan_price",
+      "from": "keep_49_price",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "pro_plan_price",
+      "from": "phase_to_54_at_release",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "mrr",
+      "from": "pro_plan_price",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "new_pro_conversion_rate",
+      "from": "pro_plan_price",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "active_pro_subscribers",
+      "from": "new_pro_conversion_rate",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "price_sensitivity",
+      "from": "pro_plan_price",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "monthly_churn",
+      "from": "price_sensitivity",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "new_pro_conversion_rate",
+      "from": "feature_value_delivered",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "monthly_churn",
+      "from": "feature_value_delivered",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "active_pro_subscribers",
+      "from": "monthly_churn",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "mrr",
+      "from": "active_pro_subscribers",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     }
+    ],
+    "node_count": 11,
+    "edge_count": 15,
+    "goal_constraints": [
+     {
+      "unit": "percent",
+      "label": "Monthly churn < 4percent",
+      "value": 4,
+      "node_id": "monthly_churn",
+      "operator": "<=",
+      "provenance": "explicit",
+      "constraint_id": "agent-lane:monthly_churn:<="
+     }
+    ]
+   },
+   "analysis_state": {
+    "run_state": {
+     "kind": "complete_current",
+     "computed_at": "2026-09-24T23:53:38.150Z"
+    },
+    "readiness": {
+     "status": "unknown",
+     "blockers": []
+    },
+    "leader_claim": {
+     "permitted": false,
+     "withheld_reason": "constraint_verdict_withheld",
+     "separation": "separated"
+    },
+    "robustness": {
+     "aggregate_level": "high"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+   },
+   "analysis_ready": {
+    "options": [
+     {
+      "option_id": "raise_to_59_at_release",
+      "label": "Raise to £59 at Release",
+      "status": "ready",
+      "interventions": {
+       "pro_plan_price": 0.295
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "pro_plan_price": {
+        "display_value": "59 GBP per month",
+        "normalised_value": 0.295,
+        "raw_value": 59,
+        "unit": "GBP per month"
+       }
+      },
+      "status_reason": "1 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "keep_49_price",
+      "label": "Keep £49 Price",
+      "status": "ready",
+      "interventions": {
+       "pro_plan_price": 0.245
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "pro_plan_price": {
+        "display_value": "49 GBP per month",
+        "normalised_value": 0.245,
+        "raw_value": 49,
+        "unit": "GBP per month"
+       }
+      },
+      "status_reason": "1 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "phase_to_54_at_release",
+      "label": "Phase to £54 at Release",
+      "status": "ready",
+      "interventions": {
+       "pro_plan_price": 0.27
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "pro_plan_price": {
+        "display_value": "54 GBP per month",
+        "normalised_value": 0.27,
+        "raw_value": 54,
+        "unit": "GBP per month"
+       }
+      },
+      "status_reason": "1 intervention(s) ready for analysis"
+     }
+    ],
+    "goal_node_id": "mrr",
+    "status": "ready",
+    "goal_threshold": 0.8,
+    "goal_threshold_raw": 20000,
+    "goal_threshold_unit": "GBP per month",
+    "goal_threshold_cap": 25000,
+    "goal_threshold_cap_provenance": "target_derived_headroom",
+    "bias_findings": [],
+    "may_run": true,
+    "analysis_admission": {
+     "structurally_analysable": true,
+     "missing_important_inputs": [],
+     "semantic_quality_sufficient": true,
+     "permitted_analysis_mode": "comparative_leader",
+     "reasons": [
+      {
+       "field": "structurally_analysable",
+       "code": "READY_TO_COMPARE",
+       "message": "Analysis can run on this model as it stands."
+      },
+      {
+       "field": "semantic_quality_sufficient",
+       "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+       "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+      },
+      {
+       "field": "permitted_analysis_mode",
+       "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+       "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+      }
+     ],
+     "graph_hash": "e391552d75e0c27e385e361e9acb36fcbf6321db304ac2813da46f887e7e5ba6",
+     "semantic_signals": {
+      "confidence_parameters_total": 16,
+      "confidence_parameters_user_stated": 1,
+      "confidence_parameters_machine_authored": 13,
+      "confidence_parameters_unattributed": 2,
+      "material_parameters_total": 13,
+      "material_parameters_user_stated": 1,
+      "intervened_factor_baselines_total": 1,
+      "intervened_factor_baselines_user_stated": 1,
+      "material_parameters_awaiting_user_node_ids": [
+       "mrr",
+       "active_pro_subscribers",
+       "monthly_churn",
+       "new_pro_conversion_rate",
+       "price_sensitivity"
+      ],
+      "goal_target_stated": true
+     }
+    },
+    "freshness": "fresh",
+    "freshness_reason": "agent_readback_run_state_current",
+    "graph_hash_at_run": "e391552d75e0c27e",
+    "current_graph_hash": "e391552d75e0c27e",
+    "computed_at": "2026-09-24T23:53:38.150Z"
+   }
+  },
+  "served-caf7d1a-eng-hiring-4": {
+   "draft_graph": {
+    "nodes": [
+     {
+      "id": "decision_new_platform_shipped_by_q3",
+      "kind": "decision",
+      "label": "Decision: New platform shipped…",
+      "provenance": "ai_inferred",
+      "description": "Decision: New platform shipped by Q3"
+     },
+     {
+      "id": "new_platform_shipped_by_q3",
+      "kind": "goal",
+      "label": "New platform shipped by Q3",
+      "provenance": "from_brief",
+      "goal_threshold_unit": "delivery status",
+      "goal_threshold_frame": "level"
+     },
+     {
+      "id": "hire_2_senior_engineers",
+      "kind": "option",
+      "label": "Hire 2 senior engineers",
+      "provenance": "from_brief",
+      "interventions": {
+       "annual_salary_spend": {
+        "value": 0.48,
+        "source": "cee_hypothesis"
+       },
+       "senior_engineer_hires": {
+        "value": 0.2,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "hire_4_junior_engineers",
+      "kind": "option",
+      "label": "Hire 4 junior engineers",
+      "provenance": "from_brief",
+      "interventions": {
+       "annual_salary_spend": {
+        "value": 0.48,
+        "source": "cee_hypothesis"
+       },
+       "junior_engineer_hires": {
+        "value": 0.2,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "current_staffing",
+      "kind": "option",
+      "label": "Current staffing",
+      "provenance": "ai_inferred",
+      "interventions": {
+       "annual_salary_spend": {
+        "value": 0,
+        "source": "cee_hypothesis"
+       },
+       "junior_engineer_hires": {
+        "value": 0,
+        "source": "cee_hypothesis"
+       },
+       "senior_engineer_hires": {
+        "value": 0,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "hire_1_senior_2_juniors",
+      "kind": "option",
+      "label": "Hire 1 senior, 2 juniors",
+      "provenance": "ai_inferred",
+      "interventions": {
+       "annual_salary_spend": {
+        "value": 0.48,
+        "source": "cee_hypothesis"
+       },
+       "junior_engineer_hires": {
+        "value": 0.1,
+        "source": "cee_hypothesis"
+       },
+       "senior_engineer_hires": {
+        "value": 0.1,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "senior_engineer_hires",
+      "kind": "factor",
+      "label": "Senior engineer hires",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "scale_frame": 10,
+      "observed_state": {
+       "unit": "engineers",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0
+      }
+     },
+     {
+      "id": "junior_engineer_hires",
+      "kind": "factor",
+      "label": "Junior engineer hires",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "scale_frame": 20,
+      "observed_state": {
+       "unit": "engineers",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0
+      }
+     },
+     {
+      "id": "annual_salary_spend",
+      "kind": "factor",
+      "label": "Annual salary spend",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "scale_frame": 500000,
+      "observed_state": {
+       "unit": "£/year",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0
+      }
+     },
+     {
+      "id": "effective_delivery_capacity",
+      "kind": "factor",
+      "label": "Effective delivery capacity",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "delivery points/month",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0
+      }
+     },
+     {
+      "id": "onboarding_duration",
+      "kind": "factor",
+      "label": "Onboarding duration",
+      "category": "external",
+      "provenance": "ai_inferred",
+      "scale_frame": 12,
+      "observed_state": {
+       "unit": "months",
+       "value": 0.25,
+       "source": "cee_inference",
+       "raw_value": 3
+      }
+     },
+     {
+      "id": "schedule_miss",
+      "kind": "risk",
+      "label": "Schedule miss",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "budget_overrun",
+      "kind": "risk",
+      "label": "Budget overrun",
+      "provenance": "ai_inferred"
+     }
+    ],
+    "edges": [
+     {
+      "to": "hire_2_senior_engineers",
+      "from": "decision_new_platform_shipped_by_q3",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hire_4_junior_engineers",
+      "from": "decision_new_platform_shipped_by_q3",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "current_staffing",
+      "from": "decision_new_platform_shipped_by_q3",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hire_1_senior_2_juniors",
+      "from": "decision_new_platform_shipped_by_q3",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "senior_engineer_hires",
+      "from": "hire_2_senior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "hire_2_senior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "junior_engineer_hires",
+      "from": "hire_4_junior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "hire_4_junior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "senior_engineer_hires",
+      "from": "current_staffing",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "junior_engineer_hires",
+      "from": "current_staffing",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "current_staffing",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "senior_engineer_hires",
+      "from": "hire_1_senior_2_juniors",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "junior_engineer_hires",
+      "from": "hire_1_senior_2_juniors",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "hire_1_senior_2_juniors",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "effective_delivery_capacity",
+      "from": "senior_engineer_hires",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "effective_delivery_capacity",
+      "from": "junior_engineer_hires",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "senior_engineer_hires",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "junior_engineer_hires",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "effective_delivery_capacity",
+      "from": "onboarding_duration",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "schedule_miss",
+      "from": "onboarding_duration",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "schedule_miss",
+      "from": "effective_delivery_capacity",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "new_platform_shipped_by_q3",
+      "from": "effective_delivery_capacity",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "budget_overrun",
+      "from": "annual_salary_spend",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "new_platform_shipped_by_q3",
+      "from": "schedule_miss",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "new_platform_shipped_by_q3",
+      "from": "budget_overrun",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     }
+    ],
+    "node_count": 13,
+    "edge_count": 25,
+    "goal_constraints": [
+     {
+      "unit": "£/year",
+      "label": "Annual salary spend <= 400000£/year",
+      "value": 400000,
+      "node_id": "annual_salary_spend",
+      "operator": "<=",
+      "provenance": "explicit",
+      "constraint_id": "agent-lane:annual_salary_spend:<="
+     }
+    ]
+   },
+   "analysis_state": {
+    "run_state": {
+     "kind": "complete_current",
+     "computed_at": "2026-09-24T23:54:01.996Z"
+    },
+    "readiness": {
+     "status": "unknown",
+     "blockers": []
+    },
+    "leader_claim": {
+     "permitted": false,
+     "withheld_reason": "constraint_verdict_withheld",
+     "separation": "separated"
+    },
+    "robustness": {
+     "aggregate_level": "very_low"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+   },
+   "analysis_ready": {
+    "options": [
+     {
+      "option_id": "hire_2_senior_engineers",
+      "label": "Hire 2 senior engineers",
+      "status": "ready",
+      "interventions": {
+       "annual_salary_spend": 0.48,
+       "senior_engineer_hires": 0.2
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "annual_salary_spend": {
+        "display_value": "240,000 £/year",
+        "normalised_value": 0.48,
+        "raw_value": 240000,
+        "unit": "£/year"
+       },
+       "senior_engineer_hires": {
+        "display_value": "2 engineers",
+        "normalised_value": 0.2,
+        "raw_value": 2,
+        "unit": "engineers"
+       }
+      },
+      "status_reason": "2 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "hire_4_junior_engineers",
+      "label": "Hire 4 junior engineers",
+      "status": "ready",
+      "interventions": {
+       "annual_salary_spend": 0.48,
+       "junior_engineer_hires": 0.2
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "annual_salary_spend": {
+        "display_value": "240,000 £/year",
+        "normalised_value": 0.48,
+        "raw_value": 240000,
+        "unit": "£/year"
+       },
+       "junior_engineer_hires": {
+        "display_value": "4 engineers",
+        "normalised_value": 0.2,
+        "raw_value": 4,
+        "unit": "engineers"
+       }
+      },
+      "status_reason": "2 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "current_staffing",
+      "label": "Current staffing",
+      "status": "ready",
+      "interventions": {
+       "annual_salary_spend": 0,
+       "junior_engineer_hires": 0,
+       "senior_engineer_hires": 0
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "annual_salary_spend": {
+        "display_value": "0 £/year",
+        "normalised_value": 0,
+        "raw_value": 0,
+        "unit": "£/year"
+       },
+       "junior_engineer_hires": {
+        "display_value": "0 engineers",
+        "normalised_value": 0,
+        "raw_value": 0,
+        "unit": "engineers"
+       },
+       "senior_engineer_hires": {
+        "display_value": "0 engineers",
+        "normalised_value": 0,
+        "raw_value": 0,
+        "unit": "engineers"
+       }
+      },
+      "status_reason": "3 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "hire_1_senior_2_juniors",
+      "label": "Hire 1 senior, 2 juniors",
+      "status": "ready",
+      "interventions": {
+       "annual_salary_spend": 0.48,
+       "junior_engineer_hires": 0.1,
+       "senior_engineer_hires": 0.1
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "annual_salary_spend": {
+        "display_value": "240,000 £/year",
+        "normalised_value": 0.48,
+        "raw_value": 240000,
+        "unit": "£/year"
+       },
+       "junior_engineer_hires": {
+        "display_value": "2 engineers",
+        "normalised_value": 0.1,
+        "raw_value": 2,
+        "unit": "engineers"
+       },
+       "senior_engineer_hires": {
+        "display_value": "1 engineers",
+        "normalised_value": 0.1,
+        "raw_value": 1,
+        "unit": "engineers"
+       }
+      },
+      "status_reason": "3 intervention(s) ready for analysis"
+     }
+    ],
+    "goal_node_id": "new_platform_shipped_by_q3",
+    "status": "ready",
+    "bias_findings": [],
+    "may_run": true,
+    "analysis_admission": {
+     "structurally_analysable": true,
+     "missing_important_inputs": [],
+     "semantic_quality_sufficient": false,
+     "permitted_analysis_mode": "quantified_provisional",
+     "reasons": [
+      {
+       "field": "structurally_analysable",
+       "code": "READY_TO_COMPARE",
+       "message": "Analysis can run on this model as it stands."
+      },
+      {
+       "field": "semantic_quality_sufficient",
+       "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+       "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures can be shown as provisional, but no option can be called the leader and no result can be called stable or robust until you have set at least one of them."
+      },
+      {
+       "field": "permitted_analysis_mode",
+       "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+       "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures can be shown as provisional, but no option can be called the leader and no result can be called stable or robust until you have set at least one of them."
+      }
+     ],
+     "graph_hash": "5d846e6b766036d27d43dbb8bce922638cb3179f4cc9eb62ae6943f110b11765",
+     "semantic_signals": {
+      "confidence_parameters_total": 19,
+      "confidence_parameters_user_stated": 0,
+      "confidence_parameters_machine_authored": 16,
+      "confidence_parameters_unattributed": 3,
+      "material_parameters_total": 16,
+      "material_parameters_user_stated": 0,
+      "intervened_factor_baselines_total": 3,
+      "intervened_factor_baselines_user_stated": 0,
+      "material_parameters_awaiting_user_node_ids": [
+       "new_platform_shipped_by_q3",
+       "senior_engineer_hires",
+       "junior_engineer_hires",
+       "annual_salary_spend",
+       "effective_delivery_capacity",
+       "schedule_miss",
+       "budget_overrun"
+      ],
+      "goal_target_stated": false
+     }
+    },
+    "freshness": "fresh",
+    "freshness_reason": "agent_readback_run_state_current",
+    "graph_hash_at_run": "5d846e6b766036d2",
+    "current_graph_hash": "5d846e6b766036d2",
+    "computed_at": "2026-09-24T23:54:01.996Z"
+   }
+  },
+  "served-caf7d1a-pricing-1": {
+   "draft_graph": {
+    "nodes": [
+     {
+      "id": "decision_mrr",
+      "kind": "decision",
+      "label": "Decision: MRR",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "mrr",
+      "kind": "goal",
+      "label": "MRR",
+      "provenance": "from_brief",
+      "goal_threshold": 0.8,
+      "goal_threshold_cap": 25000,
+      "goal_threshold_raw": 20000,
+      "goal_threshold_unit": "GBP/month",
+      "goal_threshold_frame": "level",
+      "goal_threshold_cap_provenance": "target_derived_headroom"
+     },
+     {
+      "id": "raise_pro_to_59",
+      "kind": "option",
+      "label": "Raise Pro to £59",
+      "provenance": "from_brief",
+      "interventions": {
+       "pro_plan_price": {
+        "value": 0.295,
+        "source": "brief_extraction"
+       },
+       "feature_release_value": {
+        "value": 0.6,
+        "source": "user_specified",
+        "target_match": {
+         "node_id": "feature_release_value",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "hold_pro_at_49",
+      "kind": "option",
+      "label": "Hold Pro at £49",
+      "provenance": "ai_inferred",
+      "interventions": {
+       "pro_plan_price": {
+        "value": 0.245,
+        "source": "brief_extraction"
+       },
+       "feature_release_value": {
+        "value": 0.6,
+        "source": "user_specified",
+        "target_match": {
+         "node_id": "feature_release_value",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "raise_pro_to_55",
+      "kind": "option",
+      "label": "Raise Pro to £55",
+      "provenance": "ai_inferred",
+      "interventions": {
+       "pro_plan_price": {
+        "value": 0.275,
+        "source": "cee_hypothesis"
+       },
+       "feature_release_value": {
+        "value": 0.6,
+        "source": "user_specified",
+        "target_match": {
+         "node_id": "feature_release_value",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "pro_plan_price",
+      "kind": "factor",
+      "label": "Pro plan price",
+      "category": "controllable",
+      "provenance": "from_brief",
+      "observed_state": {
+       "cap": 200,
+       "unit": "GBP/month",
+       "value": 0.245,
+       "source": "brief_extraction",
+       "raw_value": 49,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "feature_release_value",
+      "kind": "factor",
+      "label": "Feature release value",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "value score /100",
+       "value": 0.6,
+       "source": "cee_inference",
+       "raw_value": 60
+      }
+     },
+     {
+      "id": "monthly_churn",
+      "kind": "factor",
+      "label": "Monthly churn",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "%",
+       "value": 0.03,
+       "source": "cee_inference",
+       "raw_value": 3
+      }
+     },
+     {
+      "id": "pro_subscribers",
+      "kind": "factor",
+      "label": "Pro subscribers",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 2000,
+      "observed_state": {
+       "unit": "subscribers",
+       "value": 0.125,
+       "source": "cee_inference",
+       "raw_value": 250
+      }
+     },
+     {
+      "id": "churn_threshold_breach",
+      "kind": "risk",
+      "label": "Churn threshold breach",
+      "provenance": "ai_inferred"
+     }
+    ],
+    "edges": [
+     {
+      "to": "raise_pro_to_59",
+      "from": "decision_mrr",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hold_pro_at_49",
+      "from": "decision_mrr",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "raise_pro_to_55",
+      "from": "decision_mrr",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "pro_plan_price",
+      "from": "raise_pro_to_59",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "feature_release_value",
+      "from": "raise_pro_to_59",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "pro_plan_price",
+      "from": "hold_pro_at_49",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "feature_release_value",
+      "from": "hold_pro_at_49",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "pro_plan_price",
+      "from": "raise_pro_to_55",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "feature_release_value",
+      "from": "raise_pro_to_55",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "mrr",
+      "from": "pro_plan_price",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "monthly_churn",
+      "from": "pro_plan_price",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "monthly_churn",
+      "from": "feature_release_value",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "pro_subscribers",
+      "from": "feature_release_value",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "pro_subscribers",
+      "from": "monthly_churn",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "churn_threshold_breach",
+      "from": "monthly_churn",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "pro_subscribers",
+      "from": "churn_threshold_breach",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "mrr",
+      "from": "pro_subscribers",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     }
+    ],
+    "node_count": 10,
+    "edge_count": 17,
+    "goal_constraints": [
+     {
+      "unit": "%",
+      "label": "Monthly churn < 4%",
+      "value": 4,
+      "node_id": "monthly_churn",
+      "operator": "<=",
+      "provenance": "explicit",
+      "constraint_id": "agent-lane:monthly_churn:<="
+     }
+    ]
+   },
+   "analysis_state": {
+    "run_state": {
+     "kind": "complete_current",
+     "computed_at": "2026-09-24T23:53:39.391Z"
+    },
+    "readiness": {
+     "status": "unknown",
+     "blockers": []
+    },
+    "leader_claim": {
+     "permitted": false,
+     "withheld_reason": "constraint_verdict_withheld",
+     "separation": "separated"
+    },
+    "robustness": {
+     "aggregate_level": "high"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+   },
+   "analysis_ready": {
+    "options": [
+     {
+      "option_id": "raise_pro_to_59",
+      "label": "Raise Pro to £59",
+      "status": "ready",
+      "interventions": {
+       "pro_plan_price": 0.295,
+       "feature_release_value": 0.6
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "pro_plan_price": {
+        "display_value": "59 GBP/month",
+        "normalised_value": 0.295,
+        "raw_value": 59,
+        "unit": "GBP/month"
+       },
+       "feature_release_value": {
+        "display_value": "60 value score /100",
+        "normalised_value": 0.6,
+        "raw_value": 60,
+        "unit": "value score /100"
+       }
+      },
+      "status_reason": "2 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "hold_pro_at_49",
+      "label": "Hold Pro at £49",
+      "status": "ready",
+      "interventions": {
+       "pro_plan_price": 0.245,
+       "feature_release_value": 0.6
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "pro_plan_price": {
+        "display_value": "49 GBP/month",
+        "normalised_value": 0.245,
+        "raw_value": 49,
+        "unit": "GBP/month"
+       },
+       "feature_release_value": {
+        "display_value": "60 value score /100",
+        "normalised_value": 0.6,
+        "raw_value": 60,
+        "unit": "value score /100"
+       }
+      },
+      "status_reason": "2 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "raise_pro_to_55",
+      "label": "Raise Pro to £55",
+      "status": "ready",
+      "interventions": {
+       "pro_plan_price": 0.275,
+       "feature_release_value": 0.6
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "pro_plan_price": {
+        "display_value": "55 GBP/month",
+        "normalised_value": 0.275,
+        "raw_value": 55.00000000000001,
+        "unit": "GBP/month"
+       },
+       "feature_release_value": {
+        "display_value": "60 value score /100",
+        "normalised_value": 0.6,
+        "raw_value": 60,
+        "unit": "value score /100"
+       }
+      },
+      "status_reason": "2 intervention(s) ready for analysis"
+     }
+    ],
+    "goal_node_id": "mrr",
+    "status": "ready",
+    "goal_threshold": 0.8,
+    "goal_threshold_raw": 20000,
+    "goal_threshold_unit": "GBP/month",
+    "goal_threshold_cap": 25000,
+    "goal_threshold_cap_provenance": "target_derived_headroom",
+    "bias_findings": [],
+    "may_run": true,
+    "analysis_admission": {
+     "structurally_analysable": true,
+     "missing_important_inputs": [],
+     "semantic_quality_sufficient": true,
+     "permitted_analysis_mode": "comparative_leader",
+     "reasons": [
+      {
+       "field": "structurally_analysable",
+       "code": "READY_TO_COMPARE",
+       "message": "Analysis can run on this model as it stands."
+      },
+      {
+       "field": "semantic_quality_sufficient",
+       "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+       "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+      },
+      {
+       "field": "permitted_analysis_mode",
+       "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+       "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+      }
+     ],
+     "graph_hash": "97cc6e756ff2f367c6a08513be983892d44e0054557230adad281840729267b0",
+     "semantic_signals": {
+      "confidence_parameters_total": 14,
+      "confidence_parameters_user_stated": 1,
+      "confidence_parameters_machine_authored": 11,
+      "confidence_parameters_unattributed": 2,
+      "material_parameters_total": 14,
+      "material_parameters_user_stated": 1,
+      "intervened_factor_baselines_total": 2,
+      "intervened_factor_baselines_user_stated": 1,
+      "material_parameters_awaiting_user_node_ids": [
+       "mrr",
+       "feature_release_value",
+       "monthly_churn",
+       "pro_subscribers",
+       "churn_threshold_breach"
+      ],
+      "goal_target_stated": true
+     }
+    },
+    "freshness": "fresh",
+    "freshness_reason": "agent_readback_run_state_current",
+    "graph_hash_at_run": "97cc6e756ff2f367",
+    "current_graph_hash": "97cc6e756ff2f367",
+    "computed_at": "2026-09-24T23:53:39.391Z"
+   }
+  },
+  "served-caf7d1a-pricing-4": {
+   "draft_graph": {
+    "nodes": [
+     {
+      "id": "decision_mrr",
+      "kind": "decision",
+      "label": "Decision: MRR",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "mrr",
+      "kind": "goal",
+      "label": "MRR",
+      "provenance": "from_brief",
+      "goal_threshold": 0.8,
+      "goal_threshold_cap": 25000,
+      "goal_threshold_raw": 20000,
+      "goal_threshold_unit": "£ per month",
+      "goal_threshold_frame": "level",
+      "goal_threshold_cap_provenance": "target_derived_headroom"
+     },
+     {
+      "id": "raise_to_59_on_release",
+      "kind": "option",
+      "label": "Raise to £59 on release",
+      "provenance": "from_brief",
+      "interventions": {
+       "pro_plan_price": {
+        "value": 0.295,
+        "source": "brief_extraction"
+       },
+       "feature_release_alignment": {
+        "value": 1,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "hold_49_on_release",
+      "kind": "option",
+      "label": "Hold £49 on release",
+      "provenance": "ai_inferred",
+      "interventions": {
+       "pro_plan_price": {
+        "value": 0.245,
+        "source": "brief_extraction"
+       },
+       "feature_release_alignment": {
+        "value": 1,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "phase_to_54_on_release",
+      "kind": "option",
+      "label": "Phase to £54 on release",
+      "provenance": "ai_inferred",
+      "interventions": {
+       "pro_plan_price": {
+        "value": 0.27,
+        "source": "cee_hypothesis"
+       },
+       "feature_release_alignment": {
+        "value": 1,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "pro_plan_price",
+      "kind": "factor",
+      "label": "Pro plan price",
+      "category": "controllable",
+      "provenance": "from_brief",
+      "observed_state": {
+       "cap": 200,
+       "unit": "£ per month",
+       "value": 0.245,
+       "source": "brief_extraction",
+       "raw_value": 49,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "feature_release_alignment",
+      "kind": "factor",
+      "label": "Feature release alignment",
+      "category": "controllable",
+      "provenance": "user_set",
+      "display_value": "100 score out of 100",
+      "observed_state": {
+       "cap": 100,
+       "unit": "score out of 100",
+       "value": 1,
+       "source": "user_override",
+       "raw_value": 100,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "perceived_pro_value",
+      "kind": "factor",
+      "label": "Perceived Pro value",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "score out of 100",
+       "value": 0.5,
+       "source": "cee_inference",
+       "raw_value": 50
+      }
+     },
+     {
+      "id": "pro_subscriber_count",
+      "kind": "factor",
+      "label": "Pro subscriber count",
+      "category": "observable",
+      "provenance": "user_set",
+      "scale_frame": 2000,
+      "display_value": "250 subscribers",
+      "observed_state": {
+       "unit": "subscribers",
+       "value": 0.125,
+       "source": "user_override",
+       "raw_value": 250
+      }
+     },
+     {
+      "id": "monthly_churn",
+      "kind": "factor",
+      "label": "Monthly churn",
+      "category": "observable",
+      "provenance": "user_set",
+      "scale_frame": 100,
+      "display_value": "3 % per month",
+      "observed_state": {
+       "unit": "% per month",
+       "value": 0.03,
+       "source": "user_override",
+       "raw_value": 3
+      }
+     },
+     {
+      "id": "price_sensitivity",
+      "kind": "risk",
+      "label": "Price sensitivity",
+      "provenance": "ai_inferred"
+     }
+    ],
+    "edges": [
+     {
+      "to": "raise_to_59_on_release",
+      "from": "decision_mrr",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hold_49_on_release",
+      "from": "decision_mrr",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "phase_to_54_on_release",
+      "from": "decision_mrr",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "pro_plan_price",
+      "from": "raise_to_59_on_release",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "feature_release_alignment",
+      "from": "raise_to_59_on_release",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "pro_plan_price",
+      "from": "hold_49_on_release",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "feature_release_alignment",
+      "from": "hold_49_on_release",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "pro_plan_price",
+      "from": "phase_to_54_on_release",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "feature_release_alignment",
+      "from": "phase_to_54_on_release",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "perceived_pro_value",
+      "from": "feature_release_alignment",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "pro_subscriber_count",
+      "from": "perceived_pro_value",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "monthly_churn",
+      "from": "perceived_pro_value",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "price_sensitivity",
+      "from": "pro_plan_price",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "monthly_churn",
+      "from": "price_sensitivity",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "pro_subscriber_count",
+      "from": "pro_plan_price",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "pro_subscriber_count",
+      "from": "monthly_churn",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "mrr",
+      "from": "pro_subscriber_count",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "mrr",
+      "from": "pro_plan_price",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "mrr",
+      "from": "monthly_churn",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     }
+    ],
+    "node_count": 11,
+    "edge_count": 19,
+    "goal_constraints": [
+     {
+      "unit": "% per month",
+      "label": "Monthly churn < 4% per month",
+      "value": 4,
+      "node_id": "monthly_churn",
+      "operator": "<=",
+      "provenance": "explicit",
+      "constraint_id": "agent-lane:monthly_churn:<="
+     }
+    ]
+   },
+   "analysis_state": {
+    "run_state": {
+     "kind": "complete_current",
+     "computed_at": "2026-09-24T23:53:40.030Z"
+    },
+    "readiness": {
+     "status": "unknown",
+     "blockers": []
+    },
+    "leader_claim": {
+     "permitted": false,
+     "withheld_reason": "constraint_verdict_withheld",
+     "separation": "separated"
+    },
+    "robustness": {
+     "aggregate_level": "moderate"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+   },
+   "analysis_ready": {
+    "options": [
+     {
+      "option_id": "raise_to_59_on_release",
+      "label": "Raise to £59 on release",
+      "status": "ready",
+      "interventions": {
+       "pro_plan_price": 0.295,
+       "feature_release_alignment": 1
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "pro_plan_price": {
+        "display_value": "59 £ per month",
+        "normalised_value": 0.295,
+        "raw_value": 59,
+        "unit": "£ per month"
+       },
+       "feature_release_alignment": {
+        "display_value": "100 score out of 100",
+        "normalised_value": 1,
+        "raw_value": 100,
+        "unit": "score out of 100"
+       }
+      },
+      "status_reason": "2 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "hold_49_on_release",
+      "label": "Hold £49 on release",
+      "status": "ready",
+      "interventions": {
+       "pro_plan_price": 0.245,
+       "feature_release_alignment": 1
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "pro_plan_price": {
+        "display_value": "49 £ per month",
+        "normalised_value": 0.245,
+        "raw_value": 49,
+        "unit": "£ per month"
+       },
+       "feature_release_alignment": {
+        "display_value": "100 score out of 100",
+        "normalised_value": 1,
+        "raw_value": 100,
+        "unit": "score out of 100"
+       }
+      },
+      "status_reason": "2 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "phase_to_54_on_release",
+      "label": "Phase to £54 on release",
+      "status": "ready",
+      "interventions": {
+       "pro_plan_price": 0.27,
+       "feature_release_alignment": 1
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "pro_plan_price": {
+        "display_value": "54 £ per month",
+        "normalised_value": 0.27,
+        "raw_value": 54,
+        "unit": "£ per month"
+       },
+       "feature_release_alignment": {
+        "display_value": "100 score out of 100",
+        "normalised_value": 1,
+        "raw_value": 100,
+        "unit": "score out of 100"
+       }
+      },
+      "status_reason": "2 intervention(s) ready for analysis"
+     }
+    ],
+    "goal_node_id": "mrr",
+    "status": "ready",
+    "goal_threshold": 0.8,
+    "goal_threshold_raw": 20000,
+    "goal_threshold_unit": "£ per month",
+    "goal_threshold_cap": 25000,
+    "goal_threshold_cap_provenance": "target_derived_headroom",
+    "bias_findings": [],
+    "may_run": true,
+    "analysis_admission": {
+     "structurally_analysable": true,
+     "missing_important_inputs": [],
+     "semantic_quality_sufficient": true,
+     "permitted_analysis_mode": "comparative_leader",
+     "reasons": [
+      {
+       "field": "structurally_analysable",
+       "code": "READY_TO_COMPARE",
+       "message": "Analysis can run on this model as it stands."
+      },
+      {
+       "field": "semantic_quality_sufficient",
+       "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+       "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+      },
+      {
+       "field": "permitted_analysis_mode",
+       "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+       "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+      }
+     ],
+     "graph_hash": "b5c705cab8b9f6aa9871e7d8f3db23275562e6981004990c6e26cb9f17a0e85e",
+     "semantic_signals": {
+      "confidence_parameters_total": 17,
+      "confidence_parameters_user_stated": 4,
+      "confidence_parameters_machine_authored": 11,
+      "confidence_parameters_unattributed": 2,
+      "material_parameters_total": 17,
+      "material_parameters_user_stated": 4,
+      "intervened_factor_baselines_total": 2,
+      "intervened_factor_baselines_user_stated": 2,
+      "material_parameters_awaiting_user_node_ids": [
+       "mrr",
+       "perceived_pro_value",
+       "price_sensitivity"
+      ],
+      "goal_target_stated": true
+     }
+    },
+    "freshness": "fresh",
+    "freshness_reason": "agent_readback_run_state_current",
+    "graph_hash_at_run": "b5c705cab8b9f6aa",
+    "current_graph_hash": "b5c705cab8b9f6aa",
+    "computed_at": "2026-09-24T23:53:40.030Z"
+   }
+  },
+  "served-caf7d1a-eng-hiring-3": {
+   "draft_graph": {
+    "nodes": [
+     {
+      "id": "decision_new_platform_shipped",
+      "kind": "decision",
+      "label": "Decision: New platform shipped",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "new_platform_shipped",
+      "kind": "goal",
+      "label": "New platform shipped",
+      "provenance": "from_brief",
+      "goal_threshold_unit": "binary",
+      "goal_threshold_frame": "level"
+     },
+     {
+      "id": "hire_2_senior_engineers",
+      "kind": "option",
+      "label": "Hire 2 senior engineers",
+      "provenance": "from_brief",
+      "interventions": {
+       "annual_salary_spend": {
+        "value": 0.8,
+        "source": "user_specified",
+        "target_match": {
+         "node_id": "annual_salary_spend",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "junior_engineers_hired": {
+        "value": 0,
+        "source": "cee_hypothesis"
+       },
+       "senior_engineers_hired": {
+        "value": 0.2,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "hire_4_junior_engineers",
+      "kind": "option",
+      "label": "Hire 4 junior engineers",
+      "provenance": "from_brief",
+      "interventions": {
+       "annual_salary_spend": {
+        "value": 0.78,
+        "source": "user_specified",
+        "target_match": {
+         "node_id": "annual_salary_spend",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       },
+       "junior_engineers_hired": {
+        "value": 0.4,
+        "source": "cee_hypothesis"
+       },
+       "senior_engineers_hired": {
+        "value": 0,
+        "source": "cee_hypothesis"
+       },
+       "onboarding_and_mentorship_load": {
+        "value": 0.3,
+        "source": "user_specified",
+        "target_match": {
+         "node_id": "onboarding_and_mentorship_load",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "continue_current_staffing",
+      "kind": "option",
+      "label": "Continue current staffing",
+      "provenance": "ai_inferred",
+      "interventions": {
+       "junior_engineers_hired": {
+        "value": 0,
+        "source": "cee_hypothesis"
+       },
+       "senior_engineers_hired": {
+        "value": 0,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "senior_engineers_hired",
+      "kind": "factor",
+      "label": "Senior engineers hired",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "scale_frame": 10,
+      "observed_state": {
+       "unit": "engineers",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0
+      }
+     },
+     {
+      "id": "junior_engineers_hired",
+      "kind": "factor",
+      "label": "Junior engineers hired",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "scale_frame": 10,
+      "observed_state": {
+       "unit": "engineers",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0
+      }
+     },
+     {
+      "id": "onboarding_and_mentorship_load",
+      "kind": "factor",
+      "label": "Onboarding and mentorship load",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 5,
+      "observed_state": {
+       "unit": "FTE-equivalents",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0
+      }
+     },
+     {
+      "id": "effective_delivery_capacity",
+      "kind": "factor",
+      "label": "Effective delivery capacity",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 10,
+      "observed_state": {
+       "unit": "FTE-equivalents",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0
+      }
+     },
+     {
+      "id": "platform_delivery_progress",
+      "kind": "factor",
+      "label": "Platform delivery progress",
+      "category": "observable",
+      "provenance": "user_set",
+      "scale_frame": 100,
+      "display_value": "25 % complete",
+      "observed_state": {
+       "unit": "% complete",
+       "value": 0.25,
+       "source": "user_override",
+       "raw_value": 25
+      }
+     },
+     {
+      "id": "annual_salary_spend",
+      "kind": "factor",
+      "label": "Annual salary spend",
+      "category": "observable",
+      "provenance": "user_set",
+      "scale_frame": 500000,
+      "display_value": "150,000 £/year",
+      "observed_state": {
+       "unit": "£/year",
+       "value": 0.3,
+       "source": "user_override",
+       "raw_value": 150000
+      }
+     },
+     {
+      "id": "salary_cap_breach",
+      "kind": "risk",
+      "label": "Salary-cap breach",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "q3_schedule_miss",
+      "kind": "risk",
+      "label": "Q3 schedule miss",
+      "provenance": "ai_inferred"
+     }
+    ],
+    "edges": [
+     {
+      "to": "hire_2_senior_engineers",
+      "from": "decision_new_platform_shipped",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "hire_4_junior_engineers",
+      "from": "decision_new_platform_shipped",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "continue_current_staffing",
+      "from": "decision_new_platform_shipped",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "hire_2_senior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "senior_engineers_hired",
+      "from": "hire_2_senior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "junior_engineers_hired",
+      "from": "hire_2_senior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "hire_4_junior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "onboarding_and_mentorship_load",
+      "from": "hire_4_junior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "junior_engineers_hired",
+      "from": "hire_4_junior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "senior_engineers_hired",
+      "from": "hire_4_junior_engineers",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "senior_engineers_hired",
+      "from": "continue_current_staffing",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "junior_engineers_hired",
+      "from": "continue_current_staffing",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "effective_delivery_capacity",
+      "from": "senior_engineers_hired",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "senior_engineers_hired",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "effective_delivery_capacity",
+      "from": "junior_engineers_hired",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "onboarding_and_mentorship_load",
+      "from": "junior_engineers_hired",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "annual_salary_spend",
+      "from": "junior_engineers_hired",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "effective_delivery_capacity",
+      "from": "onboarding_and_mentorship_load",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "platform_delivery_progress",
+      "from": "effective_delivery_capacity",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "q3_schedule_miss",
+      "from": "platform_delivery_progress",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "new_platform_shipped",
+      "from": "q3_schedule_miss",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "salary_cap_breach",
+      "from": "annual_salary_spend",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "new_platform_shipped",
+      "from": "salary_cap_breach",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     }
+    ],
+    "node_count": 13,
+    "edge_count": 23,
+    "goal_constraints": [
+     {
+      "unit": "£/year",
+      "label": "Annual salary spend < 400000£/year",
+      "value": 400000,
+      "node_id": "annual_salary_spend",
+      "operator": "<=",
+      "provenance": "explicit",
+      "constraint_id": "agent-lane:annual_salary_spend:<="
+     }
+    ]
+   },
+   "analysis_state": {
+    "run_state": {
+     "kind": "complete_current",
+     "computed_at": "2026-09-24T23:54:12.506Z"
+    },
+    "readiness": {
+     "status": "unknown",
+     "blockers": []
+    },
+    "leader_claim": {
+     "permitted": false,
+     "withheld_reason": "constraint_verdict_withheld",
+     "separation": "separated"
+    },
+    "robustness": {
+     "aggregate_level": "low"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+   },
+   "analysis_ready": {
+    "options": [
+     {
+      "option_id": "hire_2_senior_engineers",
+      "label": "Hire 2 senior engineers",
+      "status": "ready",
+      "interventions": {
+       "annual_salary_spend": 0.8,
+       "junior_engineers_hired": 0,
+       "senior_engineers_hired": 0.2
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "annual_salary_spend": {
+        "display_value": "400,000 £/year",
+        "normalised_value": 0.8,
+        "raw_value": 400000,
+        "unit": "£/year"
+       },
+       "junior_engineers_hired": {
+        "display_value": "0 engineers",
+        "normalised_value": 0,
+        "raw_value": 0,
+        "unit": "engineers"
+       },
+       "senior_engineers_hired": {
+        "display_value": "2 engineers",
+        "normalised_value": 0.2,
+        "raw_value": 2,
+        "unit": "engineers"
+       }
+      },
+      "status_reason": "3 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "hire_4_junior_engineers",
+      "label": "Hire 4 junior engineers",
+      "status": "ready",
+      "interventions": {
+       "annual_salary_spend": 0.78,
+       "junior_engineers_hired": 0.4,
+       "senior_engineers_hired": 0,
+       "onboarding_and_mentorship_load": 0.3
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "annual_salary_spend": {
+        "display_value": "390,000 £/year",
+        "normalised_value": 0.78,
+        "raw_value": 390000,
+        "unit": "£/year"
+       },
+       "junior_engineers_hired": {
+        "display_value": "4 engineers",
+        "normalised_value": 0.4,
+        "raw_value": 4,
+        "unit": "engineers"
+       },
+       "senior_engineers_hired": {
+        "display_value": "0 engineers",
+        "normalised_value": 0,
+        "raw_value": 0,
+        "unit": "engineers"
+       },
+       "onboarding_and_mentorship_load": {
+        "display_value": "1.5 FTE-equivalents",
+        "normalised_value": 0.3,
+        "raw_value": 1.5,
+        "unit": "FTE-equivalents"
+       }
+      },
+      "status_reason": "4 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "continue_current_staffing",
+      "label": "Continue current staffing",
+      "status": "ready",
+      "interventions": {
+       "junior_engineers_hired": 0,
+       "senior_engineers_hired": 0
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "junior_engineers_hired": {
+        "display_value": "0 engineers",
+        "normalised_value": 0,
+        "raw_value": 0,
+        "unit": "engineers"
+       },
+       "senior_engineers_hired": {
+        "display_value": "0 engineers",
+        "normalised_value": 0,
+        "raw_value": 0,
+        "unit": "engineers"
+       }
+      },
+      "status_reason": "2 intervention(s) ready for analysis"
+     }
+    ],
+    "goal_node_id": "new_platform_shipped",
+    "status": "ready",
+    "bias_findings": [],
+    "may_run": true,
+    "analysis_admission": {
+     "structurally_analysable": true,
+     "missing_important_inputs": [],
+     "semantic_quality_sufficient": true,
+     "permitted_analysis_mode": "comparative_leader",
+     "reasons": [
+      {
+       "field": "structurally_analysable",
+       "code": "READY_TO_COMPARE",
+       "message": "Analysis can run on this model as it stands."
+      },
+      {
+       "field": "semantic_quality_sufficient",
+       "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+       "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+      },
+      {
+       "field": "permitted_analysis_mode",
+       "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+       "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+      }
+     ],
+     "graph_hash": "0ca9d8b675ecc16bbc692d9f075fb036d93f2a42f37bf33ea84f0dd9fa8dcc44",
+     "semantic_signals": {
+      "confidence_parameters_total": 20,
+      "confidence_parameters_user_stated": 2,
+      "confidence_parameters_machine_authored": 15,
+      "confidence_parameters_unattributed": 3,
+      "material_parameters_total": 20,
+      "material_parameters_user_stated": 2,
+      "intervened_factor_baselines_total": 4,
+      "intervened_factor_baselines_user_stated": 1,
+      "material_parameters_awaiting_user_node_ids": [
+       "new_platform_shipped",
+       "senior_engineers_hired",
+       "junior_engineers_hired",
+       "onboarding_and_mentorship_load",
+       "effective_delivery_capacity",
+       "salary_cap_breach",
+       "q3_schedule_miss"
+      ],
+      "goal_target_stated": false
+     }
+    },
+    "freshness": "fresh",
+    "freshness_reason": "agent_readback_run_state_current",
+    "graph_hash_at_run": "0ca9d8b675ecc16b",
+    "current_graph_hash": "0ca9d8b675ecc16b",
+    "computed_at": "2026-09-24T23:54:12.506Z"
+   }
+  },
+  "served-caf7d1a-pricing-3": {
+   "draft_graph": {
+    "nodes": [
+     {
+      "id": "decision_monthly_recurring_revenue_mrr",
+      "kind": "decision",
+      "label": "Decision: Monthly recurring…",
+      "provenance": "ai_inferred",
+      "description": "Decision: Monthly recurring revenue (MRR)"
+     },
+     {
+      "id": "monthly_recurring_revenue_mrr",
+      "kind": "goal",
+      "label": "Monthly recurring revenue (MRR)",
+      "provenance": "from_brief",
+      "goal_threshold": 0.8,
+      "goal_threshold_cap": 25000,
+      "goal_threshold_raw": 20000,
+      "goal_threshold_unit": "£/month",
+      "goal_threshold_frame": "level",
+      "goal_threshold_cap_provenance": "target_derived_headroom"
+     },
+     {
+      "id": "raise_pro_to_59",
+      "kind": "option",
+      "label": "Raise Pro to £59",
+      "provenance": "from_brief",
+      "interventions": {
+       "pro_plan_price": {
+        "value": 0.295,
+        "source": "brief_extraction"
+       }
+      }
+     },
+     {
+      "id": "keep_pro_at_49",
+      "kind": "option",
+      "label": "Keep Pro at £49",
+      "provenance": "ai_inferred",
+      "interventions": {
+       "pro_plan_price": {
+        "value": 0.245,
+        "source": "brief_extraction"
+       }
+      }
+     },
+     {
+      "id": "raise_pro_to_54",
+      "kind": "option",
+      "label": "Raise Pro to £54",
+      "provenance": "ai_inferred",
+      "interventions": {
+       "pro_plan_price": {
+        "value": 0.27,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "pro_plan_price",
+      "kind": "factor",
+      "label": "Pro plan price",
+      "category": "controllable",
+      "provenance": "from_brief",
+      "observed_state": {
+       "cap": 200,
+       "unit": "£/month",
+       "value": 0.245,
+       "source": "brief_extraction",
+       "raw_value": 49,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "feature_perceived_value",
+      "kind": "factor",
+      "label": "Feature perceived value",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "score out of 100",
+       "value": 0.5,
+       "source": "cee_inference",
+       "raw_value": 50
+      }
+     },
+     {
+      "id": "trial_to_paid_conversion_rate",
+      "kind": "factor",
+      "label": "Trial-to-paid conversion rate",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "%",
+       "value": 0.15,
+       "source": "cee_inference",
+       "raw_value": 15
+      }
+     },
+     {
+      "id": "monthly_churn_rate",
+      "kind": "factor",
+      "label": "Monthly churn rate",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 100,
+      "observed_state": {
+       "unit": "% per month",
+       "value": 0.03,
+       "source": "cee_inference",
+       "raw_value": 3
+      }
+     },
+     {
+      "id": "pro_subscriber_count",
+      "kind": "factor",
+      "label": "Pro subscriber count",
+      "category": "observable",
+      "provenance": "ai_inferred",
+      "scale_frame": 2000,
+      "observed_state": {
+       "unit": "subscribers",
+       "value": 0.15,
+       "source": "cee_inference",
+       "raw_value": 300
+      }
+     },
+     {
+      "id": "price_resistance",
+      "kind": "risk",
+      "label": "Price resistance",
+      "provenance": "ai_inferred"
+     },
+     {
+      "id": "feature_adoption_shortfall",
+      "kind": "risk",
+      "label": "Feature adoption shortfall",
+      "provenance": "ai_inferred"
+     }
+    ],
+    "edges": [
+     {
+      "to": "raise_pro_to_59",
+      "from": "decision_monthly_recurring_revenue_mrr",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "keep_pro_at_49",
+      "from": "decision_monthly_recurring_revenue_mrr",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "raise_pro_to_54",
+      "from": "decision_monthly_recurring_revenue_mrr",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "feature_perceived_value",
+      "from": "raise_pro_to_59",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "pro_plan_price",
+      "from": "raise_pro_to_59",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "feature_perceived_value",
+      "from": "keep_pro_at_49",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "pro_plan_price",
+      "from": "keep_pro_at_49",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "feature_perceived_value",
+      "from": "raise_pro_to_54",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "pro_plan_price",
+      "from": "raise_pro_to_54",
+      "strength": {
+       "std": 0.01,
+       "mean": 1
+      },
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1
+     },
+     {
+      "to": "monthly_recurring_revenue_mrr",
+      "from": "pro_plan_price",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "price_resistance",
+      "from": "pro_plan_price",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "feature_adoption_shortfall",
+      "from": "feature_perceived_value",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "trial_to_paid_conversion_rate",
+      "from": "price_resistance",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "monthly_churn_rate",
+      "from": "price_resistance",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "trial_to_paid_conversion_rate",
+      "from": "feature_adoption_shortfall",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "monthly_churn_rate",
+      "from": "feature_adoption_shortfall",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "pro_subscriber_count",
+      "from": "trial_to_paid_conversion_rate",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "pro_subscriber_count",
+      "from": "monthly_churn_rate",
+      "strength": {
+       "std": 0.125,
+       "mean": -0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8
+     },
+     {
+      "to": "monthly_recurring_revenue_mrr",
+      "from": "pro_subscriber_count",
+      "strength": {
+       "std": 0.125,
+       "mean": 0.5
+      },
+      "defaulted": true,
+      "provenance": {
+       "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8
+     }
+    ],
+    "node_count": 12,
+    "edge_count": 19,
+    "goal_constraints": [
+     {
+      "unit": "% per month",
+      "label": "Monthly churn rate < 4% per month",
+      "value": 4,
+      "node_id": "monthly_churn_rate",
+      "operator": "<=",
+      "provenance": "explicit",
+      "constraint_id": "agent-lane:monthly_churn_rate:<="
+     }
+    ]
+   },
+   "analysis_state": {
+    "run_state": {
+     "kind": "complete_current",
+     "computed_at": "2026-09-24T23:53:25.231Z"
+    },
+    "readiness": {
+     "status": "unknown",
+     "blockers": []
+    },
+    "leader_claim": {
+     "permitted": false,
+     "withheld_reason": "constraint_verdict_withheld",
+     "separation": "separated"
+    },
+    "robustness": {
+     "aggregate_level": "high"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+   },
+   "analysis_ready": {
+    "options": [
+     {
+      "option_id": "raise_pro_to_59",
+      "label": "Raise Pro to £59",
+      "status": "ready",
+      "interventions": {
+       "pro_plan_price": 0.295
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "pro_plan_price": {
+        "display_value": "59 £/month",
+        "normalised_value": 0.295,
+        "raw_value": 59,
+        "unit": "£/month"
+       }
+      },
+      "status_reason": "1 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "keep_pro_at_49",
+      "label": "Keep Pro at £49",
+      "status": "ready",
+      "interventions": {
+       "pro_plan_price": 0.245
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "pro_plan_price": {
+        "display_value": "49 £/month",
+        "normalised_value": 0.245,
+        "raw_value": 49,
+        "unit": "£/month"
+       }
+      },
+      "status_reason": "1 intervention(s) ready for analysis"
+     },
+     {
+      "option_id": "raise_pro_to_54",
+      "label": "Raise Pro to £54",
+      "status": "ready",
+      "interventions": {
+       "pro_plan_price": 0.27
+      },
+      "is_baseline": false,
+      "intervention_details": {
+       "pro_plan_price": {
+        "display_value": "54 £/month",
+        "normalised_value": 0.27,
+        "raw_value": 54,
+        "unit": "£/month"
+       }
+      },
+      "status_reason": "1 intervention(s) ready for analysis"
+     }
+    ],
+    "goal_node_id": "monthly_recurring_revenue_mrr",
+    "status": "needs_user_input",
+    "blockers": [
+     {
+      "option_id": "raise_pro_to_59",
+      "option_label": "Raise Pro to £59",
+      "factor_id": "feature_perceived_value",
+      "factor_label": "Feature perceived value",
+      "blocker_type": "missing_value",
+      "message": "Factor \"Feature perceived value\" is currently 50 score out of 100. What should option \"Raise Pro to £59\" set it to?",
+      "suggested_action": "add_value"
+     },
+     {
+      "option_id": "keep_pro_at_49",
+      "option_label": "Keep Pro at £49",
+      "factor_id": "feature_perceived_value",
+      "factor_label": "Feature perceived value",
+      "blocker_type": "missing_value",
+      "message": "Factor \"Feature perceived value\" is currently 50 score out of 100. What should option \"Keep Pro at £49\" set it to?",
+      "suggested_action": "add_value"
+     },
+     {
+      "option_id": "raise_pro_to_54",
+      "option_label": "Raise Pro to £54",
+      "factor_id": "feature_perceived_value",
+      "factor_label": "Feature perceived value",
+      "blocker_type": "missing_value",
+      "message": "Factor \"Feature perceived value\" is currently 50 score out of 100. What should option \"Raise Pro to £54\" set it to?",
+      "suggested_action": "add_value"
+     }
+    ],
+    "goal_threshold": 0.8,
+    "goal_threshold_raw": 20000,
+    "goal_threshold_unit": "£/month",
+    "goal_threshold_cap": 25000,
+    "goal_threshold_cap_provenance": "target_derived_headroom",
+    "bias_findings": [],
+    "readiness_issues": [
+     {
+      "issue_id": "semantic_1",
+      "repairability": "human_input_required",
+      "option_id": "raise_pro_to_59",
+      "option_label": "Raise Pro to £59",
+      "factor_id": "feature_perceived_value",
+      "factor_label": "Feature perceived value",
+      "code": "MISSING_OPTION_VALUE",
+      "category": "option_values",
+      "message": "Factor \"Feature perceived value\" is currently 50 score out of 100. What should option \"Raise Pro to £59\" set it to?",
+      "provenance": "ai_drafted",
+      "obligation": "offered"
+     },
+     {
+      "issue_id": "semantic_2",
+      "repairability": "human_input_required",
+      "option_id": "keep_pro_at_49",
+      "option_label": "Keep Pro at £49",
+      "factor_id": "feature_perceived_value",
+      "factor_label": "Feature perceived value",
+      "code": "MISSING_OPTION_VALUE",
+      "category": "option_values",
+      "message": "Factor \"Feature perceived value\" is currently 50 score out of 100. What should option \"Keep Pro at £49\" set it to?",
+      "provenance": "ai_drafted",
+      "obligation": "offered"
+     },
+     {
+      "issue_id": "semantic_3",
+      "repairability": "human_input_required",
+      "option_id": "raise_pro_to_54",
+      "option_label": "Raise Pro to £54",
+      "factor_id": "feature_perceived_value",
+      "factor_label": "Feature perceived value",
+      "code": "MISSING_OPTION_VALUE",
+      "category": "option_values",
+      "message": "Factor \"Feature perceived value\" is currently 50 score out of 100. What should option \"Raise Pro to £54\" set it to?",
+      "provenance": "ai_drafted",
+      "obligation": "offered"
+     }
+    ],
+    "repair_proposal": {
+     "proposal_version": "readiness_repair_v1",
+     "complete": true,
+     "issue_ids": [
+      "semantic_1",
+      "semantic_2",
+      "semantic_3"
+     ],
+     "changes": [],
+     "unresolved_inputs": [
+      {
+       "issue_id": "semantic_1",
+       "kind": "option_effect_value",
+       "prompt": "Factor \"Feature perceived value\" is currently 50 score out of 100. What should option \"Raise Pro to £59\" set it to?",
+       "option_id": "raise_pro_to_59",
+       "factor_id": "feature_perceived_value",
+       "obligation": "offered",
+       "provenance": "ai_drafted"
+      },
+      {
+       "issue_id": "semantic_2",
+       "kind": "option_effect_value",
+       "prompt": "Factor \"Feature perceived value\" is currently 50 score out of 100. What should option \"Keep Pro at £49\" set it to?",
+       "option_id": "keep_pro_at_49",
+       "factor_id": "feature_perceived_value",
+       "obligation": "offered",
+       "provenance": "ai_drafted"
+      },
+      {
+       "issue_id": "semantic_3",
+       "kind": "option_effect_value",
+       "prompt": "Factor \"Feature perceived value\" is currently 50 score out of 100. What should option \"Raise Pro to £54\" set it to?",
+       "option_id": "raise_pro_to_54",
+       "factor_id": "feature_perceived_value",
+       "obligation": "offered",
+       "provenance": "ai_drafted"
+      }
+     ]
+    },
+    "may_run": true,
+    "analysis_admission": {
+     "structurally_analysable": true,
+     "missing_important_inputs": [
+      {
+       "issue_id": "semantic_1",
+       "code": "MISSING_OPTION_VALUE",
+       "option_id": "raise_pro_to_59",
+       "option_label": "Raise Pro to £59",
+       "factor_id": "feature_perceived_value",
+       "factor_label": "Feature perceived value",
+       "why_it_matters": "Factor \"Feature perceived value\" is currently 50 score out of 100. What should option \"Raise Pro to £59\" set it to?",
+       "obligation": "offered",
+       "waived_by_exclusion": false
+      },
+      {
+       "issue_id": "semantic_2",
+       "code": "MISSING_OPTION_VALUE",
+       "option_id": "keep_pro_at_49",
+       "option_label": "Keep Pro at £49",
+       "factor_id": "feature_perceived_value",
+       "factor_label": "Feature perceived value",
+       "why_it_matters": "Factor \"Feature perceived value\" is currently 50 score out of 100. What should option \"Keep Pro at £49\" set it to?",
+       "obligation": "offered",
+       "waived_by_exclusion": false
+      },
+      {
+       "issue_id": "semantic_3",
+       "code": "MISSING_OPTION_VALUE",
+       "option_id": "raise_pro_to_54",
+       "option_label": "Raise Pro to £54",
+       "factor_id": "feature_perceived_value",
+       "factor_label": "Feature perceived value",
+       "why_it_matters": "Factor \"Feature perceived value\" is currently 50 score out of 100. What should option \"Raise Pro to £54\" set it to?",
+       "obligation": "offered",
+       "waived_by_exclusion": false
+      }
+     ],
+     "semantic_quality_sufficient": true,
+     "permitted_analysis_mode": "comparative_leader",
+     "reasons": [
+      {
+       "field": "structurally_analysable",
+       "code": "READY_TO_COMPARE",
+       "message": "Analysis can run on this model as it stands."
+      },
+      {
+       "field": "missing_important_inputs",
+       "code": "MODEL_HAS_BLOCKERS",
+       "message": "Olumi filled in the gaps here itself; you can review them, and nothing is required of you."
+      },
+      {
+       "field": "semantic_quality_sufficient",
+       "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+       "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+      },
+      {
+       "field": "permitted_analysis_mode",
+       "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+       "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+      }
+     ],
+     "graph_hash": "d0a02252a2d043ec253ad0fd308187bd46713bff2420099337ed072a90ec4324",
+     "semantic_signals": {
+      "confidence_parameters_total": 18,
+      "confidence_parameters_user_stated": 1,
+      "confidence_parameters_machine_authored": 14,
+      "confidence_parameters_unattributed": 3,
+      "material_parameters_total": 13,
+      "material_parameters_user_stated": 1,
+      "intervened_factor_baselines_total": 1,
+      "intervened_factor_baselines_user_stated": 1,
+      "material_parameters_awaiting_user_node_ids": [
+       "monthly_recurring_revenue_mrr",
+       "trial_to_paid_conversion_rate",
+       "monthly_churn_rate",
+       "pro_subscriber_count",
+       "price_resistance"
+      ],
+      "goal_target_stated": true
+     }
+    },
+    "freshness": "fresh",
+    "freshness_reason": "agent_readback_run_state_current",
+    "graph_hash_at_run": "d0a02252a2d043ec",
+    "current_graph_hash": "d0a02252a2d043ec",
+    "computed_at": "2026-09-24T23:53:25.231Z"
+   }
+  }
+ },
+ "replies": [
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V3.served.rep6",
+   "state": "caf7d1a-eng-hiring",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "This run cannot answer your full question, because the strict **annual salary spend < £400,000/year** condition was not successfully tested.\n\n- The model treats annual salary spend as calculated from other factors, so its result could not be compared reliably with the £400,000/year limit; the constraint was left unscored rather than assessed incorrectly.\n- The comparison is wholly provisional: its hiring, capacity and coaching figures are Olumi’s assumptions, not user-supplied evidence. It also assumed that a higher “shipped by Q3” value is better.\n- The model did compute differing outcomes, but no option can be put forward while the budget constraint is unresolved."
+  },
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V2.served.rep9",
+   "state": "caf7d1a-eng-hiring",
+   "label": "names_leader",
+   "leak_phrases": [
+    "the two-senior plan had a higher modelled outcome distribution than four juniors"
+   ],
+   "text": "The current model favours neither hiring plan as a decision, because it could not test your strict salary constraint.  \n\n- It did compare the provisional Q3-delivery outcomes: the two-senior plan had a higher modelled outcome distribution than four juniors, based on **£390,000/year**, **4 effective platform FTE**, and **12 coaching hours/week**, versus **£370,000/year**, **3.6 FTE**, and **20 hours/week**. These are Olumi-authored assumptions, not user evidence.  \n- The result is not decision-complete: “annual salary spend < £400,000/year” could not be scored against the model’s calculated salary-spend factor, and the goal direction was assumed rather than stated.  \n- Delivery capacity → shipping by Q3 was a fragile link; tested changes there could alter the ordering. This does not establish investigation priority."
+  },
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V2.served.rep3",
+   "state": "caf7d1a-eng-hiring",
+   "label": "names_leader",
+   "leak_phrases": [
+    "The current model leans towards hiring two seniors for the Q3 outcome"
+   ],
+   "text": "The current model leans towards hiring two seniors for the Q3 outcome, but it cannot answer whether either plan meets the **under £400,000/year** limit.\n\n- On the provisional first pass, two seniors assume **4 effective platform FTE**, **12 coaching hours/week**, and **£390,000/year**; four juniors assume **3.6 FTE**, **20 hours/week**, and **£370,000/year**. These are Olumi-authored assumptions, not user evidence.\n- The salary constraint was not scored: annual salary spend is modelled as an output rather than measured on a compatible baseline, and the constraint’s value frame is unspecified.\n- The Q3 link is a material uncertainty: testing that connection could switch the ordering to maintaining current staffing. This does not establish investigation priority.\n\nThe analysis is therefore a provisional comparison, not a validated decision result."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V3.served.rep6",
+   "state": "caf7d1a-paid-search",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "This run cannot yet establish whether moving 30% will achieve 25% qualified-lead growth while staying below £80 CPL.\n\n- Every material estimate is machine-authored rather than supplied by you, so no option can be put forward from this analysis.\n- The model is most sensitive to **Blended Cost per Lead**, an Olumi estimate; LinkedIn and search qualified-lead assumptions also materially shape the comparison.\n- The 25% target was not assessed in the analysis frame because no observed baseline for qualified-lead growth is recorded, and the goal’s direction was not explicitly defined. The £80 limit was not represented as an enforceable constraint in this run."
+  },
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V3.served.rep2",
+   "state": "caf7d1a-eng-hiring",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "No hiring choice can be put forward yet, because the strict **annual salary spend < £400,000/year** condition was not assessable in this run.\n\n- The comparison is a provisional model pass based entirely on Olumi-authored assumptions, including **£390,000/year and 4 effective platform FTE** for two seniors, versus **£370,000/year and 3.6 effective platform FTE** for four juniors.\n- The model also lacks a stated direction for “platform shipped by Q3”, so it assumed that a higher goal value is better.\n- The comparison otherwise held up moderately under the tested variations, but that does not establish compliance with the salary constraint or validate the assumptions."
+  },
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V3.served.rep4",
+   "state": "caf7d1a-eng-hiring",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "The model cannot yet answer which hiring plan meets your brief, because the strict **annual salary spend < £400,000/year** limit was not assessable.\n\n- Salary spend is modelled as a calculated change rather than a directly comparable annual-spend level, so none of the options can be verified against the cap. The analysis therefore withholds any option conclusion.\n- The goal’s direction is also unstated, and every material estimate—including delivery capacity, ramp-up burden and salary spend—is Olumi-authored rather than user-supplied. This is a provisional comparison, not validation.\n- The simulated comparison is not a near tie, but that does not settle the decision while the budget constraint is unscored.\n\nThe key reasoning step is to define annual spend as a comparable total—e.g. whether it includes the existing team and employer costs—so the £400,000/year cap can be tested."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V2.served.rep9",
+   "state": "caf7d1a-paid-search",
+   "label": "names_leader",
+   "leak_phrases": [
+    "keeping search allocation produces the strongest model outcome"
+   ],
+   "text": "The model does **not yet support putting any option forward**: all material estimates were authored by Olumi, not supplied by you.\n\n- On those provisional assumptions, keeping search allocation produces the strongest model outcome; reallocating 30% performs less well, mainly because blended cost per lead is the strongest driver.\n- This is not a tested answer to your **25% growth** and **below £80 CPL** requirements: the analysis could not convert the 25% target into its outcome frame, and it assumed that higher qualified-lead growth is always preferable.\n- The run held under its tested changes, but that is not validation. LinkedIn audience fit and LinkedIn qualified leads remain uncertain assumptions."
+  },
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V3.served.rep5",
+   "state": "caf7d1a-eng-hiring",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "No hiring option can yet be put forward: the model could not test the strict **annual salary spend < £400,000/year** constraint.\n\n- The provisional comparison distinguishes the options through Olumi-authored assumptions: two seniors were set at **£390,000/year**, **4 effective platform FTE**, and **12 coaching hours/week**; four juniors at **£370,000/year**, **3.6 effective platform FTE**, and **20 coaching hours/week**.\n- The salary limit remains unscored because annual salary spend is modelled as a calculated result, not a directly comparable measured level. The Q3 goal’s direction and threshold frame are also not recorded.\n- This is therefore a fresh but provisional first pass, entirely dependent on machine-authored estimates; it is not validated evidence of which plan will ship by Q3."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V2.served.rep2",
+   "state": "caf7d1a-paid-search",
+   "label": "names_leader",
+   "leak_phrases": [
+    "shifting 30% to LinkedIn is less aligned with the stated goal than keeping search allocation"
+   ],
+   "text": "On this provisional model, shifting 30% to LinkedIn is less aligned with the stated goal than keeping search allocation—but no option can be put forward yet.\n\n- The pattern is driven chiefly by **blended cost per lead**, with LinkedIn qualified leads and retained search leads also material. All underlying estimates are Olumi-authored, not your evidence.\n- The analysis did **not** establish whether any option achieves **25% growth** or stays below **£80 CPL**: the goal threshold could not be evaluated in the model’s sample frame, and no enforceable limits were set.\n- The apparent ordering held under the specific tested changes, but that is not validation of the assumptions."
+  },
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V2.served.rep4",
+   "state": "caf7d1a-eng-hiring",
+   "label": "names_leader",
+   "leak_phrases": [
+    "the two-senior scenario has a higher modelled platform-shipping outcome than the four-junior scenario"
+   ],
+   "text": "The comparison suggests a meaningful difference, but it cannot answer your full question yet because the **under-£400,000/year** condition was not successfully checked.\n\n- On the current, wholly Olumi-authored assumptions, the two-senior scenario has a higher modelled platform-shipping outcome than the four-junior scenario: it assumes **4** versus **3.6 effective platform-engineering FTE**, and **12** versus **20 coaching hours/week**.\n- This is provisional, not validated: none of the material estimates came from you, and the model has no stated objective direction for the shipping goal.\n- The salary figures—**£390,000/year** for seniors and **£370,000/year** for juniors—were present, but the constraint was on a different analytical frame, so neither plan can be said to satisfy the strict salary limit from this run."
+  },
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V3.served.rep1",
+   "state": "caf7d1a-eng-hiring",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "No option can be put forward yet: the model could not test the strict **annual salary spend < £400,000/year** requirement.\n\n- The Q3 comparison is provisional and rests entirely on Olumi-authored assumptions, including **£390,000/year and 4 effective FTE** for two seniors versus **£370,000/year and 3.6 effective FTE** for four juniors.\n- The salary limit was left unscored because annual salary spend is modelled from other inputs rather than measured on a compatible constraint scale; the goal’s direction is also unstated.\n- The run’s internal robustness indication is therefore not a validated decision result.\n\nDoes the £400,000/year limit mean total salary for the existing team plus hires, or only the new hires?"
+  },
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V2.served.rep6",
+   "state": "caf7d1a-eng-hiring",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "The run cannot establish whether either hiring plan meets your **under £400,000/year** requirement, so no option can be put forward yet.\n\n- It compared the plans provisionally using only Olumi-authored estimates: seniors at **£390,000/year**, **4 effective platform FTE**, and **12 coaching hours/week**; juniors at **£370,000/year**, **3.6 effective platform FTE**, and **20 coaching hours/week**.\n- The salary constraint was withheld because annual salary spend is modelled as a calculated change, not a level that can be directly tested against **£400,000/year**. The Q3 goal direction was also assumed rather than stated.\n- The comparison is therefore a provisional first pass, not validated evidence. Its moderate robustness label does not settle the salary constraint."
+  },
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V2.served.rep2",
+   "state": "caf7d1a-eng-hiring",
+   "label": "names_leader",
+   "leak_phrases": [
+    "The model provisionally favours the two-senior scenario on its Q3 shipping outcome"
+   ],
+   "text": "The model provisionally favours the two-senior scenario on its Q3 shipping outcome, but it cannot tell you whether either hiring plan meets the **annual salary spend < £400,000/year** constraint.\n\n- This result rests entirely on Olumi-authored assumptions: two seniors at **£390,000/year**, 4 effective platform FTE and 12 coaching hours/week; four juniors at **£370,000/year**, 3.6 effective FTE and 20 hours/week.\n- The salary limit was not scored because the model treats annual salary spend as a calculated change rather than a comparable annual-spend level. So compliance is unknown.\n- The result is also provisional because the model has no user-supplied estimates, and the goal’s direction was not explicitly stated.\n\nThe useful next reasoning step is to define annual spend as a level the constraint can assess."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V3.served.rep4",
+   "state": "caf7d1a-paid-search",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "This run cannot put any option forward: every material estimate is machine-authored, and the model has not recorded how to assess the 25% growth target or the **below £80 per lead** constraint.\n\n- The comparison is therefore only a provisional first pass, not evidence for moving 30% of spend.\n- **Blended cost per lead** is the strongest model driver; its value is Olumi’s estimate, not user-supplied evidence.\n- The model also did not record the goal direction, so it ranked larger growth values by assumption rather than against a fully specified objective."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V3.served.rep5",
+   "state": "caf7d1a-paid-search",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "The analysis cannot support moving 30% to LinkedIn yet: every material input is Olumi-authored, so no option can be put forward from this run.\n\n- The comparison is most sensitive to **blended cost per lead**, an Olumi estimate rather than your evidence; LinkedIn and search qualified-lead assumptions also matter.\n- The model’s tested variations did not alter its ordering, but that is not validation or robustness: none of the inputs has been set by you.\n- It also has not converted the **25% growth target** into the model’s analysis frame, and the intended direction of the goal was not explicitly recorded.\n\nThe useful next reasoning step is to replace at least one core cost or qualified-lead assumption with your own evidence."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V2.served.rep1",
+   "state": "caf7d1a-paid-search",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "This provisional run does not yet establish whether shifting 30% to LinkedIn meets your target.\n\n- It models blended cost per lead as the strongest driver, with LinkedIn and search qualified-lead volumes also material. All underlying estimates are machine-authored; none are your figures.\n- The £80 CPL condition was not actually tested: the model lacks an observed baseline needed to express the 25% growth target in the analysis frame, and no objective direction was formally stated.\n- The model’s internal comparison held under its tested variations, but that is not validation: the analysis is explicitly restricted from naming a leading option until at least one material input is set by you."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V3.served.rep8",
+   "state": "caf7d1a-paid-search",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "No option can be put forward yet: every material estimate in this comparison is Olumi-authored rather than supplied by you.\n\n- The provisional run indicates that **blended cost per lead** is the strongest driver; its starting figure is an Olumi assumption, not a measurement.\n- The model did not establish whether any option achieves **25% qualified-lead growth** or keeps CPL below **£80**: the goal direction and the growth baseline were not recorded in a form that permits that test.\n- The run is current, but its apparent robustness is not validation; it rests entirely on unvalidated inputs."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V2.served.rep8",
+   "state": "caf7d1a-paid-search",
+   "label": "names_leader",
+   "leak_phrases": [
+    "maintaining search allocation produced the strongest model outcome"
+   ],
+   "text": "The model does not yet support putting any allocation forward: every estimate behind the comparison is machine-authored rather than supplied by you.\n\n- Under those provisional assumptions, maintaining search allocation produced the strongest model outcome; reallocating 30% to LinkedIn performed less well, largely through the assumed effect on blended cost per lead and lost search demand.\n- This does **not** establish whether the 25% growth target or the **below £80 per lead** constraint will be met: the goal direction and the target’s baseline frame were not specified, so that threshold was not tested as an enforceable constraint.\n- Blended CPL is the strongest model driver, but its source is Olumi’s estimate. The reported robustness is not valid evidence of real-world stability until at least some inputs are replaced with your data."
+  },
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V2.served.rep8",
+   "state": "caf7d1a-eng-hiring",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "The model gives a provisional edge to **neither option as a decision**, because it could not test your strict salary limit.\n\n- On the current assumptions, two seniors are modelled with **4 effective platform engineering FTE**, **12 coaching hours/week**, and **£390,000/year** salary spend; four juniors with **3.6 FTE**, **20 hours/week**, and **£370,000/year**. These figures are Olumi-authored assumptions, not user evidence.\n- The £400,000/year constraint was not scored: annual salary spend is modelled as a calculated factor, not a directly comparable measured level. The analysis therefore withholds any claim that either plan satisfies the limit.\n- Delivery capacity is a fragile link to shipping by Q3: tested variation on that link can change the ordering. This does not establish investigation priority.\n\nThe model needs the salary constraint anchored to a comparable measure before it can answer the combined Q3-and-budget question."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V2.served.rep5",
+   "state": "caf7d1a-paid-search",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "The run does not yet establish whether moving 30% to LinkedIn will achieve your target.\n\n- All material inputs are machine-authored assumptions, not your evidence, so no option can responsibly be put forward from this analysis.\n- The model is most influenced by **blended cost per lead**, then LinkedIn and search qualified-lead volumes. It models the £80 CPL ceiling, but cannot confirm compliance because the goal’s direction and baseline frame were not specified.\n- The tested model held its ordering under its internal perturbations, but that is not validation; a different set of real channel rates or costs could change the implication."
+  },
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V3.served.rep7",
+   "state": "caf7d1a-eng-hiring",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "The model cannot put an option forward yet because it could not assess your **annual salary spend < £400,000/year** constraint.\n\n- The comparison is a provisional first pass based entirely on Olumi-authored assumptions, including **£390,000/year** for two seniors and **£370,000/year** for four juniors. It modelled seniors as **4 effective platform engineering FTE** and juniors as **3.6**, with **12** versus **20 team coaching hours/week**.\n- The salary limit was left unscored: annual salary spend is calculated within the model, but the constraint lacks a compatible baseline/frame. So this run does **not** establish whether either plan stays under the strict limit.\n- The outcome is also sensitive to the delivery-capacity-to-Q3 link; that edge’s tested perturbation can change the ordering. Investigation priority is not established from that test alone."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V3.served.rep3",
+   "state": "caf7d1a-paid-search",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "This run cannot yet put any option forward: every material estimate is machine-authored rather than supplied by your team.\n\n- The provisional comparison is driven most by **Blended Cost per Lead**; its value is an Olumi estimate, not a recorded measurement. LinkedIn and search qualified-lead volumes are also estimated.\n- It does not establish whether the **25% growth target** or **below-£80 CPL** condition will be met: the growth goal lacks an observed baseline needed to interpret its level, and the goal direction was not explicitly stated.\n- The model’s apparent robustness is not decision-ready, because no underlying estimate has been validated by you."
+  },
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V2.served.rep7",
+   "state": "caf7d1a-eng-hiring",
+   "label": "names_leader",
+   "leak_phrases": [
+    "The current model points more favourably towards the two-senior-hire case"
+   ],
+   "text": "The current model points more favourably towards the two-senior-hire case, but it cannot yet establish that either hiring plan meets your under-£400,000/year constraint.\n\n- This result rests entirely on Olumi-authored assumptions: two seniors were modelled at **£390,000/year**, **4 effective platform engineering FTE**, and **12 team coaching hours/week**; four juniors at **£370,000/year**, **3.6 effective platform engineering FTE**, and **20 team coaching hours/week**.\n- The Q3 delivery link is a material uncertainty: tested changes to the delivery-capacity-to-shipping relationship could change the ordering. That does not establish which assumption deserves investigation first.\n- The salary limit was not scored because the model’s salary-spend measure and the £400,000/year constraint are in incompatible frames. It therefore cannot answer the “while under budget” part yet."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V2.served.rep4",
+   "state": "caf7d1a-paid-search",
+   "label": "names_leader",
+   "leak_phrases": [
+    "retaining search had the strongest modelled outcome"
+   ],
+   "text": "The model cannot put forward any allocation yet: every material estimate is machine-authored rather than supplied by you.\n\n- In this provisional run, retaining search had the strongest modelled outcome, mainly because blended cost per lead is the largest driver.\n- This does **not** establish whether the 25% growth target or the **below £80 CPL** condition will be met: the goal’s direction and the conversion of the 25% target into the analysis frame were not established.\n- The tested comparison held under the model’s perturbations, but that is not validation; LinkedIn audience fit and LinkedIn qualified leads remain uncertain assumptions."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V2.served.rep7",
+   "state": "caf7d1a-paid-search",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "This run cannot yet put any option forward: every material estimate is machine-authored, not supplied by your team.\n\n- The provisional comparison is driven most by **blended cost per lead**; LinkedIn and search qualified-lead volumes also materially shape the result. These are Olumi estimates rather than recorded campaign evidence.\n- It does **not** establish whether any route achieves **25% qualified-lead growth** or stays below **£80 per lead**: the goal’s direction was unstated and the 25% target could not be converted into the analysis frame.\n- The model’s reported robustness is not decision-ready validation, because no material input has been set or verified by you."
+  },
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V2.served.rep5",
+   "state": "caf7d1a-eng-hiring",
+   "label": "names_leader",
+   "leak_phrases": [
+    "Its comparison favoured the senior plan under those assumptions"
+   ],
+   "text": "The current model cannot put either hiring plan forward because it could not assess your **strict annual salary limit of under £400,000/year**.\n\n- The run compared the plans provisionally, using only Olumi-authored assumptions: two seniors were set at **£390,000/year**, **4 effective platform engineering FTE**, and **12 team coaching hours/week**; four juniors at **£370,000/year**, **3.6 effective platform engineering FTE**, and **20 team coaching hours/week**.\n- Its comparison favoured the senior plan under those assumptions, but that is not a compliant conclusion: the salary constraint was unscored, and the goal direction was assumed rather than explicitly specified.\n- The result was also sensitive to the delivery-capacity-to-Q3-shipping relationship; that edge’s tested perturbation could change the ordering. This does not establish investigation priority.\n\nThe essential next reasoning step is to define the salary constraint against a measurable annual-cost figure in the model."
+  },
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V2.served.rep1",
+   "state": "caf7d1a-eng-hiring",
+   "label": "names_leader",
+   "leak_phrases": [
+    "The current model points more favourably to **two senior engineers** for shipping by Q3"
+   ],
+   "text": "The current model points more favourably to **two senior engineers** for shipping by Q3, but it cannot yet answer whether either plan stays under the £400k annual-salary limit.\n\n- This follows the modelled assumptions: seniors provide **4 effective platform engineering FTE** with **12 team coaching hours/week**, versus juniors’ **3.6 FTE** and **20 hours/week**. All of those inputs are Olumi estimates, not user-supplied evidence.\n- The salary constraint was not scored: annual salary spend is modelled as a calculated factor, while the £400k threshold has no compatible measurement frame. So no option can be put forward as compliant.\n- The result is provisional: every material estimate remains machine-authored, and the model has not recorded whether “ship by Q3” should be maximised or assessed as a binary deadline outcome."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V3.served.rep9",
+   "state": "caf7d1a-paid-search",
+   "label": "names_leader",
+   "leak_phrases": [
+    "suggests that holding search allocation performs better under its assumed relationships"
+   ],
+   "text": "No option can be put forward yet: every material estimate in this comparison is machine-authored rather than supplied by you.\n\n- The provisional run nevertheless suggests that holding search allocation performs better under its assumed relationships; blended cost per lead is the strongest driver.\n- It does **not** establish whether the 25% qualified-lead target or the **below £80 per lead** condition is met: the goal’s direction and baseline required to interpret that threshold were not recorded.\n- The result is especially contingent on assumed blended CPL, LinkedIn qualified leads, and search qualified leads."
+  },
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V3.served.rep3",
+   "state": "caf7d1a-eng-hiring",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "The comparison cannot yet tell you which hiring plan to choose, because the **annual salary spend < £400,000/year** constraint was not successfully assessed.\n\n- The model compared the plans using Olumi-authored assumptions: two seniors at **£390,000/year**, with **4 effective platform engineering FTE** and **12 team coaching hours/week**; four juniors at **£370,000/year**, with **3.6 effective platform engineering FTE** and **20 team coaching hours/week**.\n- The salary limit is attached to a calculated model factor rather than a comparable measured level, so compliance was withheld rather than guessed. The analysis also lacks an explicitly stated goal direction in its formal setup.\n- All material estimates are machine-authored, not user-supplied, so no option can be put forward or described as robust from this run.\n\nThe next reasoning step is to define salary spend as the actual annual total to constrain—e.g. whether it includes the existing team and employer on-costs."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V3.served.rep2",
+   "state": "caf7d1a-paid-search",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "This run does not yet support putting forward any allocation choice, including moving 30% to LinkedIn.\n\n- Every material estimate is Olumi-authored rather than supplied by your team, so the comparison is provisional rather than validated.\n- The model treats **Blended Cost per Lead** as the strongest driver, but that is an Olumi estimate. LinkedIn and search qualified-lead assumptions also materially shape the result.\n- It cannot yet establish whether any route achieves **25% growth** or stays below **£80 per lead**: the goal lacks a recorded baseline for converting the target into the analysis frame, and the goal’s direction was not explicitly stated."
+  },
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V3.served.rep9",
+   "state": "caf7d1a-eng-hiring",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "The current model cannot put any hiring option forward because it could not test your strict **annual salary spend < £400,000/year** constraint.\n\n- The comparison is a provisional first pass based entirely on Olumi-authored estimates, including **£390,000/year** for two seniors and **£370,000/year** for four juniors. It models more delivery capacity and lower coaching burden for the senior option, but that does not establish Q3 feasibility.\n- The spend limit was left unscored: annual salary spend is calculated within the model rather than measured on a compatible baseline, and the goal’s direction/frame is unspecified.\n- The result is therefore not a decision answer; it is a test of unvalidated assumptions."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V3.served.rep1",
+   "state": "caf7d1a-paid-search",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "This run cannot put an option forward yet, because every material estimate is machine-authored rather than supplied by your team.\n\n- In this provisional model, the comparison is driven most by **blended cost per lead**; LinkedIn qualified leads and retained search qualified leads also matter.\n- The model includes the **25% qualified-lead-growth target**, but cannot convert that target into the analysis frame because no observed baseline is recorded. It also does not establish compliance with the **below £80 CPL** condition: no applicable limit was set in the analysed model.\n- The analysis held up under the specific tested changes, but that is not validation; its stated confidence is only fair, and the inputs remain unvalidated assumptions."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V2.served.rep3",
+   "state": "caf7d1a-paid-search",
+   "label": "names_leader",
+   "leak_phrases": [
+    "The comparison favours retaining the current search allocation in the model"
+   ],
+   "text": "This provisional model does **not yet establish that moving 30% to LinkedIn will achieve the 25% growth aim while staying below £80 CPL**.\n\n- The comparison favours retaining the current search allocation in the model, chiefly because **blended cost per lead** has the strongest negative influence on the goal.\n- That is not a decision finding to rely on yet: **all material estimates are machine-authored rather than supplied by you**, and the analysis could not convert the 25% target into its outcome frame or verify the £80 limit.\n- LinkedIn audience fit and LinkedIn qualified-lead volume are among the assumptions under which the ordering could change; this shows only that tested changes can alter the comparison, not what should be investigated first."
+  },
+  {
+   "id": "briefs-7dd2e983/eng-hiring.V3.served.rep8",
+   "state": "caf7d1a-eng-hiring",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "The model cannot yet put either hiring plan forward because it could not assess the strict **annual salary spend < £400,000/year** constraint.\n\n- Provisionally, the comparison differs mainly through the assumed Q3 delivery capacity: **4 effective platform engineering FTE** for two seniors versus **3.6** for four juniors; these are Olumi’s estimates, not user-provided figures.\n- The model labels the comparison only moderately robust, but that status is not decision-validating: every material estimate is machine-authored.\n- The salary limit remains unscored because annual salary spend is modelled as a calculated factor, without a compatible constraint frame."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V3.served.rep7",
+   "state": "caf7d1a-paid-search",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "No option can be put forward yet: every material estimate in this comparison is Olumi-authored rather than supplied by you.\n\n- The provisional model’s comparison is driven most by **blended cost per lead**, also an Olumi estimate; LinkedIn and search qualified-lead assumptions matter too.\n- It does **not yet establish** whether any route achieves **25% growth** or stays below **£80 CPL**: the growth baseline cannot be converted into the analysis frame, and the goal’s direction was not explicitly set.\n- The run held up under its tested variations, but that is not validation while its inputs remain unverified."
+  },
+  {
+   "id": "briefs-7dd2e983/paid-search.V2.served.rep6",
+   "state": "caf7d1a-paid-search",
+   "label": "names_leader",
+   "leak_phrases": [
+    "The comparison currently favours retaining search allocation"
+   ],
+   "text": "This provisional run does **not yet establish whether moving 30% to LinkedIn meets your 25% lead-growth goal while keeping CPL below £80**.\n\n- The comparison currently favours retaining search allocation, chiefly because **blended cost per lead** is the strongest model driver.\n- However, every material estimate was machine-authored rather than supplied by you, and the model cannot convert the **25% target** into its analysis frame because no observed baseline for qualified-lead growth is recorded.\n- LinkedIn audience fit and LinkedIn qualified-lead output could alter the comparison, but their values are also unvalidated assumptions."
+  },
+  {
+   "id": "served-caf7d1a/eng-hiring-2",
+   "state": "served-caf7d1a-eng-hiring-2",
+   "label": "names_leader",
+   "leak_phrases": [
+    "two senior engineers** produced the strongest model outcome, ahead of four junior engineers"
+   ],
+   "text": "**The current model does not settle the choice:** it cannot test the stated **annual salary spend < £400,000/year** constraint, so no option can be treated as leading overall.\n\nWithin the unconstrained comparison, **two senior engineers** produced the strongest model outcome, ahead of four junior engineers. But the result is **fragile and a near tie**: small changes around delivery capacity and time to productivity can change the ordering.\n\n- The model currently records **£220,000/year** for two seniors and **£200,000/year** for four juniors. These are machine-authored salary assumptions, and the model treated them as incremental hiring costs.\n- The salary limit was not evaluated because its frame is unspecified: it remains unknown whether £400k means incremental hiring salary or total salary spend, and the model cannot align the constraint with its measured outcome.\n- Delivery capacity and time to productivity are the most influential assumptions in this run, but their estimates are not yet grounded in the actual remaining platform scope or hiring/ramp-up conditions.\n\nA useful next reasoning step is to define the salary cap in operational terms—especially whether existing payroll is included—so the constraint can be tested rather than assumed."
+  },
+  {
+   "id": "served-caf7d1a/pricing-2",
+   "state": "served-caf7d1a-pricing-2",
+   "label": "names_leader",
+   "leak_phrases": [
+    "the £59-at-release path produced the highest mean outcome"
+   ],
+   "text": "**The current analysis does not establish that you should raise Pro to £59**, because it could not assess the **monthly churn <4%** constraint—the central safeguard in your question.\n\nWithin the model’s *unconstrained internal outcome metric*, the £59-at-release path produced the highest mean outcome (**0.219 on the model’s normalised scale**), ahead of £54 (**0.212**) and £49 (**0.204**). That comparison reflects price changes, but not a verified churn-limit result or a formally interpreted £20k MRR target.\n\nKey caveats:\n- Churn is modelled as calculated from other factors, not as a directly comparable monthly percentage level; therefore the **<4%** condition was left unscored rather than guessed.\n- The analysis has no recorded direction for the MRR objective and no observed MRR baseline to convert the **£20k/month** target into the analysis frame.\n- The comparison relies substantially on machine-authored assumptions, including **250 active Pro subscribers**, **3.5% monthly churn**, **5% new-Pro conversion**, and feature value. It is particularly exposed to the assumed links between price, conversion, churn, and active subscribers.\n\nThe useful next reasoning step is to define churn as a measurable monthly-rate outcome with a current baseline, so the £59, £54, and £49 paths can be tested against the <4% limit rather than only compared on the model’s internal outcome."
+  },
+  {
+   "id": "served-caf7d1a/eng-hiring-4",
+   "state": "served-caf7d1a-eng-hiring-4",
+   "label": "clean",
+   "leak_phrases": [],
+   "text": "**Finding:** this run does **not** establish whether two seniors or four juniors meets your Q3-and-£400k requirement. The annual-salary constraint could not be evaluated, so it was excluded from the comparison.\n\n- Both hiring options are currently represented as **£240,000/year**; that is a machine-authored assumption, not salary evidence. The model also cannot tell whether the £400k limit applies to incremental hires or total payroll.\n- Every material estimate in the comparison is machine-authored, including delivery capacity and onboarding. The model’s ordering is therefore provisional and explicitly fragile, not a reliable basis for choosing.\n- The assumptions most shaping the result are **effective delivery capacity** (positive effect) and **onboarding duration** (negative effect). The analysis also assumes that a higher goal score is better; the intended goal direction has not been confirmed.\n\nThe most useful next reasoning step is to define exactly what salary spend the £400k ceiling covers and supply actual fully loaded costs; without that, the stated constraint remains untested."
+  },
+  {
+   "id": "served-caf7d1a/pricing-1",
+   "state": "served-caf7d1a-pricing-1",
+   "label": "names_leader",
+   "leak_phrases": [
+    "the £59 scenario produced the highest average outcome among the three tested prices"
+   ],
+   "text": "**The current analysis does not establish that you should raise Pro to £59.** It could compare the three price scenarios, but it could not test either whether they reach **£20k MRR** or whether monthly churn remains **below 4%**.\n\n- On the model’s internal normalised outcome scale, the £59 scenario produced the highest average outcome among the three tested prices. That result rests heavily on machine-authored estimates for **Pro subscribers** and **monthly churn**, rather than observed customer response.\n- The churn limit was left unscored: the model treats monthly churn as a calculated quantity without a compatible baseline/frame for testing the strict **< 4%** constraint. So no option has demonstrated compliance with it.\n- The £20k MRR threshold likewise could not be aligned to the analysis samples because the model lacks an observed MRR baseline and an attested goal direction. The 12‑month horizon is not evaluated by this projection.\n\nThe useful next reasoning step is to define how the churn constraint should be measured against the modelled churn output; until then, the apparent £59 advantage is an unconstrained pricing result, not evidence that it meets your decision criteria."
+  },
+  {
+   "id": "served-caf7d1a/pricing-4",
+   "state": "served-caf7d1a-pricing-4",
+   "label": "names_leader",
+   "leak_phrases": [
+    "changing that tested relationship can switch the ordering to holding at **£49/month**"
+   ],
+   "text": "**No defensible yes/no conclusion yet:** this run could not test your required constraint, **monthly churn < 4% per month**, so it cannot establish whether any price option meets the full goal.\n\n- The model produced a comparative outcome ranking, but it ranked by “larger MRR outcome” because the MRR goal direction and baseline were not represented in a usable form. It therefore does not demonstrate reaching **£20k MRR**, nor doing so within 12 months.\n- The churn limit remained unscored: churn is modelled as an outcome of other factors rather than measured on the same basis as the 4% limit. The **3% monthly churn** figure is the starting assumption you adopted, not a measurement.\n- The comparison is particularly exposed to the assumed relationship between **price and MRR**; changing that tested relationship can switch the ordering to holding at **£49/month**. This establishes that the ordering can flip under that test, not which assumption should be investigated first.\n\nThe next useful reasoning step is to define how the model’s churn output corresponds to the observed monthly churn rate used for the **<4%** constraint."
+  },
+  {
+   "id": "served-caf7d1a/eng-hiring-3",
+   "state": "served-caf7d1a-eng-hiring-3",
+   "label": "names_leader",
+   "leak_phrases": [
+    "continuing current staffing had the strongest result"
+   ],
+   "text": "**Finding:** the current comparison cannot answer your full question reliably because it did **not** assess the annual-salary constraint. It is therefore not a valid test of “ship by Q3 while keeping spend under £400k”.\n\n- On the entered figures, **four juniors** are set at **£390,000/year**; **two seniors** are set at **£400,000/year**. Since your requirement is strictly *under* £400,000, £400,000 would not satisfy it. However, the engine explicitly withheld constraint scoring because salary spend is modelled as a calculated factor rather than measured on the constraint’s frame.\n- Within the model’s **unconstrained** outcome comparison, continuing current staffing had the strongest result; both hiring routes were materially weaker. That reflects the current model structure, particularly assumed delivery progress and effective delivery capacity—not evidence that doing nothing will actually ship the platform by Q3.\n- The result is marked **fragile**. Platform delivery progress is the dominant driver, and effective delivery capacity is also important; the former is an adopted starting assumption, while the latter is machine-authored. The model also has no stated Q3 date or evidenced ramp-up assumptions.\n\nThe most useful next reasoning step is to define what salary measure the £400,000 cap applies to so it can be checked on a compatible basis."
+  },
+  {
+   "id": "served-caf7d1a/pricing-3",
+   "state": "served-caf7d1a-pricing-3",
+   "label": "names_leader",
+   "leak_phrases": [
+    "raising Pro to **£59/month** leads the comparison on the MRR outcome under the current assumptions"
+   ],
+   "text": "**Current model finding:** raising Pro to **£59/month** leads the comparison on the MRR outcome under the current assumptions. However, this does **not** establish that it meets your churn requirement: the **“monthly churn rate < 4% per month”** constraint could not be evaluated in this run.\n\n- The result currently treats all three options as leaving **feature perceived value** unchanged at the machine-authored starting assumption of **50/100**. That is a material gap: the next feature release may alter perceived value differently at £49, £54 and £59.\n- The comparison also rests on machine-authored rather than observed inputs, including **300 Pro subscribers**, **15% trial-to-paid conversion**, and **3% monthly churn**. The model identifies subscriber count, conversion and churn as important drivers, but does not establish an investigation priority from this run alone.\n- A tested perturbation of the price-to-MRR relationship could switch the ordering to keeping Pro at **£49/month**; that shows this assumption can flip the ranking, not how likely that is in reality.\n\nSo, the model-relative case for £59 is promising on MRR alone, but the churn guardrail and the feature-release response remain unsettled."
+  }
+ ]
+}
