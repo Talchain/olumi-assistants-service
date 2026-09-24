@@ -165,4 +165,39 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
     expect(interpretationUnavailableText({ ok: false, refusal: 'analysis_not_ready' })).toBe('The analysis didn’t run this time (analysis not ready). Nothing in the model was changed — ask me what it still needs.');
   });
 
+  /**
+   * ⭐ A BLOCKED RUN OFFERS THE NEXT STEP (finding on #1786/#1792, 5807064442). The typed Run keeps
+   * the turn and its one interpreting call is forbidden from calling tools, so when the run did not
+   * complete the reply carried Olumi's reason but NO action — pressing Run before approving is the
+   * ordinary pre-approval state. It now offers one deterministic next step; the click is an ordinary
+   * Agent turn (tools allowed) that proposes what the model still needs. Nothing runs again.
+   */
+  it('RED: a BLOCKED Run with a WORKING interpreter offers one next-step chip, and runs nothing again', async () => {
+    interp = 'ok';
+    blocked = true;
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+    } });
+    const b = r.json() as { suggested_actions: { id: string; label: string; message: string; action_type?: string }[]; _diagnostic_trace: { fast_path?: string } };
+    expect(b._diagnostic_trace.fast_path).toBe('run');
+    expect(runs, 'one attempted run').toBe(1);
+    expect(b.suggested_actions).toEqual([expect.objectContaining({ id: 'agent-suggest-what-it-needs', label: 'Suggest what it still needs' })]);
+    expect(b.suggested_actions[0]!.action_type, 'a plain Agent turn, never another Run').toBeUndefined();
+  });
+
+  it('CONTRAST: a COMPLETED Run offers no remedy chip', async () => {
+    interp = 'ok';
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+    } });
+    const b = r.json() as { suggested_actions: { id: string }[] };
+    expect(b.suggested_actions.some((c) => c.id === 'agent-suggest-what-it-needs')).toBe(false);
+  });
+  it('the next-step chip replays only while the model still cannot run', async () => {
+    const { stillValidOffers, NEXT_STEP_AFTER_BLOCKED_RUN_CHIP } = await import('../../../routes/agent-v1-turn.js');
+    const offered = [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP];
+    expect(stillValidOffers(offered, { outstandingProposalIds: new Set(), analysisReady: { status: 'needs_user_input', may_run: false }, analysisState: {} }).map((a) => a.id))
+      .toEqual(['agent-suggest-what-it-needs']);
+    expect(stillValidOffers(offered, { outstandingProposalIds: new Set(), analysisReady: { status: 'ready', may_run: true }, analysisState: {} }), 'runnable now: no stale remedy').toEqual([]);
+  });
 });
