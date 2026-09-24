@@ -1185,13 +1185,16 @@ export function admitCandidateModel(
    * is what makes the drafter state the link in the first place.
    */
   /**
-   * ⭐ THE HELD STATUS QUO (`wireInertStatusQuo`). Minted with the SAME stamps the
-   * conventional lane's connectivity repair uses — `origin: 'repair'`, the
-   * `cee_hypothesis` provenance and its "no effect value is implied" reasoning —
-   * because `origin` is the one discriminator readiness reads to hold the option
-   * rather than ask for a level. No level, no intervention, no `is_baseline`
-   * stamp and no user authority are written: the only claim made is the one
-   * disclosed below, and it is correctable.
+   * ⭐ THE HELD STATUS QUO (`wireInertStatusQuo`). It shares the conventional
+   * lane's connectivity repair's `origin: 'repair'` and its "no effect value is
+   * implied" wording (`CONNECTIVITY_REPAIR_WIRING_REASON`), because `origin` is the
+   * one discriminator readiness reads to hold the option rather than ask for a
+   * level. The provenance SOURCE deliberately differs: that repair stamps
+   * `synthetic` (`status-quo-fix.ts:247`), while this lane stamps
+   * `cee_hypothesis`, the source every other machine-authored edge it admits
+   * carries. No level, no intervention, no `is_baseline` stamp and no user
+   * authority are written: the only claim made is the one disclosed below, and
+   * it is correctable.
    */
   const heldStatusQuo = wireInertStatusQuo(nodes, [...topologyEdges, ...mechanismEdges], interventionsByOption);
   const heldStatusQuoEdges = (heldStatusQuo?.factorIds ?? []).map((factorId) => ({

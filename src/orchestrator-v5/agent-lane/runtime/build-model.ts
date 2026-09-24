@@ -596,7 +596,9 @@ export async function buildModelFromBrief(
       // `quantified_provisional` — figures shown against a deadline the analysis never
       // received. Saying it is the only honest option while the projection cannot hold it.
       ...admitted.loss
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing)$/.test(l.field_path))
+        // `status_quo_held`: the held status quo is a machine-inferred MEANING
+        // (`admit-model.ts`, `wireInertStatusQuo`), so it must be said and correctable.
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held)$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

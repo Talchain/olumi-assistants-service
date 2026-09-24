@@ -149,6 +149,13 @@ describe('an inert status quo is connected as a held baseline', () => {
     expect(out.options_that_change_nothing).toEqual([]);
   });
 
+  it('RED: the hiring build result says it — the disclosure reaches not_represented, verbatim', async () => {
+    const { out } = await build(hiring());
+    const [held] = admitCandidateModel(hiring()).loss.filter((l) => l.field_path === `nodes[${SQ}].status_quo_held`);
+    expect(held, 'the ledger entry the build result must carry').toBeDefined();
+    expect((out.not_represented as string[]).filter((s) => s === held!.reason)).toEqual([held!.reason]);
+  });
+
   it('CONTROL: a non-baseline inert option ("Does nothing new") stays flagged and unlinked', async () => {
     const { graph, out } = await build(hiring(null, [{ label: 'Does nothing new', provenance: 'ai_proposed', changes: [], interventions: [] }]));
     expect(optionFactorEdgesFrom(graph, 'does_nothing_new')).toEqual([]);
