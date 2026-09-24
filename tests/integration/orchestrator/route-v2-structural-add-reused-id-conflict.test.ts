@@ -2,9 +2,9 @@
  * A REUSED-ID CONFLICT ON `structural_add` MUST NOT ANSWER SUCCESS FOR AN ADD
  * THAT WAS NEVER WRITTEN.
  *
- * FIXTURE ONLY — no production change. Written RED-first against staging
- * d567638d. No case is marked `.fails` / `.skip` / `.todo`: a red that is hidden
- * is a red nobody fixes.
+ * Written RED-first against staging d567638d (the fix is in
+ * `system-events/dispatch.ts`). No case is marked `.fails` / `.skip` / `.todo`:
+ * a red that is hidden is a red nobody fixes.
  *
  * THE CLAIM (Codex, #63 5821693599). `structural_add` is the NODE writer
  * (`dispatchStructuralAdd`; edges are `structural_add_edge`). Its post-commit
@@ -43,6 +43,24 @@
  *     R2 must still claim nothing for itself: no "Added" prose, no receipt. A
  *     snapshot that shows Y is truthful here (the store holds it), so B pins the
  *     CLAIM carriers, not the snapshot.
+ *   REPLAY — the SAME request (same turn id, same bytes) whose original commit
+ *     landed between the retry's base read and its append (a double submit; once
+ *     X is stored, the adapter's stale gate refuses the retry before any append,
+ *     so this interleaving is the only way a replay reaches the store). The store
+ *     signals `replayedPriorTurn`. The add DID commit, earlier: the reply must say
+ *     so ("already been recorded"), may hand back the ORIGINAL receipt, and must
+ *     not attest that THIS attempt wrote.
+ *   DEFECT A, REREAD FAILED — as A, but commit.ts's post-conflict reread throws:
+ *     nothing graph-shaped (no `draft_graph`, `graph_hash`, `analysis_ready`) and
+ *     still no success claim. DEFECT A also pins that `analysis_ready` and its
+ *     freshness describe the SNAPSHOT, never the unwritten candidate.
+ *   REPLAY OF A REFUSAL — a committed `no_persisted_graph` refusal row under turn
+ *     T, then the identical request under T once a model exists: the store flags
+ *     `replayedPriorTurn`, but X was never written, so "already recorded" is false.
+ *   REPLAY OF A REFUSAL, REREAD FAILED — as above, with the reread throwing: the
+ *     reply says the change could not be checked, and presents no graph.
+ *   REPLAY, CHANGE NO LONGER IN THE MODEL — a genuine replay whose store no longer
+ *     holds X: the original receipt is withheld, not presented as proof.
  *   NO PROVIDER — every path is deterministic; the LLM adapter mock and `fetch`
  *     are asserted uncalled.
  *
@@ -71,6 +89,14 @@
  *   · DEFECT B: every REPLY carrier is GREEN (same prose/receipt guard; and the
  *     candidate's identity equals the foreign-stored graph's, so the snapshot and
  *     hash happen to be true). Only the dispatcher's internal attestation is RED.
+ *
+ * MEASURED with #1856 (`CommitResult.thisAttemptWrote`, 07cabcba) merged, before
+ * the dispatch.ts gate (24 Sep 2026): the conflict's `persistedGraph` is now the
+ * stored snapshot, so DEFECT A turned from a false receipt into a RETRYABLE 500
+ * (the receipt check no longer found Y); DEFECT B and REPLAY RED on the
+ * dispatcher's "committed … verified" attestation. The fix
+ * (`replyForAttemptThatWroteNothing`, gated on `thisAttemptWrote === false`)
+ * turns all five cases GREEN.
  *
  * WHAT THIS DELIBERATELY DOES NOT PROVE:
  *   - that the real Postgres function behaves as the fake does; every case
@@ -165,6 +191,14 @@ const fake = {
   versions: [] as string[],
   /** Runs once, AFTER the next `loadGraph` has taken its snapshot. */
   afterNextRead: undefined as (() => void) | undefined,
+  /**
+   * When set to N, the FIRST `loadGraph` made after more than N appends have
+   * been attempted throws (once) — i.e. the commit's post-append reread, never
+   * the dispatcher's pre-commit base read. Each failure records the append count
+   * at the time, so the premise is asserted, not inferred.
+   */
+  failFirstReadAfterAppends: undefined as number | undefined,
+  readFailuresAtAppendCount: [] as number[],
   /** The fake's own verdicts, per turn_id — asserted as preconditions. */
   landed: [] as string[],
   replayed: [] as string[],
@@ -178,6 +212,8 @@ function resetFake() {
   fake.rows = new Map();
   fake.versions = [];
   fake.afterNextRead = undefined;
+  fake.failFirstReadAfterAppends = undefined;
+  fake.readFailuresAtAppendCount = [];
   fake.landed = [];
   fake.replayed = [];
   fake.conflicted = [];
@@ -286,6 +322,12 @@ const fakeStore = {
   readFactsFor: async () => [],
   readMostRecentPendingActions: async () => [],
   loadGraph: async (_scenarioId: string) => {
+    const appendsSoFar = appendMock.mock.calls.length;
+    if (fake.failFirstReadAfterAppends !== undefined && appendsSoFar > fake.failFirstReadAfterAppends) {
+      fake.failFirstReadAfterAppends = undefined;
+      fake.readFailuresAtAppendCount.push(appendsSoFar);
+      throw new Error('fake loadGraph: the store could not be read just now');
+    }
     const snapshot = jsonCopy(fake.graph);
     loadGraphSnapshots.push(jsonCopy(snapshot));
     const interleaved = fake.afterNextRead;
@@ -345,6 +387,17 @@ const PREP_FOREIGN = 'e1000000-0000-4000-8000-0000000000f4';
 
 const X = { id: 'fac_churn', label: 'Customer churn' } as const;
 const Y = { id: 'fac_competitor', label: 'Competitor pricing' } as const;
+
+/**
+ * The dispatcher's reply on a replay whose requested change is NOT in the reread
+ * snapshot (`replyForAttemptThatWroteNothing`). Pinned verbatim: it is the whole
+ * claim the reply makes on that branch.
+ */
+const REPLAY_CHANGE_NOT_IN_MODEL =
+  'Nothing new was written just now, and that change is not in the model at the moment.';
+/** …and on a replay whose reread FAILED: the change cannot be checked either way. */
+const REPLAY_CHANGE_UNCHECKABLE =
+  "Nothing new was written just now, and I couldn't read the model to check whether that change is in it.";
 
 let app: FastifyInstance;
 let fetchSpy: ReturnType<typeof vi.spyOn>;
@@ -555,12 +608,117 @@ describe('POST /orchestrate/v2/turn — structural_add under a REUSED turn id an
         `A: reply graph_hash is not the hash of the stored graph (${observed})`,
       ).toBe(storedHash);
     }
+    // Conflicts are unchanged by the replay rule: commit.ts's refusal prose stands.
+    expect.soft(prose, `A: the conflict keeps commit.ts's refusal prose (${observed})`).toMatch(
+      /did not make that change/i,
+    );
+
+    // ── THE NON-PROSE CARRIERS DESCRIBE THE SNAPSHOT, NEVER THE CANDIDATE ────
+    // (a) readiness is built from the STORED graph (X, no Y). `blockers` and
+    //     `readiness_issues` name every unconnected factor by id, so a readiness
+    //     built from the unwritten candidate would name Y. X is the present control:
+    //     the probe sees factor ids in this very payload.
+    const ar = r2.body.analysis_ready as Record<string, unknown> | undefined;
+    expect.soft(ar, `A: the no-write reply carries the snapshot's readiness (${observed})`).toBeDefined();
+    const factorIdsIn = (field: string): string[] =>
+      ((ar?.[field] ?? []) as Array<{ factor_id?: unknown }>)
+        .map((entry) => entry.factor_id)
+        .filter((id): id is string => typeof id === 'string');
+    expect.soft(factorIdsIn('blockers'), `A: present control — readiness names X (${observed})`).toContain(X.id);
+    expect.soft(
+      factorIdsIn('blockers'),
+      `A: analysis_ready.blockers names ${Y.id}, which only the unwritten candidate holds (${observed})`,
+    ).not.toContain(Y.id);
+    expect.soft(
+      factorIdsIn('readiness_issues'),
+      `A: analysis_ready.readiness_issues names ${Y.id}, which only the unwritten candidate holds (${observed})`,
+    ).not.toContain(Y.id);
+    // (b) freshness is derived on this branch, from a healthy (empty) fact read,
+    //     against the SNAPSHOT's hash — not the candidate's, and not omitted.
+    expect.soft(ar?.freshness, `A: analysis_ready.freshness is derived, not omitted (${observed})`).toBe('none');
+    expect.soft(ar?.freshness_reason, `A: freshness comes from the healthy empty read (${observed})`).toBe(
+      'no_successful_run_analysis_fact',
+    );
+    expect.soft(
+      ar?.current_graph_hash,
+      `A: freshness is derived against the stored graph's hash (${observed})`,
+    ).toBe(storedHash);
+
     // The dispatcher's own attestation (log) — it must not claim Y "verified in
     // the persisted bytes" for an append that wrote nothing.
     expect.soft(
       committedAttestationsFor(Y.id),
       `A: dispatcher logged "structural_add committed … verified in the persisted bytes" for ${Y.id} (${observed})`,
     ).toBe(0);
+
+    expectNoProviderReached();
+  });
+
+  // ── DEFECT A, REREAD FAILED — nothing graph-shaped without a snapshot ──
+
+  it('DEFECT A, REREAD FAILED: as A, but commit.ts\'s post-conflict reread of the store throws — the reply presents nothing graph-shaped (no draft_graph, no graph_hash, no analysis_ready) and still claims nothing', async () => {
+    fake.owned = true;
+    await commitR1();
+    const storedAfterR1 = jsonCopy(fake.graph);
+    const versionsAfterR1 = [...fake.versions];
+    // Arm AFTER R1: the first read made once R2's append has been attempted throws.
+    const appendsBeforeR2 = appendMock.mock.calls.length;
+    fake.failFirstReadAfterAppends = appendsBeforeR2;
+
+    const r2 = await send(addEvent(Y, storedAfterR1), MINE);
+
+    // ── PREMISE, proven inside the test ─────────────────────────────────────
+    const mineIdx = appendIndicesFor(MINE);
+    expect(mineIdx).toHaveLength(2);
+    const r2Idx = mineIdx[1]!;
+    expect(r2Idx).toBe(appendsBeforeR2);
+    const r2Write = appendMock.mock.calls[r2Idx]![0];
+    expect(hasNode(r2Write.graph, Y.id)).toBe(true);
+    const r2Outcome = await outcomeAt(r2Idx);
+    expect(r2Outcome.priorTurnConflict).toBe(true);
+    expect(fake.conflicted).toEqual([MINE]);
+    expect(fake.landed).toEqual([MINE]);
+    expect(fake.versions).toEqual(versionsAfterR1);
+    // (a) exactly one read failed, and it was made AFTER R2's append (the reread),
+    //     not R2's pre-commit base read;
+    expect(fake.readFailuresAtAppendCount).toEqual([r2Idx + 1]);
+    // (b) the store holds X and not Y;
+    expect(hasNode(fake.graph, Y.id)).toBe(false);
+    const candidateHash = analysisHash(r2Write.graph);
+    // (c) present control: the dispatcher took the no-write branch.
+    const noWriteLines = logInfoSpy.mock.calls.filter(
+      (c) => typeof c[1] === 'string' && (c[1] as string).startsWith('V5 structural_add — this attempt wrote nothing'),
+    );
+    expect(noWriteLines).toHaveLength(1);
+
+    const observed =
+      `observed: status=${r2.status}, reply draft_graph nodes=[${
+        r2.body.draft_graph === undefined ? 'absent' : nodeIds(r2.body.draft_graph).join(',')
+      }], reply graph_hash=${String(r2.body.graph_hash)}, candidate hash=${candidateHash}, ` +
+      `analysis_ready=${r2.body.analysis_ready === undefined ? 'absent' : 'present'}, ` +
+      `assistant_text=${JSON.stringify(r2.body.assistant_text ?? null)}`;
+
+    // ── NOTHING GRAPH-SHAPED, NO SUCCESS ────────────────────────────────────
+    expect.soft(r2.status, `A-reread: a known no-write is not a server failure (${observed})`).toBe(200);
+    expect.soft(
+      (noWriteLines[0]![0] as Record<string, unknown>).stored_snapshot_presented,
+      `A-reread: the dispatcher presented a snapshot although the reread failed (${observed})`,
+    ).toBe(false);
+    expect.soft(r2.body.draft_graph, `A-reread: no graph may be presented without a snapshot (${observed})`).toBeUndefined();
+    expect.soft(r2.body.graph_hash, `A-reread: no graph_hash may be presented without a snapshot (${observed})`).toBeUndefined();
+    expect.soft(r2.body.graph_hash, `A-reread: never the candidate's hash (${observed})`).not.toBe(candidateHash);
+    expect.soft(
+      r2.body.analysis_ready,
+      `A-reread: no readiness may be presented without a snapshot (${observed})`,
+    ).toBeUndefined();
+    const prose = String(r2.body.assistant_text ?? '');
+    expect.soft(prose, `A-reread: the conflict keeps commit.ts's refusal prose (${observed})`).toMatch(
+      /did not make that change/i,
+    );
+    expect.soft(prose, `A-reread: prose must not confirm the add (${observed})`).not.toContain(`Added '${Y.label}'`);
+    expect.soft(prose, `A-reread: prose must not say the add is saved (${observed})`).not.toMatch(/That's saved/);
+    expect.soft(r2.body.model_version_receipt, `A-reread: no receipt (${observed})`).toBeUndefined();
+    expect.soft(committedAttestationsFor(Y.id), `A-reread: no success attestation (${observed})`).toBe(0);
 
     expectNoProviderReached();
   });
@@ -662,6 +820,287 @@ describe('POST /orchestrate/v2/turn — structural_add under a REUSED turn id an
       committedAttestationsFor(Y.id),
       `B: dispatcher logged "structural_add committed … verified in the persisted bytes" for ${Y.id} although THIS append wrote nothing (${observed})`,
     ).toBe(0);
+
+    expectNoProviderReached();
+  });
+
+  // ── REPLAY — a genuine replay of MY committed add ──────────────────────
+
+  it('REPLAY: the SAME request (same turn id, same bytes) arrives again after my add of X committed in between its base read and its append — the reply says "already recorded", presents the stored graph, hands back the ORIGINAL receipt, and attests nothing for THIS attempt', async () => {
+    // A replay only reaches the store if the retry read its base BEFORE the
+    // original landed (a double submit): once X is stored, the adapter's stale
+    // gate refuses the retry's old `base_graph_hash` before any append. So the
+    // original's committed row and bytes are derived through the REAL route on a
+    // fresh fake, then installed between the retry's base read and its append.
+    fake.owned = true;
+    const base = jsonCopy(fake.graph);
+    const original = await send(addEvent(X, base), MINE);
+    expect(original.status).toBe(200);
+    expect(fake.landed).toEqual([MINE]);
+    const originalRow = fake.rows.get(MINE);
+    expect(originalRow?.receipt?.version_id, 'receipt control: the original on an owned scenario must mint').toBe(
+      VERSION_IDS[0],
+    );
+    const originalGraph = jsonCopy(fake.graph);
+    const originalVersions = [...fake.versions];
+    expect(hasNode(originalGraph, X.id)).toBe(true);
+    resetFake();
+    appendMock.mockClear();
+    logInfoSpy.mockClear();
+    loadGraphSnapshots.length = 0;
+    fake.owned = true;
+
+    const readsBeforeRetry = loadGraphSnapshots.length;
+    let appendsWhenOriginalLanded: number | undefined;
+    fake.afterNextRead = () => {
+      appendsWhenOriginalLanded = appendMock.mock.calls.length;
+      fake.graph = jsonCopy(originalGraph);
+      fake.rows.set(MINE, originalRow!);
+      fake.versions = [...originalVersions];
+    };
+
+    const retry = await send(addEvent(X, base), MINE);
+
+    // ── PREMISE, proven inside the test ─────────────────────────────────────
+    const mineIdx = appendIndicesFor(MINE);
+    expect(mineIdx).toHaveLength(1);
+    const retryWrite = appendMock.mock.calls[mineIdx[0]!]![0];
+    // (a) the retry is the SAME request, built on the pre-add base, and reached
+    //     the append with a candidate holding X;
+    expect(retryWrite.request_hash).toBe(originalRow!.request_hash);
+    expect(hasNode(loadGraphSnapshots[readsBeforeRetry], X.id)).toBe(false);
+    expect(hasNode(retryWrite.graph, X.id)).toBe(true);
+    // (b) the original had landed before the retry's append was attempted;
+    expect(fake.afterNextRead, 'the interleaving hook must have run').toBeUndefined();
+    expect(appendsWhenOriginalLanded).toBe(mineIdx[0]);
+    // (c) the store signalled a REPLAY and wrote/minted nothing for the retry;
+    const outcome = await outcomeAt(mineIdx[0]!);
+    expect(outcome.replayedPriorTurn).toBe(true);
+    expect(outcome.priorTurnConflict).toBeUndefined();
+    expect(fake.replayed).toEqual([MINE]);
+    expect(fake.landed).toEqual([]);
+    expect(fake.conflicted).toEqual([]);
+    expect(fake.casRejected).toEqual([]);
+    expect(fake.versions).toEqual(originalVersions);
+    // (d) the store holds X — put there by the ORIGINAL commit of this request.
+    const stored = fake.graph;
+    expect(identityOf(stored)).toBe(identityOf(originalGraph));
+    expect(hasNode(stored, X.id)).toBe(true);
+    // Present control for the log probe: commit.ts's own replay line was seen.
+    const commitReplayLogs = logInfoSpy.mock.calls.filter(
+      (c) => typeof c[1] === 'string' && (c[1] as string).startsWith('V5 commit — this turn REPLAYED'),
+    ).length;
+    expect(commitReplayLogs, 'the log probe must see the commit\'s replay line in this run').toBe(1);
+
+    const observed =
+      `observed: status=${retry.status}, reply draft_graph nodes=[${
+        retry.body.draft_graph === undefined ? 'absent' : nodeIds(retry.body.draft_graph).join(',')
+      }], reply graph_hash=${String(retry.body.graph_hash)}, stored hash=${analysisHash(stored)}, ` +
+      `assistant_text=${JSON.stringify(retry.body.assistant_text ?? null)}`;
+
+    // ── TRUTHFUL: already recorded; nothing claimed for THIS attempt ────────
+    expect.soft(retry.status, `REPLAY: a replay is not a failure (${observed})`).toBe(200);
+    const prose = String(retry.body.assistant_text ?? '');
+    expect.soft(prose, `REPLAY: prose must say the add was already recorded (${observed})`).toMatch(
+      /already been recorded/i,
+    );
+    expect.soft(prose, `REPLAY: prose must not refuse a genuine replay (${observed})`).not.toMatch(
+      /did not make that change/i,
+    );
+    expect.soft(prose, `REPLAY: prose must not confirm a NEW add (${observed})`).not.toContain(`Added '${X.label}'`);
+    expect.soft(prose, `REPLAY: prose must not say this attempt saved it (${observed})`).not.toMatch(/That's saved/);
+    // The ORIGINAL receipt is the only evidence the add committed EARLIER.
+    const receipt = retry.body.model_version_receipt as Record<string, unknown> | undefined;
+    expect.soft(receipt?.version_id, `REPLAY: the original receipt is handed back (${observed})`).toBe(VERSION_IDS[0]);
+    expect.soft(receipt?.source_turn_id, `REPLAY: the receipt is this request's own (${observed})`).toBe(MINE);
+    // The stored snapshot, for display — the store genuinely holds X.
+    expect.soft(retry.body.draft_graph, `REPLAY: the reply presents the stored graph (${observed})`).toBeDefined();
+    expect.soft(hasNode(retry.body.draft_graph, X.id), `REPLAY: stored graph holds X (${observed})`).toBe(true);
+    expect.soft(retry.body.graph_hash, `REPLAY: graph_hash is the stored graph's (${observed})`).toBe(
+      analysisHash(stored),
+    );
+    expect.soft(
+      committedAttestationsFor(X.id),
+      `REPLAY: dispatcher logged "structural_add committed … verified in the persisted bytes" for ${X.id} although THIS append wrote nothing (${observed})`,
+    ).toBe(0);
+
+    expectNoProviderReached();
+  });
+
+  // ── REPLAY OF A REFUSAL — the store's replay flag is not "it was written" ─
+
+  it('REPLAY OF A REFUSAL: my add of X was REFUSED (no saved model) and that refusal row committed under turn T; once a model exists the identical request under T reaches the store, which flags replayedPriorTurn — X was never written, so the reply must not say "already recorded"', async () => {
+    fake.owned = true;
+    const base = buildBaseGraph();
+    fake.graph = null;
+
+    // ── the refusal, committed under T ──────────────────────────────────────
+    const first = await send(addEvent(X, base), MINE);
+    expect(first.status).toBe(200);
+    expect(String(first.body.assistant_text ?? '')).toMatch(/no saved model/i);
+    const firstIdx = appendIndicesFor(MINE);
+    expect(firstIdx).toHaveLength(1);
+    expect(appendMock.mock.calls[firstIdx[0]!]![0].graph ?? null, 'a refusal writes no graph').toBeNull();
+    expect(fake.rows.has(MINE), 'the refusal row committed under T').toBe(true);
+    expect(fake.rows.get(MINE)?.receipt).toBeUndefined();
+    expect(fake.landed).toEqual([]);
+    expect(fake.graph).toBeNull();
+
+    // ── state changes: a model now exists (another turn drafted it), without X ─
+    fake.graph = jsonCopy(base);
+    const retry = await send(addEvent(X, base), MINE);
+
+    // ── PREMISE, proven inside the test ─────────────────────────────────────
+    const mineIdx = appendIndicesFor(MINE);
+    expect(mineIdx).toHaveLength(2);
+    const retryWrite = appendMock.mock.calls[mineIdx[1]!]![0];
+    // (a) the SAME request, which now passes every pre-commit gate and reaches the
+    //     append with a candidate holding X;
+    expect(retryWrite.request_hash).toBe(appendMock.mock.calls[mineIdx[0]!]![0].request_hash);
+    expect(hasNode(retryWrite.graph, X.id)).toBe(true);
+    // (b) the store flags a REPLAY (same turn id, same request hash) and hands back
+    //     no receipt — the prior row is the refusal, which never minted one;
+    const outcome = await outcomeAt(mineIdx[1]!);
+    expect(outcome.replayedPriorTurn).toBe(true);
+    expect(outcome.priorTurnConflict).toBeUndefined();
+    expect(outcome.modelVersionReceipt).toBeUndefined();
+    expect(fake.replayed).toEqual([MINE]);
+    expect(fake.landed).toEqual([]);
+    expect(fake.conflicted).toEqual([]);
+    expect(fake.casRejected).toEqual([]);
+    expect(fake.versions).toEqual([]);
+    // (c) X was NEVER written: the store holds the drafted model without it.
+    const stored = fake.graph;
+    expect(hasNode(stored, X.id)).toBe(false);
+    // Present control for the log probe: commit.ts's own replay line was seen.
+    const commitReplayLogs = logInfoSpy.mock.calls.filter(
+      (c) => typeof c[1] === 'string' && (c[1] as string).startsWith('V5 commit — this turn REPLAYED'),
+    ).length;
+    expect(commitReplayLogs, 'the log probe must see the commit\'s replay line in this run').toBe(1);
+
+    const observed =
+      `observed: status=${retry.status}, reply draft_graph nodes=[${
+        retry.body.draft_graph === undefined ? 'absent' : nodeIds(retry.body.draft_graph).join(',')
+      }], reply graph_hash=${String(retry.body.graph_hash)}, stored hash=${analysisHash(stored)}, ` +
+      `assistant_text=${JSON.stringify(retry.body.assistant_text ?? null)}`;
+
+    // ── TRUTHFUL: nothing written, and the change is not in the model ───────
+    expect.soft(retry.status, `REFUSAL-REPLAY: not a server failure (${observed})`).toBe(200);
+    const prose = String(retry.body.assistant_text ?? '');
+    expect.soft(
+      prose,
+      `REFUSAL-REPLAY: prose claims the add was already recorded, but X was never written (${observed})`,
+    ).not.toMatch(/already been recorded/i);
+    expect.soft(prose, `REFUSAL-REPLAY: prose says what is true now (${observed})`).toBe(REPLAY_CHANGE_NOT_IN_MODEL);
+    expect.soft(prose, `REFUSAL-REPLAY: prose must not confirm the add (${observed})`).not.toContain(`Added '${X.label}'`);
+    expect.soft(prose, `REFUSAL-REPLAY: prose must not say the add is saved (${observed})`).not.toMatch(/That's saved/);
+    expect.soft(retry.body.model_version_receipt, `REFUSAL-REPLAY: no receipt (${observed})`).toBeUndefined();
+    // The stored snapshot, for display — truthfully without X.
+    expect.soft(retry.body.draft_graph, `REFUSAL-REPLAY: the stored graph is presented (${observed})`).toBeDefined();
+    expect.soft(hasNode(retry.body.draft_graph, X.id), `REFUSAL-REPLAY: no X on display (${observed})`).toBe(false);
+    expect.soft(retry.body.graph_hash, `REFUSAL-REPLAY: the stored graph's hash (${observed})`).toBe(
+      analysisHash(stored),
+    );
+    expect.soft(committedAttestationsFor(X.id), `REFUSAL-REPLAY: no success attestation (${observed})`).toBe(0);
+
+    expectNoProviderReached();
+  });
+
+  // ── REPLAY OF A REFUSAL, REREAD FAILED — neither claim can be made ─────
+
+  it('REPLAY OF A REFUSAL, REREAD FAILED: as REPLAY OF A REFUSAL, but commit.ts\'s post-append reread throws — the reply says the change could not be checked, presents nothing graph-shaped, and claims neither "already recorded" nor "not in the model"', async () => {
+    fake.owned = true;
+    const base = buildBaseGraph();
+    fake.graph = null;
+    expect((await send(addEvent(X, base), MINE)).status).toBe(200);
+    expect(fake.rows.has(MINE), 'the refusal row committed under T').toBe(true);
+    fake.graph = jsonCopy(base);
+    const appendsBeforeRetry = appendMock.mock.calls.length;
+    fake.failFirstReadAfterAppends = appendsBeforeRetry;
+
+    const retry = await send(addEvent(X, base), MINE);
+
+    // ── PREMISE ─────────────────────────────────────────────────────────────
+    const mineIdx = appendIndicesFor(MINE);
+    expect(mineIdx).toEqual([0, appendsBeforeRetry]);
+    const outcome = await outcomeAt(appendsBeforeRetry);
+    expect(outcome.replayedPriorTurn).toBe(true);
+    expect(fake.readFailuresAtAppendCount).toEqual([appendsBeforeRetry + 1]);
+    expect(hasNode(fake.graph, X.id)).toBe(false);
+
+    const observed =
+      `observed: status=${retry.status}, draft_graph=${retry.body.draft_graph === undefined ? 'absent' : 'present'}, ` +
+      `graph_hash=${String(retry.body.graph_hash)}, assistant_text=${JSON.stringify(retry.body.assistant_text ?? null)}`;
+    expect.soft(retry.status, `REFUSAL-REPLAY-REREAD: not a server failure (${observed})`).toBe(200);
+    expect.soft(String(retry.body.assistant_text ?? ''), `REFUSAL-REPLAY-REREAD: prose (${observed})`).toBe(
+      REPLAY_CHANGE_UNCHECKABLE,
+    );
+    expect.soft(retry.body.model_version_receipt, `REFUSAL-REPLAY-REREAD: no receipt (${observed})`).toBeUndefined();
+    expect.soft(retry.body.draft_graph, `REFUSAL-REPLAY-REREAD: no graph (${observed})`).toBeUndefined();
+    expect.soft(retry.body.graph_hash, `REFUSAL-REPLAY-REREAD: no graph_hash (${observed})`).toBeUndefined();
+    expect.soft(retry.body.analysis_ready, `REFUSAL-REPLAY-REREAD: no readiness (${observed})`).toBeUndefined();
+    expect.soft(committedAttestationsFor(X.id), `REFUSAL-REPLAY-REREAD: no attestation (${observed})`).toBe(0);
+
+    expectNoProviderReached();
+  });
+
+  // ── REPLAY, CHANGE NO LONGER IN THE MODEL — the original receipt is withheld ─
+
+  it('REPLAY, CHANGE NO LONGER IN THE MODEL: a genuine replay of my committed add of X whose store no longer holds X — the store hands back the ORIGINAL receipt, but the reply must not present it (or "already recorded") as proof of a change the model does not hold', async () => {
+    // As REPLAY: derive the original's committed row (with its receipt) through
+    // the REAL route, then install it between the retry's base read and its
+    // append — but leave the store's graph WITHOUT X (removed since).
+    fake.owned = true;
+    const base = jsonCopy(fake.graph);
+    expect((await send(addEvent(X, base), MINE)).status).toBe(200);
+    const originalRow = fake.rows.get(MINE);
+    expect(originalRow?.receipt?.version_id, 'receipt control: the original must mint').toBe(VERSION_IDS[0]);
+    const originalVersions = [...fake.versions];
+    resetFake();
+    appendMock.mockClear();
+    logInfoSpy.mockClear();
+    loadGraphSnapshots.length = 0;
+    fake.owned = true;
+
+    fake.afterNextRead = () => {
+      fake.rows.set(MINE, originalRow!);
+      fake.versions = [...originalVersions];
+    };
+    const retry = await send(addEvent(X, base), MINE);
+
+    // ── PREMISE, proven inside the test ─────────────────────────────────────
+    const mineIdx = appendIndicesFor(MINE);
+    expect(mineIdx).toHaveLength(1);
+    expect(fake.afterNextRead, 'the interleaving hook must have run').toBeUndefined();
+    expect(appendMock.mock.calls[mineIdx[0]!]![0].request_hash).toBe(originalRow!.request_hash);
+    const outcome = await outcomeAt(mineIdx[0]!);
+    expect(outcome.replayedPriorTurn).toBe(true);
+    // The store DID hand back the original receipt — so the reply's lack of one
+    // below is the dispatcher withholding it, not a vacuous absence.
+    expect(outcome.modelVersionReceipt?.version_id).toBe(VERSION_IDS[0]);
+    expect(fake.replayed).toEqual([MINE]);
+    expect(fake.landed).toEqual([]);
+    const stored = fake.graph;
+    expect(hasNode(stored, X.id)).toBe(false);
+
+    const observed =
+      `observed: status=${retry.status}, receipt=${JSON.stringify(
+        (retry.body.model_version_receipt as { version_id?: unknown } | undefined)?.version_id ?? null,
+      )}, assistant_text=${JSON.stringify(retry.body.assistant_text ?? null)}`;
+
+    expect.soft(retry.status, `REPLAY-GONE: not a server failure (${observed})`).toBe(200);
+    const prose = String(retry.body.assistant_text ?? '');
+    expect.soft(prose, `REPLAY-GONE: "already recorded" with the change absent (${observed})`).not.toMatch(
+      /already been recorded/i,
+    );
+    expect.soft(prose, `REPLAY-GONE: prose says what is true now (${observed})`).toBe(REPLAY_CHANGE_NOT_IN_MODEL);
+    expect.soft(
+      retry.body.model_version_receipt,
+      `REPLAY-GONE: the original receipt is presented as proof of a change the model does not hold (${observed})`,
+    ).toBeUndefined();
+    expect.soft(hasNode(retry.body.draft_graph, X.id), `REPLAY-GONE: no X on display (${observed})`).toBe(false);
+    expect.soft(retry.body.graph_hash, `REPLAY-GONE: the stored graph's hash (${observed})`).toBe(analysisHash(stored));
+    expect.soft(committedAttestationsFor(X.id), `REPLAY-GONE: no success attestation (${observed})`).toBe(0);
 
     expectNoProviderReached();
   });
