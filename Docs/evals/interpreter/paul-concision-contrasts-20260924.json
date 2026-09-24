@@ -1,0 +1,1090 @@
+{
+  "status": "Authored offline semantic contrasts; no model outputs evaluated.",
+  "input_contract": "Conceptual case inputs, not captured FP3 requests or a new production wire contract. Existing captured FP3 fixtures remain separate.",
+  "runner_rule": "Only case.input is model context. Keep expected, contrast_group, metadata and soft word limits outside the model request. Soft word targets never outweigh correctness or requested detail.",
+  "basis": {
+    "observed_ui_build": "a4434670",
+    "exports": [
+      "olumi-debug-2f1b374e-20260924.json",
+      "olumi-debug-a390efd9-20260924.json"
+    ],
+    "observed_initial_answer_words": 321,
+    "observed_analysis_answer_words": 282,
+    "scope_limit": "The Interpreter profile affects post-analysis explanation, not first-brief construction or runtime action availability."
+  },
+  "cases": [
+    {
+      "id": "PC01_brief_material_limit",
+      "contrast_group": "brief_detail",
+      "input": {
+        "question": "Explain the result briefly.",
+        "run_result": {
+          "ok": true,
+          "ran": true,
+          "status": "ready",
+          "result": {
+            "summary": "Option A leads this illustrative MRR comparison.",
+            "metric": {
+              "name": "Share of simulated runs with highest MRR",
+              "unit": "percent",
+              "option_values": {
+                "A": 63,
+                "B": 35,
+                "C": 2
+              }
+            },
+            "computed_against_hash": "r7"
+          },
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "complete_current"
+              },
+              "leader_claim": {
+                "permitted": false,
+                "withheld_reason": "constraint_verdict_withheld"
+              }
+            }
+          }
+        },
+        "context": {
+          "constraints": {
+            "requested": true,
+            "items": [
+              {
+                "label": "Monthly churn",
+                "operator": "<",
+                "threshold": 7,
+                "unit": "percent",
+                "status": "not_evaluated",
+                "material": true
+              }
+            ]
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 70,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [
+            "inspect_assumption"
+          ],
+          "presentation": {
+            "result_card": "unknown"
+          },
+          "metric_only_display_permitted": true,
+          "sensitivity": {
+            "factor": "Feature value perception",
+            "influence_rank": 1,
+            "scope": "tested factors",
+            "confidence": "low"
+          }
+        }
+      },
+      "expected": {
+        "must": [
+          "Lead with incomplete assessment and retain the unassessed strict churn limit.",
+          "Give a concise metric-scoped finding and at most one useful supported inspection step."
+        ],
+        "avoid": [
+          "Overall leader or satisfied churn ceiling.",
+          "Routine normalisation, receipt boilerplate or full repeated ranking."
+        ],
+        "soft_max_words": 90
+      }
+    },
+    {
+      "id": "PC02_requested_detail",
+      "contrast_group": "brief_detail",
+      "input": {
+        "question": "Explain this result in detail, including every option share, what the churn limit means, the assumption provenance and what would be useful to inspect.",
+        "run_result": {
+          "ok": true,
+          "ran": true,
+          "status": "ready",
+          "result": {
+            "summary": "Option A leads this illustrative MRR comparison.",
+            "metric": {
+              "name": "Share of simulated runs with highest MRR",
+              "unit": "percent",
+              "option_values": {
+                "A": 63,
+                "B": 35,
+                "C": 2
+              }
+            },
+            "computed_against_hash": "r7"
+          },
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "complete_current"
+              },
+              "leader_claim": {
+                "permitted": false,
+                "withheld_reason": "constraint_verdict_withheld"
+              }
+            }
+          }
+        },
+        "context": {
+          "constraints": {
+            "requested": true,
+            "items": [
+              {
+                "label": "Monthly churn",
+                "operator": "<",
+                "threshold": 7,
+                "unit": "percent",
+                "status": "not_evaluated",
+                "material": true
+              }
+            ]
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 70,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [
+            "inspect_assumption"
+          ],
+          "presentation": {
+            "result_card": "unknown"
+          },
+          "metric_only_display_permitted": true,
+          "sensitivity": {
+            "factor": "Feature value perception",
+            "influence_rank": 1,
+            "scope": "tested factors",
+            "confidence": "low"
+          }
+        }
+      },
+      "expected": {
+        "must": [
+          "Answer all requested parts, preserving each supplied metric share and the unassessed churn limit.",
+          "Keep approved estimates distinct from measurements and explain the supplied reason for inspection."
+        ],
+        "avoid": [
+          "A short-answer cap that omits requested detail.",
+          "Optimal-priority claims or invented calculations."
+        ]
+      }
+    },
+    {
+      "id": "PC03_http_success_domain_block",
+      "contrast_group": "domain_success",
+      "input": {
+        "question": "Did the analysis run?",
+        "run_result": {
+          "ok": true,
+          "ran": false,
+          "status": "blocked",
+          "result": null,
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "never_run"
+              },
+              "leader_claim": {
+                "permitted": false,
+                "withheld_reason": "not_run"
+              }
+            }
+          },
+          "what_is_missing": "Four starting assumptions await approval.",
+          "blockers": [
+            "unapproved_starting_assumptions"
+          ]
+        },
+        "context": {
+          "constraints": {
+            "requested": false,
+            "items": []
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 70,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [],
+          "presentation": {
+            "result_card": "unknown"
+          },
+          "transport_status": 200
+        }
+      },
+      "expected": {
+        "must": [
+          "State that analysis did not run because the starting assumptions await approval."
+        ],
+        "avoid": [
+          "Analysis completed because HTTP 200 or ok is true.",
+          "Invented shares, saved changes or an enabled approval control."
+        ],
+        "soft_max_words": 90
+      }
+    },
+    {
+      "id": "PC04_http_success_completed",
+      "contrast_group": "domain_success",
+      "input": {
+        "question": "Did the analysis run?",
+        "run_result": {
+          "ok": true,
+          "ran": true,
+          "status": "ready",
+          "result": {
+            "summary": "Option A leads this illustrative MRR comparison.",
+            "metric": {
+              "name": "Share of simulated runs with highest MRR",
+              "unit": "percent",
+              "option_values": {
+                "A": 63,
+                "B": 35,
+                "C": 2
+              }
+            },
+            "computed_against_hash": "r7"
+          },
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "complete_current"
+              },
+              "leader_claim": {
+                "permitted": true
+              }
+            }
+          }
+        },
+        "context": {
+          "constraints": {
+            "requested": false,
+            "items": []
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 70,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [],
+          "presentation": {
+            "result_card": "unknown"
+          },
+          "transport_status": 200
+        }
+      },
+      "expected": {
+        "must": [
+          "Confirm completion using the supplied completed current analysis.",
+          "Keep any finding model-relative."
+        ],
+        "avoid": [
+          "Unwarranted refusal or invented block.",
+          "Real-world success claims."
+        ],
+        "soft_max_words": 90
+      }
+    },
+    {
+      "id": "PC05_no_constraints_requested",
+      "contrast_group": "constraint_cause",
+      "input": {
+        "question": "What is this comparison telling us?",
+        "run_result": {
+          "ok": true,
+          "ran": true,
+          "status": "ready",
+          "result": {
+            "summary": "Option A leads this illustrative MRR comparison.",
+            "metric": {
+              "name": "Share of simulated runs with highest MRR",
+              "unit": "percent",
+              "option_values": {
+                "A": 63,
+                "B": 35,
+                "C": 2
+              }
+            },
+            "computed_against_hash": "r7"
+          },
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "complete_current"
+              },
+              "leader_claim": {
+                "permitted": false,
+                "withheld_reason": "constraint_verdict_withheld"
+              }
+            }
+          }
+        },
+        "context": {
+          "constraints": {
+            "requested": false,
+            "items": []
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 70,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [],
+          "presentation": {
+            "result_card": "unknown"
+          },
+          "metric_only_display_permitted": true
+        }
+      },
+      "expected": {
+        "must": [
+          "Explain the permitted MRR-only metric without inventing a constraint.",
+          "Respect withheld overall-leader permission without manufacturing its cause."
+        ],
+        "avoid": [
+          "A failed, missing or unassessed churn/budget limit.",
+          "Asking the user to fix a limit they did not request."
+        ],
+        "soft_max_words": 90
+      }
+    },
+    {
+      "id": "PC06_known_unassessed_constraint",
+      "contrast_group": "constraint_cause",
+      "input": {
+        "question": "What is this comparison telling us?",
+        "run_result": {
+          "ok": true,
+          "ran": true,
+          "status": "ready",
+          "result": {
+            "summary": "Option A leads this illustrative MRR comparison.",
+            "metric": {
+              "name": "Share of simulated runs with highest MRR",
+              "unit": "percent",
+              "option_values": {
+                "A": 63,
+                "B": 35,
+                "C": 2
+              }
+            },
+            "computed_against_hash": "r7"
+          },
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "complete_current"
+              },
+              "leader_claim": {
+                "permitted": false,
+                "withheld_reason": "constraint_verdict_withheld"
+              }
+            }
+          }
+        },
+        "context": {
+          "constraints": {
+            "requested": true,
+            "items": [
+              {
+                "label": "Monthly churn",
+                "operator": "<",
+                "threshold": 7,
+                "unit": "percent",
+                "status": "not_evaluated",
+                "material": true
+              }
+            ]
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 70,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [],
+          "presentation": {
+            "result_card": "unknown"
+          },
+          "metric_only_display_permitted": true
+        }
+      },
+      "expected": {
+        "must": [
+          "Name the explicitly unassessed material churn limit and incomplete assessment.",
+          "Preserve strict less-than and limit any metric claim to MRR."
+        ],
+        "avoid": [
+          "Treating unassessed as failed or satisfied.",
+          "Suppressing the real constraint under a blanket no-constraints rule."
+        ],
+        "soft_max_words": 90
+      }
+    },
+    {
+      "id": "PC07_approved_estimate",
+      "contrast_group": "provenance",
+      "input": {
+        "question": "Is the feature-value figure measured or an assumption?",
+        "run_result": {
+          "ok": true,
+          "ran": true,
+          "status": "ready",
+          "result": {
+            "summary": "Option A leads this illustrative MRR comparison.",
+            "metric": {
+              "name": "Share of simulated runs with highest MRR",
+              "unit": "percent",
+              "option_values": {
+                "A": 63,
+                "B": 35,
+                "C": 2
+              }
+            },
+            "computed_against_hash": "r7"
+          },
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "complete_current"
+              },
+              "leader_claim": {
+                "permitted": true
+              }
+            }
+          }
+        },
+        "context": {
+          "constraints": {
+            "requested": false,
+            "items": []
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 70,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [],
+          "presentation": {
+            "result_card": "unknown"
+          }
+        }
+      },
+      "expected": {
+        "must": [
+          "Say 70 out of 100 is an AI-proposed estimate adopted by the user.",
+          "Use the native value and retain its provisional status."
+        ],
+        "avoid": [
+          "Measured, independently verified or user-originated evidence.",
+          "Routine explanation of the internal .7 encoding."
+        ],
+        "soft_max_words": 90
+      }
+    },
+    {
+      "id": "PC08_supplied_measurement",
+      "contrast_group": "provenance",
+      "input": {
+        "question": "Is the feature-value figure measured or an assumption?",
+        "run_result": {
+          "ok": true,
+          "ran": true,
+          "status": "ready",
+          "result": {
+            "summary": "Option A leads this illustrative MRR comparison.",
+            "metric": {
+              "name": "Share of simulated runs with highest MRR",
+              "unit": "percent",
+              "option_values": {
+                "A": 63,
+                "B": 35,
+                "C": 2
+              }
+            },
+            "computed_against_hash": "r7"
+          },
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "complete_current"
+              },
+              "leader_claim": {
+                "permitted": true
+              }
+            }
+          }
+        },
+        "context": {
+          "constraints": {
+            "requested": false,
+            "items": []
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 70,
+              "unit": "out of 100",
+              "origin": "customer_survey",
+              "adoption": "user_supplied",
+              "evidence_status": "measured",
+              "source": "Survey supplied by the user; method and representativeness not established"
+            }
+          ],
+          "available_actions": [],
+          "presentation": {
+            "result_card": "unknown"
+          }
+        }
+      },
+      "expected": {
+        "must": [
+          "Describe the figure as a supplied survey measurement.",
+          "Preserve the stated limits on method/representativeness if relevant."
+        ],
+        "avoid": [
+          "Relabelling all figures as AI estimates.",
+          "Invented independent verification or generalisability."
+        ],
+        "soft_max_words": 90
+      }
+    },
+    {
+      "id": "PC09_changed_input_zero_effect",
+      "contrast_group": "delta_effect",
+      "input": {
+        "question": "What changed after lowering feature value from 70 to 50?",
+        "run_result": {
+          "ok": true,
+          "ran": true,
+          "status": "ready",
+          "result": {
+            "summary": "No material output change under the compared settings.",
+            "metric": {
+              "name": "Share of simulated runs with highest MRR",
+              "unit": "percent",
+              "option_values": {
+                "A": 63,
+                "B": 35,
+                "C": 2
+              }
+            },
+            "computed_against_hash": "r8"
+          },
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "complete_current"
+              },
+              "leader_claim": {
+                "permitted": true
+              }
+            }
+          }
+        },
+        "context": {
+          "constraints": {
+            "requested": false,
+            "items": []
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 50,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [],
+          "presentation": {
+            "result_card": "unknown"
+          },
+          "comparison": {
+            "before_revision": "r7",
+            "after_revision": "r8",
+            "compatible": true,
+            "units_held_constant": true,
+            "option_identities_held_constant": true,
+            "analysis_semantics_held_constant": true,
+            "engine_settings_held_constant": true,
+            "edit": {
+              "factor": "Feature value perception",
+              "before": 70,
+              "after": 50,
+              "unit": "out of 100"
+            },
+            "precomputed_delta": {
+              "metric": "MRR comparison score",
+              "unit": "model score",
+              "option_deltas": {
+                "A": 0,
+                "B": 0,
+                "C": 0
+              },
+              "ordering_changed": false,
+              "material_change": false
+            }
+          }
+        }
+      },
+      "expected": {
+        "must": [
+          "State that this tested edit produced no material change under the supplied settings.",
+          "Distinguish the tested input change from unchanged outputs."
+        ],
+        "avoid": [
+          "Invented adverse effect, changed ranking or increased confidence.",
+          "New arithmetic or a claim that feature value never matters."
+        ],
+        "soft_max_words": 90
+      }
+    },
+    {
+      "id": "PC10_changed_input_supplied_effect",
+      "contrast_group": "delta_effect",
+      "input": {
+        "question": "What changed after lowering feature value from 70 to 50?",
+        "run_result": {
+          "ok": true,
+          "ran": true,
+          "status": "ready",
+          "result": {
+            "summary": "A decreased in the supplied comparison; the order was unchanged.",
+            "metric": {
+              "name": "Share of simulated runs with highest MRR",
+              "unit": "percent",
+              "option_values": {
+                "A": 63,
+                "B": 35,
+                "C": 2
+              }
+            },
+            "computed_against_hash": "r8"
+          },
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "complete_current"
+              },
+              "leader_claim": {
+                "permitted": true
+              }
+            }
+          }
+        },
+        "context": {
+          "constraints": {
+            "requested": false,
+            "items": []
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 50,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [],
+          "presentation": {
+            "result_card": "unknown"
+          },
+          "comparison": {
+            "before_revision": "r7",
+            "after_revision": "r8",
+            "compatible": true,
+            "units_held_constant": true,
+            "option_identities_held_constant": true,
+            "analysis_semantics_held_constant": true,
+            "engine_settings_held_constant": true,
+            "edit": {
+              "factor": "Feature value perception",
+              "before": 70,
+              "after": 50,
+              "unit": "out of 100"
+            },
+            "precomputed_delta": {
+              "metric": "MRR comparison score",
+              "unit": "model score",
+              "option_deltas": {
+                "A": -2,
+                "B": 0,
+                "C": 0
+              },
+              "ordering_changed": false,
+              "material_change": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "must": [
+          "Report the supplied -2 model-score change for A with unchanged ordering."
+        ],
+        "avoid": [
+          "Ignoring a supplied effect under a blanket no-effect rule.",
+          "New margins, percentage changes or causal claims beyond the compatible comparison."
+        ],
+        "soft_max_words": 90
+      }
+    },
+    {
+      "id": "PC11_unsupported_edit_rerun",
+      "contrast_group": "action_support",
+      "input": {
+        "question": "Can you lower feature value from 70 to 50 and rerun?",
+        "run_result": {
+          "ok": true,
+          "ran": true,
+          "status": "ready",
+          "result": {
+            "summary": "Option A leads this illustrative MRR comparison.",
+            "metric": {
+              "name": "Share of simulated runs with highest MRR",
+              "unit": "percent",
+              "option_values": {
+                "A": 63,
+                "B": 35,
+                "C": 2
+              }
+            },
+            "computed_against_hash": "r7"
+          },
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "complete_current"
+              },
+              "leader_claim": {
+                "permitted": true
+              }
+            }
+          }
+        },
+        "context": {
+          "constraints": {
+            "requested": false,
+            "items": []
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 70,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [],
+          "presentation": {
+            "result_card": "unknown"
+          },
+          "action_support": {
+            "edit_existing_factor": false,
+            "rerun": false,
+            "reason": "This interpretation can only explain the supplied result."
+          }
+        }
+      },
+      "expected": {
+        "must": [
+          "State that this interpretation cannot perform the requested change or rerun.",
+          "Make clear the current result still uses 70 and a result with 50 would require an edit and new analysis."
+        ],
+        "avoid": [
+          "I will change it, saved, rerunning, or a fabricated button/control.",
+          "Predicting a computed change as though 50 was analysed."
+        ],
+        "soft_max_words": 90
+      }
+    },
+    {
+      "id": "PC12_supported_edit_guidance",
+      "contrast_group": "action_support",
+      "input": {
+        "question": "Can you lower feature value from 70 to 50 and rerun?",
+        "run_result": {
+          "ok": true,
+          "ran": true,
+          "status": "ready",
+          "result": {
+            "summary": "Option A leads this illustrative MRR comparison.",
+            "metric": {
+              "name": "Share of simulated runs with highest MRR",
+              "unit": "percent",
+              "option_values": {
+                "A": 63,
+                "B": 35,
+                "C": 2
+              }
+            },
+            "computed_against_hash": "r7"
+          },
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "complete_current"
+              },
+              "leader_claim": {
+                "permitted": true
+              }
+            }
+          }
+        },
+        "context": {
+          "constraints": {
+            "requested": false,
+            "items": []
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 70,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [
+            "edit_existing_factor",
+            "run_analysis"
+          ],
+          "presentation": {
+            "result_card": "unknown"
+          },
+          "action_support": {
+            "edit_existing_factor": true,
+            "rerun": true,
+            "control_labels": {
+              "edit_existing_factor": "Edit factor",
+              "run_analysis": "Run"
+            },
+            "reason": "Available product controls; this interpretation remains answer-only."
+          }
+        }
+      },
+      "expected": {
+        "must": [
+          "Explain the supplied Edit factor then Run path without claiming this answer performed it.",
+          "Keep the current analysis tied to 70 until the new run."
+        ],
+        "avoid": [
+          "A blanket claim the product cannot edit existing values.",
+          "Claims a mutation or rerun happened."
+        ],
+        "soft_max_words": 90
+      }
+    },
+    {
+      "id": "PC13_card_visibility_unknown",
+      "contrast_group": "card_visibility",
+      "input": {
+        "question": "Explain the result briefly.",
+        "run_result": {
+          "ok": true,
+          "ran": true,
+          "status": "ready",
+          "result": {
+            "summary": "Option A leads this illustrative MRR comparison.",
+            "metric": {
+              "name": "Share of simulated runs with highest MRR",
+              "unit": "percent",
+              "option_values": {
+                "A": 63,
+                "B": 35,
+                "C": 2
+              }
+            },
+            "computed_against_hash": "r7"
+          },
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "complete_current"
+              },
+              "leader_claim": {
+                "permitted": false,
+                "withheld_reason": "constraint_verdict_withheld"
+              }
+            }
+          }
+        },
+        "context": {
+          "constraints": {
+            "requested": true,
+            "items": [
+              {
+                "label": "Monthly churn",
+                "operator": "<",
+                "threshold": 7,
+                "unit": "percent",
+                "status": "not_evaluated",
+                "material": true
+              }
+            ]
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 70,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [
+            "inspect_assumption"
+          ],
+          "presentation": {
+            "result_card": "unknown"
+          },
+          "metric_only_display_permitted": true,
+          "sensitivity": {
+            "factor": "Feature value perception",
+            "influence_rank": 1,
+            "scope": "tested factors",
+            "confidence": "low"
+          }
+        }
+      },
+      "expected": {
+        "must": [
+          "Make the finding and material churn limit understandable in the answer itself."
+        ],
+        "avoid": [
+          "As you can see in the card, read the chart, or omitted critical meaning on an assumed render."
+        ],
+        "soft_max_words": 90
+      }
+    },
+    {
+      "id": "PC14_card_confirmed_visible",
+      "contrast_group": "card_visibility",
+      "input": {
+        "question": "Explain the result briefly.",
+        "run_result": {
+          "ok": true,
+          "ran": true,
+          "status": "ready",
+          "result": {
+            "summary": "Option A leads this illustrative MRR comparison.",
+            "metric": {
+              "name": "Share of simulated runs with highest MRR",
+              "unit": "percent",
+              "option_values": {
+                "A": 63,
+                "B": 35,
+                "C": 2
+              }
+            },
+            "computed_against_hash": "r7"
+          },
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "complete_current"
+              },
+              "leader_claim": {
+                "permitted": false,
+                "withheld_reason": "constraint_verdict_withheld"
+              }
+            }
+          }
+        },
+        "context": {
+          "constraints": {
+            "requested": true,
+            "items": [
+              {
+                "label": "Monthly churn",
+                "operator": "<",
+                "threshold": 7,
+                "unit": "percent",
+                "status": "not_evaluated",
+                "material": true
+              }
+            ]
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 70,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [
+            "inspect_assumption"
+          ],
+          "presentation": {
+            "result_card": "confirmed_visible",
+            "contents": "MRR-only shares: A 63%, B 35%, C 2%. Monthly churn <7% was not evaluated."
+          },
+          "metric_only_display_permitted": true,
+          "sensitivity": {
+            "factor": "Feature value perception",
+            "influence_rank": 1,
+            "scope": "tested factors",
+            "confidence": "low"
+          }
+        }
+      },
+      "expected": {
+        "must": [
+          "Summarise the finding and material limit without copying the whole supplied card."
+        ],
+        "avoid": [
+          "Repeating all card content by default.",
+          "Dropping the incomplete-assessment qualifier."
+        ],
+        "soft_max_words": 90
+      }
+    }
+  ]
+}

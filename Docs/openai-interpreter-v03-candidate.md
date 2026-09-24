@@ -8,6 +8,10 @@ The candidate makes incomplete analysis understandable without turning every wit
 
 It also distinguishes a useful investigation suggestion from a claim of optimal priority. Supplied factor sensitivity or influence, together with uncertainty, can justify inspecting an assumption. Missing investigation costs do not require refusing all help. A lone edge-switch result still cannot establish sensitivity, importance or priority. Declining a method still means answering without starting it.
 
+Paul's live test exposed a 321-word construction answer and a 282-word analysis answer, followed by a result card that repeated much of the explanation. The refinement targets the **post-analysis explanation only**: normally 2–4 sentences and about 50–90 words, with the material limitation beside the finding and at most one supported next step. Detailed requests and accuracy take precedence over the length target. This profile cannot shorten the constructor response until its separate owner improves that path.
+
+The interpretation omits routine internal-normalisation and save/version notices while retaining relevant save failures or uncertainty. It must not assume a result card rendered: presentation evidence is required before relying on an existing card to avoid duplication. Native values, explicit incomplete assessment and currentness remain essential. HTTP success is explicitly distinct from a completed analysis, and next-step guidance must not promise unsupported edits, controls or reruns.
+
 ## Existing seam and ownership
 
 `composeAnalysisInterpreterV03(baseInstructions)` returns the caller's existing baseline plus the candidate and hashes of the profile, baseline and complete instructions. It rejects an empty baseline. This is the same composition pattern as v0.2, not a replacement kernel or registry.
@@ -22,14 +26,30 @@ The candidate retains model-relative claims and human judgement; separate metric
 
 ## Evidence and remaining work
 
-- Static implementation: 9 profile/comparison-preparation tests, ESLint and strict targeted TypeScript checks passed. Those checks do not establish generated-answer quality.
+- Static implementation: 17 focused profile/comparison-preparation/fixture-integrity tests passed in 3.26 seconds with one worker. ESLint and strict targeted TypeScript passed for the changed profile and new fixture test. These checks do not establish generated-answer quality.
 - v0.2 remains 2,929 characters with SHA-256 `3d979e8406693be42d3b340fd245d76a501c4b1c191d5ffaa1353f2f0380ba32`.
-- Candidate: 3,566 characters with SHA-256 `454c2a83d4f4bfeb829437a9f351add33bfaa903982117eee5d637d9948ebb0a`. That is 637 additional characters; character length is not measured token usage or latency.
+- Refined candidate: 3,844 characters with SHA-256 `24bbfe2cbac902784eb8fefc6fbd07814229bc53b40d6f900d2f6605166426dc`. This adds 278 characters to the earlier candidate and 915 to v0.2; the intended reduction is in answer length, not instruction length. Character length is not measured token usage or latency.
 - No paid model calls or generated-answer evaluation were performed for this candidate. The v0.2 benchmark does not establish v0.3 quality.
 
 The existing six PJ cases should be combined with controls where the withheld reason has no supplied cause, a constraint actually fails, no constraints were requested, metric-only permission is denied, or one edge flip is the sole investigation evidence. Preserve positive controls for legitimate metric-only findings and useful inspection grounded in supplied sensitivity plus uncertainty. Retain all before/after and existing v0.2 regression cases.
 
 The principal quality risks are over-cautious language around missing permissions, greater prompt length, and treating any uncertain factor as a priority despite the bounded wording. Compare matched outputs for helpfulness and correctness before changing the live profile; offline request transport and composition checks cannot prove those outcomes.
+
+## Real-journey semantic contrasts
+
+`Docs/evals/interpreter/paul-concision-contrasts-20260924.json` contains fourteen authored cases in seven pairs. They are conceptual semantic fixtures, **not captured FP3 requests**, observed model answers or a new runtime contract:
+
+| Pair | What changes while relevant facts stay fixed |
+|---|---|
+| Brief / requested detail | Same result, material churn limit and uncertainty; different requested depth |
+| Domain block / completed run | Both HTTP 200 and `ok:true`; different run outcome |
+| No constraints / known unassessed constraint | Same generic withheld reason; different supplied cause evidence |
+| Approved estimate / supplied measurement | Same native figure; different origin and evidence status |
+| Zero effect / supplied effect | Changed revision in both; precomputed zero versus non-zero delta |
+| Unsupported edit / supported guidance | Same requested edit and current result; different available product actions |
+| Unknown card / confirmed visible card | Same analysis and question; different presentation evidence |
+
+Send only `case.input` as context when a later evaluation is authorised. Keep expected behaviour, scoring limits and contrast labels outside the model request. Word limits are soft: retaining a material caveat and answering an explicit request for detail are more important than a short answer. The new static tests verify that the pairs actually differ in the intended evidence and that scoring fields are separate; they do not score language-model behaviour.
 
 ## Repeatable offline comparison
 
