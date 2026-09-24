@@ -10,20 +10,66 @@
  *   P1  exact-target success — an `applied` graph_patch naming MY factor, and a
  *       `graph_hash` equal to the hash of the EXACT bytes MY append carried,
  *       exist only because MY append resolved (the same request whose append
- *       rejects carries neither). Owner variant: the version receipt names MY
- *       turn; guest variant: no receipt.
+ *       rejects carries neither). "MY appended bytes" means the PROJECTED bytes
+ *       the store received, not the handler's pre-projection copy: the fixture
+ *       carries an empty top-level `options: []`, so the persistence projection
+ *       appends `o-launch` on every first write and moves the analysis hash —
+ *       P1 asserts that premise, so a reply hash of the pre-projection copy
+ *       fails it. Owner variant: the version receipt names MY
+ *       turn; guest variant: no receipt. Post-append variant: a foreign writer
+ *       commits the instant MY append resolves, so the store's hash moves away
+ *       from my bytes before the reply is built — and the reply's `graph_hash`
+ *       and `draft_graph` are still MY commit's bytes, never a re-read of
+ *       whatever the store holds now (the "moved hash" the rule forbids).
  *   P2  a foreign commit BEFORE my base read is composed into my write, and my
  *       patch still names only my target.
  *   P3  a foreign commit AFTER my base read loses me the atomic CAS: no commit
  *       evidence on the reply, nothing of mine stored.
  *   P4  a foreign writer already set my requested value: `noop`, not `applied`,
  *       and no version receipt.
- *   P5  a refusal: no commit evidence, and no append carried a graph.
+ *   P5  a refusal, bound by identity to the above-cap rejection (the rescale
+ *       pending it persists names MY factor and MY value): no commit evidence,
+ *       and no append carried a graph.
  *   P6  ⭐ DECISIVE NEGATIVE CONTROL — my edit is REFUSED while a foreign writer
  *       MOVES the stored graph. The stored hash moves; my reply still carries no
  *       commit evidence. The reply discriminates; the hash does not.
- *   P7  a replay of an already-committed request (same turn_id) after a foreign
- *       writer moved the target: `noop`, reconciled to the current stored value.
+ *   P7  a replay of an already-committed request (same turn_id, same request)
+ *       after a foreign writer moved the target: the reply's graph_patch block is
+ *       `noop` with `after` = the current stored value. P7 claims the PATCH BLOCK
+ *       only — see the tracked finding below.
+ *   P7b P7 with a foreign write landing BETWEEN the retry's base read and its
+ *       append: the patch's `before` (the start-of-turn read) now differs from
+ *       the stored value, so `after` = the stored value proves a reply-time
+ *       re-read, not a copy of the start-of-turn state. P8b is the same for P8.
+ *   P8  a REUSED turn_id carrying a DIFFERENT request (`priorTurnConflict`) on an
+ *       owned scenario: the store hands back the PRIOR operation's version
+ *       receipt (it shares the turn id, so `source_turn_id === MINE` cannot tell
+ *       them apart) and the reply must not carry it; the patch is `noop` at the
+ *       stored value; nothing is written. P8 likewise claims the receipt and the
+ *       patch block only.
+ *
+ * ⚠ TRACKED FINDING — NOT PINNED, NOT ASSERTED (production fix first). On a
+ *   replay (P7) AND on a conflict (P8), the SAME reply still carries a
+ *   `draft_graph` and a `graph_hash` built from the retry's UNWRITTEN bytes,
+ *   while the store holds something else. Measured 24 Sep on these exact
+ *   fixtures at 5662723c, as RED runs of the assertions this rule demands
+ *   (hashes re-measured after `options: []` was added to the fixture; the
+ *   prose quotes are from the first measurement, before that change):
+ *     P7: draft_graph f-budget = 50,000 while the store holds 70,000 and the
+ *         prose says "currently £70k"; graph_hash 2a88e26c7126bd0d = hash of the
+ *         retry's unwritten bytes (stored graph: 09d5c5d0448d70b6).
+ *     P8: draft_graph f-budget = 70,000 while the store holds 50,000 and the
+ *         prose says "Nothing was written. … currently £50k"; graph_hash
+ *         09d5c5d0448d70b6 = hash of the unwritten bytes (stored: 2a88e26c7126bd0d).
+ *   By `expectNoCommitEvidence`'s own definition that `draft_graph` is commit
+ *   evidence for bytes this operation never wrote. Cause, read at HEAD: on a
+ *   replay/conflict `commitDirectAnswer` still returns `persistedGraph` /
+ *   `persistedAnalysisGraphHash` for the bytes it handed the RPC
+ *   (commit.ts:2064-2065), and `dispatchFactorValueEdit` stamps both onto the
+ *   reply (dispatch.ts:1906-1910); its `analysis_ready` / freshness derive from
+ *   the same bytes (read in the code, not measured here). Deliberately NOT asserted in either direction: pinning it
+ *   would bless the defect, and asserting the fix would put a RED test in the
+ *   required gate before the production change exists.
  *
  * THE FAKE STORE mirrors the three behaviours of the real atomic RPC these cases
  * turn on, as read at HEAD in
@@ -52,8 +98,14 @@
  *     precondition rather than assuming it;
  *   - the status CODE of a lost CAS race — 500 today (`dispatchFactorValueEdit`'s
  *     commit catch has no `GraphStaleWriteError` branch), a typed 409 is
- *     follow-up F2. P3 asserts only the absence of commit evidence, so F2's fix
- *     cannot break it;
+ *     follow-up F2. P3 asserts 'not 200' plus 'no commit evidence', never a
+ *     specific code, so F2's fix cannot break it. The no-evidence checks on the
+ *     error body cannot fail at this HEAD (the 500 body carries no patch,
+ *     postimage or receipt); they are forward guards for F2's typed 409 body.
+ *     What P3 excludes today is a design where a lost CAS answers 200 with an
+ *     honest refusal;
+ *   - the status CODE of a conflict (200 today) — P8 asserts the receipt and the
+ *     patch block, not the code;
  *   - what the UI renders, or how the reload route / freshness read the result;
  *   - ⚠ OPEN DESIGN QUESTION, "idempotent replay": whether a replay of an
  *     already-committed request should answer `noop` (today, deliberately — see
@@ -80,9 +132,17 @@ import {
 // touches the other. `f-budget` is the route-v2-factor-value-edit.test.ts
 // fixture's factor, unchanged, so its above-cap refusal (£250,000 > £100,000)
 // is reused as-is.
+//
+// `options: []` is deliberate: an EMPTY top-level options array next to the
+// `o-launch` option node, so `projectGraphForPersistence`
+// (`reconcileTopLevelOptionsFromNodes`) appends `o-launch` on the first write
+// and the persisted bytes' analysis hash differs from the handler's
+// pre-projection copy. Without it the projection is a no-op and P1 cannot tell
+// the hash of the bytes the store received from the hash of that copy.
 function buildBaseGraph() {
   return {
     goal_node_id: 'g-revenue',
+    options: [] as unknown[],
     nodes: [
       { id: 'g-revenue', kind: 'goal', label: 'Revenue' },
       {
@@ -123,12 +183,19 @@ function buildBaseGraph() {
  * the base rather than hand-copied so the ONLY difference is the foreign field.
  */
 function withForeignPrice(base: unknown, rawValue: number): Record<string, unknown> {
+  return withForeignValue(base, 'f-price', rawValue);
+}
+
+/** `base` with one factor's value moved by a foreign writer (value = raw / cap). */
+function withForeignValue(base: unknown, factorId: string, rawValue: number): Record<string, unknown> {
   const g = JSON.parse(JSON.stringify(base)) as {
     nodes: Array<{ id: string; observed_state?: Record<string, unknown> }>;
   };
-  const price = g.nodes.find((n) => n.id === 'f-price');
-  if (price?.observed_state === undefined) throw new Error('fixture has no f-price observed_state');
-  price.observed_state = { ...price.observed_state, raw_value: rawValue, value: rawValue / 1000 };
+  const factor = g.nodes.find((n) => n.id === factorId);
+  if (factor?.observed_state === undefined) throw new Error(`fixture has no ${factorId} observed_state`);
+  const cap = factor.observed_state.cap;
+  if (typeof cap !== 'number' || cap <= 0) throw new Error(`fixture ${factorId} has no numeric cap`);
+  factor.observed_state = { ...factor.observed_state, raw_value: rawValue, value: rawValue / cap };
   return g as unknown as Record<string, unknown>;
 }
 
@@ -156,6 +223,13 @@ const fake = {
   versions: [] as string[],
   /** Runs once, AFTER the next `loadGraph` has taken its snapshot. */
   afterNextRead: undefined as (() => void) | undefined,
+  /**
+   * Runs once, AFTER the next graph append has LANDED and before it returns —
+   * i.e. a foreign commit that follows mine, before my reply is built. Receives
+   * the bytes that landed so the foreign writer builds on them, as a CAS'd
+   * writer must.
+   */
+  afterNextAppend: undefined as ((landed: unknown) => void) | undefined,
   /** One-shot infrastructure failure for the next append (not a CAS verdict). */
   nextAppendFailure: undefined as Error | undefined,
   loadGraphCalls: 0,
@@ -170,6 +244,7 @@ function resetFake() {
   fake.rows = new Map();
   fake.versions = [];
   fake.afterNextRead = undefined;
+  fake.afterNextAppend = undefined;
   fake.nextAppendFailure = undefined;
   fake.loadGraphCalls = 0;
   fake.casRejected = [];
@@ -270,6 +345,10 @@ const appendMock = vi.fn(async (write: SessionTurnWrite): Promise<SessionAppendO
     request_hash: write.request_hash,
     ...(receipt !== undefined ? { receipt } : {}),
   });
+  // 4. A foreign commit that lands AFTER mine (my transaction has committed).
+  const following = fake.afterNextAppend;
+  fake.afterNextAppend = undefined;
+  following?.(jsonCopy(fake.graph));
   return { id, ...(receipt !== undefined ? { modelVersionReceipt: receipt } : {}) };
 });
 
@@ -337,6 +416,7 @@ const SCENARIO_ID = '33333333-3333-4333-8333-333333333333';
 const MINE = 'a0000000-0000-4000-8000-00000000000a';
 const MINE_2 = 'a0000000-0000-4000-8000-00000000000b';
 const FOREIGN = 'f0000000-0000-4000-8000-00000000000f';
+const FOREIGN_2 = 'f0000000-0000-4000-8000-0000000000f2';
 
 const SET_BUDGET_50K = { kind: 'factor_value_edit', target_id: 'f-budget', value: 0.5, raw_value: 50000, unit: '£' } as const;
 const SET_BUDGET_70K = { kind: 'factor_value_edit', target_id: 'f-budget', value: 0.7, raw_value: 70000, unit: '£' } as const;
@@ -358,6 +438,15 @@ async function send(event: Record<string, unknown>, turnId: string) {
 /** Every append ATTEMPTED for a turn, in order — landed or not. */
 function appendsFor(turnId: string): SessionTurnWrite[] {
   return appendMock.mock.calls.map((c) => c[0]).filter((w) => w.turn_id === turnId);
+}
+
+/** What the store HANDED BACK to each of a turn's appends, in order (a throw is `undefined`). */
+function appendOutcomesFor(turnId: string): Array<SessionAppendOutcome | undefined> {
+  return appendMock.mock.calls.flatMap((c, i) => {
+    if (c[0].turn_id !== turnId) return [];
+    const settled = appendMock.mock.settledResults[i];
+    return [settled?.type === 'fulfilled' ? settled.value : undefined];
+  });
 }
 
 function graphPatches(body: Record<string, unknown>): Array<Record<string, unknown>> {
@@ -426,6 +515,18 @@ describe('POST /orchestrate/v2/turn — factor_value_edit: what proves THIS oper
     // Its CAS base is the SERVER's start-of-turn read (fve carries no client hash).
     expect(mine?.expectedGraphIdentityHash).toBe(identityOf(g0));
 
+    // THE PREMISE, proven inside the test: the persistence projection CHANGED
+    // what my append carried — it mirrored `o-launch` into the base's empty
+    // `options[]` — and that change moves the analysis hash. So the hash of the
+    // bytes the store received is NOT the hash of the handler's pre-projection
+    // copy, and the `graph_hash` check below can tell the two apart.
+    expect(g0.options).toEqual([]);
+    const appendedOptions = (mine?.graph as { options?: Array<{ id?: unknown }> } | undefined)?.options;
+    expect((appendedOptions ?? []).map((o) => o.id)).toEqual(['o-launch']);
+    expect(analysisHash({ ...(mine?.graph as Record<string, unknown>), options: [] })).not.toBe(
+      analysisHash(mine?.graph),
+    );
+
     // The reply's commit evidence, bound to MY target and MY bytes.
     const patches = graphPatches(body);
     expect(patches).toHaveLength(1);
@@ -474,6 +575,49 @@ describe('POST /orchestrate/v2/turn — factor_value_edit: what proves THIS oper
 
     expect(graphPatches(body)[0]?.status).toBe('applied');
     expect(body.graph_hash).toBe(analysisHash(mine?.graph));
+  });
+
+  it('P1 post-append: a foreign commit that lands right AFTER my append does not leak into my reply — graph_hash and draft_graph are MY commit\'s bytes, not the store\'s current state', async () => {
+    // P1 guest cannot tell "hash of MY bytes" from "hash of whatever the store
+    // holds now": nothing lands after my append there, so the two are equal.
+    // Here a foreign writer commits on top of my bytes the instant my
+    // transaction commits, so the store has MOVED before my reply is built.
+    fake.afterNextAppend = (landed) => {
+      fake.graph = withForeignPrice(landed, 300);
+      fake.rows.set(FOREIGN, { id: `row-${FOREIGN}`, request_hash: 'sha256:foreign' });
+    };
+
+    const { status, body } = await send(SET_BUDGET_50K, MINE);
+    expect(status).toBe(200);
+
+    // Preconditions: MY append landed (one attempt, no CAS verdict, no replay)
+    // carrying MY value on the untouched f-price…
+    const mineWrites = appendsFor(MINE);
+    expect(mineWrites).toHaveLength(1);
+    const [mine] = mineWrites;
+    expect(fake.rows.has(MINE)).toBe(true);
+    expect(fake.casRejected).toEqual([]);
+    expect(fake.replayed).toEqual([]);
+    expect(rawValueOf(mine?.graph, 'f-budget')).toBe(50000);
+    expect(rawValueOf(mine?.graph, 'f-price')).toBe(200);
+    // …and THE PREMISE, proven inside the test: the foreign commit landed after
+    // mine, so the store's current hash is no longer the hash of MY bytes.
+    expect(fake.rows.has(FOREIGN)).toBe(true);
+    expect(rawValueOf(fake.graph, 'f-price')).toBe(300);
+    expect(rawValueOf(fake.graph, 'f-budget')).toBe(50000);
+    expect(analysisHash(fake.graph)).not.toBe(analysisHash(mine?.graph));
+
+    // The reply's commit evidence is THIS commit's result, bound to MY bytes.
+    const patches = graphPatches(body);
+    expect(patches).toHaveLength(1);
+    expect(patches[0]?.target_id).toBe('f-budget');
+    expect(patches[0]?.status).toBe('applied');
+    expect(body.graph_hash).toBe(analysisHash(mine?.graph));
+    expect(body.graph_hash).not.toBe(analysisHash(fake.graph));
+    // The postimage is MY bytes too: my value, and f-price as I wrote it (200),
+    // never the foreign 300 that a re-read would have returned.
+    expect(rawValueOf(body.draft_graph, 'f-budget')).toBe(50000);
+    expect(rawValueOf(body.draft_graph, 'f-price')).toBe(200);
   });
 
   // ── P2 — a foreign commit BEFORE my base read ────────────────────────────
@@ -569,6 +713,22 @@ describe('POST /orchestrate/v2/turn — factor_value_edit: what proves THIS oper
     const g0 = buildBaseGraph();
     const { status, body } = await send(ABOVE_CAP_BUDGET, MINE);
 
+    // THE CAUSE, by identity: the refusal is the ABOVE-CAP one. Only a
+    // `value_exceeds_cap` rejection mints the consented rescale pending
+    // (rescale-cap-pending.ts), and it names the factor and the value refused —
+    // an unknown-target or scale-mismatch refusal would carry neither.
+    const [refusalWrite] = appendsFor(MINE);
+    const rescale = (refusalWrite?.pending_actions ?? []).filter(
+      (pa) => pa.chip_id === 'chip_prompt_rescale_extend_cap',
+    );
+    expect(rescale).toHaveLength(1);
+    const action = rescale[0]?.action as Record<string, unknown> | undefined;
+    expect(action?.factor_id).toBe('f-budget');
+    expect(action?.value).toBe(ABOVE_CAP_BUDGET.raw_value);
+    expect(rescale[0]?.preconditions?.target_entity_ids).toEqual(['f-budget']);
+    const chips = (body.suggested_actions ?? []) as Array<Record<string, unknown>>;
+    expect(chips.map((a) => a.id)).toContain('chip_prompt_rescale_extend_cap');
+
     expect(status).toBe(200);
     expectNoCommitEvidence(body);
     expect(graphPatches(body)).toEqual([]);
@@ -602,18 +762,33 @@ describe('POST /orchestrate/v2/turn — factor_value_edit: what proves THIS oper
     expect(analysisHash(readAfter)).toBe(analysisHash(g1));
     expect(analysisHash(readAfter)).not.toBe(analysisHash(g0));
 
+    // THE CAUSE, by identity (as P5): my turn WAS recorded, exactly once, and
+    // its row is the ABOVE-CAP refusal — the consented rescale pending names MY
+    // factor and MY refused value. Without this, an empty append list would make
+    // the `every` below pass vacuously.
+    const mineWrites = appendsFor(MINE);
+    expect(mineWrites).toHaveLength(1);
+    const rescale = (mineWrites[0]?.pending_actions ?? []).filter(
+      (pa) => pa.chip_id === 'chip_prompt_rescale_extend_cap',
+    );
+    expect(rescale).toHaveLength(1);
+    const action = rescale[0]?.action as Record<string, unknown> | undefined;
+    expect(action?.factor_id).toBe('f-budget');
+    expect(action?.value).toBe(ABOVE_CAP_BUDGET.raw_value);
+
     // My reply does not follow the hash: no applied patch, no postimage.
     expect(status).toBe(200);
     expectNoCommitEvidence(body);
     expect(body.graph_hash).toBeUndefined();
     // And nothing of mine carried a graph — the move was entirely foreign.
+    expect(appendsFor(MINE)).toHaveLength(1);
     expect(appendsFor(MINE).every((w) => w.graph == null)).toBe(true);
     expect(rawValueOf(readAfter, 'f-budget')).toBe(40000);
   });
 
   // ── P7 — replay of an already-committed request ──────────────────────────
 
-  it('P7: a replay of MY already-committed request, after a foreign writer moved the target, answers noop reconciled to the stored value (idempotent replay — open design question)', async () => {
+  it('P7: on a replay of MY already-committed request, after a foreign writer moved the target, the reply\'s graph_patch is noop with after = the stored value (patch block only; idempotent replay — open design question)', async () => {
     const first = await send(SET_BUDGET_50K, MINE);
     expect(first.status).toBe(200);
     expect(graphPatches(first.body)[0]?.status).toBe('applied');
@@ -643,14 +818,154 @@ describe('POST /orchestrate/v2/turn — factor_value_edit: what proves THIS oper
     expect(patches[0]?.status).toBe('noop');
     expect((patches[0]?.after as Record<string, unknown> | null)?.raw_value).toBe(70000);
 
-    // ⚠ `noop` IS NOT THE WHOLE OWN-WRITE STORY ON A REPLAY. Measured 24 Sep on
-    // this exact fixture (a one-off probe, deliberately NOT asserted here): the
-    // same reply still carries `draft_graph` with f-budget = 50,000 and a
-    // `graph_hash` equal to the hash of the retry's UNWRITTEN bytes, while the
-    // store holds 70,000 and the prose says "currently £70k". Cause, read at
-    // HEAD: on a replay `commitDirectAnswer` still returns `persistedGraph` /
-    // `persistedAnalysisGraphHash` for bytes it never wrote (commit.ts:2064-2065),
-    // and `dispatchFactorValueEdit` stamps both onto the reply
-    // (dispatch.ts:1906-1910). Reported as a finding, not pinned.
+    // ⚠ THE PATCH BLOCK IS NOT THE WHOLE REPLY. The same reply still carries a
+    // `draft_graph` and `graph_hash` of the retry's UNWRITTEN bytes — the
+    // header's TRACKED FINDING. Deliberately not asserted either way here.
+  });
+
+  it('P7b: on a replay, when a foreign write lands BETWEEN the retry\'s base read and its append, the noop patch\'s after is the value stored at reply time — a re-read, not the start-of-turn before', async () => {
+    // P7 cannot tell a reply-time re-read from a copy of the start-of-turn read:
+    // nothing moves during the retry, so both are 70,000. Here a second foreign
+    // writer moves f-budget to 90,000 the instant the retry's base read is served.
+    const first = await send(SET_BUDGET_50K, MINE);
+    expect(first.status).toBe(200);
+    expect(graphPatches(first.body)[0]?.status).toBe('applied');
+    const foreign = await send(SET_BUDGET_70K, FOREIGN);
+    expect(foreign.status).toBe(200);
+    expect(rawValueOf(fake.graph, 'f-budget')).toBe(70000);
+
+    fake.afterNextRead = () => {
+      fake.graph = withForeignValue(fake.graph, 'f-budget', 90000);
+      fake.rows.set(FOREIGN_2, { id: `row-${FOREIGN_2}`, request_hash: 'sha256:foreign-2' });
+    };
+    const retry = await send(SET_BUDGET_50K, MINE);
+
+    // Preconditions: the interleaved foreign write ran, the store still
+    // classified the retry as a replay (replay precedes CAS) and wrote nothing,
+    // so what the store holds at reply time is exactly the foreign 90,000.
+    expect(fake.afterNextRead).toBeUndefined();
+    expect(fake.rows.has(FOREIGN_2)).toBe(true);
+    const mineWrites = appendsFor(MINE);
+    expect(mineWrites).toHaveLength(2);
+    expect(mineWrites[1]?.request_hash).toBe(mineWrites[0]?.request_hash);
+    expect(fake.replayed).toEqual([MINE]);
+    expect(fake.casRejected).toEqual([]);
+    const storedBudget = (fake.graph as { nodes: Array<{ id: string; observed_state?: unknown }> }).nodes.find(
+      (n) => n.id === 'f-budget',
+    )?.observed_state as Record<string, unknown> | undefined;
+    expect(storedBudget?.raw_value).toBe(90000);
+
+    expect(retry.status).toBe(200);
+    const patches = graphPatches(retry.body);
+    expect(patches).toHaveLength(1);
+    expect(patches[0]?.target_id).toBe('f-budget');
+    expect(patches[0]?.status).toBe('noop');
+    // THE PREMISE: the patch's `before` is the START-OF-TURN read (70,000), and
+    // it differs from what the store holds at reply time.
+    const before = patches[0]?.before as Record<string, unknown> | null | undefined;
+    expect(before?.raw_value).toBe(70000);
+    expect(before?.raw_value).not.toBe(storedBudget?.raw_value);
+    // `after` IS the stored observed_state, read at reply time.
+    expect(patches[0]?.after).toEqual(storedBudget);
+  });
+
+  // ── P8 — a reused turn_id carrying a DIFFERENT request ───────────────────
+
+  it('P8: a reused turn_id carrying a DIFFERENT request writes nothing, and the reply carries NO version receipt — not even the prior operation\'s — and a noop patch at the stored value (receipt and patch block only)', async () => {
+    fake.owned = true;
+    const first = await send(SET_BUDGET_50K, MINE);
+    expect(first.status).toBe(200);
+    expect(graphPatches(first.body)[0]?.status).toBe('applied');
+    const firstReceipt = first.body.model_version_receipt as Record<string, unknown> | undefined;
+    expect(firstReceipt?.version_id).toBe(VERSION_IDS[0]);
+    expect(firstReceipt?.source_turn_id).toBe(MINE);
+    const versionsAfterFirst = [...fake.versions];
+    const storedAfterFirst = jsonCopy(fake.graph);
+    expect(rawValueOf(storedAfterFirst, 'f-budget')).toBe(50000);
+
+    // The SAME turn id, a DIFFERENT instruction.
+    const reused = await send(SET_BUDGET_70K, MINE);
+
+    // Preconditions: the store classified it as a CONFLICT (same turn_id,
+    // different request_hash), wrote nothing, minted nothing — and handed back
+    // the PRIOR operation's receipt, whose source_turn_id is also MINE. That is
+    // exactly why `source_turn_id === MINE` alone cannot prove a receipt is
+    // THIS request's.
+    const mineWrites = appendsFor(MINE);
+    expect(mineWrites).toHaveLength(2);
+    expect(rawValueOf(mineWrites[1]?.graph, 'f-budget')).toBe(70000);
+    expect(mineWrites[1]?.request_hash).not.toBe(mineWrites[0]?.request_hash);
+    expect(fake.replayed).toEqual([MINE]);
+    const handedBack = appendOutcomesFor(MINE)[1];
+    expect(handedBack?.priorTurnConflict).toBe(true);
+    expect(handedBack?.replayedPriorTurn).toBeUndefined();
+    expect(handedBack?.modelVersionReceipt?.version_id).toBe(VERSION_IDS[0]);
+    expect(handedBack?.modelVersionReceipt?.source_turn_id).toBe(MINE);
+    expect(fake.versions).toEqual(versionsAfterFirst);
+    expect(identityOf(fake.graph)).toBe(identityOf(storedAfterFirst));
+    expect(rawValueOf(fake.graph, 'f-budget')).toBe(50000);
+
+    // No receipt on the reply: the one the store handed back is the EARLIER
+    // operation's, and this request committed nothing to be receipted.
+    expect(reused.body.model_version_receipt).toBeUndefined();
+
+    // The patch names my target, is `noop`, never `applied`, and reports the
+    // AUTHORITATIVE stored value (the earlier 50,000), not the 70,000 asked for.
+    const patches = graphPatches(reused.body);
+    expect(patches).toHaveLength(1);
+    expect(patches[0]?.target_id).toBe('f-budget');
+    expect(patches[0]?.status).toBe('noop');
+    expect(patches.filter((p) => p.status === 'applied')).toEqual([]);
+    expect((patches[0]?.after as Record<string, unknown> | null)?.raw_value).toBe(50000);
+
+    // ⚠ Status code (200 today) deliberately not pinned. The same reply's
+    // `draft_graph` / `graph_hash` of the unwritten 70,000 bytes is the header's
+    // TRACKED FINDING — deliberately not asserted either way here.
+  });
+
+  it('P8b: on a reused turn_id, when a foreign write lands BETWEEN the base read and the append, the noop patch\'s after is the value stored at reply time — a re-read, not the start-of-turn before', async () => {
+    // P8's start-of-turn read and its reply-time read both see 50,000. Here a
+    // foreign writer moves f-budget to 90,000 right after the base read.
+    fake.owned = true;
+    const first = await send(SET_BUDGET_50K, MINE);
+    expect(first.status).toBe(200);
+    expect(graphPatches(first.body)[0]?.status).toBe('applied');
+    expect(rawValueOf(fake.graph, 'f-budget')).toBe(50000);
+    const versionsAfterFirst = [...fake.versions];
+
+    fake.afterNextRead = () => {
+      fake.graph = withForeignValue(fake.graph, 'f-budget', 90000);
+      fake.rows.set(FOREIGN_2, { id: `row-${FOREIGN_2}`, request_hash: 'sha256:foreign-2' });
+    };
+    const reused = await send(SET_BUDGET_70K, MINE);
+
+    // Preconditions: the interleaved foreign write ran; the store classified the
+    // reused id as a CONFLICT (replay precedes CAS), wrote and minted nothing.
+    expect(fake.afterNextRead).toBeUndefined();
+    expect(fake.rows.has(FOREIGN_2)).toBe(true);
+    const mineWrites = appendsFor(MINE);
+    expect(mineWrites).toHaveLength(2);
+    expect(mineWrites[1]?.request_hash).not.toBe(mineWrites[0]?.request_hash);
+    expect(fake.replayed).toEqual([MINE]);
+    expect(fake.casRejected).toEqual([]);
+    expect(appendOutcomesFor(MINE)[1]?.priorTurnConflict).toBe(true);
+    expect(fake.versions).toEqual(versionsAfterFirst);
+    const storedBudget = (fake.graph as { nodes: Array<{ id: string; observed_state?: unknown }> }).nodes.find(
+      (n) => n.id === 'f-budget',
+    )?.observed_state as Record<string, unknown> | undefined;
+    expect(storedBudget?.raw_value).toBe(90000);
+
+    expect(reused.body.model_version_receipt).toBeUndefined();
+    const patches = graphPatches(reused.body);
+    expect(patches).toHaveLength(1);
+    expect(patches[0]?.target_id).toBe('f-budget');
+    expect(patches[0]?.status).toBe('noop');
+    // THE PREMISE: `before` is the START-OF-TURN read (50,000), and it differs
+    // from what the store holds at reply time.
+    const before = patches[0]?.before as Record<string, unknown> | null | undefined;
+    expect(before?.raw_value).toBe(50000);
+    expect(before?.raw_value).not.toBe(storedBudget?.raw_value);
+    // `after` IS the stored observed_state, read at reply time.
+    expect(patches[0]?.after).toEqual(storedBudget);
   });
 });

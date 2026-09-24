@@ -17,6 +17,11 @@
  *       `graph_hash` — both equal to the repo's own hash of the appended bytes.
  *       A REFUSED twin leaves the reread on the pre-edit bytes and hash, so the
  *       reread cannot be agreeing with the REQUEST rather than the COMMIT.
+ *       A CONCURRENT-WRITER twin lands a foreign graph right AFTER this
+ *       commit's append: the reply's `graph_hash` and `draft_graph` still name
+ *       THIS commit's bytes (never "whatever the store holds now"), while the
+ *       reload serves the foreign bytes and their hash — so a reply hash taken
+ *       from a post-commit re-read cannot pass for the commit's own.
  *
  *   P9  FRESHNESS ACROSS THE SAME SEAM, from a REAL prior successful
  *       `run_analysis` fact stamped with the pre-edit analysis hash:
@@ -38,6 +43,20 @@
  * `readFactsFor` serves the facts on those rows. So neither route can be
  * satisfied by a per-route stub that happens to agree with the assertion.
  *
+ * The facts take the store's real round trip, not a shortcut. On write each is
+ * projected as `serialiseHandlerFacts` projects it (`payload` = {fact_type,
+ * fact_version, result}, `noop` on its own column); on read it is rejoined and
+ * run through the strict `HandlerFactSchema`, throwing `SessionReadError` on a
+ * failure, as `readFactsWithTurnFor` does (supabase-store.ts). The loader
+ * swallows that throw into a `degraded` read, so every failure is also recorded
+ * and `afterEach` names it — a fact the real store could not serve cannot pass
+ * here as a quiet `unknown`. Every seeded run fact must also parse BEFORE it
+ * lands: that is the type the real writer hands `append`.
+ *
+ * `beforeAll` drives one committed edit and one reread on a SEPARATE scenario
+ * id, so the cold start of both routes is paid in the hook (60s budget), not
+ * inside the first test's 5s one.
+ *
  * WHAT IT DELIBERATELY DOES NOT PROVE
  *   · The Supabase RPC. The fake does not model graph CAS, the turn fence,
  *     replay / conflict (`replayedPriorTurn` / `priorTurnConflict`), the
@@ -51,24 +70,33 @@
  *     the read route goes through `loadPriorFactsWithReadState`, and the
  *     system-event branch never builds a turn context. That is asserted, not
  *     assumed — see `afterEach`.
- *   · A concurrent CAS conflict on the value edit. Separate fixture.
+ *   · A concurrent CAS conflict on the value edit. Separate fixture. The
+ *     concurrent writer in P8 lands AFTER this commit, so there is no conflict
+ *     for the fake to decide.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import { HandlerFactSchema } from '@talchain/schemas/orchestrator';
 
-import type { SessionTurnWrite } from '../../../src/orchestrator-v5/session/store.js';
+import { SessionReadError, type SessionTurnWrite } from '../../../src/orchestrator-v5/session/store.js';
 import { SESSION_READ_WINDOW_DEFAULT } from '../../../src/orchestrator-v5/session/index.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import { createMockSessionStore, makeSessionTurnRow } from '../../utils/mock-session-store.js';
 
 const SCENARIO_ID = '33333333-3333-4333-8333-333333333333';
+/** Only `beforeAll`'s warm-up touches this one — see the header. */
+const WARMUP_SCENARIO_ID = '55555555-5555-4555-8555-555555555555';
 
 // ── the persisted model ────────────────────────────────────────────────────
 // The value-edit suite's fixture (`route-v2-factor-value-edit.test.ts`), with a
 // second option so the seeded analysis compares two real option ids.
 // `f-budget` is capped at 100000 with unit £, currently £40,000 (value 0.4).
-function buildSeedGraph() {
+// The P8 concurrent writer reuses the same model with a different budget.
+function buildSeedGraph(budget: { readonly value: number; readonly raw_value: number } = {
+  value: 0.4,
+  raw_value: 40000,
+}) {
   return {
     goal_node_id: 'g-revenue',
     nodes: [
@@ -77,7 +105,7 @@ function buildSeedGraph() {
         id: 'f-budget',
         kind: 'factor',
         label: 'Marketing budget',
-        observed_state: { value: 0.4, raw_value: 40000, unit: '£', cap: 100000 },
+        observed_state: { value: budget.value, raw_value: budget.raw_value, unit: '£', cap: 100000 },
       },
       { id: 'o-launch', kind: 'option', label: 'Launch now' },
       { id: 'o-hold', kind: 'option', label: 'Hold for a quarter' },
@@ -108,22 +136,24 @@ const POST_RUN_WIN = { 'o-launch': 0.74, 'o-hold': 0.26 };
 /**
  * A committed run. Same shape as `runAnalysisFact` in
  * `src/routes/__tests__/assist.v1.scenario-graph.analysis-read.test.ts`; the
- * status is a parameter because (d) needs a non-success one.
+ * status is a parameter because (d) needs a non-success one. NO top-level
+ * `turn_id`: the strict `HandlerFactSchema` rejects it, and `landRun` refuses
+ * any fact that does not parse.
  */
 function runAnalysisFact(opts: {
   readonly graphHash: string;
   readonly computedAt: string;
   readonly win: Record<string, number>;
   readonly analysisStatus: string;
+  readonly scenarioId?: string;
 }): Record<string, unknown> {
   const [leader] = Object.entries(opts.win).sort((a, b) => b[1] - a[1])[0]!;
   return {
     fact_type: 'run_analysis',
     fact_version: 1,
     noop: false,
-    turn_id: 'turn_autorun',
     result: {
-      scenario_id: SCENARIO_ID,
+      scenario_id: opts.scenarioId ?? SCENARIO_ID,
       leading_option_id: leader,
       summary: 'Launching now leads on the current model.',
       graph_hash_at_run: opts.graphHash,
@@ -149,11 +179,19 @@ function runAnalysisFact(opts: {
 
 // ── THE ONE STORE BOTH ROUTES READ ──────────────────────────────────────────
 
+/** One `v5_handler_facts` row, in the shape `serialiseHandlerFacts` sends the RPC. */
+interface StoredFact {
+  readonly handler_id: string;
+  readonly action_type: string;
+  readonly noop?: boolean;
+  readonly payload: unknown;
+}
+
 interface FakeRow {
   readonly id: string;
   readonly turn_id: string;
   readonly handler_id: string | null;
-  readonly handler_facts: readonly unknown[];
+  readonly handler_facts: readonly StoredFact[];
 }
 
 /** jsonb semantics: what a JSONB column hands back is a parse of what went in. */
@@ -168,18 +206,90 @@ const db = {
   seq: 0,
 };
 
+/** The write-side projection, as `serialiseHandlerFacts` (supabase-store.ts) makes it. */
+function serialiseLikeTheStore(facts: readonly unknown[]): StoredFact[] {
+  return (facts as Array<{ fact_type: string; fact_version: unknown; noop?: boolean; result: unknown }>).map(
+    (f) => ({
+      handler_id: f.fact_type,
+      action_type: f.fact_type,
+      noop: f.noop,
+      payload: { fact_type: f.fact_type, fact_version: f.fact_version, result: f.result },
+    }),
+  );
+}
+
 function insertRow(turnId: string, handlerId: string | null, facts: readonly unknown[]): string {
   db.seq += 1;
   const id = `row-${String(db.seq).padStart(4, '0')}`;
-  db.rows.unshift({ id, turn_id: turnId, handler_id: handlerId, handler_facts: jsonb(facts) });
+  db.rows.unshift({
+    id,
+    turn_id: turnId,
+    handler_id: handlerId,
+    handler_facts: jsonb(serialiseLikeTheStore(facts)),
+  });
   return id;
 }
+
+/**
+ * P8's concurrent writer: when set, the NEXT append that writes a graph is
+ * followed at once by a foreign turn that overwrites `scenarios.graph` with
+ * these bytes. Cleared once it lands, and in `beforeEach`, so it cannot leak.
+ */
+let foreignGraphAfterNextCommit: unknown = null;
 
 /** Every write the routes make lands here; the spy keeps the exact argument. */
 const appendSpy = vi.fn(async (write: SessionTurnWrite) => {
   if (write.graph != null) db.graph = jsonb(write.graph);
-  return { id: insertRow(write.turn_id, write.handler_id, write.handler_facts) };
+  const id = insertRow(write.turn_id, write.handler_id, write.handler_facts);
+  if (write.graph != null && foreignGraphAfterNextCommit !== null) {
+    db.graph = jsonb(foreignGraphAfterNextCommit);
+    insertRow(nextTurnId(), null, []);
+    foreignGraphAfterNextCommit = null;
+  }
+  return { id };
 });
+
+/**
+ * Every `HandlerFactSchema` failure the fake's fact read hit. The real read
+ * THROWS, and `loadPriorFactsWithReadState` turns that into a quiet `degraded`
+ * read — so `afterEach` asserts this list is empty rather than trusting a
+ * downstream `unknown` to surface it.
+ */
+const factParseFailures: string[] = [];
+
+/**
+ * `readFactsWithTurnFor`'s read side (supabase-store.ts): rejoin `payload` with
+ * the `noop` column (payload-side `noop`, then `false`, as fallbacks), then the
+ * strict schema parse — a failure throws, it is never skipped.
+ */
+function readFactsLikeTheStore(rowIds: readonly string[], handlerId?: string): unknown[] {
+  const out: unknown[] = [];
+  // `db.rows` is newest-first, the real read's `ORDER BY created_at DESC`.
+  for (const row of db.rows) {
+    if (!rowIds.includes(row.id)) continue;
+    for (const stored of jsonb(row.handler_facts)) {
+      if (handlerId !== undefined && stored.handler_id !== handlerId) continue;
+      const payloadObj =
+        stored.payload && typeof stored.payload === 'object' && !Array.isArray(stored.payload)
+          ? (stored.payload as Record<string, unknown>)
+          : {};
+      const noop =
+        typeof stored.noop === 'boolean'
+          ? stored.noop
+          : typeof payloadObj.noop === 'boolean'
+            ? payloadObj.noop
+            : false;
+      const parsed = HandlerFactSchema.safeParse({ ...payloadObj, noop });
+      if (!parsed.success) {
+        const message = `readFactsWithTurnFor: payload failed HandlerFactSchema — ${parsed.error.message}`;
+        factParseFailures.push(message);
+        throw new SessionReadError(message, { cause: parsed.error });
+      }
+      out.push(parsed.data);
+    }
+  }
+  return out;
+}
 
 /**
  * Reads the fake does NOT model coherently with its rows. Neither route under
@@ -212,8 +322,8 @@ const store = createMockSessionStore({
       }),
     );
   },
-  readFactsFor: async (rowIds: readonly string[]) =>
-    db.rows.filter((r) => rowIds.includes(r.id)).flatMap((r) => jsonb(r.handler_facts)) as never,
+  readFactsFor: async (rowIds: readonly string[], handlerId?: string) =>
+    readFactsLikeTheStore(rowIds, handlerId) as never,
   loadGraph: async () => jsonb(db.graph),
   loadGraphAndBriefText: async () => ({ graph: jsonb(db.graph), briefText: null }),
   scenarioExists: async () => true,
@@ -272,7 +382,11 @@ function nextTurnId(): string {
   return `44444444-4444-4444-8444-${String(turnSeq).padStart(12, '0')}`;
 }
 
-async function editValue(app: FastifyInstance, event: Record<string, unknown>) {
+async function editValue(
+  app: FastifyInstance,
+  event: Record<string, unknown>,
+  scenarioId: string = SCENARIO_ID,
+) {
   const turnId = nextTurnId();
   const res = await app.inject({
     method: 'POST',
@@ -280,7 +394,7 @@ async function editValue(app: FastifyInstance, event: Record<string, unknown>) {
     payload: {
       kind: 'system_event',
       turn_id: turnId,
-      scenario_id: SCENARIO_ID,
+      scenario_id: scenarioId,
       stage: 'analyse',
       event: { kind: 'factor_value_edit', ...event },
     },
@@ -289,10 +403,10 @@ async function editValue(app: FastifyInstance, event: Record<string, unknown>) {
 }
 
 /** The reload read — the path a browser takes after a refresh. */
-async function reread(app: FastifyInstance) {
+async function reread(app: FastifyInstance, scenarioId: string = SCENARIO_ID) {
   const res = await app.inject({
     method: 'POST',
-    url: `/assist/v1/scenarios/${SCENARIO_ID}/graph`,
+    url: `/assist/v1/scenarios/${scenarioId}/graph`,
     payload: {},
   });
   expect(res.statusCode).toBe(200);
@@ -306,6 +420,19 @@ function writeFor(turnId: string): SessionTurnWrite {
   return writes[0]!;
 }
 
+/**
+ * The repo's own analysis hash of the graph THIS turn handed `append` — a
+ * string, or the premise is broken (a `null` would slip past `not.toBe(PRE)`).
+ */
+function committedHashFor(turnId: string): string {
+  const committed = writeFor(turnId).graph;
+  expect(committed, `turn ${turnId} handed append a graph`).toBeDefined();
+  const hash = computeAnalysisAffectingGraphHash(committed as never);
+  expect(typeof hash).toBe('string');
+  expect(hash).not.toBe(PRE_EDIT_HASH);
+  return hash as string;
+}
+
 function nodeById(graph: unknown, id: string) {
   const nodes = ((graph as { nodes?: unknown[] } | null)?.nodes ?? []) as Array<{
     id: string;
@@ -314,9 +441,38 @@ function nodeById(graph: unknown, id: string) {
   return nodes.find((n) => n.id === id);
 }
 
-/** A run lands the way a run does: its own turn row, carrying its fact. */
+/**
+ * A run lands the way a run does: its own turn row, carrying its fact. The fact
+ * must be a `HandlerFact` first — the type the real writer hands `append`.
+ */
 function landRun(fact: Record<string, unknown>): void {
+  const parsed = HandlerFactSchema.safeParse(fact);
+  expect(parsed.success, parsed.success ? '' : parsed.error.message).toBe(true);
   insertRow(nextTurnId(), 'run_analysis', [fact]);
+}
+
+const EDIT_TO_50K = { target_id: 'f-budget', value: 0.5, raw_value: 50000, unit: '£' } as const;
+
+/** The seed state every test starts from: the pre-edit graph + ONE prior successful run. */
+function resetStore(scenarioId: string = SCENARIO_ID): void {
+  appendSpy.mockClear();
+  llmChatMock.mockClear();
+  for (const fn of Object.values(unmodelledReads)) fn.mockClear();
+  windowOverflowed = false;
+  factParseFailures.length = 0;
+  foreignGraphAfterNextCommit = null;
+  db.graph = jsonb(buildSeedGraph());
+  db.rows = [];
+  // The REAL prior run: a successful fact stamped with the pre-edit hash.
+  landRun(
+    runAnalysisFact({
+      graphHash: PRE_EDIT_HASH,
+      computedAt: PRE_RUN_AT,
+      win: PRE_RUN_WIN,
+      analysisStatus: 'computed',
+      scenarioId,
+    }),
+  );
 }
 
 // ── the suite ───────────────────────────────────────────────────────────────
@@ -329,6 +485,19 @@ describe('own write — the reload reread and the freshness it reports', () => {
     await ceeOrchestratorRouteV2(app);
     await scenarioGraphRoute(app);
     await app.ready();
+
+    // WARM-UP, on its own scenario id: one committed edit and one reread, so
+    // both routes' cold start is paid here and not by the first test. Asserted,
+    // so a broken warm-up fails loudly instead of warming nothing.
+    resetStore(WARMUP_SCENARIO_ID);
+    const warm = await editValue(app, EDIT_TO_50K, WARMUP_SCENARIO_ID);
+    expect(warm.res.statusCode).toBe(200);
+    expect(
+      (warm.body.blocks as Array<Record<string, unknown>>).find((b) => b.type === 'graph_patch')?.status,
+    ).toBe('applied');
+    expect((await reread(app, WARMUP_SCENARIO_ID)).graph_present).toBe(true);
+    expect(factParseFailures).toEqual([]);
+    // `beforeEach` resets the store and every spy before the first test.
   });
 
   afterAll(async () => {
@@ -336,24 +505,11 @@ describe('own write — the reload reread and the freshness it reports', () => {
   });
 
   beforeEach(() => {
-    appendSpy.mockClear();
-    llmChatMock.mockClear();
-    for (const fn of Object.values(unmodelledReads)) fn.mockClear();
-    windowOverflowed = false;
-    db.graph = jsonb(buildSeedGraph());
-    db.rows = [];
-    // The REAL prior run: a successful fact stamped with the pre-edit hash.
-    landRun(
-      runAnalysisFact({
-        graphHash: PRE_EDIT_HASH,
-        computedAt: PRE_RUN_AT,
-        win: PRE_RUN_WIN,
-        analysisStatus: 'computed',
-      }),
-    );
+    resetStore();
   });
 
   afterEach(() => {
+    expect(factParseFailures, 'a stored fact failed HandlerFactSchema on the store read').toEqual([]);
     expect(windowOverflowed, 'a fixture left the 20-row readRecent window').toBe(false);
     for (const [name, fn] of Object.entries(unmodelledReads)) {
       expect(fn, `${name} is not modelled by this fake and must not be read`).not.toHaveBeenCalled();
@@ -365,12 +521,7 @@ describe('own write — the reload reread and the freshness it reports', () => {
 
   describe('P8 — the reload serves the bytes THIS commit wrote', () => {
     it('after a committed value edit, the reread carries the committed value by node id and the reply’s own graph_hash', async () => {
-      const { res, body, turnId } = await editValue(app, {
-        target_id: 'f-budget',
-        value: 0.5,
-        raw_value: 50000,
-        unit: '£',
-      });
+      const { res, body, turnId } = await editValue(app, EDIT_TO_50K);
       expect(res.statusCode).toBe(200);
 
       // The commit result the "Saved" claim rests on: an APPLIED patch on MY target.
@@ -380,9 +531,7 @@ describe('own write — the reload reread and the freshness it reports', () => {
 
       // The bytes this turn handed the atomic write, and the repo's own hash of them.
       const committed = writeFor(turnId).graph;
-      expect(committed).toBeDefined();
-      const committedHash = computeAnalysisAffectingGraphHash(committed as never);
-      expect(committedHash).not.toBe(PRE_EDIT_HASH);
+      const committedHash = committedHashFor(turnId);
       expect(body.graph_hash).toBe(committedHash);
 
       const read = await reread(app);
@@ -399,6 +548,48 @@ describe('own write — the reload reread and the freshness it reports', () => {
       expect(read.graph_hash).toBe(body.graph_hash);
     });
 
+    it('CONCURRENT WRITER — a foreign graph landing right after this commit moves the store, yet the reply’s graph_hash and draft_graph still name THIS commit’s bytes', async () => {
+      // Another writer's graph: the same model with f-budget at £60,000. It
+      // lands in the gap between this commit's append resolving and the reply
+      // being built — so "hash what the store holds now" and "hash what THIS
+      // commit wrote" give different answers, and only the second is the rule.
+      const foreignGraph = buildSeedGraph({ value: 0.6, raw_value: 60000 });
+      foreignGraphAfterNextCommit = foreignGraph;
+
+      const { res, body, turnId } = await editValue(app, EDIT_TO_50K);
+      expect(res.statusCode).toBe(200);
+
+      // PREMISES, asserted rather than assumed: the foreign writer landed after
+      // this turn's append, and its hash differs from this commit's.
+      expect(foreignGraphAfterNextCommit).toBeNull();
+      expect(db.rows[0]!.turn_id).not.toBe(turnId);
+      expect(db.rows[1]!.turn_id).toBe(turnId);
+      const committedHash = committedHashFor(turnId);
+      const foreignHash = computeAnalysisAffectingGraphHash(foreignGraph as never);
+      expect(typeof foreignHash).toBe('string');
+      expect(foreignHash).not.toBe(committedHash);
+      expect(foreignHash).not.toBe(PRE_EDIT_HASH);
+      expect(computeAnalysisAffectingGraphHash(db.graph as never)).toBe(foreignHash);
+
+      const patch = (body.blocks as Array<Record<string, unknown>>).find((b) => b.type === 'graph_patch');
+      expect(patch?.target_id).toBe('f-budget');
+      expect(patch?.status).toBe('applied');
+
+      // THE RULE: the reply names MY commit's bytes, not the store's current ones.
+      expect(body.graph_hash).toBe(committedHash);
+      // …and so does the postimage the client reconciles, by node id.
+      const wireBudget = nodeById(body.draft_graph, 'f-budget');
+      expect(wireBudget?.observed_state?.raw_value).toBe(50000);
+      expect(wireBudget?.observed_state?.value).toBeCloseTo(0.5, 10);
+
+      // The reload, by contrast, is authoritative about the STORE: it serves the
+      // foreign bytes and their hash, and never adopts the reply's.
+      const read = await reread(app);
+      expect(read.graph).toEqual(jsonb(foreignGraph));
+      expect(read.graph_hash).toBe(foreignHash);
+      expect(read.graph_hash).not.toBe(body.graph_hash);
+    });
+
     it('CONTRAST — a refused edit leaves the reread on the pre-edit bytes and hash', async () => {
       const { res, body, turnId } = await editValue(app, {
         // £250,000 against a £100,000 cap — refused, never clamped.
@@ -409,6 +600,9 @@ describe('own write — the reload reread and the freshness it reports', () => {
       });
       expect(res.statusCode).toBe(200);
       expect(body.blocks).toEqual([]);
+      // The reply side of the refusal twin is as strict as the reread side: no
+      // postimage of the requested value may ride on a refusal.
+      expect(body.draft_graph).toBeUndefined();
       // Committed as a turn, but with no graph.
       expect(writeFor(turnId).graph).toBeUndefined();
 
@@ -435,14 +629,9 @@ describe('own write — the reload reread and the freshness it reports', () => {
     });
 
     it('(b) a committed value edit makes the reply say `stale` AND the reload read report complete_stale with no result', async () => {
-      const { res, body } = await editValue(app, {
-        target_id: 'f-budget',
-        value: 0.5,
-        raw_value: 50000,
-        unit: '£',
-      });
+      const { res, body, turnId } = await editValue(app, EDIT_TO_50K);
       expect(res.statusCode).toBe(200);
-      expect(body.graph_hash).not.toBe(PRE_EDIT_HASH);
+      expect(body.graph_hash).toBe(committedHashFor(turnId));
       expect(body.analysis_ready.freshness).toBe('stale');
 
       const read = await reread(app);
@@ -458,14 +647,11 @@ describe('own write — the reload reread and the freshness it reports', () => {
     });
 
     it('(c) a new SUCCESSFUL run stamped with the post-edit hash makes the reload current again', async () => {
-      const { body } = await editValue(app, {
-        target_id: 'f-budget',
-        value: 0.5,
-        raw_value: 50000,
-        unit: '£',
-      });
-      const postEditHash = body.graph_hash as string;
-      expect(postEditHash).not.toBe(PRE_EDIT_HASH);
+      const { body, turnId } = await editValue(app, EDIT_TO_50K);
+      // The post-edit hash is the repo's hash of the bytes THIS commit wrote —
+      // what a run reading the stored graph would stamp — and the reply agrees.
+      const postEditHash = committedHashFor(turnId);
+      expect(body.graph_hash).toBe(postEditHash);
 
       landRun(
         runAnalysisFact({
@@ -490,14 +676,9 @@ describe('own write — the reload reread and the freshness it reports', () => {
     it.each(['failed', 'refused'])(
       '(d) a run with analysis_status %s stamped with the post-edit hash does NOT make the reload current',
       async (analysisStatus) => {
-        const { body } = await editValue(app, {
-          target_id: 'f-budget',
-          value: 0.5,
-          raw_value: 50000,
-          unit: '£',
-        });
-        const postEditHash = body.graph_hash as string;
-        expect(postEditHash).not.toBe(PRE_EDIT_HASH);
+        const { body, turnId } = await editValue(app, EDIT_TO_50K);
+        const postEditHash = committedHashFor(turnId);
+        expect(body.graph_hash).toBe(postEditHash);
 
         landRun(
           runAnalysisFact({
@@ -520,5 +701,30 @@ describe('own write — the reload reread and the freshness it reports', () => {
         expect(read.analysis_result).toBeNull();
       },
     );
+
+    // (b) proves the reply says `stale` after an edit. On its own it cannot tell a
+    // hash comparison from "any committed edit is stale", which is exactly the
+    // "stale because the hash moved" reasoning the product rule forbids. The
+    // contrast: edit away (stale), then edit BACK to the analysed value. The
+    // committed bytes hash to the run's hash again, so the reply must say `fresh`.
+    // A constant-`stale` reply goes RED here (verifier mutant M8b).
+    it('(e) editing back to the analysed value makes the edit reply say fresh, and the reload current', async () => {
+      const away = await editValue(app, EDIT_TO_50K);
+      expect(away.res.statusCode).toBe(200);
+      expect(away.body.analysis_ready.freshness).toBe('stale');
+
+      const back = await editValue(app, { target_id: 'f-budget', value: 0.4, raw_value: 40000, unit: '£' });
+      expect(back.res.statusCode).toBe(200);
+      const backGraph = writeFor(back.turnId).graph;
+      expect(backGraph).toBeDefined();
+      // Premise, proven rather than assumed: the committed bytes hash back to the
+      // hash the prior run was stamped with.
+      expect(computeAnalysisAffectingGraphHash(backGraph as never)).toBe(PRE_EDIT_HASH);
+      expect(back.body.graph_hash).toBe(PRE_EDIT_HASH);
+      expect(back.body.analysis_ready.freshness).toBe('fresh');
+
+      const read = await reread(app);
+      expect(read.analysis_state.run_state).toEqual({ kind: 'complete_current', computed_at: PRE_RUN_AT });
+    });
   });
 });
