@@ -66,24 +66,37 @@
 --     (iv)  a non-empty graph v4 wrote with a NULL incoming hash (unparseable).
 --   Presence is therefore defined as:
 --       v_current_hash IS NOT NULL
---       OR the stored graph has a non-empty `nodes` array   (only read when
---                                                           the hash is NULL)
+--       OR the stored graph is IDENTITY-BEARING   (only read when the hash
+--                                                  is NULL)
+--   where identity-bearing is graph-identity.ts `isIdentityEmptyGraph`
+--   negated, field for field: a non-empty `nodes`, `edges` or `options`
+--   array, or a `goal_node_id` key (v_current_identity_bearing).
 --   so (iii) and (iv) ARE presence and (i) and (ii) are NOT.
 --   * Why not the hash alone: in (iii) and (iv) a distinct operation's graph
 --     would satisfy expected-empty through the NULL column, which is the class
 --     of hole this change exists to close.
 --   * Why not `graph IS NOT NULL`: (ii) is exactly what the caller's own read
---     classified as empty (assist.v1.scenario-graph-register.ts `baseIsEmpty`:
---     `graph == null || !Array.isArray(nodes) || nodes.length === 0`), and the
+--     classified as empty (assist.v1.scenario-graph-register.ts, the
+--     `expected_model_empty` preflight: `isIdentityEmptyGraph(base)`), and the
 --     stored skeleton does not go away — every retry would read it as empty
 --     and be refused again, bricking first construction on that scenario.
---   * The nodes test mirrors that route predicate on the SAME column
---     (`loadGraph` returns `scenarios.graph` raw), so on every state whose
---     hash column is NULL the route's read-time check and this clause agree:
---     a graph the route admitted as empty is refused here only if it changed.
---     It is a deliberate twin of a one-line predicate; change them together.
+--   * Why all four fields and not `nodes` (independent review of #1786,
+--     5807034398): the ingress schema admits an options-only graph, and the
+--     identity rule counts nodes, edges, options and goal_node_id. A
+--     nodes-only test here let an UNSTAMPED options-, edges- or goal-only
+--     graph pass as empty and be overwritten by a "first" construction.
+--   * The test mirrors that route predicate on the SAME column (`loadGraph`
+--     returns `scenarios.graph` raw), so on every state whose hash column is
+--     NULL the route's read-time check and this clause agree: a graph the
+--     route admitted as empty is refused here only if it changed. It is a
+--     deliberate twin of a TS predicate; change them together. The static
+--     guard test (CORRESPONDENCE) parses this expression and compares it,
+--     field by field and on a probe set, with `isIdentityEmptyGraph`.
 --   * CASE, not AND, guards jsonb_array_length: SQL does not promise
 --     left-to-right evaluation, and jsonb_array_length raises on a non-array.
+--   * `goal_node_id` counts by KEY presence (`?`), whatever its value, as the
+--     TS rule does (`goal_node_id === undefined` is its only empty goal). A
+--     stored `"goal_node_id": null` is therefore presence at BOTH boundaries.
 --   * The graph read happens under the row lock this transaction already
 --     holds, so it sees the same row the hash was read from.
 --   NOT CHANGED HERE (pre-existing, recorded so it is not mistaken for fixed):
@@ -208,7 +221,7 @@ DECLARE
   v_user_id             UUID;
   v_current_hash        TEXT;
   -- ── BEGIN strict expected-empty (20260924030000) ──
-  v_current_has_nodes   BOOLEAN;
+  v_current_identity_bearing BOOLEAN;
   -- ── END strict expected-empty (20260924030000) ──
   v_head_id             UUID;
   v_head_root           UUID;
@@ -393,26 +406,47 @@ BEGIN
     -- graph presence is a conflict and `incoming` is deliberately not consulted.
     -- A replay of THIS turn never reaches here: v_turn_preexisting decided it above.
     --
-    -- Presence = a stamped identity hash, OR (hash NULL) a stored graph with at
-    -- least one node. v_current_hash is scenarios.graph_identity_hash, which the
-    -- v2 / store_draft_graph writers never stamp, so the hash alone would let an
+    -- Presence = a stamped identity hash, OR (hash NULL) a stored graph that is
+    -- IDENTITY-BEARING: a non-empty `nodes`, `edges` or `options` array, or a
+    -- `goal_node_id` key. That is graph-identity.ts `isIdentityEmptyGraph`, the
+    -- SAME predicate the route's `expected_model_empty` preflight applies, field
+    -- for field (independent review of #1786, 5807034398: "nodes only" here let
+    -- an unstamped options-only graph pass as empty and be overwritten).
+    -- v_current_hash is scenarios.graph_identity_hash, which the v2 /
+    -- store_draft_graph writers never stamp, so the hash alone would let an
     -- unstamped graph pass as empty. An identity-empty graph with a NULL hash is
-    -- NOT presence: it is what the caller's own read classified as empty
-    -- (assist.v1.scenario-graph-register.ts `baseIsEmpty`), and refusing it would
-    -- refuse every retry on that scenario. Read under the FOR UPDATE lock above.
-    -- CASE, not AND: jsonb_array_length raises on a non-array, and SQL does not
-    -- promise to evaluate AND left to right.
+    -- NOT presence: it is what the caller's own read classified as empty, and
+    -- refusing it would refuse every retry on that scenario. Read under the FOR
+    -- UPDATE lock above.
+    --   * CASE, not AND: jsonb_array_length raises on a non-array, and SQL does
+    --     not promise to evaluate AND left to right. Every OR operand is safe
+    --     to evaluate in any order.
+    --   * The outer object CASE mirrors `!graph || …` over a non-object value,
+    --     and keeps `?` off scalars/arrays, where it tests string membership.
+    --   * `graph ? 'goal_node_id'` is KEY presence, whatever the value, as in TS
+    --     (`goal_node_id === undefined` is the only empty goal on JSON input).
+    -- ⛔ A deliberate twin of a TS predicate: change them together. The static
+    --   guard test parses THIS expression and compares it with isIdentityEmptyGraph.
     IF p_require_expected_empty THEN
       IF v_current_hash IS NULL THEN
-        SELECT CASE WHEN jsonb_typeof(graph -> 'nodes') = 'array'
-                    THEN jsonb_array_length(graph -> 'nodes') > 0
+        SELECT CASE WHEN jsonb_typeof(graph) = 'object' THEN
+                      (CASE WHEN jsonb_typeof(graph -> 'nodes') = 'array'
+                            THEN jsonb_array_length(graph -> 'nodes') > 0
+                            ELSE FALSE END)
+                   OR (CASE WHEN jsonb_typeof(graph -> 'edges') = 'array'
+                            THEN jsonb_array_length(graph -> 'edges') > 0
+                            ELSE FALSE END)
+                   OR (CASE WHEN jsonb_typeof(graph -> 'options') = 'array'
+                            THEN jsonb_array_length(graph -> 'options') > 0
+                            ELSE FALSE END)
+                   OR (graph ? 'goal_node_id')
                     ELSE FALSE
                END
-          INTO v_current_has_nodes
+          INTO v_current_identity_bearing
           FROM public.scenarios
           WHERE id = p_scenario_id;
       END IF;
-      IF v_current_hash IS NOT NULL OR v_current_has_nodes IS TRUE THEN
+      IF v_current_hash IS NOT NULL OR v_current_identity_bearing IS TRUE THEN
         RAISE EXCEPTION USING
           ERRCODE = 'OLGC1',
           MESSAGE = format(

@@ -20,10 +20,23 @@
  * v_current_hash` to it → the no-exemption assertion goes red; `DEFAULT TRUE` → the default
  * assertion goes red. The VERBATIM assertion guards everything OUTSIDE the marked blocks, so
  * it deliberately does not see an edit inside them — the clause assertions do.
+ *
+ * ⭐ ONE EMPTY PREDICATE (independent review of #1786, 5807034398). The presence read for an
+ * unstamped row is the SQL mirror of graph-identity.ts `isIdentityEmptyGraph` — the predicate
+ * the route's `expected_model_empty` preflight calls. The CORRESPONDENCE block parses the
+ * read out of this file (`strict-expected-empty-sql-emulation.ts`, fail-closed) and compares
+ * it with the TS function by behaviour: which keys count, how they count, and the verdict on
+ * a probe set that includes non-objects. Mutation anchor: revert the read to nodes-only → the
+ * correspondence and RED (2) cases go red here, and the rpc-double cases in
+ * `supabase-store-atomic-version-v5.test.ts` (which evaluate the same parsed read) go red too.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+
+import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
+import { isIdentityEmptyGraph } from '../../context/graph-identity.js';
+import { strictPresenceFromMigration } from './strict-expected-empty-sql-emulation.js';
 
 const TS = '20260924030000';
 const rel = (p: string) => fileURLToPath(new URL(`../../../../supabase/migrations/${p}`, import.meta.url));
@@ -155,7 +168,7 @@ describe('append_turn_atomic_v5 — strict expected-empty (migration static guar
 
   it('⛔ the strict clause refuses ANY presence with OLGC1, and carries NO `incoming` exemption', () => {
     const strict = ifBlock(newBody, STRICT_HEAD);
-    expect(strict).toContain('IF v_current_hash IS NOT NULL OR v_current_has_nodes IS TRUE THEN');
+    expect(strict).toContain('IF v_current_hash IS NOT NULL OR v_current_identity_bearing IS TRUE THEN');
     expect(strict).toContain("ERRCODE = 'OLGC1'");
     expect(strict).toContain(MESSAGE);
     // NOT consulted at all — neither the incoming hash nor any IS DISTINCT FROM, nor the posture
@@ -178,19 +191,112 @@ describe('append_turn_atomic_v5 — strict expected-empty (migration static guar
     expect(ifBlock(newBody, CAS_HEAD)).toBe(ifBlock(oldBody, CAS_HEAD));
   });
 
-  it('empty-but-present: an UNSTAMPED graph with nodes is presence; the nodes read is guarded and CASE-protected', () => {
+  it('empty-but-present: an UNSTAMPED identity-bearing graph is presence; the read is object-guarded and CASE-protected', () => {
     const strict = ifBlock(newBody, STRICT_HEAD);
     const read = ifBlock(strict, 'IF v_current_hash IS NULL THEN');
-    expect(read).toContain("SELECT CASE WHEN jsonb_typeof(graph -> 'nodes') = 'array'");
-    expect(read).toContain("THEN jsonb_array_length(graph -> 'nodes') > 0");
+    expect(read).toContain("SELECT CASE WHEN jsonb_typeof(graph) = 'object' THEN");
+    for (const key of ['nodes', 'edges', 'options']) {
+      expect(read).toContain(`CASE WHEN jsonb_typeof(graph -> '${key}') = 'array'`);
+      expect(read).toContain(`THEN jsonb_array_length(graph -> '${key}') > 0`);
+    }
+    expect(read).toContain("OR (graph ? 'goal_node_id')");
     expect(read).toContain('ELSE FALSE');
-    expect(read).toContain('INTO v_current_has_nodes');
+    expect(read).toContain('INTO v_current_identity_bearing');
     expect(read).toContain('FROM public.scenarios');
     expect(read).toContain('WHERE id = p_scenario_id;');
-    // the unguarded form would raise on a non-array `nodes`
+    // the parsed variable is the one the refusal reads
+    expect(strictPresenceFromMigration(NEW_RAW).variable).toBe('v_current_identity_bearing');
+    // the unguarded form would raise on a non-array entry field
     expect(strict).not.toMatch(/jsonb_typeof\([^)]*\)\s*=\s*'array'\s+AND\s+jsonb_array_length/);
-    expect(newBody).toMatch(/^\s*v_current_has_nodes\s+BOOLEAN;$/m);
-    expect(oldBody).not.toContain('v_current_has_nodes');
+    expect(newBody).toMatch(/^\s*v_current_identity_bearing\s+BOOLEAN;$/m);
+    expect(oldBody).not.toContain('v_current_identity_bearing');
+    // the nodes-only predicate this replaced is gone
+    expect(newBody).not.toContain('v_current_has_nodes');
+  });
+
+  /**
+   * ⭐ ONE EMPTY PREDICATE AT BOTH BOUNDARIES (independent review of #1786, 5807034398).
+   * The route's preflight is `isIdentityEmptyGraph` (graph-identity.ts); the SQL cannot import
+   * it, so the SQL MIRRORS it and this pins the mirror. Nothing below restates either side:
+   * the TS side is probed by calling `isIdentityEmptyGraph`, the SQL side is the migration's
+   * own presence read, parsed fail-closed by `strictPresenceFromMigration`.
+   */
+  describe('⭐ CORRESPONDENCE — the SQL presence read IS graph-identity.ts `isIdentityEmptyGraph`', () => {
+    const sql = strictPresenceFromMigration(NEW_RAW);
+    type Kind = 'array' | 'presence' | 'none' | 'other';
+    /** How a top-level key counts, measured by BEHAVIOUR over one value of each JSON type. */
+    const kindOf = (bearing: (graph: unknown) => boolean, key: string): Kind => {
+      const probes = [[1], [], 'x', null, {}, 0, false].map((v) => bearing({ [key]: v }));
+      if (probes.every(Boolean)) return 'presence';
+      if (probes.every((b) => !b)) return 'none';
+      if (probes[0] && probes.slice(1).every((b) => !b)) return 'array';
+      return 'other';
+    };
+    const tsBearing = (g: unknown) => !isIdentityEmptyGraph(g);
+    // The key universe: every key the ingress schema declares, every key the SQL names, and a
+    // few a graph plausibly carries. A TS key outside this set would go unseen — keep
+    // `isIdentityEmpty` to schema-declared keys, or add it here.
+    const universe = [
+      ...new Set([
+        ...Object.keys(GraphStateIngressSchema.shape),
+        ...sql.arrayKeys,
+        ...sql.presenceKeys,
+        'goal', 'factors', 'constraints', 'meta', 'schema_version', 'version', 'id',
+      ]),
+    ].sort();
+
+    it('PROBE LIVENESS: the presence read parsed from the file, and both probes see a known field', () => {
+      expect(kindOf(tsBearing, 'nodes')).toBe('array');
+      expect(kindOf(sql.identityBearing, 'nodes')).toBe('array');
+      expect(kindOf(tsBearing, 'goal_constraints'), 'CONTRAST: a declared key that is NOT identity').toBe('none');
+    });
+
+    it('the SQL counts EXACTLY the fields isIdentityEmptyGraph counts, the same way: nodes, edges, options (non-empty arrays) and goal_node_id (present)', () => {
+      const ts = Object.fromEntries(universe.map((k) => [k, kindOf(tsBearing, k)]));
+      const db = Object.fromEntries(universe.map((k) => [k, kindOf(sql.identityBearing, k)]));
+      expect(db).toEqual(ts);
+      // the spec, named — and nothing the SQL grammar cannot express
+      expect(Object.entries(ts).filter(([, v]) => v !== 'none').sort()).toEqual([
+        ['edges', 'array'], ['goal_node_id', 'presence'], ['nodes', 'array'], ['options', 'array'],
+      ]);
+      expect([...sql.arrayKeys].sort()).toEqual(['edges', 'nodes', 'options']);
+      expect(sql.presenceKeys).toEqual(['goal_node_id']);
+    });
+
+    it('on every probe graph the SQL decides what isIdentityEmptyGraph decides — including non-objects', () => {
+      const probes: unknown[] = [
+        undefined, null, {}, { nodes: [], edges: [] }, { nodes: [], edges: [], options: [] },
+        { nodes: [{ id: 'n' }], edges: [] }, { nodes: [], edges: [{ from: 'a', to: 'b' }] },
+        { nodes: [], edges: [], options: [{ id: 'o' }] }, { options: [{ id: 'o' }] },
+        { nodes: [], edges: [], goal_node_id: 'g' }, { goal_node_id: null }, { goal_node_id: '' },
+        { nodes: 'x', edges: {}, options: 3 }, { goal_constraints: [1], meta: { nodes: [1] } },
+        [], ['goal_node_id'], 'goal_node_id', 0, 1, true, false,
+      ];
+      const mismatches = probes.filter((g) => sql.identityBearing(g) !== tsBearing(g)).map((g) => JSON.stringify(g));
+      expect(mismatches).toEqual([]);
+      // the probes are not all one answer (a probe that always agrees proves nothing)
+      expect(probes.filter(tsBearing).length).toBeGreaterThan(4);
+      expect(probes.filter((g) => !tsBearing(g)).length).toBeGreaterThan(4);
+    });
+
+    it('RED (2): an UNSTAMPED graph with only options, only edges or only a goal id is PRESENCE — the strict clause raises', () => {
+      for (const graph of [
+        { nodes: [], edges: [], options: [{ id: 'opt_contractor', label: 'Hire a contractor' }] },
+        { options: [{ id: 'opt_contractor' }] },
+        { nodes: [], edges: [{ from: 'fac_capacity', to: 'out_velocity' }] },
+        { nodes: [], edges: [], goal_node_id: 'goal_velocity' },
+        { nodes: [{ id: 'goal_velocity', kind: 'goal', label: 'Velocity' }], edges: [] }, // the existing control
+      ]) {
+        expect(sql.refuses({ hash: null, graph }), JSON.stringify(graph)).toBe(true);
+      }
+    });
+
+    it('CONTRAST (1): a truly empty skeleton, empty entry arrays or no graph is NOT presence; a stamped hash always is', () => {
+      for (const graph of [null, { nodes: [], edges: [] }, { nodes: [], edges: [], options: [] }]) {
+        expect(sql.refuses({ hash: null, graph }), JSON.stringify(graph)).toBe(false);
+        expect(sql.refuses({ hash: 'a'.repeat(64), graph }), 'a stamped hash is presence on its own').toBe(true);
+      }
+    });
   });
 
   it('asking for strictness without a KNOWN-EMPTY base is refused (22023), before the row lock', () => {

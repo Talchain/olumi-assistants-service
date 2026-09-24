@@ -145,7 +145,7 @@ import {
   CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
   resolveVerifiedIdentityOrRefuse,
 } from "../orchestrator/route-v2-preflight.js";
-import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
+import { computeGraphIdentityHash, isIdentityEmptyGraph } from "../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
 import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
@@ -507,14 +507,26 @@ export default async function route(app: FastifyInstance) {
        * read→write window too. A populated model is refused with nothing written — the
        * caller recovers its OWN earlier commit by its operation's version, never by
        * adopting the newer state.
+       *
+       * ⛔ "EMPTY" IS THE CANONICAL IDENTITY RULE, `isIdentityEmptyGraph` — not "no nodes"
+       * (independent review of #1786, 5807034398). This check used to admit any base whose
+       * `nodes` was absent or empty, while the identity rule counts nodes, edges, options
+       * AND goal_node_id and the ingress schema admits an options-only graph. So an
+       * options-, edges- or goal-only model passed as empty: its identity hash is non-NULL,
+       * the store sent no strict flag, and the construction replaced it as a "first" model.
+       * The predicate reads the raw server bytes, never the hash, so an unparseable graph
+       * (identity hash NULL) is judged by its content too. The SAME four fields are the
+       * SQL's `v_current_identity_bearing` under the row lock (migration 20260924030000);
+       * the correspondence is pinned by
+       * `append-turn-atomic-v5-strict-expected-empty-static-guards.test.ts`. A base that
+       * passes here therefore has a NULL identity hash, which is what makes the store send
+       * `p_require_expected_empty`.
        */
       if (callerExpectsEmptyModel) {
         if (expectedGraphIdentityHash === undefined) {
           return unavailable();
         }
-        const baseNodes = (baseGraphForInvariants as { nodes?: unknown } | null | undefined)?.nodes;
-        const baseIsEmpty = baseGraphForInvariants == null || !Array.isArray(baseNodes) || baseNodes.length === 0;
-        if (!baseIsEmpty) {
+        if (!isIdentityEmptyGraph(baseGraphForInvariants)) {
           log.warn(
             {
               event: "v5.scenario_graph_register.expected_model_empty_stale",

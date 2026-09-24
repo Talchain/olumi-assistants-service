@@ -4,6 +4,7 @@ import { SupabaseSessionStore } from '../supabase-store.js';
 import { AtomicPreconditionUnenforceableError, GraphStaleWriteError, StateCommitFailedError } from '../store.js';
 import type { SessionTurnWrite } from '../store.js';
 import { setTestSink, TelemetryEvents } from '../../../utils/telemetry.js';
+import { strictPresenceFromMigration } from './strict-expected-empty-sql-emulation.js';
 
 type SunkEvent = { event: string; data: Record<string, unknown> };
 function captureEvents(): SunkEvent[] {
@@ -596,6 +597,115 @@ describe('a caller precondition (requireAtomicExpectedBase) is held inside the a
         store.append(write({ expectedGraphIdentityHash: null, requireAtomicExpectedBase: true })),
       ).resolves.toMatchObject({ id: 'turn-row' });
       expect(v5Args()['p_require_expected_empty']).toBe(true);
+    });
+  });
+
+  /**
+   * ⛔ AN UNSTAMPED IDENTITY-BEARING GRAPH IS PRESENCE — ALL FOUR FIELDS (independent review
+   * of #1786, 5807034398). `scenarios.graph_identity_hash` is NULL for a graph written by
+   * append_turn_atomic_v2 or store_draft_graph, so the strict clause must read the stored
+   * graph itself — and "empty" there must be the canonical identity rule (nodes, edges,
+   * options, goal_node_id; graph-identity.ts `isIdentityEmptyGraph`), not "no nodes": the
+   * ingress schema admits an options-only graph.
+   *
+   * THE ROW IS MODELLED, so "no turn, no version, no graph overwrite" is observable rather
+   * than inferred from a rejected promise. The strict clause is NOT restated here: it is
+   * `strictPresenceFromMigration()`, parsed from the migration FILE, so an edit to the SQL
+   * changes this double. The ordinary guard is the `sqlGuard` above, and replay-first is the
+   * ordering `append-turn-atomic-v5-strict-expected-empty-static-guards.test.ts` pins in the
+   * same file (the lookup precedes both guards).
+   */
+  describe('an UNSTAMPED identity-bearing graph lands after the empty read (strict clause parsed from the migration)', () => {
+    const strictSql = strictPresenceFromMigration();
+    type Row = { hash: string | null; graph: unknown; turns: Map<string, unknown>; versions: number };
+    let row: Row;
+    beforeEach(() => {
+      row = { hash: null, graph: null, turns: new Map(), versions: 0 };
+      rpc.mockImplementation(async (name: string, a: Record<string, unknown>) => {
+        if (name !== 'append_turn_atomic_v5') throw new Error(`unexpected rpc ${name}`);
+        const turnId = a['p_turn_id'] as string;
+        // 1. replay of an already-committed turn: read-only, the durable receipt, no guard runs
+        if (row.turns.has(turnId)) {
+          return { data: { turn_row_id: 'turn-row', model_version_receipt: row.turns.get(turnId) }, error: null };
+        }
+        // 2. the ordinary guard, then 3. the strict clause — both against the row under the lock
+        rowHashAtAppend = row.hash;
+        if (sqlGuard(a) || (a['p_require_expected_empty'] === true && strictSql.refuses(row))) {
+          return { data: null, error: { code: OLGC1, message: 'append_turn_atomic_v5: stale graph write' } };
+        }
+        // 4. commit: turn, graph, stamped hash, and a version only when the identity moved
+        const created = row.hash !== a['p_incoming_graph_identity_hash'];
+        row.graph = a['p_graph'];
+        row.hash = a['p_incoming_graph_identity_hash'] as string;
+        row.turns.set(turnId, created ? receipt : null);
+        if (created) row.versions += 1;
+        return { data: { turn_row_id: 'turn-row', model_version_receipt: created ? receipt : null }, error: null };
+      });
+    });
+
+    const OPTIONS_ONLY = { nodes: [], edges: [], options: [{ id: 'opt_contractor', label: 'Hire a contractor' }] };
+    const strictWrite = (graph: unknown, over: Partial<SessionTurnWrite> = {}) =>
+      write({ graph, expectedGraphIdentityHash: null, requireAtomicExpectedBase: true, ...over });
+
+    it('RED: an unstamped OPTIONS-ONLY graph whose bytes EQUAL this write\'s graph → OLGC1; no turn, no version, no overwrite', async () => {
+      const current = structuredClone(OPTIONS_ONLY); // a DIFFERENT operation's graph, byte-equal to ours
+      row.graph = current;
+      const store = storeWith('shadow');
+      await expect(store.append(strictWrite(structuredClone(OPTIONS_ONLY)))).rejects.toBeInstanceOf(GraphStaleWriteError);
+      const args = v5Args();
+      // PRECONDITION PINS — this is the cell a nodes-only clause admits, and the old guard admits it too.
+      expect(args['p_graph'], 'the incoming graph equals the current bytes').toEqual(current);
+      expect(row.hash, 'unstamped: the hash column is NULL').toBeNull();
+      expect(current.nodes, 'no nodes: a nodes-only presence read calls it empty').toHaveLength(0);
+      expect(sqlGuard(args), 'the ordinary guard ADMITS this cell').toBe(false);
+      expect(args['p_require_expected_empty']).toBe(true);
+      // NOTHING WRITTEN — identity, not a lookalike
+      expect(row.graph).toBe(current);
+      expect(row.hash).toBeNull();
+      expect(row.turns.size).toBe(0);
+      expect(row.versions).toBe(0);
+    });
+
+    it.each([
+      ['edges only', { nodes: [], edges: [{ from: 'fac_capacity', to: 'out_velocity' }] }],
+      ['a goal id only', { nodes: [], edges: [], goal_node_id: 'goal_velocity' }],
+      ['options only, no entry arrays', { options: [{ id: 'opt_contractor' }] }],
+      ['nodes (the existing control)', { nodes: [{ id: 'goal_velocity', kind: 'goal', label: 'Velocity' }], edges: [] }],
+    ])('RED: an unstamped graph with %s is presence → OLGC1, nothing written', async (_l, current) => {
+      row.graph = current;
+      await expect(storeWith('shadow').append(strictWrite(receipt.graph))).rejects.toBeInstanceOf(GraphStaleWriteError);
+      expect(row.graph).toBe(current);
+      expect(row.turns.size).toBe(0);
+      expect(row.versions).toBe(0);
+    });
+
+    it.each([
+      ['no graph at all (NULL column)', null],
+      ['a truly empty skeleton', { nodes: [], edges: [] }],
+      ['empty entry arrays, options included', { nodes: [], edges: [], options: [] }],
+    ])('CONTRAST: %s is NOT presence → the strict write lands and mints its version', async (_l, current) => {
+      row.graph = current;
+      await expect(storeWith('shadow').append(strictWrite(OPTIONS_ONLY))).resolves.toMatchObject({ id: 'turn-row' });
+      expect(row.graph).toBe(OPTIONS_ONLY);
+      expect(row.hash).toBe(HASH);
+      expect(row.turns.size).toBe(1);
+      expect(row.versions).toBe(1);
+    });
+
+    it('a same turn-id REPLAY stays read-only and succeeds, even though the row now carries a graph', async () => {
+      await storeWith('shadow').append(strictWrite(OPTIONS_ONLY)); // this turn's own first commit
+      const after = { graph: row.graph, hash: row.hash, versions: row.versions };
+      expect(after).toEqual({ graph: OPTIONS_ONLY, hash: HASH, versions: 1 });
+      await expect(storeWith('shadow').append(strictWrite(OPTIONS_ONLY))).resolves.toMatchObject({ id: 'turn-row' });
+      expect(row.graph).toBe(after.graph);
+      expect(row.hash).toBe(after.hash);
+      expect(row.versions).toBe(1);
+      expect(row.turns.size).toBe(1);
+      // CONTRAST: a DIFFERENT turn on the same row is refused by the strict clause
+      await expect(
+        storeWith('shadow').append(strictWrite(OPTIONS_ONLY, { turn_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' })),
+      ).rejects.toBeInstanceOf(GraphStaleWriteError);
+      expect(row.turns.size).toBe(1);
     });
   });
 });

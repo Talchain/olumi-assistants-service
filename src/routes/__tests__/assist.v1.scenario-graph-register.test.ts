@@ -78,7 +78,7 @@ vi.mock("../../orchestrator/user-identity.js", async (importOriginal) => {
 });
 
 import registerRoute from "../assist.v1.scenario-graph-register.js";
-import { computeGraphIdentityHash } from "../../orchestrator-v5/context/graph-identity.js";
+import { computeGraphIdentityHash, isIdentityEmptyGraph } from "../../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../../orchestrator-v5/persisted-graph-projection.js";
 import { GraphStaleWriteError } from "../../orchestrator-v5/session/store.js";
@@ -1317,8 +1317,50 @@ describe("register — expected_model_empty makes a first construction condition
     await app.close();
   });
 
-  it.each([["absent (null)", null], ["present but empty", { nodes: [], edges: [] }]])(
+  /**
+   * ⛔ "EMPTY" IS THE IDENTITY RULE, NOT "NO NODES" (independent review of #1786, 5807034398).
+   * The canonical rule (`isIdentityEmptyGraph`, graph-identity.ts) calls a graph non-empty
+   * when ANY of nodes, edges, options or goal_node_id carries content, and the ingress schema
+   * admits an options-only graph. A nodes-only preflight admitted each base below as empty:
+   * the first three carry a NON-null identity hash, so the store never sent the strict flag
+   * and the construction replaced them; the fourth fails the ingress parse, so its hash is
+   * NULL — emptiness inferred from the hash alone would admit it too.
+   */
+  it.each([
+    ["options only", { nodes: [], edges: [], options: [{ id: "opt_contractor", label: "Hire a contractor" }] }, "hashed"],
+    ["edges only", { nodes: [], edges: [{ from: "fac_capacity", to: "out_velocity" }] }, "hashed"],
+    ["a goal id only", { nodes: [], edges: [], goal_node_id: "goal_velocity" }, "hashed"],
+    ["options only, no entry arrays (unparseable: identity hash NULL)", { options: [{ id: "opt_contractor" }] }, "unhashed"],
+  ])("RED: an identity-bearing base with NO nodes (%s) is refused 409 MODEL_NOT_EMPTY — nothing reaches the atomic writer", async (_l, base, hashed) => {
+    // PRECONDITION PINS — this base discriminates: a nodes-only reading calls it empty, the
+    // canonical rule does not, and the hash column says what a hash-only reading would.
+    const nodes = (base as { nodes?: readonly unknown[] }).nodes;
+    expect(nodes === undefined || nodes.length === 0, "no nodes: a nodes-only predicate admits it").toBe(true);
+    expect(isIdentityEmptyGraph(base), "the canonical identity rule calls it NON-empty").toBe(false);
+    const { expectedGraphIdentityHash } = computeExpectedGraphCasHashes(base);
+    if (hashed === "hashed") expect(expectedGraphIdentityHash).toMatch(/^[0-9a-f]{64}$/);
+    else expect(expectedGraphIdentityHash).toBeNull();
+
+    loadGraph.mockResolvedValue(base);
+    const claim = vi.fn(async (scenarioId: string, turnId: string) => ({ scenarioId, turnId, generation: 7 }));
+    (store as Record<string, unknown>).claimTurnFence = claim;
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_model_empty: true });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().details.code).toBe("MODEL_NOT_EMPTY");
+    expect(claim).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    delete (store as Record<string, unknown>).claimTurnFence;
+    await app.close();
+  });
+
+  it.each([
+    ["absent (null)", null],
+    ["present but empty", { nodes: [], edges: [] }],
+    ["empty entry arrays, options included", { nodes: [], edges: [], options: [] }],
+  ])(
     "an EMPTY base (%s) writes, carrying a KNOWN-absent base to the atomic RPC", async (_l, base) => {
+      expect(isIdentityEmptyGraph(base), "CONTRAST: the canonical rule calls this base empty").toBe(true);
       loadGraph.mockResolvedValue(base);
       const app = await buildApp();
       const res = await post(app, SCENARIO, { graph: IMPORTED, expected_model_empty: true });
