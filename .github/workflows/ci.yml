@@ -27,9 +27,24 @@ permissions:
   packages: read
 
 jobs:
-  # Job A: Required checks (no secrets needed)
-  unit-tests:
-    name: Lint, TypeCheck, Unit Tests
+  # ── Job A: THE REQUIRED GATE, split into three jobs (no secrets needed) ─────
+  #
+  # Branch protection on `staging` requires exactly ONE context:
+  # `Lint, TypeCheck, Unit Tests`. That context is now the `unit-tests` job
+  # further down, and it decides the verdict of the whole split gate:
+  #
+  #   required-static  every lint / build / guard step, verbatim   (~2.5 min)
+  #   required-tests   `pnpm test:required`, sharded 3 ways        (~8.5 min each, in parallel)
+  #   unit-tests       `Lint, TypeCheck, Unit Tests` — RED unless both succeeded
+  #                    AND every required test file ran in exactly one shard
+  #
+  # WHY SPLIT. On one runner `pnpm test:required` was ~21 of the gate's ~23 min
+  # (measured 48h to 24 Sep 2026: required job p50 23.0 min, p90 24.4, n=441),
+  # the steadiest cost between review-ready code and a green check. The test
+  # population, config and environment are UNCHANGED — `--shard` only partitions
+  # the files, and the gate proves the partition is complete.
+  required-static:
+    name: Required — lint, typecheck, guards
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -106,8 +121,9 @@ jobs:
         # the compiled-boot test (prompt-loader.test.ts, "compiled dist module
         # boots") is `it.skipIf(!dist exists)` and this job never built, so it
         # DETERMINISTICALLY skipped in the required gate — an always-skipping
-        # check is theatre. With dist present, `pnpm test:required` below actually
-        # executes it. (`pnpm check:schemas-resolution` is run explicitly because
+        # check is theatre. With dist present, `pnpm test:required` actually
+        # executes it — which is why every `required-tests` shard now runs its
+        # own `pnpm build` too. (`pnpm check:schemas-resolution` is run explicitly because
         # it lived in `pretypecheck`, which `pnpm build` does not trigger; build
         # itself re-runs openapi:generate, which is idempotent here.)
         # The full src+test `tsc --noEmit` is deliberately NOT this gate — it
@@ -197,6 +213,8 @@ jobs:
         # it, a prompt-fixture regression would redden test:required first and this
         # step would be skipped — a shadowed gate that could never independently go
         # RED. Running it first makes it the attributable signal for prompt drift.
+        # (Since the split, test:required runs in the parallel `required-tests`
+        # shards instead of after this step, so neither can shadow the other.)
         run: pnpm eval:orchestrator:test
 
       - name: Eval-pass promotion gate
@@ -234,18 +252,20 @@ jobs:
         # there, rather than reporting a vacuous pass (see the checkout note).
         run: pnpm eval:promotion-gate:shrink-guard
 
-      - name: Run required test subset
-        # Deterministic, in-process suite (see vitest.required.config.ts).
-        # Since O-6 this INCLUDES the ~155 in-process tests/integration files —
-        # only the finite, self-checking REQUIRED_GATE_INTEGRATION_EXCLUSIONS
-        # list (vitest.shared.ts: real Supabase/Postgres, live LLM, staging
-        # HTTP) is excluded, so a change that breaks an in-process integration
-        # test turns THIS required check red (the old `tests/integration/**`
-        # category glob let PR #539 report "0 failed" while breaking two).
-        # The full suite + coverage and the external-dependent files still run
-        # in the non-required "Full Test Suite (advisory)" / "Integration
-        # Tests (advisory)" jobs below, so nothing is hidden.
-        run: pnpm test:required
+      - name: Publish the required test population
+        # The EXPECTED half of the shard-completeness proof: every file
+        # vitest.required.config.ts selects, derived from the config itself.
+        # `vitest list --filesOnly` only globs — it does not collect or run.
+        # The `Lint, TypeCheck, Unit Tests` job compares it with what the
+        # shards actually reported (scripts/ci/assert-required-shards-complete.mjs).
+        run: pnpm exec vitest list --config vitest.required.config.ts --filesOnly --json=.vitest-reports/expected.json
+      - name: Upload the required test population
+        uses: actions/upload-artifact@v4
+        with:
+          name: required-tests-expected
+          path: .vitest-reports/expected.json
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Check for quarantined tests
         if: success()
@@ -275,6 +295,120 @@ jobs:
             exit 1
           fi
           echo "✅ All QUARANTINED markers are inside comments or .skip(...) literals"
+
+  # The required tests, sharded. Same config, same files, same environment as
+  # the single-runner step this replaces; `--shard` only partitions the files.
+  # Each shard also writes a vitest JSON report — the OBSERVED half of the
+  # completeness proof decided in `unit-tests` below.
+  required-tests:
+    name: Required — tests ${{ matrix.shard }}/${{ strategy.job-total }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Every shard must finish and report. fail-fast would CANCEL the siblings
+      # of a red shard and hide how much else is red.
+      fail-fast: false
+      matrix:
+        # Keep in step with `--shards` in `unit-tests` below (pinned by
+        # tests/unit/ci/required-shards-complete.test.ts).
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
+      - name: Build dist (the compiled-boot test skips without it)
+        # prompt-loader.test.ts "compiled dist module boots" is
+        # `it.skipIf(!dist exists)`: without this step it would DETERMINISTICALLY
+        # skip in whichever shard holds it. `pnpm build` also regenerates the
+        # OpenAPI types the suite imports.
+        run: pnpm build
+      - name: Run required test subset (shard)
+        # Deterministic, in-process suite (see vitest.required.config.ts).
+        # Since O-6 this INCLUDES the ~155 in-process tests/integration files —
+        # only the finite, self-checking REQUIRED_GATE_INTEGRATION_EXCLUSIONS
+        # list (vitest.shared.ts: real Supabase/Postgres, live LLM, staging
+        # HTTP) is excluded, so a change that breaks an in-process integration
+        # test turns the required check red (the old `tests/integration/**`
+        # category glob let PR #539 report "0 failed" while breaking two).
+        # The full suite + coverage and the external-dependent files still run
+        # in the non-required "Full Test Suite (advisory)" / "Integration
+        # Tests (advisory)" jobs below, so nothing is hidden.
+        run: pnpm test:required --shard=${{ matrix.shard }}/${{ strategy.job-total }} --reporter=default --reporter=json --outputFile.json=.vitest-reports/shard-${{ matrix.shard }}.json
+      - name: Upload this shard's report
+        # Uploaded pass or fail, so a red shard's report is still inspectable;
+        # a shard that died before writing one fails here as well.
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: required-tests-shard-${{ matrix.shard }}
+          path: .vitest-reports/shard-${{ matrix.shard }}.json
+          if-no-files-found: error
+          retention-days: 3
+
+  # ── THE REQUIRED CONTEXT: `Lint, TypeCheck, Unit Tests` ─────────────────────
+  #
+  # The single context branch protection requires, and the one place the split
+  # gate's verdict is decided. It is RED unless:
+  #   1. every job it `needs` concluded `success` — not failure, cancelled or
+  #      skipped (a matrix's result is `success` only if EVERY shard succeeded);
+  #   2. every required test file ran in exactly one shard, and every shard
+  #      report is green (scripts/ci/assert-required-shards-complete.mjs). All
+  #      shards green is necessary, NOT sufficient: a shard that never ran, or a
+  #      matrix narrowed while `--shard` still says /3, leaves the rest green.
+  #
+  # ⛔ `if: !cancelled()` IS LOAD-BEARING. Without it a failed `needs` makes this
+  # job SKIPPED, and GitHub treats a skipped required check as PASSING. With it
+  # this job runs once its needs finish and goes red on any of them. If the run
+  # itself is cancelled (a superseded PR head) this job is cancelled too, which
+  # never satisfies protection.
+  #
+  # ⚠ Keep the job KEY `unit-tests` and the NAME exactly as is. `live-tests`
+  # needs the key; branch protection and the estate's premerge guard match the
+  # name, one instance per head. tests/unit/ci/required-shards-complete.test.ts
+  # pins both, and that no other job or matrix leg can report the same name.
+  #
+  # No provider credential reaches any of the three required jobs; the same
+  # spec asserts that too (programme constraint, 24 Sep 2026: no paid model
+  # calls from the required path).
+  unit-tests:
+    name: Lint, TypeCheck, Unit Tests
+    needs: [required-static, required-tests]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every required job succeeded
+        env:
+          STATIC_RESULT: ${{ needs.required-static.result }}
+          TESTS_RESULT: ${{ needs.required-tests.result }}
+        run: |
+          echo "required-static: $STATIC_RESULT"
+          echo "required-tests (every shard): $TESTS_RESULT"
+          if [ "$STATIC_RESULT" != "success" ] || [ "$TESTS_RESULT" != "success" ]; then
+            echo "::error title=Required gate RED::required-static=$STATIC_RESULT, required-tests=$TESTS_RESULT. Every required job must succeed; open the red one above."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Collect the population and every shard report
+        uses: actions/download-artifact@v4
+        with:
+          pattern: required-tests-*
+          path: .vitest-reports
+          merge-multiple: true
+      - name: Every required test file ran in exactly one shard
+        run: node scripts/ci/assert-required-shards-complete.mjs --expected .vitest-reports/expected.json --dir .vitest-reports --shards 3
 
   # Full Test Suite (advisory): the complete `pnpm test -- --coverage` + Codecov
   # upload, relocated verbatim from the required job. NON-REQUIRED — surfaces the
@@ -411,7 +545,7 @@ jobs:
       # So the move is safe ONLY as part of moving the installing jobs to pnpm >=10
       # (18 of them, all currently pinned to 9) — it cannot land on its own. Until
       # then the `Assert pnpm overrides are readable by the installing pnpm` step in
-      # the unit-tests job blocks the half-migration in either direction.
+      # the required-static job blocks the half-migration in either direction.
       # Auditing from the committed lockfile needs no NPM_PACKAGES_TOKEN.
       - name: Check for duplicate files (prevents drift from shadow copies)
         # ROADMAP 2.660. This used to be eight inline globs — '* 2.ts', '* 2.js',

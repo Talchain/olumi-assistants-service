@@ -508,8 +508,21 @@ describe("Core/Drafting release hold is bounded and restores without a push", ()
 
   it("only the paid CI job is variable-gated; required code checks retain their gate", () => {
     expect(findVarGatedConditions(ci, "ci")).toEqual([`ci.jobs.live-tests.if = ${ci.jobs["live-tests"].if}`]);
-    expect(ci.jobs["unit-tests"].if).toBeUndefined();
-    expect(ci.jobs["unit-tests"].steps.some((step: any) => step.run === "pnpm test:required")).toBe(true);
+    // The required gate is split (see ci.yml Job A). The jobs doing the work
+    // carry no condition at all, so nothing can skip them; the required
+    // context `unit-tests` runs whatever they concluded and goes red on any
+    // failure. It may carry exactly `!cancelled()` and nothing else, because a
+    // SKIPPED required check reads as passing.
+    expect(ci.jobs["required-static"].if).toBeUndefined();
+    expect(ci.jobs["required-tests"].if).toBeUndefined();
+    expect(ci.jobs["unit-tests"].if).toBe("${{ !cancelled() }}");
+    expect(ci.jobs["unit-tests"].needs).toEqual(["required-static", "required-tests"]);
+    // The whole required population still runs, in the shards the gate needs.
+    expect(
+      ci.jobs["required-tests"].steps.some((step: any) =>
+        typeof step.run === "string" &&
+        step.run.startsWith("pnpm test:required --shard=${{ matrix.shard }}/${{ strategy.job-total }} ")),
+    ).toBe(true);
     expect(ci.on.push.branches).toEqual(["main", "staging", "feat/**"]);
     expect(ci.on.pull_request.branches).toEqual(["main", "staging"]);
   });
