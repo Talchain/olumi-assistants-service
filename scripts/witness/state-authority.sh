@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# MG&Q acceptance probe — drives the goal's own journey at the WIRE and prints
+# the rung for each clause. Written 24 Sep 2026; safe to re-run any time.
+#
+#   bash output/mgq-lane/witness-state-authority.sh
+#
+# ⛔ It creates a real scenario on staging and costs one LLM draft (~50-60s).
+# ⛔ It reads ASSIST_API_KEY from .env.staging.local and NEVER prints it.
+# ⚠  No browser. This is the wire beneath the journey, not the journey.
+set -uo pipefail
+
+BASE=${BASE:-https://cee-staging.onrender.com}
+ENVF=${ENVF:-olumi-assistants-service/.env.staging.local}
+[ -f "$ENVF" ] || { echo "FATAL: no $ENVF"; exit 2; }
+K=$(grep -m1 '^ASSIST_API_KEY=' "$ENVF" | cut -d= -f2- | tr -d '"'"'"'' | tr -d '\r\n')
+[ ${#K} -gt 20 ] || { echo "FATAL: key looks wrong (len ${#K})"; exit 2; }
+echo "key len=${#K} (value never printed)"
+
+SERVED=$(curl -s --max-time 20 "$BASE/healthz" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build',''))")
+echo "SERVED BUILD: $SERVED"
+
+SC=$(python3 -c "import uuid;print(uuid.uuid4())")
+USR=$(python3 -c "import uuid;print(uuid.uuid4())")
+TID=$(python3 -c "import uuid;print(uuid.uuid4())")
+echo "scenario=$SC"
+
+# ── AUTH CONTROL FIRST. A fabricated path must 404, not 401 — auth precedes
+#    routing here, so a 401 would make every later probe blind.
+CTRL=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "X-Olumi-Assist-Key: $K" "$BASE/assist/v1/scenarios/$SC/definitely-not-a-route")
+echo "AUTH CONTROL (fabricated path, expect 404): $CTRL"
+
+# ── 1. a draft turn. NOTE the enums: stage/turn_class lowercase, source=composer.
+curl -s --max-time 300 -X POST "$BASE/orchestrate/v2/turn" \
+  -H "X-Olumi-Assist-Key: $K" -H 'content-type: application/json' \
+  -d "{\"kind\":\"message\",\"scenario_id\":\"$SC\",\"turn_id\":\"$TID\",\"stage\":\"frame\",\"turn_class\":\"frame\",\"source\":\"composer\",\"user_id\":\"$USR\",\"message\":\"Decide whether to launch a paid Enterprise tier. Enterprise customers is currently 0, plausibly up to 500. Options: launch at 89 per seat, or hold.\"}" \
+  -o /tmp/w_turn.json -w 'TURN HTTP %{http_code} in %{time_total}s\n'
+
+python3 - <<'PY'
+import json
+d=json.load(open('/tmp/w_turn.json'))
+g=d.get('draft_graph') or {}
+json.dump({'graph': g}, open('/tmp/w_reg.json','w'))
+print("\n--- CLAUSE: consistent values at CONSTRUCTION (#63 item 1) ---")
+bad=[]
+for n in (g.get('nodes') or []):
+    if n.get('kind')!='factor': continue
+    os_=n.get('observed_state') or {}
+    if os_.get('value') is None: continue
+    framed = os_.get('cap') is not None or n.get('scale_frame') is not None
+    print("  %-38s value=%-8s cap=%-7s scale_frame=%-6s FRAMED=%s" % (
+        str(n.get('label'))[:38], os_.get('value'), os_.get('cap'), n.get('scale_frame'), framed))
+    if not framed and abs(float(os_.get('value') or 0)) <= 1 and os_.get('value') == 0:
+        bad.append(n.get('label'))
+print("  UNFRAMED zero baselines:", bad or "none")
+print("  → item 1 DEFECT PRESENT" if bad else "  → item 1 not reproduced on this brief (it is BRIEF-DEPENDENT; try again)")
+PY
+
+# ── 2. register (owner-attributed), then exercise the identity expectation.
+python3 -c "
+import json;d=json.load(open('/tmp/w_reg.json'));d['user_id']='$USR';json.dump(d,open('/tmp/w_reg.json','w'))"
+curl -s --max-time 60 -X POST "$BASE/assist/v1/scenarios/$SC/graph/register" \
+  -H "X-Olumi-Assist-Key: $K" -H 'content-type: application/json' -d @/tmp/w_reg.json \
+  -o /tmp/w_r.json -w 'REGISTER HTTP %{http_code}\n'
+python3 -c "
+import json;d=json.load(open('/tmp/w_r.json'));gih=d.get('graph_identity_hash')
+print('  identity on the wire is a', type(gih).__name__, '- kind=', (gih or {}).get('kind') if isinstance(gih,dict) else None)
+print('  → provenance envelope', 'PRESENT' if isinstance(gih,dict) else 'MISSING')
+import json as j; j.dump(gih, open('/tmp/w_gih.json','w'))"
+
+echo "--- CLAUSE: edits cannot overwrite committed state (#1810/#1820) ---"
+for CASE in envelope null stale; do
+  python3 - "$CASE" <<'PY'
+import json,sys
+base=json.load(open('/tmp/w_reg.json'))
+case=sys.argv[1]
+v = json.load(open('/tmp/w_gih.json')) if case=='envelope' else (None if case=='null' else 'f'*64)
+base=dict(base); base['expected_graph_identity_hash']=v
+json.dump(base, open('/tmp/w_case.json','w'))
+PY
+  CODE=$(curl -s --max-time 60 -X POST "$BASE/assist/v1/scenarios/$SC/graph/register" \
+    -H "X-Olumi-Assist-Key: $K" -H 'content-type: application/json' -d @/tmp/w_case.json \
+    -o /tmp/w_out.json -w '%{http_code}')
+  FE=$(python3 -c "import json;print((json.load(open('/tmp/w_out.json')).get('details') or {}).get('failed_expectation'))" 2>/dev/null)
+  echo "  expectation=$CASE → HTTP $CODE  failed_expectation=$FE"
+done
+echo "  → EXPECTED: envelope 200 · null 409/absence · stale 409/identity"
+
+# ── 3. the edit, then the reload. This is the goal's own journey step.
+FID=$(python3 -c "
+import json;g=json.load(open('/tmp/w_reg.json'))['graph']
+c=[n for n in g['nodes'] if n.get('kind')=='factor' and (n.get('observed_state') or {}).get('cap') is None and n.get('scale_frame') is None]
+print(c[0]['id'] if c else (([n for n in g['nodes'] if n.get('kind')=='factor'][0])['id']))")
+echo "--- editing factor $FID to 40 ---"
+TID2=$(python3 -c "import uuid;print(uuid.uuid4())")
+curl -s --max-time 120 -X POST "$BASE/orchestrate/v2/turn" \
+  -H "X-Olumi-Assist-Key: $K" -H 'content-type: application/json' \
+  -d "{\"kind\":\"system_event\",\"scenario_id\":\"$SC\",\"turn_id\":\"$TID2\",\"stage\":\"frame\",\"user_id\":\"$USR\",\"event\":{\"kind\":\"factor_value_edit\",\"target_id\":\"$FID\",\"value\":40}}" \
+  -o /tmp/w_edit.json -w 'EDIT HTTP %{http_code}\n'
+python3 -c "
+import json;ar=(json.load(open('/tmp/w_edit.json')).get('analysis_ready') or {})
+f=ar.get('freshness')
+print('--- CLAUSE: freshness on an edit (#63 item 15 / PR #1822) ---')
+print('  freshness =', f if f is not None else '<<ABSENT>>')
+print('  →', 'SATISFIED' if f is not None else 'DEFECT PRESENT (item 15 not yet served)')"
+
+# ⚠ POST, not GET. The read route is app.post; a GET returns 404 and that is a
+#    METHOD mismatch, never an auth failure. (This cost a wrong published claim.)
+curl -s --max-time 60 -X POST "$BASE/assist/v1/scenarios/$SC/graph" \
+  -H "X-Olumi-Assist-Key: $K" -H 'content-type: application/json' -d "{\"user_id\":\"$USR\"}" \
+  -o /tmp/w_reload.json -w 'RELOAD HTTP %{http_code}\n'
+python3 - "$FID" <<'PY'
+import json,sys
+d=json.load(open('/tmp/w_reload.json')); fid=sys.argv[1]
+print("--- CLAUSE: reloads read one authoritative current model ---")
+print("  graph_present=%s  identity=%s  graph_hash=%s" % (
+    d.get('graph_present'), type(d.get('graph_identity_hash')).__name__, d.get('graph_hash')))
+aa=d.get('analysis_admission') or {}
+print("  admission: admitted=%s mode=%s missing=%s demanded=%s waived=%s" % (
+    aa.get('admitted'), aa.get('permitted_analysis_mode'), aa.get('missing_input_count'),
+    aa.get('inputs_demanded_of_user'), aa.get('inputs_waived_by_exclusion')))
+for n in ((d.get('graph') or {}).get('nodes') or []):
+    if n.get('id')==fid:
+        os_=n.get('observed_state') or {}
+        ds=os_.get('declared_scale'); val=os_.get('value'); cap=os_.get('cap')
+        print("--- CLAUSE: no self-contradictory stored data (PR #1832) ---")
+        print("  value=%s raw_value=%s cap=%s declared_scale=%s" % (val, os_.get('raw_value'), cap, ds))
+        falsified = ds=='unit_interval' and cap is None and isinstance(val,(int,float)) and abs(val)>1
+        print("  →", "DEFECT PRESENT: declares unit_interval while holding %s" % val if falsified else "SATISFIED: no false declaration")
+        if aa.get('admitted') and falsified:
+            print("  ⛔ AND readiness ADMITS it (#63 item 3) — mode=%s" % aa.get('permitted_analysis_mode'))
+PY
+
+# ── 4. versions. ⚠ A zero here from a key-authed caller is VACUOUS: it cannot
+#    distinguish "broken" from "correctly declined for an anonymous writer".
+curl -s --max-time 60 -X POST "$BASE/assist/v1/scenarios/$SC/versions" \
+  -H "X-Olumi-Assist-Key: $K" -H 'content-type: application/json' -d "{\"user_id\":\"$USR\"}" \
+  -o /tmp/w_ver.json -w 'VERSIONS HTTP %{http_code}\n'
+python3 -c "
+import json;d=json.load(open('/tmp/w_ver.json'))
+print('--- CLAUSE: versions / receipts ---')
+print('  versions=%s current_version_id=%s' % (len(d.get('versions') or []), d.get('current_version_id')))
+print('  ⚠ VACUOUS from a key-authed caller — needs a SIGNED-IN session to mean anything.')"
+echo
+echo "SERVED BUILD WAS: $SERVED   scenario: $SC"
