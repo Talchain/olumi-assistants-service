@@ -129,7 +129,11 @@ vi.mock("../../src/cee/transforms/analysis-ready.js", () => ({
   extractConstraintDropBlockers: vi.fn().mockReturnValue([]),
 }));
 
-vi.mock("../../src/schemas/cee-v3.js", () => ({
+// Partial mock: `field-safety.ts` reads `InterventionV3.shape` at MODULE-LOAD time, so a
+// full replacement of this module breaks any test whose import graph reaches it. Keep the
+// real exports and override only the two this suite stubs.
+vi.mock("../../src/schemas/cee-v3.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/schemas/cee-v3.js")>()),
   CEEGraphResponseV3: {
     safeParse: vi.fn((input: unknown) => ({ success: true, data: input })),
   },
