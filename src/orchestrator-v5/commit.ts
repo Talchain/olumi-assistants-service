@@ -381,6 +381,11 @@ export interface CommitResult {
    *
    * `null` when this commit wrote no graph (there are no persisted bytes to
    * hash) or when the graph was empty/unhashable.
+   *
+   * ⛔ ON A REPLAY OR A REUSED-ID CONFLICT THE STORE WROTE NOTHING (F3). The
+   * candidate this turn re-ran was never stored, so its hash must never be
+   * advertised. Here the field is the analysis hash of the AUTHORITATIVE
+   * REREAD of `scenarios.graph`, or `null` when that reread failed.
    */
   readonly persistedAnalysisGraphHash: string | null;
   /**
@@ -399,6 +404,14 @@ export interface CommitResult {
    *
    * `null` when this commit wrote no graph. Do NOT treat it as a general
    * read-back: it is this commit's own input after projection, not a re-read.
+   *
+   * ⛔ THE ONE EXCEPTION IS A REPLAY OR A REUSED-ID CONFLICT (F3). The store
+   * wrote nothing, so "this commit's own input" is bytes that never landed,
+   * and callers stamp this field onto the wire as the applied postimage
+   * (`draft_graph`). On that branch it is the AUTHORITATIVE REREAD of
+   * `scenarios.graph`, the same reread the branch already reconciles the
+   * `graph_patch` against, or `null` when that reread failed. Never the
+   * candidate.
    */
   readonly persistedGraph: unknown | null;
 }
@@ -1634,6 +1647,9 @@ export async function commitDirectAnswer(
   // reused id carrying a different instruction.
   const priorTurnReplay = appendOutcome.replayedPriorTurn === true;
   const priorTurnConflict = appendOutcome.priorTurnConflict === true;
+  // F3: set only on this branch. The return below uses it in place of the
+  // candidate, because on a replay or conflict the candidate never landed.
+  let replayReread: { readonly graph: unknown | null } | null = null;
   if (priorTurnReplay || priorTurnConflict) {
     // ⭐⭐ A RECOVERY MUST RECONCILE AGAINST AUTHORITATIVE CURRENT STATE, NOT
     //    MERELY DECLINE TO LIE.
@@ -1687,9 +1703,23 @@ export async function commitDirectAnswer(
     //    `display_value:"17 months"` and the block carried `target_id`, yet the
     //    reply was "I couldn't read the current value just now" with
     //    `after: null`. Nothing was unreadable; the reread never ran.
-    if (patchTargetId !== null) {
+    // One reread, shared by the patch reconciliation below and by the
+    // `persistedGraph` / `persistedAnalysisGraphHash` this commit returns (F3).
+    // It runs whenever this commit carried a graph, because every caller that
+    // stamps those two fields needs the stored state, patch target or not.
+    let currentGraph: unknown | null = null;
+    let currentGraphRead = false;
+    if (writesGraph || patchTargetId !== null) {
       try {
-        const currentGraph = await store.loadGraph(metadata.scenario_id);
+        currentGraph = await store.loadGraph(metadata.scenario_id);
+        currentGraphRead = true;
+      } catch {
+        // An unreadable graph is an UNKNOWN, not a fact — fall to the neutral arm.
+      }
+    }
+    if (writesGraph) replayReread = { graph: currentGraphRead ? currentGraph : null };
+    if (patchTargetId !== null && currentGraphRead) {
+      try {
         const nodes = (currentGraph as { nodes?: unknown } | null)?.nodes;
         if (Array.isArray(nodes)) {
           for (const n of nodes) {
@@ -2060,9 +2090,20 @@ export async function commitDirectAnswer(
   });
 
   const graphPersisted = writesGraph;
+  // ⛔ F3. `writesGraph` means "a graph was PROVIDED", not "a graph LANDED". On a
+  // replay or conflict the store wrote nothing, so the candidate and its hash
+  // describe bytes that were never stored. Callers stamp these two fields onto
+  // the wire as `draft_graph` / `graph_hash`, and the UI renders them as the
+  // applied state. Hand back the authoritative reread instead (or null).
+  const replayGraph = replayReread === null ? null : replayReread.graph;
   return {
-    persistedAnalysisGraphHash,
-    persistedGraph: writesGraph ? graphForStore : null,
+    persistedAnalysisGraphHash:
+      replayReread === null
+        ? persistedAnalysisGraphHash
+        : replayGraph === null
+          ? null
+          : checkPersistedGraphInvariants(replayGraph).analysisGraphHash,
+    persistedGraph: replayReread === null ? (writesGraph ? graphForStore : null) : replayGraph,
     // Same disclosure boundary as the response above: on a CONFLICT the
     // receipt belongs to the earlier operation, not to this refused request,
     // and the two carriers must agree or a consumer reading one and rendering

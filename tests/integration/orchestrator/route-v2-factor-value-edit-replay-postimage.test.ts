@@ -449,6 +449,15 @@ describe('POST /orchestrate/v2/turn — factor_value_edit REPLAY: the reply pres
       ).toBe(storedHash);
     }
 
+    // ── THE SHAPE F3 CHOSE ──────────────────────────────────────────────────
+    // `commit.ts` hands back its authoritative reread on a replay, so the reply
+    // PRESENTS the stored graph rather than omitting it: the UI reconciles to
+    // what is actually stored (£70k) instead of keeping an optimistic £50k. Pinned
+    // here so a later "just omit both carriers" change is a visible decision.
+    expect(retry.body.draft_graph, `F3 shape: the reply presents the stored graph (${observed})`).toBeDefined();
+    expect(replyDraftRaw).toBe(storedRaw);
+    expect(retry.body.graph_hash, `F3 shape: graph_hash is the stored graph's hash (${observed})`).toBe(storedHash);
+
     expectNoProviderReached();
   });
 
