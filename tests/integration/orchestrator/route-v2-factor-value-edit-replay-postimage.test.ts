@@ -66,14 +66,21 @@
  *   · ATOMIC CAS on the identity hash (`computeExpectedGraphCasHashes`, the
  *     function the real store stamps with), with the migration's idempotent and
  *     unstamped-row exemptions; a conflict throws `GraphStaleWriteError`.
- *   Guest scenario throughout (no version receipts) — receipts are P1-owner's
- *   concern in the sibling file, not this one's.
+ *   Guest scenario (no version receipts) except the CONFLICT + INTERLEAVING
+ *   case, which turns on the sibling's owned-scenario receipt minting so that
+ *   its "no receipt" assertion is not vacuous; and a one-shot `afterNextRead`
+ *   hook (the sibling's P7b/P10b device) for a foreign commit landing between a
+ *   request's base read and its append.
  *
  * WHAT THIS DELIBERATELY DOES NOT PROVE:
  *   - which reply shape F3 should choose (omit `draft_graph`, or re-derive it and
  *     the hash from the reread stored graph) — both pass;
- *   - the `priorTurnConflict` (reused id, DIFFERENT request) arm, which shares the
- *     same return path and is expected to share the same fix — not pinned here;
+ *   - the `priorTurnConflict` (reused id, DIFFERENT request) arm WITHOUT an
+ *     interleaving writer — only the interleaving variant is pinned (CONFLICT +
+ *     INTERLEAVING SAME-TARGET WRITE, below);
+ *   - that any consumer attests success from `CommitResult.thisAttemptWrote` — the
+ *     field is pinned at the commit seam (`commit-this-attempt-wrote.test.ts`);
+ *     no dispatcher reads it yet;
  *   - that the real Postgres function behaves as the fake does; each case asserts
  *     the fake's verdict (landed / replayed) as a precondition instead;
  *   - what the UI renders from the reply.
@@ -87,6 +94,7 @@ import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/
 import { computeExpectedGraphCasHashes } from '../../../src/orchestrator-v5/context/graph-cas-conflict.js';
 import {
   GraphStaleWriteError,
+  type AtomicCommittedModelVersionReceipt,
   type SessionAppendOutcome,
   type SessionTurnWrite,
 } from '../../../src/orchestrator-v5/session/store.js';
@@ -136,13 +144,33 @@ function buildBaseGraph() {
 interface FakeRow {
   readonly id: string;
   readonly request_hash: string;
+  readonly receipt?: AtomicCommittedModelVersionReceipt;
 }
+
+const VERSION_IDS = [
+  'c0000000-0000-4000-8000-0000000000a1',
+  'c0000000-0000-4000-8000-0000000000a2',
+  'c0000000-0000-4000-8000-0000000000a3',
+] as const;
 
 const fake = {
   /** `scenarios.graph` — what the next read returns. */
   graph: buildBaseGraph() as unknown,
+  /**
+   * `scenarios.user_id IS NOT NULL` — gates the version receipt. Off by default
+   * (the guest cases above); the CONFLICT + INTERLEAVING case turns it on so
+   * its "no receipt" assertion is not vacuous.
+   */
+  owned: false,
   /** `v5_conversation_turns`, keyed by turn_id (one scenario in this file). */
   rows: new Map<string, FakeRow>(),
+  versions: [] as string[],
+  /**
+   * Runs once, AFTER the next `loadGraph` has taken its snapshot — a foreign
+   * commit landing between a request's base read and its append. Copied from
+   * the sibling `route-v2-own-write-proof.test.ts` (P7b / P10b).
+   */
+  afterNextRead: undefined as (() => void) | undefined,
   /** The fake's own verdicts, per turn_id — asserted as preconditions. */
   landed: [] as string[],
   replayed: [] as string[],
@@ -151,7 +179,10 @@ const fake = {
 
 function resetFake() {
   fake.graph = buildBaseGraph();
+  fake.owned = false;
   fake.rows = new Map();
+  fake.versions = [];
+  fake.afterNextRead = undefined;
   fake.landed = [];
   fake.replayed = [];
   fake.casRejected = [];
@@ -164,6 +195,37 @@ function identityOf(graph: unknown): string | null {
 
 function jsonCopy<T>(value: T): T {
   return value == null ? value : (JSON.parse(JSON.stringify(value)) as T);
+}
+
+/** The sibling file's receipt minter, unchanged (the migration's `source_turn_id` = the write's turn id). */
+function mintReceipt(write: SessionTurnWrite, incomingIdentity: string): AtomicCommittedModelVersionReceipt {
+  const carrier = write.modelVersion;
+  if (carrier === undefined) throw new Error('mintReceipt called without a model-version carrier');
+  const parent = fake.versions.at(-1) ?? null;
+  const versionId = VERSION_IDS[fake.versions.length];
+  if (versionId === undefined) throw new Error('fixture ran out of version ids');
+  fake.versions.push(versionId);
+  return {
+    mutation_id: carrier.mutation_id,
+    version_id: versionId,
+    version_number: fake.versions.length,
+    graph_identity_hash: incomingIdentity,
+    analysis_affecting_hash: carrier.analysis_affecting_hash,
+    hash_algorithm: carrier.hash_algorithm,
+    identity_projection_version: carrier.identity_projection_version,
+    identity_normaliser_version: carrier.identity_normaliser_version,
+    graph_schema_version: carrier.graph_schema_version,
+    actor_kind: carrier.actor_kind,
+    authored_by: carrier.authored_by,
+    creation_kind: parent === null ? 'initial' : 'committed_mutation',
+    source_version_id: null,
+    source_turn_id: write.turn_id,
+    parent_version_id: parent,
+    root_version_id: fake.versions[0] ?? versionId,
+    undo_version_id: parent,
+    graph: write.graph,
+    event_id: `model_version_created_mutation_${carrier.mutation_id}`,
+  };
 }
 
 const appendMock = vi.fn(async (write: SessionTurnWrite): Promise<SessionAppendOutcome> => {
@@ -180,9 +242,11 @@ const appendMock = vi.fn(async (write: SessionTurnWrite): Promise<SessionAppendO
   // 1. REPLAY BEFORE CAS — an existing (scenario_id, turn_id) writes nothing.
   if (prior !== undefined) {
     fake.replayed.push(write.turn_id);
+    // As the real RPC does: the durable row's receipt comes back with it.
+    const receipt = prior.receipt !== undefined ? { modelVersionReceipt: prior.receipt } : {};
     return prior.request_hash === write.request_hash
-      ? { id: prior.id, replayedPriorTurn: true }
-      : { id: prior.id, priorTurnConflict: true };
+      ? { id: prior.id, replayedPriorTurn: true, ...receipt }
+      : { id: prior.id, priorTurnConflict: true, ...receipt };
   }
 
   // 2. ATOMIC CAS on identity, with the migration's two exemptions.
@@ -202,20 +266,35 @@ const appendMock = vi.fn(async (write: SessionTurnWrite): Promise<SessionAppendO
     });
   }
 
-  // 3. LAND — graph and turn row (guest scenario: no version receipt).
+  // 3. LAND — graph, turn row and (owned + carrier + moved identity) a version.
+  const receipt =
+    fake.owned && write.modelVersion !== undefined && incoming !== null && incoming !== current
+      ? mintReceipt(write, incoming)
+      : undefined;
   const id = `row-${write.turn_id}`;
   fake.graph = jsonCopy(write.graph);
-  fake.rows.set(write.turn_id, { id, request_hash: write.request_hash });
+  fake.rows.set(write.turn_id, {
+    id,
+    request_hash: write.request_hash,
+    ...(receipt !== undefined ? { receipt } : {}),
+  });
   fake.landed.push(write.turn_id);
-  return { id };
+  return { id, ...(receipt !== undefined ? { modelVersionReceipt: receipt } : {}) };
 });
 
 const fakeStore = {
   append: appendMock,
   readRecent: async () => [],
   readFactsFor: async () => [],
-  // A DB read hands back fresh bytes every time.
-  loadGraph: async (_scenarioId: string) => jsonCopy(fake.graph),
+  // A DB read hands back fresh bytes every time; the snapshot is taken BEFORE
+  // any interleaved foreign commit runs, which is what "after my base read" means.
+  loadGraph: async (_scenarioId: string) => {
+    const snapshot = jsonCopy(fake.graph);
+    const interleaved = fake.afterNextRead;
+    fake.afterNextRead = undefined;
+    interleaved?.();
+    return snapshot;
+  },
   loadGraphAndBriefText: async () => ({ graph: jsonCopy(fake.graph), briefText: null }),
   invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
   invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
@@ -272,6 +351,11 @@ const REQUESTED_RAW = 50000;
 const FOREIGN_RAW = 70000;
 const SET_BUDGET_50K = { kind: 'factor_value_edit', target_id: TARGET, value: 0.5, raw_value: REQUESTED_RAW, unit: '£' } as const;
 const SET_BUDGET_70K = { kind: 'factor_value_edit', target_id: TARGET, value: 0.7, raw_value: FOREIGN_RAW, unit: '£' } as const;
+// CONFLICT + INTERLEAVING: R2 reuses MINE asking for £60k, and a foreign writer
+// sets exactly £60k in between. PREP only derives that foreign writer's bytes.
+const R2_RAW = 60000;
+const SET_BUDGET_60K = { kind: 'factor_value_edit', target_id: TARGET, value: 0.6, raw_value: R2_RAW, unit: '£' } as const;
+const PREP = 'e0000000-0000-4000-8000-0000000000f3';
 
 let app: FastifyInstance;
 // Belt and braces for "no provider": any real SDK call goes through fetch.
@@ -508,6 +592,121 @@ describe('POST /orchestrate/v2/turn — factor_value_edit REPLAY: the reply pres
     expect(sha(retry.body.draft_graph)).toBe(sha(first.body.draft_graph));
     expect(retry.body.graph_hash).toBe(first.body.graph_hash);
     expect(retry.body.graph_hash).toBe(analysisHash(fake.graph));
+
+    expectNoProviderReached();
+  });
+
+  // ── CONFLICT + INTERLEAVING SAME-TARGET WRITE (Codex 5821693599) ──────────
+  //
+  // THE OBJECTION: on a reused-id conflict the reply's snapshot is the reread
+  // stored graph (right, for display). If ANOTHER writer has meanwhile set the
+  // SAME target to the SAME value this request asked for, that snapshot holds
+  // "my" value — and a consumer that attests success from "a graph was provided
+  // AND the snapshot contains my change" is satisfied for the wrong operation.
+  //
+  // THIS CASE pins the reply for exactly that interleaving: R2's reply makes NO
+  // success claim (noop patch, no receipt, "did not make that change") while its
+  // draft_graph / graph_hash are the STORED snapshot, which shows the value R2
+  // asked for. The snapshot may agree with R2; R2 still claims nothing.
+  //
+  // ⚠ WHAT THIS DOES NOT PROVE. On this path (`factor_value_edit`) the reply was
+  //   already correct before `CommitResult.thisAttemptWrote` existed — the
+  //   commit's conflict branch rewrites the patch, receipt and prose itself, and
+  //   the dispatcher does not read the new field. This is a reply-level pin, not
+  //   a RED test for the field; the field's RED is the commit-level file
+  //   `src/orchestrator-v5/__tests__/commit-this-attempt-wrote.test.ts`. The
+  //   structural-add consumer Codex named is a separate follow-up.
+  it('CONFLICT + INTERLEAVING SAME-TARGET WRITE: a reused turn id (R2, £60k) makes no success claim even though a foreign writer set exactly £60k between R2\'s base read and its append, and the reply presents that STORED snapshot', async () => {
+    // ── derive the foreign writer's bytes through the REAL route ────────────
+    // A foreign factor_value_edit(£60k), run on a fresh fake and then discarded,
+    // so the interleaved graph is what this route would actually store rather
+    // than a hand-edited copy (display fields included).
+    fake.owned = false;
+    expect((await send(SET_BUDGET_60K, PREP)).status).toBe(200);
+    expect(fake.landed).toEqual([PREP]);
+    const foreignGraph = jsonCopy(fake.graph);
+    expect(rawValueOf(foreignGraph, TARGET)).toBe(R2_RAW);
+    resetFake();
+    appendMock.mockClear();
+
+    // ── R1: MY request (turn T, £50k) commits on an OWNED scenario ─────────
+    fake.owned = true;
+    const r1 = await send(SET_BUDGET_50K, MINE);
+    expect(r1.status).toBe(200);
+    expect(graphPatches(r1.body)[0]?.status).toBe('applied');
+    // Control: this fixture DOES mint receipts, so R2's "no receipt" is not vacuous.
+    const r1Receipt = r1.body.model_version_receipt as Record<string, unknown> | undefined;
+    expect(r1Receipt?.version_id).toBe(VERSION_IDS[0]);
+    expect(r1Receipt?.source_turn_id).toBe(MINE);
+    const storedAfterR1 = jsonCopy(fake.graph);
+    expect(rawValueOf(storedAfterR1, TARGET)).toBe(REQUESTED_RAW);
+    const versionsAfterR1 = [...fake.versions];
+
+    // Premise on the foreign bytes: they are R1's stored graph with ONLY the
+    // target moved — what a CAS'd writer building on R1's commit would store.
+    const without = (g: unknown) => {
+      const c = jsonCopy(g) as { nodes: Array<{ id: string }> };
+      c.nodes = c.nodes.filter((n) => n.id !== TARGET);
+      return c;
+    };
+    expect(without(foreignGraph)).toEqual(without(storedAfterR1));
+    expect(identityOf(foreignGraph)).not.toBe(identityOf(storedAfterR1));
+
+    // ── the interleaved foreign write: after R2's base read, before its append ──
+    let appendsWhenForeignLanded: number | undefined;
+    fake.afterNextRead = () => {
+      appendsWhenForeignLanded = appendMock.mock.calls.length;
+      fake.graph = jsonCopy(foreignGraph);
+      fake.rows.set(FOREIGN, { id: `row-${FOREIGN}`, request_hash: 'sha256:foreign-60k' });
+    };
+
+    // ── R2: a DIFFERENT request reusing turn T (£60k) ─────────────────────────
+    const r2 = await send(SET_BUDGET_60K, MINE);
+
+    // ── PREMISE, proven inside the test ──────────────────────────────────────
+    const mineIdx = appendIndicesFor(MINE);
+    expect(mineIdx).toHaveLength(2);
+    const r2Idx = mineIdx[1]!;
+    const r2Write = appendMock.mock.calls[r2Idx]![0];
+    // (a) R2 is a DIFFERENT request under the same turn id, asking for £60k;
+    expect(r2Write.request_hash).not.toBe(appendMock.mock.calls[mineIdx[0]!]![0].request_hash);
+    expect(rawValueOf(r2Write.graph, TARGET)).toBe(R2_RAW);
+    // (b) the foreign write landed, and it landed BEFORE R2's append was attempted;
+    expect(fake.afterNextRead, 'the interleaving hook must have run').toBeUndefined();
+    expect(fake.rows.has(FOREIGN)).toBe(true);
+    expect(appendsWhenForeignLanded).toBe(r2Idx);
+    // (c) the store signalled priorTurnConflict for R2, handed back R1's receipt,
+    //     and wrote and minted nothing;
+    const r2Outcome = await outcomeAt(r2Idx);
+    expect(r2Outcome.priorTurnConflict).toBe(true);
+    expect(r2Outcome.replayedPriorTurn).toBeUndefined();
+    expect(r2Outcome.modelVersionReceipt?.version_id).toBe(VERSION_IDS[0]);
+    expect(fake.replayed).toEqual([MINE]);
+    expect(fake.landed).toEqual([MINE]);
+    expect(fake.casRejected).toEqual([]);
+    expect(fake.versions).toEqual(versionsAfterR1);
+    // (d) the stored value now EQUALS what R2 asked for — set by the foreign writer.
+    const stored = fake.graph;
+    expect(identityOf(stored)).toBe(identityOf(foreignGraph));
+    expect(rawValueOf(stored, TARGET)).toBe(R2_RAW);
+
+    // ── R2 MAKES NO SUCCESS CLAIM ─────────────────────────────────────────────
+    expect(r2.status).toBe(200);
+    const patches = graphPatches(r2.body);
+    expect(patches.map((p) => p.target_id)).toEqual([TARGET]);
+    expect(patches[0]?.status).toBe('noop');
+    expect(patches.filter((p) => p.status === 'applied')).toEqual([]);
+    expect(r2.body.model_version_receipt, 'the handed-back receipt is R1\'s, not R2\'s').toBeUndefined();
+    const prose = String(r2.body.assistant_text ?? '');
+    expect(prose).toMatch(/did not make that change/i);
+    expect(prose).not.toMatch(/already been recorded/i);
+    expect(prose).not.toMatch(/\bUpdated\b/i);
+
+    // ── …WHILE THE SNAPSHOT IS THE STORED GRAPH, WHICH SHOWS R2's VALUE ──────
+    expect(r2.body.draft_graph, 'the reply presents the stored snapshot (F3)').toBeDefined();
+    expect(rawValueOf(r2.body.draft_graph, TARGET)).toBe(rawValueOf(stored, TARGET));
+    expect(rawValueOf(r2.body.draft_graph, TARGET)).toBe(R2_RAW);
+    expect(r2.body.graph_hash).toBe(analysisHash(stored));
 
     expectNoProviderReached();
   });
