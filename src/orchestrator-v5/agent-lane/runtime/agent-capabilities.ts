@@ -90,14 +90,13 @@ import { planNewOption, newOptionFollowUp } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
-import { structuralFacts } from '../structural-facts.js';
+import { heldStatusQuoOptionId, structuralFacts } from '../structural-facts.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, findConstructionVersion, type CallStructuredModel } from './build-model.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
-import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 
 /** Marks a compound starting point, so a newer one can replace it before approval. */
 const STARTING_POINT_BASIS = 'a starting point \u2014 values and what each option sets \u2014 for the user to adopt or correct in one approval';
@@ -137,7 +136,7 @@ interface GraphRead {
     interventions?: Record<string, unknown>;
     changes?: unknown;
   }[];
-  /** `origin` is read only to recognise a repair-authored edge (`isRepairAuthoredOptionFactorEdge`). */
+  /** `origin` is read only to recognise a repair-authored edge (`heldStatusQuoOptionId`). */
   readonly edges: { from: string; to: string; origin?: unknown }[];
   readonly analysis_state: unknown;
   /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
@@ -161,14 +160,12 @@ const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$
  * edge is mapped), through the ONE authority, never a copy of it.
  */
 function heldStatusQuoPairs(g: Pick<GraphRead, 'nodes' | 'edges'>): ReadonlySet<string> {
+  // ONE test for "held status quo" (`heldStatusQuoOptionId`): a baseline label AND
+  // all-repair edges. Every pair of that option is repair-authored by definition.
+  const id = heldStatusQuoOptionId(g.nodes as never, g.edges);
+  if (id === null) return new Set();
   const kinds = new Map(g.nodes.map((n) => [n.id, n.kind] as const));
-  const repaired = new Set<string>();
-  const ordinary = new Set<string>();
-  for (const e of g.edges) {
-    if (kinds.get(e.from) !== 'option' || kinds.get(e.to) !== 'factor') continue;
-    (isRepairAuthoredOptionFactorEdge(e, kinds) ? repaired : ordinary).add(`${e.from}::${e.to}`);
-  }
-  return new Set([...repaired].filter((k) => !ordinary.has(k)));
+  return new Set(g.edges.filter((e) => e.from === id && kinds.get(e.to) === 'factor').map((e) => `${e.from}::${e.to}`));
 }
 
 /**
@@ -1063,11 +1060,17 @@ export function createAgentCapabilities(
           });
           continue;
         }
-        // ⛔ A held status quo takes no level (`heldStatusQuoPairs`): not accepted, never an operation.
-        if (held.has(`${option.id}::${factor.id}`)) {
+        // ⛔ A held status quo takes no level the AGENT supplies (`heldStatusQuoPairs`):
+        // not accepted, never an operation. ⭐ The USER's own correction is the
+        // exception (independent review of #1849, 5820560331): the Agent is told to
+        // say the user can correct the held reading, so what they say must be
+        // recordable. `user_stated` is opt-in per level, on the same terms as
+        // `revise` — only when the user said it and gave the level — and it still
+        // reaches the user as a proposal to approve, never a write.
+        if (held.has(`${option.id}::${factor.id}`) && i?.user_stated !== true) {
           notAccepted.push({
             option: option.label, factor: factor.label, value: i?.value,
-            reason: `${option.label} is held at its starting values — carrying on as now sets no level, so none is recorded for ${factor.label}. Leave it out.`,
+            reason: `${option.label} is held at its starting values — carrying on as now sets no level, so none is recorded for ${factor.label}. Leave it out, unless the user themselves said carrying on changes ${factor.label} and gave the level: then send it with user_stated: true.`,
           });
           continue;
         }

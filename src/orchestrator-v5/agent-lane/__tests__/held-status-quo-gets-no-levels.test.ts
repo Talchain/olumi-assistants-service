@@ -189,7 +189,7 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
       expect(r.refusal).toBe('nothing_to_set');
       expect(r.levels_not_accepted).toEqual([{
         option: statusQuoLabel, factor: 'Tech leads hired', value: 0,
-        reason: `${statusQuoLabel} is held at its starting values — carrying on as now sets no level, so none is recorded for Tech leads hired. Leave it out.`,
+        reason: `${statusQuoLabel} is held at its starting values — carrying on as now sets no level, so none is recorded for Tech leads hired. Leave it out, unless the user themselves said carrying on changes Tech leads hired and gave the level: then send it with user_stated: true.`,
       }]);
       expect(store.size()).toBe(0);
       expect(p.posted).toEqual([]);
@@ -228,6 +228,59 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
       expect(out.ok, JSON.stringify(out)).toBe(true);
       expect(p.posted.filter((x) => x.startsWith('level ')).sort()).toEqual(ORDINARY_PATHS.map((x) => `level ${x}`));
       expect(p.read().find((n) => n.id === SQ)).not.toHaveProperty('interventions');
+    });
+  });
+
+  describe('(b2) the USER\'s own correction to a held status quo IS recordable (review 5820560331, blocker 1)', () => {
+    it('RED: a user-stated level on a held pair becomes an operation, and ONE approval writes it', async () => {
+      const { SQ, nodes, edges } = fixture();
+      const p = fakeProduct(nodes, edges);
+      const store = new ProposalStore();
+      const caps = createAgentCapabilities(p.d, store);
+      const r = await caps.proposeOptionInterventions(ctx, {
+        interventions: [{
+          option_label: statusQuoLabel, factor_label: 'Developers hired', value: 1,
+          basis: 'carrying on still backfills one developer', user_stated: true,
+        }],
+      });
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      expect(r).not.toHaveProperty('levels_not_accepted');
+      expect(store.size()).toBe(1);
+      const auth = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+      expect(auth.ok, JSON.stringify(auth)).toBe(true);
+      expect(p.posted).toEqual([`level ${SQ}::developers_hired`]);
+      expect(p.read().find((n) => n.id === SQ)?.interventions).toEqual({ developers_hired: { value: expect.any(Number) } });
+    });
+
+    it('CONTRAST: the identical level WITHOUT user_stated is still refused, and nothing is stored', async () => {
+      const { nodes, edges } = fixture();
+      const p = fakeProduct(nodes, edges);
+      const store = new ProposalStore();
+      const caps = createAgentCapabilities(p.d, store);
+      const r = await caps.proposeOptionInterventions(ctx, {
+        interventions: [{ option_label: statusQuoLabel, factor_label: 'Developers hired', value: 1, basis: 'carrying on still backfills one developer' }],
+      });
+      expect(r.ok).toBe(false);
+      expect(r.refusal).toBe('nothing_to_set');
+      expect(store.size()).toBe(0);
+    });
+
+    it('RED: inside a starting point too — the user-stated held level joins the one approval', async () => {
+      const { SQ, nodes, edges } = fixture();
+      const p = fakeProduct(nodes, edges);
+      const caps = createAgentCapabilities(p.d, new ProposalStore());
+      const r = await caps.proposeStartingPoint(ctx, {
+        assumptions: VALUES,
+        option_levels: [
+          ...ORDINARY_LEVELS,
+          { option_label: statusQuoLabel, factor_label: 'Developers hired', value: 1, basis: 'the user: carrying on backfills one', user_stated: true },
+        ],
+      });
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      expect(r).not.toHaveProperty('levels_not_accepted');
+      const auth = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+      expect(auth.ok, JSON.stringify(auth)).toBe(true);
+      expect(p.posted).toContain(`level ${SQ}::developers_hired`);
     });
   });
 
@@ -320,5 +373,57 @@ describe('(d) the Agent is told a held status quo is never given levels — in t
       'An option in `status_quo_held` is not in that list and is never given levels: say, in one short clause, that carrying ' +
       'on as now holds today’s values, and that the user can say what would change if that is wrong.',
     );
+  });
+});
+
+/**
+ * ⛔ BLOCKER 2 (review 5820560331): "held" was decided from `origin: 'repair'`
+ * alone. The conventional `fixStatusQuoConnectivity` stamps that origin on EVERY
+ * disconnected option, so a real alternative ("Use contractors") was called a
+ * status quo holding today's values and its levels were refused. Held now needs
+ * the same test #1838 mints under: exactly one baseline label, all-repair edges.
+ */
+describe('a repair-wired option is held ONLY when its label reads as carrying on as now', () => {
+  function contractors() {
+    const { nodes, edges } = hiring('Maintain current staffing');
+    // Replace the status quo with a real alternative the repair wired the same way.
+    const nodes2 = nodes.map((n) => (n.id === idOf('Maintain current staffing') ? { ...n, id: 'use_contractors', label: 'Use contractors' } : n));
+    const edges2 = edges.map((e) => (e.from === idOf('Maintain current staffing') ? { ...e, from: 'use_contractors' } : e));
+    return { nodes: nodes2, edges: edges2 };
+  }
+
+  it('RED: "Use contractors" (repair edges only) is NOT held — it is listed as changing nothing', () => {
+    const { nodes, edges } = contractors();
+    const f = structuralFacts(nodes as never, edges as never);
+    expect(f.status_quo_held).toEqual([]);
+    expect(f.options_that_change_nothing).toContain('Use contractors');
+  });
+
+  it('RED: its level is accepted as an operation, with no user_stated needed', async () => {
+    const { nodes, edges } = contractors();
+    const p = fakeProduct(nodes, edges);
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const r = await caps.proposeOptionInterventions(ctx, {
+      interventions: [{ option_label: 'Use contractors', factor_label: 'Developers hired', value: 3, basis: 'three contractors' }],
+    });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(store.size()).toBe(1);
+  });
+
+  it('CONTRAST: the same graph with the baseline label IS held (the predicate discriminates on the label alone)', () => {
+    const { nodes, edges } = hiring('Maintain current staffing');
+    const f = structuralFacts(nodes as never, edges as never);
+    expect(f.status_quo_held).toEqual(['Maintain current staffing']);
+    expect(f.options_that_change_nothing).not.toContain('Maintain current staffing');
+  });
+
+  it('RED: TWO baseline-labelled repair-wired options — neither is held (ambiguity is not guessed)', () => {
+    const { nodes, edges } = hiring('Maintain current staffing');
+    const nodes2 = [...nodes, { id: 'status_quo', kind: 'option', label: 'Status quo' }];
+    const edges2 = [...edges, held('status_quo', 'tech_leads_hired')];
+    const f = structuralFacts(nodes2 as never, edges2 as never);
+    expect(f.status_quo_held).toEqual([]);
+    expect(f.options_that_change_nothing).toEqual(expect.arrayContaining(['Maintain current staffing', 'Status quo']));
   });
 });

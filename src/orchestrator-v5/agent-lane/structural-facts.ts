@@ -14,6 +14,7 @@
  */
 
 import { isRepairAuthoredOptionFactorEdge } from '../../graph/repair-authored-edge.js';
+import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 
 export interface GraphNodeLike {
   readonly id: string;
@@ -90,6 +91,35 @@ function reachable(adjacency: Map<string, string[]>, from: string): Set<string> 
   return seen;
 }
 
+
+/**
+ * ⛔ THE ONE TEST FOR "THIS OPTION IS A HELD STATUS QUO" on the Agent lane —
+ * read by `structuralFacts` and by the level proposer (`agent-capabilities.ts`).
+ *
+ * The same two conditions #1838's `wireInertStatusQuo` mints under, so the
+ * reader recognises exactly what the constructor wrote:
+ *   1. EXACTLY ONE option's label reads as carrying on as now
+ *      (`labelMatchesBaseline`, readiness's own idiom list). None or two → none
+ *      is held: ambiguity is not resolved by guessing.
+ *   2. That option's option→factor edges are ALL repair-authored
+ *      (`isRepairAuthoredOptionFactorEdge`), and there is at least one.
+ *
+ * ⚠ The repair origin ALONE is not enough (independent review of #1849,
+ * 5820560331): the conventional `fixStatusQuoConnectivity` stamps
+ * `origin: 'repair'` on EVERY disconnected option, whatever its label, so
+ * "Use contractors" would have been called a status quo holding today's values.
+ */
+export function heldStatusQuoOptionId(
+  nodes: readonly { id: string; kind?: string; label?: string }[],
+  edges: readonly GraphEdgeLike[],
+): string | null {
+  const baselines = nodes.filter((n) => n.kind === 'option' && labelMatchesBaseline(n.label ?? ''));
+  if (baselines.length !== 1) return null;
+  const id = baselines[0]!.id;
+  const kinds = new Map(nodes.flatMap((n) => (typeof n.kind === 'string' ? [[n.id, n.kind] as const] : [])));
+  const out = edges.filter((e) => e.from === id && kinds.get(e.to) === 'factor');
+  return out.length > 0 && out.every((e) => isRepairAuthoredOptionFactorEdge(e, kinds)) ? id : null;
+}
 export function structuralFacts(
   nodes: readonly GraphNodeLike[],
   edges: readonly GraphEdgeLike[],
@@ -103,11 +133,8 @@ export function structuralFacts(
   }
   const labelOf = (id: string): string => nodes.find((n) => n.id === id)?.label ?? id;
   const goal = nodes.find((n) => n.kind === 'goal') ?? null;
-  const kinds = new Map(nodes.flatMap((n) => (typeof n.kind === 'string' ? [[n.id, n.kind] as const] : [])));
-  const isHeld = (optionId: string): boolean => {
-    const out = edges.filter((e) => e.from === optionId && kinds.get(e.to) === 'factor');
-    return out.length > 0 && out.every((e) => isRepairAuthoredOptionFactorEdge(e, kinds));
-  };
+  const heldId = heldStatusQuoOptionId(nodes, edges);
+  const isHeld = (optionId: string): boolean => optionId === heldId;
   const setsNothing = nodes
     .filter((n) => n.kind === 'option')
     .filter((n) => {
