@@ -79,6 +79,7 @@
  *   - what the UI renders from the reply.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
@@ -457,6 +458,56 @@ describe('POST /orchestrate/v2/turn — factor_value_edit REPLAY: the reply pres
     expect(retry.body.draft_graph, `F3 shape: the reply presents the stored graph (${observed})`).toBeDefined();
     expect(replyDraftRaw).toBe(storedRaw);
     expect(retry.body.graph_hash, `F3 shape: graph_hash is the stored graph's hash (${observed})`).toBe(storedHash);
+
+    expectNoProviderReached();
+  });
+
+  // ── REGRESSION GUARD — the path that works today must not move (RC 5821175162) ──
+  //
+  // A genuine replay with NO interleaving writer: my request committed, nobody
+  // else wrote, the client lost my reply and retried. The store holds exactly my
+  // first attempt's postimage, so the retry must present the SAME `draft_graph`
+  // and `graph_hash` as my first reply, byte for byte (bound by sha256 of the
+  // serialised wire field). GREEN before and after F3.
+  //
+  // ⚠ WHICH MUTANT THIS CAN AND CANNOT CATCH. On this path the re-run candidate
+  //   and the stored bytes are equal (premise (c) below proves it), so "return
+  //   the candidate on replay" is indistinguishable here BY CONSTRUCTION. That
+  //   mutant is killed by the DEFECT case above, where a foreign writer makes
+  //   them differ. What this case catches is a fix that MOVES the working path:
+  //   omitting the postimage on replay (null), or hashing a different projection.
+  it('REGRESSION GUARD: a genuine replay with no interleaving writer presents the same draft_graph and graph_hash as my first reply, byte for byte', async () => {
+    const first = await send(SET_BUDGET_50K, MINE);
+    expect(first.status).toBe(200);
+    expect(graphPatches(first.body)[0]?.status).toBe('applied');
+    expect(first.body.draft_graph).toBeDefined();
+    expect(typeof first.body.graph_hash).toBe('string');
+
+    const storedBeforeRetry = jsonCopy(fake.graph);
+    const retry = await send(SET_BUDGET_50K, MINE);
+
+    // ── PREMISE ─────────────────────────────────────────────────────────────
+    // (a) a replay of MY turn, nothing written, nobody else wrote;
+    const mineIdx = appendIndicesFor(MINE);
+    expect(mineIdx).toHaveLength(2);
+    expect((await outcomeAt(mineIdx[1]!)).replayedPriorTurn).toBe(true);
+    expect(fake.replayed).toEqual([MINE]);
+    expect(fake.landed).toEqual([MINE]);
+    expect(identityOf(fake.graph)).toBe(identityOf(storedBeforeRetry));
+    // (b) the store holds my first attempt's bytes;
+    expect(identityOf(fake.graph)).toBe(identityOf(appendMock.mock.calls[mineIdx[0]!]![0].graph));
+    // (c) the candidate equals the stored graph in the analysis hash (why the
+    //     candidate mutant cannot discriminate here).
+    expect(analysisHash(appendMock.mock.calls[mineIdx[1]!]![0].graph)).toBe(analysisHash(fake.graph));
+
+    // ── THE GUARD ───────────────────────────────────────────────────────────
+    expect(retry.status).toBe(200);
+    expect(graphPatches(retry.body)[0]?.status).toBe('noop');
+    const sha = (v: unknown): string => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+    expect(retry.body.draft_graph, 'the replay must still present a postimage').toBeDefined();
+    expect(sha(retry.body.draft_graph)).toBe(sha(first.body.draft_graph));
+    expect(retry.body.graph_hash).toBe(first.body.graph_hash);
+    expect(retry.body.graph_hash).toBe(analysisHash(fake.graph));
 
     expectNoProviderReached();
   });
