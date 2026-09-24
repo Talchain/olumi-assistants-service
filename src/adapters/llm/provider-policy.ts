@@ -34,6 +34,12 @@ export interface ProviderPolicy {
   readonly route: string;
   /** Every guarded generative attempt made under this policy, in order. */
   readonly calls: GenerativeCall[];
+  /**
+   * Set when an attempt was NOT recorded because the ledger was full. Enforcement is
+   * unaffected (a refusal past the cap still throws), but "no anthropic row" then no
+   * longer proves "no anthropic attempt", so the wire must say so (review of #1749).
+   */
+  truncated: boolean;
 }
 
 export interface GenerativeCall {
@@ -59,7 +65,7 @@ export class ForbiddenProviderError extends Error {
 
 const store = new AsyncLocalStorage<ProviderPolicy>();
 
-export const OPENAI_ONLY = (route: string): ProviderPolicy => ({ allowed: new Set<LlmProvider>(['openai']), route, calls: [] });
+export const OPENAI_ONLY = (route: string): ProviderPolicy => ({ allowed: new Set<LlmProvider>(['openai']), route, calls: [], truncated: false });
 
 export function runWithProviderPolicy<T>(policy: ProviderPolicy, fn: () => T): T {
   return store.run(policy, fn);
@@ -90,6 +96,8 @@ export function assertProviderAllowed(
       purpose: detail?.purpose ?? site ?? 'unspecified',
       outcome: allowed ? 'allowed' : 'refused_before_network',
     });
+  } else {
+    policy.truncated = true;
   }
   if (allowed) return;
   // Logged by the caller's own error path (no logger import here: this module sits
@@ -105,6 +113,11 @@ export function assertProviderAllowed(
 export function isProviderAllowed(provider: LlmProvider): boolean {
   const policy = store.getStore();
   return policy === undefined || policy.allowed.has(provider);
+}
+
+/** Whether the current request's ledger dropped an attempt at the cap. False outside a policy. */
+export function providerLedgerTruncated(): boolean {
+  return store.getStore()?.truncated === true;
 }
 
 /** The current request's ledger, or `[]` outside a policy. A copy — the wire must not alias it. */

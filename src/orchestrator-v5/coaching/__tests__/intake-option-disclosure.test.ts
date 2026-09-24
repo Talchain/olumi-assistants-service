@@ -29,22 +29,17 @@ import {
 const BAKERY_BRIEF =
   'The options are a second production oven line, an automated packing cell, refrigerated ' +
   'delivery vans, a new retail concession, or an energy-efficiency retrofit.';
-const FOUR_LABELS = [
-  'Second Production Oven Line',
-  'Automated Packing Cell',
-  'Refrigerated Delivery Vans',
-  'Energy-Efficiency Retrofit',
+// Synthetic explicit lineage controls, not provenance recovered from the old capture.
+const FOUR_OPTIONS = [
+  { id: 'oven', source_quote: 'a second production oven line' },
+  { id: 'packing', source_quote: 'an automated packing cell' },
+  { id: 'vans', source_quote: 'refrigerated delivery vans' },
+  { id: 'retrofit', source_quote: 'an energy-efficiency retrofit' },
 ];
-
 const missingOne = (): IntakeOptionReconciliation =>
-  deriveIntakeOptionReconciliation(BAKERY_BRIEF, FOUR_LABELS);
-
+  deriveIntakeOptionReconciliation(BAKERY_BRIEF, FOUR_OPTIONS);
 const missingTwo = (): IntakeOptionReconciliation =>
-  deriveIntakeOptionReconciliation(BAKERY_BRIEF, [
-    'Second Production Oven Line',
-    'Automated Packing Cell',
-    'Refrigerated Delivery Vans',
-  ]);
+  deriveIntakeOptionReconciliation(BAKERY_BRIEF, FOUR_OPTIONS.slice(0, 3));
 
 describe('2.579 disclosure — names the gap and both repairs', () => {
   it('QUOTES the missing option from the real capture, not a count', () => {
@@ -58,7 +53,7 @@ describe('2.579 disclosure — names the gap and both repairs', () => {
 
   it('offers BOTH repairs — add it, or confirm the omission was deliberate', () => {
     const text = buildIntakeOptionDisclosure(missingOne());
-    expect(text).toContain('Add it to the model');
+    expect(text).toContain('Check whether it should be included');
     expect(text).toContain('confirm you meant to leave it out');
   });
 
@@ -72,19 +67,19 @@ describe('2.579 disclosure — names the gap and both repairs', () => {
 
   it('pluralises against the number of MISSING options', () => {
     const text = buildIntakeOptionDisclosure(missingTwo());
-    expect(text).toContain('options that are not in the model');
-    expect(text).toContain('Add them to the model');
+    expect(text).toContain('options that are not included in this comparison');
+    expect(text).toContain('Check whether they should be included');
     expect(text).toContain('“a new retail concession”');
     expect(text).toContain('“an energy-efficiency retrofit”');
   });
 
-  it('is SILENT on every state but options_missing', () => {
+  it('is silent for no enumeration and reconciled source bindings', () => {
     expect(
-      buildIntakeOptionDisclosure(deriveIntakeOptionReconciliation('no cue here', FOUR_LABELS)),
+      buildIntakeOptionDisclosure(deriveIntakeOptionReconciliation('no cue here', FOUR_OPTIONS)),
     ).toBe('');
     expect(
       buildIntakeOptionDisclosure(
-        deriveIntakeOptionReconciliation(BAKERY_BRIEF, [...FOUR_LABELS, 'New Retail Concession']),
+        deriveIntakeOptionReconciliation(BAKERY_BRIEF, [...FOUR_OPTIONS, { id: 'concession', source_quote: 'a new retail concession' }]),
       ),
     ).toBe('');
   });
@@ -132,7 +127,7 @@ describe('2.579 disclosure — the three pieces of plumbing', () => {
     } as const satisfies IntakeOptionReconciliation;
     const text = buildIntakeOptionDisclosure(reconciliation);
     expect(text).not.toContain(longText);
-    expect(text).toContain('not in the model.');
+    expect(text).toContain('not included in this comparison.');
     expect(new RegExp(`^(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})$`).test(text)).toBe(true);
   });
 
@@ -179,4 +174,29 @@ describe('2.579 disclosure — SURVIVES the registry egress it is appended to', 
       ),
     ).toBe(false);
   });
+});
+
+describe('unverified identity disclosure at the actual egress grammar', () => {
+  it('survives the allowlist without a false omission or instruction to add a duplicate', () => {
+    const intake = deriveIntakeOptionReconciliation(BAKERY_BRIEF, [{ id: 'oven', label: 'Oven line' }]);
+    expect(intake.state).toBe('identity_unverified');
+    const suffix = buildIntakeOptionDisclosure(intake);
+    expect(suffix).toContain('does not establish which options correspond');
+    expect(suffix).not.toMatch(/missing|not in the model|add it|add them|complete/i);
+    expect(textNamesLeadingOption(suffix)).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText(`${[...RUN_ANALYSIS_LOCKED_TEMPLATES][0]}${suffix}`)).toBe(true);
+  });
+});
+
+it('does not tell the user to recreate a canonical option excluded from this comparison', () => {
+  const canonical = { options: [...FOUR_OPTIONS, { id: 'concession', source_quote: 'a new retail concession' }] };
+  const analysed = FOUR_OPTIONS.map(({ id }) => ({ id }));
+  const intake = deriveIntakeOptionReconciliation(BAKERY_BRIEF, analysed, canonical);
+  expect(intake.state).toBe('options_missing');
+  expect(intake.missing.map((option) => option.text)).toEqual(['a new retail concession']);
+  const summary = `${[...RUN_ANALYSIS_LOCKED_TEMPLATES][0]}${buildIntakeOptionDisclosure(intake)}`;
+  expect(summary).toContain('not included in this comparison: “a new retail concession”');
+  expect(summary).toContain('Check whether it should be included');
+  expect(summary).not.toMatch(/not in the model|Add it|Add them/);
+  expect(isAllowedRunAnalysisAssistantText(summary)).toBe(true);
 });

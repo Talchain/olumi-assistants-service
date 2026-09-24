@@ -135,7 +135,7 @@ describe('the route states what was saved', () => {
     const body = res.json() as { assistant_text: string; _agent: { tool_calls: { name: string; ok: boolean; refusal?: string }[] }; _diagnostic_trace: { write_claims_removed?: number } };
     expect(body._agent.tool_calls).toEqual([{ name: 'authorise_change', ok: false, mutated: false, refusal: 'unknown_proposal' }]);
     expect(body.assistant_text).not.toMatch(/Applied proposal/);
-    expect(body.assistant_text).toMatch(/Not saved: there was no such proposal to apply\./);
+    expect(body.assistant_text).toMatch(/Not saved: that proposal is no longer available, so nothing was changed/);
     expect(body._diagnostic_trace.write_claims_removed).toBe(1);
   });
 });

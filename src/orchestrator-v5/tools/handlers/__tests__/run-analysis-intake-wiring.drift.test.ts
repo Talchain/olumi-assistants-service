@@ -36,18 +36,25 @@ function occurrences(text: string, needle: string): number {
 }
 
 describe('2.579 wiring — the handler actually consumes the intake axis', () => {
-  it('derives the reconciliation from the persisted brief and the graph labels', () => {
+  it('derives the reconciliation from the persisted brief, analysed IDs and same-snapshot provenance', () => {
     expect(occurrences(source, 'deriveIntakeOptionReconciliation(')).toBeGreaterThan(0);
     // BOUND TO THE INPUTS BY IDENTITY. A derivation fed something other than
     // `snapshot.briefText` is a different claim wearing the same call.
     expect(source).toContain('snapshot.briefText');
-    expect(occurrences(source, 'readGraphOptionLabels(')).toBeGreaterThan(0);
+    expect(source).toContain('snapshot.briefText,\n      finalWireOptions,');
+    expect(source).toContain('options: finalWireOptions,');
+    expect(source).toContain('snapshot.rawPersistedGraph ?? snapshot.graph,');
+    expect(source).not.toContain('readGraphOptionLabels(');
   });
 
   it('feeds the headline gate', () => {
     expect(source).toContain(
       "intake_options_missing: intakeReconciliation.state === 'options_missing'",
     );
+  });
+
+  it('withholds for uncertain identity as well as proven omissions', () => {
+    expect(source).toContain("intake_identity_unverified: intakeReconciliation.state === 'identity_unverified'");
   });
 
   it('appends the disclosure to the summary, LAST', () => {

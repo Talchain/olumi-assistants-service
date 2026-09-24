@@ -1,205 +1,119 @@
-/**
- * ROADMAP 2.579 — the intake reconciliation producer.
- *
- * ⚠ THE PRIMARY CORPUS MEMBER IS A REAL CAPTURE, NOT A FIXTURE I WROTE.
- * CLAUDE.md trap 22: "a corpus drawn from the author's head cannot see the
- * class the author did not imagine — and a 25/25 mutant kit will certify it".
- * {@link BAKERY_BRIEF} is the verbatim brief driven against deployed staging in
- * `PHASE0-EVIDENCE-2026-07-28/expert-session-2026-08-05-raw/expert-pass.mjs:5`,
- * and {@link BAKERY_GRAPH_LABELS} are the option labels the drafter actually
- * produced from it, read out of that session's own wire capture
- * (`run3/wire.json`). Neither was written for this test.
- *
- * The adversarial negatives below ARE mine, and they are stated as such: they
- * exist to hold the extractor's precision, which is the property whose failure
- * mode (suppressing a TRUE ranking) is worse than the defect being fixed.
- */
-
 import { describe, expect, it } from 'vitest';
 import {
   INTAKE_MAY_NAME_LEADING_OPTION,
   applyIntakeToLeaderPermission,
   deriveIntakeOptionReconciliation,
   extractEnumeratedOptions,
-  normaliseOptionTokens,
   readGraphOptionLabels,
-  type IntakeCompletenessState,
 } from '../intake-option-reconciliation.js';
 
-/** Verbatim from expert-pass.mjs:5 — the brief that produced the defect. */
-const BAKERY_BRIEF =
-  'We are a UK regional bakery group choosing which single capital project to fund this year. ' +
-  'The options are a second production oven line, an automated packing cell, refrigerated ' +
-  'delivery vans, a new retail concession, or an energy-efficiency retrofit. The goal is to ' +
-  'raise operating profit by at least 8 percent within 18 months. Keep the model deliberately ' +
-  'simple: contracted costs, energy tariffs and labour rates are known constants. The one ' +
-  "important uncertainty is next year's average wholesale flour price, now 340 pounds per " +
-  'tonne and plausibly between 250 and 520. Use sensible defaults for anything else.';
+// Reported Panel witness d712b756: these two phrases refer to the same
+// intended option, but the saved graph has no binding that proves it.
+const BRIEF = 'The options are keeping pricing as it is, raising prices, or introducing a premium tier.';
+const OPTIONS = [
+  { id: 'keep_current_pricing', label: 'Keep current pricing', provenance: 'from_brief' },
+  { id: 'raise_prices', label: 'Raise prices', provenance: 'from_brief' },
+  { id: 'premium_tier', label: 'Premium tier', provenance: 'from_brief' },
+];
+// Synthetic positive controls add explicit source references; these were NOT
+// present in the captured graph. Labels play no role in constructing bindings.
+const BOUND = [
+  { ...OPTIONS[0], source_quote: 'keeping pricing as it is' },
+  { ...OPTIONS[1], source_quote: 'raising prices' },
+  { ...OPTIONS[2], source_quote: 'introducing a premium tier' },
+];
 
-/** The four labels the drafter actually produced (run3/wire.json). */
-const BAKERY_GRAPH_LABELS: readonly string[] = Object.freeze([
-  'Second Production Oven Line',
-  'Automated Packing Cell',
-  'Refrigerated Delivery Vans',
-  'Energy-Efficiency Retrofit',
-]);
+function expectUnknown(options: unknown, provenance?: unknown, brief = BRIEF) {
+  const result = deriveIntakeOptionReconciliation(brief, options, provenance);
+  expect(result.state).toBe('identity_unverified');
+  expect(result.mayNameLeadingOption).toBe(false);
+  expect(result.missing).toEqual([]);
+}
 
-/** The same four plus the one that went missing. */
-const BAKERY_GRAPH_LABELS_COMPLETE: readonly string[] = Object.freeze([
-  ...BAKERY_GRAPH_LABELS,
-  'New Retail Concession',
-]);
-
-describe('2.579 producer — the measured defect, identity-matched', () => {
-  it('names the DROPPED option from the real five-option bakery brief', () => {
-    const result = deriveIntakeOptionReconciliation(BAKERY_BRIEF, BAKERY_GRAPH_LABELS);
-
-    expect(result.state).toBe('options_missing');
-    expect(result.mayNameLeadingOption).toBe(false);
-
-    // BOUND BY IDENTITY, NOT BY COUNT (CLAUDE.md trap 19). Asserting
-    // `missing.length === 1` would pass just as happily if the reconciler had
-    // named the oven line and lost the concession — a different object
-    // satisfying the same predicate. The claim is about WHICH option.
-    expect(result.missing.map((m) => m.text)).toEqual(['a new retail concession']);
-    expect(result.enumerated.map((e) => e.text)).toEqual([
-      'a second production oven line',
-      'an automated packing cell',
-      'refrigerated delivery vans',
-      'a new retail concession',
-      'an energy-efficiency retrofit',
-    ]);
+describe('source-bound option identity containment', () => {
+  it('contains the captured paraphrase without declaring a missing option', () => {
+    expectUnknown(OPTIONS);
   });
-
-  it('withholds NOTHING once the same brief has all five options on the graph', () => {
-    // The positive control for the assertion above: same brief, same extractor,
-    // and the ONLY thing that changed is the graph. Without this, "missing is
-    // non-empty" could be an extractor that never matches anything.
-    const result = deriveIntakeOptionReconciliation(
-      BAKERY_BRIEF,
-      BAKERY_GRAPH_LABELS_COMPLETE,
-    );
+  it('neither exact labels nor overlapping labels establish identity or absence', () => {
+    expectUnknown(['keeping pricing as it is', 'raising prices', 'introducing a premium tier']);
+    expectUnknown(OPTIONS.map((option, index) => ({ ...option, label: BOUND[index]!.source_quote })));
+    expectUnknown([OPTIONS[0], OPTIONS[1]]);
+    expectUnknown([{ id: 'o1', label: 'Alpha' }, { id: 'o2', label: 'Beta' }]);
+  });
+  it('reconciles unique validated source bindings regardless of the authored labels', () => {
+    const result = deriveIntakeOptionReconciliation(BRIEF, BOUND);
     expect(result.state).toBe('reconciled');
     expect(result.mayNameLeadingOption).toBe(true);
     expect(result.missing).toEqual([]);
   });
-
-  it('reconciles the four survivors individually, so the gap is the concession alone', () => {
-    // PIN THE PRECONDITION IN-TEST (trap 13b): the verdict above is only
-    // evidence about the concession if the other four genuinely matched. A
-    // reconciler that matched nothing would return `not_applicable`, but one
-    // that matched only ONE would still return `options_missing` with four
-    // entries — so assert the matched set, not just the state.
-    const result = deriveIntakeOptionReconciliation(BAKERY_BRIEF, BAKERY_GRAPH_LABELS);
-    const matched = result.enumerated
-      .filter((e) => !result.missing.includes(e))
-      .map((e) => e.text);
-    expect(matched).toEqual([
-      'a second production oven line',
-      'an automated packing cell',
-      'refrigerated delivery vans',
-      'an energy-efficiency retrofit',
-    ]);
-  });
-});
-
-describe('2.579 producer — the SECOND corpus case, for the discriminating mutant pair', () => {
-  /**
-   * A different brief losing a DIFFERENT option. Its only job is to make the
-   * binding of the bakery assertion PROVABLE (CLAUDE.md trap 19): a mutant that
-   * loosens the match for THIS case must turn this test RED and leave the
-   * bakery test GREEN. Without a second named object, "loosen for a different
-   * object only" has no object to loosen for, and the GREEN half of the pair
-   * proves nothing.
-   */
-  const CAFE_BRIEF =
-    'We run three city-centre cafés and must pick one growth move this year. ' +
-    'The options are a station kiosk, a delivery partnership, or a weekend bakery counter. ' +
-    'The goal is to raise contribution margin.';
-
-  it('names the KIOSK when the kiosk is the one the graph lost', () => {
-    const result = deriveIntakeOptionReconciliation(CAFE_BRIEF, [
-      'Delivery Partnership',
-      'Weekend Bakery Counter',
-    ]);
+  it('names a genuinely absent candidate only with complete analysed-set bindings', () => {
+    const result = deriveIntakeOptionReconciliation(BRIEF, BOUND.slice(0, 2));
     expect(result.state).toBe('options_missing');
-    expect(result.missing.map((m) => m.text)).toEqual(['a station kiosk']);
+    expect(result.missing.map((option) => option.text)).toEqual(['introducing a premium tier']);
+    // A third, unbound option could be the premium tier: absence is no longer proven.
+    expectUnknown([...BOUND.slice(0, 2), OPTIONS[2]]);
   });
-
-  it('POSITIVE CONTROL — reconciles once the kiosk is on the graph', () => {
-    const result = deriveIntakeOptionReconciliation(CAFE_BRIEF, [
-      'Station Kiosk',
-      'Delivery Partnership',
-      'Weekend Bakery Counter',
-    ]);
-    expect(result.state).toBe('reconciled');
+  it('reads existing OptionV3 extraction quotes without rewording them', () => {
+    const options = BOUND.map(({ source_quote, ...option }) => ({
+      ...option, provenance: { source: 'brief_extraction', brief_quote: source_quote },
+    }));
+    expect(deriveIntakeOptionReconciliation(BRIEF, { options }).state).toBe('reconciled');
+    expectUnknown(options.map((option) => ({
+      ...option, provenance: { ...option.provenance, source: 'cee_hypothesis' },
+    })));
   });
-});
-
-describe('2.579 producer — precision guards (a false positive suppresses a TRUE ranking)', () => {
-  it('has NO OPINION on a brief that never enumerates its options', () => {
-    const brief =
-      'We need to decide how to grow revenue next year. Marketing spend, hiring and pricing ' +
-      'all matter, and the flour price is uncertain.';
-    const result = deriveIntakeOptionReconciliation(brief, BAKERY_GRAPH_LABELS);
-    expect(result.state).toBe('not_applicable');
-    expect(result.mayNameLeadingOption).toBe(true);
+  it('restores projected-out lineage by canonical ID from the same snapshot', () => {
+    const nodes = BOUND.map((option) => ({ ...option, kind: 'option' }));
+    expect(deriveIntakeOptionReconciliation(BRIEF, OPTIONS, { nodes }).state).toBe('reconciled');
+    expect(deriveIntakeOptionReconciliation(BRIEF, { nodes }).state).toBe('reconciled');
+    expectUnknown(OPTIONS, { nodes: nodes.map((option) => ({ ...option, id: `foreign_${option.id}` })) });
+    // Extra persisted records do not expand the actual analysed set.
+    const missing = deriveIntakeOptionReconciliation(BRIEF, OPTIONS.slice(0, 2), { nodes });
+    expect(missing.state).toBe('options_missing');
+    expect(missing.missing[0]!.text).toBe('introducing a premium tier');
   });
-
-  it('has NO OPINION when NOT ONE enumerated candidate reconciles with the graph', () => {
-    // The load-bearing guard, and the same rule `deriveConstraintVerdict` uses
-    // at its own unenforced seam: zero overlap is a statement about THIS
-    // MODULE'S reading of the brief, not about the graph. Asserting a missing
-    // option from it would be "suppress on a say-so" — the exact failure the
-    // row warned against.
-    const result = deriveIntakeOptionReconciliation(BAKERY_BRIEF, [
-      'Alpha',
-      'Beta',
-      'Gamma',
-      'Delta',
-    ]);
-    expect(result.state).toBe('not_applicable');
-    expect(result.mayNameLeadingOption).toBe(true);
+  it.each([
+    ['duplicate canonical ID', [BOUND[0], { ...BOUND[1], id: BOUND[0]!.id }, BOUND[2]]],
+    ['duplicate source binding', [BOUND[0], { ...BOUND[1], source_quote: BOUND[0]!.source_quote }, BOUND[2]]],
+    ['foreign quote', [{ ...BOUND[0], source_quote: 'keeping costs as they are' }, ...BOUND.slice(1)]],
+    ['partial quote', [{ ...BOUND[0], source_quote: 'pricing' }, ...BOUND.slice(1)]],
+    ['malformed quote', [{ ...BOUND[0], source_quote: 12 }, ...BOUND.slice(1)]],
+    ['empty quote', [{ ...BOUND[0], source_quote: '' }, ...BOUND.slice(1)]],
+    ['missing ID', [{ source_quote: BOUND[0]!.source_quote }, ...BOUND.slice(1)]],
+    ['conflicting IDs', [{ ...BOUND[0], option_id: 'different' }, ...BOUND.slice(1)]],
+    ['empty analysed set', []],
+    ['malformed option', [null, ...BOUND.slice(1)]],
+  ])('leaves %s unresolved', (_name, options) => expectUnknown(options));
+  it('rejects duplicate or conflicting bindings across canonical carriers', () => {
+    expectUnknown(OPTIONS, { options: [...BOUND, BOUND[0]] });
+    expectUnknown(BOUND, { nodes: [{ ...BOUND[0], kind: 'option', source_quote: BOUND[1]!.source_quote }] });
   });
-
-  it('has NO OPINION with no brief, a blank brief, or no graph labels', () => {
-    for (const brief of [null, undefined, '', '   ']) {
-      expect(deriveIntakeOptionReconciliation(brief, BAKERY_GRAPH_LABELS).state).toBe(
-        'not_applicable',
-      );
+  it('cannot choose between repeated source occurrences', () => {
+    expectUnknown(BOUND, undefined, `${BRIEF} We discussed keeping pricing as it is earlier.`);
+    expectUnknown(BOUND, undefined, 'The options are keeping pricing as it is, raising prices, or keeping pricing as it is.');
+  });
+  it('has no intake opinion when no explicit enumeration can be read', () => {
+    for (const brief of [undefined, null, '', 'We need to improve pricing.', 'The options are raising prices.']) {
+      expect(deriveIntakeOptionReconciliation(brief, OPTIONS).state).toBe('not_applicable');
     }
-    expect(deriveIntakeOptionReconciliation(BAKERY_BRIEF, []).state).toBe('not_applicable');
-    expect(deriveIntakeOptionReconciliation(BAKERY_BRIEF, ['   ']).state).toBe(
-      'not_applicable',
-    );
   });
-
-  it('has NO OPINION on a single-item "enumeration"', () => {
-    const result = deriveIntakeOptionReconciliation(
-      'The options are a second production oven line.',
-      BAKERY_GRAPH_LABELS,
-    );
-    expect(result.state).toBe('not_applicable');
+  it('withholds on every unresolved state without changing the independent constraint verdict', () => {
+    expect(INTAKE_MAY_NAME_LEADING_OPTION).toEqual({
+      not_applicable: true, reconciled: true, options_missing: false, identity_unverified: false,
+    });
+    for (const options of [OPTIONS, BOUND.slice(0, 2), BOUND]) {
+      const intake = deriveIntakeOptionReconciliation(BRIEF, options);
+      const withheld = { may_name_leading_option: false, constraint_verdict_state: 'unevaluated' } as const;
+      expect(applyIntakeToLeaderPermission(withheld, intake)).toEqual(withheld);
+      const permitted = { may_name_leading_option: true, constraint_verdict_state: 'evaluated_feasible' } as const;
+      expect(applyIntakeToLeaderPermission(permitted, intake)).toEqual({
+        ...permitted, may_name_leading_option: intake.mayNameLeadingOption,
+      });
+    }
   });
-
-  it('does not open an enumeration on a cue that is not one ("the options aren\'t")', () => {
-    expect(
-      extractEnumeratedOptions("Whatever we do, the options aren't obvious, so advise us."),
-    ).toEqual([]);
-  });
-
-  it('reconciles a drafter that SHORTENED or LENGTHENED the label', () => {
-    // Real drafter behaviour: it re-words. A reconciler that demanded an exact
-    // string would report four missing options on a perfect graph.
-    const result = deriveIntakeOptionReconciliation(BAKERY_BRIEF, [
-      'Oven Line', // shortened
-      'Automated Packing Cell Programme', // lengthened
-      'Refrigerated Delivery Van Fleet', // singular + lengthened
-      'Energy Efficiency Retrofit', // hyphen dropped
-      'Retail Concession', // present, article dropped
-    ]);
-    expect(result.state).toBe('reconciled');
-    expect(result.missing).toEqual([]);
+  it('keeps label reading for display-only consumers', () => {
+    expect(readGraphOptionLabels({ options: OPTIONS })).toEqual(OPTIONS.map((option) => option.label));
+    expect(readGraphOptionLabels(undefined)).toEqual([]);
   });
 });
 
@@ -235,115 +149,19 @@ describe('2.579 producer — the decimal-point trap (CLAUDE.md trap 22)', () => 
   });
 });
 
-describe('2.579 producer — the tables and the leaves', () => {
-  it('declares an answer for EVERY state, exhaustively', () => {
-    const states: IntakeCompletenessState[] = [
-      'not_applicable',
-      'reconciled',
-      'options_missing',
-    ];
-    for (const state of states) {
-      expect(typeof INTAKE_MAY_NAME_LEADING_OPTION[state]).toBe('boolean');
-    }
-    // Derived from the table, not hand-listed: a new state added without a
-    // declared answer is a compile error, and a state that flips its answer
-    // shows up here rather than silently.
-    expect(
-      Object.keys(INTAKE_MAY_NAME_LEADING_OPTION).filter(
-        (s) => !INTAKE_MAY_NAME_LEADING_OPTION[s as IntakeCompletenessState],
-      ),
-    ).toEqual(['options_missing']);
-  });
-
-  it('every reconciliation carries the state table’s own answer', () => {
-    for (const [brief, labels] of [
-      [BAKERY_BRIEF, BAKERY_GRAPH_LABELS],
-      [BAKERY_BRIEF, BAKERY_GRAPH_LABELS_COMPLETE],
-      ['no enumeration here', BAKERY_GRAPH_LABELS],
-    ] as ReadonlyArray<readonly [string, readonly string[]]>) {
-      const result = deriveIntakeOptionReconciliation(brief, labels);
-      expect(result.mayNameLeadingOption).toBe(
-        INTAKE_MAY_NAME_LEADING_OPTION[result.state],
-      );
-    }
-  });
-
-  it('normalises articles, hyphens, case and plurals to identity tokens', () => {
-    expect(normaliseOptionTokens('an energy-efficiency retrofit')).toEqual([
-      'energy',
-      'efficiency',
-      'retrofit',
-    ]);
-    expect(normaliseOptionTokens('Refrigerated Delivery Vans')).toEqual([
-      'refrigerated',
-      'delivery',
-      'van',
-    ]);
-    // A candidate made only of stopwords has no identity and must not match
-    // everything.
-    expect(normaliseOptionTokens('the other options')).toEqual(['other']);
-    expect(normaliseOptionTokens('a new option')).toEqual([]);
-  });
-
-  it('reads labels from both the PLoT-shape array and a graph object', () => {
-    const options = [
-      { id: 'o1', label: 'Second Production Oven Line' },
-      { id: 'o2', label: '  ' },
-      { id: 'o3' },
-      null,
-      { id: 'o4', label: 'Automated Packing Cell' },
-    ];
-    expect(readGraphOptionLabels(options)).toEqual([
-      'Second Production Oven Line',
-      'Automated Packing Cell',
-    ]);
-    expect(readGraphOptionLabels({ options })).toEqual([
-      'Second Production Oven Line',
-      'Automated Packing Cell',
-    ]);
-    expect(readGraphOptionLabels(undefined)).toEqual([]);
-    expect(readGraphOptionLabels({ nodes: [] })).toEqual([]);
-  });
-});
-
-describe('2.579 gate — the fold into the ratified leader permission (row 1.215)', () => {
-  const permitted = {
-    may_name_leading_option: true,
-    constraint_verdict_state: 'evaluated_feasible',
-  } as const;
-  const withheld = {
-    may_name_leading_option: false,
-    constraint_verdict_state: 'unevaluated',
-  } as const;
-
-  it('REMOVES the permission when the intake is incomplete', () => {
-    const intake = deriveIntakeOptionReconciliation(BAKERY_BRIEF, BAKERY_GRAPH_LABELS);
-    expect(applyIntakeToLeaderPermission(permitted, intake)).toEqual({
-      may_name_leading_option: false,
-      // ⚠ THE STATE IS NOT REWRITTEN. It is a statement about the CONSTRAINT
-      // evidence and the intake axis has nothing true to say about it
-      // (CLAUDE.md trap 21). Asserting the pass-through here is what stops a
-      // later "tidy-up" from aligning the two and re-opening the seam.
-      constraint_verdict_state: 'evaluated_feasible',
-    });
-  });
-
-  it('is TRANSPARENT on every permitting intake state', () => {
-    for (const labels of [BAKERY_GRAPH_LABELS_COMPLETE, [] as readonly string[]]) {
-      const intake = deriveIntakeOptionReconciliation(BAKERY_BRIEF, labels);
-      expect(intake.mayNameLeadingOption).toBe(true);
-      expect(applyIntakeToLeaderPermission(permitted, intake)).toBe(permitted);
-      expect(applyIntakeToLeaderPermission(withheld, intake)).toBe(withheld);
-    }
-  });
-
-  it('never GRANTS a permission the constraint verdict withheld', () => {
-    const intake = deriveIntakeOptionReconciliation(
-      BAKERY_BRIEF,
-      BAKERY_GRAPH_LABELS_COMPLETE,
-    );
-    expect(applyIntakeToLeaderPermission(withheld, intake).may_name_leading_option).toBe(
-      false,
-    );
-  });
+it('contains the exact persisted pricing witness without inferring a duplicate option', () => {
+  // Read-only capture 2026-09-24T05:11:59Z, d712b756, CEE 6dfb56f2.
+  const brief = "We run a B2B SaaS product. Pro is £49/month and we have about 300 paying customers. We're deciding between raising Pro to £59, adding a new £89 Enterprise tier, or keeping pricing as it is. Goal: reach £20k MRR within 12 months. Hard limit: monthly churn must stay under 4%.";
+  const options = [
+    { id: 'raise_pro_to_59', kind: 'option', label: 'Raise Pro to £59', provenance: 'from_brief' },
+    { id: 'add_89_enterprise_tier', kind: 'option', label: 'Add £89 Enterprise tier', provenance: 'from_brief' },
+    { id: 'keep_current_pricing', kind: 'option', label: 'Keep current pricing', provenance: 'from_brief' },
+  ];
+  const result = deriveIntakeOptionReconciliation(brief, options, { nodes: options });
+  expect(result.state).toBe('identity_unverified');
+  expect(result.enumerated.map((option) => option.text)).toEqual([
+    'raising Pro to £59', 'adding a new £89 Enterprise tier', 'keeping pricing as it is',
+  ]);
+  expect(result.missing).toEqual([]);
+  expect(result.mayNameLeadingOption).toBe(false);
 });

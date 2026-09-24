@@ -50,6 +50,7 @@
  */
 
 import type { MessageTurnPayload, OlumiResponse, StageType } from '@talchain/schemas/boundary';
+import { AGENT_RUN_ANALYSIS_CHIP_ID } from './agent-chip-ids.js';
 import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
 
 import { config } from '../../config/index.js';
@@ -1552,7 +1553,8 @@ export async function dispatchChipClickRunAnalysis(
     const timingsEnabled =
       config.cee.timingDebugEnabled || config.features.diagnosticTraceEnabled;
     let chipTurnTimings: V5TurnTimings | undefined;
-    if (!config.cee.runAnalysisAwaitDecisionReview) {
+    const agentLaneRun = (payload as { chip?: { id?: unknown } }).chip?.id === AGENT_RUN_ANALYSIS_CHIP_ID;
+    if (!config.cee.runAnalysisAwaitDecisionReview || agentLaneRun) {
       const briefLength =
         typeof context.scenarioBriefText === 'string'
           ? context.scenarioBriefText.length
@@ -1572,7 +1574,7 @@ export async function dispatchChipClickRunAnalysis(
       emit(TelemetryEvents.V5DecisionReviewSkipped, {
         request_id: requestId,
         scenario_id: context.session_id,
-        reason: 'autofire_disabled',
+        reason: agentLaneRun ? 'agent_lane_openai' : 'autofire_disabled',
         brief_present: briefLength > 0,
         brief_length: briefLength,
         has_enrichment: enrichment !== undefined,
@@ -2365,3 +2367,5 @@ function deriveAnalysisReadyFromSnapshot(
   }
   return readiness;
 }
+
+export { AGENT_RUN_ANALYSIS_CHIP_ID } from './agent-chip-ids.js';

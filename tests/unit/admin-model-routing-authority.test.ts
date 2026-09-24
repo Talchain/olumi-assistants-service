@@ -5,10 +5,12 @@ import { join } from 'node:path';
 import { _resetConfigCache } from '../../src/config/index.js';
 import {
   EXECUTABLE_RUNTIME_TASKS,
+  requireTaskModelAssignmentCapability,
   ROUTER_TASK_PROVIDER_CAPABILITIES,
   RUNTIME_AI_TASK_AUTHORITY,
   TASK_MODEL_DEFAULTS,
 } from '../../src/config/model-routing.js';
+import { resolveModelAssignment } from '../../src/config/model-assignment.js';
 import { resolveTaskRouting } from '../../src/routes/admin.models.js';
 import {
   buildStartupTaskModels,
@@ -95,9 +97,31 @@ describe('admin runtime model-routing authority', () => {
     );
     expect(EXECUTABLE_RUNTIME_TASKS).toContain('clarify_brief');
     expect(EXECUTABLE_RUNTIME_TASKS).toContain('explain_diff');
+    // ⭐⭐ BOTH ENTRIES ARE NOW OPEN, AND THAT CHANGES WHAT THIS MAP IS.
+    //
+    // `critique_graph` gained 'openai' with #1771 and `explain_diff` with
+    // #1764. Each was excluded for the same recorded reason — "OpenAI exposes
+    // compatibility stubs that throw before making a call" — and both stubs are
+    // now implementations.
+    //
+    // ⛔ THE HONEST CONSEQUENCE, STATED RATHER THAN LEFT TO BE FOUND: the map
+    // now lists every provider for every entry it has, so
+    // `requireTaskModelAssignmentCapability` CANNOT REJECT ANYTHING. The
+    // provider union is exactly ['anthropic','openai','fixtures'] and both rows
+    // carry all three. The map is, as of these two PRs, inert — it documents a
+    // fact rather than enforcing a constraint.
+    //
+    // That is the correct end state (the exclusions were workarounds for
+    // missing adapters, not policy), but it means the ASYMMETRY that used to
+    // prove this map tracked the adapters is gone. Two things replace it, and
+    // neither depends on an entry being closed:
+    //   · the MODEL_DISABLED guard below — registry `enabled: false`, a
+    //     DIFFERENT mechanism, which is now the live fail-closed path; and
+    //   · this deep-equal, which REDs the moment anyone adds a third entry,
+    //     forcing them to state which adapters actually implement it.
     expect(ROUTER_TASK_PROVIDER_CAPABILITIES).toEqual({
-      critique_graph: ['anthropic', 'fixtures'],
-      explain_diff: ['anthropic', 'fixtures'],
+      critique_graph: ['anthropic', 'openai', 'fixtures'],
+      explain_diff: ['anthropic', 'openai', 'fixtures'],
     });
   });
 
@@ -141,49 +165,137 @@ describe('admin runtime model-routing authority', () => {
       critique_graph: 'claude-sonnet-4-6',
     });
 
+    // ⭐ INVERTED BY THIS PR, AND IT IS THE HEADLINE. An OpenAI model on
+    // CEE_MODEL_CRITIQUE used to die at resolution with MODEL_PROVIDER_MISMATCH
+    // — the env var existed and COULD NOT BE USED, so an OpenAI-only
+    // deployment had no way to run the challenger at all.
+    // OpenAIAdapter.critiqueGraph is now implemented, the capability map
+    // records that, and the override resolves. Revert the map entry and this
+    // REDs.
     process.env.CEE_MODEL_CRITIQUE = 'gpt-4o';
     _resetConfigCache();
 
     expect(resolveTaskRouting('critique_graph')).toMatchObject({
       model: 'gpt-4o',
       provider: 'openai',
-      availability: 'configuration_error',
+      availability: 'registry_enabled',
       source: 'env_override',
       source_key: 'CEE_MODEL_CRITIQUE',
-      configuration_error: { code: 'MODEL_PROVIDER_MISMATCH' },
     });
     expect(
       buildStartupTaskModels(resolveModelRoutingSnapshot()),
-    ).not.toHaveProperty('critique_graph');
+    ).toHaveProperty('critique_graph', 'gpt-4o');
   });
 
-  it('gives failover precedence and reports only task-capable members in order', () => {
+  /**
+   * ⛔⛔ THE GATE'S REJECTION PATH IS NOW UNREACHABLE THROUGH THE REAL MAP, AND
+   * THIS TEST SAYS SO INSTEAD OF FAKING A VEHICLE.
+   *
+   * One version of this asserted the gate rejects an OpenAI model for
+   * `critique_graph`; #1771 opened that. I repointed it to `explain_diff`;
+   * #1764 opened that too. Both map entries now list all three providers, and
+   * the provider union IS those three — so `supportedProviders.includes(...)`
+   * is always true and MODEL_PROVIDER_MISMATCH cannot be produced by any live
+   * configuration. **A third repoint would assert a rejection the system can no
+   * longer perform.**
+   *
+   * ⚠ SO THIS IS EXPLICITLY A UNIT TEST OF THE MECHANISM, NOT A CLAIM ABOUT
+   * LIVE BEHAVIOUR. It forces a provider outside every list to prove the gate's
+   * LOGIC is intact, so that if a future task is added with a genuine
+   * constraint the enforcement still works. The cast is the honest signal that
+   * no real resolution can reach this branch today.
+   *
+   * The live fail-closed path is the disabled-model guard, covered separately
+   * in tests/unit/llm-router.test.ts and tests/integration/admin.routes.test.ts.
+   */
+  it('⛔ MECHANISM — the gate still rejects a provider absent from a task\'s list', () => {
+    const openai = resolveModelAssignment('gpt-4o');
+    expect(openai.provider, 'positive control: the fixture really is OpenAI').toBe('openai');
+
+    // Forced OUTSIDE the union on purpose — see the docblock. No live
+    // configuration produces this, which is exactly the point being recorded.
+    const impossible = { ...openai, provider: 'nonesuch' as typeof openai.provider };
+
+    let caught: { code?: string; model?: string } | undefined;
+    try {
+      requireTaskModelAssignmentCapability('explain_diff', impossible);
+    } catch (error) {
+      caught = error as { code?: string; model?: string };
+    }
+    expect(caught, 'the gate must throw for a provider absent from the list').toBeDefined();
+    expect(caught?.code).toBe('MODEL_PROVIDER_MISMATCH');
+    expect(caught?.model, 'identity binding — the exact model bytes are reported back').toBe('gpt-4o');
+  });
+
+  it('POSITIVE CONTROL — the identical gate PASSES a capable provider, so it is not rejecting everything', () => {
+    const anthropic = resolveModelAssignment(TASK_MODEL_DEFAULTS.explain_diff);
+    expect(anthropic.provider).toBe('anthropic');
+    expect(requireTaskModelAssignmentCapability('explain_diff', anthropic)).toBe(anthropic);
+    // ...and the newly-opened task admits OpenAI through the very same call.
+    expect(
+      requireTaskModelAssignmentCapability('critique_graph', resolveModelAssignment('gpt-4o'))
+        .provider,
+    ).toBe('openai');
+  });
+
+  it('gives failover precedence, and reports EVERY requested member in order', () => {
+    // ⚠ RENAMED AND RE-AIMED. It was "reports only task-capable members": it
+    // asserted the chain OMITTED a provider with no adapter for the task. That
+    // subject no longer exists — both capability-map entries are now fully
+    // open, so no provider is omitted for any task. Asserting the old shape
+    // would require a closed entry that no longer exists.
+    //
+    // ⭐ The precedence fact it also carried is REAL and is kept, because it is
+    // easy to misread: `resolveRouterResolution` computes the failover attempt
+    // FIRST and returns it whenever two or more providers are usable
+    // (router-resolution.ts:216-227), BEFORE any env override or task default
+    // is consulted. An earlier version of this test set CEE_MODEL_CRITIQUE
+    // alongside the failover list, implying the override provoked the failover.
+    // It did not; that line was inert.
     process.env.LLM_FAILOVER_PROVIDERS = 'openai,anthropic,fixtures';
-    process.env.CEE_MODEL_CRITIQUE = 'gpt-4o';
     _resetConfigCache();
 
-    expect(resolveTaskRouting('critique_graph')).toMatchObject({
-      model: PROVIDER_DEFAULT_MODELS.anthropic,
-      provider: 'anthropic',
+    const routing = resolveTaskRouting('explain_diff');
+    expect(routing).toMatchObject({
+      model: PROVIDER_DEFAULT_MODELS.openai,
+      provider: 'openai',
       availability: 'registry_enabled',
       source: 'failover',
       source_key: 'LLM_FAILOVER_PROVIDERS',
-      failover_chain: [
-        {
-          model: PROVIDER_DEFAULT_MODELS.anthropic,
-          provider: 'anthropic',
-          availability: 'registry_enabled',
-        },
-        {
-          model: PROVIDER_DEFAULT_MODELS.fixtures,
-          provider: 'fixtures',
-          availability: 'fixture_only',
-        },
-      ],
     });
+    // Every requested provider is present, in the requested order — the part a
+    // caller actually depends on now that nothing is filtered.
+    expect(routing.failover_chain?.map((m) => m.provider)).toEqual([
+      'openai',
+      'anthropic',
+      'fixtures',
+    ]);
     expect(buildStartupTaskModels(resolveModelRoutingSnapshot())).toMatchObject({
-      critique_graph: PROVIDER_DEFAULT_MODELS.anthropic,
+      explain_diff: PROVIDER_DEFAULT_MODELS.openai,
     });
+
+  });
+
+  it('POSITIVE CONTROL — the identical failover request keeps OpenAI FIRST for the task that implements it', () => {
+    // Without this, the filter assertion above would pass on a chain builder
+    // that dropped openai unconditionally, or on a capability map opened to
+    // nothing. The two tasks differ ONLY in their map entry, so the pair is a
+    // discriminating mutant: flip either entry and exactly one of them REDs.
+    process.env.LLM_FAILOVER_PROVIDERS = 'openai,anthropic,fixtures';
+    _resetConfigCache();
+
+    const routing = resolveTaskRouting('critique_graph');
+    expect(routing).toMatchObject({
+      source: 'failover',
+      source_key: 'LLM_FAILOVER_PROVIDERS',
+      provider: 'openai',
+      model: PROVIDER_DEFAULT_MODELS.openai,
+    });
+    expect(routing.failover_chain?.map((member) => member.provider)).toEqual([
+      'openai',
+      'anthropic',
+      'fixtures',
+    ]);
   });
 
   // Vehicle changed from explain_diff to clarify_brief. providers.json is

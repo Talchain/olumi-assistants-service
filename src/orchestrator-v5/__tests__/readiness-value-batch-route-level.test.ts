@@ -277,6 +277,39 @@ describe('value batch chip click — one approval, one commit', () => {
     expect(result.response.draft_graph).toBeDefined();
   });
 
+  /**
+   * ⭐⭐ THE PAYOFF TURN MUST CARRY THE RUN ADMISSION, NOT JUST A STATUS.
+   *
+   * This is the turn right after the user supplied what Olumi asked for. It set
+   * the turn's readiness from
+   * `assessCanonicalAnalysisReadiness(persistedGraph).analysisReady`, which does
+   * NOT compute `may_run` — only `canonicalAnalysisReadyFrom(
+   * resolveRunAdmission(g), g)` does. So the payload reached every Run-affordance
+   * consumer with no admission verdict and they fell back to the stricter
+   * `status` rule. Measured: `may_run` absent on 400/400 assessments of real
+   * persisted models, and 95/400 (23.8%) carry a non-empty value-batch
+   * membership, so this turn is genuinely reachable.
+   *
+   * ⚠ BOUND AT THE ROUTE, NOT AT THE HELPER. A unit test of the two producers
+   * pins the MECHANISM but would stay green if this call site were reverted —
+   * which is the whole failure mode. This asserts the field on the response the
+   * executor actually returns.
+   */
+  it('⭐ the applied turn publishes may_run, so the Run affordance is not withheld', async () => {
+    const result = await runTurnExecutor(payload(), 'req-value-batch-may-run', {
+      routingAdapter: throwingRoutingAdapter(),
+    });
+    // ⚠ `analysisReady` is on the EXECUTOR RESULT, not inside `response` — the
+    // response-finaliser stamps it onto the wire envelope after composition.
+    // This is the value that stamping reads, so it is the right binding point.
+    const ready = result.analysisReady as { status?: unknown; may_run?: unknown } | undefined;
+    expect(ready, 'the applied turn must publish a readiness payload').toBeDefined();
+    // CONTRAST CONTROL: `status` was always present, so its presence proves the
+    // payload is real and a missing `may_run` is a genuine absence.
+    expect(typeof ready?.status).toBe('string');
+    expect(typeof ready?.may_run).toBe('boolean');
+  });
+
   it('a DECLINED cell writes nothing — an honest refusal is not an invented number', async () => {
     await runTurnExecutor(payload(), 'req-value-batch-declined', {
       routingAdapter: throwingRoutingAdapter(),

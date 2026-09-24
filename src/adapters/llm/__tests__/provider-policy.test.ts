@@ -22,7 +22,7 @@ vi.mock('undici', async (orig) => {
   };
 });
 
-import { assertProviderAllowed, runWithProviderPolicy, OPENAI_ONLY, ForbiddenProviderError, currentProviderPolicy, recordedProviderCalls } from '../provider-policy.js';
+import { assertProviderAllowed, runWithProviderPolicy, OPENAI_ONLY, ForbiddenProviderError, currentProviderPolicy, recordedProviderCalls, providerLedgerTruncated, MAX_RECORDED_CALLS } from '../provider-policy.js';
 
 describe('the request-scoped provider policy', () => {
   it('outside any policy every provider is allowed (Conventional is unchanged)', () => {
@@ -77,3 +77,49 @@ describe('the Anthropic adapter is refused BEFORE network under an OpenAI-only p
     expect(networkCalls.length).toBeGreaterThan(0);
   }, 60_000);
 });
+
+/**
+ * Independent review of #1749 (5796174445): (1) the TRANSPORT guard was unpinned —
+ * deleting it left every test green, because every path today reaches it through the
+ * guarded client; (2) a ledger past its cap dropped refusals WITHOUT SAYING SO, so "no
+ * anthropic row" did not prove "no anthropic attempt".
+ */
+describe('the backstops the review found unpinned', () => {
+  beforeEach(() => { networkCalls.length = 0; });
+
+  it('RED: the Anthropic TRANSPORT itself refuses under the policy, with zero network calls', async () => {
+    const { anthropicFetchForTests } = await import('../anthropic.js');
+    const err = await runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), async () => {
+      try { await anthropicFetchForTests('https://api.anthropic.com/v1/messages', { method: 'POST', body: '{}' }); return null; }
+      catch (e) { return e; }
+    });
+    expect(err).toBeInstanceOf(ForbiddenProviderError);
+    expect(networkCalls).toEqual([]);
+  }, 60_000);
+
+  it('CONTRAST: the same transport outside a policy reaches the (mocked) network', async () => {
+    const { anthropicFetchForTests } = await import('../anthropic.js');
+    await anthropicFetchForTests('https://api.anthropic.com/v1/messages', { method: 'POST', body: '{}' }).catch(() => undefined);
+    expect(networkCalls.length).toBe(1);
+  }, 60_000);
+
+  it('RED: a ledger that reached its cap SAYS it was truncated — and a refusal past the cap still throws', () => {
+    const out = runWithProviderPolicy(OPENAI_ONLY('test'), () => {
+      for (let i = 0; i < MAX_RECORDED_CALLS; i += 1) assertProviderAllowed('openai', 'agent-v1-turn.callModel', { model: 'gpt-5.6-terra', purpose: 'conversation' });
+      let threw = false;
+      try { assertProviderAllowed('anthropic', 'anthropic.client'); } catch { threw = true; }
+      return { threw, calls: recordedProviderCalls(), truncated: providerLedgerTruncated() };
+    });
+    expect(out.threw).toBe(true);
+    expect(out.calls).toHaveLength(MAX_RECORDED_CALLS);
+    expect(out.calls.some((c) => c.provider === 'anthropic')).toBe(false);
+    expect(out.truncated).toBe(true);
+  });
+
+  it('CONTRAST: a ledger within its cap is not truncated; outside a policy nothing is', () => {
+    expect(providerLedgerTruncated()).toBe(false);
+    const t = runWithProviderPolicy(OPENAI_ONLY('test'), () => { assertProviderAllowed('openai', 'x'); return providerLedgerTruncated(); });
+    expect(t).toBe(false);
+  });
+});
+
