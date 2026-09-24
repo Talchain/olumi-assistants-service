@@ -50,7 +50,7 @@ import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/anal
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
-import { narrateWriteOutcome, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { narrateWriteOutcome, notAdoptedLine, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
 import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
@@ -1012,7 +1012,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // ⛔ A proposal id is a binding for authorise_change, never text a user reads or
       // types (display-ids.ts). Applied here, before the answer row is written, so a
       // replay returns exactly what the user first saw.
-      assistant_text: withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, owed), narration.status)),
+      // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic.
+      assistant_text: withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, owed),
+        [narration.status, notAdoptedLine(result.tool_calls, result.tool_results)].filter((x): x is string => x !== null && x !== '').join(' ') || null)),
       stage: 'frame',
       answerKind: 'substantive',
       // One click approves the ONE proposal just offered — the same words as typing "yes".
