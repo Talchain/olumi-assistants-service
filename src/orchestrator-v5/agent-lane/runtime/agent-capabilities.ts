@@ -1045,17 +1045,34 @@ export function createAgentCapabilities(
         const operationId = authorisationTurnId(decision.proposal.proposal_id);
         let baseHash = decision.proposal.base_graph_identity_hash;
 
-        const addRes = await dispatch('/orchestrate/v2/turn', {
-          kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
-          event: { kind: 'structural_add', node_id: optionId, node_kind: 'option',
-            label: String(nodeValue.label ?? ''), base_graph_hash: baseHash },
-        });
+        /**
+         * ⛔ CONTINUATION MUST NOT RE-ADD THE NODE (Codex, exact head 5c908d1a).
+         * A partial leaves the proposal unapplied ON PURPOSE so the user can retry —
+         * but the option is already there by then, and `structural_add` refuses
+         * `node_id_collision` (`structural-add.ts:452`). So the node write is SKIPPED
+         * when the node already exists, and the retry proceeds to the missing links.
+         */
+        const beforeAdd = await readGraph(ctx.scenario_id);
+        const alreadyThere = (beforeAdd?.nodes ?? []).some((n) => n.id === optionId);
+        const receipts: ReceiptSummary[] = [];
+        let receiptUnreadable = false;
+        let addRes: { status: number; json: Record<string, unknown> } | null = null;
+        if (!alreadyThere) {
+          addRes = await dispatch('/orchestrate/v2/turn', {
+            kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
+            event: { kind: 'structural_add', node_id: optionId, node_kind: 'option',
+              label: String(nodeValue.label ?? ''), base_graph_hash: baseHash },
+          });
+          const addReceipt = receiptSummaryOf(addRes.json);
+          if (addReceipt.summary !== null) receipts.push(addReceipt.summary);
+          if (addReceipt.unreadable) receiptUnreadable = true;
+        }
         let afterAdd = await readGraph(ctx.scenario_id);
         const optionExists = (afterAdd?.nodes ?? []).some((n) => n.id === optionId);
         if (!optionExists) {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied',
-            detail: String(addRes.json.assistant_text ?? 'The option was not added, so nothing else was attempted.'),
-            http: addRes.status, operation_id: operationId };
+            detail: String(addRes?.json.assistant_text ?? 'The option was not added, so nothing else was attempted.'),
+            http: addRes?.status ?? 0, operation_id: operationId };
         }
         baseHash = afterAdd?.graph_hash ?? baseHash;
 
@@ -1076,25 +1093,54 @@ export function createAgentCapabilities(
           });
           afterAdd = await readGraph(ctx.scenario_id);
           const present = (afterAdd?.edges ?? []).some((e) => e.from === optionId && e.to === factorId);
-          if (present) { linked.push(factorLabel); baseHash = afterAdd?.graph_hash ?? baseHash; }
-          else notLinked.push({ factor: factorLabel, detail: String(edgeRes.json.assistant_text ?? 'not linked') });
+          if (present) {
+            linked.push(factorLabel);
+            baseHash = afterAdd?.graph_hash ?? baseHash;
+            const r = receiptSummaryOf(edgeRes.json);
+            if (r.summary !== null) receipts.push(r.summary);
+            if (r.unreadable) receiptUnreadable = true;
+          } else notLinked.push({ factor: factorLabel, detail: String(edgeRes.json.assistant_text ?? 'not linked') });
         }
 
         /**
-         * ⚠ REPORTED HONESTLY, INCLUDING A PARTIAL. The option exists once the node
-         * write lands, so claiming failure would be false — but an option missing a
-         * link it was approved with is NOT what the user agreed to, and saying so is
-         * the difference between a receipt and a reassurance.
+         * ⛔ AN APPROVED PROPOSAL IS COMPLETE ONLY WHEN THE WHOLE STORED OPERATION SET
+         * IS CONFIRMED FROM READBACK (Codex, exact head 5c908d1a). Three repairs here:
+         *
+         * 1. `markApplied` on completion, so a retry returns `already_applied` with the
+         *    ORIGINAL receipts instead of `superseded`. `ProposalStore.authorise`
+         *    (`proposal.ts:216`) checks the applied map BEFORE the base hash — and this
+         *    write moves that hash — so without this a user who retried was told their
+         *    own completed change was stale, and `outstanding()` kept offering it.
+         * 2. `receipts` is the ARRAY the narration path consumes. It was a single
+         *    OBJECT from `receiptSummaryOf`, and `write-outcome.ts:48-50` reads only an
+         *    array — so `:153-157` said "Saved. No version number was recorded" even
+         *    when the write minted one.
+         * 3. A partial reports through the standard failure shape, never an unqualified
+         *    "Saved". `ok`/`applied` are false and the unlinked factors are named, so
+         *    the status line cannot claim a completion the user did not get.
          */
+        const complete = notLinked.length === 0;
+        if (complete) proposals.markApplied(decision.proposal.proposal_id, receipts);
         return {
-          ok: true, mutated: true, applied: true,
+          ok: complete,
+          mutated: true,
+          applied: complete,
           operation_id: operationId,
           option: { label: String(nodeValue.label ?? ''), linked_to: linked },
-          ...(notLinked.length > 0 ? { not_linked: notLinked } : {}),
-          receipts: receiptSummaryOf(addRes.json),
-          follow_up: newOptionFollowUp({ ok: true, optionId, label: String(nodeValue.label ?? ''),
+          ...(notLinked.length > 0 ? {
+            not_linked: notLinked,
+            failures: notLinked.map((n) => `${n.factor}: ${n.detail}`),
+            detail:
+              `"${String(nodeValue.label ?? '')}" was added, but ${notLinked.length} of `
+              + `${linked.length + notLinked.length} links were not recorded: `
+              + `${notLinked.map((n) => n.factor).join(', ')}. The option is in the model and `
+              + 'incomplete. Approving again will add only the missing links — it will not add the option twice.',
+          } : {}),
+          receipts,
+          ...(receiptUnreadable ? { receipt_unreadable: true } : {}),
+          ...(complete ? { follow_up: newOptionFollowUp({ ok: true, optionId, label: String(nodeValue.label ?? ''),
             actsOn: linked.map((l) => ({ id: '', label: l, direction: 'positive' as const })),
-            publicLabel: decision.proposal.public_label }),
+            publicLabel: decision.proposal.public_label }) } : {}),
         };
       }
 
