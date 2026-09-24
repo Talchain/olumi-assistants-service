@@ -1612,3 +1612,48 @@ describe("register — a 409 says WHICH expectation failed and carries both pair
 function wireIdentityOf(g: WireGraph) {
   return computeGraphIdentityHash(g as never);
 }
+
+/**
+ * ⛔⛔ "NO HASHABLE GRAPH" IS NOT "NO GRAPH" — accepted from independent review.
+ *
+ * `hashesForRawGraph` maps a graph that is PRESENT BUT UNPARSEABLE to
+ * `identity: null`, exactly as it maps an absent one. So an absence assertion
+ * passed against stored malformed bytes and REPLACED them — the very overwrite
+ * the field exists to prevent, and flatly contrary to the refusal's own wording.
+ */
+describe("register — an absence assertion does not discard a graph that merely could not be READ", () => {
+  it("⛔⛔ THE DEFECT: `null` against PRESENT-but-unparseable bytes is refused, not written over", async () => {
+    // Present and non-null, but fails `GraphStateIngressSchema` — so the identity
+    // hash is `null` and the old preflight saw it as "no graph".
+    loadGraph.mockResolvedValue({ nodes: "not an array", edges: 17 });
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: null });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().details.failed_expectation).toBe("absence");
+    // ⭐ And it says the bytes were unreadable rather than reporting a null hash as
+    // though the model were empty — the distinction the caller needs to recover.
+    expect(res.json().details.current_graph_unhashable).toBe(true);
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("⭐ CONTRAST: a GENUINELY absent graph still proceeds — the discriminator is raw presence, not hashability", async () => {
+    // Both cases yield `identity: null`. Only this one may write. Without this
+    // control the fix above could be satisfied by refusing every absence claim,
+    // which would break the first write into every new scenario.
+    loadGraph.mockResolvedValue(null);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: null });
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it("⭐ and a caller that sends NO expectation is still unaffected by unparseable bytes, byte for byte", async () => {
+    loadGraph.mockResolvedValue({ nodes: "not an array" });
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED });
+    expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+});

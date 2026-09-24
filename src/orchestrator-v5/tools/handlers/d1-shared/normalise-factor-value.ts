@@ -300,6 +300,35 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
       }
     }
 
+    /**
+     * ⛔⛔ DO NOT DERIVE A FRAME HERE. THE ESTATE ALREADY MEASURED THAT FIX AS
+     * WORSE THAN THE DEFECT, and I nearly shipped it a second time.
+     *
+     * Panel's #63 item 2 asks for `defaultFrameFor(raw)` in this branch, as the
+     * agent path does. `stored-scale-frame-edit.test.ts` is the ruling against it,
+     * with the numbers: deriving a frame from the EDITED BASELINE ALONE (PR #1103,
+     * blocked on review) turns a VISIBLE REFUSAL into a SILENT WRONG ANSWER, because
+     * the option levels were framed against the DRAFT's frame, not this one.
+     *
+     *   drafted option levels [0.6, 0.8]      (draft frame 500,000)
+     *   user types £600,000 → ladder frame  =  1,000,000
+     *   persisted {value: 0.6, raw_value: 600000}
+     *   option raw £400,000, level 0.8 → TRUE ratio 1.50x, WIRE ratio 0.75x
+     *
+     * The £600,000 status quo lands EQUAL to the £300,000 option and BELOW the
+     * £400,000 one, and the analysis recommends the wrong option with no refusal
+     * anywhere. 9 of 25 framings distorted the ratio, worst 100x.
+     *
+     * ⭐ THE FRAME IS A PROPERTY OF THE FACTOR AND ITS OPTION LEVELS TOGETHER, so it
+     * can only be derived where both are in scope — at CONSTRUCTION (pass 3d /
+     * `admit-model.ts`), which is what #63 item 1 repairs. A value edit sees one
+     * number and cannot know what the levels were divided by.
+     *
+     * So the raw write stands and the analysis gate keeps refusing it HONESTLY. The
+     * remedy for an unframed factor is an explicit framing step the user answers —
+     * Paul's own instruction, "never silently clamp the value or fabricate a
+     * user-authored range" — not a ladder applied behind their back.
+     */
     return { raw_value: rawInput, value: rawInput };
   }
 

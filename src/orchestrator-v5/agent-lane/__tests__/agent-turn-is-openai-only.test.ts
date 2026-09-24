@@ -31,13 +31,18 @@ describe('the Agent route is OpenAI-only, all the way down', () => {
   // When set, the internal handler attempts an Anthropic call, as the legacy
   // decision_review did on served c4a6cce.
   let internalTriesAnthropic = false;
+  // Per-hop usage, so a test can prove attribution is BY HANDLE rather than to the
+  // last call. Empty means the provider sent none, which is the default here and must
+  // leave `usage` off the entry entirely rather than record a zero.
+  let usagePerCall: Record<string, unknown>[] = [];
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async () => {
       call += 1;
       const output = call === 1
         ? [{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'c1' }]
         : [{ type: 'message', content: [{ type: 'output_text', text: 'Here is the comparison.' }] }];
-      return new Response(JSON.stringify({ output }), { status: 200 });
+      const usage = usagePerCall[call - 1];
+      return new Response(JSON.stringify({ output, ...(usage !== undefined ? { usage } : {}) }), { status: 200 });
     }));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
@@ -76,12 +81,68 @@ describe('the Agent route is OpenAI-only, all the way down', () => {
     call = 0;
     internalTriesAnthropic = false;
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis.' } });
-    const calls = r.json()._provider_calls as { site: string; provider: string; model: string; purpose: string; outcome: string }[];
+    const calls = r.json()._provider_calls as { site: string; provider: string; model: string; purpose: string; outcome: string; duration_ms?: number; usage?: unknown }[];
+    /**
+     * ⚠ THE PURITY FIELDS ARE DEEP-EQUALLED ON A PROJECTION, NOT ON THE WHOLE ENTRY.
+     *
+     * This asserted the whole object, so wiring `recordProviderUsage` on the transport
+     * turned it RED for the right reason and the wrong cause: `duration_ms` is an
+     * INTENDED field (#1805) and a key count is not what this test is about. Deleting
+     * the deep-equal would have weakened the purity claim, so the five purity fields are
+     * still compared exactly, by identity, and the new fields are asserted separately
+     * below rather than tolerated by a loosened matcher.
+     */
+    const PURITY = ['site', 'provider', 'model', 'purpose', 'outcome'] as const;
+    const project = (c: Record<string, unknown>) => Object.fromEntries(PURITY.map((k) => [k, c[k]]));
     // Two model hops: the run_analysis function call, then the answer.
-    expect(calls).toEqual([
+    expect(calls.map((c) => project(c as unknown as Record<string, unknown>))).toEqual([
       { site: 'agent-v1-turn.callModel', provider: 'openai', model: expect.stringMatching(/^gpt-/), purpose: 'conversation', outcome: 'allowed' },
       { site: 'agent-v1-turn.callModel', provider: 'openai', model: expect.stringMatching(/^gpt-/), purpose: 'conversation', outcome: 'allowed' },
     ]);
+    // No key beyond the purity five and the two measurement fields may appear, or this
+    // projection would hide a field nobody reviewed.
+    for (const c of calls) {
+      expect(Object.keys(c).sort()).toEqual([...PURITY].concat('duration_ms').sort());
+    }
+  });
+
+  /**
+   * ⭐ CACHING IS NOW MEASURABLE ON A REAL TURN, which is the point of keeping the
+   * handle. `normaliseProviderUsage` reads `input_tokens_details.cached_tokens` — the
+   * Responses API's own cache field — so a turn reports what the provider actually
+   * cached instead of what the source structurally permits.
+   *
+   * ⚠ THIS TEST DOES **NOT** DISCRIMINATE THE BY-HANDLE ATTRIBUTION, and saying so is
+   * the honest option. MEASURED: mutating `provider-policy.ts` to attribute to the
+   * newest row instead of the handle leaves this test GREEN, because the route's two
+   * hops are SEQUENTIAL — during hop 1 the newest row IS hop 1's. The mutant is killed
+   * by three tests in `adapters/llm/__tests__` ("attaches by handle, and a second
+   * in-flight call is left untouched", "an out-of-range handle is ignored", "duration
+   * attaches to the handle given, not the newest row"), which construct the concurrent
+   * case this route cannot produce.
+   *
+   * What this test DOES prove is that the wiring reaches the ledger at all and that
+   * each hop's own numbers arrive — which is what was missing, since
+   * `recordProviderUsage` had zero callers before this change.
+   */
+  it('RED: each conversation call carries its OWN usage, including the prefix cache hit', async () => {
+    call = 0;
+    internalTriesAnthropic = false;
+    usagePerCall = [
+      { input_tokens: 2000, output_tokens: 40, input_tokens_details: { cached_tokens: 1800 } },
+      { input_tokens: 2100, output_tokens: 90, input_tokens_details: { cached_tokens: 1900 } },
+    ];
+    try {
+      const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis.' } });
+      const calls = r.json()._provider_calls as { usage?: { input_tokens?: number; cached_input_tokens?: number } }[];
+      expect(calls.length).toBe(2);
+      expect(calls[0]?.usage?.input_tokens).toBe(2000);
+      expect(calls[0]?.usage?.cached_input_tokens, 'the first hop\u2019s own cache hit').toBe(1800);
+      expect(calls[1]?.usage?.input_tokens).toBe(2100);
+      expect(calls[1]?.usage?.cached_input_tokens, 'the second hop\u2019s own cache hit').toBe(1900);
+    } finally {
+      usagePerCall = [];
+    }
   });
 
   it('RED: an Anthropic attempt BENEATH internal dispatch is on the ledger as refused_before_network', async () => {

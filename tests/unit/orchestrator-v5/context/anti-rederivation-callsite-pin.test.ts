@@ -273,7 +273,20 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // No extra I/O: the same prior facts are re-projected against the committed
     // hash, and the healthy-empty/degraded distinction is preserved exactly as
     // the note above requires.
-    'src/orchestrator-v5/system-events/dispatch.ts': 7,
+    'src/orchestrator-v5/system-events/dispatch.ts': 8,
+    // 2026-09-24 MG&Q: +1 (one call) — `dispatchFactorValueEdit` now derives the
+    // wire freshness for a factor-value edit, exactly as the edge_strength_edit
+    // writer in this same file already does. Programme #63 item 15: the value
+    // writer — by far the commoner edit — returned `analysisReady` with NO
+    // freshness, so a surface that clears its "stale" mark only on that field
+    // looked clean immediately after an edit that had just invalidated the
+    // analysis. Same derivation, same honesty rule as its sibling: a healthy read
+    // yields a real verdict, a degraded read yields `unknown` / `derivation_failed`
+    // rather than fabricating `none`. ⚠ This required switching that function off
+    // `loadPriorFactsQuietly`, which DISCARDS the read state — with it, a failed
+    // read would have reported `none` ("no run has happened") from a read that
+    // merely failed. No extra I/O: the facts read already happened on this path.
+    // Deliberate, and the bump is the point of this pin.
     // 2026-07-22 Lane C3: +2 (import + one call) — the typed add-option
     // transaction pre-route derives the PRE-edit frame freshness for its
     // referee gate against `computeAnalysisAffectingGraphHash(persistedGraph)`

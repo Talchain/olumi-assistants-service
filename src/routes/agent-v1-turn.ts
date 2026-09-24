@@ -27,7 +27,7 @@ import { withRunStateFreshness } from '../orchestrator-v5/agent-lane/analysis-re
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
-import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
+import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
@@ -50,8 +50,9 @@ import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
-import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { narrateWriteOutcome, notAdoptedLine, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
+import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
 import { proposalPendingAction, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
@@ -323,6 +324,27 @@ const AGENT_INSTRUCTIONS = [
    */
   'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one; say which option leads in this model and how firmly. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding.',
   'When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each — then authorise_change once they confirm. It adds the option and its links ONLY: say plainly that it cannot be compared until it states what it does to each factor, and offer propose_option_interventions for that. Never invent the direction; if you are not sure which way it pushes a factor, ask.',
+  /*
+   * \u26d4 NO AUTOMATIC RUN AFTER A REVISION (Codex 5810763729, 24 Sep). This
+   * instruction used to end "after it applies, run_analysis in the same turn and
+   * say what moved", which spends a compute run the user never asked for. A
+   * revision and a Run are two decisions; the user makes both.
+   */
+  'When the user asks to change an assumption after an analysis \u2014 which is the whole point of naming the ones the ordering turns on \u2014 call propose_assumptions with `revise: true` on that factor and the number THEY gave, then authorise_change once they confirm. Show them the current value and the new one. Never set `revise` to push a figure of your own over theirs. After it applies, confirm what was saved and say that the earlier analysis now describes the previous model \u2014 then STOP: do NOT call run_analysis in the same turn. Offer to re-run it and wait for them to ask.',
+  /*
+   * \u26d4 NEVER ASSERT AN ARTEFACT THAT NO TOOL RETURNED (RC 5811851733; measured on
+   * served b53f098). On the suggest-starting-point chip the model answered "The model
+   * still needs starting values for three factors. THE PENDING PROPOSAL COVERS THEM",
+   * and on a second scenario "Here is the complete pending...", while `suggested_actions`
+   * was EMPTY and the only tool call in the turn was `get_canonical_state`. 5 of 6 turns.
+   * The user is told to approve something that was never created and has no control to do
+   * it with \u2014 a remedy in copy that is not a reachable control.
+   *
+   * \u26a0 This is NOT claimed as the sentence that caused the missing call, and a 5/6
+   * repeat is an observed failure rather than proof of determinism. It bounds the DAMAGE:
+   * when the model does not call the tool, it must say so instead of inventing the result.
+   */
+  'NEVER say a proposal, a saved change or a pending action exists unless a tool call in THIS turn returned it. If you did not call a proposing tool, do not describe a proposal, do not say one is pending or ready, and do not ask the user to approve or confirm anything \u2014 say what the model still needs and offer to propose it. If a tool refused, say what it refused and what you will do next. Your own intention is not a result: only a tool result is.',
   'History entries that begin \u201c(Board edit\u201d are changes the user made directly on the canvas. When the user asks about \u201cmy change\u201d, start from the most recent board edit, and read the current state before explaining what it did.',
   'British English. Concise but substantive.',
 ].join(' ');
@@ -696,7 +718,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
   const callModel: CallModel = async (req) => onceMoreOnTransportFailure('conversation', async () => {
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
-    assertProviderAllowed('openai', 'agent-v1-turn.callModel', { model: budget.model, purpose: 'conversation' });
+    /**
+     * ⭐ THE HANDLE IS KEPT SO CACHING CAN BE MEASURED AT ALL.
+     *
+     * This return value was discarded, and with it the only way to answer "is the
+     * instruction prefix being cached, and by how much" on a real turn. The prefix is
+     * structurally cacheable — `AGENT_INSTRUCTIONS` is a pure constant with zero
+     * interpolations and `AGENT_TOOLS` is a module-level readonly array — but
+     * "structurally cacheable" is a claim about the SOURCE, not a measurement of the
+     * PROVIDER. `normaliseProviderUsage` reads `input_tokens_details.cached_tokens`,
+     * the Responses API's own cache field, so this turns an assumption into a number
+     * on every turn.
+     *
+     * ⚠ Bound BY HANDLE, never to "the last call": this route makes 4-6
+     * conversation calls per turn, and attributing a cache hit to the wrong one is the
+     * quietest possible way to make the measurement wrong.
+     */
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', { model: budget.model, purpose: 'conversation' });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
@@ -717,7 +755,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const text = await r.text();
       throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
     }
-    return (await r.json()) as { output: Record<string, unknown>[] };
+    const j = (await r.json()) as { output: Record<string, unknown>[]; usage?: unknown };
+    // Never throws, and records nothing for a malformed payload, so a successful call
+    // cannot be turned into a failed one by the measurement of it.
+    recordProviderUsage(usageHandle, j.usage);
+    // The usage sidecar is read above and is not part of the transport contract.
+    return { output: j.output };
   });
 
   /**
@@ -726,7 +769,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
    * (see BANKED_BUDGETS role 'whole'), not the conversation budget.
    */
   const callStructured: CallStructuredModel = async (reqBody) => onceMoreOnTransportFailure('construction', async () => {
-    assertProviderAllowed('openai', 'agent-v1-turn.callStructured', { model: reqBody.model, purpose: 'construction' });
+    /**
+     * ⭐ THE MOST EXPENSIVE CALL IN THE PRODUCT, AND IT WAS THE ONE NOT MEASURED.
+     *
+     * #1825 wired `callModel` and left this handle discarded, so the caching witness on
+     * served `c2ef0b8` read: 4 conversation calls with usage (9,441 of 14,638 input
+     * tokens cached, 64.5%) and `call 3 construction: (no usage)`. Construction is
+     * banked at ~54s with in 838 / out 3404 incl. 2070 reasoning — by far the largest
+     * single call — so leaving it dark meant the aggregate cache figure could never be
+     * trusted and the obvious optimisation target could not be ranked.
+     *
+     * ⚠ `j.usage` was ALREADY parsed and returned by this function; only the ledger
+     * write was missing. Nothing new is fetched or computed here.
+     */
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', { model: reqBody.model, purpose: 'construction' });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
@@ -764,6 +820,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (item.type !== 'message') continue;
       for (const c of item.content ?? []) if (c.type === 'output_text') text += c.text ?? '';
     }
+    // Same contract as the conversation path: never throws, and records nothing for a
+    // malformed payload, so measuring a call cannot turn a successful one into a failure.
+    recordProviderUsage(usageHandle, j.usage);
     return { text, usage: j.usage };
   }, (call, err) => log.warn({ err, call }, 'agent-lane transport failure, retrying once'));
 
@@ -1317,7 +1376,43 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ OLUMI OWES THE DISCLOSURE, NOT THE AGENT. When a write had to carry a
     // placeholder strength the user never gave, the user is told — whether or
     // not the model chose to mention it.
-    const owed = disclosuresFor(result.tool_results);
+    /**
+     * ⭐ THE SERVER STATES WHAT IT CHANGED, rather than asking the model to.
+     *
+     * A value the person APPROVED can be stored differently, and a factor's
+     * range can be chosen BY THE PRODUCT so the analysis can run at all. Both
+     * were told only to the model, carried on `must_disclose_rescaling` — a
+     * field that occurs at exactly ONE site in the tree, the one that sets it.
+     * Nothing read it and nothing verified it, so whether the person was told
+     * depended on the model electing to say so.
+     *
+     * This does not replace that obligation; the model should still say it in
+     * its own words. It removes the DEPENDENCE on it.
+     */
+    const stateFacts = collectTurnStateFacts(result.tool_results);
+    /**
+     * ⛔⛔ `current_state_unknown` MUST WIN OVER EVERY PRESENT-STATE CLAIM, AND
+     * THE ORDER HERE IS WHAT DECIDES THAT — not the early return inside
+     * `valueChangeDisclosures`.
+     *
+     * ⚠ CHANGES_REQUIRED on 044fe50c, accepted, and it RECURRED one level up:
+     * that early return governs only the disclosures the module composes. This
+     * route concatenated `disclosuresFor(...)` FIRST, so a single turn could say
+     * "the model … is holding a placeholder … Tell me how strong … and I will
+     * replace it" and then "What the model now holds … is NOT KNOWN … do not
+     * treat any figure as current". The second sentence is the true one; the
+     * first is authority a failed readback cannot support.
+     *
+     * So when the readback failed, the unknown disclosure is the ONLY one owed.
+     * `PLACEHOLDER_STRENGTH_DISCLOSURE` describes what the model NOW HOLDS, which
+     * is precisely the thing we could not observe.
+     */
+    const owed = stateFacts.current_state_unknown === true
+      ? [...valueChangeDisclosures(stateFacts)]
+      : [
+        ...disclosuresFor(result.tool_results),
+        ...valueChangeDisclosures(stateFacts),
+      ];
     /**
      * ⛔ WHAT WAS SAVED IS STATED BY OLUMI, FROM THE TOOL RESULTS (RC #63
      * 5788648244). A model-authored "Saved…" survived here on a turn that wrote
@@ -1518,6 +1613,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * empty list is reported honestly rather than filled in.
          */
         receipts: collectTurnReceipts(result.tool_results),
+        /**
+         * The structured twin of the prose disclosure above. Prose is readable;
+         * structure is reliable. Omitted entirely when nothing changed, so its
+         * presence is itself the signal.
+         */
+        // ⛔ THE GATE OMITTED THE TWO FACTS THAT MATTER MOST. On the turn a
+        // reconciling surface most needs to read — a frame write refused and the
+        // readback failed, nothing rescaled, nothing added — `_agent` carried NO
+        // `state_facts` at all, so the channel this module calls "reliable" was
+        // silent exactly when the prose was saying the state is unknown. A
+        // consumer would read that as "nothing happened".
+        ...(stateFacts.rescaled.length > 0
+          || stateFacts.ranges_added.length > 0
+          || (stateFacts.ranges_not_attached ?? []).length > 0
+          || stateFacts.current_state_unknown === true
+          ? { state_facts: stateFacts }
+          : {}),
       },
       /**
        * ⭐ EVERY GENERATIVE ATTEMPT THIS TURN MADE, off the provider policy's ledger
