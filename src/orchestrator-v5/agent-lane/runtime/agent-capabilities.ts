@@ -93,7 +93,8 @@ import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { structuralFacts } from '../structural-facts.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
-import { buildModelFromBrief, findConstructionVersion, type CallStructuredModel } from './build-model.js';
+import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel } from './build-model.js';
+import { describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
@@ -230,12 +231,23 @@ export function createAgentCapabilities(
    * summary does not already say.
    */
   onAnalysis?: (payload: { analysis_ready?: unknown; blocks?: unknown[] }) => void,
+  /**
+   * ⭐ THE AUTOMATIC FIRST ANALYSIS (Paul, 5812069638), injected by the route so the run, its turn
+   * deadline and its write accounting stay the route's. Absent → no automatic run (a unit test, or a
+   * caller that does not want one). See `../first-analysis.ts` for the rules it enforces.
+   */
+  opts: { readonly firstAnalysis?: (input: FirstAnalysisInput) => Promise<FirstAnalysisOutcome> } = {},
 ): AgentCapabilities {
   const readOnly = mode === 'preview';
   const refuseReadOnly = (): ToolResult => ({
     ok: false, mutated: false, refusal: 'read_only_preview',
     detail: 'This preview cannot change the model. Nothing has been altered.',
   });
+  /**
+   * The first analysis THIS request ran, and the revision it ran on. Capabilities are created per
+   * request, so this never outlives the build turn: a later explicit Run never sees it.
+   */
+  let firstAnalysisThisRequest: { readonly revisionHash: string; readonly result: ToolResult } | undefined;
   /**
    * Normalise the read route's `graph_identity_hash` to the 64-hex value the
    * register route compares. `''` means "no identity to anchor to" — the route
@@ -2333,6 +2345,44 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'model_not_readable_after_write' };
       }
       /**
+       * ⭐ THE FIRST ANALYSIS, RUN BY OLUMI, ONCE (Paul, 5812069638) — ONLY when this request is the one
+       * whose construction COMMITTED. Every retry shape fails this gate: a new turn id recovers the
+       * version (`mutated: false, replayed: true`), a concurrent twin gets OPERATION_ID_REUSED (the
+       * same), and the registration replay arm answers `mutated: true, replayed: true` — which is why
+       * `replayed !== true` is required and `mutated` alone is not. The runner then checks admission,
+       * the turn deadline and the (K, H) prior fact before the one dispatch.
+       */
+      let firstAnalysis: Record<string, unknown> | undefined;
+      if (built.mutated === true && built.replayed !== true && opts.firstAnalysis !== undefined) {
+        const outcome = await opts.firstAnalysis({
+          scenarioId: ctx.scenario_id,
+          constructionTurnId: registrationTurnId(ctx.scenario_id, constructionOperationId(ctx.scenario_id, brief)),
+          revisionGraph: after.raw,
+          revisionHash: after.graph_hash,
+          requestId: ctx.request_id,
+        });
+        // What the Agent narrates from: the READBACK after the run — its confined summary and the
+        // typed leader permission — never the run's own receipt. A failed read describes nothing.
+        const postRun = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph`, {}).catch(() => null);
+        const read = postRun !== null && postRun.status === 200 ? postRun.json : {};
+        firstAnalysis = describeFirstAnalysisForAgent(outcome, {
+          analysisState: read.analysis_state,
+          analysisResult: read.analysis_result,
+          analysisAdmission: read.analysis_admission,
+        });
+        if (outcome.ran) {
+          firstAnalysisThisRequest = {
+            revisionHash: after.graph_hash,
+            result: {
+              ok: true, mutated: false, ran: true, already_run_this_turn: true,
+              ...(firstAnalysis.summary !== undefined ? { summary: firstAnalysis.summary } : {}),
+              claim_permissions: firstAnalysis.claim_permissions,
+              note: 'Olumi already ran the first analysis of this model on this turn, so it was not run again.',
+            },
+          };
+        }
+      }
+      /**
        * ⭐ RETURN THE POST-BUILD STATE, so the Agent does not have to go and
        * fetch it. Measured on the preview path: the first turn called
        * `get_canonical_state`, then `build_model_from_brief`, then
@@ -2348,6 +2398,7 @@ export function createAgentCapabilities(
         // The SAME projection get_canonical_state uses — see projectEntity.
         entities: after.nodes.map(projectEntity),
         structure: structuralFacts(after.nodes, after.edges),
+        ...(firstAnalysis !== undefined ? { first_analysis: firstAnalysis } : {}),
       };
     },
 
@@ -2408,6 +2459,17 @@ export function createAgentCapabilities(
     },
 
     async runAnalysis(ctx, args): Promise<ToolResult> {
+      /**
+       * The model asked again on the build turn itself: the first analysis of THIS revision already ran in
+       * this request, so it is returned rather than run twice. Verified against a fresh read — if the
+       * model moved since, this is a new analysis and it runs.
+       */
+      if (firstAnalysisThisRequest !== undefined) {
+        const now = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph`, {}).catch(() => null);
+        if (now !== null && now.status === 200 && now.json.graph_hash === firstAnalysisThisRequest.revisionHash) {
+          return firstAnalysisThisRequest.result;
+        }
+      }
       const r = await dispatch('/orchestrate/v2/turn', {
         kind: 'message',
         // Deliberately NOT derived, unlike the authorised write above: asking

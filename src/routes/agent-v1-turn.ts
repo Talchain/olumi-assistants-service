@@ -61,6 +61,12 @@ import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compo
 import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
 import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
+import {
+  firstAnalysisDeadline,
+  firstAnalysisSentence,
+  runFirstAnalysisAfterConstruction,
+  type FirstAnalysisOutcome,
+} from '../orchestrator-v5/agent-lane/first-analysis.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
@@ -242,14 +248,14 @@ const AGENT_INSTRUCTIONS = [
   'If get_canonical_state reports the model is empty, call build_model_from_brief with the user\u2019s own words before answering about the model.',
   'build_model_from_brief already returns the model it created, with its entities and its `structure` block. Do NOT call get_canonical_state again afterwards \u2014 answer from what it returned.',
   /*
-   * ⛔ DO NOT RUN THE ANALYSIS ON THE TURN THAT BUILDS THE MODEL. Measured on
-   * a real session: 99.9 s for a first turn that built AND analysed, against a
-   * construction cost of 38-110 s on its own. The analysis on a just-built
-   * model is ALWAYS blocked — nothing has values yet — so the user waits
-   * ~20 extra seconds to be told what the build already knows. Report the gaps
-   * from the build's own `structure` block and let them ask.
+   * ⭐ OLUMI RUNS THE FIRST ANALYSIS ITSELF, ONCE (Paul, 5812069638). This replaced "After
+   * build_model_from_brief, do NOT call run_analysis on the same turn", measured at 99.9 s for a
+   * first turn that built AND analysed through a second tool hop. The run now happens inside the
+   * build call, in-process, only when the admission would run the new model, and only if the turn
+   * still has time for it — so the Agent narrates it on the SAME hop, with no extra model call. The
+   * Agent never runs it itself: the build result's `first_analysis` says what happened.
    */
-  'After build_model_from_brief, do NOT call run_analysis on the same turn. A newly built model has no values yet, so the analysis can only report what the build already told you \u2014 and it costs the user another twenty seconds. Describe the model and what it still needs, then stop.',
+  'After build_model_from_brief, never call run_analysis on the same turn: Olumi runs the first analysis itself when the new model can be analysed, and the build result\u2019s `first_analysis` says what happened. Follow its `note`: when it ran, or already exists, describe it as a provisional first pass on a model nobody has confirmed yet \u2014 something to argue with, not an answer. When it did not run, describe no result: Olumi tells the user why beneath your reply, so describe the model and what it still needs.',
   /*
    * ⭐ ONE APPROVAL TO A FIRST COMPARISON. Measured on Paul's 22 Sep journey
    * and its replay: the model was built, then took five further turns of
@@ -268,10 +274,12 @@ const AGENT_INSTRUCTIONS = [
    */
   'When the user asks for ideas or other options, offer three to five the model does not already hold, preferring non-obvious ones, and give each one line on what it would change or which assumption it would test. Say plainly that none has been added to the model, and offer to add any the user picks.',
   /*
-   * ⛔ MEASURED on Paul's 22 Sep session: fourteen values were applied and the
-   * analysis was never run again, so nothing the user could see had moved.
+   * ⛔ APPROVALS NEVER AUTO-RUN (Paul, 5812069638). This used to read "After authorise_change
+   * applies values or option levels, call run_analysis in the SAME turn", which spent a compute
+   * run the user never asked for and contradicted the revision rule below. A change and a Run are
+   * two decisions, and the user makes both; the typed approval (fast path 2) already runs nothing.
    */
-  'After authorise_change applies values or option levels, call run_analysis in the SAME turn and report what it now says \u2014 or, if it still refuses, exactly what is left and the fastest way to supply it. The user asked for a model they can compare, not for a write.',
+  'After authorise_change applies a change, confirm what was saved and what the model still needs, then stop: do NOT call run_analysis in the same turn. Run the analysis only when the user asks for it.',
   'get_canonical_state returns a `structure` block computed from the persisted model: which options reach the goal, which cannot, what is unconnected, and how many FACTORS have no value (only factors can hold one). These are facts, not estimates \u2014 use them, and say them plainly when they explain why an analysis cannot run.',
   'When a tool tells you something was not represented, say so.',
   /*
@@ -1174,7 +1182,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (path.endsWith('/graph/register') || path === '/orchestrate/v2/turn') writesDispatched += 1;
       return dispatch(path, body);
     };
-    const capabilities = createAgentCapabilities(countingDispatch, proposals, callStructured, mode);
+    /**
+     * ⭐ THE AUTOMATIC FIRST ANALYSIS (Paul, 5812069638), handed to the build capability. The route
+     * owns three things about it: the DEADLINE (the build and the run share one browser-proxy
+     * budget, measured from this request's start), the WRITE accounting (a run commits a turn, so a
+     * failed turn must never release its claim after one), and the witness record below.
+     */
+    const firstAnalysisDeadlineAt = firstAnalysisDeadline(startedAt);
+    let firstAnalysis: { outcome: FirstAnalysisOutcome; ms: number; constructionTurnId: string; revision: string } | undefined;
+    const runFirstAnalysis = async (input: Parameters<typeof runFirstAnalysisAfterConstruction>[0]): Promise<FirstAnalysisOutcome> => {
+      const t0 = Date.now();
+      const outcome = await runFirstAnalysisAfterConstruction({ ...input, onDispatch: () => { writesDispatched += 1; } });
+      firstAnalysis = { outcome, ms: Date.now() - t0, constructionTurnId: input.constructionTurnId, revision: input.revisionHash };
+      return outcome;
+    };
+    const capabilities = createAgentCapabilities(
+      countingDispatch, proposals, callStructured, mode, undefined,
+      { firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }) },
+    );
     // A session whose in-process history holds no user message (a restart, a
     // deploy, an eviction — or only a board-edit note appended since) is seeded
     // from the durable conversation, ahead of whatever is already held — see
@@ -1407,11 +1432,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * `PLACEHOLDER_STRENGTH_DISCLOSURE` describes what the model NOW HOLDS, which
      * is precisely the thing we could not observe.
      */
+    /**
+     * ⭐ A FIRST ANALYSIS THAT DID NOT RUN IS SAID BY OLUMI, NEVER LEFT TO THE MODEL (Paul: "never a
+     * silent skip"). One deterministic sentence naming what is missing, or that the turn ran out of
+     * time; the control beside it (next step, or Run) is added to the chips below.
+     */
+    const firstAnalysisSaid = firstAnalysis !== undefined ? firstAnalysisSentence(firstAnalysis.outcome) : null;
     const owed = stateFacts.current_state_unknown === true
       ? [...valueChangeDisclosures(stateFacts)]
       : [
         ...disclosuresFor(result.tool_results),
         ...valueChangeDisclosures(stateFacts),
+        ...(firstAnalysisSaid !== null ? [firstAnalysisSaid] : []),
       ];
     /**
      * ⛔ WHAT WAS SAVED IS STATED BY OLUMI, FROM THE TOOL RESULTS (RC #63
@@ -1436,10 +1468,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * readiness this same response carries.
      */
     const { graphHash, analysisReady, draftGraph, analysisState, analysisResult } = await readBackState(dispatch, scenarioId);
-    // Offered only after a change, only when that change was not already analysed this turn,
-    // and only when the canonical readiness in THIS response admits a run.
+    const fa = firstAnalysis?.outcome;
+    // An analysis of THIS revision exists because this turn's construction ran it (or already had).
+    const firstAnalysisExists = fa !== undefined && (fa.ran || fa.reason === 'already_ran_for_construction');
+    // Offered only after a change, only when that change was not already analysed this turn
+    // (by the Agent's run, or by the first analysis), and only when the canonical readiness in
+    // THIS response admits a run. A first analysis stopped only by the turn's time was admitted on
+    // this same revision, so the same readiness offers Run beside Olumi's sentence.
     const offerRun = result.mutated
       && !result.tool_calls.some((c) => c.name === 'run_analysis')
+      && !firstAnalysisExists
       && admitsRunOffer(analysisReady);
 
     // A typed Run that answered but did not complete (blocked) offers the next step instead.
@@ -1458,11 +1496,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const id = executableWaitingProposal(scenarioId, userId, graphHash);
       return chip !== undefined && id !== undefined && typedApprovalOf({ chip: { id: chip.id } }) === id ? [chip, AMEND_CHIP] : [];
     })();
+    const approvals = approvalChipsFor(result.tool_calls);
+    // A first analysis the model could not run offers its repair: the approve chip when the Agent
+    // proposed the missing values this turn, otherwise the next-step chip.
+    const firstAnalysisBlocked = fa !== undefined && !fa.ran && (fa.reason === 'not_admissible' || fa.reason === 'refused')
+      && approvals.length === 0;
     const offeredNow: OfferedAction[] = [
-      ...approvalChipsFor(result.tool_calls),
+      ...approvals,
       ...carriedApproval,
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
-      ...(runBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
+      ...(runBlocked || firstAnalysisBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
       ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
     ];
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
@@ -1594,6 +1637,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         stopped_reason: result.stopped_reason,
         tools_called: result.tool_calls.map((c) => c.name),
         write_claims_removed: narration.stripped.length,
+        /**
+         * ⭐ WHAT THE AUTOMATIC FIRST ANALYSIS DID, for witnesses: ran, or why not, how long it took,
+         * and the (construction, revision) identity it was bound to. Absent when no construction
+         * committed on this turn.
+         */
+        ...(firstAnalysis !== undefined
+          ? {
+            first_analysis: {
+              ran: firstAnalysis.outcome.ran,
+              ...(firstAnalysis.outcome.ran ? { run_turn_id: firstAnalysis.outcome.runTurnId } : { reason: firstAnalysis.outcome.reason }),
+              ...(!firstAnalysis.outcome.ran && firstAnalysis.outcome.reason === 'failed' ? { dispatch_outcome: firstAnalysis.outcome.dispatchOutcome } : {}),
+              construction_turn_id: firstAnalysis.constructionTurnId,
+              revision: firstAnalysis.revision,
+              ms: firstAnalysis.ms,
+            },
+          }
+          : {}),
       },
       _agent: {
         session_id: sessionId,
