@@ -33,10 +33,60 @@ export const AMEND_CHIP: SuggestedAction = {
   message: 'Before you apply it, I want to change some of it.',
 };
 
+/**
+ * ⭐ WHAT TO OFFER ONCE A CHANGE HAS BEEN APPLIED.
+ *
+ * ⛔ THE DEAD END THIS CLOSES, read from served code at `bcb774e7`: the line below
+ * returns `[]` for ANY turn containing `authorise_change`. Fast path 2 applies the
+ * approval deterministically and composes its own response, so after an approval the
+ * OpenAI route emitted **zero** suggested actions — not a missing chip, none at all.
+ * The user approves, the write lands, and nothing carries the journey forward.
+ *
+ * That was tolerable when an approval implicitly ran the analysis. FP2 deliberately
+ * removed the implicit run — correctly, it was consent the user never gave — which
+ * makes the silence afterwards a dead end rather than a pause.
+ *
+ * ⚠ ONLY WHAT IS UNCONDITIONALLY TRUE IS OFFERED HERE. This function has the tool
+ * calls and nothing else — no graph, no readiness. So it offers the next step that
+ * follows from the WRITE ITSELF and never one that depends on model state:
+ *
+ *   · adding an option ALWAYS leaves it unable to be compared until it states what it
+ *     does (`get_canonical_state` reports it in `options_that_change_nothing`, and such
+ *     an option blocks the comparison for EVERY option, not only itself). So "say what
+ *     it does" is true the instant the write lands.
+ *
+ * ⛔ AND THE RUN IS DELIBERATELY NOT OFFERED HERE. Whether an analysis may run is a
+ * question about the graph, answered by `isRunAffordanceAdmitted` over the readback's
+ * readiness — which this function cannot see. Offering a Run that CEE would refuse is
+ * worse than offering none, so that chip belongs where the readiness is in hand.
+ */
+const AFTER_APPLY: Readonly<Record<string, SuggestedAction>> = {
+  propose_new_option: {
+    id: 'agent-set-option-levels',
+    label: 'Say what it changes',
+    message: 'Now say what that option changes, and by how much.',
+  },
+};
+
 export function approvalChipsFor(
   toolCalls: readonly { name: string; ok: boolean; proposal_id?: string }[],
 ): SuggestedAction[] {
-  if (toolCalls.some((c) => c.name === 'authorise_change')) return [];
+  if (toolCalls.some((c) => c.name === 'authorise_change')) {
+    /**
+     * ⚠ BOUND TO WHAT WAS ACTUALLY APPLIED, not to what was proposed earlier in the
+     * turn. A turn can propose one thing and authorise another; offering a follow-on
+     * for a write that did not happen would be the same class of error as consenting
+     * to A and authorising B.
+     */
+    const appliedOk = toolCalls.some((c) => c.name === 'authorise_change' && c.ok === true);
+    if (!appliedOk) return [];
+    const follow = toolCalls
+      .filter((c) => c.ok && AFTER_APPLY[c.name] !== undefined)
+      .map((c) => AFTER_APPLY[c.name]!);
+    // One clear next step or none. Two would make the user choose between Olumi's
+    // suggestions instead of thinking about their decision.
+    return follow.length === 1 ? [follow[0]!] : [];
+  }
   const offered = new Map<string, string>();
   for (const c of toolCalls) {
     if (c.ok && typeof c.proposal_id === 'string' && APPROVE[c.name] !== undefined) offered.set(c.proposal_id, c.name);

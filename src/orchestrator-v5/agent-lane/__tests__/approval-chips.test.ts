@@ -109,3 +109,53 @@ describe('the route offers one-click approval for the proposal it just made', ()
     expect(body.assistant_text).toContain('**This proposal** would connect Team size to Velocity.');
   });
 });
+
+/**
+ * ⛔ THE DEAD END AFTER AN APPROVAL.
+ *
+ * Read from served code at `bcb774e7`: `approvalChipsFor` returned `[]` for any turn
+ * containing `authorise_change`. Fast path 2 applies the approval deterministically
+ * and composes its own response, so after an approval the OpenAI route emitted ZERO
+ * suggested actions — not a missing chip, none at all.
+ *
+ * That was tolerable while an approval implicitly ran the analysis. FP2 removed that
+ * implicit run, correctly — it was consent the user never gave — which turns the
+ * silence afterwards from a pause into a dead end.
+ */
+describe('after a change is applied, the journey continues', () => {
+  it('⭐ adding an option offers the step that is ALWAYS true next: say what it changes', () => {
+    const chips = approvalChipsFor([
+      { name: 'propose_new_option', ok: true, proposal_id: 'prop_abc123' },
+      { name: 'authorise_change', ok: true },
+    ]);
+    expect(chips.map((c) => c.id)).toEqual(['agent-set-option-levels']);
+    // An option that states nothing blocks the comparison for EVERY option, so this
+    // is true the instant the write lands — no graph read needed to know it.
+    expect(chips[0]!.message).toMatch(/what that option changes/i);
+  });
+
+  it('⛔ a FAILED authorisation offers nothing — never a next step for a write that did not happen', () => {
+    const chips = approvalChipsFor([
+      { name: 'propose_new_option', ok: true, proposal_id: 'prop_abc123' },
+      { name: 'authorise_change', ok: false },
+    ]);
+    expect(chips).toEqual([]);
+  });
+
+  it('⛔ CONTROL: an applied change with no defined follow-on still offers nothing', () => {
+    const chips = approvalChipsFor([
+      { name: 'propose_assumptions', ok: true, proposal_id: 'prop_abc123' },
+      { name: 'authorise_change', ok: true },
+    ]);
+    // Whether an analysis may RUN is a question about the graph, which this function
+    // cannot see. Offering a Run CEE would refuse is worse than offering none.
+    expect(chips).toEqual([]);
+  });
+
+  it('⛔ CONTROL: the pre-approval behaviour is untouched', () => {
+    const chips = approvalChipsFor([
+      { name: 'propose_new_option', ok: true, proposal_id: 'prop_abc123' },
+    ]);
+    expect(chips.map((c) => c.label)).toEqual(['Add this option', 'Change something first']);
+  });
+});
