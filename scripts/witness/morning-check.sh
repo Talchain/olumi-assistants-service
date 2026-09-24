@@ -105,15 +105,46 @@ if [ -n "$APPROVE" ] && [ "$APPROVE" != "null" ]; then
   gate "replay: 0 model calls" "$([ "$(jqv "$RR" '[._provider_calls[]?]|length')" = "0" ] && echo 1 || echo 0)" "calls=$(jqv "$RR" '[._provider_calls[]?]|length')"
 fi
 
+# ⭐ THE JOURNEY DOES NOT END AT `may_run`. Measured on served c6393cf: five approved
+# scenarios were all `may_run: true` with `mode: comparative_leader`, yet ONE had the
+# engine decline the run ("List-price change would be silently rescaled"). Readiness can
+# promise a run the engine then refuses, so the only honest gate is to RUN it and read
+# what came back. This uses the ordinary Agent path, which works on every build — FP3
+# only changes how the Run is routed, not whether it can run.
+#
+# ⚠ Do NOT probe top-level `analysis_result` for "did it run": measured absent on 4 of 4
+# turns whose prose carried real figures ("leads in 77% of simulated runs"). The
+# interpretation is the evidence.
+say "6) explicit Run through the Agent (works on every build)"
+T0=$(date +%s)
+RUN1=$(post /agent/v1/turn "$(jq -nc --arg s "$SCEN" '{scenario_id:$s,message:"Run the analysis and tell me what it shows."}')")
+EL=$(( $(date +%s) - T0 ))
+RTXT=$(jqv "$RUN1" '.assistant_text // ""')
+RTOOLS=$(jqv "$RUN1" '[._agent.tool_calls[]?|.name]|join(",")')
+say "   ${EL}s · tools=${RTOOLS:-none} · $(printf '%s' "$RTXT" | wc -c | tr -d ' ') chars"
+gate "Run: run_analysis was called" "$(printf '%s' "$RTOOLS" | grep -q run_analysis && echo 1 || echo 0)" "tools=${RTOOLS:-none}"
+gate "Run: a substantive interpretation came back" "$([ "$(printf '%s' "$RTXT" | wc -c | tr -d ' ')" -gt 200 ] && echo 1 || echo 0)" "$(printf '%s' "$RTXT" | wc -c | tr -d ' ') chars"
+# A declined run is a legitimate outcome, but the user must be TOLD, not left guessing.
+if printf '%s' "$RTXT" | grep -qiE "declin|could not run|cannot run|unable to run"; then
+  say "   NOTE: the engine DECLINED this run and said so. That is honest, not a failure —"
+  say "         but it means `may_run: true` promised a run the engine then refused."
+  say "         first two lines of what the user is told:"
+  printf '%s' "$RTXT" | head -2 | sed 's/^/           /'
+else
+  say "   the run produced an interpretation; first two lines:"
+  printf '%s' "$RTXT" | head -2 | sed 's/^/           /'
+fi
+say ""
+
 if [ "$FP3" = "yes" ]; then
-  say "6) explicit Run (FP3 is on the served build)"
+  say "7) the same Run through FP3's typed chip (FP3 is on the served build)"
   T0=$(date +%s); RUN=$(post /agent/v1/turn "$(jq -nc --arg s "$SCEN" '{scenario_id:$s,message:"Run the analysis.",chip:{id:"agent-run-analysis",action_type:"run_analysis"}}')"); EL=$(( $(date +%s) - T0 ))
   RCALLS=$(jqv "$RUN" '[._provider_calls[]?]|length')
   say "   ${EL}s · provider calls=${RCALLS:-?}"
   gate "Run: exactly ONE interpreting call" "$([ "${RCALLS:-0}" = "1" ] && echo 1 || echo 0)" "calls=${RCALLS:-?}"
   gate "Run: produces an interpretation" "$([ "$(jqv "$RUN" '.assistant_text|length')" -gt 0 ] && echo 1 || echo 0)" "$(jqv "$RUN" '.assistant_text|length') chars"
 else
-  say "6) explicit Run — SKIPPED, FP3 is not on the served build (typedRunOf absent)"
+  say "7) FP3's typed Run chip — SKIPPED, FP3 is not on the served build (typedRunOf absent)"
 fi
 
 say ""
