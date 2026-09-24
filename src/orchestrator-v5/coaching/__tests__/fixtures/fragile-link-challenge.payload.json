@@ -41,8 +41,8 @@
         "freshness": "fresh",
         "type": "coaching",
         "coaching_kind": "assumption_check",
-        "title": "Pressure-test a fragile link",
-        "body": "The robustness check flagged the link from Pro subscriber base to MRR as fragile — a modest change in how strongly Pro subscriber base drives MRR could change how the options compare.",
+        "title": "Pressure-test a sensitive link",
+        "body": "The robustness check found the result sensitive to the link from Pro subscriber base to MRR — worth checking what the estimate of how strongly Pro subscriber base drives MRR rests on.",
         "source": "deterministic_signal",
         "target_refs": [
           {
@@ -77,8 +77,8 @@
         "freshness": "fresh",
         "type": "coaching",
         "coaching_kind": "assumption_check",
-        "title": "Pressure-test a fragile link",
-        "body": "Before relying on this first pass on Olumi's estimates, note that the robustness check flagged the link from Pro subscriber base to MRR as fragile — a modest change in how strongly Pro subscriber base drives MRR could change how the options compare.",
+        "title": "Pressure-test a sensitive link",
+        "body": "Before relying on this first pass on Olumi's estimates, note that the robustness check found the result sensitive to the link from Pro subscriber base to MRR — worth checking what the estimate of how strongly Pro subscriber base drives MRR rests on.",
         "source": "deterministic_signal",
         "target_refs": [
           {
@@ -113,8 +113,8 @@
         "freshness": "fresh",
         "type": "coaching",
         "coaching_kind": "assumption_check",
-        "title": "Pressure-test a fragile link",
-        "body": "The robustness check flagged the link from Developer capacity to Velocity as fragile — a modest change in how strongly Developer capacity drives Velocity could change how the options compare.",
+        "title": "Pressure-test a sensitive link",
+        "body": "The robustness check found the result sensitive to the link from Developer capacity to Velocity — worth checking what the estimate of how strongly Developer capacity drives Velocity rests on.",
         "source": "deterministic_signal",
         "target_refs": [
           {

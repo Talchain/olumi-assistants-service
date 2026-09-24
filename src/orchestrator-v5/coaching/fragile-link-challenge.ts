@@ -123,12 +123,20 @@ export interface FragileLinkChallengeCopy {
  * form fits every label pair `selectGroundedCounterCase` admits (its own
  * 400-char sentence bound caps the two labels at 87 characters together), so
  * a length refusal can only come from a bound this module does not own.
+ *
+ * ⛔ WHAT THE WORDS MAY CLAIM. A `fragile_edges` row means the OUTCOME is
+ * sensitive to the link (ISL: elasticity above `FRAGILE_THRESHOLD = 0.1`).
+ * Whether the ranking flips is a separate measurement (`is_robust`,
+ * `switch_probability`) this card never reads, and ISL states "robust but
+ * sensitive to …" runs outright. So no wording says the options could swap,
+ * nor sizes the change that would do it: on a decisive run whose perturbations
+ * never switched the winner, that sentence would be false (#1855 review).
  */
 export function fragileLinkBodyForms(fromLabel: string, toLabel: string, firstPass: boolean): readonly string[] {
-  const flagged = `the robustness check flagged the link from ${fromLabel} to ${toLabel} as fragile — `;
+  const flagged = `the robustness check found the result sensitive to the link from ${fromLabel} to ${toLabel} — `;
   const findings = [
-    `${flagged}a modest change in how strongly ${fromLabel} drives ${toLabel} could change how the options compare.`,
-    `${flagged}a modest change in the strength of this link could change how the options compare.`,
+    `${flagged}worth checking what the estimate of how strongly ${fromLabel} drives ${toLabel} rests on.`,
+    `${flagged}worth checking what this link's estimated strength rests on.`,
   ];
   return findings.map((finding) => (firstPass ? `${FIRST_PASS_PREFIX}${finding}` : `T${finding.slice(1)}`));
 }
@@ -146,7 +154,7 @@ export function composeFragileLinkChallenge(
   const forms = fragileLinkBodyForms(fromLabel, toLabel, firstPass);
   const body = forms.find((form) => form.length <= RUN_TURN_COACHING_CONTRACT.limits.body_max) ?? forms[forms.length - 1]!;
   return {
-    title: 'Pressure-test a fragile link',
+    title: 'Pressure-test a sensitive link',
     body,
     action_label: 'Pressure-test this link',
     action_prompt:

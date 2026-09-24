@@ -114,7 +114,7 @@ describe('run-turn fragile-link challenge', () => {
       source: 'deterministic_signal',
       source_handler: 'run_analysis',
       freshness: 'fresh',
-      title: 'Pressure-test a fragile link',
+      title: 'Pressure-test a sensitive link',
       action_label: 'Pressure-test this link',
     });
     expect(card.coaching_kind).toBe('assumption_check');
@@ -138,7 +138,7 @@ describe('run-turn fragile-link challenge', () => {
     expect(CoachingBlockSchema.safeParse(card).success).toBe(true);
     expect(card.target_refs).toEqual([{ id: 'pro_subscriber_base→mrr', kind: 'edge', label: 'Pro subscriber base → MRR' }]);
     expect(card.body).toBe(
-      'The robustness check flagged the link from Pro subscriber base to MRR as fragile — a modest change in how strongly Pro subscriber base drives MRR could change how the options compare.',
+      'The robustness check found the result sensitive to the link from Pro subscriber base to MRR — worth checking what the estimate of how strongly Pro subscriber base drives MRR rests on.',
     );
     expect(card.body.startsWith(FIRST_PASS_PREFIX)).toBe(false);
 
@@ -165,7 +165,7 @@ describe('run-turn fragile-link challenge', () => {
     const card = fragileLinkCards(out.blocks)[0]!;
     expect(CoachingBlockSchema.safeParse(card).success).toBe(true);
     expect(card.body).toBe(
-      'Before relying on this first pass on Olumi\'s estimates, note that the robustness check flagged the link from Pro subscriber base to MRR as fragile — a modest change in how strongly Pro subscriber base drives MRR could change how the options compare.',
+      'Before relying on this first pass on Olumi\'s estimates, note that the robustness check found the result sensitive to the link from Pro subscriber base to MRR — worth checking what the estimate of how strongly Pro subscriber base drives MRR rests on.',
     );
     expect(card.body.length).toBeLessThanOrEqual(300);
 
@@ -197,7 +197,7 @@ describe('run-turn fragile-link challenge', () => {
     const card = fragileLinkCards(out.blocks)[0]!;
     expect(CoachingBlockSchema.safeParse(card).success).toBe(true);
     expect(card.body).toBe(
-      'Before relying on this first pass on Olumi\'s estimates, note that the robustness check flagged the link from Engineering delivery capacity to Delivery throughput as fragile — a modest change in the strength of this link could change how the options compare.',
+      'Before relying on this first pass on Olumi\'s estimates, note that the robustness check found the result sensitive to the link from Engineering delivery capacity to Delivery throughput — worth checking what this link\'s estimated strength rests on.',
     );
     expect(card.body).toBe(shortFirstPass);
     expect(card.body.length).toBeLessThanOrEqual(300);
@@ -208,7 +208,7 @@ describe('run-turn fragile-link challenge', () => {
     const explicitOut = runTurnCoaching(explicit.captured, explicit.final);
     expect(explicitOut.eligibility).toEqual({ eligible: true });
     expect(fragileLinkCards(explicitOut.blocks)[0]!.body).toBe(
-      'The robustness check flagged the link from Engineering delivery capacity to Delivery throughput as fragile — a modest change in how strongly Engineering delivery capacity drives Delivery throughput could change how the options compare.',
+      'The robustness check found the result sensitive to the link from Engineering delivery capacity to Delivery throughput — worth checking what the estimate of how strongly Engineering delivery capacity drives Delivery throughput rests on.',
     );
   });
 
@@ -251,6 +251,58 @@ describe('run-turn fragile-link challenge', () => {
         expect(runTurnCoaching(over.captured, over.final), `${name} / ${trigger} / +1`).toEqual({
           blocks: [], eligibility: { eligible: false, reason: 'copy_gate' },
         });
+      }
+    }
+  });
+
+  it('(iii-d) the copy claims only what a fragile_edges row establishes (the result is sensitive to the link) — never a ranking change or its size', () => {
+    // ISL lists an edge in `fragile_edges` when the outcome's elasticity to it
+    // exceeds 0.1 (robustness_analyzer_v2.py FRAGILE_THRESHOLD); whether the
+    // ranking flips is a SEPARATE measurement (`is_robust`, `switch_probability`)
+    // that this card never reads. So on a robust, decisive run the card still
+    // ships — the link is still worth checking — and no wording may say the
+    // options could swap or that a "modest" change would do it.
+    const RANKING_OR_MAGNITUDE = /options compare|could change|could shift|which option|modest|small change|slight|likely|overturn|flip|swap|switch|reverse|tip/i;
+    const robustDecisive = (r: Record<string, any>) => {
+      Object.assign(r.enrichment.robustness, {
+        level: 'high',
+        is_robust: true,
+        confidence: 0.97,
+        display_verdict: 'robust',
+        display_verdict_reason: 'the result held across the changes to your assumptions that were tested',
+        near_tie: { gap: 0.96, is_tie: false, threshold: 0.1 },
+      });
+      for (const e of r.enrichment.robustness.fragile_edges) {
+        Object.assign(e, { switch_probability: 0, marginal_switch_probability: 0, alternative_winner_id: null, alternative_winner_label: null });
+      }
+    };
+    const noMetric = (r: Record<string, any>) => {
+      for (const e of r.enrichment.robustness.fragile_edges) {
+        delete e.switch_probability;
+        delete e.marginal_switch_probability;
+        delete e.alternative_winner_id;
+        delete e.alternative_winner_label;
+      }
+    };
+    const briefs: [string, RunTurnCase][] = [
+      ['B robust and decisive, switch_probability 0', withResult(runTurnCase('B', 't2', 'explicit_run'), robustDecisive)],
+      ['A as served (low robustness)', runTurnCase('A', 't5', 'explicit_run')],
+      ['B robust and decisive, first pass', withResult(runTurnCase('B', 't2', 'auto_first_pass'), robustDecisive)],
+      ['B with no switch metric on any row', withResult(runTurnCase('B', 't2', 'explicit_run'), noMetric)],
+    ];
+    for (const [name, c] of briefs) {
+      const out = runTurnCoaching(c.captured, c.final);
+      expect(out.eligibility, name).toEqual({ eligible: true });
+      const card = fragileLinkCards(out.blocks)[0]!;
+      for (const field of USER_FACING) expect(String(card[field]), `${name} / ${field}`).not.toMatch(RANKING_OR_MAGNITUDE);
+      expect(card.body, name).toMatch(/sensitive to the link from /);
+    }
+    // Every wording the module can ship, on served labels and on the longest the selector admits.
+    for (const [from, to] of [['Pro subscriber base', 'MRR'], ['Engineering delivery capacity', 'Delivery throughput']] as const) {
+      for (const firstPass of [false, true]) {
+        for (const form of fragileLinkBodyForms(from, to, firstPass)) expect(form).not.toMatch(RANKING_OR_MAGNITUDE);
+        const copy = composeFragileLinkChallenge(from, to, firstPass);
+        for (const field of USER_FACING) expect(copy[field]).not.toMatch(RANKING_OR_MAGNITUDE);
       }
     }
   });
