@@ -1295,3 +1295,139 @@ describe("register — an optional caller expectation makes the write conditiona
     await app.close();
   });
 });
+
+/**
+ * ⛔ A FIRST CONSTRUCTION NEVER LANDS ON A MODEL SOMEONE ELSE SAVED (independent review
+ * of #1786, 5805279370). The constructor reads the model as empty, then spends ~20 s
+ * generating; the route's CAS base was its own read at write time, so a graph another
+ * author committed in that window became the base and was replaced. `expected_model_empty`
+ * carries the constructor's precondition into the write.
+ */
+describe("register — expected_model_empty makes a first construction conditional on an empty model", () => {
+  it("RED: a POPULATED base is refused 409 MODEL_NOT_EMPTY — no fence claim, and NOTHING reaches the atomic writer", async () => {
+    const claim = vi.fn(async (scenarioId: string, turnId: string) => ({ scenarioId, turnId, generation: 7 }));
+    (store as Record<string, unknown>).claimTurnFence = claim;
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_model_empty: true });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().details.code).toBe("MODEL_NOT_EMPTY");
+    expect(claim).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    delete (store as Record<string, unknown>).claimTurnFence;
+    await app.close();
+  });
+
+  it.each([["absent (null)", null], ["present but empty", { nodes: [], edges: [] }]])(
+    "an EMPTY base (%s) writes, carrying a KNOWN-absent base to the atomic RPC", async (_l, base) => {
+      loadGraph.mockResolvedValue(base);
+      const app = await buildApp();
+      const res = await post(app, SCENARIO, { graph: IMPORTED, expected_model_empty: true });
+      expect(res.statusCode).toBe(200);
+      expect(append).toHaveBeenCalledTimes(1);
+      // null (not undefined) is the fact the RPC enforces as `p_expected_base_known`.
+      expect(append.mock.calls[0][0].expectedGraphIdentityHash).toBeNull();
+      await app.close();
+    });
+
+  it("CONTRAST: with NO precondition a populated base is written exactly as before", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED });
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it.each([["false", false], ["a string", "yes"], ["a number", 1]])("a malformed precondition (%s) is refused before any database work", async (_l, v) => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_model_empty: v });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.code).toBe("EXPECTED_MODEL_EMPTY_INVALID");
+    expect(ensureScenarioExists).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("a base that cannot be read cannot adjudicate emptiness: 503, never an unconditional write", async () => {
+    loadGraph.mockRejectedValue(new Error("db blip"));
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_model_empty: true });
+    expect(res.statusCode).toBe(503);
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
+
+/**
+ * THE RACE ITSELF, through the REAL constructor and the REAL route: B reads empty and
+ * starts generating; A commits a graph; B resumes and registers. A's graph must survive,
+ * B must write nothing and say so. Contrasts: a model that stayed empty, and B's OWN
+ * construction already committed by a concurrent call of the same brief.
+ */
+describe("construction race — pause B after its empty read, commit A, resume B", async () => {
+  const { buildModelFromBrief, constructionOperationId } = await import("../../orchestrator-v5/agent-lane/runtime/build-model.js");
+  const BRIEF = "Should we hire a tech lead or two developers to increase delivery velocity this year?";
+  const A_GRAPH = SERVER_PRE_IMPORT;
+  const candidateText = JSON.stringify({
+    goal: { metric: "Velocity", operator: ">=", value: 20, unit: "points", horizon_months: 6, provenance: "explicit" },
+    constraints: [],
+    options: [
+      { label: "Hire a tech lead", provenance: "explicit", changes: ["Delivery capacity"], interventions: [] },
+      { label: "Hire two developers", provenance: "explicit", changes: ["Delivery capacity"], interventions: [] },
+    ],
+    factors: [{ label: "Delivery capacity", role: "observable", baseline_known: false, baseline_value: null, unit: null, provenance: "inferred", plausible_max: 100 }],
+    risks: [],
+    outcomes: [{ label: "Velocity", provenance: "inferred" }],
+    links: [{ from: "Delivery capacity", to: "Velocity", direction: "positive", provenance: "inferred" }],
+    unknowns: [],
+  });
+
+  function harness(app: FastifyInstance, versions: Array<Record<string, unknown>>) {
+    const registers: number[] = [];
+    const dispatch = async (path: string, body: Record<string, unknown>) => {
+      if (path.endsWith("/versions")) return { status: 200, json: { versions } };
+      const res = await app.inject({ method: "POST", url: path, payload: body });
+      if (path.endsWith("/graph/register")) registers.push(res.statusCode);
+      return { status: res.statusCode, json: res.json() as Record<string, unknown> };
+    };
+    return { dispatch, registers };
+  }
+  /** B's one structured call — during which A commits (or nothing happens). */
+  const generating = (duringGeneration: () => void) => (async () => {
+    duringGeneration();
+    return { text: candidateText };
+  }) as never;
+
+  it("RED: A commits while B generates → B writes NOTHING, A's graph stands, and B says so truthfully", async () => {
+    loadGraph.mockResolvedValue(null); // B's empty read
+    const app = await buildApp();
+    const h = harness(app, [{ version_id: "v-a", sequence: 1, creation: { kind: "committed_mutation", source_turn_id: "someone-elses-turn" } }]);
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, h.dispatch as never, generating(() => loadGraph.mockResolvedValue(A_GRAPH)));
+    expect(append, "B created no write and no version over A").not.toHaveBeenCalled();
+    expect(h.registers).toEqual([409]);
+    expect(out).toMatchObject({ ok: false, mutated: false, refusal: "model_changed_during_build" });
+    expect(await loadGraph(SCENARIO), "A's graph is still the model").toBe(A_GRAPH);
+    await app.close();
+  });
+
+  it("CONTRAST: the model stayed empty → B's construction is written once", async () => {
+    loadGraph.mockResolvedValue(null);
+    const app = await buildApp();
+    const h = harness(app, []);
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, h.dispatch as never, generating(() => undefined));
+    expect(h.registers).toEqual([200]);
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(out).toMatchObject({ ok: true, mutated: true });
+    await app.close();
+  });
+
+  it("CONTRAST: B's OWN construction was committed meanwhile (same brief) → its receipt is recovered, nothing written twice", async () => {
+    loadGraph.mockResolvedValue(null);
+    const app = await buildApp();
+    const ownTurn = registrationTurnId(SCENARIO, constructionOperationId(SCENARIO, BRIEF));
+    const h = harness(app, [{ version_id: "v-b1", sequence: 1, creation: { kind: "committed_mutation", mutation_id: "m-b1", source_turn_id: ownTurn } }]);
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, h.dispatch as never, generating(() => loadGraph.mockResolvedValue(A_GRAPH)));
+    expect(append).not.toHaveBeenCalled();
+    expect(out).toMatchObject({ ok: true, mutated: false, replayed: true, model_version: { version_id: "v-b1" } });
+    await app.close();
+  });
+});

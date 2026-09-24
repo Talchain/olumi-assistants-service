@@ -294,6 +294,12 @@ export default async function route(app: FastifyInstance) {
       }
       const callerExpectedGraphHash =
         typeof body.expected_graph_hash === "string" ? body.expected_graph_hash : undefined;
+      // An OPTIONAL caller assertion that the model is still EMPTY — the precondition a
+      // FIRST construction was built on. Validated before any database work.
+      if (body.expected_model_empty != null && body.expected_model_empty !== true) {
+        return invalid("EXPECTED_MODEL_EMPTY_INVALID", "`expected_model_empty` must be `true` when supplied.");
+      }
+      const callerExpectsEmptyModel = body.expected_model_empty === true;
       const brief = normaliseBriefText(body.brief_text);
       if (brief.truncated) {
         return invalid("BRIEF_INVALID", "`brief_text` exceeds the supported brief length.");
@@ -484,6 +490,47 @@ export default async function route(app: FastifyInstance) {
                 "BAD_INPUT",
                 "This model changed since it was read. Nothing was written — read it again first.",
                 { code: "GRAPH_STALE", expected_graph_hash: callerExpectedGraphHash, current_graph_hash: expectedGraphAnalysisHash ?? null },
+                requestId,
+              ),
+            );
+        }
+      }
+
+      /**
+       * ⛔ A FIRST CONSTRUCTION NEVER LANDS ON A MODEL SOMEONE ELSE SAVED (independent
+       * review of #1786, 5805279370). A construction reads the model as empty, then spends
+       * ~20 s generating. Without this, the CAS base above is the server's read NOW — so a
+       * graph another author committed in that window became the base, and the
+       * construction replaced it. The caller's precondition is checked against the same
+       * server read; when it holds, that read is an ABSENT/empty base, which the atomic
+       * RPC then enforces as known-absent (`p_expected_base_known`), closing the
+       * read→write window too. A populated model is refused with nothing written — the
+       * caller recovers its OWN earlier commit by its operation's version, never by
+       * adopting the newer state.
+       */
+      if (callerExpectsEmptyModel) {
+        if (expectedGraphIdentityHash === undefined) {
+          return unavailable();
+        }
+        const baseNodes = (baseGraphForInvariants as { nodes?: unknown } | null | undefined)?.nodes;
+        const baseIsEmpty = baseGraphForInvariants == null || !Array.isArray(baseNodes) || baseNodes.length === 0;
+        if (!baseIsEmpty) {
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.expected_model_empty_stale",
+              request_id: requestId,
+              scenario_id: scenarioId,
+              current: expectedGraphAnalysisHash ?? null,
+            },
+            "Graph registration — a model was saved since the caller read it as empty; nothing written",
+          );
+          return reply
+            .code(409)
+            .send(
+              buildErrorV1(
+                "BAD_INPUT",
+                "A model was saved for this decision after it was read as empty. Nothing was written.",
+                { code: "MODEL_NOT_EMPTY", current_graph_hash: expectedGraphAnalysisHash ?? null },
                 requestId,
               ),
             );

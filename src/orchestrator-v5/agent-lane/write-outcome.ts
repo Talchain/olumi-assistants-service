@@ -61,6 +61,7 @@ const REFUSAL_WORDS: Record<string, string> = {
   not_applied: 'none of it was applied',
   model_changed_while_proposing: 'the model changed while it was being put together',
   model_already_exists: 'a model already exists for this decision',
+  model_changed_during_build: 'a model was saved for this decision while I was building one, so I kept that model and wrote nothing over it',
   read_only_preview: 'this preview cannot change the model',
 };
 
