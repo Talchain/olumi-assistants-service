@@ -1,0 +1,462 @@
+[
+  {
+    "id": "paired-57f903c/M.rep1",
+    "label": "names_leader",
+    "leak_phrases": [
+      "on the current assumptions, raising Pro to £59 with the feature release leads the MRR comparison."
+    ],
+    "text": "**Model finding:** on the current assumptions, **raising Pro to £59 with the feature release leads the MRR comparison**. It led in 83.28% of the model’s simulated cases, versus 15.39% for keeping £49 and 1.33% for phasing the rise. The run describes this ordering as robust under the changes it tested.\n\nWhy it appears: the £59 option combines **£59/month** per Pro subscriber with **100% price–release alignment**, whereas the phased route is modelled at **£54/month** and **50% alignment**. This result rests on the planning assumptions previously adopted, rather than observed conversion or retention evidence.\n\n**Critical limitation:** it does **not** answer whether the £59 change keeps monthly churn below **4%**. The model could not score that constraint: monthly churn is calculated from other factors, and the constraint has no specified value frame or compatible measured baseline. As a result, the comparison is an MRR ordering only—not evidence that any option satisfies the churn limit or achieves **£20,000 MRR within 12 months**.\n\nThe ordering can change in the model if price–release alignment is lower: in the tested sensitivity, reducing that alignment from the phased assumption of **50%** was sufficient to switch the ordering towards keeping Pro at £49 at an alignment of **97.92%** in the stated test context. That is a tested switch condition, not a measure of overall stability or an observed customer response."
+  },
+  {
+    "id": "paired-57f903c/M.rep2",
+    "label": "names_leader",
+    "leak_phrases": [
+      "On the current model, raising Pro to £59/month with the feature release leads the comparison",
+      "it had an 83.28% chance of producing the highest modelled MRR outcome, versus 15.39% for keeping £49 and 1.33% for phasing the increase."
+    ],
+    "text": "**Finding:** On the current model, raising Pro to **£59/month with the feature release** leads the comparison: it had an **83.28%** chance of producing the highest modelled MRR outcome, versus **15.39%** for keeping £49 and **1.33%** for phasing the increase. This is a result of the model’s assumptions, not a recommendation.\n\n- The lead arises because the model credits the simultaneous release with **100% price–release alignment**, compared with **50%** for the phased path, alongside the higher **£59/month** price.\n- The MRR comparison was robust under the changes tested. However, it does **not** establish that £59 meets your “monthly churn rate **< 4%**” requirement: that constraint could not be scored against the modelled churn output, and was therefore excluded from the comparison.\n- The ordering can flip in a tested scenario if price–release alignment is increased to **97.92%**, where **Keep Pro at £49** becomes the alternative leader. This shows that the treatment of release alignment matters; it does not establish which assumption should be investigated first.\n\nThe analysis also assumed that maximising MRR is the goal direction. It does not yet test attainment of **£20k MRR within 12 months**, because the model lacks an observed MRR baseline and a compatible constraint frame."
+  },
+  {
+    "id": "paired-57f903c/M.rep3",
+    "label": "names_leader",
+    "leak_phrases": [
+      "On the current assumptions, raising Pro to £59 with the feature release leads the comparison",
+      "it had the highest modelled outcome in 83.3% of simulations, versus 15.4% for keeping £49 and 1.3% for phasing the rise."
+    ],
+    "text": "**On the current assumptions, raising Pro to £59 with the feature release leads the comparison**: it had the highest modelled outcome in **83.3%** of simulations, versus **15.4%** for keeping £49 and **1.3%** for phasing the rise. This is a model-relative result, not a recommendation.\n\nWhy: the model gives the £59-at-release path both higher revenue per Pro subscriber and full price–release alignment. Its modelled median outcome was **0.315 on the model’s normalised scale**, compared with **0.283** for keeping £49 and **0.283** for phasing.\n\n**Crucial limitation:** the model could not test your requirement that monthly churn remain **under 4%**. “Monthly churn rate < 4%” is recorded, but churn is currently calculated from upstream factors rather than measured on a compatible level scale; the result therefore does **not** establish that any option meets the churn limit. The £20k/month MRR target also was not assessed directly because the MRR baseline/frame needed to align that target is absent.\n\nThe ordering held up under the changes tested, but it is particularly exposed to the assumed link between **price–release alignment and perceived Pro value**: in a tested perturbation, changing that relationship could switch the ordering to keeping £49. That shows this assumption can matter; it does not establish investigation priority."
+  },
+  {
+    "id": "paired-57f903c/M.rep4",
+    "label": "names_leader",
+    "leak_phrases": [
+      "On the model’s MRR comparison alone, raising Pro to £59 with the release leads"
+    ],
+    "text": "**On the model’s MRR comparison alone, raising Pro to £59 with the release leads**: it ranked highest in **83.28%** of the model’s sampled scenarios, versus **15.39%** for keeping £49 and **1.33%** for phasing the increase. This is a model-relative result, not a recommendation.\n\nHowever, it does **not yet answer your full question**. The model could not assess the constraint **“monthly churn rate < 4%”**, nor could it test attainment of the **£20k/month** target in its current sample frame. It also assumed that higher MRR is the intended direction because that was not explicitly encoded.\n\nThe ordering is conditional on the planning assumptions used, particularly the assumed effects of the release on perceived Pro value, conversion, and churn. The analysis found that changing the price–release-alignment assumption could flip the ordering to keeping Pro at £49; that establishes a tested sensitivity, not which assumption is most important to investigate."
+  },
+  {
+    "id": "paired-57f903c/M.rep5",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The £59 at release path leads in the current model’s MRR comparison, with an 83.28% modelled chance of leading the three options"
+    ],
+    "text": "**The £59-at-release path leads in the current model’s MRR comparison**, with an 83.28% modelled chance of leading the three options; keeping £49 is at 15.39%, and phasing is at 1.33%. This is a comparison under the **user-approved planning assumptions**, not evidence that £59 is the right commercial decision.\n\nWhy it leads: it combines **£59/month** with **100% price–release alignment**, whereas the phased path assumes **£54/month** and **50% alignment**.\n\nThe crucial unresolved point is your churn condition: **monthly churn rate < 4% could not be assessed in this run**. The model treats churn as calculated from other inputs, while the constraint has no specified comparison frame or measured baseline on the same scale. So this result does **not** establish that the £59 path keeps churn under 4%.\n\nThe ordering was robust in the model’s tested scenarios, but one tested change can reverse it: changing the assumed price–release alignment to **97.92%** switches the ordering to keeping Pro at £49. That shows this assumption can matter; it does not establish investigation priority."
+  },
+  {
+    "id": "paired-57f903c/C1.rep1",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The £59 at release path produces the highest MRR outcome in this model"
+    ],
+    "text": "The £59-at-release path produces the highest MRR outcome in this model, but it does **not** answer whether it keeps churn below 4%.\n\n- That result rests on the adopted assumptions, especially the assumed **3% monthly churn**, **250 Pro subscribers**, and the feature’s perceived value. The comparison was robust under the modelled tests, though confidence remains provisional.\n- The churn constraint was not scored: “under 4%” could not be aligned with the model’s calculated churn measure, and the £20k MRR threshold was also not assessed against a baseline level.\n- The ordering can flip in a tested scenario if price–release alignment rises from the assumed **50%** to **97.92%**; this shows that change can flip the ordering, not that it is the most important assumption to investigate.\n\nSo this is directional support for £59 with the release, not a conclusion that it satisfies your churn guardrail."
+  },
+  {
+    "id": "paired-57f903c/C1.rep2",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The model does not yet support a yes/no on raising Pro to £59.\n\n- It produced a comparative result, but no option can be put forward because the **monthly-churn constraint, “< 4%”**, could not be scored against the model’s churn output.\n- The **£20k MRR target** also was not assessed as a level: the model has no observed MRR baseline to place its projected changes against that target.\n- The comparison is most sensitive to the **monthly churn rate** assumption, currently **3%** and user-adopted; the analysis treats this as provisional rather than measured.\n\nSo the apparent comparison is conditional on assumptions, not evidence that the £59 increase preserves churn below 4%."
+  },
+  {
+    "id": "paired-57f903c/C1.rep3",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The analysis cannot support a yes/no price decision yet, because it did not test either of your stated success conditions reliably.\n\n- The **£20k MRR target** was not assessed: the model lacks an observed MRR baseline needed to compare its level target with the analysis output.\n- The **monthly churn <4%** constraint was also unscored: churn is modelled as a calculated result, not a directly comparable level.\n- The ordering is most sensitive to the user-adopted **3% monthly-churn assumption**, but that sensitivity is provisional and low-confidence. The model’s apparent comparison is therefore not enough to put any option forward."
+  },
+  {
+    "id": "paired-57f903c/C2.rep1",
+    "label": "names_leader",
+    "leak_phrases": [
+      "On the model’s current assumptions, the £59 at release path produced the strongest MRR comparison"
+    ],
+    "text": "The comparison is incomplete: it could not assess the **monthly churn under 4%** constraint, so it cannot answer whether £59 meets both of your stated conditions. On the model’s current assumptions, the £59-at-release path produced the strongest MRR comparison, but that is not a recommendation or a verified constraint-safe result.\n\n- The comparison assumes that higher MRR is the objective; that direction was not explicitly recorded.\n- Monthly churn is the most influential assumption, and its current **3%** is a user-adopted planning estimate, not a measurement.\n- The next useful step is to define how the 4% churn limit should be evaluated against the model, then rerun."
+  },
+  {
+    "id": "paired-57f903c/C2.rep2",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The model favours raising Pro to £59/month with the feature release on its MRR outcome, and that ordering held under the tested variations."
+    ],
+    "text": "The model favours raising Pro to **£59/month with the feature release** on its MRR outcome, and that ordering held under the tested variations. However, it cannot answer your full question yet: the **under-4% monthly churn constraint was not assessed**, because the model’s churn output is not aligned to the stated 4% level.\n\nThe conclusion is most exposed to the assumed connection between the release and perceived Pro value; it rests on provisional planning estimates, not observed churn or conversion data. Clarify whether the 4% target is a monthly churn **level** and provide a measured churn baseline to test that constraint properly."
+  },
+  {
+    "id": "paired-57f903c/C2.rep3",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The £59 with release scenario produced the strongest MRR outcome in this model"
+    ],
+    "text": "The £59-with-release scenario produced the strongest MRR outcome in this model, but it cannot answer your actual question yet: the **under-4% monthly churn limit was not assessed**. Monthly churn is modelled as a calculated effect, while the 4% limit is a level; without a compatible observed churn baseline/frame, the comparison cannot test whether any option stays below it.\n\nThe result is otherwise robust under the tested assumptions, but it rests materially on the assumed churn rate, subscriber base, and perceived value of the release. It also assumes that *more* MRR is the goal direction."
+  },
+  {
+    "id": "stack-1854-714677d5/pricing-run-complete.W.V1.rep1",
+    "label": "names_leader",
+    "leak_phrases": [
+      "the £59-at-release path produces the strongest MRR comparison result"
+    ],
+    "text": "The model cannot yet support a yes/no on the £59 increase because it could not test your **monthly churn under 4%** requirement.\n\n- On the current provisional assumptions, the £59-at-release path produces the strongest MRR comparison result; however, no option may be put forward because the churn constraint was withheld.\n- The limit is unscored because monthly churn is modelled as an outcome, while the **4%** limit has no specified comparison frame or compatible baseline.\n- This is a provisional first pass: the subscriber base, conversion, perceived value and churn inputs are assumptions, not measured evidence.\n- The analysis also assumed that higher MRR is the goal direction; that aim was not explicitly encoded.\n\nThe key unresolved reasoning is whether the release and £59 price actually keep churn below **4% per month**."
+  },
+  {
+    "id": "stack-1854-714677d5/pricing-run-complete.W.V1.rep2",
+    "label": "names_leader",
+    "leak_phrases": [
+      "Its unconstrained comparison favours the £59-at-release path"
+    ],
+    "text": "The model cannot yet say whether raising Pro to **£59/month** meets your decision criteria.\n\n- Its unconstrained comparison favours the £59-at-release path, driven by higher MRR per Pro subscriber and the assumed **100%** price–release alignment. This is a provisional model result based on the starting assumptions, not evidence that customers will accept the increase.\n- Crucially, it could **not test “monthly churn rate < 4%”**: churn is modelled as an outcome, while the 4% limit is an absolute level. Therefore no option can be put forward against your stated goal.\n- The model’s ordering can switch in a tested change to price–release alignment; investigation priority is not established from that alone.\n\nA current churn baseline and a clear way to assess churn as an absolute monthly percentage are needed before this answers the question."
+  },
+  {
+    "id": "stack-1854-714677d5/pricing-run-complete.W.V1.rep3",
+    "label": "names_leader",
+    "leak_phrases": [
+      "the £59-at-release path produces the strongest MRR outcome under the adopted assumptions"
+    ],
+    "text": "The model suggests the £59-at-release path produces the strongest MRR outcome under the adopted assumptions, but it cannot answer your full question because the **monthly churn rate < 4%** requirement was not evaluable.\n\n- The comparison is relatively separated under this model, but it is provisional: the subscriber base, conversion, perceived value and churn inputs were planning assumptions rather than measured evidence.\n- Crucially, the analysis could not compare churn with the **<4%** limit: churn is modelled as a derived change rather than a monthly percentage on the same scale. So no option can be put forward as satisfying your retention constraint.\n- The result is particularly exposed to the assumed relationship between feature-release alignment, perceived value and churn; the tested alignment assumption can change the ordering.\n\nA current monthly churn measurement and a properly framed **<4% monthly level** constraint are needed before assessing whether £59 is compatible with the guardrail."
+  },
+  {
+    "id": "stack-1854-714677d5/pricing-run-complete.W.V2.rep1",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The comparison cannot yet answer whether to raise Pro to £59, because neither of your decision constraints was successfully checked.\n\n- The **under-4% monthly churn** limit was not scored: the model treats monthly churn as calculated from other factors, not as a directly comparable churn reading.\n- The **£20k MRR target** was also not tested against a current MRR baseline, and the goal direction was unstated. The outcome comparison is therefore only a provisional, model-relative MRR comparison.\n- The tested comparison held up under its perturbations, but that does not establish compliance with either constraint. It rests partly on the starting assumptions you adopted, including the 3% churn and 250 Pro-subscriber baseline.\n\nThe next reasoning step is to define the churn limit on a measurable model quantity and supply the current MRR baseline."
+  },
+  {
+    "id": "stack-1854-714677d5/pricing-run-complete.W.V2.rep2",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The model favours raising Pro to £59 with the feature release on its current assumptions"
+    ],
+    "text": "The model favours raising Pro to **£59 with the feature release** on its current assumptions, but it does **not** establish that this keeps churn below 4%.\n\n- The result was robust under the changes tested, yet it rests partly on unvalidated planning assumptions, including the **3% monthly churn**, **250 Pro subscribers**, **5% conversion**, and the release’s effect on perceived value.\n- The under-4% churn condition was not scored: the model treats churn as calculated from other factors, and the constraint lacks a stated value frame. So the comparison cannot confirm compliance with your churn limit.\n- The price–release alignment assumption is material: the tested ordering can change when alignment is altered; its 50% and 100% levels are assumptions, not evidence."
+  },
+  {
+    "id": "stack-1854-714677d5/pricing-run-complete.W.V2.rep3",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The model cannot yet support a decision on the £59 increase because it did not assess the **monthly churn <4%** constraint.\n\n- The comparison ran, but churn is modelled as a calculated change rather than a monthly percentage level, so the 4% limit could not be scored for any option. The £20k MRR target also lacks a recorded current MRR baseline for level-based assessment.\n- Results are therefore only a provisional comparison under the adopted planning assumptions, not evidence that any path meets both goals.\n- The model is structurally most sensitive to **monthly churn rate**—an adopted assumption, not a measurement—while the link between release alignment and perceived value is also fragile."
+  },
+  {
+    "id": "stack-1854-714677d5-more/pricing-run-complete.W.V2.rep5",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The comparison favours the £59-at-release scenario on the model’s MRR outcome"
+    ],
+    "text": "The comparison favours the £59-at-release scenario on the model’s MRR outcome, but it does **not** establish that it keeps churn below 4%.\n\n- The result is based on the starting assumptions you adopted, not observed performance data. It held up under the model’s tested perturbations, but that robustness does not validate those assumptions.\n- The churn constraint was not scored: “monthly churn rate < 4%” could not be aligned to the analysis’s calculated churn measure, and the goal direction for MRR was not explicitly recorded.\n- The ordering can flip in a tested scenario if price–release alignment is increased from the assumed **50%** to **97.92%**; that only shows this tested change can flip the ordering, not what to investigate first.\n\nSo, this run supports treating £59 with the release as a plausible MRR-led path, while leaving the retention guardrail unresolved."
+  },
+  {
+    "id": "stack-1854-714677d5-more/pricing-run-complete.W.V1.rep6",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The analysis cannot yet answer whether to raise Pro to £59 while meeting your churn requirement.\n\n- The **monthly churn rate < 4%** constraint was not scored: churn is modelled as an outcome, but the model has no compatible measured churn level or defined constraint frame to test that strict limit against.\n- The comparison currently assumes that **higher MRR is the objective**; that direction was not explicitly recorded.\n- It is therefore a provisional comparison of modelled MRR under your adopted assumptions, not evidence that any path preserves churn below 4%.\n\nThe critical next reasoning step is to define how the **under-4% monthly churn** limit should be measured in this model."
+  },
+  {
+    "id": "stack-1854-714677d5-more/pricing-run-complete.W.V2.rep8",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The model favours a £59 increase with the feature release on its MRR comparison"
+    ],
+    "text": "The model favours a £59 increase with the feature release on its MRR comparison, but it cannot answer whether this keeps churn below 4%.\n\n- The result is robust within the tested assumptions, but it rests on provisional starting estimates, including your adopted **3% monthly churn**, **250 Pro subscribers**, and **5% conversion rate**.\n- The churn constraint was not scored: monthly churn is modelled as an outcome, while the **under 4%** limit lacks a compatible measurement frame. Therefore no option can be put forward as meeting both parts of your goal.\n- The comparison is especially exposed to the assumed link between release alignment and perceived Pro value; the result can switch in a tested scenario when alignment rises from **50%** to **97.92%**. This establishes only that this tested change can flip the ordering, not its investigation priority."
+  },
+  {
+    "id": "stack-1854-714677d5-more/pricing-run-complete.W.V1.rep4",
+    "label": "names_leader",
+    "leak_phrases": [
+      "Its comparison favours the direct £59-at-release path on the modelled MRR outcome"
+    ],
+    "text": "The model cannot yet say whether raising Pro to **£59/month** meets your full objective.\n\n- Its comparison favours the direct £59-at-release path on the modelled MRR outcome, and that ordering held under the tested changes.\n- But the **monthly churn rate < 4%** constraint was not scored: churn is modelled as an outcome, while the 4% limit has no specified comparison frame or measured baseline. The analysis therefore cannot establish compliance with the strict under-4% requirement.\n- The result also assumes that higher price–release alignment improves perceived Pro value. That link is uncertain; in one tested change, raising alignment from its assumed **50%** level to **97.92%** switched the ordering. This establishes only that tested change can switch it, not how important it is to investigate relative to other unknowns.\n\nSo this is a provisional MRR comparison, not a decision answer against your churn constraint."
+  },
+  {
+    "id": "stack-1854-714677d5-more/pricing-run-complete.W.V1.rep9",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The comparison favours the £59-at-release path on the model’s MRR outcome"
+    ],
+    "text": "The current model cannot support a yes/no answer because it could not test your churn requirement.\n\n- The comparison favours the £59-at-release path on the model’s MRR outcome, and that pattern held under the tested changes. But no option can be put forward because compliance with **monthly churn rate <4%** was not assessed.\n- The churn limit was unscorable: churn is modelled as a calculated change rather than a measured monthly rate on the same scale as the **4%** threshold. The analysis also lacks an explicit objective direction for MRR.\n- The most exposed relationship tested was whether aligning the price rise with the release increases perceived Pro value; a tested change there could reverse the ordering. This is a model assumption, not evidence that it should be investigated first.\n\nA current analysis needs the churn constraint expressed against a comparable monthly churn-rate measure before it can answer your question."
+  },
+  {
+    "id": "stack-1854-714677d5-more/pricing-run-complete.W.V2.rep9",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The model favours the £59-at-release scenario on its MRR outcome"
+    ],
+    "text": "The model favours the £59-at-release scenario on its MRR outcome, but it cannot answer your full question because the **monthly churn rate < 4%** constraint was not scored.\n\n- This is a provisional result based on the starting assumptions you adopted, not observed performance. The £59 option was modelled at **£59/month** with **100%** price–release alignment.\n- The comparison held up under the tested perturbations, but the result is particularly exposed to the assumed link between price–release alignment and perceived Pro value; changing that tested relationship can change the ordering.\n- The churn limit remains unresolved: the model treats churn as calculated from other factors, while the constraint’s measurement frame is unspecified. So it does not establish that any option keeps churn below **4%**."
+  },
+  {
+    "id": "stack-1854-714677d5-more/pricing-run-complete.W.V1.rep7",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The model’s MRR comparison favours the £59-at-release scenario"
+    ],
+    "text": "The model’s MRR comparison favours the £59-at-release scenario, but it cannot answer your full question because it did **not** assess the “monthly churn under 4%” requirement.\n\n- This result reflects the starting assumptions you adopted: **250 Pro subscribers**, **3% monthly churn**, **5% conversion**, and **60% perceived Pro value**. Those are planning assumptions, not observed evidence.\n- The comparison held up under the changes tested, but the result is especially contingent on how strongly the release supports perceived Pro value and, in turn, churn.\n- The churn constraint remains unscored: the model treats monthly churn as calculated from other factors, while the 4% limit has no specified measurement frame or baseline compatible with the analysis.\n\nSo this is evidence that £59 could improve the modelled MRR outcome, not evidence that it will keep churn below 4%."
+  },
+  {
+    "id": "stack-1854-714677d5-more/pricing-run-complete.W.V2.rep6",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The comparison favours a £59 launch-price increase on its current assumptions"
+    ],
+    "text": "The comparison favours a £59 launch-price increase on its current assumptions, but it does **not** answer whether it keeps churn below 4%.\n\n- The run treated £59 at release, £49, and a £54 phased path as comparable, and found the £59 path held up under the tested variations. This is a provisional model result, not a recommendation.\n- The result is especially exposed to the assumed link between the release and perceived Pro value. The model’s starting **50%** alignment figure is an assumption, not evidence; the tested ordering can switch when it reaches **97.92%**.\n- Crucially, the strict churn constraint, **monthly churn < 4%**, could not be scored: the model calculates churn as a derived change rather than a directly comparable monthly churn level. Therefore no option can be put forward as satisfying your full goal."
+  },
+  {
+    "id": "stack-1854-714677d5-more/pricing-run-complete.W.V1.rep5",
+    "label": "names_leader",
+    "leak_phrases": [
+      "the £59-at-release path produces the strongest MRR outcome among the three compared paths"
+    ],
+    "text": "The model cannot yet say whether raising Pro to **£59/month** meets your full goal, because the **monthly churn rate < 4%** limit could not be evaluated.\n\n- On its current provisional assumptions, the £59-at-release path produces the strongest MRR outcome among the three compared paths, and that comparison held under the tested changes.\n- But this is not a conclusion about the decision: the analysis could not align the churn constraint with the modelled churn output, and it also lacks a stated direction for the £20k MRR goal.\n- The result is especially contingent on the assumed relationship between releasing the feature and perceived Pro value; a tested change in that relationship can reverse the ordering. This establishes only that the assumption can flip the comparison, not how important it is to investigate.\n\nA current analysis needs the churn limit expressed against a measurable model outcome before it can assess the stated guardrail."
+  },
+  {
+    "id": "stack-1854-714677d5-more/pricing-run-complete.W.V2.rep4",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The £59-at-release path scores highest on the model’s MRR outcome"
+    ],
+    "text": "The £59-at-release path scores highest on the model’s MRR outcome, but it does **not** answer whether it keeps churn below 4%.\n\n- This result is a provisional comparison built on the starting assumptions you adopted, not observed operating data. It held up under the model’s tested perturbations, but that is not validation.\n- Your churn constraint, **Monthly churn rate < 4%**, could not be assessed: the model treats churn as calculated change rather than a measured monthly rate on the same scale. So no option can be put forward against your full goal.\n- The comparison is particularly exposed to the assumed relationship between release alignment and perceived Pro value; the tested setting can change the ordering.\n\nThe key unresolved question is how to represent and measure monthly churn as an actual percentage level."
+  },
+  {
+    "id": "stack-1854-714677d5-more/pricing-run-complete.W.V2.rep7",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The current model favours a £59 Pro price with the feature release on its MRR outcome measure"
+    ],
+    "text": "The current model favours a £59 Pro price with the feature release on its MRR outcome measure, but it does **not** establish that this meets your churn requirement.\n\n- The comparison is robust under the tested model variations, but it rests on provisional starting assumptions: **250 Pro subscribers**, **3% monthly churn**, **5% conversion**, and **60% perceived Pro value** were adopted assumptions, not observed data.\n- Your strict constraint, **monthly churn <4%**, was not scored: the model treats churn as calculated from other factors and cannot compare it to the 4% limit on a compatible scale. So no option can be put forward as satisfying the full goal.\n- The result is particularly exposed to how strongly customers see the release as justifying the price. At the assumed **50%** alignment for phasing, the tested ordering can switch when that assumption reaches **97.92%**; this shows one tested change can flip the ordering, not what to investigate first."
+  },
+  {
+    "id": "stack-1854-714677d5-more/pricing-run-complete.W.V1.rep8",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The model cannot yet answer whether to raise Pro to £59 **while keeping churn below 4%**.\n\n- The comparison separates the three pricing paths on its modelled MRR outcome, but no option can be put forward because the **“monthly churn rate < 4%”** condition was not scored.\n- The model treats monthly churn as a calculated result, not a directly comparable measured level; it also lacks the constraint’s frame (whether 4% is a level or a change) and an MRR baseline needed to evaluate the £20k/month target as a level.\n- The result rests on the adopted planning assumptions, including **3% monthly churn**, **250 Pro subscribers**, **5% conversion**, and a **50% price–release alignment** baseline—not observed evidence.\n\nSo this is a useful directional comparison, but not a test of your actual guardrail."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.served.rep3",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The model cannot yet answer whether £59 meets your decision rule, because it could not test the **monthly churn rate <4%** constraint.\n\n- The price scenarios were compared, and that comparison held up under the changes tested; however, no option can be put forward because the churn limit was left unscored.\n- The analysis is most sensitive to **monthly churn rate**—a starting assumption you adopted at **3%**—but the model currently treats churn as calculated rather than as a directly comparable monthly level.\n- It also assumes the goal is to maximise MRR; that objective direction was not explicitly recorded."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.strip.rep6",
+    "label": "names_leader",
+    "leak_phrases": [
+      "raising Pro to **£59 with the release** produces the highest modelled MRR outcome"
+    ],
+    "text": "The comparison suggests that raising Pro to **£59 with the release** produces the highest modelled MRR outcome, but it does **not** establish whether it meets your churn requirement.\n\n- The result is a provisional model pass built on adopted starting assumptions, including **3% monthly churn**, **250 Pro subscribers**, **5% conversion**, and **60% perceived Pro value**; these are not measured evidence.\n- The churn constraint, **monthly churn rate < 4%**, could not be scored: the model treats churn as calculated from other factors and has no compatible measured baseline or specified constraint frame.\n- The ordering held under the tests run, but the relationship between release alignment, perceived value and churn remains fragile. The analysis does not establish investigation priority from that alone."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.served.rep6",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "No option can be put forward yet, because the model could not test the monthly-churn-under-4% condition.\n\n- The comparison is a provisional first pass based on adopted assumptions, not observed data; its ordering held up under the tested changes, but that does not establish compliance with your churn limit.\n- The churn constraint is unscored: churn is modelled as a calculated change, while **under 4%** is a level threshold with no stated frame or measured baseline. The £20k MRR level likewise cannot be evaluated against the model’s change-from-origin samples.\n- The result is most sensitive to the assumed monthly churn rate, which is an adopted assumption rather than a measurement."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.served.rep3",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The £59-at-release scenario produces the strongest **modelled MRR outcome** in this run"
+    ],
+    "text": "The £59-at-release scenario produces the strongest **modelled MRR outcome** in this run, but the model cannot yet support a decision against your full goal.\n\n- This result rests on the starting assumptions you approved, including **250 Pro subscribers**, **3% monthly churn**, **5% conversion**, and **60% perceived Pro value**; the £49/£59 prices come from your brief.\n- The churn requirement, **monthly churn rate <4%**, was not scored: the model treats churn as calculated change rather than a comparable level. It also lacks an explicit direction for the MRR objective.\n- The ordering held under the tested perturbations, but that is not validation of the assumptions or proof that churn stays below 4%.\n\nClarifying how the churn limit should be measured would make the comparison decision-relevant."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.strip.rep7",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The analysis cannot answer whether to raise Pro to £59 while meeting your churn requirement, because it could not score **monthly churn rate < 4%** against the model.\n\n- It compared all three price paths, but the churn limit was withheld: churn is modelled as a change driven by other factors, not a measured monthly rate on the same scale as the **4%** limit.\n- The comparison is therefore provisional and rests on adopted planning assumptions, including **250 Pro subscribers**, **3% monthly churn**, **5% conversion**, and **60% perceived Pro value**—not observed evidence.\n- The model also lacks a stated direction for the MRR goal, so its numerical ordering should not be treated as a decision conclusion."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.strip.rep3",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "**This run cannot support a price decision against your stated guardrail:** the model could not assess whether any option keeps monthly churn **below 4%**, so no option can be put forward.\n\n- The **£20k MRR target** was also not scored: the model lacks the MRR baseline needed to compare its simulated change with a £20k/month level.\n- The comparison itself held up under the changes tested, but that is not enough while the churn constraint is unscored.\n- Monthly churn is the strongest structural driver in this model, resting on the **3% planning assumption you adopted**; its attribution stability is low.\n\nThe key unresolved issue is how the 4% limit should be measured against the model’s churn output."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.served.rep8",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "This run cannot answer whether to raise Pro to £59 while meeting your stated guardrails.\n\n- The comparison was robust under the changes tested, but **monthly churn below 4% was not scored**: the model treats churn as calculated rather than a directly comparable level. The £20k MRR threshold was also not evaluable because no MRR baseline/frame was recorded.\n- The model ranked outcomes as though **higher MRR is the aim**; that direction was not explicitly recorded.\n- The ordering is most sensitive to the **monthly churn rate** assumption, recorded as your approved **3%** starting estimate; the analysis flags its confidence as provisional.\n\nSo this is a provisional revenue comparison, not evidence that the £59 change satisfies the churn constraint."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.strip.rep8",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The £59-at-release path has the strongest modelled MRR outcome"
+    ],
+    "text": "The £59-at-release path has the strongest modelled MRR outcome, but the model cannot answer whether it keeps churn below 4%.\n\n- Its median outcome is **0.315** on the model’s normalised scale, versus **0.283** for £49 and **0.283** for phasing; these are model outputs, not revenue figures.\n- This rests on adopted assumptions including **3% monthly churn**, **250 Pro subscribers**, **5% conversion**, and **60% perceived value**—not measurements.\n- The churn limit was not scored: monthly churn is modelled as an outcome/change, while the **<4%** limit lacks a compatible level frame and baseline. So no option can be put forward against your full goal."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.strip.rep8",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The model cannot put any pricing path forward yet, because it could not test the requirement that monthly churn stay **below 4%**.\n\n- The comparison itself held up under the model’s tested changes, but that does **not** establish compliance: churn is currently calculated as a modelled change, whereas the constraint is a level threshold.\n- The model’s output is particularly conditional on the assumed monthly churn rate, Pro subscriber base, and MRR per Pro subscriber. These were adopted starting assumptions, not observed evidence.\n- The goal direction was also assumed to mean maximising MRR; the model has no recorded current MRR baseline with which to assess the **£20k/month** target.\n\nThe next reasoning step is to define whether the 4% churn limit is a level or a change from a stated baseline, and connect it to a comparable churn measure."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.served.rep4",
+    "label": "names_leader",
+    "leak_phrases": [
+      "the £59-at-release scenario produces the highest modelled MRR outcome among the three scenarios"
+    ],
+    "text": "The model cannot yet answer whether to raise Pro to £59, because it could not assess your **monthly churn rate < 4%** constraint.\n\n- On the current assumptions, the £59-at-release scenario produces the highest modelled MRR outcome among the three scenarios; however, that is **not a decision conclusion** because churn compliance was withheld and the model’s goal direction was not explicitly stated.\n- The comparison rests heavily on assumed inputs, including **3% monthly churn**, **250 Pro subscribers**, **5% conversion**, and **60% perceived Pro value**. These are planning assumptions, not observed evidence.\n- The ordering can flip in a tested change to **price–release alignment**: raising that assumption from **50%** to **97.92%** switched the ordering in the test. This does not establish investigation priority, only that this tested assumption can change the comparison."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.served.rep4",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The analysis cannot support a “should” answer yet, because it could not test your **monthly churn under 4%** requirement.\n\n- The comparison ran, but the churn limit was left unscored: churn is modelled as a change rather than measured on the same level scale as the **4%** threshold. The goal direction for MRR was also not explicitly recorded.\n- The tested comparisons were robust under the model’s perturbations, but that does **not** establish compliance with the churn constraint.\n- The ordering is most sensitive to the monthly-churn assumption: **3% monthly churn**, which you approved as a starting assumption, rather than a measured figure.\n\nThe useful next reasoning step is to define how the 4% limit should be assessed against the modelled churn outcome."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.served.rep1",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The model cannot yet support a “yes” to £59, because it did not assess the under-4% monthly-churn condition.\n\n- The comparison itself was robust under the tested perturbations, but no option can be put forward: churn was modelled as a calculated change, while your **<4%** limit needs a compatible level/delta frame and baseline.\n- The result is especially sensitive to monthly churn, using the **3% user-approved planning assumption**; perceived Pro value and the feature/price alignment are also provisional assumptions, not measured evidence.\n- The £20k MRR target was compared as “larger is better” because the goal direction was not explicitly recorded."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.strip.rep2",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "No option can be put forward yet because the model could not assess your **monthly churn rate < 4%** constraint.\n\n- The comparison itself held up under the tested changes, but the churn limit was withheld: monthly churn is modelled as an outcome, not measured on the same scale as the **under 4%** target. The model also lacks the MRR baseline needed to judge the **£20k/month** target as a level.\n- The analysis is most sensitive to monthly churn, Pro subscriber base, and MRR per Pro subscriber. These are user-adopted planning assumptions, not observed data.\n- It also assumes that higher price–release alignment increases perceived Pro value; changing that relationship can alter the comparison.\n\nThe useful next reasoning step is to define whether the churn limit is a current level or a change, and provide the current MRR level."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.served.rep5",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The comparison cannot yet support a price decision, because neither the £20k MRR target nor the under‑4% churn limit could be checked against the model’s output scale.\n\n- The simulated price paths were separated robustly under the tested assumptions, but constraint compliance was not assessed; no option can therefore be put forward.\n- The most sensitive assumption is **monthly churn rate**. Its **3%** input came from your adopted starting assumption, but the model currently calculates churn from other factors, so it cannot compare that calculated change with an absolute **<4%** limit.\n- The £20k MRR threshold also lacks a recorded current MRR baseline, and the model has no stated objective direction for MRR.\n\nA useful next reasoning step is to define the current measured MRR and how the churn limit should be evaluated: absolute monthly churn level or change from today."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.strip.rep1",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "No option can be put forward yet: the model could not assess your **monthly churn rate <4%** limit.\n\n- The comparison is robust under the changes tested, but the churn constraint is unscored because the model treats churn as calculated change rather than a directly comparable monthly rate. The £20k MRR threshold also lacks a recorded baseline for conversion into the analysis frame.\n- The largest model driver is monthly churn, based on the adopted **3%** starting assumption, not measured evidence. The result is also sensitive to the assumed effect of aligning price with the release.\n- The current analysis therefore describes MRR trade-offs only, not whether any path preserves your churn requirement."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.served.rep7",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "No option can be put forward yet: the comparison did not assess the requirement to keep monthly churn **below 4%**.\n\n- The model’s comparative result is driven by the adopted planning assumptions, including **250 Pro subscribers**, **3% monthly churn**, **5% conversion**, and **50% price–release alignment**; these are assumptions, not measured evidence.\n- The churn limit could not be scored because the model treats churn as calculated from other factors, and its constraint frame is unspecified. The MRR goal’s direction is also unstated.\n- The ordering can switch in a tested change to price–release alignment at **97.92%**; this shows that tested change can alter the ordering, not that it is the most important fact to validate.\n\nDefine how the under-4% churn limit should be measured in the model before relying on this result."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.served.rep6",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The analysis cannot support a “should” answer yet, because it did not assess the **monthly churn under 4%** requirement.\n\n- It compared the three price paths on modelled MRR, using your approved planning assumptions, but churn is modelled as a change rather than a monthly-rate level; the `< 4%` limit therefore could not be scored.\n- The model’s goal direction is also unstated, so its MRR comparison assumes that higher is better rather than recording that as your stated objective.\n- The comparison held up under its tested perturbations, but that is not a verdict on churn compliance."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.strip.rep4",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The £59-at-release path produces the strongest MRR outcome in this model"
+    ],
+    "text": "The £59-at-release path produces the strongest MRR outcome in this model, but it cannot yet answer your churn condition.\n\n- Its modelled outcome distribution is higher than keeping £49 or phasing; this rests on the adopted planning assumptions, including **3% monthly churn**, **250 Pro subscribers**, **5% conversion**, and **60% perceived value**.\n- The **“monthly churn under 4%”** constraint was not assessed: churn is modelled as a calculated change, while the 4% limit has no stated measurement frame or compatible baseline.\n- The comparison held up under the tested changes, but the release-to-value relationship is fragile; its **100% alignment** for the £59 option is an assumption, not evidence.\n\nSo the price move is directionally favourable for modelled MRR, while retention compliance remains unsettled."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.served.rep7",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The model cannot yet support a price decision because it could not test the requirement that monthly churn stays **under 4%**.\n\n- The comparison itself was robust under its tested perturbations, but no option can be put forward: the churn limit was left unscored because churn is modelled as a calculated change, not a directly comparable monthly-rate level.\n- The model also lacks a stated direction for the MRR goal and a baseline MRR level needed to assess the **£20k/month** threshold.\n- The result is particularly sensitive to monthly churn. Its **3%** starting point is an approved planning assumption, not a measurement; perceived Pro value and the subscriber base also materially shape the result.\n\nThe useful next reasoning step is to define whether the 4% limit is a monthly churn **level** and connect it to a measured/current churn reading."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.strip.rep6",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The comparison cannot support a price-change decision against your full goal yet, because the **monthly churn rate < 4%** limit was not assessable in this run.\n\n- The model did compute all three paths and held up under the tested changes, but no option can be put forward: churn is modelled as a derived change, not measured on the same scale as the **under 4%** threshold.\n- The largest modelled drivers are monthly churn, Pro subscriber base, and MRR per Pro subscriber. Their starting figures were adopted assumptions, not measurements.\n- The analysis also assumed that higher MRR is the objective; it does not yet establish whether £20k MRR is reached within 12 months.\n\nThe key unresolved reasoning step is to define the churn constraint’s frame—whether **4%** is an absolute monthly level or a change from a baseline—and connect it to a comparable churn measure."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.served.rep5",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "No option can be put forward from this run, because the **monthly churn rate < 4%** constraint could not be checked.\n\n- The comparison ran, but churn is modelled as a calculated change rather than a measured monthly rate on the same scale as the **4%** limit; the constraint was therefore withheld, not treated as satisfied.\n- The result is also provisional: the model has no stated direction for the MRR goal, so it assumed that higher modelled MRR is preferable.\n- The comparison is most sensitive to the adopted assumptions about monthly churn, Pro subscriber base, and MRR per Pro subscriber."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.strip.rep1",
+    "label": "names_leader",
+    "leak_phrases": [
+      "raising Pro to **£59/month** with the release produces the highest MRR outcome distribution of the three paths"
+    ],
+    "text": "The current model cannot put any option forward because it could not test your **monthly churn rate < 4%** constraint.\n\n- Within the model’s unvalidated assumptions, raising Pro to **£59/month** with the release produces the highest MRR outcome distribution of the three paths; this is a model comparison, not a recommendation.\n- The comparison held up under the tested changes, but the churn limit was unscored: monthly churn is modelled as a calculated change, not a measured monthly rate that can be compared with **4%**. The MRR target also lacks a recorded baseline to test against **£20,000/month**.\n- The result is particularly contingent on the assumed links from price–release alignment to perceived value, and perceived value to churn. Those are Olumi’s provisional assumptions, not observed evidence."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.strip.rep4",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "No option can be put forward yet because the model could not assess your **monthly churn rate < 4%** constraint.\n\n- The comparison itself is robust under the tested changes, but the churn limit is unscored: churn is modelled as a calculated change, while the **4%** target lacks a stated frame and comparable measured baseline.\n- The result rests partly on the starting figures you adopted: **3% monthly churn**, **250 Pro subscribers**, **5% conversion**, and **60% perceived Pro value**. Several relationships remain provisional Olumi estimates.\n- The analysis also assumed that higher MRR is the goal direction; that objective sense was not explicitly recorded.\n\nThe useful next reasoning step is to define whether “under 4% churn” is a current-level constraint or a change-from-baseline constraint, with a compatible churn measurement."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.served.rep9",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The comparison cannot yet answer whether the £59 increase meets your full goal, because the **monthly churn under 4%** limit could not be assessed.\n\n- The model’s MRR comparison held up under the tested changes, but no option can be put forward while the churn constraint is unscored.\n- This rests on the assumptions you adopted: **3% monthly churn**, **250 Pro subscribers**, **5% conversion**, and **60% perceived Pro value**. They are planning assumptions, not measurements.\n- The ordering is particularly exposed to the assumed relationship between releasing features and perceived Pro value; a tested change to that link can alter it. This does not establish what should be investigated first.\n\nThe model needs the churn limit expressed in the same frame as the modelled churn outcome before it can evaluate the constraint."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.served.rep1",
+    "label": "names_leader",
+    "leak_phrases": [
+      "the £59-at-release scenario produced the strongest MRR comparison result"
+    ],
+    "text": "The model cannot yet support a decision on the £59 rise because it could not assess your **monthly churn under 4%** condition.\n\n- On the provisional assumptions, the £59-at-release scenario produced the strongest MRR comparison result and held up under the tested changes. But no option can be put forward while the churn limit is unscored.\n- The issue is modelling, not a result: monthly churn is calculated from other factors, whereas the **<4%** limit needs a compatible level or change frame. The MRR direction is also not explicitly recorded.\n- The comparison is particularly exposed to the assumed link between release alignment and perceived Pro value; changing that assumption in a tested way can reverse the ordering. The assumptions remain unvalidated."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.served.rep2",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "You cannot yet rely on this analysis to answer the £59 question, because it did not assess the **monthly churn under 4%** requirement.\n\n- The price comparison itself was robust under the changes tested, but no option can be put forward while that constraint is unscored. The model also assumed that higher MRR is the objective; that direction was not explicitly recorded.\n- The comparison is most sensitive to **monthly churn rate**, using your adopted **3%** starting assumption. Its relationship to the price/release decision is therefore material but still provisional.\n- The model needs the churn threshold expressed in the same frame as the modelled churn result before it can test compliance."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.strip.rep9",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The model cannot yet support a yes/no on the £59 increase because it could not test either goal in the required form.\n\n- The **monthly churn rate < 4%** constraint was left unscored: churn is modelled as a change driven by other factors, not as a comparable monthly-rate reading.\n- The **£20k MRR** threshold also could not be assessed because the model has no observed baseline MRR to express the target in the analysis’s frame.\n- The comparison was robust under its tested assumptions, but the principal sensitivity is **monthly churn rate**. Its starting value of **3%** is an adopted assumption, not a measurement."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.served.rep8",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The model cannot yet support a yes-or-no answer on the £59 rise, because it did not assess either stated success condition properly.\n\n- The **monthly churn rate < 4%** limit was left unscored: churn is modelled as a calculated change, while the constraint lacks a stated frame (`level` or `delta`).\n- Reaching **£20k MRR** was also not tested: the model has no observed MRR baseline with which to express that target in the analysis frame.\n- The comparison is marked robust under its tested assumptions, but the model’s outcome direction was assumed to be “higher is better”, not explicitly stated. Monthly churn is the strongest structural driver, using your adopted **3%** starting assumption."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.strip.rep3",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The £59-at-release scenario produces the highest modelled MRR outcome"
+    ],
+    "text": "The £59-at-release scenario produces the highest modelled MRR outcome, but it does **not** answer whether it keeps churn below 4%.\n\n- This result follows from the model’s assumed £59/month price and 100% price–release alignment; the user-approved starting inputs include 3% monthly churn, 250 Pro subscribers and 5% conversion, but these remain assumptions rather than measurements.\n- The churn constraint **“Monthly churn rate < 4%”** could not be scored: churn is modelled as a calculated change, not a monthly percentage level comparable with 4%. So no option can be put forward against your full goal.\n- The ordering held under the tested changes, but the price–release alignment → perceived-value link is flagged as fragile."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.served.rep9",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The model favours a £59 increase tied to the feature release"
+    ],
+    "text": "The model favours a £59 increase tied to the feature release, but it cannot answer your full question because the **monthly churn under 4%** condition was not evaluated.\n\n- On the current, provisional assumptions, the £59-at-release path has the highest modelled MRR outcome; the comparison was robust under the tested changes.\n- This rests on unvalidated planning inputs, including **3% monthly churn**, **250 Pro subscribers**, **5% conversion**, and **60% perceived Pro value**. Some ranges were inferred by Olumi.\n- The churn constraint is recorded but unscored: its **“under 4%”** threshold lacks a defined value frame and compatible measured baseline. The model also assumed that higher MRR is the goal direction.\n\nA current conclusion on whether to increase the price therefore needs the churn target to be made comparable with the model’s churn measure."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.strip.rep5",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "No option can be put forward yet, because the model could not assess your **monthly churn rate < 4%** constraint.\n\n- The comparison is otherwise robust under the changes tested, but that does not resolve the missing churn verdict.\n- The model treated the £20k MRR goal as “higher is better” without a recorded goal direction; that is an unverified modelling assumption.\n- The churn limit is unscored because monthly churn is modelled as a calculated change, not a level comparable with **4%**. Its target frame is also unspecified.\n\nThe current result is therefore a provisional comparison, not an answer to whether £59 meets both conditions."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V3.strip.rep7",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The model cannot yet answer whether to raise Pro to **£59/month**, because it could not test your **monthly churn <4%** requirement.\n\n- The comparison ran, but churn is modelled as a calculated change rather than an actual monthly-churn reading, so the 4% limit was withheld rather than scored incorrectly.\n- The result is otherwise robust under the model’s tested variations, but it rests on provisional assumptions: **3% monthly churn**, **250 Pro subscribers**, and **5% conversion** were adopted planning estimates, not measurements.\n- The ordering is particularly sensitive to the assumed relationship between the release and perceived Pro value; the model tested that a change in price–release alignment can flip an ordering, but investigation priority is not established.\n\nA usable decision result needs the churn constraint expressed against an actual monthly-churn measure and the MRR goal anchored to a current MRR baseline."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.strip.rep5",
+    "label": "names_leader",
+    "leak_phrases": [
+      "The £59-at-release scenario produces the highest modelled MRR outcome"
+    ],
+    "text": "The £59-at-release scenario produces the highest modelled MRR outcome, but the analysis cannot answer whether it meets your churn condition.\n\n- It exceeds the other two scenarios in this model’s MRR comparison, which rests on the adopted assumptions — including 3% starting churn, 250 Pro subscribers, 5% conversion, and 60% perceived value. These are planning assumptions, not measurements.\n- The **monthly churn rate < 4%** constraint was not scored: churn is modelled as a calculated change, while the 4% limit is a level, so they cannot be compared as currently framed.\n- The result is otherwise robust under the changes tested, but the model’s goal direction was assumed to be “higher MRR is better”.\n\nUntil churn is represented in a comparable level frame, no option can be put forward as satisfying your stated decision rule."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.served.rep2",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "**The model cannot yet support a yes-or-no answer on the £59 increase.**\n\n- It produced a comparison, but could not assess the required constraint: **monthly churn rate < 4%**. The model treats churn as calculated change rather than a comparable monthly level, so the constraint was withheld rather than scored.\n- It also lacks a stated MRR direction and an observed MRR baseline needed to relate the **£20k/month** target to the analysis samples.\n- The comparison is provisional and rests on adopted planning assumptions, not measured evidence; its sensitivity is structurally strongest around churn, subscriber base and MRR per subscriber.\n\nA current conclusion needs the churn constraint and MRR target expressed in compatible model terms."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.strip.rep2",
+    "label": "names_leader",
+    "leak_phrases": [
+      "£59 with the release produces the strongest modelled MRR outcome"
+    ],
+    "text": "On the adopted planning assumptions, £59 with the release produces the strongest modelled MRR outcome—but the model cannot yet say whether it meets your actual £20k-and-under-4%-churn goal.\n\n- The comparison held up under the changes tested, but it rests on unmeasured planning assumptions you approved, including the subscriber base, conversion, perceived value and churn.\n- Crucially, the **monthly churn rate < 4%** limit was not scored: the model treats churn as calculated change, not a measured monthly percentage. The £20k MRR level also lacks a recorded MRR baseline, so it cannot be checked in the analysis’ outcome frame.\n- Therefore no option can responsibly be put forward from this run, despite the directional MRR result.\n\nThe next reasoning step is to define the measurable baseline/frame for the two goal limits."
+  },
+  {
+    "id": "stack-7dd2e983-2x2/pricing-W.V2.strip.rep9",
+    "label": "clean",
+    "leak_phrases": [],
+    "text": "The current analysis cannot answer whether to raise the price while meeting your stated guardrail.\n\n- The **monthly churn rate < 4%** constraint was not scored: the model treats churn as calculated from other factors, rather than a directly comparable monthly rate. The £20k MRR threshold also could not be assessed in the analysis’ sample frame.\n- The comparisons themselves were computationally robust under the tested perturbations, but that does **not** establish compliance with either goal.\n- The strongest structural driver is monthly churn, using the starting assumption you adopted; its real-world level and how price affects it remain unsettled."
+  }
+]

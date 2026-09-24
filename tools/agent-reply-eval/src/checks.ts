@@ -144,7 +144,7 @@ const LEADER_CUE = new RegExp(
     String.raw`\b(?:more|most) likely to (?:lead|win|come out)\b`,
     String.raw`\b(?:higher|highest|greater|greatest|better) (?:modelled |simulated )?(?:chance|probability|likelihood) of (?:leading|winning|coming out)\b`,
     String.raw`\bhighest\b(?:\s+[\w-]+){0,3}?\s+(?:chance|probability|likelihood|win|frequency|share|score|outcome|rate)\b`,
-    String.raw`\bscored highest\b|\bmost often\b`,
+    String.raw`\bscor(?:es|ed|ing) (?:the )?highest\b|\bmost often\b`,
     String.raw`\b(?:the|current|clear|apparent) leader\b`,
     String.raw`\bof (?:the )?(?:model |simulated )?(?:runs|simulations|scenarios)\b`,
   ].join('|'),
@@ -169,10 +169,20 @@ const NOT_ASSERTED_ANYWHERE = /\b(?:neither|nor|whether)\b|\brather than\b|\bins
 const ROLE_LEAD =
   /\b(?:tech(?:nical)?|team|engineering|squad|project|product|design|delivery|dev(?:elopment)?)[\s-]+leads?(?:ership)?\b|(?<!\bin\s)\b(?:a|an|the|one|new|another|dedicated|senior)\s+lead\b|\blead[\s-]?times?\b|\blead(?:ership)? (?:capacity|coverage|role|hire)s?\b/gi;
 
+/**
+ * A hyphenated compound hides the option from the tokeniser ("the £59-at-release path"). Every clause is
+ * read twice — as written and with inner hyphens split — and a claim found either way counts once.
+ * Corpus v4 (65 real withheld replies, blind-labelled): the split alone took recall from 12 to 24 of 34.
+ */
+const splitInnerHyphens = (t: string): string => t.replace(/(\w)-(\w)/g, '$1 $2');
+
 export function leaderClaimsIn(text: string, matchers: readonly OptionMatcher[], otherLabels: readonly string[]): string[] {
   const out: string[] = [];
   const analysisSentence = ANALYSIS_CONTEXT.test(text);
-  for (const clause of clausesOf(text)) {
+  const asWritten = clausesOf(text);
+  const split = clausesOf(splitInnerHyphens(text));
+  for (const [i, clause] of [...asWritten, ...split].entries()) {
+    if (i >= asWritten.length && out.includes(asWritten[i - asWritten.length] ?? '')) continue;
     if (optionsNamedIn(clause, matchers).length === 0) continue;
     const masked = maskOptions(clause, matchers, otherLabels).replace(ROLE_LEAD, ' role ');
     if (NOT_ASSERTED_ANYWHERE.test(masked)) continue;
