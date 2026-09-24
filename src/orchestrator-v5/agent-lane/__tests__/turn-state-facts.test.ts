@@ -129,7 +129,24 @@ describe('the agent route surfaces them, and only when there is something to say
     // which is true — but it also trains a consumer to ignore the field. The
     // conditional is what keeps its presence meaningful.
     const sidecar = ROUTE.slice(ROUTE.lastIndexOf('_agent: {'));
-    expect(sidecar).toContain('stateFacts.rescaled.length > 0 || stateFacts.ranges_added.length > 0');
+    // ⚠ WIDENED, and the widening is the point. The gate used to be
+    // `rescaled.length > 0 || ranges_added.length > 0`, which omitted the key on
+    // exactly the turn a reconciling surface most needs it: a frame write refused
+    // and the readback failed, nothing rescaled, nothing added. `_agent` then
+    // carried NO `state_facts` and read as "nothing happened", while the prose was
+    // saying the state is unknown.
+    //
+    // The ORIGINAL INTENT is unchanged and still asserted below: the key is
+    // omitted when there is genuinely nothing to disclose, so its presence stays
+    // meaningful. What changed is what counts as something to disclose.
+    expect(sidecar).toContain('stateFacts.rescaled.length > 0');
+    expect(sidecar).toContain('stateFacts.ranges_added.length > 0');
+    expect(sidecar).toContain('ranges_not_attached');
+    expect(sidecar).toContain('current_state_unknown === true');
+    // ⭐ AND IT IS STILL CONDITIONAL — a regression to an unconditional
+    // `state_facts: stateFacts` would satisfy every `toContain` above, so the
+    // conditional itself is bound here.
+    expect(sidecar).toMatch(/\?\s*\{ state_facts: stateFacts \}\s*\n?\s*:\s*\{\}/);
   });
 });
 
