@@ -37,9 +37,9 @@ describe('what the server itself observed about this turn', () => {
   });
 
   it('⛔ reports NOTHING when nothing was rescaled or framed', () => {
-    expect(collectTurnStateFacts([{ ok: true, mutated: true }])).toEqual({ rescaled: [], ranges_added: [], ranges_not_attached: [] });
-    expect(collectTurnStateFacts([])).toEqual({ rescaled: [], ranges_added: [], ranges_not_attached: [] });
-    expect(collectTurnStateFacts(undefined)).toEqual({ rescaled: [], ranges_added: [], ranges_not_attached: [] });
+    expect(collectTurnStateFacts([{ ok: true, mutated: true }])).toEqual({ rescaled: [], ranges_added: [], ranges_not_attached: [], current_state_unknown: false });
+    expect(collectTurnStateFacts([])).toEqual({ rescaled: [], ranges_added: [], ranges_not_attached: [], current_state_unknown: false });
+    expect(collectTurnStateFacts(undefined)).toEqual({ rescaled: [], ranges_added: [], ranges_not_attached: [], current_state_unknown: false });
   });
 
   it('⛔ drops an entry that cannot name WHICH FACTOR it concerns', () => {
@@ -99,7 +99,7 @@ describe('what the server itself observed about this turn', () => {
 
   it('survives malformed tool results without throwing', () => {
     expect(collectTurnStateFacts([null, 'x', 42, { rescaled_by_the_model: 'not-an-array' }, { ranges_added_for_analysis: 5 }]))
-      .toEqual({ rescaled: [], ranges_added: [], ranges_not_attached: [] });
+      .toEqual({ rescaled: [], ranges_added: [], ranges_not_attached: [], current_state_unknown: false });
   });
 });
 
