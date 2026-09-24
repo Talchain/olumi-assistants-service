@@ -139,6 +139,26 @@ RTOOLS=$(jqv "$RUN1" '[._agent.tool_calls[]?|.name]|join(",")')
 say "   ${EL}s · tools=${RTOOLS:-none} · $(printf '%s' "$RTXT" | wc -c | tr -d ' ') chars"
 gate "Run: run_analysis was called" "$(printf '%s' "$RTOOLS" | grep -q run_analysis && echo 1 || echo 0)" "tools=${RTOOLS:-none}"
 gate "Run: a substantive interpretation came back" "$([ "$(printf '%s' "$RTXT" | wc -c | tr -d ' ')" -gt 200 ] && echo 1 || echo 0)" "$(printf '%s' "$RTXT" | wc -c | tr -d ' ') chars"
+# ⛔ A STRUCTURAL REFUSAL IS A DEFECT, NOT A LEGITIMATE OUTCOME.
+#
+# "needs more values" is the product working — the user supplies them. A CIRCULAR
+# DEPENDENCY is different in kind: it is decided at CONSTRUCTION, and the user only
+# meets it after paying the whole journey (brief, suggested assumptions, one
+# approval). Measured on served 6dfb56f: the A2 churn-cause brief came back "The
+# analysis is currently blocked by a circular dependency in the model, so it cannot
+# yet calculate a defensible ordering of the four paths." 1 of 4 briefs.
+#
+# The asymmetry that makes it a defect: `graph-structure-validator.ts:184` REFUSES
+# an edit that "would create a circular dependency", and `:185` reports one during
+# analysis — but construction never runs that check, so a first model is allowed to
+# be born with the condition an edit is forbidden from creating.
+#
+# Gated separately from the interpretation check, because that one passes on a
+# blocked run: a paragraph explaining the block IS substantive prose.
+gate "Run: not blocked by a model-structure defect" \
+  "$(printf '%s' "$RTXT" | grep -qiE "circular dependenc|cyclic|dependency cycle" && echo 0 || echo 1)" \
+  "a cycle is decided at construction and costs the user the whole journey"
+
 # A declined run is a legitimate outcome, but the user must be TOLD, not left guessing.
 if printf '%s' "$RTXT" | grep -qiE "declin|could not run|cannot run|unable to run"; then
   say "   NOTE: the engine DECLINED this run and said so. That is honest, not a failure —"
