@@ -1264,7 +1264,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     ];
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
 
-    const narration = narrateWriteOutcome(text, result.tool_calls, result.tool_results);
+    // A Run writes nothing: its interpretation is never passed through the WRITE narrator, whose
+    // completion-claim stripper would delete a sentence and append a false write-status line
+    // (finding 3 on #1786, 5807230197).
+    const narration = fastPath === 'run'
+      ? { text, status: null as string | null, stripped: [] as string[] }
+      : narrateWriteOutcome(text, result.tool_calls, result.tool_results);
     const composed = composeDirectAnswerResponse({
       // ⛔ A proposal id is a binding for authorise_change, never text a user reads or
       // types (display-ids.ts). Applied here, before the answer row is written, so a

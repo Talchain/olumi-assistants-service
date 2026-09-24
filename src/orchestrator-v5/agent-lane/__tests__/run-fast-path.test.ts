@@ -25,7 +25,8 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
   let modelBodies: Record<string, unknown>[] = [];
   let runs = 0;
   // How the ONE interpreting call behaves: answers, fails with an HTTP error, or says nothing.
-  let interp: 'ok' | 'throw' | 'empty' = 'ok';
+  let interp: 'ok' | 'throw' | 'empty' | 'claims' = 'ok';
+  const CLAIMING = 'Your starting assumptions were applied before this run. In the current model, Hire a tech lead leads, but only weakly.';
   // A BLOCKED Run: HTTP 200, no analysis_result, Olumi's own explanation (the real recoverable shape).
   let blocked = false;
   const BLOCKED_WORDS = 'I can\'t run the analysis yet: no option has a path to the goal.';
@@ -35,6 +36,7 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
       modelBodies.push(body);
       if (body['tool_choice'] === 'none' && interp === 'throw') return new Response(JSON.stringify({ error: { message: 'boom' } }), { status: 400 });
       if (body['tool_choice'] === 'none' && interp === 'empty') return new Response(JSON.stringify({ output: [] }), { status: 200 });
+      if (body['tool_choice'] === 'none' && interp === 'claims') return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: CLAIMING }] }] }), { status: 200 });
       if (body['tool_choice'] !== 'none' && modelBodies.length === 1) {
         // The Agent path: it would first decide to call run_analysis.
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'run_analysis', call_id: 'c1', arguments: JSON.stringify({ reason: 'asked' }) }] }), { status: 200 });
@@ -199,5 +201,21 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
     expect(stillValidOffers(offered, { outstandingProposalIds: new Set(), analysisReady: { status: 'needs_user_input', may_run: false }, analysisState: {} }).map((a) => a.id))
       .toEqual(['agent-suggest-what-it-needs']);
     expect(stillValidOffers(offered, { outstandingProposalIds: new Set(), analysisReady: { status: 'ready', may_run: true }, analysisState: {} }), 'runnable now: no stale remedy').toEqual([]);
+  });
+  /**
+   * ⛔ Finding 3 on #1786 (5807230197): the Run's interpretation — a turn that writes NOTHING — was
+   * passed through the WRITE narrator, whose completion-claim stripper deletes a sentence such as
+   * "…were applied before this run" and appends "Nothing was saved this turn." to an analysis
+   * explanation. There is no write on this path for the stripper to protect.
+   */
+  it('RED: the interpretation reaches the user intact — no sentence stripped, no write-status line appended', async () => {
+    interp = 'claims';
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+    } });
+    const b = r.json() as { assistant_text: string; _diagnostic_trace: { fast_path?: string } };
+    expect(b._diagnostic_trace.fast_path).toBe('run');
+    expect(b.assistant_text).toContain(CLAIMING);
+    expect(b.assistant_text).not.toContain('Nothing was saved this turn');
   });
 });
