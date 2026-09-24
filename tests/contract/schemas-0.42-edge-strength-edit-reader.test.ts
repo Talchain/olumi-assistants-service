@@ -173,7 +173,10 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     //
     // So the strict member, the root superRefine and the intent/direction
     // vocabularies this suite exercises are unchanged across the bump.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.55.0');
+    // 0.56.0 — `analysis_participation_withheld`. UPDATED, never loosened: this
+    // pin is what makes a re-vendor a deliberate act, and it is the only thing
+    // that would catch a tarball swapped under the same version string.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.56.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {

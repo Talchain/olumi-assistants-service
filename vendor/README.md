@@ -7,7 +7,50 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.55.0.tgz` ← **THE CURRENT PIN**
+### `talchain-schemas-0.56.0.tgz` ← **THE CURRENT PIN**
+
+> ## ⛔⛔ PRE-PUBLISH BRANCH PACK — **THIS MUST BE RE-VENDORED FROM THE REGISTRY BEFORE THIS PR MERGES.**
+>
+> **These are NOT the published bytes, because there are no published bytes yet.**
+> `@talchain/schemas@0.56.0` is unpublished: it lives on `Talchain/olumi-schemas`
+> **PR #61**, branch `contract/analysis-participation-withheld-0.56`, and
+> `publish.yml` only publishes on a push to `main`. So this tarball was produced by
+> `npm pack` from that branch at **`8342e2f4ba80b35726854a3dc56886455424fbbb`**,
+> after `npm ci && npm run build`.
+>
+> **577,971 bytes · sha256 `09be1d514dee9dd07abfecac8ee3f76fedd9e6940aff1f0b1957cce4cc538064`.**
+>
+> ⚠ **npm REPACKS ON PUBLISH, so the registry artefact will have DIFFERENT
+> ENVELOPE BYTES and a different sha256 from this file even if every unpacked
+> byte is identical.** That is stated in the 0.31.0 and 0.46.0 entries below and
+> it is the whole reason this warning is here. Merging this PR with this file in
+> place would put a second byte-set into circulation under the version string
+> `0.56.0` — precisely the hazard the 0.55.0 entry's neighbours were written to
+> prevent, and the debt the 0.32.0 entry still carries unpaid as ROADMAP 2.464
+> (*"the registry-bytes comparison flagged in that entry was never performed"*).
+>
+> **THE REQUIRED SEQUENCE, and it is not optional:**
+>
+> 1. Merge `olumi-schemas` PR #61 to `main`. `publish.yml` publishes `0.56.0` and
+>    tags `v0.56.0`.
+> 2. **Download** the published tarball from GitHub Packages, replace this file,
+>    rewrite the `.sha256`, and rewrite this entry in the form every other
+>    CURRENT-PIN entry uses — registry URL, `npm shasum` (sha1), `integrity`
+>    (sha512), sha256, the publisher job and run id, and the `gitHead` commit the
+>    registry binds.
+> 3. Re-run `pnpm install` so `pnpm-lock.yaml` records the registry integrity
+>    rather than this pack's.
+> 4. Only then merge this PR.
+>
+> **What this release adds (additive only):** `AnalysisParticipationWithheldSchema`
+> plus two optional fields —
+> `OlumiResponseSchema.analysis_participation_withheld` (the wire member,
+> **top-level**, deliberately NOT inside the strict `analysis_result` block) and
+> `RunAnalysisResultSchema.analysis_participation_withheld` (the persistence
+> carrier, the **same schema object**). It also carries `olumi-schemas` #59 and
+> #60, which changed the adoption manifest on `main` without a version bump.
+
+### `talchain-schemas-0.55.0.tgz` (historical — no longer vendored as of 0.56.0)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
 >

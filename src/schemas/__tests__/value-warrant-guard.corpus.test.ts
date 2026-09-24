@@ -294,18 +294,27 @@ describe("the live value-bearing contract, adjudicated", () => {
     expect(report.stale.map((d) => d.id)).toEqual([]);
   });
 
-  it("the first cut is an ENUMERATION: 34 sites, 26 findings, 18 OPEN, 8 accepted", () => {
-    // Pinned so the shape of the first cut cannot move quietly. There is no date
-    // trigger anywhere in this check — a CI job that turns red on a calendar is a
-    // time bomb. What this gives instead is an OPEN count a human can watch.
-    expect(SITES.length).toBe(34);
-    expect(FINDINGS.length).toBe(26);
+  it("the enumeration is 36 sites, 28 findings, 18 OPEN, 10 accepted", () => {
+    // Pinned so the shape cannot move quietly. There is no date trigger anywhere
+    // in this check — a CI job that turns red on a calendar is a time bomb. What
+    // this gives instead is an OPEN count a human can watch.
+    //
+    // ⭐ MOVED 34 → 36 ON 19 Sep 2026, AND THE WAY IT MOVED IS THE POINT.
+    // The guard landed as #1608 and REDded the very next PR to add value-bearing
+    // boundary fields — "expected 36 to be 34", within the hour. The two new
+    // fields (`analysis_participation_withheld.{excluded_node_count,
+    // pruned_edge_count}`) could not enter the boundary without someone
+    // answering the question the guard asks. Both are ACCEPTED with the argument
+    // recorded, so OPEN is UNCHANGED at 18: nothing was rushed through to make
+    // this green, and the number a human watches did not move.
+    expect(SITES.length).toBe(36);
+    expect(FINDINGS.length).toBe(28);
     expect(report.open.length).toBe(18);
-    expect(report.accepted.length).toBe(8);
+    expect(report.accepted.length).toBe(10);
     expect(SITES.filter((s) => s.verdict === "FIELD").length).toBe(4);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SOLE").length).toBe(4);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(11);
-    expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(15);
+    expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(17);
   });
 
   it("no decision is a bare exemption — each one argues, or names the one that does", () => {
