@@ -1,0 +1,439 @@
+{
+  "source": {
+    "filename": "olumi-debug-0f174255-20260924.json",
+    "sha256": "8807bd75d21b523266b0638bc92828fb2243108e050d40d6e236a8d9a3f760cb",
+    "trace_id": "0f174255-af68-4755-bc67-0dbe5a333269",
+    "captured_at": "2026-09-24T09:41:55Z",
+    "cee_build": "not captured",
+    "proposal_arguments": "not captured; proposal tests reconstruct the visible offer only"
+  },
+  "brief": "Should I hire a Tech lead or two developers to increase productivity?",
+  "graph": {
+    "nodes": [
+      {
+        "id": "decision_productivity_increase",
+        "kind": "decision",
+        "label": "Decision: Productivity increase",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "productivity_increase",
+        "kind": "goal",
+        "label": "Productivity increase",
+        "provenance": "from_brief",
+        "goal_threshold_raw": 0,
+        "goal_threshold_unit": "%",
+        "goal_threshold_frame": "level"
+      },
+      {
+        "id": "hire_a_tech_lead",
+        "kind": "option",
+        "label": "Hire a Tech Lead",
+        "provenance": "from_brief",
+        "interventions": {
+          "tech_lead_headcount": {
+            "value": 0.2,
+            "source": "brief_extraction"
+          }
+        }
+      },
+      {
+        "id": "hire_two_developers",
+        "kind": "option",
+        "label": "Hire Two Developers",
+        "provenance": "from_brief",
+        "interventions": {
+          "developer_headcount": {
+            "value": 0.1,
+            "source": "brief_extraction"
+          }
+        }
+      },
+      {
+        "id": "maintain_current_team",
+        "kind": "option",
+        "label": "Maintain Current Team",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "hire_one_developer",
+        "kind": "option",
+        "label": "Hire One Developer",
+        "provenance": "ai_inferred",
+        "interventions": {
+          "developer_headcount": {
+            "value": 0.05,
+            "source": "cee_hypothesis"
+          }
+        }
+      },
+      {
+        "id": "tech_lead_headcount",
+        "kind": "factor",
+        "label": "Tech Lead headcount",
+        "category": "controllable",
+        "provenance": "from_brief",
+        "scale_frame": 5
+      },
+      {
+        "id": "developer_headcount",
+        "kind": "factor",
+        "label": "Developer headcount",
+        "category": "controllable",
+        "provenance": "from_brief",
+        "scale_frame": 20
+      },
+      {
+        "id": "technical_direction_quality",
+        "kind": "factor",
+        "label": "Technical direction quality",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100
+      },
+      {
+        "id": "delivery_capacity",
+        "kind": "factor",
+        "label": "Delivery capacity",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100
+      },
+      {
+        "id": "coordination_efficiency",
+        "kind": "factor",
+        "label": "Coordination efficiency",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100
+      },
+      {
+        "id": "onboarding_disruption",
+        "kind": "risk",
+        "label": "Onboarding disruption",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "technical_leadership_mismatch",
+        "kind": "risk",
+        "label": "Technical leadership mismatch",
+        "provenance": "ai_inferred"
+      }
+    ],
+    "edges": [
+      {
+        "to": "hire_a_tech_lead",
+        "from": "decision_productivity_increase",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "hire_two_developers",
+        "from": "decision_productivity_increase",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "maintain_current_team",
+        "from": "decision_productivity_increase",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "hire_one_developer",
+        "from": "decision_productivity_increase",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "tech_lead_headcount",
+        "from": "hire_a_tech_lead",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "developer_headcount",
+        "from": "hire_two_developers",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "tech_lead_headcount",
+        "from": "maintain_current_team",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "developer_headcount",
+        "from": "maintain_current_team",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "developer_headcount",
+        "from": "hire_one_developer",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "technical_leadership_mismatch",
+        "from": "hire_a_tech_lead",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "onboarding_disruption",
+        "from": "hire_a_tech_lead",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "onboarding_disruption",
+        "from": "hire_two_developers",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "onboarding_disruption",
+        "from": "hire_one_developer",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "technical_direction_quality",
+        "from": "tech_lead_headcount",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "delivery_capacity",
+        "from": "developer_headcount",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "coordination_efficiency",
+        "from": "technical_direction_quality",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "productivity_increase",
+        "from": "technical_direction_quality",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "productivity_increase",
+        "from": "delivery_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "productivity_increase",
+        "from": "coordination_efficiency",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "productivity_increase",
+        "from": "onboarding_disruption",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "technical_direction_quality",
+        "from": "technical_leadership_mismatch",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      }
+    ]
+  },
+  "narrated_offer": {
+    "status": "proposed_not_adopted",
+    "developer_baseline": 5,
+    "tech_lead_baseline": 0,
+    "developer_totals": {
+      "hire_two_developers": 7,
+      "hire_one_developer": 6,
+      "maintain_current_team": 5
+    }
+  },
+  "recorded_tool_calls": [
+    {
+      "name": "get_canonical_state",
+      "ok": true,
+      "mutated": false
+    },
+    {
+      "name": "build_model_from_brief",
+      "ok": true,
+      "mutated": true
+    },
+    {
+      "name": "propose_starting_point",
+      "ok": true,
+      "mutated": false,
+      "proposal_id": "prop_da22ec43409da2a6e560e6ec30271434"
+    }
+  ]
+}
