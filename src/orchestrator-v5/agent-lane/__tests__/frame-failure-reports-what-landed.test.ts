@@ -49,7 +49,7 @@ const ASK = {
  *   · 'changes_value'  — the competing writer overwrites an approved value. The
  *     reply must NOT call it unchanged or safe.
  */
-function product(opts: { frameRefusal?: boolean; competingWriter?: 'attaches_range' | 'changes_value'; readbackFails?: boolean } = {}) {
+function product(opts: { frameRefusal?: boolean; competingWriter?: 'attaches_range' | 'changes_value' | 'duplicate_label_frames_the_twin'; readbackFails?: boolean } = {}) {
   const posted: { target_id: string; value: number }[] = [];
   // Counted so a control can prove the re-read HAPPENED, not just that the
   // wording changed. Without it the two claims above cannot be derived at all.
@@ -67,6 +67,16 @@ function product(opts: { frameRefusal?: boolean; competingWriter?: 'attaches_ran
         if (opts.competingWriter === 'attaches_range') {
           nodes = nodes.map((n) => (n.id === 'monthly_churn_rate'
             ? { ...n, observed_state: { ...n.observed_state, cap: 100 } }
+            : n));
+        } else if (opts.competingWriter === 'duplicate_label_frames_the_twin') {
+          // ⛔ THE DUPLICATE-LABEL CONTROL. The competing writer renames the SECOND
+          // factor to the FIRST one's label and frames only the second. Both now
+          // display 'Monthly churn rate'; only `pro_subscribers` has a range, and
+          // it appears LATER in the node list — so a `Map<label, node>` built in
+          // order resolves BOTH to it and reports every factor as framed, while
+          // `monthly_churn_rate` still blocks the analysis.
+          nodes = nodes.map((n) => (n.id === 'pro_subscribers'
+            ? { ...n, label: 'Monthly churn rate', observed_state: { ...n.observed_state, cap: 1000 } }
             : n));
         } else if (opts.competingWriter === 'changes_value') {
           nodes = nodes.map((n) => (n.id === 'monthly_churn_rate'
@@ -89,6 +99,7 @@ function product(opts: { frameRefusal?: boolean; competingWriter?: 'attaches_ran
       nodes = nodes.map((n) => (n.id === ev.target_id
         ? { ...n, observed_state: { ...n.observed_state, value: ev.value, raw_value: ev.value } }
         : n));
+
       rev += 1;
       return { status: 200, json: { assistant_text: 'Updated.' } };
     }
@@ -101,7 +112,7 @@ function product(opts: { frameRefusal?: boolean; competingWriter?: 'attaches_ran
   return { d, posted, registered, read: () => nodes, reads: () => reads };
 }
 
-async function authorise(opts: { frameRefusal?: boolean; competingWriter?: 'attaches_range' | 'changes_value'; readbackFails?: boolean } = {}) {
+async function authorise(opts: { frameRefusal?: boolean; competingWriter?: 'attaches_range' | 'changes_value' | 'duplicate_label_frames_the_twin'; readbackFails?: boolean } = {}) {
   const p = product(opts);
   const caps = createAgentCapabilities(p.d, new ProposalStore());
   const prop = await caps.proposeAssumptions(ctx as never, ASK as never);
@@ -445,5 +456,52 @@ describe('⛔ LIMB 1 (the assertion half) — the frame write carries the identi
     expect('expected_graph_identity_hash' in frame, 'fabricated an identity the read never supplied').toBe(false);
     // The analysis expectation still goes, so the write stays conditional.
     expect(frame.expected_graph_hash).toBeDefined();
+  });
+});
+
+
+/**
+ * ⛔⛔ THE DUPLICATE-LABEL STALE REFUSAL — accepted from independent review of
+ * #1743, and it is the sharper half of that finding.
+ *
+ * The post-refusal readback joined the fresh canonical nodes by
+ * `Map<label, node>`, where the LAST duplicate label wins. A label is a value
+ * another object can satisfy, so binding a user-facing claim to one is the
+ * estate's own named trap — and I walked into it while fixing the RENAME case,
+ * which an id join handles for free.
+ *
+ * Control: two factors both display 'Monthly churn rate'. `pro_subscribers` is
+ * framed by a competing writer and appears later; `monthly_churn_rate` is still
+ * unframed and still blocks the analysis.
+ */
+describe('⛔ THE DUPLICATE-LABEL CONTROL — a claim is bound to the node ID, never to its label', () => {
+  it('⛔⛔ THE DEFECT: the still-unframed factor is NOT resolved away by its framed twin', async () => {
+    const { r } = await authorise({ frameRefusal: true, competingWriter: 'duplicate_label_frames_the_twin' });
+    const agent = r as { ranges_not_attached?: { factor: string }[]; analysis_still_blocked_for?: string[] };
+    // With the label join this array was EMPTY and the reply said every factor now
+    // had a range — while the analysis stayed blocked.
+    expect(agent.ranges_not_attached ?? []).toHaveLength(1);
+    expect(agent.analysis_still_blocked_for ?? []).toHaveLength(1);
+    await Promise.resolve();
+  });
+
+  it('⭐ CONTRAST: with UNIQUE labels the same competing writer classifies correctly', async () => {
+    // The discriminator. If the fix merely stopped dropping entries, this would
+    // over-report: here the competing writer frames the factor this turn wanted to
+    // frame, so it must be dropped.
+    const { r } = await authorise({ frameRefusal: true, competingWriter: 'attaches_range' });
+    const agent = r as { ranges_not_attached?: { factor: string }[] };
+    const named = (agent.ranges_not_attached ?? []).map((f) => f.factor);
+    expect(named).not.toContain('Monthly churn rate');
+  });
+
+  it('⭐ the wire payload shape is unchanged — the internal id is stripped', async () => {
+    // `IntendedFrame` carries `id` internally so the join can be by identity; the
+    // emitted entries must still be exactly `{factor, value, range}`.
+    const { r } = await authorise({ frameRefusal: true, competingWriter: 'duplicate_label_frames_the_twin' });
+    const agent = r as { ranges_not_attached?: Record<string, unknown>[] };
+    for (const e of agent.ranges_not_attached ?? []) {
+      expect(Object.keys(e).sort()).toEqual(['factor', 'range', 'value']);
+    }
   });
 });
