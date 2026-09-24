@@ -655,20 +655,46 @@ export function createAgentCapabilities(
       const notAFactor: { label: string; kind: string }[] = [];
       const occupied: { label: string; current_value: number }[] = [];
       const seen = new Set<string>();
-      const adopted: { id: string; label: string; value: number; unit: string; basis: string }[] = [];
+      const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number }[] = [];
 
       for (const a of input) {
         const node = find(String(a?.factor_label ?? ''));
         if (node === undefined) { unresolved.push(String(a?.factor_label ?? '')); continue; }
         if (!writable(node)) { notAFactor.push({ label: node.label, kind: String(node.kind) }); continue; }
         const existing = node.observed_state?.value;
-        if (typeof existing === 'number') { occupied.push({ label: node.label, current_value: existing }); continue; }
+        /**
+         * ⭐ THE ONE CASE THE BLANKET REFUSAL WAS NEVER MEANT TO CATCH.
+         *
+         * The refusal above this exists to stop the MODEL replacing somebody's
+         * number with a guess "under cover of adopting assumptions". That is
+         * still refused and the wording of that rule has not moved.
+         *
+         * But the product's whole sensitivity loop asks the user to do exactly
+         * the opposite act: the analysis names the assumption the ordering turns
+         * on and invites them to change it and see how much it matters. An
+         * assumption the ordering is sensitive to ALWAYS already holds a value —
+         * otherwise it could not drive an ordering — so every such request landed
+         * on the blanket refusal and the invitation could never be honoured.
+         *
+         * `revise` is opt-in PER FACTOR and the tool tells the model it may set
+         * it only when the user has just asked for that factor to be changed and
+         * named the number. The old value is carried into `replaces` so the
+         * approval the user is shown says what it is replacing: consent stays
+         * informed, and the write still goes through authorise_change like any
+         * other. Nothing here writes.
+         */
+        const userNamedThisChange = a?.revise === true;
+        if (typeof existing === 'number' && !userNamedThisChange) {
+          occupied.push({ label: node.label, current_value: existing });
+          continue;
+        }
         if (!Number.isFinite(Number(a?.value))) { unresolved.push(node.label); continue; }
         if (seen.has(node.id)) continue;
         seen.add(node.id);
         adopted.push({
           id: node.id, label: node.label,
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
+          ...(typeof existing === 'number' ? { replaces: existing } : {}),
         });
       }
 
@@ -691,17 +717,46 @@ export function createAgentCapabilities(
         path: a.id,
         value: { value: a.value, unit: a.unit, basis: a.basis },
       }));
+      /**
+       * ⛔ THE APPROVAL MUST SAY WHAT IT REPLACES.
+       *
+       * A revision and an adoption are different acts and the user is agreeing to
+       * a different thing in each case. "Churn = 6%" hides that a number was
+       * already there; "Churn: 4% to 6%" does not. The receipt quotes this label,
+       * so what was consented to stays legible after the fact.
+       */
+      const revisions = ordered.filter((a) => typeof a.replaces === 'number');
+      const fresh = ordered.filter((a) => typeof a.replaces !== 'number');
+      const withUnit = (a: { value: number; unit: string }) => `${a.value}${a.unit !== '' ? ' ' + a.unit : ''}`;
+      const describe = (a: { label: string; value: number; unit: string; replaces?: number }) =>
+        typeof a.replaces === 'number'
+          ? `${a.label}: ${a.replaces}${a.unit !== '' ? ' ' + a.unit : ''} \u2192 ${withUnit(a)}`
+          : `${a.label} = ${withUnit(a)}`;
+      const heading =
+        revisions.length === 0
+          ? `Adopt ${fresh.length} starting assumption${fresh.length === 1 ? '' : 's'}: `
+          : fresh.length === 0
+            ? `Revise ${revisions.length} value${revisions.length === 1 ? '' : 's'} you asked to change: `
+            : `Revise ${revisions.length} value${revisions.length === 1 ? '' : 's'} and adopt ${fresh.length} starting assumption${fresh.length === 1 ? '' : 's'}: `;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
         operations,
-        provenance: { authored_by: 'model_proposed', basis: 'starting assumptions offered for the user to adopt or correct' },
+        provenance: {
+          // A revision the user named is theirs, not the model's. Only a proposal
+          // made entirely of those may claim it.
+          authored_by: fresh.length === 0 && revisions.length > 0 ? 'user_stated' : 'model_proposed',
+          basis:
+            revisions.length > 0 && fresh.length === 0
+              ? 'values the user asked to change, at the figures they gave'
+              : 'starting assumptions offered for the user to adopt or correct',
+        },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label:
-          `Adopt ${ordered.length} starting assumption${ordered.length === 1 ? '' : 's'}: ` +
-          ordered.map((a) => `${a.label} = ${a.value}${a.unit !== '' ? ' ' + a.unit : ''}`).join('; ') +
-          leftOutClause(notAFactor),
+        // ⭐ BOTH sides are needed: the revise-aware heading (so an approval says
+        // "Revise 1 value" rather than hiding that a number was already there) AND
+        // the left-out clause (so a label the model does not hold is named).
+        public_label: heading + ordered.map(describe).join('; ') + leftOutClause(notAFactor),
       });
       proposals.put(proposal);
       return {
@@ -709,7 +764,10 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        assumptions: ordered.map((a) => ({ factor: a.label, value: a.value, unit: a.unit, basis: a.basis })),
+        assumptions: ordered.map((a) => ({
+          factor: a.label, value: a.value, unit: a.unit, basis: a.basis,
+          ...(typeof a.replaces === 'number' ? { replaces: a.replaces } : {}),
+        })),
         ...(unresolved.length > 0 ? { unresolved_labels: unresolved } : {}),
         ...(occupied.length > 0 ? { left_alone_already_valued: occupied } : {}),
         // Named, but not something a value can be set on (a risk, an outcome, an option): left out,
