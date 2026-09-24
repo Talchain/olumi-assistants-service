@@ -34,13 +34,27 @@ export const AMEND_CHIP: SuggestedAction = {
 };
 
 export function approvalChipsFor(
-  toolCalls: readonly { name: string; ok: boolean; proposal_id?: string }[],
+  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[],
 ): SuggestedAction[] {
-  if (toolCalls.some((c) => c.name === 'authorise_change')) return [];
+  /**
+   * A turn that authorised something consumes THOSE proposals only: one that approved A and proposed
+   * B offers B (measured on served `6dfb56f`: "Yes, make that change" applied a link and proposed its
+   * level, and the reply had no chip). If any authorisation's identity is unknown, nothing is offered —
+   * never a chip on a guess about which proposal was consumed.
+   *
+   * ⛔ ORDER DECIDES VALIDITY. A proposal is bound to the revision it was made on, and any call that
+   * moved the model after it makes it stale: `ProposalStore.authorise` refuses it as `superseded`
+   * (Codex #1806 5807933515: propose B on H0, then approve A → H1, offered a chip that could not
+   * commit). So only a proposal made AFTER the turn's last model change is still offerable.
+   */
+  const authorisations = toolCalls.filter((c) => c.name === 'authorise_change');
+  if (authorisations.some((c) => typeof c.proposal_id !== 'string')) return [];
+  const consumed = new Set(authorisations.map((c) => c.proposal_id as string));
+  const lastChange = toolCalls.map((c) => c.mutated).lastIndexOf(true);
   const offered = new Map<string, string>();
-  for (const c of toolCalls) {
-    if (c.ok && typeof c.proposal_id === 'string' && APPROVE[c.name] !== undefined) offered.set(c.proposal_id, c.name);
-  }
+  toolCalls.forEach((c, i) => {
+    if (i > lastChange && c.ok && typeof c.proposal_id === 'string' && APPROVE[c.name] !== undefined && !consumed.has(c.proposal_id)) offered.set(c.proposal_id, c.name);
+  });
   if (offered.size !== 1) return [];
   const [proposalId, tool] = [...offered.entries()][0]!;
   const approve = APPROVE[tool]!;
