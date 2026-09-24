@@ -282,8 +282,20 @@ jobs:
   # merges. Coverage thresholds are a regression RATCHET at the measured
   # baseline (see vitest.config.ts), so a red here means a REAL regression —
   # new test failures or a coverage drop — not a stale aspiration.
+  #
+  # ⚠ RUNS AFTER THE REQUIRED JOB, NOT BESIDE IT (24 Sep 2026). Runner slots
+  # are the binding constraint: at 18:10Z, 10 jobs were running and 13 queued,
+  # and a PR's required job sat queued for 21 min. This job is 47% of CI
+  # job-minutes (12,234 of 26,007 min over 48h), more than the required job
+  # itself (40%). Queued beside it, it takes a slot that another PR's REQUIRED
+  # job could have had. `needs:` delays queuing it until this run's required
+  # job finishes. `!cancelled()` keeps it running when that job FAILS, so the
+  # advisory signal is not lost. A newer push that supersedes this run cancels
+  # it before it has used a slot at all.
   full-test-suite:
     name: Full Test Suite (advisory)
+    needs: unit-tests
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
