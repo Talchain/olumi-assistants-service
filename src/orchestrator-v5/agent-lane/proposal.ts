@@ -224,14 +224,30 @@ export class ProposalStore {
     /**
      * ⛔ PARTIAL PROGRESS IS COMMITTED STATE (Codex 5810472138, the interaction with #1788): an option
      * whose node landed but whose links did not was promised a same-proposal continuation. Evicting it as
-     * "unapplied" broke that promise and orphaned its `partial` record. So: an untouched proposal first,
-     * then an applied one (forgotten, it is told honestly — `write-outcome.ts` `unknown_proposal`), and a
-     * partially saved one only when nothing else is left. Every record for the victim goes with it.
+     * "unapplied" broke that promise and orphaned its `partial` record. So a partially saved one goes LAST.
+     *
+     * ⛔⛔ AN UNTOUCHED PROPOSAL IS THE ONE THE USER IS LOOKING AT — it must not be the preferred victim.
+     * MEASURED (24 Sep, running this file at 41e4c563 under node --experimental-strip-types): with
+     * `!applied && !partial` tried FIRST, `items` fills to the cap and the unapplied count drains to 0-1
+     * and STAYS there — at the cap every `put` adds one untouched and evicts one untouched, so the
+     * untouched count is invariant across puts while every `markApplied` decrements it. Simulated from
+     * empty at a 30% approval rate: step 600 -> unapplied 32, step 1500 -> unapplied 0, step 3999 ->
+     * unapplied 1. That is the ATTRACTOR of the policy, not a far corner.
+     *
+     * In that state `proposeStartingPoint` failed 100%: it puts half A, puts half B, then re-reads both.
+     * Half A was evicted by half B's own put, `halves.length !== 2` took the refusal branch, and the user
+     * was told "the model changed while this was being put together" when the model had not changed.
+     * Five consecutive retries all refused, because the refusal path discards the surviving half and
+     * leaves the store one short again.
+     *
+     * So the order is: an APPLIED proposal first — its cycle is complete, and all that is lost is a replay
+     * receipt, which `write-outcome.ts` `unknown_proposal` reports honestly — then an untouched one
+     * (oldest first), and a partially saved one only when nothing else is left. Every record goes with it.
      */
     const held = (id: string) => this.items.has(id);
     const victim =
-      this.order.find((id) => held(id) && !this.applied.has(id) && !this.partial.has(id))
-      ?? this.order.find((id) => held(id) && this.applied.has(id))
+      this.order.find((id) => held(id) && this.applied.has(id))
+      ?? this.order.find((id) => held(id) && !this.partial.has(id))
       ?? this.order.find((id) => held(id));
     if (victim === undefined) return;
     this.items.delete(victim);
@@ -250,6 +266,9 @@ export class ProposalStore {
   }
 
   markApplied(id: string, receipts: readonly ReceiptSummary[] = []): void {
+    // A receipt for a proposal the store no longer holds is a record `authorise` can find and
+    // have nothing to return with, so `applied` stays a SUBSET of `items` rather than nearly one.
+    if (!this.items.has(id)) return;
     this.applied.set(id, receipts);
     this.partial.delete(id);
   }
@@ -268,6 +287,8 @@ export class ProposalStore {
    */
   discard(id: string): void {
     this.items.delete(id);
+    this.applied.delete(id);
+    this.partial.delete(id);
     this.order = this.order.filter((x) => x !== id);
   }
 

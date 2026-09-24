@@ -193,19 +193,52 @@ describe('eviction keeps saved progress, and leaves no orphaned record', () => {
     expect(s.size()).toBeLessThanOrEqual(MAX_PROPOSALS);
   });
 
-  it('CONTRAST: an untouched proposal is the one evicted, and the bound holds', () => {
+  it('CONTRAST: an APPLIED proposal is the one evicted — the untouched and the partial both survive', () => {
     const s = new ProposalStore();
     const untouched = s.put(createProposal(content({ public_label: 'offered and ignored' })));
+    const appliedIds: string[] = [];
     for (let i = 0; i < MAX_PROPOSALS - 2; i++) {
       const p = s.put(createProposal(content({ public_label: 'applied ' + i })));
       s.markApplied(p.proposal_id);
+      appliedIds.push(p.proposal_id);
     }
     const partial = s.put(createProposal(content({ public_label: 'partly saved' })));
     s.markPartial(partial.proposal_id, progress);
     s.put(createProposal(content({ public_label: 'one more' })));
-    expect(s.authorise(req(untouched.proposal_id)).status).toBe('unknown_proposal');
+    expect(s.authorise(req(appliedIds[0]!)).status, 'the oldest APPLIED one went').toBe('unknown_proposal');
+    expect(s.authorise(req(untouched.proposal_id)).status, 'the one the user is looking at survived').toBe('execute');
     expect(s.authorise(req(partial.proposal_id, { current_graph_identity_hash: PARTIAL_REV })).status).toBe('execute');
     expect(s.size()).toBeLessThanOrEqual(MAX_PROPOSALS);
+  });
+
+  /**
+   * ⛔ RED-first for the regression the adversarial review found at 41e4c563 (24 Sep): with an
+   * untouched proposal tried FIRST as the victim, the untouched count at the cap drains to 0-1 and
+   * stays there, so a just-offered proposal is evicted by the very next put from any user.
+   * REVERT the eviction order in `evictOne` and both of these go RED.
+   */
+  it('RED: 199 applied at capacity, then a just-offered proposal survives an unrelated put', () => {
+    const s = new ProposalStore();
+    for (let i = 0; i < MAX_PROPOSALS - 1; i++) {
+      const p = s.put(createProposal(content({ public_label: 'applied ' + i })));
+      s.markApplied(p.proposal_id);
+    }
+    const offered = s.put(createProposal(content({ public_label: 'the proposal the user is being shown' })));
+    s.put(createProposal(content({ public_label: 'an unrelated turn, another user' })));
+    expect(s.authorise(req(offered.proposal_id)).status, 'the user can still approve what they were just offered').toBe('execute');
+    expect(s.outstanding(SCENARIO, USER).map((o) => o.proposal_id), 'it is still listed as awaiting approval').toContain(offered.proposal_id);
+  });
+
+  it('RED: a two-half starting point survives its own second put — no false "the model changed"', () => {
+    const s = new ProposalStore();
+    for (let i = 0; i < MAX_PROPOSALS; i++) {
+      const p = s.put(createProposal(content({ public_label: 'applied ' + i })));
+      s.markApplied(p.proposal_id);
+    }
+    const halfA = s.put(createProposal(content({ public_label: 'the assumptions half' })));
+    const halfB = s.put(createProposal(content({ public_label: 'the option levels half' })));
+    const halves = [halfA, halfB].filter((h) => s.get(h.proposal_id) !== undefined);
+    expect(halves.length, 'both halves must be re-readable, or proposeStartingPoint refuses and blames the model').toBe(2);
   });
 
   it('all-partial at capacity: exactly one (the oldest) goes, and its progress record goes with it', () => {
