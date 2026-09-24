@@ -34,6 +34,7 @@ import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
+import { withCurrentGraphHash } from '../orchestrator-v5/agent-lane/analysis-freshness-stamp.js';
 import { BOARD_EDIT_PREFIX, HistoryStore, historyFromDurableTurns, needsDurableSeed } from '../orchestrator-v5/agent-lane/history-store.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
@@ -535,6 +536,12 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       'agent-lane: could not read the current model back — the client will not learn this turn\u2019s revision, so a delete gesture stands down',
     );
   }
+
+  // ⭐ ONE AUTHORITATIVE STATE: `graphHash` and `analysisReady` come from the
+  // SAME dispatch above, so the stamp cannot describe a different model. See
+  // the helper's header for why `graph_hash_at_run` is never set here.
+  analysisReady = withCurrentGraphHash(analysisReady, graphHash);
+
   return { graphHash, analysisReady, draftGraph, analysisState, analysisResult };
 }
 
