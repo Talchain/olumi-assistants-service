@@ -36,10 +36,18 @@ export const AMEND_CHIP: SuggestedAction = {
 export function approvalChipsFor(
   toolCalls: readonly { name: string; ok: boolean; proposal_id?: string }[],
 ): SuggestedAction[] {
-  if (toolCalls.some((c) => c.name === 'authorise_change')) return [];
+  /**
+   * A turn that authorised something consumes THOSE proposals only: one that approved A and proposed
+   * B offers B (measured on served `6dfb56f`: "Yes, make that change" applied a link and proposed its
+   * level, and the reply had no chip). If any authorisation's identity is unknown, nothing is offered —
+   * never a chip on a guess about which proposal was consumed.
+   */
+  const authorisations = toolCalls.filter((c) => c.name === 'authorise_change');
+  if (authorisations.some((c) => typeof c.proposal_id !== 'string')) return [];
+  const consumed = new Set(authorisations.map((c) => c.proposal_id as string));
   const offered = new Map<string, string>();
   for (const c of toolCalls) {
-    if (c.ok && typeof c.proposal_id === 'string' && APPROVE[c.name] !== undefined) offered.set(c.proposal_id, c.name);
+    if (c.ok && typeof c.proposal_id === 'string' && APPROVE[c.name] !== undefined && !consumed.has(c.proposal_id)) offered.set(c.proposal_id, c.name);
   }
   if (offered.size !== 1) return [];
   const [proposalId, tool] = [...offered.entries()][0]!;

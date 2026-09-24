@@ -30,6 +30,34 @@ describe('approval chips', () => {
     ]);
   });
 
+  /**
+   * ⭐ A turn that APPROVED one change and PROPOSED the next offers the next one's chip (measured on
+   * served `6dfb56f`, 24 Sep: "Yes, make that change" applied the baseline link and proposed its level,
+   * and the reply offered NO chip — the user had to type "yes" again). Only proposals authorised in
+   * THIS turn are consumed; if an authorisation's identity is unknown, nothing is offered on a guess.
+   */
+  it('RED: authorised A and proposed B in one turn → B\'s typed approve chip', () => {
+    const chips = approvalChipsFor([
+      { name: 'authorise_change', ok: true, proposal_id: 'prop_a1b2c3' },
+      { name: 'propose_option_interventions', ok: true, proposal_id: 'prop_d4e5f6' },
+    ]);
+    expect(chips.map((c) => c.id)).toEqual(['agent-approve-proposal:prop_d4e5f6', 'agent-amend-proposal']);
+  });
+
+  it('CONTRAST: the proposal authorised in this same turn is never re-offered', () => {
+    expect(approvalChipsFor([
+      { name: 'propose_model_change', ok: true, proposal_id: 'prop_a1b2c3' },
+      { name: 'authorise_change', ok: true, proposal_id: 'prop_a1b2c3' },
+    ])).toEqual([]);
+  });
+
+  it('CONTRAST: an authorisation whose proposal is unknown → nothing is offered on a guess', () => {
+    expect(approvalChipsFor([
+      { name: 'authorise_change', ok: true },
+      { name: 'propose_option_interventions', ok: true, proposal_id: 'prop_d4e5f6' },
+    ])).toEqual([]);
+  });
+
   it('CONTRAST: two proposals pending → no chip (a "yes" would be ambiguous)', () => {
     expect(approvalChipsFor([
       { name: 'propose_assumptions', ok: true, proposal_id: 'prop_1' },
