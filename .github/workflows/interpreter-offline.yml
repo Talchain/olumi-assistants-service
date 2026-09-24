@@ -1,0 +1,93 @@
+name: Interpreter Offline
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/interpreter-offline.yml'
+      - 'src/orchestrator-v5/agent-lane/prompt-profiles/analysis-interpreter-*.ts'
+      - 'src/orchestrator-v5/agent-lane/__tests__/analysis-interpreter-*.test.ts'
+      - 'Docs/evals/interpreter/**'
+      - 'tools/interpreter-eval/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.npmrc'
+      - 'vendor/talchain-schemas-*.tgz'
+      - 'eslint.config.js'
+      - 'vitest.config.ts'
+      - 'vitest.shared.ts'
+      - 'vitest.setup.ts'
+
+# One run per PR; no push trigger that duplicates the same candidate check.
+concurrency:
+  group: interpreter-offline-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  interpreter-offline:
+    name: Offline Interpreter validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      LLM_PROVIDER: fixtures
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          # The locked Talchain dependency is vendored. Satisfy .npmrc without
+          # making package or model credentials available to this offline job.
+          NPM_PACKAGES_TOKEN: ''
+      - name: Focused tests
+        run: >-
+          pnpm exec vitest run
+          src/orchestrator-v5/agent-lane/__tests__/analysis-interpreter-profile.test.ts
+          src/orchestrator-v5/agent-lane/__tests__/analysis-interpreter-refinement-fixtures.test.ts
+          tools/interpreter-eval/prepare-comparison.test.ts
+          --maxWorkers=1 --fileParallelism=false
+      - name: Targeted lint
+        run: >-
+          pnpm exec eslint
+          src/orchestrator-v5/agent-lane/prompt-profiles/analysis-interpreter-v02.ts
+          src/orchestrator-v5/agent-lane/prompt-profiles/analysis-interpreter-v03.ts
+          src/orchestrator-v5/agent-lane/__tests__/analysis-interpreter-profile.test.ts
+          src/orchestrator-v5/agent-lane/__tests__/analysis-interpreter-refinement-fixtures.test.ts
+          tools/interpreter-eval/prepare-comparison.ts
+          tools/interpreter-eval/prepare-comparison.test.ts
+      - name: Targeted strict TypeScript
+        run: >-
+          pnpm exec tsc --noEmit --strict --target ES2022
+          --module NodeNext --moduleResolution NodeNext --skipLibCheck
+          src/orchestrator-v5/agent-lane/prompt-profiles/analysis-interpreter-v02.ts
+          src/orchestrator-v5/agent-lane/prompt-profiles/analysis-interpreter-v03.ts
+          src/orchestrator-v5/agent-lane/__tests__/analysis-interpreter-profile.test.ts
+          src/orchestrator-v5/agent-lane/__tests__/analysis-interpreter-refinement-fixtures.test.ts
+          tools/interpreter-eval/prepare-comparison.ts
+          tools/interpreter-eval/prepare-comparison.test.ts
+      - name: Prepare matched comparison without model calls
+        run: >-
+          pnpm exec tsx tools/interpreter-eval/prepare-comparison.ts
+          Docs/evals/interpreter/fp3-captured-cases-20260924.json
+          "$RUNNER_TEMP/interpreter-comparison"
+      - name: Record validation scope
+        run: |
+          {
+            echo '### Offline Interpreter validation'
+            echo ''
+            echo "Validated checkout: $(git rev-parse HEAD)"
+            echo 'Focused tests, targeted lint/TypeScript and matched-request preparation completed.'
+            echo 'No provider calls, generated-answer evaluation, deployment or release approval.'
+            echo 'Prepared requests remain in runner temporary storage; no credentials or request artefacts are uploaded.'
+          } >> "$GITHUB_STEP_SUMMARY"
