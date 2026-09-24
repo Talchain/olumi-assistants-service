@@ -519,6 +519,36 @@ export function wireInertStatusQuo(
   return basis.size === 0 ? null : { optionId: statusQuo.id, factorIds: [...basis] };
 }
 
+/**
+ * The shortest mechanism from `from` to `to` over `edges`, or null — THE
+ * option→risk mechanism test (#1830), exported so the producer
+ * (`runtime/build-model.ts`) asks the same question admission answers rather
+ * than a second derivation of it. Pure breadth-first search in edge order; the
+ * caller decides which edges count (admission removes every machine-authored
+ * shortcut first, so no shortcut can be its own mechanism).
+ */
+export function findMechanismPath(
+  edges: readonly { from: string; to: string }[],
+  from: string,
+  to: string,
+): readonly string[] | null {
+  const adjacency = new Map<string, string[]>();
+  for (const e of edges) adjacency.set(e.from, [...(adjacency.get(e.from) ?? []), e.to]);
+  const queue: string[][] = [[from]];
+  const seen = new Set([from]);
+  while (queue.length > 0) {
+    const path = queue.shift()!;
+    const head = path[path.length - 1]!;
+    if (head === to) return path;
+    for (const next of adjacency.get(head) ?? []) {
+      if (seen.has(next)) continue;
+      seen.add(next);
+      queue.push([...path, next]);
+    }
+  }
+  return null;
+}
+
 export function admitCandidateModel(
   model: CandidateModel,
   widened: WidenerAdditions = {},
@@ -1076,27 +1106,8 @@ export function admitCandidateModel(
     && kindById.get(e.to) === 'risk'
     && !USER_AUTHORED_EDGE_SOURCES.has(String(e.provenance?.source ?? '')));
   const shortcutPairs = new Set(shortcutEdges.map((e) => `${e.from}\u0000${e.to}`));
-  const mechanismAdjacency = new Map<string, string[]>();
-  for (const e of [...topologyEdges, ...causalEdges]) {
-    if (shortcutPairs.has(`${e.from}\u0000${e.to}`)) continue;
-    mechanismAdjacency.set(e.from, [...(mechanismAdjacency.get(e.from) ?? []), e.to]);
-  }
-  /** The shortest mechanism from `from` to `to` using no shortcut, or null. */
-  const mechanismPath = (from: string, to: string): readonly string[] | null => {
-    const queue: string[][] = [[from]];
-    const seen = new Set([from]);
-    while (queue.length > 0) {
-      const path = queue.shift()!;
-      const head = path[path.length - 1]!;
-      if (head === to) return path;
-      for (const next of mechanismAdjacency.get(head) ?? []) {
-        if (seen.has(next)) continue;
-        seen.add(next);
-        queue.push([...path, next]);
-      }
-    }
-    return null;
-  };
+  const mechanismGraph = [...topologyEdges, ...causalEdges].filter((e) => !shortcutPairs.has(`${e.from}\u0000${e.to}`));
+  const mechanismPath = (from: string, to: string): readonly string[] | null => findMechanismPath(mechanismGraph, from, to);
   const foldedShortcutPairs = new Set<string>();
   for (const s of shortcutEdges) {
     const optionLabel = labelById.get(s.from) ?? s.from;
