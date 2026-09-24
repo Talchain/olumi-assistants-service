@@ -8,7 +8,7 @@ import { approvalChipsFor } from '../approval-chips.js';
 
 describe('approval chips', () => {
   it('one proposal offered, nothing authorised → an approve chip and an amend chip', () => {
-    const chips = approvalChipsFor([{ name: 'propose_starting_point', ok: true, proposal_id: 'prop_1' }]);
+    const chips = approvalChipsFor([{ name: 'propose_starting_point', ok: true, mutated: false, proposal_id: 'prop_1' }]);
     expect(chips.map((c) => [c.label, c.message])).toEqual([
       ['Use as starting assumptions', 'Yes, use those.'],
       ['Change something first', 'Before you apply it, I want to change some of it.'],
@@ -23,7 +23,7 @@ describe('approval chips', () => {
    * full Agent turn. Without an entry here the proposal was offered with NO chip at all.
    */
   it('RED: a proposed NEW OPTION → a typed approve chip carrying its proposal id, and the amend chip', () => {
-    const chips = approvalChipsFor([{ name: 'propose_new_option', ok: true, proposal_id: 'prop_abc123' }]);
+    const chips = approvalChipsFor([{ name: 'propose_new_option', ok: true, mutated: false, proposal_id: 'prop_abc123' }]);
     expect(chips.map((c) => [c.id, c.label, c.message])).toEqual([
       ['agent-approve-proposal:prop_abc123', 'Add this option', 'Yes, add that option.'],
       ['agent-amend-proposal', 'Change something first', 'Before you apply it, I want to change some of it.'],
@@ -38,40 +38,64 @@ describe('approval chips', () => {
    */
   it('RED: authorised A and proposed B in one turn → B\'s typed approve chip', () => {
     const chips = approvalChipsFor([
-      { name: 'authorise_change', ok: true, proposal_id: 'prop_a1b2c3' },
-      { name: 'propose_option_interventions', ok: true, proposal_id: 'prop_d4e5f6' },
+      { name: 'authorise_change', ok: true, mutated: true, proposal_id: 'prop_a1b2c3' },
+      { name: 'propose_option_interventions', ok: true, mutated: false, proposal_id: 'prop_d4e5f6' },
     ]);
     expect(chips.map((c) => c.id)).toEqual(['agent-approve-proposal:prop_d4e5f6', 'agent-amend-proposal']);
   });
 
   it('CONTRAST: the proposal authorised in this same turn is never re-offered', () => {
     expect(approvalChipsFor([
-      { name: 'propose_model_change', ok: true, proposal_id: 'prop_a1b2c3' },
-      { name: 'authorise_change', ok: true, proposal_id: 'prop_a1b2c3' },
+      { name: 'propose_model_change', ok: true, mutated: false, proposal_id: 'prop_a1b2c3' },
+      { name: 'authorise_change', ok: true, mutated: true, proposal_id: 'prop_a1b2c3' },
     ])).toEqual([]);
   });
 
   it('CONTRAST: an authorisation whose proposal is unknown → nothing is offered on a guess', () => {
     expect(approvalChipsFor([
-      { name: 'authorise_change', ok: true },
-      { name: 'propose_option_interventions', ok: true, proposal_id: 'prop_d4e5f6' },
+      { name: 'authorise_change', ok: true, mutated: true },
+      { name: 'propose_option_interventions', ok: true, mutated: false, proposal_id: 'prop_d4e5f6' },
     ])).toEqual([]);
   });
 
   it('CONTRAST: two proposals pending → no chip (a "yes" would be ambiguous)', () => {
     expect(approvalChipsFor([
-      { name: 'propose_assumptions', ok: true, proposal_id: 'prop_1' },
-      { name: 'propose_option_interventions', ok: true, proposal_id: 'prop_2' },
+      { name: 'propose_assumptions', ok: true, mutated: false, proposal_id: 'prop_1' },
+      { name: 'propose_option_interventions', ok: true, mutated: false, proposal_id: 'prop_2' },
     ])).toEqual([]);
   });
 
   it('CONTRAST: a refused proposal, a turn that authorised, and a read-only turn → no chip', () => {
-    expect(approvalChipsFor([{ name: 'propose_starting_point', ok: false }])).toEqual([]);
+    expect(approvalChipsFor([{ name: 'propose_starting_point', ok: false, mutated: false }])).toEqual([]);
     expect(approvalChipsFor([
-      { name: 'propose_starting_point', ok: true, proposal_id: 'prop_1' },
-      { name: 'authorise_change', ok: true },
+      { name: 'propose_starting_point', ok: true, mutated: false, proposal_id: 'prop_1' },
+      { name: 'authorise_change', ok: true, mutated: true },
     ])).toEqual([]);
-    expect(approvalChipsFor([{ name: 'get_canonical_state', ok: true }])).toEqual([]);
+    expect(approvalChipsFor([{ name: 'get_canonical_state', ok: true, mutated: false }])).toEqual([]);
+  });
+
+  /**
+   * ⛔ ORDER DECIDES VALIDITY (Codex #1806 5807933515). B proposed on H0, then A approved → H1: the
+   * store refuses B as superseded, so a chip for it would offer an action that cannot commit.
+   */
+  it('RED: proposed B, THEN a write moved the model → no chip for the now-stale B', () => {
+    expect(approvalChipsFor([
+      { name: 'propose_option_interventions', ok: true, mutated: false, proposal_id: 'prop_d4e5f6' },
+      { name: 'authorise_change', ok: true, mutated: true, proposal_id: 'prop_a1b2c3' },
+    ])).toEqual([]);
+    // Any change counts, not only an authorisation — a build after the proposal stales it too.
+    expect(approvalChipsFor([
+      { name: 'propose_model_change', ok: true, mutated: false, proposal_id: 'prop_d4e5f6' },
+      { name: 'build_model_from_brief', ok: true, mutated: true },
+    ])).toEqual([]);
+  });
+
+  it('CONTRAST: an approval that REFUSED (nothing moved) leaves the earlier proposal offerable', () => {
+    const chips = approvalChipsFor([
+      { name: 'propose_option_interventions', ok: true, mutated: false, proposal_id: 'prop_d4e5f6' },
+      { name: 'authorise_change', ok: false, mutated: false, proposal_id: 'prop_a1b2c3' },
+    ]);
+    expect(chips.map((c) => c.id)).toEqual(['agent-approve-proposal:prop_d4e5f6', 'agent-amend-proposal']);
   });
 });
 
