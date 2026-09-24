@@ -243,3 +243,30 @@ describe('server/model split and counts (harness PQ1/PQ2 adapter)', () => {
     expect(score({ text: '- **Hire a Tech Lead**\n- **Hire Two Developers**' }).metrics.finalWords).toBe(7);
   });
 });
+
+describe('INTERNAL_ID', () => {
+  // Served 9b7767b, typed approval (probe-typed-approval.sh): the reply exposed two revision hashes.
+  const leaked = 'The approved assumptions have been applied; the model moved from revision `d438351b509a4c56` to `212fc69c44d1732a`.';
+  const clean = 'The approved assumptions have been applied; the model now uses them.';
+  it('FAILS on the served revision hashes, one finding each, in the model\'s words', () => {
+    const r = score({ text: leaked }).checks.INTERNAL_ID;
+    expect(r.verdict).toBe('FAIL');
+    expect(r.findings.map((f) => [f.kind, f.excerpt, f.where])).toEqual([
+      ['hex_hash', 'd438351b509a4c56', 'model'],
+      ['hex_hash', '212fc69c44d1732a', 'model'],
+    ]);
+  });
+  it('PASSES (not vacuously) on the minimal edit without them', () => {
+    const r = score({ text: clean }).checks.INTERNAL_ID;
+    expect(r.verdict).toBe('PASS');
+    expect(r.vacuous).toBe(false);
+  });
+  it('catches a proposal id and a UUID, each once', () => {
+    const r = score({ text: 'I proposed prop_0a1b2c3d4e5f for scenario 00000000-0000-4000-8000-000000000099.' }).checks.INTERNAL_ID;
+    expect(r.findings.map((f) => f.kind)).toEqual(['proposal_id', 'uuid']);
+  });
+  it('never mistakes figures for an identifier', () => {
+    const r = score({ text: 'Reach £20,000 MRR by 2026: £59 leads in 52% of 10000 runs; 123456789012 is a count, and deadbeefcafe is a word.' }).checks.INTERNAL_ID;
+    expect(r.verdict, 'pure digits and pure letters are not hashes').toBe('PASS');
+  });
+});

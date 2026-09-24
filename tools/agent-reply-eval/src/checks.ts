@@ -1,5 +1,5 @@
 /**
- * The seven reply checks. Each returns PASS / FAIL / NOT_DECIDABLE with a reason.
+ * The eight reply checks. Each returns PASS / FAIL / NOT_DECIDABLE with a reason.
  *
  * ⛔ NOT_DECIDABLE IS MANDATORY WHEN THE CAPTURE CANNOT SETTLE IT. A capture holds
  * the final text, the chips, the tool NAMES with ok/mutated/refusal, and the
@@ -40,6 +40,7 @@ export const CHECK_NAMES = [
   'UNITS',
   'PROVENANCE_WORDING',
   'CAVEAT',
+  'INTERNAL_ID',
 ] as const;
 export type CheckName = (typeof CHECK_NAMES)[number];
 
@@ -591,6 +592,44 @@ export function checkCaveat(v: ReplyView, sentences: readonly Sentence[], ctx: C
 }
 
 // ======================================================================
+// 8. INTERNAL_ID — an identifier the user cannot act on, shown in the reply.
+//
+// Witnessed on served 9b7767b (typed approval): "the model moved from revision `d438351b509a4c56` to
+// `212fc69c44d1732a`". A revision/graph hash, a proposal id or a UUID tells the user nothing and
+// leaks internal state. A hex run counts only when it mixes letters and digits and is 12+ long, so
+// figures (£20,000, 2026, 52%) are never mistaken for one.
+
+const INTERNAL_ID_PATTERNS: readonly (readonly [string, RegExp])[] = [
+  ['proposal_id', /\bprop_[0-9a-f]{6,}\b/gi],
+  ['uuid', /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi],
+  ['hex_hash', /(?<![0-9a-z_-])(?=[0-9a-f]*[a-f])(?=[0-9a-f]*[0-9])[0-9a-f]{12,64}(?![0-9a-z_-])/gi],
+];
+
+export function internalIdsIn(text: string): { kind: string; id: string }[] {
+  const out: { kind: string; id: string }[] = [];
+  const seen = new Set<string>();
+  for (const [kind, re] of INTERNAL_ID_PATTERNS) {
+    for (const m of text.matchAll(re)) {
+      const id = m[0];
+      if ([...seen].some((x) => x.includes(id))) continue; // a UUID's own hex runs are not a second finding
+      seen.add(id);
+      out.push({ kind, id });
+    }
+  }
+  return out;
+}
+
+export function checkInternalId(split: TextSplit): CheckResult {
+  const findings: Finding[] = [];
+  for (const [where, text] of [['model', split.modelText], ['server', split.serverText]] as const) {
+    for (const f of internalIdsIn(text)) findings.push({ kind: f.kind, where, excerpt: f.id });
+  }
+  return findings.length > 0
+    ? result('INTERNAL_ID', 'FAIL', `the reply shows ${findings.length} internal identifier(s) the user cannot act on`, findings)
+    : result('INTERNAL_ID', 'PASS', 'no revision hash, proposal id or UUID in the reply');
+}
+
+// ======================================================================
 
 export function runChecks(v: ReplyView, split: TextSplit, ctx: CheckContext): Record<CheckName, CheckResult> {
   const sentences = sentencesOfSplit(split);
@@ -602,5 +641,6 @@ export function runChecks(v: ReplyView, split: TextSplit, ctx: CheckContext): Re
     UNITS: checkUnits(v, sentences),
     PROVENANCE_WORDING: checkProvenanceWording(v, sentences),
     CAVEAT: checkCaveat(v, sentences, ctx),
+    INTERNAL_ID: checkInternalId(split),
   };
 }

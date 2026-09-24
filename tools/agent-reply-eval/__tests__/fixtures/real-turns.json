@@ -271,7 +271,8 @@
         "OPTION_NAME_FIDELITY": "PASS",
         "UNITS": "PASS",
         "PROVENANCE_WORDING": "NOT_DECIDABLE",
-        "CAVEAT": "PASS"
+        "CAVEAT": "PASS",
+        "INTERNAL_ID": "PASS"
       }
     },
     {
@@ -574,7 +575,8 @@
         "OPTION_NAME_FIDELITY": "PASS",
         "UNITS": "PASS",
         "PROVENANCE_WORDING": "NOT_DECIDABLE",
-        "CAVEAT": "PASS"
+        "CAVEAT": "PASS",
+        "INTERNAL_ID": "PASS"
       }
     },
     {
@@ -819,7 +821,8 @@
         "OPTION_NAME_FIDELITY": "PASS",
         "UNITS": "PASS",
         "PROVENANCE_WORDING": "NOT_DECIDABLE",
-        "CAVEAT": "PASS"
+        "CAVEAT": "PASS",
+        "INTERNAL_ID": "PASS"
       }
     }
   ]

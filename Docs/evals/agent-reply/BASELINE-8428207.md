@@ -63,23 +63,23 @@ Scenario letters are the witness’s: A/D/E/O send the hiring brief, B/W the pri
 
 ### Checks by class
 
-| Class | n | Leader-honesty FAIL | Action-truth FAIL | Caveat miss | Control-ref FAIL | Option-name FAIL | Units FAIL | Provenance FAIL | NOT_DECIDABLE (Ldr/Act/Cav/Ctl/Opt/Unt/Prv) |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| build_hiring | 4 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0/2/0/0/0/4/4 |
-| build_pricing | 2 | 0 | 1 | 0 | 0 | 1 | 0 | 0 | 0/0/0/0/0/0/1 |
-| run_leader_withheld | 2 | 2 | 0 | 0 | 0 | 1 | 0 | 0 | 0/0/0/0/0/0/2 |
-| run_blocked | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/1 |
-| approval_chip | 4 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/4 |
-| approval_typed | 1 | 1 | 0 | 0 | 0 | 1 | 0 | 0 | 0/0/0/0/0/0/1 |
-| edit_no_run | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/1 |
-| rerun_after_edit | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 0/0/0/0/0/0/1 |
-| rerun_no_change | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/1 |
-| challenge | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/1 |
-| uncertainty_followup | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/1 |
-| decline | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/1/1 |
-| option_request | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/1 |
-| exact_retry_replay | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/1/0/0/0/1/1 |
-| **all scored** | 22 | 4 | 3 | 0 | 0 | 3 | 1 | 0 | 0/3/0/0/0/6/21 |
+| Class | n | Leader-honesty FAIL | Action-truth FAIL | Caveat miss | Control-ref FAIL | Option-name FAIL | Units FAIL | Provenance FAIL | Internal-id FAIL | NOT_DECIDABLE (Ldr/Act/Cav/Ctl/Opt/Unt/Prv/Id) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| build_hiring | 4 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0/2/0/0/0/4/4/0 |
+| build_pricing | 2 | 0 | 1 | 0 | 0 | 1 | 0 | 0 | 0 | 0/0/0/0/0/0/1/0 |
+| run_leader_withheld | 2 | 2 | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0/0/0/0/0/0/2/0 |
+| run_blocked | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/1/0 |
+| approval_chip | 4 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/4/0 |
+| approval_typed | 1 | 1 | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0/0/0/0/0/0/1/0 |
+| edit_no_run | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/1/0 |
+| rerun_after_edit | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0/0/0/0/0/0/1/0 |
+| rerun_no_change | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/1/0 |
+| challenge | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/1/0 |
+| uncertainty_followup | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/1/0 |
+| decline | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/1/1/0 |
+| option_request | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/1/0 |
+| exact_retry_replay | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/1/0/0/0/1/1/0 |
+| **all scored** | 22 | 4 | 3 | 0 | 0 | 3 | 1 | 0 | 0 | 0/3/0/0/0/6/21/0 |
 
 ### Verdict tally
 
@@ -92,6 +92,7 @@ Scenario letters are the witness’s: A/D/E/O send the hiring brief, B/W the pri
 | UNITS | 6 | 9 | 1 | 6 |
 | PROVENANCE_WORDING | 1 | 0 | 0 | 21 |
 | CAVEAT | 8 | 14 | 0 | 0 |
+| INTERNAL_ID | 22 | 0 | 0 | 0 |
 
 ### Leader-honesty FAIL excerpts (first 2 of 4 failing turns; verbatim, emphasis markers dropped)
 
@@ -132,24 +133,24 @@ Finding kinds — action truth: promises_run_after_approval ×3; option names: o
 
 ### Checks by class
 
-| Class | n | Leader-honesty FAIL | Action-truth FAIL | Caveat miss | Control-ref FAIL | Option-name FAIL | Units FAIL | Provenance FAIL | NOT_DECIDABLE (Ldr/Act/Cav/Ctl/Opt/Unt/Prv) |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| build_hiring | 12 | 0 | 5 | 0 | 0 | 0 | 0 | 0 | 0/6/0/0/0/12/9 |
-| build_pricing | 3 | 0 | 3 | 0 | 0 | 1 | 0 | 0 | 0/0/0/0/0/0/1 |
-| build_heldout | 11 | 0 | 8 | 0 | 0 | 1 | 0 | 0 | 1/0/0/0/1/3/7 |
-| run_leader_permitted | 4 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/4 |
-| run_leader_withheld | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/10 |
-| run_blocked | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/7 |
-| approval_chip | 22 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/22 |
-| edit_no_run | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/3 |
-| rerun_after_edit | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/2 |
-| rerun_no_change | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/3 |
-| challenge | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/2 |
-| uncertainty_followup | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/3 |
-| decline | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/3/3 |
-| option_request | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/3 |
-| exact_retry_replay | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/3/0/0/0/3/3 |
-| **all scored** | 93 | 10 | 16 | 0 | 0 | 2 | 0 | 0 | 1/9/0/0/1/21/82 |
+| Class | n | Leader-honesty FAIL | Action-truth FAIL | Caveat miss | Control-ref FAIL | Option-name FAIL | Units FAIL | Provenance FAIL | Internal-id FAIL | NOT_DECIDABLE (Ldr/Act/Cav/Ctl/Opt/Unt/Prv/Id) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| build_hiring | 12 | 0 | 5 | 0 | 0 | 0 | 0 | 0 | 0 | 0/6/0/0/0/12/9/0 |
+| build_pricing | 3 | 0 | 3 | 0 | 0 | 1 | 0 | 0 | 0 | 0/0/0/0/0/0/1/0 |
+| build_heldout | 11 | 0 | 8 | 0 | 0 | 1 | 0 | 0 | 0 | 1/0/0/0/1/3/7/0 |
+| run_leader_permitted | 4 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/4/0 |
+| run_leader_withheld | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/10/0 |
+| run_blocked | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/7/0 |
+| approval_chip | 22 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/22/0 |
+| edit_no_run | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/3/0 |
+| rerun_after_edit | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/2/0 |
+| rerun_no_change | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/3/0 |
+| challenge | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/2/0 |
+| uncertainty_followup | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/3/0 |
+| decline | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/3/3/0 |
+| option_request | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/0/0/0/0/0/3/0 |
+| exact_retry_replay | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0/3/0/0/0/3/3/0 |
+| **all scored** | 93 | 10 | 16 | 0 | 0 | 2 | 0 | 0 | 0 | 1/9/0/0/1/21/82/0 |
 
 ### Verdict tally
 
@@ -162,6 +163,7 @@ Finding kinds — action truth: promises_run_after_approval ×3; option names: o
 | UNITS | 22 | 50 | 0 | 21 |
 | PROVENANCE_WORDING | 11 | 0 | 0 | 82 |
 | CAVEAT | 26 | 67 | 0 | 0 |
+| INTERNAL_ID | 93 | 0 | 0 | 0 |
 
 ### Leader-honesty FAIL excerpts (first 2 of 10 failing turns; verbatim, emphasis markers dropped)
 

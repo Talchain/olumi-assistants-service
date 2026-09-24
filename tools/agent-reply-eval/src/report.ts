@@ -32,6 +32,7 @@ const SHORT: Record<CheckName, string> = {
   UNITS: 'Unt',
   PROVENANCE_WORDING: 'Prv',
   CAVEAT: 'Cav',
+  INTERNAL_ID: 'Id',
 };
 
 function quantile(xs: readonly number[], q: number): number | null {
@@ -68,7 +69,7 @@ function lengthTable(scores: readonly TurnScore[]): string[] {
 }
 
 /** Column order of the checks table; the FAIL and NOT_DECIDABLE columns both follow it. */
-const TABLE_ORDER: readonly CheckName[] = ['LEADER_HONESTY', 'ACTION_TRUTH', 'CAVEAT', 'CONTROL_REFERENCE', 'OPTION_NAME_FIDELITY', 'UNITS', 'PROVENANCE_WORDING'];
+const TABLE_ORDER: readonly CheckName[] = ['LEADER_HONESTY', 'ACTION_TRUTH', 'CAVEAT', 'CONTROL_REFERENCE', 'OPTION_NAME_FIDELITY', 'UNITS', 'PROVENANCE_WORDING', 'INTERNAL_ID'];
 const FAIL_HEADER: Record<CheckName, string> = {
   LEADER_HONESTY: 'Leader-honesty FAIL',
   ACTION_TRUTH: 'Action-truth FAIL',
@@ -77,6 +78,7 @@ const FAIL_HEADER: Record<CheckName, string> = {
   OPTION_NAME_FIDELITY: 'Option-name FAIL',
   UNITS: 'Units FAIL',
   PROVENANCE_WORDING: 'Provenance FAIL',
+  INTERNAL_ID: 'Internal-id FAIL',
 };
 
 function checksRow(label: string, xs: readonly TurnScore[]): string {
