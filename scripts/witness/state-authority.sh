@@ -105,19 +105,25 @@ import json;d=json.load(open('/tmp/w_reg.json'));d['user_id']='$USR';json.dump(d
 curl -s --max-time 60 -X POST "$BASE/assist/v1/scenarios/$SC/graph/register" \
   -H "X-Olumi-Assist-Key: $K" -H 'content-type: application/json' -d @/tmp/w_reg.json \
   -o /tmp/w_r.json -w 'REGISTER HTTP %{http_code}\n'
-python3 -c "
-import json,sys
-d=json.load(open('/tmp/w_r.json'))
+python3 - <<'PYEOF'
+# ⚠ HEREDOC, not `python3 -c "..."`. The quoted form mangled a print line into
+# `econdition: command not found` — bash re-parsed inside the double quotes. Nested
+# quoting across bash and python has now cost this script twice; a heredoc ends it.
+import json, sys
+d = json.load(open('/tmp/w_r.json'))
 if d.get('registered') is not True:
-    det=(d.get('details') or {}).get('code')
-    print('  ⛔ ABORTED — the register did not succeed (details.code=%s): %s' % (det, str(d.get('message'))[:120]))
-    print('     Nothing downstream is testable, so no clause verdict is printed. This is a')
-    print('     PROBE precondition failure, not a product defect.')
+    det = (d.get('details') or {}).get('code')
+    print('  ABORTED - the register did not succeed (details.code=%s): %s'
+          % (det, str(d.get('message'))[:120]))
+    print('     Nothing downstream is testable, so no clause verdict is printed.')
+    print('     This is a PROBE precondition failure, not a product defect.')
     sys.exit(3)
-gih=d.get('graph_identity_hash')
-print('  identity on the wire is a', type(gih).__name__, '- kind=', (gih or {}).get('kind') if isinstance(gih,dict) else None)
-print('  → provenance envelope', 'PRESENT' if isinstance(gih,dict) else 'MISSING')
-import json as j; j.dump(gih, open('/tmp/w_gih.json','w'))"
+gih = d.get('graph_identity_hash')
+print('  identity on the wire is a', type(gih).__name__,
+      '- kind=', gih.get('kind') if isinstance(gih, dict) else None)
+print('  -> provenance envelope', 'PRESENT' if isinstance(gih, dict) else 'MISSING')
+json.dump(gih, open('/tmp/w_gih.json', 'w'))
+PYEOF
 
 echo "--- CLAUSE: edits cannot overwrite committed state (#1810/#1820) ---"
 for CASE in envelope null stale; do
@@ -204,8 +210,17 @@ for n in ((d.get('graph') or {}).get('nodes') or []):
             print("    before the edit, so there was nothing to falsify. This is NOT a pass.")
         elif falsified:
             print("  → DEFECT PRESENT: declares unit_interval while holding %s" % val)
+        elif ds != 'unit_interval' and os_.get('unit') != 'unit_interval':
+            print("  → SATISFIED: the claim was present before the edit and is GONE after it")
         else:
-            print("  → SATISFIED: the claim was present before the edit and is gone after it")
+            # ⚠ The commonest healthy case, and my first message described it WRONGLY as
+            # "the claim ... is gone". Measured on `1e7e08a`: value=0.2, raw_value=40,
+            # declared_scale=unit_interval, scale_frame=200 — 40/200 = 0.2, which IS on
+            # the unit interval, so the declaration is TRUE and correctly RETAINED. The
+            # guard is not meant to fire here, and saying it did would misreport the fix.
+            print("  → SATISFIED: the declaration is still TRUE (value %s is on the unit"
+                  " interval), so it is correctly RETAINED — the guard is not meant to"
+                  " fire here" % val)
         if aa.get('admitted') and falsified:
             print("  ⛔ AND readiness ADMITS it (#63 item 3) — mode=%s" % aa.get('permitted_analysis_mode'))
 PY
