@@ -66,18 +66,37 @@ if not isinstance(g, dict) or not isinstance(g.get('nodes'), list) or len(g['nod
     sys.exit(3)
 json.dump({'graph': g}, open('/tmp/w_reg.json','w'))
 print("\n--- CLAUSE: consistent values at CONSTRUCTION (#63 item 1) ---")
-bad=[]
+bad=[]; other=[]
 for n in (g.get('nodes') or []):
     if n.get('kind')!='factor': continue
     os_=n.get('observed_state') or {}
     if os_.get('value') is None: continue
     framed = os_.get('cap') is not None or n.get('scale_frame') is not None
-    print("  %-38s value=%-8s cap=%-7s scale_frame=%-6s FRAMED=%s" % (
-        str(n.get('label'))[:38], os_.get('value'), os_.get('cap'), n.get('scale_frame'), framed))
-    if not framed and abs(float(os_.get('value') or 0)) <= 1 and os_.get('value') == 0:
-        bad.append(n.get('label'))
-print("  UNFRAMED zero baselines:", bad or "none")
+    decl = os_.get('declared_scale')
+    print("  %-34s value=%-7s cap=%-7s scale_frame=%-6s declared=%-13s FRAMED=%s" % (
+        str(n.get('label'))[:34], os_.get('value'), os_.get('cap'), n.get('scale_frame'), decl, framed))
+    # ⛔⛔ ITEM 1 IS SPECIFICALLY A SELF-CONTRADICTION, NOT "UNFRAMED".
+    #
+    # My first version flagged ANY unframed zero baseline and reported "DEFECT PRESENT"
+    # on served `1e7e08a` for `Enterprise Customer Count` — which declares
+    # `raw_count`, unit `customers`. That is NOT item 1: a factor declaring itself a
+    # raw count of customers is COHERENTLY unframed. Item 1's defect was a factor
+    # claiming `unit_interval` with no cap — a claim its own value contradicts.
+    #
+    # Conflating them makes the probe cry wolf, so the two are now reported apart.
+    if not framed and os_.get('value') == 0:
+        if decl == 'unit_interval':
+            bad.append(n.get('label'))          # the item-1 contradiction
+        else:
+            other.append((n.get('label'), decl))  # a different question, not this one
+print("  UNFRAMED + declares unit_interval (the item-1 contradiction):", bad or "none")
 print("  → item 1 DEFECT PRESENT" if bad else "  → item 1 not reproduced on this brief (it is BRIEF-DEPENDENT; try again)")
+if other:
+    print("  ⚠ ALSO unframed, but declaring something else — NOT item 1 and NOT scored here:")
+    for lbl, dc in other:
+        print("      %-34s declared=%s" % (str(lbl)[:34], dc))
+    print("      Whether an unframed factor with this declaration is ANALYSABLE is UNVERIFIED.")
+    print("      Drive a Run against it before treating it as either a defect or acceptable.")
 PY
 
 # ── 2. register (owner-attributed), then exercise the identity expectation.
