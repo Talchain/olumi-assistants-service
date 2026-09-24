@@ -654,11 +654,43 @@ export function createSetFactorValueHandler(): HandlerFn {
        */
       const priorObserved = (node.observed_state ?? {}) as { declared_scale?: unknown; cap?: unknown };
       const capAfterWrite = after.cap !== undefined ? after.cap : priorObserved.cap;
+      /**
+       * ⛔⛔ AND A NEGATIVE VALUE FALSIFIES *EVERY* DECLARED SCALE, not just
+       * `unit_interval`. This is the half the first version missed.
+       *
+       * The contract's own vocabulary is a THREE-member enum, and every member's
+       * admissible domain starts at zero (`schemas/graph.ts`, quoted in
+       * `cee/factor-extraction/display-value.ts:321-331`):
+       *
+       *   unit_interval — "a proportion or a cap-normalised magnitude. Admissible [0, 1]"
+       *   ratio         — "can meaningfully exceed 100% (NRR, growth, ROI). Admissible [0, +inf)"
+       *   raw_count     — "a magnitude left un-normalised in `unit`. Admissible [0, +inf)"
+       *
+       * So `unit_interval` is the only member a LARGE value can falsify — which is why
+       * the magnitude arm below is still scoped to it — but a NEGATIVE value is
+       * inadmissible under all three.
+       *
+       * MEASURED on served `1e7e08a`, driving the real writer at each declaration with
+       * an edit to -5:
+       *     unit_interval → declaration cleared   (the first guard, working)
+       *     ratio         → declaration RETAINED  ⛔ falsified and left standing
+       *     raw_count     → declaration RETAINED  ⛔ falsified and left standing
+       *
+       * Same remedy as before, and the same reason: drop a claim the value contradicts
+       * rather than invent a scale. The analysis still refuses the pair, honestly.
+       */
+      const storedValue = normalised.value;
+      const priorDeclared = String(priorObserved.declared_scale ?? '');
+      const declaredIsKnown =
+        priorDeclared === 'unit_interval' || priorDeclared === 'ratio' || priorDeclared === 'raw_count';
+      const negativeFalsifiesAny =
+        declaredIsKnown && Number.isFinite(storedValue) && storedValue < 0;
       const declarationFalsified =
-        String(priorObserved.declared_scale ?? '') === 'unit_interval'
-        && typeof capAfterWrite !== 'number'
-        && Number.isFinite(normalised.value)
-        && Math.abs(normalised.value) > 1;
+        negativeFalsifiesAny
+        || (priorDeclared === 'unit_interval'
+          && typeof capAfterWrite !== 'number'
+          && Number.isFinite(storedValue)
+          && Math.abs(storedValue) > 1);
       const merged = {
         ...(node.observed_state ?? {}),
         value: normalised.value,

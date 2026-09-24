@@ -55,7 +55,7 @@ import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orch
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
-import { proposalPendingAction, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
+import { CarriedProposals, carrierForAnswerRow, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
 import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
@@ -126,6 +126,8 @@ export const AGENT_TURN_CLAIM_WAIT = {
 /** The conversation of record stays Olumi's; this is a per-process cache. */
 const histories = new HistoryStore();
 const proposals = new ProposalStore();
+/** The approval carrier each scenario and subject's latest answer row persisted — see `carrierForAnswerRow`. */
+const carriedProposals = new CarriedProposals();
 
 type OfferedAction = SuggestedAction;
 /**
@@ -1053,7 +1055,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // The durable carrier: this exact row's persisted Run offer, still within its lifetime.
       const durableRun = (prior.pending_actions ?? []).some((pa) =>
         pa.chip_id === RUN_OFFER_CHIP.id && pa.action.kind === 'run_analysis' && !isPendingActionExpired(pa, Date.now()));
-      const offered = durableRun && !remembered.some((a) => a.id === RUN_OFFER_CHIP.id) ? [...remembered, RUN_OFFER_CHIP] : remembered;
+      // ⛔ And this exact row's approve chip, from the carrier persisted WITH it (Codex #1823 5819308426: a
+      // lost proposing response retried on a restarted process replayed the proposal with no way to approve
+      // it). Only its words come from the row; `stillValidOffers` below decides whether it is still offered,
+      // against the store the rehydration above has already refilled from the latest answer row.
+      const durableApprove = remembered.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
+        ? undefined
+        : offeredApproveChipOnRow(prior.pending_actions, { scenario_id: scenarioId, user_id: userId });
+      const offered = [
+        ...(durableApprove !== undefined ? [durableApprove] : []),
+        ...remembered,
+        ...(durableRun && !remembered.some((a) => a.id === RUN_OFFER_CHIP.id) ? [RUN_OFFER_CHIP] : []),
+      ];
       const composedReplay = composeDirectAnswerResponse({
         assistant_text: prior.assistant_message ?? 'That request was already completed.',
         stage: 'frame',
@@ -1084,11 +1097,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * offered; put it back when this process does not hold it. Read BEFORE this turn's own claim row is
      * written, or the latest row would be that claim, which carries nothing. A failed read degrades to today's behaviour.
      */
+    const approveKey = `${scenarioId}:${userId ?? ''}`;
     if ((approvedProposal !== undefined && proposals.get(approvedProposal) === undefined)
       || proposals.outstanding(scenarioId, userId).length === 0) {
       if (typeof store.readMostRecentPendingActions === 'function') {
         try {
-          rehydrateProposals(await store.readMostRecentPendingActions(scenarioId), proposals, { scenario_id: scenarioId, user_id: userId });
+          // What is restored is also carried forward by this turn's own answer row (`carrierForAnswerRow`).
+          rehydrateProposals(await store.readMostRecentPendingActions(scenarioId), proposals, { scenario_id: scenarioId, user_id: userId },
+            Date.now(), (carrier) => carriedProposals.remember(approveKey, carrier));
         } catch (err) {
           log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: pending proposals could not be read back — continuing without them');
         }
@@ -1509,12 +1525,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const offerRebuild = lastBuild?.refusal === 'model_too_large' && !result.mutated;
     // A Run changes no graph: the ONE proposal still awaiting a yes keeps its chip if the store would still
     // execute it on this revision (never on a guess — two outstanding, or a moved model, carry nothing).
-    const approveKey = `${scenarioId}:${userId ?? ''}`;
+    // ⛔ On a FRESH worker the process-local `lastApproveOffer` is empty (Codex #1823 5819308426: "if Run lands
+    // on a fresh worker, the process-local carry can be absent"), so the chip also comes from the carrier the
+    // rehydration above restored from the latest answer row — the exact words the offer used.
     const carriedApproval = ((): OfferedAction[] => {
       if (fastPath !== 'run') return [];
-      const chip = lastApproveOffer.get(approveKey);
       const id = executableWaitingProposal(scenarioId, userId, graphHash);
-      return chip !== undefined && id !== undefined && typedApprovalOf({ chip: { id: chip.id } }) === id ? [chip, AMEND_CHIP] : [];
+      if (id === undefined) return [];
+      const chip = [lastApproveOffer.get(approveKey), carriedProposals.get(approveKey)?.chip]
+        .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === id);
+      return chip !== undefined ? [chip, AMEND_CHIP] : [];
     })();
     const approvals = approvalChipsFor(result.tool_calls);
     // A first analysis the model could not run offers its repair: the approve chip when the Agent
@@ -1530,15 +1550,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     ];
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
     rememberApprove(approveKey, offeredNow);
-    // What this answer row persists: the Run offer, and the exact proposal behind any approve chip it offers.
+    // What this answer row persists: the Run offer, and the exact proposal behind the approve chip it offers
+    // — or, on a turn that offers none, the one still outstanding (a question between the offer and the "yes"
+    // must not drop what a restart needs to find it).
     const offeredApprove = offeredNow.find((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined);
     const offeredProposal = offeredApprove !== undefined ? proposals.get(typedApprovalOf({ chip: { id: offeredApprove.id } }) as string) : undefined;
     const emittedAtIso = new Date().toISOString();
+    const approvalCarrier = carrierForAnswerRow({
+      offered: offeredApprove !== undefined && offeredProposal !== undefined ? { proposal: offeredProposal, chip: offeredApprove } : undefined,
+      carried: carriedProposals.get(approveKey),
+      store: proposals,
+      subject: { scenario_id: scenarioId, user_id: userId },
+      currentGraphHash: graphHash,
+      emittedAtIso,
+    });
     const durablePending = [
       ...(offerRun ? derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: emittedAtIso, ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) : []),
-      ...(offeredApprove !== undefined && offeredProposal !== undefined
-        ? [proposalPendingAction(offeredProposal, offeredApprove, { scenario_id: scenarioId, emitted_at_iso: emittedAtIso })]
-        : []),
+      ...(approvalCarrier !== undefined ? [approvalCarrier] : []),
     ];
 
     const coachingBound = bindRunBlocksToReadback(lastRunBlocks, { graphHash, analysisState, analysisResult });
@@ -1679,6 +1707,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           if (first !== null) return reply.code(200).send(await replayed(first));
         }
         durability = 'recorded';
+        // Only a row that was written moves the slot: the next answer row carries what THIS one did.
+        carriedProposals.persisted(approveKey, approvalCarrier);
       } catch (err) {
         // The answer is real and the writes already happened; hiding it would be
         // worse. It is returned, flagged as not durable, and logged loudly.
