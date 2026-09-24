@@ -318,9 +318,15 @@ export function retrySchemaPinningGoal(goal: CandidateModel['goal']): Record<str
  *
  * Two kinds of finding, and they are NOT the same weight:
  *
- * - `issues` — a total that cannot be made coherent (an addition with no finite
- *   baseline, or across units). The build refuses on these if a retry cannot
- *   clear them: admitting "hire two" as a total of two would misstate the option.
+ * - `additions_without_total` — an addition that cannot become a total (no finite
+ *   baseline, units that differ, an ambiguous factor, an unknown `value_kind`).
+ *   ⛔ IT DEGRADES, IT NEVER REFUSES (review 5822711266, B1). Refusing gave "should we
+ *   hire two more engineers?" with no team size NO model on turn 1 and a raw code. So
+ *   the level is dropped — admitting "hire two" as a total of two would misstate the
+ *   option — and the option keeps ACTING on the factor as a structural `changes`
+ *   entry, with no level invented. The build result names each one and what would
+ *   make it a total. No retry is spent on it: the missing figure is the user's to give.
+ * - `provenance_demoted` — see the guard below.
  * - `mechanism_issues` — a MACHINE-AUTHORED option→risk link with NO
  *   option→factor→…→risk mechanism in the candidate. It asks the retry to route
  *   the hypothesis through a factor, and NOTHING MORE: if the retry cannot, the
@@ -333,45 +339,101 @@ export function retrySchemaPinningGoal(goal: CandidateModel['goal']): Record<str
  *   admission searches: option→factor from `changes`/`interventions`, every
  *   directed link, and no machine shortcut.
  *
- * ⛔ An EXPLICIT absolute level on a factor whose baseline is NOT known is
- * demoted to `ai_proposed`: with no known starting point, a resulting total was
- * derived from Olumi's estimate, and stamping it as the user's would exempt a
- * modelling guess from the money invariant's brief audit.
+ * ⛔ An EXPLICIT `value_kind:"absolute"` level on a factor whose baseline is NOT
+ * known is demoted to `ai_proposed`: with no known starting point it may be an
+ * addition mislabelled as a total, derived from Olumi's estimate, and stamping it
+ * as the user's would exempt a modelling guess from the money invariant's audit.
+ * ⚠ BUT A USER'S OWN NUMBER MUST NEVER SILENTLY READ AS OLUMI'S (review 5822711266,
+ * B2): every demotion is returned in `provenance_demoted` and said to the user, who
+ * can confirm it. A candidate with no `value_kind` (stored before the field) is left
+ * exactly as it was on staging.
  */
-export function prepareProvisionalCandidate(model: CandidateModel): { candidate: CandidateModel; issues: string[]; mechanism_issues: string[] } {
-  const issues: string[] = [];
+export interface AdditionWithoutTotal {
+  readonly option: string;
+  readonly factor: string;
+  readonly value: number;
+  readonly unit?: string;
+  readonly reason: 'baseline_unknown' | 'unit_mismatch' | 'factor_ambiguous' | 'value_kind_unknown';
+  readonly factor_unit?: string;
+}
+export interface DemotedProvenance { readonly option: string; readonly factor: string; readonly value: number }
+/** The user-facing sentence for an addition kept with no total: what is missing, and how to supply it. */
+function sayAdditionWithoutTotal(a: AdditionWithoutTotal): string {
+  const amount = `${a.value}${a.unit ? ` ${a.unit}` : ''}`;
+  const why =
+    a.reason === 'baseline_unknown' ? `the current level of "${a.factor}" is not known`
+    : a.reason === 'unit_mismatch' ? `it is stated in ${a.unit ?? 'another unit'}, while "${a.factor}" is measured in ${a.factor_unit ?? 'another unit'}`
+    : a.reason === 'factor_ambiguous' ? `more than one factor is called "${a.factor}"`
+    : 'it was not clear whether it is an addition or a total';
+  const fix =
+    a.reason === 'baseline_unknown' ? `Tell me the current level of "${a.factor}" and it becomes a total.`
+    : a.reason === 'unit_mismatch' ? `Say whether those are the same unit and it becomes a total.`
+    : `Say what "${a.option}" sets "${a.factor}" to and it becomes a level.`;
+  return `"${a.option}" adds ${amount} to "${a.factor}", but ${why}, so no total was set: the option is kept as ` +
+    `changing "${a.factor}", with no level of its own. ${fix}`;
+}
+
+export function prepareProvisionalCandidate(model: CandidateModel): {
+  candidate: CandidateModel;
+  mechanism_issues: string[];
+  additions_without_total: AdditionWithoutTotal[];
+  provenance_demoted: DemotedProvenance[];
+} {
   const mechanism_issues: string[] = [];
+  const additions_without_total: AdditionWithoutTotal[] = [];
+  const provenance_demoted: DemotedProvenance[] = [];
   const factorsByLabel = (label: string) => model.factors.filter((f) => f.label === label);
-  const options = model.options.map((option) => ({
-    ...option,
-    interventions: option.interventions?.map((intervention) => {
-      const kind = (intervention as typeof intervention & { value_kind?: string }).value_kind;
-      if (kind === undefined || kind === 'absolute') {
-        const factors = factorsByLabel(intervention.factor_label);
-        const unknownBaseline = factors.length === 1 && factors[0]!.baseline_known !== true;
-        return intervention.provenance === 'explicit' && unknownBaseline
-          ? { ...intervention, provenance: 'ai_proposed' }
-          : intervention; // Existing stored candidates.
-      }
-      if (kind !== 'additional') {
-        issues.push(`${option.label}: unknown value_kind for ${intervention.factor_label}`);
-        return intervention;
-      }
+  type Iv = NonNullable<CandidateModel['options'][number]['interventions']>[number];
+  const options = model.options.map((option) => {
+    const becameChanges: string[] = [];
+    const interventions: Iv[] = [];
+    for (const intervention of option.interventions ?? []) {
+      const kind = (intervention as Iv & { value_kind?: string }).value_kind;
       const factors = factorsByLabel(intervention.factor_label);
-      const factor = factors.length === 1 ? factors[0] : undefined;
-      if (factor === undefined || typeof factor.baseline_value !== 'number' || !Number.isFinite(factor.baseline_value)
-        || !Number.isFinite(intervention.value) || !Number.isFinite(factor.baseline_value + intervention.value)
-        || !factor.unit || !intervention.unit || factor.unit.trim().toLowerCase() !== intervention.unit.trim().toLowerCase()) {
-        issues.push(`${option.label}: ${intervention.factor_label} needs one finite baseline and matching units before an addition can become a total`);
-        return intervention;
+      if (kind === undefined) { interventions.push(intervention); continue; } // Stored before the field: as on staging.
+      if (kind === 'absolute') {
+        const unknownBaseline = factors.length === 1 && factors[0]!.baseline_known !== true;
+        if (intervention.provenance === 'explicit' && unknownBaseline) {
+          provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
+          interventions.push({ ...intervention, provenance: 'ai_proposed' });
+        } else {
+          interventions.push(intervention);
+        }
+        continue;
       }
-      return {
+      const factor = factors.length === 1 ? factors[0] : undefined;
+      const unresolved = (reason: AdditionWithoutTotal['reason']): void => {
+        additions_without_total.push({
+          option: option.label, factor: intervention.factor_label, value: intervention.value, reason,
+          ...(intervention.unit ? { unit: intervention.unit } : {}),
+          ...(factor?.unit ? { factor_unit: factor.unit } : {}),
+        });
+        // Kept as what the option ACTS ON, with no level — never a guessed total.
+        if (factors.length > 0) becameChanges.push(intervention.factor_label);
+      };
+      if (kind !== 'additional') { unresolved('value_kind_unknown'); continue; }
+      if (factor === undefined) { unresolved('factor_ambiguous'); continue; }
+      if (typeof factor.baseline_value !== 'number' || !Number.isFinite(factor.baseline_value)
+        || !Number.isFinite(intervention.value) || !Number.isFinite(factor.baseline_value + intervention.value)) {
+        unresolved('baseline_unknown'); continue;
+      }
+      if (!factor.unit || !intervention.unit || factor.unit.trim().toLowerCase() !== intervention.unit.trim().toLowerCase()) {
+        unresolved('unit_mismatch'); continue;
+      }
+      interventions.push({
         ...intervention, value_kind: 'absolute', value: factor.baseline_value + intervention.value,
         provenance: factor.baseline_known && factor.provenance === 'explicit' && intervention.provenance === 'explicit'
           ? 'explicit' : 'ai_proposed',
-      };
-    }),
-  }));
+      } as Iv);
+    }
+    const changes = [...(option.changes ?? [])];
+    for (const f of becameChanges) if (!changes.includes(f)) changes.push(f);
+    return {
+      ...option,
+      ...(option.interventions !== undefined ? { interventions } : {}),
+      ...(option.changes !== undefined || becameChanges.length > 0 ? { changes } : {}),
+    };
+  });
   const optionLabels = new Set(model.options.map((o) => o.label));
   const riskLabels = new Set(model.risks.map((r) => r.label));
   const factorLabels = new Set(model.factors.map((f) => f.label));
@@ -388,7 +450,7 @@ export function prepareProvisionalCandidate(model: CandidateModel): { candidate:
     if (findMechanismPath(mechanismGraph, link.from, link.to) !== null) continue;
     mechanism_issues.push(`${link.from} -> ${link.to}: retain this risk hypothesis through a causal factor or mediator, not a direct option-risk setting`);
   }
-  return { candidate: { ...model, options }, issues, mechanism_issues };
+  return { candidate: { ...model, options }, mechanism_issues, additions_without_total, provenance_demoted };
 }
 
 /** A repair may replace an invalid direct edge, but must preserve its signed path. */
@@ -480,8 +542,9 @@ export async function buildModelFromBrief(
   // them — otherwise an option the model mislabelled as its own vanishes unseen.
   let leftOut: { kind: string; label: string }[] = [];
   const needsSizeRetry = !size.within && !size.user_material_exceeds_limit;
-  // Both kinds of finding ask the retry to repair; only an incoherent total can refuse (below).
-  const repairIssues = (p: typeof preparation): string[] => [...p.issues, ...p.mechanism_issues];
+  // Only a missing risk mechanism asks the retry to repair. An addition with no total
+  // DEGRADES instead (see `prepareProvisionalCandidate`): the figure is the user's to give.
+  const repairIssues = (p: typeof preparation): string[] => p.mechanism_issues;
   if (needsSizeRetry || repairIssues(preparation).length > 0) {
     sizeRetried = needsSizeRetry;
     constructionRetried = true;
@@ -534,12 +597,6 @@ export async function buildModelFromBrief(
       // A failed retry costs the retry, never the turn: the refusal below reports
       // the FIRST model's real counts rather than inventing a reason.
     }
-  }
-
-  if (preparation.issues.length > 0) {
-    return { ok: false, mutated: false, refusal: 'construction_needs_semantic_repair',
-      detail: 'The model could not make a coherent total for every option level. Nothing was saved.',
-      issues: preparation.issues, retried: constructionRetried };
   }
 
   if (!size.within && !size.user_material_exceeds_limit) {
@@ -704,7 +761,14 @@ export async function buildModelFromBrief(
     // strategic additions in `unknowns`, and on the common path (a first pass already
     // within budget — 3 of 3 live benchmark runs) nothing else ever showed them.
     ...(openQuestions.length > 0 ? { open_questions: openQuestions } : {}),
+    // B1/B2 (review 5822711266), machine-readable beside the sentences below.
+    ...(preparation.additions_without_total.length > 0 ? { additions_without_total: preparation.additions_without_total } : {}),
+    ...(preparation.provenance_demoted.length > 0 ? { provenance_demoted: preparation.provenance_demoted } : {}),
     not_represented: [
+      ...preparation.additions_without_total.map(sayAdditionWithoutTotal),
+      ...preparation.provenance_demoted.map((d) =>
+        `I've treated your ${d.value} for "${d.factor}" in "${d.option}" as a working figure because the current ` +
+        `level of "${d.factor}" is unknown \u2014 confirm it and I'll mark it as yours.`),
       admitted.withheld.length > 0
         ? `${admitted.withheld.length} relationship(s) were left out because nobody has stated which way they run.`
         : undefined,

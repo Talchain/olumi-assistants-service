@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { BUILD_INSTRUCTIONS, buildCandidateSchema, buildModelFromBrief, prepareProvisionalCandidate } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import { narrateWriteOutcome } from '../write-outcome.js';
 
 // Paul's 24 September hiring brief, reconstructed as a corrected producer candidate.
 // This is a no-provider contract fixture, not a claim about generated model quality.
@@ -59,7 +60,8 @@ describe('provisional hiring construction uses real admission and registration p
     const validate = new Ajv({ strict: false }).compile(buildCandidateSchema());
     expect(validate(hiring()), JSON.stringify(validate.errors)).toBe(true);
     const prepared = prepareProvisionalCandidate(hiring());
-    expect(prepared.issues).toEqual([]);
+    expect(prepared.additions_without_total).toEqual([]);
+    expect(prepared.provenance_demoted).toEqual([]);
     expect(prepared.candidate.factors[1]).toMatchObject({ baseline_known: false, baseline_value: 5, provenance: 'ai_proposed' });
     expect(prepared.candidate.options[1].interventions?.[0]).toMatchObject({ value: 7, provenance: 'ai_proposed' });
     // RC fix (3): "hire a tech lead" is ONE MORE on an estimated baseline of 0 — a total of 1, and Olumi's.
@@ -107,14 +109,65 @@ describe('provisional hiring construction uses real admission and registration p
     expect(admitCandidateModel(prepared, {}).nodes.find((n) => n.label === 'Developers')?.observed_state).toMatchObject({ raw_value: 5, source: 'brief_extraction' });
   });
 
-  it.each(['missing baseline', 'wrong unit'])('refuses unresolved addition after one bounded retry: %s', async (fault) => {
+  /**
+   * B1 (review 5822711266): an addition that cannot become a total DEGRADES — it is
+   * never a refusal. "Should we hire two more engineers?" with no team size must still
+   * give the user a model on turn 1: the option keeps acting on the factor (a
+   * structural `changes` entry, no level invented), and the user is told what is
+   * missing and how to supply it.
+   */
+  it.each([
+    ['missing baseline', 'the current level of "Developers" is not known'],
+    ['unit drift', 'is stated in developers, while "Developers" is measured in people'],
+  ])('B1 RED: an unresolvable addition degrades to a level-free change and is said, never refused: %s', async (fault, said) => {
     const c: CandidateModel = hiring();
     if (fault === 'missing baseline') c.factors[1].baseline_value = null;
-    else c.options[1].interventions![0].unit = 'GBP';
+    else c.options[1].interventions![0].unit = 'developers';
     const { result, graph, calls } = await construct(c);
-    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'construction_needs_semantic_repair' });
-    expect(graph).toBeUndefined();
-    expect(calls).toBe(2);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result).not.toHaveProperty('refusal');
+    expect(calls, 'no retry is spent on a figure only the user can supply').toBe(1);
+    // The option still acts on the factor — by an edge, with NO level.
+    const option = graph?.nodes.find((n) => n.id === 'hire_two_developers');
+    expect(option, 'the option is still in the model').toBeDefined();
+    expect((option?.interventions ?? {}) as Record<string, unknown>).not.toHaveProperty('developers');
+    expect(graph?.edges.some((e) => e.from === 'hire_two_developers' && e.to === 'developers')).toBe(true);
+    // Machine-readable, and said.
+    expect(result.additions_without_total).toEqual([
+      expect.objectContaining({ option: 'Hire two developers', factor: 'Developers', value: 2 }),
+    ]);
+    const lines = (result.not_represented as string[]).filter((x) => x.includes('Hire two developers') && x.includes(said));
+    expect(lines, JSON.stringify(result.not_represented)).toHaveLength(1);
+    expect(lines[0]).toMatch(/becomes a total/);
+    // The user never reads a raw refusal code.
+    const n = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [result as never]);
+    expect(n.status).not.toMatch(/construction_needs_semantic_repair|refused/);
+  });
+
+  /**
+   * B2 (review 5822711266): a user's own number must never SILENTLY read as Olumi's
+   * hypothesis. "Grow the team to 7" on an estimated baseline is stored as a working
+   * figure — and the build result says so, by option, factor and value.
+   */
+  it('B2 RED: an explicit total demoted to a working figure is returned and said, never silent', async () => {
+    const c = hiring();
+    c.options[1].interventions[0] = { factor_label: 'Developers', value: 7, value_kind: 'absolute', unit: 'people', provenance: 'explicit' };
+    const { result, graph } = await construct(c);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect((graph?.nodes.find((n) => n.id === 'hire_two_developers')?.interventions as Record<string, { source: string }>).developers?.source).toBe('cee_hypothesis');
+    expect(result.provenance_demoted).toEqual([{ option: 'Hire two developers', factor: 'Developers', value: 7 }]);
+    const lines = (result.not_represented as string[]).filter((x) => x.includes('your 7'));
+    expect(lines, JSON.stringify(result.not_represented)).toHaveLength(1);
+    expect(lines[0]).toContain('"Developers"');
+    expect(lines[0]).toContain("confirm it and I'll mark it as yours");
+  });
+
+  it('B2 control: a candidate with no value_kind (stored before the field) keeps its stated provenance, exactly as on staging', () => {
+    const c = hiring();
+    c.options[1].interventions[0] = { factor_label: 'Developers', value: 7, unit: 'people', provenance: 'explicit' } as never;
+    const prepared = prepareProvisionalCandidate(c);
+    expect(prepared.candidate.options[1].interventions?.[0]).toMatchObject({ value: 7, provenance: 'explicit' });
+    expect(prepared.provenance_demoted).toEqual([]);
   });
 
   it('repairs a direct option-risk hypothesis through a factor without dropping its downstream effect', async () => {
