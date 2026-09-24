@@ -21,6 +21,7 @@ import {
   CEE_GOAL_THRESHOLD_FRAME,
   resolveGoalThresholdCapWithProvenance,
 } from '../../utils/goal-threshold-cap.js';
+import { admitGoalBaseline } from '../../cee/factor-extraction/goal-baseline-admissibility.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import type { InterventionV3T } from '../../schemas/cee-v3.js';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
@@ -84,6 +85,16 @@ export interface CandidateModel {
      */
     target_stated?: boolean;
     value: number | null;
+    /**
+     * The goal metric's CURRENT level, when there is one. Optional because the
+     * banked contract has no such field: absent means no current level, which is
+     * exactly what an older candidate meant. `baseline_known: true` is a figure
+     * the brief gave; `false` with a finite value is Olumi's estimate.
+     * `baseline_provenance` defaults to the goal's own `provenance`.
+     */
+    baseline_known?: boolean;
+    baseline_value?: number | null;
+    baseline_provenance?: string;
   };
   readonly constraints: readonly CandidateConstraint[];
   readonly options: readonly {
@@ -177,7 +188,7 @@ export interface AdmittedNode {
    * type was the reason three test files failed the typecheck ratchet while
    * `tsconfig.build.json` — which excludes tests — reported clean.
    */
-  observed_state?: { value: number; unit?: string; source?: string; raw_value?: number; cap?: number; declared_scale?: string };
+  observed_state?: { value: number; unit?: string; source?: string; raw_value?: number; cap?: number; declared_scale?: string; baseline?: number };
   /**
    * `cee-v3.ts` `scale_frame`: the divisor this factor's levels are stated
    * on, for a factor with no baseline. The declared carrier; see the write site.
@@ -632,6 +643,52 @@ export function admitCandidateModel(
         const resolved = resolveGoalThresholdCapWithProvenance(
           undefined, raw, model.goal.unit, undefined,
         );
+        /**
+         * ⛔ A LEVEL FRAME WITH NO BASELINE HAS NO GOAL FIT. ISL reads the level
+         * frame against `observed_state.baseline` and refuses without it
+         * (`missing_goal_baseline`, `GOAL_THRESHOLD_NOT_CONVERTIBLE`), so PLoT has
+         * no `probability_of_goal` to copy. The draft path carries a stated current
+         * level (`enricher.ts` `goal_baseline`); this writes the SAME shape its
+         * projection sends (`transforms/schema-v3.ts`, the goal limb):
+         * `{ value: B, baseline: B, unit?, source, raw_value, cap }`, B on the
+         * threshold's OWN cap. `value` repeats `baseline` because ISL requires it
+         * (see that limb). Admission is the shared rule (`admitGoalBaseline`),
+         * never restated: a level above the target is a decrease the `>=` frame
+         * would invert, and is withheld and said, not written.
+         *
+         * Stated in the brief → `brief_extraction`; anything else → Olumi's
+         * (`cee_inference`). No current level → nothing, and nothing is derived
+         * from the target.
+         */
+        const baselineRaw = model.goal.baseline_value;
+        let observed_state: AdmittedNode['observed_state'];
+        if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)) {
+          const admission = admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap });
+          if (admission.admitted) {
+            const stated = model.goal.baseline_known === true
+              && (model.goal.baseline_provenance ?? model.goal.provenance) === 'explicit';
+            observed_state = {
+              value: admission.normalised,
+              baseline: admission.normalised,
+              ...(model.goal.unit ? { unit: model.goal.unit } : {}),
+              source: stated ? 'brief_extraction' : 'cee_inference',
+              raw_value: baselineRaw,
+              cap: resolved.cap,
+            };
+          } else {
+            loss.push({
+              field_path: `nodes[${slugId(model.goal.metric)}].observed_state.baseline`,
+              before: baselineRaw,
+              after: null,
+              reason:
+                `The current level of "${model.goal.metric}" (${baselineRaw}) was not carried ` +
+                `(${admission.reason}): against a target of ${raw} it cannot be read on the goal's ` +
+                'level frame without inverting the question. The target is kept; the chance of reaching ' +
+                'it cannot be shown until the current level and the target agree on a direction.',
+              severity: 'warn',
+            } as RepairEntry);
+          }
+        }
         return {
           ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
           goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
@@ -643,6 +700,7 @@ export function admitCandidateModel(
                 goal_threshold: raw / resolved.cap,
               }
             : {}),
+          ...(observed_state !== undefined ? { observed_state } : {}),
         };
       })(),
     },
