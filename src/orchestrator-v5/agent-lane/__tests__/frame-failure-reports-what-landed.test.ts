@@ -378,7 +378,28 @@ describe('⛔ LIMB 1 (the assertion half) — the frame write carries the identi
       }
       // The read route supplies BOTH hashes; the identity one moves on any edit,
       // including a rename that leaves the analysis hash alone.
-      return { status: 200, json: { graph: { nodes, edges: [] }, graph_hash: `analysis-h${rev}`, graph_identity_hash: `identity-h${rev}` } };
+      // ⛔⛔ THE ENVELOPE, because that is what the read route actually emits:
+      // `graph_identity_hash: computeGraphIdentityHash(graph)` returns
+      // `GraphIdentityHash | null` = `{kind, value, algorithm, ...}`
+      // (`context/graph-identity.ts:84-91`). This double used to return a BARE
+      // STRING, so the suite pinned the opposite of production and could not
+      // falsify `String(envelope) === "[object Object]"` — which is exactly what
+      // the code under test was sending on every frame write.
+      return {
+        status: 200,
+        json: {
+          graph: { nodes, edges: [] },
+          graph_hash: `analysis-h${rev}`,
+          graph_identity_hash: {
+            kind: 'graph_identity_hash',
+            value: `identity-h${rev}`,
+            algorithm: 'sha256',
+            projection_version: 'test',
+            graph_schema_version: 'test',
+            normaliser_version: 'test',
+          },
+        },
+      };
     };
     return { d, registered };
   }
@@ -392,6 +413,9 @@ describe('⛔ LIMB 1 (the assertion half) — the frame write carries the identi
     const frame = p.registered[p.registered.length - 1];
     expect(frame, 'no register happened — control would be vacuous').toBeDefined();
     expect(frame.expected_graph_identity_hash, 'the write asserts no identity, so a rename cannot be refused').toMatch(/^identity-h\d+$/);
+    // ⛔ THE DISCRIMINATOR: a regression to `String(envelope)` sends this instead,
+    // and the register route then refuses EVERY frame write 409 GRAPH_STALE.
+    expect(frame.expected_graph_identity_hash).not.toBe('[object Object]');
     // Bound to the SAME read as the analysis expectation, not an older one.
     const n = String(frame.expected_graph_hash).replace('analysis-h', '');
     expect(frame.expected_graph_identity_hash).toBe(`identity-h${n}`);

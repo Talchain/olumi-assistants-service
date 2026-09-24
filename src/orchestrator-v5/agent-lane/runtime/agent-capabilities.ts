@@ -235,15 +235,43 @@ export function createAgentCapabilities(
     ok: false, mutated: false, refusal: 'read_only_preview',
     detail: 'This preview cannot change the model. Nothing has been altered.',
   });
+  /**
+   * Normalise the read route's `graph_identity_hash` to the 64-hex value the
+   * register route compares. `''` means "no identity to anchor to" — the route
+   * returns `null` for an absent, unparseable or identity-empty graph — and
+   * every caller below treats `''` as "send no expectation".
+   *
+   * A bare string is tolerated so this keeps working if the wire is ever
+   * flattened; nothing is invented either way, because the envelope's `.value`
+   * IS the comparison space.
+   */
+  const identityHashOf = (raw: unknown): string => {
+    if (typeof raw === 'string') return raw;
+    if (raw !== null && typeof raw === 'object') {
+      const v = (raw as { value?: unknown }).value;
+      if (typeof v === 'string') return v;
+    }
+    return '';
+  };
+
   const readGraph = async (scenarioId: string): Promise<GraphRead | null> => {
     const r = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
     if (r.status !== 200) return null;
     const g = (r.json.graph ?? {}) as Record<string, unknown>;
     return {
       graph_hash: String(r.json.graph_hash ?? ''),
-      // The read route supplies it beside `graph_hash`
-      // (`assist.v1.scenario-graph.ts:536`); it was being discarded here.
-      graph_identity_hash: String(r.json.graph_identity_hash ?? ''),
+      // ⛔⛔ IT IS AN ENVELOPE OBJECT, NOT A STRING. The read route emits the
+      // producer's own return value — `computeGraphIdentityHash(graph)`, type
+      // `GraphIdentityHash | null` = `{kind, value, algorithm, ...}` — so the
+      // `String(...)` this line used to do produced the literal
+      // `"[object Object]"`, and once the register route enforced the field
+      // EVERY frame write below would have been refused 409 and the user told a
+      // competing writer had moved their model when none had. That is the exact
+      // fabricated-concurrency claim this PR exists to remove, so it is fixed
+      // here rather than tolerated. The register route compares the 64-hex
+      // `.value` (`context/graph-cas-conflict.ts` extracts it), and accepts
+      // either spelling; we send the value.
+      graph_identity_hash: identityHashOf(r.json.graph_identity_hash),
       nodes: (g.nodes as GraphRead['nodes']) ?? [],
       edges: (g.edges as GraphRead['edges']) ?? [],
       analysis_state: r.json.analysis_state,
@@ -1444,7 +1472,12 @@ export function createAgentCapabilities(
             const range = defaultFrameFor(raw);
             if (range <= 1) continue;
             frameById.set(n.id, range);
-            framed.push({ factor: n.label, value: raw, range });
+            // ⛔ `framed` is NOT built here. It is the list reported back to the
+            // user as `ranges_added_for_analysis`, and it must describe what the
+            // write ACTUALLY DID — which is only knowable after the re-read
+            // below decides which factors still need a frame. Building it here
+            // meant a 200 reported ranges added for factors the code had
+            // deliberately skipped because a competing writer already framed them.
           }
           if (frameById.size > 0) {
           /**
@@ -1483,7 +1516,22 @@ export function createAgentCapabilities(
             for (const [id, range] of frameById) {
               const node = base.nodes.find((n) => n.id === id);
               if (node !== undefined && frameOf(node) !== null) continue;
+              /**
+               * ⛔ AND IT MUST STILL HAVE A VALUE IN THE FRESH BYTES. `needsFrame`
+               * validated `typeof os.value === 'number'` against the EARLIER read;
+               * `patched` maps over the fresh one. A competing writer that cleared
+               * a value therefore yielded `raw === undefined` and put `value: NaN`
+               * on the wire — a number the selection filter never validated, on
+               * bytes it never saw. The first site has this guard; this one did not.
+               * A factor with no value is left without one rather than framed.
+               */
+              const freshOs = (node?.observed_state ?? {}) as { value?: unknown; raw_value?: unknown };
+              const freshRaw = typeof freshOs.raw_value === 'number' ? freshOs.raw_value : freshOs.value;
+              if (node === undefined || typeof freshRaw !== 'number' || !Number.isFinite(freshRaw)) continue;
               stillNeeds.set(id, range);
+              // ⭐ Reported only now, from the FRESH node, so the sentence the user
+              // reads and the bytes that were written are the same fact.
+              framed.push({ factor: node.label, value: freshRaw, range });
             }
             const patched = base.nodes.map((n) => {
               const range = stillNeeds.get(n.id);
@@ -1604,7 +1652,25 @@ export function createAgentCapabilities(
                     const label = String((n as { label?: unknown }).label ?? '');
                     if (label !== '') byLabel.set(label, n);
                   }
-                  const stillUnranged = rangesNotAttached.filter((f) => frameOf(byLabel.get(f.factor)) === null);
+                  /**
+                   * ⛔⛔ AND A LABEL THAT IS NOT IN THE FRESH READ PROVES NOTHING.
+                   * The join is on `label`, so a factor a competing writer RENAMED
+                   * — the exact case GRAPH_STALE fires for — is simply absent from
+                   * `byLabel`. `frameOf(undefined)` is null, so it survived the
+                   * filter and was then printed BY ITS OLD LABEL as "still has no
+                   * range": a present-state claim about a name the model no longer
+                   * uses, from a read that never saw it. That is the same
+                   * fabrication as the refusal copy this block was written to fix.
+                   *
+                   * So the three cases are separated. Found and unranged → named.
+                   * Found and framed → dropped, someone supplied one. NOT FOUND →
+                   * dropped from the named list and disclosed as unaccounted for,
+                   * without asserting anything about it.
+                   */
+                  const unaccounted = rangesNotAttached.filter((f) => byLabel.get(f.factor) === undefined);
+                  const stillUnranged = rangesNotAttached.filter(
+                    (f) => byLabel.get(f.factor) !== undefined && frameOf(byLabel.get(f.factor)) === null,
+                  );
                   rangesNotAttached = stillUnranged;
                   failures.push({
                     factor: 'scale_frame',
@@ -1612,7 +1678,10 @@ export function createAgentCapabilities(
                       ? 'the model changed while the range was being attached, so this turn attached none. Read back afterwards, ' +
                         (stillUnranged.length > 0
                           ? `these still have no range: ${stillUnranged.map((f) => f.factor).join(', ')}. Describe the values from that read, not from what was approved — someone else may have changed them.`
-                          : 'every factor now has a range, so someone else supplied one. Describe the model from that read before advising anything.')
+                          : 'every factor that could be found now has a range, so someone else supplied one. Describe the model from that read before advising anything.')
+                        + (unaccounted.length > 0
+                          ? ` ⚠ ${unaccounted.length} factor(s) this turn tried to frame could not be found in that read at all — they may have been renamed or removed, so nothing is claimed about them; read the model as it now stands.`
+                          : '')
                       : 'the model changed while this was being prepared, so this turn attached no range. Read the model as it now stands before proposing again.',
                   });
                 }
