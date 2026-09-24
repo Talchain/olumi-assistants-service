@@ -300,15 +300,15 @@ describe('buildDraftOptionWideningBlocks — 4. the option-count floor', () => {
 });
 
 describe('buildDraftOptionWideningBlocks — 5. ⭐ the trap-21 anti-collision gate', () => {
-  it('PRECONDITION PINNED: the fixture really drives the reconciler to options_missing', () => {
+  it('PRECONDITION PINNED: the unbound fixture leaves identity unverified', () => {
     // Without this, a silence below could be the FIXTURE failing rather than
     // the gate firing, and the test would pass while guarding nothing.
     const reconciliation = deriveIntakeOptionReconciliation(BRIEF_OPTIONS_MISSING, [
       'Replacing the CRM',
       'Keeping it',
     ]);
-    expect(reconciliation.state).toBe('options_missing');
-    expect(reconciliation.missing.length).toBeGreaterThan(0);
+    expect(reconciliation.state).toBe('identity_unverified');
+    expect(reconciliation.missing).toEqual([]);
   });
 
   it('PRECONDITION PINNED: the firing fixture does NOT drive it to options_missing', () => {
@@ -683,4 +683,17 @@ describe('extractSetAsideOptions — the extractor, on its own', () => {
     expect(extractSetAsideOptions(null)).toEqual([]);
     expect(extractSetAsideOptions('x')).toEqual([]);
   });
+});
+
+it('withholds widening for a proven missing option and restores it with reconciled lineage', () => {
+  const graph = crmGraph();
+  const nodes = graph.nodes.map((node) => node.id === 'opt_0'
+    ? { ...node, source_quote: 'replacing the CRM' }
+    : node.id === 'opt_1' ? { ...node, source_quote: 'keeping it' } : node);
+  const boundGraph = { ...graph, nodes };
+  expect(deriveIntakeOptionReconciliation(BRIEF_OPTIONS_MISSING, boundGraph).state).toBe('options_missing');
+  expect(build({ graph: boundGraph, briefText: BRIEF_OPTIONS_MISSING })).toEqual([]);
+  const completeBrief = 'We are choosing between replacing the CRM or keeping it.';
+  expect(deriveIntakeOptionReconciliation(completeBrief, boundGraph).state).toBe('reconciled');
+  expect(build({ graph: boundGraph, briefText: completeBrief })).toHaveLength(1);
 });

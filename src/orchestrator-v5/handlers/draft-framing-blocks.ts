@@ -131,7 +131,6 @@ import { CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/bound
 
 import {
   deriveIntakeOptionReconciliation,
-  readGraphOptionLabels,
 } from '../../orchestrator/context/intake-option-reconciliation.js';
 import type { GraphV3T } from '../../orchestrator/types.js';
 import { gateCoachingCardBody } from '../coaching/copy-quality-gate.js';
@@ -243,39 +242,6 @@ function signalIdSegment(item: Record<string, unknown>, label: string): string {
   return slug.slice(0, SIGNAL_ID_SEGMENT_MAX);
 }
 
-/**
- * The graph's own option labels, for gate 3.
- *
- * ⚠ DERIVED THE HARD WAY, AND THE REASON MATTERS. `readGraphOptionLabels`
- * accepts either a bare array of `{label}` or an object carrying an `.options`
- * array — it does NOT walk `GraphV3.nodes` looking for `kind === 'option'`. So
- * `readGraphOptionLabels(graphV3)` returns `[]` on a real drafted graph, and
- * `deriveIntakeOptionReconciliation(brief, [])` short-circuits to
- * `not_applicable` (`intake-option-reconciliation.ts:522`) — i.e. the gate
- * would be structurally incapable of ever firing, while every test that fed it
- * an options-shaped fixture passed.
- *
- * That was caught here only because T9 PINS THE RECONCILER'S STATE IN-TEST
- * before asserting the suppression (trap 13b, third face): the precondition
- * assertion went green while the suppression assertion went red, which is
- * exactly the signal a bare "expect([])" would have swallowed.
- *
- * So the labels are read from BOTH shapes and unioned: the node walk is what
- * makes the gate real on a drafted graph, and the `readGraphOptionLabels` call
- * keeps the reconciler's own accepted input shapes working.
- */
-function readOptionLabels(graph: GraphV3T | null | undefined): string[] {
-  const labels = [...readGraphOptionLabels(graph ?? null)];
-  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
-  for (const node of nodes as ReadonlyArray<unknown>) {
-    if (!isRecord(node)) continue;
-    if (node.kind !== 'option') continue;
-    const label = readTrimmedString(node.label);
-    if (label.length > 0) labels.push(label);
-  }
-  return labels;
-}
-
 export interface BuildDraftFramingBlocksParams {
   /**
    * Sole admission authority — and INVERTED relative to every sibling. This
@@ -314,8 +280,8 @@ export function buildDraftFramingBlocks(
   // Gate 2.
   if (!Array.isArray(strengthenItems) || strengthenItems.length === 0) return [];
 
-  // Gate 3 — repair outranks ideation. Derived, never inferred from a count.
-  if (deriveIntakeOptionReconciliation(briefText, readOptionLabels(graph)).state === 'options_missing') {
+  // Gate 3 — repair or unresolved identity outranks ideation. Never inferred from a count.
+  if (!deriveIntakeOptionReconciliation(briefText, graph).mayNameLeadingOption) {
     return [];
   }
 

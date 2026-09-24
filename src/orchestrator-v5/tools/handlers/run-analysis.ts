@@ -65,7 +65,6 @@ import { decideOptionCostAsk } from '../../coaching/decide-option-cost-ask.js';
 // ratified constraint labels it names.
 import {
   deriveIntakeOptionReconciliation,
-  readGraphOptionLabels,
   applyIntakeToLeaderPermission,
 } from '../../../orchestrator/context/intake-option-reconciliation.js';
 import { buildIntakeOptionDisclosure } from '../../coaching/intake-option-disclosure.js';
@@ -1799,23 +1798,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // and kept entirely separate from it (trap 21: two authorities, two
     // questions, named apart rather than aligned).
     //
-    // Option labels come from the SAME `snapshot.options` array this handler
-    // forwards to PLoT — the tightest possible statement of "what we asked the
-    // engine to rank" — falling back to the raw persisted graph for snapshots
-    // that carry labels only there. That mirrors `readRatifiedConstraints`'s
-    // two-shape read above and for the same reason: never depend on which
-    // mirror a call site happens to hold.
-    //
-    // Fails toward TODAY'S BEHAVIOUR at every step: no brief, no explicit
-    // enumeration, or a brief whose words reconcile with nothing on the graph
-    // all yield `not_applicable`, which declares `mayNameLeadingOption: true`
-    // and leaves both the headline and the persisted verdict byte-identical.
-    const snapshotOptionLabels = readGraphOptionLabels(snapshot.options);
+    // Reconcile the exact analysed set. Recover existing source quotes only by
+    // canonical ID from this same snapshot; labels never manufacture lineage.
+    // Readable enumeration without validated bindings remains unverified.
     const intakeReconciliation = deriveIntakeOptionReconciliation(
       snapshot.briefText,
-      snapshotOptionLabels.length > 0
-        ? snapshotOptionLabels
-        : readGraphOptionLabels(snapshot.rawPersistedGraph ?? snapshot.graph),
+      snapshot.options ?? snapshot.rawPersistedGraph ?? snapshot.graph,
+      snapshot.rawPersistedGraph ?? snapshot.graph,
     );
     // ⚠ NO TELEMETRY EVENT HERE, AND THAT IS A DISCLOSED GAP RATHER THAN AN
     // OVERSIGHT. The obvious move — reuse `V5RunAnalysisConstraintUnevaluated`
@@ -1896,6 +1885,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // standing rule is no new env-var gates, and a flag here would mean the
       // product keeps making the false claim by default.
       intake_options_missing: intakeReconciliation.state === 'options_missing',
+      intake_identity_unverified: intakeReconciliation.state === 'identity_unverified',
       samples_reduced: samplesReduced,
       // Spine A backstop: the headline reads raw `factor_sensitivity` directly
       // (bypassing projectTopDrivers), so it must skip option-controlled levers.
