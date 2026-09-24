@@ -36,6 +36,7 @@
  * timeouts) is preserved.
  */
 
+import { buildPostApplyChips } from './handlers/post-apply-chips.js';
 import { createHash } from 'node:crypto';
 
 import type {
@@ -4070,7 +4071,27 @@ export async function runTurnExecutor(
               ? `${remaining} ${remaining === 1 ? 'item still needs' : 'items still need'} your judgement; I did not invent any missing values or relationships.`
               : 'The model now passes the readiness check.'),
           stage: context.stage,
-          suggested_actions: [],
+          // ⭐ THE PAYOFF TURN NOW OFFERS THE NEXT ACT. This was `[]`, and the
+          // return below is unreachable from any `generateChips` site, so the
+          // empty list was FINAL: the user supplied exactly what Olumi asked
+          // for, was told the model now passes, and was offered nothing —
+          // including when the model was fully ready. See `post-apply-chips.ts`.
+          // ⛔⛔ THE CANONICAL BUILDER, NOT `assessmentAfter.analysisReady`.
+          // The bare assessment does NOT compute `may_run` — measured, it
+          // carries it on 0 of 15,282 real models — so gating the run chip on
+          // that payload made the admission term DEAD CODE: the chip could
+          // only ever appear for `status === 'ready'`, and an
+          // admissible-but-not-ready model was offered nothing while the
+          // client would happily have rendered the run. Only
+          // `canonicalAnalysisReadyFrom(resolveRunAdmission(g), g)` — i.e.
+          // this builder — carries the verdict.
+          //
+          // ⚠ It is computed HERE rather than read from `analysisReadyForTurn`
+          // because that assignment happens AFTER this response is composed.
+          suggested_actions: buildPostApplyChips(
+            buildCanonicalAnalysisReadyFromGraph(outcome.appliedGraph) as never,
+            ((outcome.appliedGraph as { nodes?: unknown[] } | null)?.nodes ?? []) as never,
+          ),
         });
         sonnetTextForLog = appliedResponse.assistant_text;
         resolvedTurnClass = 'direct_answer';
@@ -4402,7 +4423,24 @@ export async function runTurnExecutor(
               ? `${remaining} ${remaining === 1 ? 'item still needs' : 'items still need'} your judgement.`
               : 'The model now passes the readiness check.'),
           stage: context.stage,
-          suggested_actions: [],
+          // ⭐ Same dead end, same close — see the repair sibling above. Fixing
+          // one and not the other is the shape that has bitten this PR twice.
+          // ⛔⛔ THE CANONICAL BUILDER, NOT `assessmentAfter.analysisReady`.
+          // The bare assessment does NOT compute `may_run` — measured, it
+          // carries it on 0 of 15,282 real models — so gating the run chip on
+          // that payload made the admission term DEAD CODE: the chip could
+          // only ever appear for `status === 'ready'`, and an
+          // admissible-but-not-ready model was offered nothing while the
+          // client would happily have rendered the run. Only
+          // `canonicalAnalysisReadyFrom(resolveRunAdmission(g), g)` — i.e.
+          // this builder — carries the verdict.
+          //
+          // ⚠ It is computed HERE rather than read from `analysisReadyForTurn`
+          // because that assignment happens AFTER this response is composed.
+          suggested_actions: buildPostApplyChips(
+            buildCanonicalAnalysisReadyFromGraph(outcome.appliedGraph) as never,
+            ((outcome.appliedGraph as { nodes?: unknown[] } | null)?.nodes ?? []) as never,
+          ),
         });
         sonnetTextForLog = appliedResponse.assistant_text;
         resolvedTurnClass = 'direct_answer';
