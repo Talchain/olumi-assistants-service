@@ -56,7 +56,7 @@ import { AMEND_CHIP, approvalChipsFor, typedApprovalOf } from '../orchestrator-v
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
 import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
-import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
 
@@ -346,6 +346,17 @@ export function admitsRunOffer(analysisReady: unknown): boolean {
  * call."). Prompt text is owned by Paul + ChatGPT; this file only carries it. When CEE #1787
  * (the packaged profile) lands, this constant is replaced by its import.
  */
+/**
+ * ⛔ THE INTERPRETING CALL CAN ONLY EXPLAIN (finding 8 on #1786, 5807230197). It receives the whole
+ * Agent instruction block — which tells the Agent to call tools and make proposals — on a call that
+ * may not act, so it could promise a proposal it cannot make. This route-authored line, placed
+ * BEFORE the banked Interpreter v0.2 text (which stays last and byte-identical), says so plainly.
+ */
+export const INTERPRET_ONLY_CONSTRAINT =
+  'IN THIS REPLY you are explaining a result only. You cannot call tools, change the model or create a proposal, '
+  + 'so never promise one or describe one as made. If the analysis did not run, say in plain words what it still '
+  + 'needs; the user can ask you to suggest it.';
+
 export const INTERPRETER_V02_BANKED: string = "Explain the current **model-relative** analysis. Do not make the user's decision.\n\n**Finding first.** State the most useful conclusion supported by the supplied analysis, then briefly: why it appears, what is not settled, and at most one next reasoning step when justified.\n\n### Hard grounding rules\n\n- Use only supplied canonical analysis, provenance, currentness and claim permissions. Unknown stays unknown.\n- Keep comparison/outcomes, sensitivity, robustness, constraint satisfaction, before/after deltas and evidence provenance as different meanings. Never substitute one for another.\n- Never call an option objectively best, the winner, the right decision or Olumi's recommendation merely because it leads in the model.\n- Never convert a point result into a probability or invert a local switch/perturbation probability into overall stability.\n- Never claim an edit was tested unless the analysed revision/inputs include it.\n- Identical analytical inputs producing the same result show repeatability under those settings, **not** new validation or increased confidence.\n- A changed input may produce no material output change. Report that without inventing an effect.\n- For before/after comparisons, use only **precomputed supplied deltas**. Do not calculate new differences, ratios, annualisations, margins or unit conversions in prose.\n- Attribute a delta to one edit only when the supplied comparison is explicitly compatible and the relevant units, option identities, analysis/projection semantics and engine settings are held constant. Otherwise say the isolated effect is not established.\n- Preserve exact constraint operators and units. Equality does not satisfy a strict `<` or `>` condition.\n- If only a subset of options was analysed, keep conclusions inside that subset and name exclusions.\n- If the result is stale, present it only as historical. If rerun/action eligibility is unknown, do not imply a current control is available; say a current analysis would be needed.\n- If sensitivity or a flip threshold was not computed, do not invent it.\n- **A first-tested assumption that flips an ordering establishes only that this tested change can flip that ordering. It does NOT establish validation priority, importance, largest effect or best next investigation. Never say \"validate X first\" or equivalent on that basis alone.** If comparable effect size, uncertainty and evidence cost/value are absent, say investigation priority is not established.\n- One edge's perturbation/switch metric is not aggregate stability or factor sensitivity.\n- If a method is declined or applicability is unknown, answer the user's question without starting or completing the method.\n- Do not invent exercise horizons, required counts, missing business dimensions, benchmarks, operating assumptions or retrospective rationales.\n\nKeep the response compact: finding first, then 1–3 grounded points/caveats. Do not force a next step.\n";
 
 /** The UI's Run control: a typed `run_analysis` chip. Words alone never take fast path 3. */
@@ -1151,9 +1162,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       try {
         const resp = await callModel({
-          instructions: `${AGENT_INSTRUCTIONS}\n\n${INTERPRETER_V02_BANKED}`,
+          instructions: `${AGENT_INSTRUCTIONS}\n\n${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
           input: priorAndRun,
-          tools: toolsFor(mode),
+          // No tools at all: acting is structurally impossible on this call (and no schema tokens
+          // are spent on tools it may not use). Measured against the live API: accepted with the
+          // server-recorded run pair in history.
+          tools: [],
           max_output_tokens: budget.max_output_tokens,
           tool_choice: 'none',
         } as never);

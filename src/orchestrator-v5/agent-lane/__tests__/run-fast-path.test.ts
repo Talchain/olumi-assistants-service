@@ -100,6 +100,10 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
     expect(modelBodies).toHaveLength(1);
     const instructions = String(modelBodies[0]!['instructions']);
     expect(instructions.endsWith(INTERPRETER_V02_BANKED), 'appended, not replacing').toBe(true);
+    // Finding 8 (5807230197): the call can only explain — no tools at all, and it is told so.
+    const { INTERPRET_ONLY_CONSTRAINT } = await import('../../../routes/agent-v1-turn.js');
+    expect(modelBodies[0]!['tools'], 'no tools: acting is structurally impossible').toEqual([]);
+    expect(instructions).toContain(`${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`);
     expect(instructions.length).toBeGreaterThan(INTERPRETER_V02_BANKED.length + 1000);
     const input = JSON.stringify(modelBodies[0]!['input']);
     expect(input, 'the withheld leader reaches the interpreter').toContain('constraint_verdict_withheld');
