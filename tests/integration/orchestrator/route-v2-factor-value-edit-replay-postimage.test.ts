@@ -2,9 +2,9 @@
  * F3 — A REPLAYED `factor_value_edit` MUST NOT PRESENT BYTES THAT WERE NEVER
  * WRITTEN.
  *
- * ⛔ RED BY DESIGN until F3 lands. The DEFECT case below fails on purpose at the
- *    commit this file was written against (staging 57f903c4). It is NOT marked
- *    `.fails` / `.skip` / `.todo`: a red that is hidden is a red nobody fixes.
+ * The DEFECT case below was RED at staging 57f903c4 (commit a05df8f8, fixture
+ * only) and is GREEN with F3's `commit.ts` change. It was never marked
+ * `.fails` / `.skip` / `.todo`: a red that is hidden is a red nobody fixes.
  *
  * THE PRODUCT RULE (Paul): "Saved" / applied state rests ONLY on this
  * operation's own committed result. The UI renders the reply's top-level
@@ -45,10 +45,10 @@
  *   `priorTurnConflict` (`session/store.ts:119/131`; `supabase-store.ts:294-295`).
  *
  * THE PAIR (same request bytes, same pre-state, only the store's verdict differs):
- *   CONTRAST (GREEN today) — a foreign writer has set £70k; MY request (£50k) is a
+ *   CONTRAST (GREEN before and after F3) — a foreign writer has set £70k; MY request (£50k) is a
  *     FIRST attempt, lands, and the reply's draft_graph / graph_hash describe the
  *     bytes the append stored.
- *   DEFECT (RED today) — MY request was already committed; the foreign writer set
+ *   DEFECT (RED before F3) — MY request was already committed; the foreign writer set
  *     £70k; MY request is REPLAYED. The store writes nothing, so the reply may
  *     either omit `draft_graph` or present the STORED f-budget, and any
  *     `graph_hash` must be the hash of the STORED graph. Either shape of fix
@@ -321,7 +321,7 @@ function expectNoProviderReached() {
   expect(fetchSpy, 'a network call was attempted on a no-provider path').not.toHaveBeenCalled();
 }
 
-describe('POST /orchestrate/v2/turn — factor_value_edit REPLAY: the reply presents only bytes the store holds (F3, RED BY DESIGN)', () => {
+describe('POST /orchestrate/v2/turn — factor_value_edit REPLAY: the reply presents only bytes the store holds (F3)', () => {
   beforeAll(async () => {
     fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       throw new Error('fetch attempted in a no-provider test');
@@ -343,7 +343,7 @@ describe('POST /orchestrate/v2/turn — factor_value_edit REPLAY: the reply pres
     resetFake();
   });
 
-  // ── CONTRAST — GREEN today ───────────────────────────────────────────────
+  // ── CONTRAST — GREEN before and after F3 ───────────────────────────────────────────────
 
   it('CONTRAST: a FIRST attempt of the edit (after a foreign writer set £70k) lands, and the reply draft_graph / graph_hash describe the bytes the append stored', async () => {
     const foreign = await send(SET_BUDGET_70K, FOREIGN);
@@ -380,9 +380,9 @@ describe('POST /orchestrate/v2/turn — factor_value_edit REPLAY: the reply pres
     expectNoProviderReached();
   });
 
-  // ── DEFECT — RED today, until F3 ─────────────────────────────────────────
+  // ── DEFECT — RED before F3 ─────────────────────────────────────────
 
-  it('DEFECT (RED until F3): a REPLAY of MY committed edit after a foreign writer set £70k must not present the unwritten £50k candidate as draft_graph or graph_hash', async () => {
+  it('DEFECT (RED before F3): a REPLAY of MY committed edit after a foreign writer set £70k must not present the unwritten £50k candidate as draft_graph or graph_hash', async () => {
     const first = await send(SET_BUDGET_50K, MINE);
     expect(first.status).toBe(200);
     expect(graphPatches(first.body)[0]?.status).toBe('applied');
