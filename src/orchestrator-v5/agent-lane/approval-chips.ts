@@ -25,6 +25,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_model_change: { label: 'Make this change', message: 'Yes, make that change.' },
   // #1788's add-option proposal: the same typed, zero-call approval as every other proposal.
   propose_new_option: { label: 'Add this option', message: 'Yes, add that option.' },
+  // A direct option→risk link the analysis cannot use (remove-direct-risk-link.test.ts).
+  propose_remove_risk_link: { label: 'Remove this link', message: 'Yes, remove that link.' },
 };
 
 export const AMEND_CHIP: SuggestedAction = {
