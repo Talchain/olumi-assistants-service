@@ -1052,7 +1052,22 @@ export function createAgentCapabilities(
          */
         const cont = decision.continuation;
         const landedBefore = new Set(cont?.landed ?? []);
-        let baseHash = cont !== undefined ? before.graph_hash : decision.proposal.base_graph_identity_hash;
+        // The revision this pass was authorised at: the proposal's base, or its own recorded progress.
+        const authorisedRevision = cont !== undefined ? before.graph_hash : decision.proposal.base_graph_identity_hash;
+        /**
+         * ⛔ OWNERSHIP IS PROVEN, NEVER OBSERVED (independent review of #1788, 5807353449 / 5807492503).
+         * `ownRevision` is the last revision this proposal can PROVE it produced: the authorised one, or
+         * the `graph_hash` a write of OURS reports it committed (the served system-event response carries
+         * the persisted graph's analysis hash — the same space as the read route) — and only while a
+         * readback agrees with it. A readback that differs means someone else edited in between: the pass
+         * STOPS dispatching, nothing is written on the observed revision, and progress stays at the last
+         * proven revision, so the next approval is superseded instead of applied to a model the user
+         * never saw. Presence of a link alone never proves this proposal wrote it.
+         */
+        let ownRevision = authorisedRevision;
+        let interleaved = false;
+        const committedHashOf = (res: { json: Record<string, unknown> } | null): string | undefined =>
+          (typeof res?.json.graph_hash === 'string' ? res.json.graph_hash : undefined);
         const receipts: ReceiptSummary[] = [...(cont?.receipts ?? [])];
         let receiptUnreadable = false;
         let addRes: { status: number; json: Record<string, unknown> } | null = null;
@@ -1060,28 +1075,29 @@ export function createAgentCapabilities(
           addRes = await dispatch('/orchestrate/v2/turn', {
             kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
             event: { kind: 'structural_add', node_id: optionId, node_kind: 'option',
-              label: String(nodeValue.label ?? ''), base_graph_hash: baseHash },
+              label: String(nodeValue.label ?? ''), base_graph_hash: ownRevision },
           });
-          const addReceipt = receiptSummaryOf(addRes.json);
-          if (addReceipt.summary !== null) receipts.push(addReceipt.summary);
-          if (addReceipt.unreadable) receiptUnreadable = true;
         }
         let afterAdd = await readGraph(ctx.scenario_id);
         const optionExists = (afterAdd?.nodes ?? []).some((n) => n.id === optionId);
-        if (!optionExists) {
+        const nodeCommitted = committedHashOf(addRes);
+        if (!optionExists || (addRes !== null && nodeCommitted === undefined)) {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied',
             detail: String(addRes?.json.assistant_text ?? 'The option was not added, so nothing else was attempted.'),
             http: addRes?.status ?? 0, operation_id: operationId };
         }
-        baseHash = afterAdd?.graph_hash ?? baseHash;
-        /**
-         * ⛔ PROGRESS SITS ONLY AT A REVISION THIS PROPOSAL'S OWN CONFIRMED WRITE PRODUCED (independent
-         * review of #1788, 5807353449). A foreign edit during this pass makes the next link's CAS
-         * refuse; the readback then shows the FOREIGN revision, which must never become this
-         * proposal's continuation base — the next approval would apply the link to a model the user
-         * never approved. `ownRevision` advances only when a write of ours is confirmed present.
-         */
-        let ownRevision = baseHash;
+        if (addRes !== null) {
+          const addReceipt = receiptSummaryOf(addRes.json);
+          if (addReceipt.summary !== null) receipts.push(addReceipt.summary);
+          if (addReceipt.unreadable) receiptUnreadable = true;
+          ownRevision = nodeCommitted as string;
+          if (afterAdd?.graph_hash !== ownRevision) interleaved = true;
+        } else if (afterAdd?.graph_hash !== authorisedRevision) {
+          // A continuation whose model moved after it was authorised: nothing is written.
+          return { ok: false, mutated: false, applied: false, refusal: 'superseded',
+            expected: authorisedRevision, actual: afterAdd?.graph_hash ?? null,
+            detail: 'The model changed after this was approved, so nothing more was written. Look at it again and approve once more.' };
+        }
 
         const linked: string[] = [];
         const notLinked: { factor: string; detail: string }[] = [];
@@ -1092,6 +1108,10 @@ export function createAgentCapabilities(
           const factorLabel = String(factorNode?.label ?? factorId);
           // Landed by THIS proposal's earlier partial write: kept, never written twice.
           if (landedBefore.has(String(edgeOp.path))) { linked.push(factorLabel); landedNow.push(String(edgeOp.path)); continue; }
+          if (interleaved) {
+            notLinked.push({ factor: factorLabel, detail: 'not attempted: the model changed while this was being saved' });
+            continue;
+          }
           const direction = (edgeOp.value as { direction?: unknown } | undefined)?.direction === 'negative' ? 'negative' : 'positive';
           const edgeRes = await dispatch('/orchestrate/v2/turn', {
             kind: 'system_event', turn_id: authorisationTurnId(`${decision.proposal.proposal_id}:${factorId}`),
@@ -1099,19 +1119,23 @@ export function createAgentCapabilities(
             event: { kind: 'structural_add_edge', from: optionId, to: factorId,
               // ⚠ The projection default, exactly as the edge route above records:
               // the wire requires a magnitude and this is not the user's claim.
-              magnitude: 0.5, effect_direction: direction, base_graph_hash: baseHash },
+              magnitude: 0.5, effect_direction: direction, base_graph_hash: ownRevision },
           });
+          const committed = committedHashOf(edgeRes);
           afterAdd = await readGraph(ctx.scenario_id);
           const present = (afterAdd?.edges ?? []).some((e) => e.from === optionId && e.to === factorId);
-          if (present) {
+          if (present && committed !== undefined) {
             linked.push(factorLabel);
             landedNow.push(String(edgeOp.path));
-            baseHash = afterAdd?.graph_hash ?? baseHash;
-            ownRevision = baseHash;
+            ownRevision = committed;
+            if (afterAdd?.graph_hash !== committed) interleaved = true; // ours landed; someone edited after it
             const r = receiptSummaryOf(edgeRes.json);
             if (r.summary !== null) receipts.push(r.summary);
             if (r.unreadable) receiptUnreadable = true;
-          } else notLinked.push({ factor: factorLabel, detail: String(edgeRes.json.assistant_text ?? 'not linked') });
+          } else {
+            notLinked.push({ factor: factorLabel, detail: String(edgeRes.json.assistant_text ?? 'not linked') });
+            if (afterAdd?.graph_hash !== ownRevision) interleaved = true; // refused, and the model moved: not ours
+          }
         }
 
         /**

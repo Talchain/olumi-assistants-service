@@ -58,6 +58,13 @@ function fakeProduct(refuseEdgeToInit: string | null = null) {
   let refuseEdgeTo = refuseEdgeToInit;
   // A foreign author edits the model at the very moment this edge write arrives (the window Codex named).
   let foreignDuringEdgeTo: string | null = null;
+  // Injection points for the windows around a write (Codex 5807492503).
+  let foreignAfterWrite: string | null = null;
+  let pendingForeign = false;
+  let foreignAtRead: number | null = null;
+  let reads = 0;
+  /** Every edge write DISPATCHED (attempted), whether or not it committed. */
+  const edgeAttempts: string[] = [];
   let nodes: N[] = [
     { id: 'goal', kind: 'goal', label: 'Increase velocity' },
     { id: 'dev_headcount', kind: 'factor', label: 'Developer headcount' },
@@ -71,6 +78,7 @@ function fakeProduct(refuseEdgeToInit: string | null = null) {
     const b = (body ?? {}) as Record<string, unknown>;
     if (path === '/orchestrate/v2/turn' && b.kind === 'system_event') {
       const ev = b.event as Record<string, string>;
+      if (ev.kind === 'structural_add_edge') edgeAttempts.push(String(ev.to));
       if (ev.kind === 'structural_add_edge' && foreignDuringEdgeTo !== null && ev.to === foreignDuringEdgeTo) {
         foreignDuringEdgeTo = null;
         nodes = [...nodes, { id: 'someone_elses', kind: 'factor', label: 'Someone else\'s factor' }]; rev += 1;
@@ -79,12 +87,20 @@ function fakeProduct(refuseEdgeToInit: string | null = null) {
         refusedStale.push(`${ev.kind}:${ev.base_graph_hash}`);
         return { status: 200, json: { assistant_text: 'BASE_HASH_DIVERGED — nothing was written.' } };
       }
-      if (ev.kind === 'structural_add') { nodes = [...nodes, { id: ev.node_id, kind: ev.node_kind, label: ev.label }]; rev += 1; writes.push(ev.kind); return { status: 200, json: { assistant_text: 'Added.', ...receipt(rev) } }; }
+      if (ev.kind === 'structural_add') { nodes = [...nodes, { id: ev.node_id, kind: ev.node_kind, label: ev.label }]; rev += 1; writes.push(ev.kind); const committed = `h${rev}`; if (foreignAfterWrite === 'node') { foreignAfterWrite = null; pendingForeign = true; } return { status: 200, json: { assistant_text: 'Added.', graph_hash: committed, ...receipt(rev) } }; }
       if (ev.kind === 'structural_add_edge') {
         if (refuseEdgeTo !== null && ev.to === refuseEdgeTo) return { status: 200, json: { assistant_text: 'That link was refused.' } };
         edges = [...edges, { from: ev.from, to: ev.to, effect_direction: ev.effect_direction }]; rev += 1; writes.push(ev.kind);
-        return { status: 200, json: { assistant_text: 'Linked.', ...receipt(rev) } };
+        const committed = `h${rev}`;
+        // Someone else edits AFTER this write committed and BEFORE its readback (Codex 5807492503).
+        if (foreignAfterWrite === ev.to) { foreignAfterWrite = null; pendingForeign = true; }
+        return { status: 200, json: { assistant_text: 'Linked.', graph_hash: committed, ...receipt(rev) } };
       }
+    }
+    reads += 1;
+    if (pendingForeign || (foreignAtRead !== null && reads === foreignAtRead)) {
+      pendingForeign = false; foreignAtRead = null;
+      nodes = [...nodes, { id: `foreign_${rev}`, kind: 'factor', label: 'Someone else\'s factor' }]; rev += 1;
     }
     return { status: 200, json: { graph: { nodes, edges }, graph_hash: `h${rev}` } };
   };
@@ -93,7 +109,11 @@ function fakeProduct(refuseEdgeToInit: string | null = null) {
   /** Someone ELSE changes the model: a new revision this proposal did not write. */
   const foreignEdit = () => { nodes = [...nodes, { id: 'unrelated', kind: 'factor', label: 'Unrelated' }]; rev += 1; };
   const foreignDuringEdge = (to: string) => { foreignDuringEdgeTo = to; };
-  return { d, read: () => ({ nodes, edges }), refusedStale, writes, allowAll, foreignEdit, foreignDuringEdge };
+  /** A foreign edit lands just before the n-th graph read from now. */
+  const foreignBeforeRead = (n: number) => { foreignAtRead = reads + n; };
+  /** A foreign edit lands after the write to `to` commits and before its readback. */
+  const foreignAfterWriteTo = (to: string) => { foreignAfterWrite = to; };
+  return { d, read: () => ({ nodes, edges }), refusedStale, writes, allowAll, foreignEdit, foreignDuringEdge, foreignBeforeRead, foreignAfterWriteTo, edgeAttempts };
 }
 
 const ASK = {
@@ -327,5 +347,34 @@ describe('a partially added option is completed by approving the SAME proposal a
     const status = narrateWriteOutcome('', [{ name: 'authorise_change' }], [first]).status ?? '';
     expect(status).not.toMatch(/adds only the missing link/);
     expect(status).toMatch(/if the model has changed since, you will be asked to confirm again/);
+  });
+  /**
+   * ⛔ Independent review of #1788 (5807492503): two more windows where an UNOWNED revision was
+   * adopted. Ownership is proven only by a write's own reported revision matching the readback.
+   */
+  it('RED: a foreign edit between authorisation and the continuation\'s first read → superseded, NO missing-link write', async () => {
+    const { p, caps, id } = await partial();
+    p.allowAll();
+    // authoriseChange reads once to authorise; the foreign edit lands before the NEXT read.
+    p.foreignBeforeRead(2);
+    const writes = p.writes.length;
+    const retry = await caps.authoriseChange(ctx, { proposal_id: id });
+    expect(retry).toMatchObject({ ok: false, mutated: false, refusal: 'superseded' });
+    expect(p.writes, 'nothing written on the foreign-edited model').toHaveLength(writes);
+  });
+
+  it('RED: a foreign edit between a confirmed link write and its readback → no LATER link on that revision; the next approval is superseded', async () => {
+    const p = fakeProduct(null);
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const prop = await caps.proposeNewOption(ctx, ASK);
+    p.foreignAfterWriteTo('dev_headcount');
+    const first = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(first.ok, 'the pass stopped: ownership of the observed revision was not proven').toBe(false);
+    expect(p.writes, 'the node and ONE link — no link was dispatched on the foreign revision').toEqual(['structural_add', 'structural_add_edge']);
+    expect(p.edgeAttempts, 'the later link was never even DISPATCHED once ownership was unproven').toEqual(['dev_headcount']);
+    const writes = p.writes.length;
+    const again = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(again).toMatchObject({ ok: false, refusal: 'superseded' });
+    expect(p.writes).toHaveLength(writes);
   });
 });
