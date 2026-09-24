@@ -62,12 +62,28 @@ export interface RangeAddedForAnalysis {
   readonly range: number;
 }
 
+/**
+ * A range this turn INTENDED to attach and could not, so the analysis is still
+ * blocked for that factor even though the value itself was saved.
+ *
+ * ⛔ WITHOUT THIS THE PROSE COULD NOT SAY IT. The tool result reports the
+ * partial outcome (`ranges_not_attached`, `analysis_still_blocked_for`), but a
+ * field only the model reads is a field that is disclosed only if the model
+ * elects to — which is the exact dependence this module exists to remove.
+ */
+export interface RangeNotAttached {
+  readonly factor: string;
+  readonly range: number;
+}
+
 export interface TurnStateFacts {
   readonly rescaled: readonly RescaledValue[];
   readonly ranges_added: readonly RangeAddedForAnalysis[];
+  /** Ranges that were refused — the value landed, the range did not. */
+  readonly ranges_not_attached: readonly RangeNotAttached[];
 }
 
-const EMPTY: TurnStateFacts = { rescaled: [], ranges_added: [] };
+const EMPTY: TurnStateFacts = { rescaled: [], ranges_added: [], ranges_not_attached: [] };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -94,8 +110,10 @@ export function collectTurnStateFacts(toolResults: readonly unknown[] | undefine
   if (!Array.isArray(toolResults)) return EMPTY;
   const rescaled: RescaledValue[] = [];
   const ranges: RangeAddedForAnalysis[] = [];
+  const notAttached: RangeNotAttached[] = [];
   const seenRescaled = new Set<string>();
   const seenRange = new Set<string>();
+  const seenNotAttached = new Set<string>();
 
   for (const result of toolResults) {
     const r = asRecord(result);
@@ -141,7 +159,25 @@ export function collectTurnStateFacts(toolResults: readonly unknown[] | undefine
       seenRange.add(e.factor);
       ranges.push({ factor: e.factor, range: e.range });
     }
+
+    /**
+     * ⚠ SAME SHAPE AS `ranges_added_for_analysis`, OPPOSITE MEANING. The
+     * producer emits exactly one of the two per factor: a range was attached,
+     * or it was refused. Reading only the first told the user a range had been
+     * chosen and never that one was missing.
+     */
+    for (const entry of Array.isArray(r.ranges_not_attached) ? r.ranges_not_attached : []) {
+      const e = asRecord(entry);
+      if (e === null) continue;
+      if (typeof e.factor !== 'string' || e.factor === '') continue;
+      // A range must be a usable denominator to be worth naming; the producer
+      // applies the same `> 1` rule when it chooses one.
+      if (typeof e.range !== 'number' || !Number.isFinite(e.range) || e.range <= 1) continue;
+      if (seenNotAttached.has(e.factor)) continue;
+      seenNotAttached.add(e.factor);
+      notAttached.push({ factor: e.factor, range: e.range });
+    }
   }
 
-  return { rescaled, ranges_added: ranges };
+  return { rescaled, ranges_added: ranges, ranges_not_attached: notAttached };
 }
