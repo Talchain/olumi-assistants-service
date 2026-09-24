@@ -15,6 +15,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
+import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
 import { AGENT_RUN_ANALYSIS_CHIP_ID } from '../../handlers/agent-chip-ids.js';
 
 /**
@@ -620,8 +621,20 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'empty_proposal', detail: 'No assumptions were given.' };
       }
 
-      const find = (l: string) => g.nodes.find((n) => norm(n.label) === norm(l) || norm(n.description) === norm(l));
+      /**
+       * ⛔ ONLY A NODE THE VALUE WRITER ACCEPTS CAN BE PROPOSED A VALUE — the writer's own rule,
+       * imported (`SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS`), never a copy. Served `778f1fd`
+       * (witness c7a, 24 Sep 03:05Z): a value proposed for a RISK node matched by label was
+       * refused at write (`entity_kind_mismatch_at_execute`) and the whole approval landed
+       * nothing. A label shared by a factor and another node resolves to the factor.
+       */
+      const writable = (n: { kind?: unknown }) => SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS.includes(String(n.kind));
+      const find = (l: string) => {
+        const hits = g.nodes.filter((n) => norm(n.label) === norm(l) || norm(n.description) === norm(l));
+        return hits.find(writable) ?? hits[0];
+      };
       const unresolved: string[] = [];
+      const notAFactor: { label: string; kind: string }[] = [];
       const occupied: { label: string; current_value: number }[] = [];
       const seen = new Set<string>();
       const adopted: { id: string; label: string; value: number; unit: string; basis: string }[] = [];
@@ -629,6 +642,7 @@ export function createAgentCapabilities(
       for (const a of input) {
         const node = find(String(a?.factor_label ?? ''));
         if (node === undefined) { unresolved.push(String(a?.factor_label ?? '')); continue; }
+        if (!writable(node)) { notAFactor.push({ label: node.label, kind: String(node.kind) }); continue; }
         const existing = node.observed_state?.value;
         if (typeof existing === 'number') { occupied.push({ label: node.label, current_value: existing }); continue; }
         if (!Number.isFinite(Number(a?.value))) { unresolved.push(node.label); continue; }
@@ -644,6 +658,7 @@ export function createAgentCapabilities(
         return {
           ok: false, mutated: false, refusal: 'nothing_to_adopt',
           unresolved_labels: unresolved, already_valued: occupied,
+          ...(notAFactor.length > 0 ? { not_a_factor: notAFactor } : {}),
           detail:
             'None of those could be adopted. Read the state again and use the labels exactly as they appear; ' +
             'factors that already hold a value are left alone.',
@@ -678,6 +693,9 @@ export function createAgentCapabilities(
         assumptions: ordered.map((a) => ({ factor: a.label, value: a.value, unit: a.unit, basis: a.basis })),
         ...(unresolved.length > 0 ? { unresolved_labels: unresolved } : {}),
         ...(occupied.length > 0 ? { left_alone_already_valued: occupied } : {}),
+        // Named, but not something a value can be set on (a risk, an outcome, an option): left out,
+        // so the user is never asked to approve a value that cannot be saved.
+        ...(notAFactor.length > 0 ? { not_a_factor: notAFactor } : {}),
         note:
           'Nothing has changed. Show the user each value and what it rests on, say plainly that these are ' +
           'assumptions to adopt or correct and NOT measurements, and call authorise_change with this ' +
