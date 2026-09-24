@@ -22,6 +22,7 @@
 import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { committedValueWrite } from './fixtures/served-value-write.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440000';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r' };
@@ -187,8 +188,8 @@ function framedProduct(writes: 'receipt' | 'refused' | 'committed_no_receipt') {
       hash = 'h1';
       // The egress validator DELETES the receipt when it is the only field that fails
       // (validators/b1.ts:128) — the write is committed and the 200 carries no receipt.
-      if (writes === 'committed_no_receipt') return { status: 200, json: {} };
-      return { status: 200, json: { model_version_receipt: RECEIPT(String(b.turn_id)) } };
+      if (writes === 'committed_no_receipt') return { status: 200, json: committedValueWrite(String(e.target_id)) };
+      return { status: 200, json: committedValueWrite(String(e.target_id), { model_version_receipt: RECEIPT(String(b.turn_id)) }) };
     }
     return { status: 200, json: { graph: { nodes, edges: [] }, graph_hash: hash } };
   };
