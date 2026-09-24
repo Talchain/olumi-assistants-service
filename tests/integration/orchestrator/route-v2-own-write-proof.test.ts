@@ -661,8 +661,10 @@ describe('POST /orchestrate/v2/turn — factor_value_edit: what proves THIS oper
     const { status, body } = await send(SET_BUDGET_50K, MINE);
 
     // ── preconditions: MY append was attempted on the G0 base and the fake's
-    //    CAS — not anything else — rejected it.
-    expect(fake.loadGraphCalls).toBe(1);
+    //    CAS — not anything else — rejected it. Two graph reads since #1847: the
+    //    start-of-turn base read, then the post-conflict fresh read that supplies
+    //    the typed 409's `expected_base_graph_hash` (readClientRecoverableBaseHash).
+    expect(fake.loadGraphCalls).toBe(2);
     const mineWrites = appendsFor(MINE);
     expect(mineWrites).toHaveLength(1);
     const attempted = mineWrites[0]?.graph;
@@ -671,9 +673,14 @@ describe('POST /orchestrate/v2/turn — factor_value_edit: what proves THIS oper
     expect(identityOf(g0)).not.toBe(identityOf(g1));
     expect(fake.casRejected).toEqual([MINE]);
 
-    // ── no commit evidence on the reply. The CODE is 500 today; a typed 409 is
-    //    follow-up F2 — so this asserts "not a success", never "is 500".
-    expect(status).not.toBe(200);
+    // ── no commit evidence on the reply, and (since #1847) the TYPED conflict:
+    //    409 GRAPH_DIVERGED naming the CAS category and the fresh (foreign) base,
+    //    never the retryable 500 that read as "we don't know whether it saved".
+    expect(status).toBe(409);
+    expect(body.error).toBe('GRAPH_DIVERGED');
+    expect(body.details?.conflict_category).toBe('rpc_cas_conflict');
+    expect(body.details?.retryable).toBe(false);
+    expect(body.details?.expected_base_graph_hash).toBe(analysisHash(g1));
     expectNoCommitEvidence(body);
     expect(body.graph_hash).not.toBe(analysisHash(attempted));
 
