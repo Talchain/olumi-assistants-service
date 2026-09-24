@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
-import { currentAnalysisCoaching, runTurnCoaching } from '../analysis-coaching-pass-through.js';
+import { currentAnalysisCoaching, runTurnCoaching, type CapturedAnalysis, type RunTurnCoachingFinal } from '../analysis-coaching-pass-through.js';
 const hash = '0123456789abcdef';
 const time = '2026-09-24T10:00:00.000Z';
 const state = {run_state: {kind: 'complete_current', computed_at: time}, leader_claim: {permitted: false, withheld_reason: 'constraint_verdict_withheld'}};
@@ -17,14 +17,14 @@ for (const [name, change] of [
  ['stale card',{blocks:[result,{...card,freshness:'stale'}]}], ['unbound card',{blocks:[result,{...card,graph_hash_at_generation:undefined}]}],
  ['legacy review source',{blocks:[result,{...card,source:'decision_review'}]}], ['invalid schema',{blocks:[result,{...card,title:''}]}],
  ['no claim authority',{analysis_state:{...state,leader_claim:{}}}],
-]) test(name,()=>assert.deepEqual(currentAnalysisCoaching({...capture,...change},final),[]));
+] as [string, Partial<CapturedAnalysis>][]) test(name,()=>assert.deepEqual(currentAnalysisCoaching({...capture,...change},final),[]));
 for (const [name, change] of [
  ['changed graph',{graphHash:'fedcba9876543210'}],
  ['newer same-graph run',{analysisState:{...state,run_state:{kind:'complete_current',computed_at:'2026-09-24T10:01:00.000Z'}}}],
  ['changed permission',{analysisState:{...state,leader_claim:{permitted:true}}}],
  ['same tuple but conflicting leader designation',{analysisResult:{...result,leading_option_id:'another-option'}}],
  ['no canonical result',{analysisResult:undefined}],
-]) test(name,()=>assert.deepEqual(currentAnalysisCoaching(capture,{...final,...change}),[]));
+] as [string, Partial<RunTurnCoachingFinal>][]) test(name,()=>assert.deepEqual(currentAnalysisCoaching(capture,{...final,...change}),[]));
 test('missing action prompt stays absent',()=>{const plain={...card,action_prompt:undefined};assert.equal(currentAnalysisCoaching({...capture,blocks:[result,plain]},final)[0].action_prompt,undefined)});
 test('no analysis result or approval action forwarded',()=>assert.deepEqual(currentAnalysisCoaching({...capture,blocks:[result,card,{type:'approval',id:'wrong-action'}]},final).map(b=>b.type),['coaching']));
 

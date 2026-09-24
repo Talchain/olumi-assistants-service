@@ -23,8 +23,8 @@ test('actual provisional producer/finaliser and canonical read may differ in sum
  const freshness=deriveAnalysisFreshness([fact],hash,undefined,{priorFactsReadOk:true});
  const upstream=finaliseV5Response(composeDirectAnswerResponse({assistant_text:'Provisional result.',stage:'analyse',answerKind:'substantive',blocks:[buildAnalysisResultBlock(fact,analysisReady),card]}),{scenarioId,analysisReady:analysisReady as never,freshness,canonicalState:canonicalStateFromFreshness(freshness,{}),priorFacts:[fact],mayNameLeadingOption:false});
  const canonical=await readScenarioAnalysis({scenarioId,graph,requestId:'coaching-parity'});
- const before=upstream.blocks.find(b=>b.type==='analysis_result');
- expect(before?.summary).not.toEqual(canonical.analysis_result?.summary);
+ const before=upstream.blocks.find((b): b is Extract<typeof b,{type:'analysis_result'}>=>b.type==='analysis_result');
+ expect(before?.summary).not.toEqual((canonical.analysis_result as {summary?:unknown}|null)?.summary);
  expect(upstream.analysis_state?.run_state).toEqual(canonical.analysis_state?.run_state);
  expect(upstream.analysis_state?.leader_claim).toEqual(canonical.analysis_state?.leader_claim);
  expect(currentAnalysisCoaching({scenario_id:scenarioId,status:200,analysis_state:upstream.analysis_state,blocks:upstream.blocks},{scenarioId,graphHash:hash,analysisState:canonical.analysis_state,analysisResult:canonical.analysis_result})).toEqual([card]);
