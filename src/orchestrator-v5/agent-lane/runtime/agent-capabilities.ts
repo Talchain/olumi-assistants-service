@@ -1074,6 +1074,14 @@ export function createAgentCapabilities(
             http: addRes?.status ?? 0, operation_id: operationId };
         }
         baseHash = afterAdd?.graph_hash ?? baseHash;
+        /**
+         * ⛔ PROGRESS SITS ONLY AT A REVISION THIS PROPOSAL'S OWN CONFIRMED WRITE PRODUCED (independent
+         * review of #1788, 5807353449). A foreign edit during this pass makes the next link's CAS
+         * refuse; the readback then shows the FOREIGN revision, which must never become this
+         * proposal's continuation base — the next approval would apply the link to a model the user
+         * never approved. `ownRevision` advances only when a write of ours is confirmed present.
+         */
+        let ownRevision = baseHash;
 
         const linked: string[] = [];
         const notLinked: { factor: string; detail: string }[] = [];
@@ -1099,6 +1107,7 @@ export function createAgentCapabilities(
             linked.push(factorLabel);
             landedNow.push(String(edgeOp.path));
             baseHash = afterAdd?.graph_hash ?? baseHash;
+            ownRevision = baseHash;
             const r = receiptSummaryOf(edgeRes.json);
             if (r.summary !== null) receipts.push(r.summary);
             if (r.unreadable) receiptUnreadable = true;
@@ -1126,9 +1135,7 @@ export function createAgentCapabilities(
         if (complete) proposals.markApplied(decision.proposal.proposal_id, receipts);
         // A partial records what THIS proposal landed and the revision it left, so approving the
         // SAME proposal again continues from there and adds only what is missing.
-        else if (afterAdd?.graph_hash !== undefined) {
-          proposals.markPartial(decision.proposal.proposal_id, { revision: afterAdd.graph_hash, landed: landedNow, receipts });
-        }
+        else proposals.markPartial(decision.proposal.proposal_id, { revision: ownRevision, landed: landedNow, receipts });
         return {
           ok: complete,
           mutated: true,
@@ -1142,7 +1149,8 @@ export function createAgentCapabilities(
               `"${String(nodeValue.label ?? '')}" was added, but ${notLinked.length} of `
               + `${linked.length + notLinked.length} links were not recorded: `
               + `${notLinked.map((n) => n.factor).join(', ')}. The option is in the model and `
-              + 'incomplete. Approving again will add only the missing links — it will not add the option twice.',
+              + 'incomplete. Approving the same change again will try only the missing links — it will not add the option twice; '
+              + 'if the model has changed since, it will be refused and you will be asked to confirm again.',
           } : {}),
           receipts,
           ...(receiptUnreadable ? { receipt_unreadable: true } : {}),

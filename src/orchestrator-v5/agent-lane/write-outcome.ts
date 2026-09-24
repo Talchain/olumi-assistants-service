@@ -168,7 +168,8 @@ function statusLine(name: string, r: ToolResult): string {
     const missing = (r.not_linked as { factor?: unknown }[]).map((n) => String(n.factor ?? ''));
     const vs = versionsOf(r);
     return `Partly saved${versionPhrase(vs)}: "${label}" was added${linkedTo.length > 0 ? ` and linked to ${linkedTo.join(', ')}` : ''}, `
-      + `but not yet linked to ${missing.join(', ')}. Approving the same change again adds only the missing ${missing.length === 1 ? 'link' : 'links'}.`;
+      + `but not yet linked to ${missing.join(', ')}. Approving the same change again will try only the missing ${missing.length === 1 ? 'link' : 'links'}; `
+      + 'if the model has changed since, you will be asked to confirm again.';
   }
   const code = String(r.refusal ?? '');
   const mutated = r.mutated === true;

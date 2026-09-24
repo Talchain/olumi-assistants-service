@@ -56,6 +56,8 @@ function receipt(rev: number) {
 
 function fakeProduct(refuseEdgeToInit: string | null = null) {
   let refuseEdgeTo = refuseEdgeToInit;
+  // A foreign author edits the model at the very moment this edge write arrives (the window Codex named).
+  let foreignDuringEdgeTo: string | null = null;
   let nodes: N[] = [
     { id: 'goal', kind: 'goal', label: 'Increase velocity' },
     { id: 'dev_headcount', kind: 'factor', label: 'Developer headcount' },
@@ -69,6 +71,10 @@ function fakeProduct(refuseEdgeToInit: string | null = null) {
     const b = (body ?? {}) as Record<string, unknown>;
     if (path === '/orchestrate/v2/turn' && b.kind === 'system_event') {
       const ev = b.event as Record<string, string>;
+      if (ev.kind === 'structural_add_edge' && foreignDuringEdgeTo !== null && ev.to === foreignDuringEdgeTo) {
+        foreignDuringEdgeTo = null;
+        nodes = [...nodes, { id: 'someone_elses', kind: 'factor', label: 'Someone else\'s factor' }]; rev += 1;
+      }
       if (ev.base_graph_hash !== `h${rev}`) {
         refusedStale.push(`${ev.kind}:${ev.base_graph_hash}`);
         return { status: 200, json: { assistant_text: 'BASE_HASH_DIVERGED — nothing was written.' } };
@@ -86,7 +92,8 @@ function fakeProduct(refuseEdgeToInit: string | null = null) {
   const allowAll = () => { refuseEdgeTo = null; };
   /** Someone ELSE changes the model: a new revision this proposal did not write. */
   const foreignEdit = () => { nodes = [...nodes, { id: 'unrelated', kind: 'factor', label: 'Unrelated' }]; rev += 1; };
-  return { d, read: () => ({ nodes, edges }), refusedStale, writes, allowAll, foreignEdit };
+  const foreignDuringEdge = (to: string) => { foreignDuringEdgeTo = to; };
+  return { d, read: () => ({ nodes, edges }), refusedStale, writes, allowAll, foreignEdit, foreignDuringEdge };
 }
 
 const ASK = {
@@ -293,7 +300,32 @@ describe('a partially added option is completed by approving the SAME proposal a
     expect(status).toMatch(/^Partly saved/);
     expect(status).toContain('"Hire a contractor" was added and linked to Developer headcount');
     expect(status).toContain('not yet linked to Lead time');
-    expect(status).toContain('adds only the missing link');
+    expect(status).toContain('will try only the missing link');
     expect(status).not.toMatch(/unknown reason/);
+  });
+  /**
+   * ⛔ Independent review of #1788 (5807353449): a foreign edit DURING the continuation made the
+   * missing link's CAS refuse; the route then read the foreign revision and recorded it as this
+   * proposal's own progress, so the NEXT approval would apply the link to a model the user never
+   * approved. Progress may only ever sit at a revision this proposal's own confirmed write produced.
+   */
+  it('RED: a foreign edit DURING the retry → the missing link refuses, and a further approval writes nothing and reports superseded', async () => {
+    const { p, caps, id } = await partial();
+    p.allowAll();
+    p.foreignDuringEdge('lead_time'); // someone else edits at the moment the missing link is written
+    const retry = await caps.authoriseChange(ctx, { proposal_id: id });
+    expect(retry.ok, 'the missing link could not land on a moved model').toBe(false);
+    const writes = p.writes.length;
+    const again = await caps.authoriseChange(ctx, { proposal_id: id });
+    expect(again, 'never continue on a revision this proposal did not write').toMatchObject({ ok: false, refusal: 'superseded' });
+    expect(p.writes, 'nothing written on the foreign-edited model').toHaveLength(writes);
+  });
+
+  it('the partial status line never promises the retry WILL add the link', async () => {
+    const { first } = await partial();
+    const { narrateWriteOutcome } = await import('../write-outcome.js');
+    const status = narrateWriteOutcome('', [{ name: 'authorise_change' }], [first]).status ?? '';
+    expect(status).not.toMatch(/adds only the missing link/);
+    expect(status).toMatch(/if the model has changed since, you will be asked to confirm again/);
   });
 });
