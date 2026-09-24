@@ -259,8 +259,23 @@ export function notAdoptedLine(
       items.push(kind !== '' ? `${label} (${/^[aeiou]/i.test(kind) ? 'an' : 'a'} ${kind})` : label);
     }
   });
-  if (items.length === 0) return null;
-  return `Not included in this proposal: ${items.join('; ')}. Only a factor can hold a starting value, so ${items.length === 1 ? 'it was' : 'they were'} left out — approving adds nothing for ${items.length === 1 ? 'it' : 'them'}.`;
+  // An option that acts on no factor (c8a on served `6dfb56f`): approving the starting point cannot make it runnable.
+  const inert = new Set<string>();
+  toolCalls.forEach((c, i) => {
+    if (c.name !== 'propose_starting_point') return;
+    const list = (toolResults[i] as { options_acting_on_nothing?: unknown } | undefined)?.options_acting_on_nothing;
+    for (const l of Array.isArray(list) ? list : []) if (String(l).trim() !== '') inert.add(String(l).trim());
+  });
+  const lines: string[] = [];
+  if (items.length > 0) {
+    lines.push(`Not included in this proposal: ${items.join('; ')}. Only a factor can hold a starting value, so ${items.length === 1 ? 'it was' : 'they were'} left out — approving adds nothing for ${items.length === 1 ? 'it' : 'them'}.`);
+  }
+  if (inert.size > 0) {
+    const names = [...inert].map((l) => `"${l}"`);
+    const one = names.length === 1;
+    lines.push(`Still needed before the analysis can run: ${names.join(', ')} ${one ? 'acts' : 'act'} on no factor yet, so approving this will not make the model runnable — say what ${one ? 'it changes' : 'each one changes'}.`);
+  }
+  return lines.length === 0 ? null : lines.join(' ');
 }
 
 export function withWriteOutcome(body: string, status: string | null): string {
