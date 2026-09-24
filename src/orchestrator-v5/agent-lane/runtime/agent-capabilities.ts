@@ -512,6 +512,26 @@ export function createAgentCapabilities(
   const levelPathsOf = (ps: readonly StructuredProposal[]): Set<string> =>
     new Set(ps.flatMap((p) => p.operations).filter((o) => o.op === 'set_option_intervention').map((o) => o.path));
   /**
+   * ⛔ AN OPTION THAT ACTS ON NO FACTOR PASSES `missingPairs` VACUOUSLY — it has no pair to miss — yet
+   * readiness blocks the whole comparison on it (`OPTION_NO_FACTOR_EDGES`). MEASURED on served `6dfb56f`
+   * (witness c8a, hiring): "Continue Current Hiring" had no factor link, one approval saved every value
+   * and level, and the Run straight after was blocked. Named on the proposal so the user knows BEFORE
+   * approving that one more answer is needed; nothing is invented for it here.
+   */
+  const optionsActingOnNothing = async (ctx: AgentToolContext): Promise<string[]> => {
+    const g = await readGraph(ctx.scenario_id);
+    if (g === null) return [];
+    return g.nodes
+      .filter((n) => n.kind === 'option' && linkedFactorsOf(g as never, n.id).length === 0)
+      .map((n) => String(n.label ?? n.id));
+  };
+  const inertOptionsOf = (labels: readonly string[]): Record<string, unknown> => (labels.length === 0 ? {} : {
+    options_acting_on_nothing: labels,
+    options_acting_on_nothing_note:
+      'These options act on no factor, so the comparison cannot run even after this is approved. Tell the user, and ' +
+      'ask what each one changes \u2014 for an option that keeps things as they are, whether it holds each factor at its starting value.',
+  });
+  /**
    * ⛔ COMPLETENESS IS AN ADMISSION RULE, NOT A NOTE — independent review of
    * #1719 at d00727aa: reporting the missing pairs AFTER storing an approvable
    * proposal let a model that ignored the note ask the user to approve an
@@ -778,7 +798,7 @@ export function createAgentCapabilities(
             ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor } : {}), ...refused,
           });
         }
-        return { ...made[0], ...refused };
+        return { ...made[0], ...refused, ...inertOptionsOf(await optionsActingOnNothing(ctx)) };
       }
       const halves = made.map((r) => proposals.get(r.proposal_id as string)).filter((p): p is StructuredProposal => p !== undefined);
       if (halves.length !== 2 || halves[0].base_graph_identity_hash !== halves[1].base_graph_identity_hash) {
@@ -824,6 +844,7 @@ export function createAgentCapabilities(
         // never reached the Agent, and the starting point looked complete at the moment of consent.
         ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor, not_a_factor_note: NOT_A_FACTOR_NOTE } : {}),
         ...refused,
+        ...inertOptionsOf(await optionsActingOnNothing(ctx)),
         note:
           'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +
           'assumptions to adopt or correct, NOT measurements, and that ONE approval applies all of them. Then call ' +
