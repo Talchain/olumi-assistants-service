@@ -112,6 +112,21 @@ const OPTION_KIND = "option";
 const DRAFT_EXIT_PATH = "draft_graph";
 
 /**
+ * ⛔ OPENAI ONLY (programme constraint, 24 Sep 2026). No turn this gate drives
+ * may reach Anthropic. The gate therefore SELECTS the OpenAI lane on every
+ * request (`x-olumi-ai-mode: openai`, which the proxy forwards and resolves to
+ * `/agent/v1/turn`; see `resolveProxyInternalTarget` in
+ * src/routes/proxy-v5-turn.ts) and then PROVES it on every response with
+ * `assertOpenAiOnly`. Selecting it is not proof: a deployment whose proxy
+ * ignored the header would silently serve the Conventional (Anthropic) route.
+ */
+export const AI_MODE_HEADER = "x-olumi-ai-mode";
+export const AI_MODE = "openai";
+/** The only exit path the OpenAI lane writes. See src/routes/agent-v1-turn.ts. */
+export const AGENT_EXIT_PATH = "agent_lane_v1";
+export const ALLOWED_PROVIDER = "openai";
+
+/**
  * Exit paths whose `sendFinalised200` call site supplies an `analysisReady`
  * payload — i.e. the ONLY paths on which an absent/empty `analysis_ready` means
  * something was LOST rather than simply never produced.
@@ -733,6 +748,13 @@ export function assertPromptProvenance(diagnostics, bodies = []) {
   const f = [];
   diagnostics.forEach((d, i) => {
     if (!d) return;
+    // The OpenAI lane has no prompt registry and so no `prompt_identity`. Its
+    // provenance is the provider ledger, whose every row names provider AND
+    // model: `assertOpenAiOnly` demands that ledger on the same turn and fails
+    // on a row without a model. Skipping ONLY this exit path keeps the check
+    // at full strength on any turn that reached the Conventional route —
+    // which `assertOpenAiOnly` also fails.
+    if (d.exit_path === AGENT_EXIT_PATH) return;
     const delivered = carriedDraftGraph(bodies[i]);
     const declared = d.exit_path === DRAFT_EXIT_PATH;
     if (!delivered && !declared) return;
@@ -747,6 +769,77 @@ export function assertPromptProvenance(diagnostics, bodies = []) {
     );
   });
   return f;
+}
+
+/**
+ * ⛔ PROVE this turn was served by OpenAI and by nothing else.
+ *
+ * Fails closed: every way of being unable to prove it is a failure, not a pass.
+ *   · the proxy's own `x-olumi-ai-mode` response header is not `openai`
+ *     (the proxy stamps the lane it actually routed to);
+ *   · `_diagnostic_trace.exit_path` is not `agent_lane_v1`;
+ *   · `_provider_calls` is absent, not an array, or EMPTY — a turn that
+ *     records no generative call cannot prove which provider answered it;
+ *   · `_provider_calls_truncated` is true — the rows we cannot see are
+ *     exactly the ones that could name another provider;
+ *   · ANY row's `provider` is not `openai`. That includes a row with outcome
+ *     `refused_before_network`: the producer's own contract (agent-v1-turn.ts)
+ *     is that "any `anthropic` row is a failure even though it was refused",
+ *     because a refusal proves the code path TRIED;
+ *   · any row has no `model` — that row is the turn's provenance
+ *     (see `assertPromptProvenance`), so an unnamed model is unprovable.
+ *
+ * @param {{body?: unknown, aiMode?: string|null}} turn
+ * @param {string} label
+ * @returns {string[]} failure messages; empty means proven OpenAI-only.
+ */
+export function assertOpenAiOnly(turn, label = "turn") {
+  const f = [];
+  const body = turn?.body;
+  if (!body || typeof body !== "object") return [`${label}: response body was not a JSON object — cannot prove OpenAI-only`];
+  const served = turn?.aiMode ?? null;
+  if (served !== AI_MODE) {
+    f.push(`${label}: proxy served ${AI_MODE_HEADER}=${served ?? "absent"}, not ${AI_MODE} — the OpenAI lane was not selected`);
+  }
+  const exit = body?._diagnostic_trace?.exit_path ?? null;
+  if (exit !== AGENT_EXIT_PATH) {
+    f.push(`${label}: exit_path=${exit ?? "absent"}, not ${AGENT_EXIT_PATH} — this turn did not run on the OpenAI lane`);
+  }
+  const calls = body._provider_calls;
+  if (!Array.isArray(calls)) {
+    f.push(`${label}: _provider_calls absent — cannot prove which provider served this turn`);
+    return f;
+  }
+  if (calls.length === 0) {
+    f.push(`${label}: _provider_calls is empty — no generative call recorded, so OpenAI-only is unproven`);
+  }
+  if (body._provider_calls_truncated === true) {
+    f.push(`${label}: _provider_calls_truncated=true — unseen rows could name another provider`);
+  }
+  calls.forEach((c, i) => {
+    const provider = c?.provider ?? "absent";
+    const where = `${c?.site ?? "?"}/${c?.purpose ?? "?"} outcome=${c?.outcome ?? "?"}`;
+    if (provider !== ALLOWED_PROVIDER) {
+      f.push(`${label}: _provider_calls[${i}] provider=${provider} (${where}) — NOT OpenAI`);
+    }
+    if (typeof c?.model !== "string" || c.model.trim().length === 0) {
+      f.push(`${label}: _provider_calls[${i}] has no model (${where}) — provenance unprovable`);
+    }
+  });
+  return f;
+}
+
+/** One printable line: which providers and models this turn's ledger names. */
+export function providerLine(body) {
+  const calls = body?._provider_calls;
+  if (!Array.isArray(calls)) return "providers: absent";
+  const counts = {};
+  for (const c of calls) {
+    const k = `${c?.provider ?? "?"}:${c?.model ?? "?"}`;
+    counts[k] = (counts[k] ?? 0) + 1;
+  }
+  const parts = Object.entries(counts).map(([k, n]) => `${k}×${n}`);
+  return `providers: ${parts.length > 0 ? parts.join(" ") : "none"}${body?._provider_calls_truncated === true ? " (TRUNCATED)" : ""}`;
 }
 
 /** Extract the diagnostics we report on every run, healthy or not. */
@@ -859,6 +952,11 @@ export function classifyJourneySample(turns, failures) {
   for (const t of list) {
     const code = proxyFailureCode(t?.body);
     if (code) return { ok: false, code: `PROXY:${code}` };
+  }
+  for (const t of list) {
+    const calls = t?.body?._provider_calls;
+    const other = Array.isArray(calls) ? calls.find((c) => c?.provider !== ALLOWED_PROVIDER) : undefined;
+    if (other) return { ok: false, code: `PROVIDER:${nonEmpty(other?.provider) ? other.provider.trim() : "absent"}` };
   }
   for (const t of list) if (nonEmpty(t?.body?.details?.violation_code)) return { ok: false, code: `VIOLATION:${t.body.details.violation_code.trim()}` };
   for (const t of list) if (nonEmpty(t?.body?.details?.reason)) return { ok: false, code: `REASON:${t.body.details.reason.trim()}` };
@@ -1233,6 +1331,11 @@ async function postTurn(base, origin, payload, timeoutMs) {
         "Content-Type": "application/json",
         Accept: "application/json",
         Origin: origin,
+        // ⛔ OPENAI ONLY. The proxy forwards this header (it is in its
+        // ALLOWED_REQUEST_HEADERS) and routes to the OpenAI lane. Never
+        // remove it: without it the deployment default decides, and that
+        // may be the Conventional (Anthropic) route.
+        [AI_MODE_HEADER]: AI_MODE,
       },
       body: JSON.stringify(payload),
       signal: ac.signal,
@@ -1244,7 +1347,7 @@ async function postTurn(base, origin, payload, timeoutMs) {
     } catch {
       body = { __unparseable: text.slice(0, 500) };
     }
-    return { status: res.status, body, ms: Date.now() - started };
+    return { status: res.status, body, ms: Date.now() - started, aiMode: res.headers.get(AI_MODE_HEADER) };
   } finally {
     clearTimeout(timer);
   }
@@ -1337,7 +1440,7 @@ async function runJourneySample({ base, origin, turnTimeout, index, total }) {
       turnTimeout,
     );
     const d1 = extractDiagnostics(t1.body);
-    turns.push({ label: "turn 1", body: t1.body, status: t1.status, d: d1 });
+    turns.push({ label: "turn 1", body: t1.body, status: t1.status, d: d1, aiMode: t1.aiMode });
     log(
       `  turn 1: HTTP ${t1.status} in ${(t1.ms / 1000).toFixed(1)}s | exit_path=${d1.exit_path} | ` +
         `build_sha=${d1.build_sha} | ${graphLine(t1.body)}`,
@@ -1349,7 +1452,9 @@ async function runJourneySample({ base, origin, turnTimeout, index, total }) {
     log(`    ${draftGraphCensus(t1.body)}`);
     log(`    readiness: ${readinessDiagnosis(t1.body)}`);
     log(`    draft_error: ${draftErrorDiagnosis(t1.body)}`);
+    log(`    ${providerLine(t1.body)} | ${AI_MODE_HEADER}=${t1.aiMode ?? "absent"}`);
     failures.push(...assertProxyDelivered(t1.body, "turn 1"));
+    failures.push(...assertOpenAiOnly({ body: t1.body, aiMode: t1.aiMode }, "turn 1"));
     if (t1.status !== 200) failures.push(`turn 1: HTTP ${t1.status} (expected 200)`);
     failures.push(...assertHealthyFrame(t1.body));
 
@@ -1368,7 +1473,7 @@ async function runJourneySample({ base, origin, turnTimeout, index, total }) {
       turnTimeout,
     );
     const d2 = extractDiagnostics(t2.body);
-    turns.push({ label: "turn 2", body: t2.body, status: t2.status, d: d2 });
+    turns.push({ label: "turn 2", body: t2.body, status: t2.status, d: d2, aiMode: t2.aiMode });
     // build_sha is stamped PER TURN, not once per run. Render made a rolled-back
     // parent build live mid-window on 17 Aug 2026 (two merges 14s apart, the
     // parent's deploy finishing last), so "the run confirmed the build at the
@@ -1381,7 +1486,9 @@ async function runJourneySample({ base, origin, turnTimeout, index, total }) {
     log(`    ${draftGraphCensus(t2.body)}`);
     log(`    readiness: ${readinessDiagnosis(t2.body)}`);
     log(`    draft_error: ${draftErrorDiagnosis(t2.body)}`);
+    log(`    ${providerLine(t2.body)} | ${AI_MODE_HEADER}=${t2.aiMode ?? "absent"}`);
     failures.push(...assertProxyDelivered(t2.body, "turn 2"));
+    failures.push(...assertOpenAiOnly({ body: t2.body, aiMode: t2.aiMode }, "turn 2"));
     if (t2.status !== 200) failures.push(`turn 2: HTTP ${t2.status} (expected 200)`);
 
     // Assert over the JOURNEY, not over turn 2. See assertHealthyJourney.

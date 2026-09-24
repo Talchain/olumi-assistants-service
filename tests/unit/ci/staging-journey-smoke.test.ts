@@ -46,6 +46,11 @@ import {
   halfDetectionRate,
   assertSampleFloor,
   samplingReport,
+  assertOpenAiOnly,
+  providerLine,
+  AI_MODE_HEADER,
+  AI_MODE,
+  AGENT_EXIT_PATH,
 } from "../../../scripts/ci/staging-journey-smoke.mjs";
 
 const REPO_ROOT = resolve(__dirname, "../../..");
@@ -1852,5 +1857,103 @@ describe("the .d.mts type mirror cannot silently fall behind the .mjs", () => {
     const exported = mjsExports();
     const phantom = dtsDeclares().filter((n) => !exported.includes(n));
     expect(phantom, `declared in ${DTS} but NOT exported from ${MJS}: ${phantom.join(", ")}`).toEqual([]);
+  });
+});
+
+describe("⛔ OPENAI ONLY (24 Sep 2026) — the gate selects the OpenAI lane AND proves it on every turn", () => {
+  const row = (over: Record<string, unknown> = {}) => ({
+    site: "agent_lane.loop",
+    provider: "openai",
+    model: "gpt-5",
+    purpose: "turn",
+    outcome: "ok",
+    ...over,
+  });
+  const openAiTurn = (over: Record<string, unknown> = {}) => ({
+    assistant_text: "Here is a first model.",
+    _diagnostic_trace: { exit_path: AGENT_EXIT_PATH },
+    _provider_calls: [row(), row({ site: "agent_lane.construction" })],
+    ...over,
+  });
+  const served = (body: unknown, aiMode: string | null = AI_MODE) => ({ body, aiMode });
+
+  it("the constants name the OpenAI lane, and nothing else", () => {
+    expect(AI_MODE_HEADER).toBe("x-olumi-ai-mode");
+    expect(AI_MODE).toBe("openai");
+    expect(AGENT_EXIT_PATH).toBe("agent_lane_v1");
+  });
+
+  it("CALL-SITE PIN: every turn is sent with x-olumi-ai-mode: openai, and nothing selects conventional", () => {
+    const src = readFileSync(resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.mjs"), "utf8");
+    expect(src).toContain("[AI_MODE_HEADER]: AI_MODE,");
+    expect(src).toContain("aiMode: res.headers.get(AI_MODE_HEADER)");
+    expect(src).not.toMatch(/["']conventional["']/);
+    // Both driven turns are judged by the OpenAI-only proof, not just one.
+    expect(src).toContain('assertOpenAiOnly({ body: t1.body, aiMode: t1.aiMode }, "turn 1")');
+    expect(src).toContain('assertOpenAiOnly({ body: t2.body, aiMode: t2.aiMode }, "turn 2")');
+  });
+
+  it("CONTROL: a turn served by the OpenAI lane with an all-openai ledger passes", () => {
+    expect(assertOpenAiOnly(served(openAiTurn()), "turn 1")).toEqual([]);
+  });
+
+  it("an ANTHROPIC row fails — even one refused before the network — and classifies as PROVIDER:anthropic", () => {
+    const body = openAiTurn({
+      _provider_calls: [row(), row({ provider: "anthropic", model: "claude", outcome: "refused_before_network" })],
+    });
+    const f = assertOpenAiOnly(served(body), "turn 1");
+    expect(f.join(" ")).toMatch(/_provider_calls\[1\] provider=anthropic .*NOT OpenAI/);
+    expect(classifyJourneySample([{ label: "turn 1", body, status: 200 }], f)).toEqual({
+      ok: false,
+      code: "PROVIDER:anthropic",
+    });
+  });
+
+  it("the Conventional route fails: wrong exit_path, wrong served mode", () => {
+    const f = assertOpenAiOnly(
+      served(openAiTurn({ _diagnostic_trace: { exit_path: "draft_graph" } }), "conventional"),
+      "turn 1",
+    );
+    expect(f.join(" ")).toContain("x-olumi-ai-mode=conventional, not openai");
+    expect(f.join(" ")).toContain("exit_path=draft_graph, not agent_lane_v1");
+  });
+
+  it("a proxy that dropped the header (served mode absent) fails even when the body looks right", () => {
+    expect(assertOpenAiOnly(served(openAiTurn(), null), "turn 2").join(" ")).toContain(
+      "x-olumi-ai-mode=absent, not openai",
+    );
+  });
+
+  it.each([
+    ["absent", { _provider_calls: undefined }, "_provider_calls absent"],
+    ["not an array", { _provider_calls: { provider: "openai" } }, "_provider_calls absent"],
+    ["empty", { _provider_calls: [] }, "_provider_calls is empty"],
+    ["truncated", { _provider_calls_truncated: true }, "_provider_calls_truncated=true"],
+    ["a row with no model", { _provider_calls: [row({ model: "" })] }, "has no model"],
+    ["a row with no provider", { _provider_calls: [row({ provider: undefined })] }, "provider=absent"],
+  ])("FAILS CLOSED when the ledger is %s", (_name, over, expected) => {
+    const f = assertOpenAiOnly(served(openAiTurn(over)), "turn 1");
+    expect(f.length).toBeGreaterThan(0);
+    expect(f.join(" ")).toContain(expected);
+  });
+
+  it("a non-object body cannot be proven OpenAI-only", () => {
+    expect(assertOpenAiOnly(served(undefined), "turn 1")).toHaveLength(1);
+  });
+
+  it("prompt provenance is waived ONLY on agent_lane_v1 (whose provenance is the ledger), never on Conventional", () => {
+    const graph = { nodes: [{ id: "a", kind: "goal" }], edges: [] };
+    const agent = extractDiagnostics(openAiTurn({ draft_graph: graph }));
+    expect(agent.prompt_identity_count).toBe(0);
+    expect(assertPromptProvenance([agent], [openAiTurn({ draft_graph: graph })])).toEqual([]);
+    // Same body, Conventional exit: the check keeps full strength.
+    const conventional = { ...openAiTurn({ draft_graph: graph }), _diagnostic_trace: { exit_path: "draft_graph" } };
+    expect(assertPromptProvenance([extractDiagnostics(conventional)], [conventional])).toHaveLength(1);
+  });
+
+  it("providerLine names every provider and model, and flags truncation", () => {
+    expect(providerLine(openAiTurn())).toBe("providers: openai:gpt-5×2");
+    expect(providerLine(openAiTurn({ _provider_calls_truncated: true }))).toContain("(TRUNCATED)");
+    expect(providerLine({})).toBe("providers: absent");
   });
 });
