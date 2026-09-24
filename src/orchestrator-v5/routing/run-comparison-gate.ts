@@ -68,6 +68,7 @@ import { textNamesLeadingOption } from '../compose/leading-option-egress-guard.j
 // `readMayNameLeadingOptionVerdictForFact`'s docstring for why a second
 // selection ceremony here is the defect and this is not.
 import { readMayNameLeadingOptionVerdictForFact } from '../context/claim-safety-read.js';
+import { wasAnalysisRequestedByUser } from '../compose/unrequested-analysis-confinement.js';
 
 export type RunComparisonFreshness = 'fresh' | 'stale' | 'unknown' | 'none';
 
@@ -851,13 +852,21 @@ export function tryRunComparisonGate(
   // per-run verdict can only
   // narrow it further. Every value is `<=` the pre-fix boolean, so a turn that
   // withheld still withholds and no leader becomes newly nameable.
+  //
+  // ⛔ AND THE RUN MUST HAVE BEEN ASKED FOR (review of #1857, B3). An automatic run's leader is
+  // never PRESENTED (`mayPresentLeaderClaimForFact` = verdict ∧ `wasAnalysisRequestedByUser`),
+  // so a comparison may not name it either — "Offshore still leads" after a construction
+  // auto-run designates a leader the user was never given. Same narrowing direction: `<=` the
+  // verdict-only value, and the withheld-prior arm below composes the rest.
   const authority: RunComparisonLeaderAuthority = {
     prior:
       input.mayNameLeadingOption
-      && readMayNameLeadingOptionVerdictForFact(pair.prior).may_name_leading_option,
+      && readMayNameLeadingOptionVerdictForFact(pair.prior).may_name_leading_option
+      && wasAnalysisRequestedByUser(pair.prior),
     current:
       input.mayNameLeadingOption
-      && readMayNameLeadingOptionVerdictForFact(pair.current).may_name_leading_option,
+      && readMayNameLeadingOptionVerdictForFact(pair.current).may_name_leading_option
+      && wasAnalysisRequestedByUser(pair.current),
   };
 
   // ⭐ THE SAME TWO FACTS THE DELTA WAS PROJECTED FROM. `pair` is this gate's
