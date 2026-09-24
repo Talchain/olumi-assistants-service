@@ -170,12 +170,47 @@ export class ProposalStore {
 
   put(p: StructuredProposal): StructuredProposal {
     if (this.items.size >= MAX_PROPOSALS && !this.items.has(p.proposal_id)) {
-      const oldest = this.order.shift();
-      if (oldest !== undefined) this.items.delete(oldest);
+      this.evictOne();
     }
     if (!this.items.has(p.proposal_id)) this.order.push(p.proposal_id);
     this.items.set(p.proposal_id, p);
     return p;
+  }
+
+  /**
+   * ⛔ NEVER EVICT AN APPLIED PROPOSAL WHILE AN UNAPPLIED ONE IS AVAILABLE.
+   *
+   * This used to be `this.order.shift()` — drop the oldest id from `items`, and
+   * leave `applied` untouched. But `authorise` reads `items` FIRST and returns
+   * `unknown_proposal` before it ever consults `applied`, so an approval that HAD
+   * been applied came back as "no longer available".
+   *
+   * The user-visible cost is not a wrong code. `REFUSAL_WORDS.unknown_proposal`
+   * reads "that proposal is no longer available, so nothing was changed — ask me
+   * to suggest it again and approve the new one", so the user is told nothing was
+   * saved when it WAS, and invited to apply the same change a second time.
+   *
+   * Eviction targeted exactly the wrong entries: `order` is FIFO and an applied
+   * proposal is by definition one that has already been through a full cycle, so
+   * it sits among the oldest. And this store is a PROCESS-WIDE singleton shared by
+   * every user and scenario, so the cap is reached by total traffic rather than by
+   * any one conversation.
+   *
+   * ⚠ The bound is unchanged: exactly one entry is removed per call. When every
+   * candidate IS applied — which needs 200 applied proposals and no outstanding
+   * one, so it is a far corner rather than the path above — the oldest is removed
+   * and its `applied` record goes with it, keeping `applied` a SUBSET of `items`.
+   * A receipt we can no longer name a proposal for is worse than none, because
+   * `authorise` would find the record and have nothing to return with it.
+   */
+  private evictOne(): void {
+    const victim =
+      this.order.find((id) => this.items.has(id) && !this.applied.has(id))
+      ?? this.order.find((id) => this.items.has(id));
+    if (victim === undefined) return;
+    this.items.delete(victim);
+    this.applied.delete(victim);
+    this.order = this.order.filter((x) => x !== victim);
   }
 
   get(id: string): StructuredProposal | undefined {
