@@ -19,6 +19,11 @@
  * field and a driven journey. Stated here so nobody reads a green run as a
  * witness — the estate has made that mistake before.
  *
+ * ⭐ FRESHNESS WAS ADDED HERE ONCE #1746 LANDED (staging `0415b191`), which is the
+ * follow-up I named in this file's own merge verdict rather than slipping it into
+ * that PR's rebase. The rule this file follows is that an element is guarded the
+ * moment it is served, and not before.
+ *
  * ⚠ AND IT DELIBERATELY DOES NOT ASSERT THE UNLANDED HALF. Freshness in the agent
  * lane, the deterministic value-change disclosure, reload admissibility and the
  * identity-space write expectation are open PRs. Asserting their absence would
@@ -29,6 +34,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { collectTurnReceipts } from '../agent-lane/turn-receipts.js';
+import { withCurrentGraphHash } from '../agent-lane/analysis-freshness-stamp.js';
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
 const AGENT_ROUTE = read('../../routes/agent-v1-turn.ts');
@@ -137,5 +143,58 @@ describe('THE CAS POSTURE IS DERIVED, NEVER ASSERTED IN PROSE', () => {
     for (const c of CONSUMERS) {
       expect(read(c), `${c} no longer consults requiresExpectedHash`).toMatch(/\brequiresExpectedHash\b/);
     }
+  });
+});
+
+describe('FRESHNESS — the OpenAI turn says which model its analysis describes', () => {
+  it('⭐ the route stamps `current_graph_hash` inside readBackState', () => {
+    // Landed in #1746 (staging `0415b191`, `/healthz build=0415b19`). Before it,
+    // the agent path sent NEITHER freshness field, so the UI fell into its own
+    // degraded branch — `analysisStateSelector.ts:619` minting
+    // `current_graph_hash_unavailable`, with user-facing copy at
+    // `components/results/copy/freshnessReasons.ts:31`.
+    expect(AGENT_ROUTE).toContain('withCurrentGraphHash(analysisReady, graphHash)');
+  });
+
+  it('⛔⛔ EVERY `analysis_ready` the route emits is readback-derived, or it is unstamped', () => {
+    // The stamp lives in ONE place (`readBackState`), so this is the composition
+    // that makes it total. An emitter fed from anywhere else silently ships an
+    // unstamped payload — an inner branch under an outer gate, which is how the
+    // unit stayed right while the whole was wrong. This guard already caught a
+    // real change once: staging added a THIRD emitter and it went red.
+    const emitters = [...AGENT_ROUTE.matchAll(/analysis_ready:\s*([A-Za-z.?]+)/g)].map((m) => m[1]);
+    expect(emitters.length).toBeGreaterThan(0);
+    const READBACK_DERIVED = new Set(['analysisReady', 'state.analysisReady', 'st.analysisReady']);
+    for (const e of emitters) {
+      expect(READBACK_DERIVED.has(e), `emitter \`analysis_ready: ${e}\` is not readBackState-derived — it will NOT be stamped`).toBe(true);
+    }
+  });
+
+  it('⛔ the stamp OVERWRITES a stale producer value — never-overwrite read FRESH over a moved model', () => {
+    // The defect the shipped fix closed: preserving a producer's hash kept the
+    // PRE-write value, so the UI reported fresh over a model that had moved.
+    const out = withCurrentGraphHash({ status: 'ready', current_graph_hash: 'from-the-run' }, 'from-this-read') as Record<string, unknown>;
+    expect(out.current_graph_hash).toBe('from-this-read');
+  });
+
+  it('⛔ it NEVER invents `graph_hash_at_run` — only the run can state that', () => {
+    // Deriving it from a read would manufacture a provenance this code does not
+    // have, and a wrong freshness verdict is worse than an absent one.
+    const out = withCurrentGraphHash({ status: 'ready' }, 'h') as Record<string, unknown>;
+    expect(Object.keys(out)).not.toContain('graph_hash_at_run');
+  });
+
+  it('⭐ a run-supplied `graph_hash_at_run` survives beside the new field', () => {
+    // The two-sided comparison the UI is told to make must remain possible.
+    const out = withCurrentGraphHash({ status: 'ready', graph_hash_at_run: 'when-it-ran' }, 'now') as Record<string, unknown>;
+    expect(out.graph_hash_at_run).toBe('when-it-ran');
+    expect(out.current_graph_hash).toBe('now');
+  });
+
+  it('⛔ fails open on anything it cannot stamp — a readback must never break a turn', () => {
+    for (const bad of [null, undefined, 'a string', 42, [1, 2]]) expect(withCurrentGraphHash(bad, 'h')).toBe(bad);
+    const ok = { status: 'ready' };
+    expect(withCurrentGraphHash(ok, undefined)).toBe(ok);
+    expect(withCurrentGraphHash(ok, '')).toBe(ok);
   });
 });
