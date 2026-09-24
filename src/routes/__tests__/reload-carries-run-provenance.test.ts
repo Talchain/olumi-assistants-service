@@ -2,7 +2,7 @@
  * THE PROVISIONAL MARKER REACHES THE BROWSER ON THE RELOAD READ.
  *
  * `enrichment.run_provenance` is stamped on the persisted fact of a run the
- * SERVER started (context/run-initiator.ts). Until schemas 0.57.0 the transport
+ * SERVER started (context/run-initiator.ts). Until schemas 0.58.0 the transport
  * keep-list stripped it, so an automatic first analysis over machine-authored
  * estimates reached the browser looking exactly like a run the user asked for.
  *

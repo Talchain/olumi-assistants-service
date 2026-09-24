@@ -924,7 +924,7 @@ export const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
   // the over-suppression failure the acceptance criteria weight equally with
   // the leak.
   'conditional_winners',
-  // schemas 0.57.0 — `run_provenance`, the provisional-run marker
+  // schemas 0.58.0 — `run_provenance`, the provisional-run marker
   // (context/run-initiator.ts). CEE-authored, NOT a PLoT key: the auto-run
   // dispatch stamps it on a SERVER-initiated run's fact, and until now this
   // list stripped it, so the browser saw an automatic first pass over

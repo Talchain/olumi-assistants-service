@@ -211,7 +211,7 @@ describe("CEE→UI: keep-list membership pins", () => {
     expect(CEE_UI_ENRICHMENT_KEEP_LIST).toContain("decision_brief");
   });
 
-  it("run_provenance is keep-listed (schemas 0.57.0, the provisional-run marker)", () => {
+  it("run_provenance is keep-listed (schemas 0.58.0, the provisional-run marker)", () => {
     expect(CEE_UI_ENRICHMENT_KEEP_LIST).toContain("run_provenance");
     expect(P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP).toContain("run_provenance");
   });
@@ -571,7 +571,7 @@ const WITHHELD_RULING_BY_TRANSPORT_KEY: ReadonlyMap<string, WithheldRuling> =
     // win_probability. `winner_flips` survives because it says THAT the winner
     // changes, never WHICH option it changes to.
     ["conditional_winners", "projected"],
-    // schemas 0.57.0 — `run_provenance`, the provisional-run marker.
+    // schemas 0.58.0 — `run_provenance`, the provisional-run marker.
     // `pass_through`, DERIVED: the stamp is { initiated_by, provisional, one turn
     // id } — no member names an option, so the leading-option guard has nothing
     // to catch. And "nobody asked for this run and none of it is confirmed" is
