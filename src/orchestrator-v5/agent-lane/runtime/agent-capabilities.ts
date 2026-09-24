@@ -90,7 +90,8 @@ import { planNewOption, newOptionFollowUp } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
-import { heldStatusQuoOptionId, structuralFacts } from '../structural-facts.js';
+import { baselineLabelledOptionId, structuralFacts } from '../structural-facts.js';
+import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, findConstructionVersion, type CallStructuredModel } from './build-model.js';
@@ -136,7 +137,7 @@ interface GraphRead {
     interventions?: Record<string, unknown>;
     changes?: unknown;
   }[];
-  /** `origin` is read only to recognise a repair-authored edge (`heldStatusQuoOptionId`). */
+  /** `origin` is read only to recognise a repair-authored edge (`isRepairAuthoredOptionFactorEdge`). */
   readonly edges: { from: string; to: string; origin?: unknown }[];
   readonly analysis_state: unknown;
   /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
@@ -160,12 +161,21 @@ const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$
  * edge is mapped), through the ONE authority, never a copy of it.
  */
 function heldStatusQuoPairs(g: Pick<GraphRead, 'nodes' | 'edges'>): ReadonlySet<string> {
-  // ONE test for "held status quo" (`heldStatusQuoOptionId`): a baseline label AND
-  // all-repair edges. Every pair of that option is repair-authored by definition.
-  const id = heldStatusQuoOptionId(g.nodes as never, g.edges);
+  // The LABEL test is per option (`baselineLabelledOptionId`: exactly one option reads
+  // as carrying on as now — review of #1849, blocker 2). The REPAIR test is per PAIR,
+  // the granularity readiness uses (`analysis-ready.ts:780` skips each repair edge on
+  // its own): a status quo the user has since linked to one more factor keeps its
+  // other pairs held (review of #1849 at 1a32b120 — all-or-nothing re-opened RC's harm).
+  const id = baselineLabelledOptionId(g.nodes as never);
   if (id === null) return new Set();
   const kinds = new Map(g.nodes.map((n) => [n.id, n.kind] as const));
-  return new Set(g.edges.filter((e) => e.from === id && kinds.get(e.to) === 'factor').map((e) => `${e.from}::${e.to}`));
+  const repaired = new Set<string>();
+  const ordinary = new Set<string>();
+  for (const e of g.edges) {
+    if (e.from !== id || kinds.get(e.to) !== 'factor') continue;
+    (isRepairAuthoredOptionFactorEdge(e, kinds) ? repaired : ordinary).add(`${e.from}::${e.to}`);
+  }
+  return new Set([...repaired].filter((k) => !ordinary.has(k)));
 }
 
 /**

@@ -93,6 +93,20 @@ function reachable(adjacency: Map<string, string[]>, from: string): Set<string> 
 
 
 /**
+ * The ONE option whose label reads as carrying on as now (`labelMatchesBaseline`,
+ * readiness's idiom list), or null when none or two do — ambiguity is not
+ * guessed. The LABEL half of "held", shared by `heldStatusQuoOptionId` (the
+ * option-level view `structuralFacts` reports) and the level proposer's
+ * PAIR-level test (`heldStatusQuoPairs` in `agent-capabilities.ts`).
+ */
+export function baselineLabelledOptionId(
+  nodes: readonly { id: string; kind?: string; label?: string }[],
+): string | null {
+  const baselines = nodes.filter((n) => n.kind === 'option' && labelMatchesBaseline(n.label ?? ''));
+  return baselines.length === 1 ? baselines[0]!.id : null;
+}
+
+/**
  * ⛔ THE ONE TEST FOR "THIS OPTION IS A HELD STATUS QUO" on the Agent lane —
  * read by `structuralFacts` and by the level proposer (`agent-capabilities.ts`).
  *
@@ -113,9 +127,8 @@ export function heldStatusQuoOptionId(
   nodes: readonly { id: string; kind?: string; label?: string }[],
   edges: readonly GraphEdgeLike[],
 ): string | null {
-  const baselines = nodes.filter((n) => n.kind === 'option' && labelMatchesBaseline(n.label ?? ''));
-  if (baselines.length !== 1) return null;
-  const id = baselines[0]!.id;
+  const id = baselineLabelledOptionId(nodes);
+  if (id === null) return null;
   const kinds = new Map(nodes.flatMap((n) => (typeof n.kind === 'string' ? [[n.id, n.kind] as const] : [])));
   const out = edges.filter((e) => e.from === id && kinds.get(e.to) === 'factor');
   return out.length > 0 && out.every((e) => isRepairAuthoredOptionFactorEdge(e, kinds)) ? id : null;

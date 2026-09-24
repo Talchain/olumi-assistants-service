@@ -427,3 +427,63 @@ describe('a repair-wired option is held ONLY when its label reads as carrying on
     expect(f.options_that_change_nothing).toEqual(expect.arrayContaining(['Maintain current staffing', 'Status quo']));
   });
 });
+
+/**
+ * ⛔ REVIEW OF #1849 AT 1a32b120: "held" must stay PAIR-level inside the status quo.
+ * The user corrects one thing about carrying on ("it raises onboarding workload"),
+ * the Agent links it — the status quo now has two repair pairs and one ordinary
+ * pair. The two repair pairs are STILL held: never demanded, never accepted
+ * unflagged. (The existing mixed-edge contrast uses a non-baseline label, so it
+ * could not see this.)
+ */
+describe('a status quo with one ordinary link keeps its OTHER pairs held', () => {
+  function mixedStatusQuo() {
+    const f = hiring('Maintain current staffing');
+    return { ...f, edges: [...f.edges, edge(f.SQ, 'onboarding_workload')] };
+  }
+
+  it('RED: a starting point is admitted without levels for the still-held repair pairs (P2)', async () => {
+    const { SQ, nodes, edges } = mixedStatusQuo();
+    const p = fakeProduct(nodes, edges);
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const r = await caps.proposeStartingPoint(ctx, {
+      assumptions: VALUES,
+      option_levels: [
+        ...ORDINARY_LEVELS,
+        { option_label: 'Maintain current staffing', factor_label: 'Onboarding workload', value: 40, basis: 'the user: carrying on raises onboarding workload' },
+      ],
+    });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r).not.toHaveProperty('options_missing_levels');
+    const auth = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    expect(auth.ok, JSON.stringify(auth)).toBe(true);
+    expect(p.posted).toContain(`level ${SQ}::onboarding_workload`);
+    expect(p.posted).not.toContain(`level ${SQ}::developers_hired`);
+    expect(p.posted).not.toContain(`level ${SQ}::tech_leads_hired`);
+  });
+
+  it('RED: an UNFLAGGED level on a still-held repair pair is refused and stores nothing (P3)', async () => {
+    const { nodes, edges } = mixedStatusQuo();
+    const p = fakeProduct(nodes, edges);
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const r = await caps.proposeOptionInterventions(ctx, {
+      interventions: [{ option_label: 'Maintain current staffing', factor_label: 'Developers hired', value: 0, basis: 'no hires' }],
+    });
+    expect(r.ok).toBe(false);
+    expect(r.refusal).toBe('nothing_to_set');
+    expect(store.size()).toBe(0);
+  });
+
+  it('CONTRAST: its ORDINARY pair takes a level with no flag', async () => {
+    const { nodes, edges } = mixedStatusQuo();
+    const p = fakeProduct(nodes, edges);
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const r = await caps.proposeOptionInterventions(ctx, {
+      interventions: [{ option_label: 'Maintain current staffing', factor_label: 'Onboarding workload', value: 40, basis: 'the user said so' }],
+    });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(store.size()).toBe(1);
+  });
+});
