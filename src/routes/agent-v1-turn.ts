@@ -61,6 +61,7 @@ import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compo
 import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
 import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
+import { enforceLeadingOptionClaimsAtWire } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
 import {
   firstAnalysisDeadline,
   firstAnalysisSentence,
@@ -68,6 +69,7 @@ import {
   type FirstAnalysisOutcome,
 } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
+import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
@@ -330,7 +332,7 @@ const AGENT_INSTRUCTIONS = [
    * the vocabulary itself casts the finding as picking an answer. The useful move is the one the science supports: point at what the
    * ordering is sensitive to, and let the user change it and see how much it matters.
    */
-  'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one; say which option leads in this model and how firmly. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding.',
+  'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one. Say which option leads in this model, and how firmly, ONLY when the result\u2019s `claim_permissions.leader_may_be_named` is true; when it is false or absent, say plainly that no option can be put forward yet and why, without naming or hinting at one. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding.',
   'When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each — then authorise_change once they confirm. It adds the option and its links ONLY: say plainly that it cannot be compared until it states what it does to each factor, and offer propose_option_interventions for that. Never invent the direction; if you are not sure which way it pushes a factor, ask.',
   /*
    * \u26d4 NO AUTOMATIC RUN AFTER A REVISION (Codex 5810763729, 24 Sep). This
@@ -473,7 +475,7 @@ export function typedRunOf(body: Record<string, unknown>): boolean {
   return (body['kind'] === undefined || body['kind'] === 'message') && (chip?.action_type === 'run_analysis' || chip?.id === RUN_OFFER_CHIP.id);
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -516,9 +518,12 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
    * where nothing errors and everything looks broken.
    */
   let draftGraph: unknown;
+  /** The persisted graph as read — the leader wire gate reads its option ROSTER, never a verdict. */
+  let graph: unknown;
   try {
     const after = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
     if (after.status === 200) {
+      graph = after.json.graph;
       graphHash = typeof after.json.graph_hash === 'string' ? after.json.graph_hash : undefined;
       analysisReady = after.json.analysis_ready;
       if (typeof after.json.analysis_state === 'object' && after.json.analysis_state !== null) analysisState = after.json.analysis_state;
@@ -649,7 +654,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1467,7 +1472,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * BEFORE the reply is composed, because the Run offer below keys on the
      * readiness this same response carries.
      */
-    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult } = await readBackState(dispatch, scenarioId);
+    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph } = await readBackState(dispatch, scenarioId);
     const fa = firstAnalysis?.outcome;
     // An analysis of THIS revision exists because this turn's construction ran it (or already had).
     const firstAnalysisExists = fa !== undefined && (fa.ran || fa.reason === 'already_ran_for_construction');
@@ -1546,6 +1551,55 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : [];
 
     /**
+     * ⭐ THE RESPONSE AS IT WILL SHIP — assembled BEFORE the answer row is written, so the leader gate
+     * below edits the text a replay returns, not only the text this request returns.
+     */
+    let wireBody = {
+      ...finalised,
+      // The FINAL readback's bound result block — never the tool run's own blocks. See
+      // `analysisResult` in readBackState. The Agent's text still reports what its run
+      // found and, if the model has since changed, that it has.
+      ...(analysisResult !== undefined ? { blocks: [...existingBlocks, analysisResult] } : {}),
+      ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
+      // Readiness of the graph this response returns — the final readback's only.
+      ...(analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
+      // The scenario-bound verdict from the FINAL readback governs; otherwise the
+      // finaliser's own honest no-context verdict stays (present, never deleted).
+      ...(analysisState !== undefined ? { analysis_state: analysisState } : {}),
+      ...(draftGraph !== undefined ? { draft_graph: draftGraph } : {}),
+    } as OlumiResponse & Record<string, unknown>;
+    /**
+     * ⛔ THE LEADER FOLLOWS THE TYPED PERMISSION, AT THE WIRE (Paul: "do NOT hard-code no leader").
+     * The Agent is told to name a leader only when `leader_may_be_named`; this is the deterministic
+     * backstop, the same gate route-v2 runs at its single send point. On any turn that carries an
+     * analysis, `leader_claim.permitted` from the SAME readback is the entitlement, conjoined inside
+     * the gate with the admission's `permitted_analysis_mode`. PERMIT-WINS: a permitted turn is
+     * returned by reference, byte-identical.
+     */
+    const analysisBearing = analysisResult !== undefined
+      || fa !== undefined
+      || result.tool_calls.some((c) => c.name === 'run_analysis');
+    let leaderClaimEnforced = false;
+    if (analysisBearing) {
+      const claim = (analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
+      const enforced = enforceLeadingOptionClaimsAtWire(wireBody, {
+        requestId: String(req.id),
+        exitPath: 'agent_lane_v1',
+        mayNameLeadingOption: claim?.permitted === true,
+        separationEstablished: claim?.separation === 'separated',
+        ...(typeof claim?.withheld_reason === 'string' ? { leaderClaimWithheldReason: claim.withheld_reason } : {}),
+        graph: readbackGraph ?? null,
+        analysisReady,
+      });
+      if (enforced.changed) {
+        leaderClaimEnforced = true;
+        // A shape sidecar describes the text it was built from; it goes with an edit to that text.
+        const { _answer_shape: _dropped, ...withoutShape } = enforced.response as OlumiResponse & { _answer_shape?: unknown };
+        wireBody = (enforced.editedFields.includes('assistant_text') ? withoutShape : enforced.response) as OlumiResponse & Record<string, unknown>;
+      }
+    }
+
+    /**
      * ⭐ PERSIST THE TURN BEFORE ANSWERING — the row a lost-response retry is
      * replayed from. No graph rides on it (the Agent's writes carry their own
      * identities), so it takes no fence and no CAS. Stored text is the FINAL
@@ -1575,7 +1629,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           duration_ms: Date.now() - startedAt,
           handler_facts: [],
           userMessage: message,
-          assistantMessage: String((finalised as { assistant_text?: unknown }).assistant_text ?? text),
+          assistantMessage: String(wireBody.assistant_text ?? text),
           // The Run offer AND the offered approval, durably, with THIS answer row — so a replay, or an
           // approval that reaches a restarted process, can still find them.
           ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}),
@@ -1603,18 +1657,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
 
     return reply.code(200).send({
-      ...finalised,
-      // The FINAL readback's bound result block — never the tool run's own blocks. See
-      // `analysisResult` in readBackState. The Agent's text still reports what its run
-      // found and, if the model has since changed, that it has.
-      ...(analysisResult !== undefined ? { blocks: [...existingBlocks, analysisResult] } : {}),
-      ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
-      // Readiness of the graph this response returns — the final readback's only.
-      ...(analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
-      // The scenario-bound verdict from the FINAL readback governs; otherwise the
-      // finaliser's own honest no-context verdict stays (present, never deleted).
-      ...(analysisState !== undefined ? { analysis_state: analysisState } : {}),
-      ...(draftGraph !== undefined ? { draft_graph: draftGraph } : {}),
+      ...wireBody,
       /**
        * ⭐ SAY WHICH PATH SERVED THIS TURN.
        *
@@ -1637,6 +1680,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         stopped_reason: result.stopped_reason,
         tools_called: result.tool_calls.map((c) => c.name),
         write_claims_removed: narration.stripped.length,
+        ...(leaderClaimEnforced ? { leader_claim_enforced: true } : {}),
         /**
          * ⭐ WHAT THE AUTOMATIC FIRST ANALYSIS DID, for witnesses: ran, or why not, how long it took,
          * and the (construction, revision) identity it was bound to. Absent when no construction

@@ -94,7 +94,7 @@ import { structuralFacts } from '../structural-facts.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel } from './build-model.js';
-import { describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
+import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
@@ -2497,6 +2497,9 @@ export function createAgentCapabilities(
         blockers: ready.blockers ?? [],
         options: ready.options ?? [],
         ...(result !== undefined ? { result } : {}),
+        // The typed leader permission for THIS run, read from its own wire verdict — so the Agent names a
+        // leader only when `leader_may_be_named` (see the route's reporting instruction).
+        claim_permissions: claimPermissionsFrom(r.json.analysis_state, r.json.analysis_ready),
       };
     },
   };

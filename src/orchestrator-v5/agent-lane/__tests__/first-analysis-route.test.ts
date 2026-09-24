@@ -301,6 +301,40 @@ describe('the Agent route runs the first analysis itself, once', () => {
     expect(instructions).not.toContain('After authorise_change applies values or option levels, call run_analysis in the SAME turn');
     expect(instructions).not.toContain('After build_model_from_brief, do NOT call run_analysis on the same turn. A newly built model has no values yet');
     expect(instructions).toContain('first_analysis');
+    // Leader narration follows the typed permission — never unconditional.
+    expect(instructions).not.toContain('say which option leads in this model and how firmly.');
+    expect(instructions).toContain('leader_may_be_named');
+  });
+
+  it('RED: a leader named in prose on a turn whose typed claim is withheld is edited at the wire (test 6)', async () => {
+    await buildTurn(app);
+    const prose = 'Option A is the leading option in this model, and fairly firmly.';
+    script = [say(prose)];
+    const b = await turn(app, { message: 'What does the analysis say?' });
+    expect((b.blocks ?? []).some((x) => x.type === 'analysis_result'), 'control: an analysis-bearing turn').toBe(true);
+    expect(b.assistant_text).not.toContain('Option A is the leading option');
+  });
+
+  it('RED: the TYPED claim alone withholds — permitted:false under a comparative_leader admission is still edited (test 6)', async () => {
+    // The admission would license a leader, and `separation_unavailable` is a "did not look" reason the gate
+    // does NOT narrow on (`leaderClaimReasonKind` → not_evaluated) — so only `leader_claim.permitted` can
+    // be what withholds it here.
+    knobs.leaderClaim = { permitted: false, withheld_reason: 'separation_unavailable' };
+    knobs.analysisReady = { status: 'ready', may_run: true, analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } };
+    await buildTurn(app);
+    script = [say('Option A is the leading option in this model, and fairly firmly.')];
+    const b = await turn(app, { message: 'What does the analysis say?' });
+    expect(b.assistant_text).not.toContain('Option A is the leading option');
+  });
+
+  it('PERMIT-WINS: permitted:true with comparative_leader leaves the prose byte-identical (test 6)', async () => {
+    knobs.leaderClaim = { permitted: true, separation: 'separated' };
+    knobs.analysisReady = { status: 'ready', may_run: true, analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } };
+    await buildTurn(app);
+    const prose = 'Option A is the leading option in this model, and fairly firmly.';
+    script = [say(prose)];
+    const b = await turn(app, { message: 'What does the analysis say?' });
+    expect(b.assistant_text).toBe(prose);
   });
 });
 
