@@ -1,0 +1,868 @@
+{
+  "response_version": 2,
+  "assistant_text": "I’ve set up a comparison model, but it cannot yet tell us which hiring path leads under your circumstances.\n\nIt includes:\n- **Hire a Tech Lead**\n- **Hire Two Developers**\n- Also, for context: **Hire One Developer** and **Continue Current Staffing**\n\nThe key uncertainty is whether your present constraint is **technical leadership, prioritisation and coordination** or simply **engineering delivery capacity**. The model currently has six unknown starting factors, and “continue current staffing” has no stated effect, so it cannot be compared.\n\nI can use the following **machine-authored assumptions** as a first test — these are not measurements. Please adopt or correct them:\n\n**Starting position**\n- Tech-lead capacity: **4 capacity points (0–10)** — some leadership exists, but a bottleneck remains.\n- Developer capacity: **8 capacity points (0–20)** — a modest existing delivery base.\n- Work prioritisation: **60 index points (0–100)** — workable, with meaningful room to improve.\n- Engineering coordination: **60 index points (0–100)** — adequate, but not yet strong at scale.\n- Delivery capacity: **12 capacity points (0–30)** — below the middle of the model range.\n- New-hire ramp-up: **50 index points (0–100)** — a typical moderate ramp-up burden.\n\n**What each hire would set**\n- Hire a Tech Lead → Tech-lead capacity: **8**\n- Hire One Developer → Developer capacity: **10**\n- Hire Two Developers → Developer capacity: **12**\n\nThese assumptions deliberately separate the direct capacity added by developers from the leadership/coordination effect of a Tech Lead. They do not yet represent salary, time-to-hire, or your exact team size.\n\nIf you approve this starting point, I’ll save it and run the comparison.\n\nThe model was saved. Questions this model does not answer yet: What is the current team size and existing technical-leadership capacity? How will productivity be measured (for example, throughput, cycle time, quality-adjusted output, or business outcomes)? What hiring timeline and ramp-up period should be evaluated? Are budget, salary, or headcount constraints material to this decision? Is the current primary constraint insufficient engineering capacity, weak technical direction/prioritisation, or both?",
+  "blocks": [],
+  "suggested_actions": [
+    {
+      "id": "agent-approve-proposal:prop_4419ca4d8fb615566ffc888eb4cffb08",
+      "label": "Use as starting assumptions",
+      "message": "Yes, use those."
+    },
+    {
+      "id": "agent-amend-proposal",
+      "label": "Change something first",
+      "message": "Before you apply it, I want to change some of it."
+    }
+  ],
+  "insights": [],
+  "stage_indicator": "frame",
+  "analysis_state": {
+    "run_state": {
+      "kind": "never_run"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld"
+    },
+    "robustness": {},
+    "usable_for_prose": false,
+    "usable_for_chips": false,
+    "usable_for_followup": false,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "graph_hash": "dc2033d38b92b528",
+  "analysis_ready": {
+    "options": [
+      {
+        "option_id": "hire_a_tech_lead",
+        "label": "Hire a Tech Lead",
+        "status": "needs_encoding",
+        "interventions": {},
+        "is_baseline": false,
+        "status_reason": "Connected to 1 factor(s); awaiting effect value(s)",
+        "user_questions": [
+          "Which factor(s) does \"Hire a Tech Lead\" change, and what value should each be set to?"
+        ]
+      },
+      {
+        "option_id": "hire_two_developers",
+        "label": "Hire Two Developers",
+        "status": "needs_encoding",
+        "interventions": {},
+        "is_baseline": false,
+        "status_reason": "Connected to 1 factor(s); awaiting effect value(s)",
+        "user_questions": [
+          "Which factor(s) does \"Hire Two Developers\" change, and what value should each be set to?"
+        ]
+      },
+      {
+        "option_id": "continue_current_staffing",
+        "label": "Continue Current Staffing",
+        "status": "needs_user_mapping",
+        "interventions": {},
+        "is_baseline": false,
+        "status_reason": "No interventions extracted",
+        "user_questions": [
+          "Which factor(s) does \"Continue Current Staffing\" change, and what value should each be set to?"
+        ]
+      },
+      {
+        "option_id": "hire_one_developer",
+        "label": "Hire One Developer",
+        "status": "needs_encoding",
+        "interventions": {},
+        "is_baseline": false,
+        "status_reason": "Connected to 1 factor(s); awaiting effect value(s)",
+        "user_questions": [
+          "Which factor(s) does \"Hire One Developer\" change, and what value should each be set to?"
+        ]
+      }
+    ],
+    "goal_node_id": "productivity",
+    "status": "blocked",
+    "blockers": [
+      {
+        "option_id": "hire_a_tech_lead",
+        "option_label": "Hire a Tech Lead",
+        "factor_id": "tech_lead_capacity",
+        "factor_label": "Tech-lead capacity",
+        "blocker_type": "missing_value",
+        "message": "Factor \"Tech-lead capacity\" needs a numeric value for option \"Hire a Tech Lead\"",
+        "suggested_action": "add_value"
+      },
+      {
+        "option_id": "hire_two_developers",
+        "option_label": "Hire Two Developers",
+        "factor_id": "developer_capacity",
+        "factor_label": "Developer capacity",
+        "blocker_type": "missing_value",
+        "message": "Factor \"Developer capacity\" needs a numeric value for option \"Hire Two Developers\"",
+        "suggested_action": "add_value"
+      },
+      {
+        "option_id": "hire_one_developer",
+        "option_label": "Hire One Developer",
+        "factor_id": "developer_capacity",
+        "factor_label": "Developer capacity",
+        "blocker_type": "missing_value",
+        "message": "Factor \"Developer capacity\" needs a numeric value for option \"Hire One Developer\"",
+        "suggested_action": "add_value"
+      }
+    ],
+    "bias_findings": [],
+    "blocked_reason": "OPTION_NO_FACTOR_EDGES",
+    "readiness_issues": [
+      {
+        "issue_id": "structural_1",
+        "code": "OPTION_NO_FACTOR_EDGES",
+        "category": "graph_structure",
+        "message": "An option has no factor connections and cannot be analysed. Add at least one factor edge.",
+        "repairability": "human_input_required",
+        "provenance": "unattributed",
+        "obligation": "required"
+      },
+      {
+        "issue_id": "semantic_2",
+        "repairability": "human_input_required",
+        "option_id": "hire_a_tech_lead",
+        "option_label": "Hire a Tech Lead",
+        "factor_id": "tech_lead_capacity",
+        "factor_label": "Tech-lead capacity",
+        "code": "MISSING_OPTION_VALUE",
+        "category": "option_values",
+        "message": "Factor \"Tech-lead capacity\" needs a numeric value for option \"Hire a Tech Lead\"",
+        "provenance": "unattributed",
+        "obligation": "offered"
+      },
+      {
+        "issue_id": "semantic_3",
+        "repairability": "human_input_required",
+        "option_id": "hire_two_developers",
+        "option_label": "Hire Two Developers",
+        "factor_id": "developer_capacity",
+        "factor_label": "Developer capacity",
+        "code": "MISSING_OPTION_VALUE",
+        "category": "option_values",
+        "message": "Factor \"Developer capacity\" needs a numeric value for option \"Hire Two Developers\"",
+        "provenance": "unattributed",
+        "obligation": "offered"
+      },
+      {
+        "issue_id": "semantic_4",
+        "repairability": "human_input_required",
+        "option_id": "hire_one_developer",
+        "option_label": "Hire One Developer",
+        "factor_id": "developer_capacity",
+        "factor_label": "Developer capacity",
+        "code": "MISSING_OPTION_VALUE",
+        "category": "option_values",
+        "message": "Factor \"Developer capacity\" needs a numeric value for option \"Hire One Developer\"",
+        "provenance": "unattributed",
+        "obligation": "offered"
+      },
+      {
+        "issue_id": "semantic_5",
+        "code": "OPTION_NEEDS_MAPPING",
+        "category": "option_mapping",
+        "message": "Choose which factor \"Continue Current Staffing\" changes and by how much.",
+        "repairability": "human_input_required",
+        "option_id": "continue_current_staffing",
+        "option_label": "Continue Current Staffing",
+        "provenance": "unattributed",
+        "obligation": "offered"
+      }
+    ],
+    "repair_proposal": {
+      "proposal_version": "readiness_repair_v1",
+      "complete": true,
+      "issue_ids": [
+        "structural_1",
+        "semantic_2",
+        "semantic_3",
+        "semantic_4",
+        "semantic_5"
+      ],
+      "changes": [],
+      "unresolved_inputs": [
+        {
+          "issue_id": "structural_1",
+          "kind": "model_structure",
+          "prompt": "An option has no factor connections and cannot be analysed. Add at least one factor edge.",
+          "obligation": "required",
+          "provenance": "unattributed"
+        },
+        {
+          "issue_id": "semantic_2",
+          "kind": "option_effect_value",
+          "prompt": "Factor \"Tech-lead capacity\" needs a numeric value for option \"Hire a Tech Lead\"",
+          "option_id": "hire_a_tech_lead",
+          "factor_id": "tech_lead_capacity",
+          "obligation": "offered",
+          "provenance": "unattributed"
+        },
+        {
+          "issue_id": "semantic_3",
+          "kind": "option_effect_value",
+          "prompt": "Factor \"Developer capacity\" needs a numeric value for option \"Hire Two Developers\"",
+          "option_id": "hire_two_developers",
+          "factor_id": "developer_capacity",
+          "obligation": "offered",
+          "provenance": "unattributed"
+        },
+        {
+          "issue_id": "semantic_4",
+          "kind": "option_effect_value",
+          "prompt": "Factor \"Developer capacity\" needs a numeric value for option \"Hire One Developer\"",
+          "option_id": "hire_one_developer",
+          "factor_id": "developer_capacity",
+          "obligation": "offered",
+          "provenance": "unattributed"
+        },
+        {
+          "issue_id": "semantic_5",
+          "kind": "option_mapping",
+          "prompt": "Choose which factor \"Continue Current Staffing\" changes and by how much.",
+          "option_id": "continue_current_staffing",
+          "obligation": "offered",
+          "provenance": "unattributed"
+        }
+      ]
+    },
+    "may_run": false,
+    "analysis_admission": {
+      "structurally_analysable": false,
+      "missing_important_inputs": [
+        {
+          "issue_id": "structural_1",
+          "code": "OPTION_NO_FACTOR_EDGES",
+          "why_it_matters": "An option has no factor connections and cannot be analysed. Add at least one factor edge.",
+          "obligation": "required",
+          "waived_by_exclusion": false
+        },
+        {
+          "issue_id": "semantic_2",
+          "code": "MISSING_OPTION_VALUE",
+          "option_id": "hire_a_tech_lead",
+          "option_label": "Hire a Tech Lead",
+          "factor_id": "tech_lead_capacity",
+          "factor_label": "Tech-lead capacity",
+          "why_it_matters": "Factor \"Tech-lead capacity\" needs a numeric value for option \"Hire a Tech Lead\"",
+          "obligation": "offered",
+          "waived_by_exclusion": false
+        },
+        {
+          "issue_id": "semantic_3",
+          "code": "MISSING_OPTION_VALUE",
+          "option_id": "hire_two_developers",
+          "option_label": "Hire Two Developers",
+          "factor_id": "developer_capacity",
+          "factor_label": "Developer capacity",
+          "why_it_matters": "Factor \"Developer capacity\" needs a numeric value for option \"Hire Two Developers\"",
+          "obligation": "offered",
+          "waived_by_exclusion": false
+        },
+        {
+          "issue_id": "semantic_4",
+          "code": "MISSING_OPTION_VALUE",
+          "option_id": "hire_one_developer",
+          "option_label": "Hire One Developer",
+          "factor_id": "developer_capacity",
+          "factor_label": "Developer capacity",
+          "why_it_matters": "Factor \"Developer capacity\" needs a numeric value for option \"Hire One Developer\"",
+          "obligation": "offered",
+          "waived_by_exclusion": false
+        },
+        {
+          "issue_id": "semantic_5",
+          "code": "OPTION_NEEDS_MAPPING",
+          "option_id": "continue_current_staffing",
+          "option_label": "Continue Current Staffing",
+          "why_it_matters": "Choose which factor \"Continue Current Staffing\" changes and by how much.",
+          "obligation": "offered",
+          "waived_by_exclusion": false
+        }
+      ],
+      "semantic_quality_sufficient": false,
+      "permitted_analysis_mode": "none",
+      "reasons": [
+        {
+          "field": "structurally_analysable",
+          "code": "MODEL_HAS_BLOCKERS",
+          "message": "Review all 5 readiness issues together before analysis."
+        },
+        {
+          "field": "missing_important_inputs",
+          "code": "MODEL_HAS_BLOCKERS",
+          "message": "One input is still needed from you."
+        },
+        {
+          "field": "semantic_quality_sufficient",
+          "code": "NO_COMPARISON_SUBSTRATE",
+          "message": "Nothing in this model connects the options to your goal, so there is no comparison to draw a leader from."
+        },
+        {
+          "field": "permitted_analysis_mode",
+          "code": "MODEL_HAS_BLOCKERS",
+          "message": "This model cannot be analysed yet."
+        }
+      ],
+      "graph_hash": "dc2033d38b92b5280fb8854b55e9bf4074c08c3c0da0d8b4b00bd067fb95f069",
+      "semantic_signals": {
+        "confidence_parameters_total": 22,
+        "confidence_parameters_user_stated": 0,
+        "confidence_parameters_machine_authored": 12,
+        "confidence_parameters_unattributed": 10,
+        "material_parameters_total": 0,
+        "material_parameters_user_stated": 0,
+        "intervened_factor_baselines_total": 0,
+        "intervened_factor_baselines_user_stated": 0,
+        "material_parameters_awaiting_user_node_ids": [],
+        "goal_target_stated": false
+      }
+    },
+    "current_graph_hash": "dc2033d38b92b528"
+  },
+  "draft_graph": {
+    "nodes": [
+      {
+        "id": "decision_productivity",
+        "kind": "decision",
+        "label": "Decision: Productivity",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "productivity",
+        "kind": "goal",
+        "label": "Productivity",
+        "provenance": "from_brief",
+        "goal_threshold_frame": "level"
+      },
+      {
+        "id": "hire_a_tech_lead",
+        "kind": "option",
+        "label": "Hire a Tech Lead",
+        "provenance": "from_brief"
+      },
+      {
+        "id": "hire_two_developers",
+        "kind": "option",
+        "label": "Hire Two Developers",
+        "provenance": "from_brief"
+      },
+      {
+        "id": "continue_current_staffing",
+        "kind": "option",
+        "label": "Continue Current Staffing",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "hire_one_developer",
+        "kind": "option",
+        "label": "Hire One Developer",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "tech_lead_capacity",
+        "kind": "factor",
+        "label": "Tech-lead capacity",
+        "category": "controllable",
+        "provenance": "from_brief",
+        "scale_frame": 10
+      },
+      {
+        "id": "developer_capacity",
+        "kind": "factor",
+        "label": "Developer capacity",
+        "category": "controllable",
+        "provenance": "from_brief",
+        "scale_frame": 20
+      },
+      {
+        "id": "work_prioritisation",
+        "kind": "factor",
+        "label": "Work prioritisation",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100
+      },
+      {
+        "id": "engineering_coordination",
+        "kind": "factor",
+        "label": "Engineering coordination",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100
+      },
+      {
+        "id": "delivery_capacity",
+        "kind": "factor",
+        "label": "Delivery capacity",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 30
+      },
+      {
+        "id": "new_hire_ramp_up",
+        "kind": "factor",
+        "label": "New-hire ramp-up",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100
+      },
+      {
+        "id": "coordination_overhead",
+        "kind": "risk",
+        "label": "Coordination overhead",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "leadership_bottleneck",
+        "kind": "risk",
+        "label": "Leadership bottleneck",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "team_delivery_throughput",
+        "kind": "outcome",
+        "label": "Team delivery throughput",
+        "provenance": "ai_inferred"
+      }
+    ],
+    "edges": [
+      {
+        "to": "hire_a_tech_lead",
+        "from": "decision_productivity",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "hire_two_developers",
+        "from": "decision_productivity",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "continue_current_staffing",
+        "from": "decision_productivity",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "hire_one_developer",
+        "from": "decision_productivity",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "tech_lead_capacity",
+        "from": "hire_a_tech_lead",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "developer_capacity",
+        "from": "hire_two_developers",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "developer_capacity",
+        "from": "hire_one_developer",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "work_prioritisation",
+        "from": "tech_lead_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "engineering_coordination",
+        "from": "tech_lead_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "leadership_bottleneck",
+        "from": "tech_lead_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "delivery_capacity",
+        "from": "developer_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "coordination_overhead",
+        "from": "developer_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "team_delivery_throughput",
+        "from": "work_prioritisation",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "team_delivery_throughput",
+        "from": "engineering_coordination",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "team_delivery_throughput",
+        "from": "delivery_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "team_delivery_throughput",
+        "from": "new_hire_ramp_up",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "team_delivery_throughput",
+        "from": "coordination_overhead",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "team_delivery_throughput",
+        "from": "leadership_bottleneck",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "productivity",
+        "from": "team_delivery_throughput",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      }
+    ],
+    "node_count": 15,
+    "edge_count": 19
+  },
+  "_diagnostic_trace": {
+    "exit_path": "agent_lane_v1",
+    "agent_mode": "full",
+    "hops": 3,
+    "stopped_reason": "answered",
+    "tools_called": [
+      "get_canonical_state",
+      "build_model_from_brief",
+      "propose_starting_point"
+    ],
+    "write_claims_removed": 0
+  },
+  "_agent": {
+    "session_id": "sess_00000000-0000-4000-8000-000000000002",
+    "mode": "full",
+    "tool_calls": [
+      {
+        "name": "get_canonical_state",
+        "ok": true,
+        "mutated": false
+      },
+      {
+        "name": "build_model_from_brief",
+        "ok": true,
+        "mutated": true
+      },
+      {
+        "name": "propose_starting_point",
+        "ok": true,
+        "mutated": false,
+        "proposal_id": "prop_4419ca4d8fb615566ffc888eb4cffb08"
+      }
+    ],
+    "mutated": true,
+    "hops": 3,
+    "stopped_reason": "answered",
+    "turn_id": "00000000-0000-4000-8000-000000000004",
+    "durability": "recorded",
+    "receipts": []
+  },
+  "_provider_calls": [
+    {
+      "site": "agent-v1-turn.callModel",
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "purpose": "conversation",
+      "outcome": "allowed",
+      "duration_ms": 2147,
+      "usage": {
+        "raw": {
+          "input_tokens": 3127,
+          "input_tokens_details": {
+            "cache_write_tokens": 17,
+            "cached_tokens": 3107
+          },
+          "output_tokens": 45,
+          "output_tokens_details": {
+            "reasoning_tokens": 10
+          },
+          "total_tokens": 3172
+        },
+        "input_tokens": 3127,
+        "output_tokens": 45,
+        "cached_input_tokens": 3107
+      }
+    },
+    {
+      "site": "agent-v1-turn.callModel",
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "purpose": "conversation",
+      "outcome": "allowed",
+      "duration_ms": 1610,
+      "usage": {
+        "raw": {
+          "input_tokens": 3271,
+          "input_tokens_details": {
+            "cache_write_tokens": 144,
+            "cached_tokens": 3124
+          },
+          "output_tokens": 33,
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          },
+          "total_tokens": 3304
+        },
+        "input_tokens": 3271,
+        "output_tokens": 33,
+        "cached_input_tokens": 3124
+      }
+    },
+    {
+      "site": "agent-v1-turn.callStructured",
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "purpose": "construction",
+      "outcome": "allowed",
+      "duration_ms": 8057,
+      "usage": {
+        "raw": {
+          "input_tokens": 2517,
+          "input_tokens_details": {
+            "cache_write_tokens": 17,
+            "cached_tokens": 2497
+          },
+          "output_tokens": 815,
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          },
+          "total_tokens": 3332
+        },
+        "input_tokens": 2517,
+        "output_tokens": 815,
+        "cached_input_tokens": 2497
+      }
+    },
+    {
+      "site": "agent-v1-turn.callModel",
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "purpose": "conversation",
+      "outcome": "allowed",
+      "duration_ms": 11685,
+      "usage": {
+        "raw": {
+          "input_tokens": 4121,
+          "input_tokens_details": {
+            "cache_write_tokens": 850,
+            "cached_tokens": 3268
+          },
+          "output_tokens": 701,
+          "output_tokens_details": {
+            "reasoning_tokens": 280
+          },
+          "total_tokens": 4822
+        },
+        "input_tokens": 4121,
+        "output_tokens": 701,
+        "cached_input_tokens": 3268
+      }
+    },
+    {
+      "site": "agent-v1-turn.callModel",
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "purpose": "conversation",
+      "outcome": "allowed",
+      "duration_ms": 6704,
+      "usage": {
+        "raw": {
+          "input_tokens": 5498,
+          "input_tokens_details": {
+            "cache_write_tokens": 1377,
+            "cached_tokens": 4118
+          },
+          "output_tokens": 379,
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          },
+          "total_tokens": 5877
+        },
+        "input_tokens": 5498,
+        "output_tokens": 379,
+        "cached_input_tokens": 4118
+      }
+    }
+  ]
+}

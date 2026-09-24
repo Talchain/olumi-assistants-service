@@ -1,0 +1,9 @@
+{
+  "kind": "message",
+  "turn_id": "00000000-0000-4000-8000-000000000011",
+  "scenario_id": "00000000-0000-4000-8000-000000000009",
+  "stage": "frame",
+  "turn_class": "frame",
+  "message": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
+  "source": "user"
+}

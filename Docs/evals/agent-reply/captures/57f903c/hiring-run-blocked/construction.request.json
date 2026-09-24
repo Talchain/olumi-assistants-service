@@ -1,0 +1,9 @@
+{
+  "kind": "message",
+  "turn_id": "00000000-0000-4000-8000-000000000004",
+  "scenario_id": "00000000-0000-4000-8000-000000000002",
+  "stage": "frame",
+  "turn_class": "frame",
+  "message": "Should I hire a Tech lead or two developers to increase productivity?",
+  "source": "user"
+}

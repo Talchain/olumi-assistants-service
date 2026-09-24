@@ -1,0 +1,721 @@
+{
+  "response_version": 2,
+  "assistant_text": "The comparison cannot run yet because **Continue Current Staffing** has no stated effect on any factor, so it has no connection to the productivity goal.\n\nThe three hiring options are structurally ready:\n- Tech Lead sets Tech-lead capacity to **8 capacity points (0–10)**.\n- Two Developers sets Developer capacity to **12 capacity points (0–20)**.\n- One Developer sets Developer capacity to **10 capacity points (0–20)**.\n\nTo include the status-quo option, say which factor it changes and to what level — for example, whether it leaves developer capacity at **8 capacity points (0–20)**, tech-lead capacity at **4 capacity points (0–10)**, or both.",
+  "blocks": [],
+  "suggested_actions": [
+    {
+      "id": "agent-suggest-what-it-needs",
+      "label": "Suggest what it still needs",
+      "message": "Suggest what this model still needs before the analysis can run, so I can approve it."
+    }
+  ],
+  "insights": [],
+  "stage_indicator": "frame",
+  "analysis_state": {
+    "run_state": {
+      "kind": "never_run"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld"
+    },
+    "robustness": {},
+    "usable_for_prose": false,
+    "usable_for_chips": false,
+    "usable_for_followup": false,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "graph_hash": "59ec62a14e4c4bdd",
+  "analysis_ready": {
+    "options": [
+      {
+        "option_id": "hire_a_tech_lead",
+        "label": "Hire a Tech Lead",
+        "status": "ready",
+        "interventions": {
+          "tech_lead_capacity": 0.8
+        },
+        "is_baseline": false,
+        "intervention_details": {
+          "tech_lead_capacity": {
+            "display_value": "8 capacity points (0–10)",
+            "normalised_value": 0.8,
+            "raw_value": 8,
+            "unit": "capacity points (0–10)"
+          }
+        },
+        "status_reason": "1 intervention(s) ready for analysis"
+      },
+      {
+        "option_id": "hire_two_developers",
+        "label": "Hire Two Developers",
+        "status": "ready",
+        "interventions": {
+          "developer_capacity": 0.6
+        },
+        "is_baseline": false,
+        "intervention_details": {
+          "developer_capacity": {
+            "display_value": "12 capacity points (0–20)",
+            "normalised_value": 0.6,
+            "raw_value": 12,
+            "unit": "capacity points (0–20)"
+          }
+        },
+        "status_reason": "1 intervention(s) ready for analysis"
+      },
+      {
+        "option_id": "continue_current_staffing",
+        "label": "Continue Current Staffing",
+        "status": "needs_user_mapping",
+        "interventions": {},
+        "is_baseline": false,
+        "status_reason": "No interventions extracted",
+        "user_questions": [
+          "Which factor(s) does \"Continue Current Staffing\" change, and what value should each be set to?"
+        ]
+      },
+      {
+        "option_id": "hire_one_developer",
+        "label": "Hire One Developer",
+        "status": "ready",
+        "interventions": {
+          "developer_capacity": 0.5
+        },
+        "is_baseline": false,
+        "intervention_details": {
+          "developer_capacity": {
+            "display_value": "10 capacity points (0–20)",
+            "normalised_value": 0.5,
+            "raw_value": 10,
+            "unit": "capacity points (0–20)"
+          }
+        },
+        "status_reason": "1 intervention(s) ready for analysis"
+      }
+    ],
+    "goal_node_id": "productivity",
+    "status": "blocked",
+    "bias_findings": [],
+    "blocked_reason": "OPTION_NO_FACTOR_EDGES",
+    "readiness_issues": [
+      {
+        "issue_id": "structural_1",
+        "code": "OPTION_NO_FACTOR_EDGES",
+        "category": "graph_structure",
+        "message": "An option has no factor connections and cannot be analysed. Add at least one factor edge.",
+        "repairability": "human_input_required",
+        "provenance": "unattributed",
+        "obligation": "required"
+      },
+      {
+        "issue_id": "semantic_2",
+        "code": "OPTION_NEEDS_MAPPING",
+        "category": "option_mapping",
+        "message": "Choose which factor \"Continue Current Staffing\" changes and by how much.",
+        "repairability": "human_input_required",
+        "option_id": "continue_current_staffing",
+        "option_label": "Continue Current Staffing",
+        "provenance": "unattributed",
+        "obligation": "offered"
+      }
+    ],
+    "repair_proposal": {
+      "proposal_version": "readiness_repair_v1",
+      "complete": true,
+      "issue_ids": [
+        "structural_1",
+        "semantic_2"
+      ],
+      "changes": [],
+      "unresolved_inputs": [
+        {
+          "issue_id": "structural_1",
+          "kind": "model_structure",
+          "prompt": "An option has no factor connections and cannot be analysed. Add at least one factor edge.",
+          "obligation": "required",
+          "provenance": "unattributed"
+        },
+        {
+          "issue_id": "semantic_2",
+          "kind": "option_mapping",
+          "prompt": "Choose which factor \"Continue Current Staffing\" changes and by how much.",
+          "option_id": "continue_current_staffing",
+          "obligation": "offered",
+          "provenance": "unattributed"
+        }
+      ]
+    },
+    "may_run": false,
+    "analysis_admission": {
+      "structurally_analysable": false,
+      "missing_important_inputs": [
+        {
+          "issue_id": "structural_1",
+          "code": "OPTION_NO_FACTOR_EDGES",
+          "why_it_matters": "An option has no factor connections and cannot be analysed. Add at least one factor edge.",
+          "obligation": "required",
+          "waived_by_exclusion": false
+        },
+        {
+          "issue_id": "semantic_2",
+          "code": "OPTION_NEEDS_MAPPING",
+          "option_id": "continue_current_staffing",
+          "option_label": "Continue Current Staffing",
+          "why_it_matters": "Choose which factor \"Continue Current Staffing\" changes and by how much.",
+          "obligation": "offered",
+          "waived_by_exclusion": false
+        }
+      ],
+      "semantic_quality_sufficient": true,
+      "permitted_analysis_mode": "none",
+      "reasons": [
+        {
+          "field": "structurally_analysable",
+          "code": "MODEL_HAS_BLOCKERS",
+          "message": "Review all 2 readiness issues together before analysis."
+        },
+        {
+          "field": "missing_important_inputs",
+          "code": "MODEL_HAS_BLOCKERS",
+          "message": "One input is still needed from you."
+        },
+        {
+          "field": "semantic_quality_sufficient",
+          "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+          "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+        },
+        {
+          "field": "permitted_analysis_mode",
+          "code": "MODEL_HAS_BLOCKERS",
+          "message": "This model cannot be analysed yet."
+        }
+      ],
+      "graph_hash": "59ec62a14e4c4bdda5bfa009ca99ce8471de754ff3afd9ab2dc44b26de04db42",
+      "semantic_signals": {
+        "confidence_parameters_total": 22,
+        "confidence_parameters_user_stated": 6,
+        "confidence_parameters_machine_authored": 12,
+        "confidence_parameters_unattributed": 4,
+        "material_parameters_total": 20,
+        "material_parameters_user_stated": 5,
+        "intervened_factor_baselines_total": 2,
+        "intervened_factor_baselines_user_stated": 2,
+        "material_parameters_awaiting_user_node_ids": [
+          "productivity",
+          "coordination_overhead",
+          "leadership_bottleneck",
+          "team_delivery_throughput"
+        ],
+        "goal_target_stated": false
+      }
+    },
+    "current_graph_hash": "59ec62a14e4c4bdd"
+  },
+  "draft_graph": {
+    "nodes": [
+      {
+        "id": "decision_productivity",
+        "kind": "decision",
+        "label": "Decision: Productivity",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "productivity",
+        "kind": "goal",
+        "label": "Productivity",
+        "provenance": "from_brief",
+        "goal_threshold_frame": "level"
+      },
+      {
+        "id": "hire_a_tech_lead",
+        "kind": "option",
+        "label": "Hire a Tech Lead",
+        "provenance": "from_brief",
+        "interventions": {
+          "tech_lead_capacity": {
+            "value": 0.8,
+            "source": "user_specified",
+            "target_match": {
+              "node_id": "tech_lead_capacity",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "hire_two_developers",
+        "kind": "option",
+        "label": "Hire Two Developers",
+        "provenance": "from_brief",
+        "interventions": {
+          "developer_capacity": {
+            "value": 0.6,
+            "source": "user_specified",
+            "target_match": {
+              "node_id": "developer_capacity",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "continue_current_staffing",
+        "kind": "option",
+        "label": "Continue Current Staffing",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "hire_one_developer",
+        "kind": "option",
+        "label": "Hire One Developer",
+        "provenance": "ai_inferred",
+        "interventions": {
+          "developer_capacity": {
+            "value": 0.5,
+            "source": "user_specified",
+            "target_match": {
+              "node_id": "developer_capacity",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "tech_lead_capacity",
+        "kind": "factor",
+        "label": "Tech-lead capacity",
+        "category": "controllable",
+        "provenance": "user_set",
+        "scale_frame": 10,
+        "display_value": "4 capacity points (0–10)",
+        "observed_state": {
+          "unit": "capacity points (0–10)",
+          "value": 0.4,
+          "source": "user_override",
+          "raw_value": 4
+        }
+      },
+      {
+        "id": "developer_capacity",
+        "kind": "factor",
+        "label": "Developer capacity",
+        "category": "controllable",
+        "provenance": "user_set",
+        "scale_frame": 20,
+        "display_value": "8 capacity points (0–20)",
+        "observed_state": {
+          "unit": "capacity points (0–20)",
+          "value": 0.4,
+          "source": "user_override",
+          "raw_value": 8
+        }
+      },
+      {
+        "id": "work_prioritisation",
+        "kind": "factor",
+        "label": "Work prioritisation",
+        "category": "observable",
+        "provenance": "user_set",
+        "scale_frame": 100,
+        "display_value": "60 index points (0–100)",
+        "observed_state": {
+          "unit": "index points (0–100)",
+          "value": 0.6,
+          "source": "user_override",
+          "raw_value": 60
+        }
+      },
+      {
+        "id": "engineering_coordination",
+        "kind": "factor",
+        "label": "Engineering coordination",
+        "category": "observable",
+        "provenance": "user_set",
+        "scale_frame": 100,
+        "display_value": "60 index points (0–100)",
+        "observed_state": {
+          "unit": "index points (0–100)",
+          "value": 0.6,
+          "source": "user_override",
+          "raw_value": 60
+        }
+      },
+      {
+        "id": "delivery_capacity",
+        "kind": "factor",
+        "label": "Delivery capacity",
+        "category": "observable",
+        "provenance": "user_set",
+        "scale_frame": 30,
+        "display_value": "12 capacity points (0–30)",
+        "observed_state": {
+          "unit": "capacity points (0–30)",
+          "value": 0.4,
+          "source": "user_override",
+          "raw_value": 12
+        }
+      },
+      {
+        "id": "new_hire_ramp_up",
+        "kind": "factor",
+        "label": "New-hire ramp-up",
+        "category": "observable",
+        "provenance": "user_set",
+        "scale_frame": 100,
+        "display_value": "50 index points (0–100)",
+        "observed_state": {
+          "unit": "index points (0–100)",
+          "value": 0.5,
+          "source": "user_override",
+          "raw_value": 50
+        }
+      },
+      {
+        "id": "coordination_overhead",
+        "kind": "risk",
+        "label": "Coordination overhead",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "leadership_bottleneck",
+        "kind": "risk",
+        "label": "Leadership bottleneck",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "team_delivery_throughput",
+        "kind": "outcome",
+        "label": "Team delivery throughput",
+        "provenance": "ai_inferred"
+      }
+    ],
+    "edges": [
+      {
+        "to": "hire_a_tech_lead",
+        "from": "decision_productivity",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "hire_two_developers",
+        "from": "decision_productivity",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "continue_current_staffing",
+        "from": "decision_productivity",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "hire_one_developer",
+        "from": "decision_productivity",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "tech_lead_capacity",
+        "from": "hire_a_tech_lead",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "developer_capacity",
+        "from": "hire_two_developers",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "developer_capacity",
+        "from": "hire_one_developer",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "work_prioritisation",
+        "from": "tech_lead_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "engineering_coordination",
+        "from": "tech_lead_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "leadership_bottleneck",
+        "from": "tech_lead_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "delivery_capacity",
+        "from": "developer_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "coordination_overhead",
+        "from": "developer_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "team_delivery_throughput",
+        "from": "work_prioritisation",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "team_delivery_throughput",
+        "from": "engineering_coordination",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "team_delivery_throughput",
+        "from": "delivery_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "team_delivery_throughput",
+        "from": "new_hire_ramp_up",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "team_delivery_throughput",
+        "from": "coordination_overhead",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "team_delivery_throughput",
+        "from": "leadership_bottleneck",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "productivity",
+        "from": "team_delivery_throughput",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      }
+    ],
+    "node_count": 15,
+    "edge_count": 19
+  },
+  "_diagnostic_trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": "run",
+    "agent_mode": "full",
+    "hops": 1,
+    "stopped_reason": "answered",
+    "tools_called": [
+      "run_analysis"
+    ],
+    "write_claims_removed": 0
+  },
+  "_agent": {
+    "session_id": "sess_00000000-0000-4000-8000-000000000002",
+    "mode": "full",
+    "tool_calls": [
+      {
+        "name": "run_analysis",
+        "ok": true,
+        "mutated": false
+      }
+    ],
+    "mutated": false,
+    "hops": 1,
+    "stopped_reason": "answered",
+    "turn_id": "00000000-0000-4000-8000-000000000006",
+    "durability": "recorded",
+    "receipts": []
+  },
+  "_provider_calls": [
+    {
+      "site": "agent-v1-turn.callModel",
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "purpose": "conversation",
+      "outcome": "allowed",
+      "duration_ms": 3066,
+      "usage": {
+        "raw": {
+          "input_tokens": 6877,
+          "input_tokens_details": {
+            "cache_write_tokens": 6874,
+            "cached_tokens": 0
+          },
+          "output_tokens": 150,
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          },
+          "total_tokens": 7027
+        },
+        "input_tokens": 6877,
+        "output_tokens": 150,
+        "cached_input_tokens": 0
+      }
+    }
+  ]
+}
