@@ -662,9 +662,35 @@ export function admitCandidateModel(
          */
         const baselineRaw = model.goal.baseline_value;
         let observed_state: AdmittedNode['observed_state'];
+        const withheld = (reason: string): void => {
+          loss.push({
+            field_path: `nodes[${slugId(model.goal.metric)}].observed_state.baseline`,
+            before: baselineRaw ?? null,
+            after: null,
+            reason,
+            severity: 'warn',
+          } as RepairEntry);
+        };
+        /**
+         * ⛔ ONLY A GOAL TO REACH OR EXCEED IS SCORED CORRECTLY TODAY. The level
+         * consumer scores P(level >= threshold) whatever the operator says, so for
+         * "keep churn at or below 5%; it is 4% now" a baseline would buy a Goal-fit
+         * figure for the WRONG tail. Withheld, and said, until the consumer honours
+         * the operator. The target itself is kept as before.
+         */
+        const scoresTheRightTail = model.goal.operator === '>=' || model.goal.operator === '>';
         if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)) {
-          const admission = admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap });
-          if (admission.admitted) {
+          const admission = scoresTheRightTail
+            ? admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap })
+            : null;
+          if (admission === null) {
+            withheld(
+              `"${model.goal.metric}" is a goal to stay at or below ${raw}, and the chance of meeting a ` +
+              'goal of that kind cannot be calculated correctly yet, so its current level ' +
+              `(${baselineRaw}) was not used for that. The options can still be compared on everything ` +
+              'else; no chance of meeting the goal will be shown.',
+            );
+          } else if (admission.admitted) {
             const stated = model.goal.baseline_known === true
               && (model.goal.baseline_provenance ?? model.goal.provenance) === 'explicit';
             observed_state = {
@@ -676,17 +702,12 @@ export function admitCandidateModel(
               cap: resolved.cap,
             };
           } else {
-            loss.push({
-              field_path: `nodes[${slugId(model.goal.metric)}].observed_state.baseline`,
-              before: baselineRaw,
-              after: null,
-              reason:
-                `The current level of "${model.goal.metric}" (${baselineRaw}) was not carried ` +
-                `(${admission.reason}): against a target of ${raw} it cannot be read on the goal's ` +
-                'level frame without inverting the question. The target is kept; the chance of reaching ' +
-                'it cannot be shown until the current level and the target agree on a direction.',
-              severity: 'warn',
-            } as RepairEntry);
+            withheld(
+              `The current level of "${model.goal.metric}" (${baselineRaw}) is already above the target ` +
+              `of ${raw}, so the chance of reaching the target cannot be shown: read that way the question ` +
+              'would be upside down. The target is kept. If the goal is to get back below a level, or if ' +
+              'either figure is wrong, say which and it can be corrected.',
+            );
           }
         }
         return {

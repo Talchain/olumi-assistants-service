@@ -17,7 +17,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
-import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import { Ajv } from 'ajv';
+import { buildCandidateSchema, buildModelFromBrief, retrySchemaPinningGoal, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
@@ -26,7 +27,10 @@ const GOAL = 'monthly_recurring_revenue';
 
 function pricing(goal: Partial<CandidateModel['goal']> = {}): CandidateModel {
   return {
-    goal: { metric: 'Monthly recurring revenue', operator: '>=', value: 20000, unit: 'GBP', horizon_months: null, provenance: 'explicit', ...goal },
+    goal: {
+      metric: 'Monthly recurring revenue', operator: '>=', target_stated: true, value: 20000, unit: 'GBP', horizon_months: null, provenance: 'explicit',
+      baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', ...goal,
+    },
     constraints: [],
     options: [
       { label: 'Raise to £59', provenance: 'explicit', changes: [],
@@ -42,9 +46,14 @@ function pricing(goal: Partial<CandidateModel['goal']> = {}): CandidateModel {
   } as CandidateModel;
 }
 
+/** The production contract: the candidate must pass the real strict schema, as the model's output would. */
+const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
+
 async function registeredGoal(model: CandidateModel) {
+  const wire = { ...model, unknowns: [] };
+  expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let graph: unknown = null;
-  const call = (async () => ({ text: JSON.stringify({ ...model, unknowns: [] }) })) as unknown as CallStructuredModel;
+  const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
   const d: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph/register')) {
       graph = structuredClone((body as { graph: unknown }).graph);
@@ -57,7 +66,7 @@ async function registeredGoal(model: CandidateModel) {
   const parsed = GraphV3.parse(graph);
   const goal = parsed.nodes.find((n) => n.id === GOAL);
   expect(goal?.kind).toBe('goal');
-  return { goal: goal as Record<string, unknown> & { observed_state?: Record<string, unknown> }, graph: parsed };
+  return { goal: goal as Record<string, unknown> & { observed_state?: Record<string, unknown> }, graph: parsed, out };
 }
 
 describe('the goal carries its current level, in the shape ISL reads', () => {
@@ -105,7 +114,40 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
     expect(m.nodes.find((n) => n.id === GOAL)).not.toHaveProperty('observed_state');
     const [said] = m.loss.filter((l) => l.field_path === `nodes[${GOAL}].observed_state.baseline`);
     expect(said?.before).toBe(24000);
-    expect(said?.reason).toContain('direction_unsupported');
+    expect(said?.reason).toContain('already above the target');
+  });
+
+  it('RED (disclosure): that refusal reaches the Agent through not_represented, with the repair', async () => {
+    const { out } = await registeredGoal(pricing({ baseline_known: true, baseline_value: 24000 }));
+    const said = (out.not_represented as string[]).filter((s) => s.includes('already above the target'));
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain('say which and it can be corrected');
+  });
+
+  it('RED (meaning): a goal to stay AT OR BELOW a level gets no baseline — never a Goal fit for the wrong tail', async () => {
+    for (const operator of ['<=', '<']) {
+      const { goal, out } = await registeredGoal(pricing({ operator, value: 5, unit: '%', baseline_known: true, baseline_value: 4 }));
+      expect(goal, operator).not.toHaveProperty('observed_state');
+      expect((out.not_represented as string[]).filter((s) => s.includes('stay at or below')), operator).toHaveLength(1);
+    }
+  });
+
+  it('CONTROL (meaning): the same figures on a goal to reach or exceed DO carry the baseline', async () => {
+    for (const operator of ['>=', '>']) {
+      const { goal } = await registeredGoal(pricing({ operator, value: 5, unit: '%', baseline_known: true, baseline_value: 4 }));
+      expect(goal.observed_state, operator).toMatchObject({ baseline: 0.04, raw_value: 4, source: 'brief_extraction' });
+    }
+  });
+
+  it('RED (efficacy): the production schema REQUIRES the goal\u2019s current level, and the retry pins it', () => {
+    const goal = (buildCandidateSchema() as { properties: { goal: { required: string[]; properties: Record<string, unknown> } } }).properties.goal;
+    expect(goal.required).toEqual(expect.arrayContaining(['baseline_known', 'baseline_value', 'baseline_provenance']));
+    const bad = { ...pricing(), unknowns: [] } as Record<string, unknown>;
+    const { baseline_value: _dropped, ...goalWithout } = (bad.goal as Record<string, unknown>);
+    expect(strict({ ...bad, goal: goalWithout }), 'a model that omits the key is refused by the strict contract').toBe(false);
+    const pinned = new Ajv({ strict: false }).compile(retrySchemaPinningGoal(pricing({ baseline_known: true, baseline_value: 16000 }).goal));
+    expect(pinned({ ...pricing({ baseline_known: true, baseline_value: 16000 }), unknowns: [] })).toBe(true);
+    expect(pinned({ ...pricing({ baseline_known: true, baseline_value: 17000 }), unknowns: [] }), 'the retry cannot change it').toBe(false);
   });
 
   it('the baseline adds no readiness blocker (round trip through the readiness authority)', async () => {
