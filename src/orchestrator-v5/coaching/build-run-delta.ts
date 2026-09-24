@@ -61,7 +61,7 @@ import {
   winnerOptionResultSource,
 } from '../../orchestrator/context/option-result-source.js';
 import { RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED } from '../compose/claim-safety-cage.js';
-import { readMayNameLeadingOptionVerdictForFact } from '../context/claim-safety-read.js';
+import { mayPresentComparedRunLeader } from './compared-run-leader.js';
 
 import { projectRunFact, selectTwoNewestRunAnalysisFacts } from './compare-runs.js';
 // ⭐ THE BAND LIVES IN ITS OWN MODULE NOW, AND IT HAS TWO READERS. The
@@ -473,12 +473,10 @@ export function buildRunDelta(input: {
   // entitle the claim. The contract's absence semantics are explicit: *"ABSENCE
   // of an id means 'no entitled leader claim on that side', never 'no leader
   // existed'; a consumer must not name one."*
-  const priorEntitled =
-    input.mayNameLeadingOption
-    && readMayNameLeadingOptionVerdictForFact(pair.prior).may_name_leading_option;
-  const currentEntitled =
-    input.mayNameLeadingOption
-    && readMayNameLeadingOptionVerdictForFact(pair.current).may_name_leading_option;
+  // ⛔ …and that run was ASKED FOR (`mayPresentComparedRunLeader`, the one per-run authority
+  // shared with the "What changed?" gate — review of #1857, B4).
+  const priorEntitled = mayPresentComparedRunLeader(input.mayNameLeadingOption, pair.prior);
+  const currentEntitled = mayPresentComparedRunLeader(input.mayNameLeadingOption, pair.current);
 
   const priorLeaderId = priorEntitled ? priorProjection.leader_option_id : null;
   const currentLeaderId = currentEntitled ? currentProjection.leader_option_id : null;
