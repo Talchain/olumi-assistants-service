@@ -52,19 +52,37 @@ interface BoundRun {
   readonly graphHash: string;
   readonly computedAt: string;
   readonly analysisResult: Record<string, unknown>;
+  /**
+   * True only when the capture's OWN run_state and leader_claim were compared
+   * with the readback's. Upstream blocks carry the CAPTURE's content, so they
+   * are forwarded only on a full identity; the fragile-link card is built from
+   * the READBACK, so a stateless capture may authorise it (reviewer F2).
+   */
+  readonly fullIdentity: boolean;
 }
 
 /**
  * The captured run IS the run the final readback shows, and that run is CURRENT
  * for the readback's graph. Null on any doubt.
  */
+/** The run's option labels as its `analysis_ready.options` state them (present on automatic runs too). */
+function optionLabelsFromReady(analysisReady: unknown): string[] {
+  const options = record(analysisReady)?.options;
+  if (!Array.isArray(options)) return [];
+  return options.flatMap((o) => {
+    const label = record(o)?.label;
+    return typeof label === 'string' && label.trim().length > 0 ? [label] : [];
+  });
+}
+
 function bindCapturedRun(captured: CapturedAnalysis, final: RunTurnCoachingFinal): BoundRun | null {
   if (!Array.isArray(captured.blocks)) return null;
   const oldState = record(captured.analysis_state);
   const newState = record(final.analysisState);
   const oldRun = record(oldState?.run_state);
   const newRun = record(newState?.run_state);
-  if (oldRun?.kind !== 'complete_current' || newRun?.kind !== 'complete_current') return null;
+  // The READBACK is the freshness authority: its run must be complete and current.
+  if (newRun?.kind !== 'complete_current') return null;
   const results = captured.blocks.filter((b) => record(b)?.type === 'analysis_result');
   if (results.length !== 1) return null;
   const oldResult = record(results[0]);
@@ -72,6 +90,26 @@ function bindCapturedRun(captured: CapturedAnalysis, final: RunTurnCoachingFinal
   if (oldResult === undefined || newResult?.type !== 'analysis_result') return null;
   // CURRENT: the readback's result was computed against the readback's graph.
   if (typeof final.graphHash !== 'string' || newResult.computed_against_hash !== final.graphHash) return null;
+  /**
+   * ⭐ A CAPTURE WITH NO `analysis_state` AT ALL (reviewer F2). A run response
+   * that states no run_state cannot contradict the readback, so it binds on
+   * what it DOES state: its one result, computed against the readback's graph,
+   * with the same leader designation — and the readback's own complete_current
+   * run and leader_claim govern. A capture that states a run_state which
+   * disagrees still refuses below (`oldRun.kind` must be complete_current).
+   * Without this, a first-pass runner that hands over the result without the
+   * finaliser's state would leave the first experience blank.
+   */
+  if (captured.analysis_state === undefined) {
+    if (oldResult.computed_against_hash !== final.graphHash) return null;
+    if (!Object.hasOwn(oldResult, 'leading_option_id') || !Object.hasOwn(newResult, 'leading_option_id')
+      || oldResult.leading_option_id !== newResult.leading_option_id) return null;
+    if (typeof record(newState?.leader_claim)?.permitted !== 'boolean') return null;
+    if (typeof newRun.computed_at !== 'string' || newRun.computed_at.length === 0) return null;
+    if (captured.scenario_id !== final.scenarioId) return null;
+    return { graphHash: final.graphHash, computedAt: newRun.computed_at, analysisResult: newResult, fullIdentity: false };
+  }
+  if (oldRun?.kind !== 'complete_current') return null;
   // SAME RUN: the captured run and the readback's run share scenario, hash and time.
   const identity = compareAnalysisRunFactIdentity(
     { scenario_id: captured.scenario_id, graph_hash_at_run: oldResult.computed_against_hash, computed_at: oldRun.computed_at },
@@ -86,7 +124,7 @@ function bindCapturedRun(captured: CapturedAnalysis, final: RunTurnCoachingFinal
   if (typeof record(oldState?.leader_claim)?.permitted !== 'boolean'
     || typeof record(newState?.leader_claim)?.permitted !== 'boolean'
     || !isDeepStrictEqual(oldState?.leader_claim, newState?.leader_claim)) return null;
-  return { graphHash: final.graphHash, computedAt: identity.identity.computed_at, analysisResult: newResult };
+  return { graphHash: final.graphHash, computedAt: identity.identity.computed_at, analysisResult: newResult, fullIdentity: true };
 }
 
 /**
@@ -127,7 +165,9 @@ export function runTurnCoaching(
   }
   // (2) it is the run the readback shows, current for the readback's graph.
   const bound = bindCapturedRun(captured, final);
-  const upstream = bound !== null ? dedupeByBlockId(forwardUpstreamCoaching(captured.blocks ?? [], bound.graphHash)) : [];
+  const upstream = bound !== null && bound.fullIdentity
+    ? dedupeByBlockId(forwardUpstreamCoaching(captured.blocks ?? [], bound.graphHash))
+    : [];
   if (!isRunTurnTrigger(captured.trigger)) {
     return { blocks: upstream, eligibility: { eligible: false, reason: 'no_run_this_turn' } };
   }
@@ -140,9 +180,10 @@ export function runTurnCoaching(
     graphHash: bound.graphHash,
     computedAt: bound.computedAt,
     trigger: captured.trigger,
-    // run_state `complete_current` on both sides ⇔ canonical freshness `fresh`,
-    // and the hash binding above held — the strictest faithful verdict here.
+    // The readback's run_state is `complete_current` (⇔ canonical freshness
+    // `fresh`) and the hash binding above held — the strictest faithful verdict here.
     freshness: 'fresh',
+    optionLabels: optionLabelsFromReady(captured.analysis_ready),
   });
   if (built.block === null) {
     return { blocks: upstream, eligibility: { eligible: false, reason: built.reason } };

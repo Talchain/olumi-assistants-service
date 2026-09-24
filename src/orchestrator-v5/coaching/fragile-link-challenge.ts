@@ -83,12 +83,12 @@ export const RUN_TURN_COACHING_CONTRACT = Object.freeze({
   version: 'run-turn-coaching/v1',
   block: Object.freeze({
     type: 'coaching',
-    coaching_kind: 'bias_signal',
+    coaching_kind: 'assumption_check',
     source: 'deterministic_signal',
     source_handler: 'run_analysis',
     freshness: 'fresh',
     priority_rank: 15,
-    signal_id: `${SIGNAL_ID_PREFIX}<edgeIdentity>:<graph_hash>:<run computed_at>`,
+    signal_id: `${SIGNAL_ID_PREFIX}<edgeIdentity>:<graph_hash>:<run computed_at>:<effective trigger>`,
     block_id: 'deterministicBlockId(signal_id)',
     graph_hash_at_generation: 'readback graph_hash === analysis_result.computed_against_hash',
     created_at: 'analysis_state.run_state.computed_at',
@@ -165,10 +165,16 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** The run's option labels, as the readback states them (`win_probabilities` keys). */
-function optionLabelsOf(result: Record<string, unknown>): string[] {
+/**
+ * The run's option labels: the readback's `win_probabilities` keys, PLUS the
+ * labels the caller supplies (the run's `analysis_ready.options`). The second
+ * source matters on an automatic run, whose confinement drops
+ * `win_probabilities` — without it the option-name guard would see nothing.
+ */
+function optionLabelsOf(result: Record<string, unknown>, supplied: readonly string[] = []): string[] {
   const wins = readRecord(result.win_probabilities);
-  return wins === null ? [] : Object.keys(wins).filter((l) => l.trim().length > 0);
+  const fromWins = wins === null ? [] : Object.keys(wins);
+  return [...fromWins, ...supplied].filter((l) => typeof l === 'string' && l.trim().length > 0);
 }
 
 function namesAnOption(label: string, optionLabels: readonly string[]): boolean {
@@ -221,6 +227,8 @@ export interface FragileLinkChallengeInput {
    * `compose/analysis-state-v1.ts`) plus the hash binding; anything else is null.
    */
   readonly freshness: AnalysisFreshness | null;
+  /** The run's option labels from `analysis_ready.options` (see `optionLabelsOf`). */
+  readonly optionLabels?: readonly string[];
 }
 
 export type FragileLinkChallengeDecision =
@@ -260,17 +268,18 @@ export function buildFragileLinkChallenge(input: FragileLinkChallengeInput): Fra
   if (!claim.usable) return { block: null, reason: 'claim_not_usable' };
 
   // (5) the words: leader-free, option-free, gated, bounded.
-  if (namesAnOption(fromLabel, optionLabelsOf(result)) || namesAnOption(toLabel, optionLabelsOf(result))) {
+  const optionLabels = optionLabelsOf(result, input.optionLabels);
+  if (namesAnOption(fromLabel, optionLabels) || namesAnOption(toLabel, optionLabels)) {
     return { block: null, reason: 'copy_gate' };
   }
-  const copy = composeFragileLinkChallenge(
-    fromLabel,
-    toLabel,
-    input.trigger === 'auto_first_pass' || isAutomaticRun(enrichment),
-  );
+  // The copy variant actually shipped. It is part of the identity: one
+  // block_id must never name two different bodies.
+  const effectiveTrigger: RunTurnTrigger =
+    input.trigger === 'auto_first_pass' || isAutomaticRun(enrichment) ? 'auto_first_pass' : 'explicit_run';
+  const copy = composeFragileLinkChallenge(fromLabel, toLabel, effectiveTrigger === 'auto_first_pass');
   if (!copyPasses(copy)) return { block: null, reason: 'copy_gate' };
 
-  const signalId = `${SIGNAL_ID_PREFIX}${edgeIdentity}:${input.graphHash}:${input.computedAt}`;
+  const signalId = `${SIGNAL_ID_PREFIX}${edgeIdentity}:${input.graphHash}:${input.computedAt}:${effectiveTrigger}`;
   const dsk = resolveFragileLinkDskProvenance();
   const parsed = CoachingBlockSchema.safeParse({
     type: 'coaching',

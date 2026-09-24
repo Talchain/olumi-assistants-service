@@ -33,14 +33,14 @@
   "explicit_run": {
     "blocks": [
       {
-        "block_id": "463392ae-3465-58aa-bdd9-f1f33445c24f",
-        "signal_id": "coach:fragile_link:pro_subscriber_base→mrr:2cac03f2a47449be:2026-09-24T16:47:26.848Z",
+        "block_id": "23150107-6583-5c5a-92d4-548775ea50da",
+        "signal_id": "coach:fragile_link:pro_subscriber_base→mrr:2cac03f2a47449be:2026-09-24T16:47:26.848Z:explicit_run",
         "created_at": "2026-09-24T16:47:26.848Z",
         "source_handler": "run_analysis",
         "graph_hash_at_generation": "2cac03f2a47449be",
         "freshness": "fresh",
         "type": "coaching",
-        "coaching_kind": "bias_signal",
+        "coaching_kind": "assumption_check",
         "title": "Pressure-test a fragile link",
         "body": "The robustness check flagged the link from Pro subscriber base to MRR as fragile — a modest change in how strongly Pro subscriber base drives MRR could change how the options compare.",
         "source": "deterministic_signal",
@@ -69,14 +69,14 @@
   "auto_first_pass": {
     "blocks": [
       {
-        "block_id": "463392ae-3465-58aa-bdd9-f1f33445c24f",
-        "signal_id": "coach:fragile_link:pro_subscriber_base→mrr:2cac03f2a47449be:2026-09-24T16:47:26.848Z",
+        "block_id": "31365171-6695-5cbb-83ad-13da141e47c5",
+        "signal_id": "coach:fragile_link:pro_subscriber_base→mrr:2cac03f2a47449be:2026-09-24T16:47:26.848Z:auto_first_pass",
         "created_at": "2026-09-24T16:47:26.848Z",
         "source_handler": "run_analysis",
         "graph_hash_at_generation": "2cac03f2a47449be",
         "freshness": "fresh",
         "type": "coaching",
-        "coaching_kind": "bias_signal",
+        "coaching_kind": "assumption_check",
         "title": "Pressure-test a fragile link",
         "body": "Before relying on this first pass on Olumi's estimates, note that the robustness check flagged the link from Pro subscriber base to MRR as fragile — a modest change in how strongly Pro subscriber base drives MRR could change how the options compare.",
         "source": "deterministic_signal",
@@ -105,14 +105,14 @@
   "permitted_explicit_run": {
     "blocks": [
       {
-        "block_id": "3aeb89f2-fa90-5527-9820-65c024103217",
-        "signal_id": "coach:fragile_link:developer_capacity→velocity:6f1ec70c62fa6733:2026-09-24T16:45:25.249Z",
+        "block_id": "38c99945-4b82-57e9-ae75-eb80e715e5a3",
+        "signal_id": "coach:fragile_link:developer_capacity→velocity:6f1ec70c62fa6733:2026-09-24T16:45:25.249Z:explicit_run",
         "created_at": "2026-09-24T16:45:25.249Z",
         "source_handler": "run_analysis",
         "graph_hash_at_generation": "6f1ec70c62fa6733",
         "freshness": "fresh",
         "type": "coaching",
-        "coaching_kind": "bias_signal",
+        "coaching_kind": "assumption_check",
         "title": "Pressure-test a fragile link",
         "body": "The robustness check flagged the link from Developer capacity to Velocity as fragile — a modest change in how strongly Developer capacity drives Velocity could change how the options compare.",
         "source": "deterministic_signal",

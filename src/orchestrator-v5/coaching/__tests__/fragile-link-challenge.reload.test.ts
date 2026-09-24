@@ -31,6 +31,9 @@ function blockTypesIn(value: unknown, into: string[] = []): string[] {
   return into;
 }
 
+// ⚠ REGRESSION GUARD (reviewer F6): the reload assertion pins EXISTING readScenarioAnalysis
+// behaviour (a read carries no coaching block). It is not evidence of new behaviour; the
+// contrast arm is the part that exercises this change.
 test('(viii) reload: readScenarioAnalysis returns no coaching block, and a reload has no run this turn', async () => {
   const fixture = loadRunTurnFixture('B');
   const turn = fixture.turns.t2!;

@@ -104,7 +104,7 @@ describe('run-turn fragile-link challenge', () => {
     const grounded = selectGroundedCounterCase(c.turn.analysis_result.enrichment).grounded!;
     expect(grounded.edgeIdentity).toBe('developer_capacity→velocity');
     expect(card.signal_id).toBe(
-      `coach:fragile_link:${grounded.edgeIdentity}:${c.turn.graph_hash}:${c.turn.analysis_state.run_state.computed_at}`,
+      `coach:fragile_link:${grounded.edgeIdentity}:${c.turn.graph_hash}:${c.turn.analysis_state.run_state.computed_at}:explicit_run`,
     );
     expect(card.block_id).toBe(deterministicBlockId(card.signal_id));
     expect(card.target_refs).toEqual([{ id: grounded.edgeIdentity, kind: 'edge', label: 'Developer capacity → Velocity' }]);
@@ -117,7 +117,7 @@ describe('run-turn fragile-link challenge', () => {
       title: 'Pressure-test a fragile link',
       action_label: 'Pressure-test this link',
     });
-    expect(card.coaching_kind).toBe('bias_signal');
+    expect(card.coaching_kind).toBe('assumption_check');
     expect(card.dsk_claim_provenance).toEqual(dskClaimFromBundle());
     expect(card.body.length).toBeLessThanOrEqual(300);
     // A permitted leader does not license leader copy on this card.
@@ -431,3 +431,64 @@ describe('run-turn fragile-link challenge', () => {
     }
   });
 });
+
+describe('run-turn coaching — identity carries the copy variant, captures without state, options named via analysis_ready', () => {
+  const cardOf = (r: ReturnType<typeof runTurnCoaching>) => r.blocks.filter((b) => b.signal_id.startsWith('coach:fragile_link:'));
+
+  it('(id) one run under the two triggers gives two block_ids — one id never names two bodies', () => {
+    const explicit = cardOf(runTurnCoaching(runTurnCase('B', 't2', 'explicit_run').captured, runTurnCase('B', 't2', 'explicit_run').final))[0]!;
+    const auto = cardOf(runTurnCoaching(runTurnCase('B', 't2', 'auto_first_pass').captured, runTurnCase('B', 't2', 'auto_first_pass').final))[0]!;
+    expect(explicit.body).not.toBe(auto.body);
+    expect(explicit.block_id).not.toBe(auto.block_id);
+    expect(explicit.signal_id.endsWith(':explicit_run')).toBe(true);
+    expect(auto.signal_id.endsWith(':auto_first_pass')).toBe(true);
+    // Same trigger, same run: the id is stable.
+    const again = cardOf(runTurnCoaching(runTurnCase('B', 't2', 'auto_first_pass').captured, runTurnCase('B', 't2', 'auto_first_pass').final))[0]!;
+    expect(again.block_id).toBe(auto.block_id);
+  });
+
+  it('(F2) a capture that states NO analysis_state still binds to the readback run — the automatic first pass is not blank', () => {
+    for (const trigger of ['auto_first_pass', 'explicit_run'] as const) {
+      const c = runTurnCase('B', 't2', trigger);
+      const { analysis_state: _dropped, ...stateless } = c.captured;
+      const r = runTurnCoaching(stateless, c.final);
+      expect(r.eligibility).toEqual({ eligible: true });
+      const card = cardOf(r)[0]!;
+      expect(card.graph_hash_at_generation).toBe(c.turn.graph_hash);
+      expect(card.created_at).toBe(c.turn.analysis_state.run_state.computed_at);
+    }
+  });
+
+  it('(F2) a stateless capture of a DIFFERENT run is still refused (hash or leader designation differs)', () => {
+    const c = runTurnCase('B', 't2', 'auto_first_pass');
+    const { analysis_state: _dropped, ...stateless } = c.captured;
+    const otherHash = { ...stateless, blocks: [{ ...(stateless.blocks![0] as Record<string, unknown>), computed_against_hash: 'ffffffffffffffff' }] };
+    expect(runTurnCoaching(otherHash, c.final)).toEqual({ blocks: [], eligibility: { eligible: false, reason: 'identity_mismatch' } });
+    const otherLeader = { ...stateless, blocks: [{ ...(stateless.blocks![0] as Record<string, unknown>), leading_option_id: 'another-option' }] };
+    expect(runTurnCoaching(otherLeader, c.final)).toEqual({ blocks: [], eligibility: { eligible: false, reason: 'identity_mismatch' } });
+    // A capture that DOES state a run_state which disagrees is refused, not bypassed.
+    const stale = { ...c.captured, analysis_state: { ...(c.captured.analysis_state as Record<string, unknown>), run_state: { kind: 'complete_stale', computed_at: c.turn.analysis_state.run_state.computed_at } } };
+    expect(runTurnCoaching(stale, c.final).eligibility).toEqual({ eligible: false, reason: 'identity_mismatch' });
+  });
+
+  it('(F4) on an automatic-run shape (no win_probabilities) an endpoint that names an option is refused via analysis_ready.options', () => {
+    const c = runTurnCase('B', 't2', 'auto_first_pass');
+    const grounded = selectGroundedCounterCase(c.turn.analysis_result.enrichment).grounded!;
+    const optionLabel = c.turn.analysis_ready.options[0]!.label;
+    const retag = (result: Record<string, unknown>) => {
+      const r = structuredClone(result) as Record<string, unknown> & { enrichment: { robustness: { fragile_edges: Record<string, unknown>[] } } };
+      delete r.win_probabilities;
+      for (const row of r.enrichment.robustness.fragile_edges) {
+        if (row.from_id === grounded.fromId && row.to_id === grounded.toId) row.from_label = optionLabel;
+      }
+      return r;
+    };
+    const final = { ...c.final, analysisResult: retag(c.final.analysisResult as Record<string, unknown>) };
+    const captured = { ...c.captured, blocks: [retag(c.captured.blocks![0] as Record<string, unknown>)] };
+    expect(runTurnCoaching(captured, final).eligibility).toEqual({ eligible: false, reason: 'copy_gate' });
+    // Contrast: without analysis_ready's options the guard has nothing to read, and the card ships.
+    const { analysis_ready: _none, ...noReady } = captured;
+    expect(runTurnCoaching(noReady, final).eligibility).toEqual({ eligible: true });
+  });
+});
+
