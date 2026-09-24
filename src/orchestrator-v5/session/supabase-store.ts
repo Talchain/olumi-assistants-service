@@ -1422,6 +1422,18 @@ export class SupabaseSessionStore implements SessionStore {
     // fact permanently false on three live paths.
     const expectedBaseKnown = write.expectedGraphIdentityHash !== undefined;
 
+    // ⛔ STRICT EXPECTED-EMPTY — ONE KIND OF WRITE, AND OTHERWISE NO KEY AT ALL (independent
+    // review of #1786, 5806044132). The guard at 20260920210000:263-276 exempts
+    // `incoming = current` as a content-idempotent retry, so when a DIFFERENT operation saved
+    // byte-identical bytes after this caller read the model as empty, the write was admitted
+    // and committed with no version receipt. `p_require_expected_empty` (migration
+    // 20260924030000) refuses ANY graph presence for this write, with no such exemption.
+    // Sent ONLY for a caller precondition on a KNOWN-EMPTY base. Every other write sends the
+    // exact pre-migration argument object: PostgREST matches named arguments by KEY, so even
+    // `false` would make a pre-install database answer PGRST202 for every versioned write.
+    const requireExpectedEmpty =
+      write.requireAtomicExpectedBase === true && write.expectedGraphIdentityHash === null;
+
     const { data, error } = await this.client.rpc('append_turn_atomic_v5', {
       ...baseRpcArgs,
       p_expected_graph_identity_hash: trustedExpectedHash,
@@ -1451,6 +1463,7 @@ export class SupabaseSessionStore implements SessionStore {
       p_version_authored_by: version.authored_by,
       p_version_creation_kind: version.creation_kind,
       p_version_source_turn_id: version.source_turn_id,
+      ...(requireExpectedEmpty ? { p_require_expected_empty: true } : {}),
     });
 
     if (error) {
@@ -1499,7 +1512,14 @@ export class SupabaseSessionStore implements SessionStore {
             'because the turn, graph, version, head and event must share one transaction. ' +
             'Execute migration 20260824200000_c8_atomic_model_version_restore BEFORE this build ' +
             'serves traffic, or set CEE_MODEL_VERSIONS_ENABLED=false to disable versioning ' +
-            'without a deploy.',
+            'without a deploy.' +
+            // Only a strict write names the new argument, so only it can be the one PostgREST
+            // could not match; nothing was written either way (fail closed).
+            (requireExpectedEmpty
+              ? ' This write sent p_require_expected_empty, which needs migration ' +
+                '20260924030000_v5_append_v5_strict_expected_empty installed (and the PostgREST ' +
+                'schema cache reloaded) before a build that sends it serves traffic.'
+              : ''),
           { cause: error, rpc_code: errCode(error) },
         );
       }
