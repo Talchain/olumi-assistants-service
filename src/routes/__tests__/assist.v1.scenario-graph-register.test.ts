@@ -1295,3 +1295,320 @@ describe("register — an optional caller expectation makes the write conditiona
     await app.close();
   });
 });
+
+/**
+ * ⭐⭐ THE IDENTITY-SPACE EXPECTATION — it refuses the case the analysis-space one
+ * provably cannot.
+ *
+ * ⛔ THE COUNTEREXAMPLE, from the reviewed finding on CEE #1743: "caller reads
+ * label L, another writer renames it, frame update follows — retain the new label
+ * or refuse, never restore L." `expected_graph_hash` is compared over
+ * `computeAnalysisAffectingGraphHash`, whose projection EXCLUDES labels — so a
+ * rename leaves it UNCHANGED and the stale whole-graph write sails through.
+ *
+ * The first test below is the load-bearing one, and it is built to be
+ * DISCRIMINATING: the same pair of graphs is asserted to have an IDENTICAL
+ * analysis hash and a DIFFERENT identity hash. If that premise ever stops
+ * holding, the test fails loudly rather than passing for the wrong reason.
+ */
+describe("register — the IDENTITY expectation catches what the analysis one cannot", () => {
+  /** The server's graph after a colleague renamed one node — nothing else. */
+  const RENAMED = (() => {
+    const g = JSON.parse(JSON.stringify(SERVER_PRE_IMPORT)) as WireGraph;
+    const n = (g.nodes as { id: string; label?: string }[])[0];
+    n.label = `${n.label ?? ""} (renamed by a colleague)`;
+    return g;
+  })();
+
+  const preAnalysis = () => computeExpectedGraphCasHashes(SERVER_PRE_IMPORT).expectedGraphAnalysisHash;
+  const preIdentity = () => computeExpectedGraphCasHashes(SERVER_PRE_IMPORT).expectedGraphIdentityHash;
+  const renamedIdentity = () => computeExpectedGraphCasHashes(RENAMED).expectedGraphIdentityHash;
+
+  it("⭐ PREMISE, asserted rather than assumed: a rename moves the IDENTITY hash and leaves the ANALYSIS hash alone", () => {
+    // Without this the headline test could pass because the route refused for
+    // some unrelated reason. It also documents exactly why a second hash exists.
+    expect(computeExpectedGraphCasHashes(RENAMED).expectedGraphAnalysisHash).toBe(preAnalysis());
+    expect(renamedIdentity()).not.toBe(preIdentity());
+    expect(typeof preIdentity()).toBe("string");
+  });
+
+  it("⛔⛔ THE DEFECT: a caller's stale IDENTITY expectation is refused 409, even though its analysis expectation still matches", async () => {
+    // The server has moved (a rename). The caller's analysis hash is STILL
+    // CORRECT — that is the whole problem — so only the identity expectation can
+    // refuse this write.
+    loadGraph.mockResolvedValue(RENAMED);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, {
+      graph: IMPORTED,
+      expected_graph_hash: preAnalysis(),        // still matches: labels are not in this projection
+      expected_graph_identity_hash: preIdentity(), // stale: the rename moved it
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().details.code).toBe("GRAPH_STALE");
+    expect(res.json().details.expected_graph_identity_hash).toBe(preIdentity());
+    expect(res.json().details.current_graph_identity_hash).toBe(renamedIdentity());
+    // ⭐ NOTHING was written — the colleague's rename survives.
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("⭐ CONTRAST: the same request WITHOUT the identity expectation is accepted — proving the analysis hash alone cannot refuse it", async () => {
+    // This is the before-picture, and it is what makes the test above a finding
+    // rather than an assertion about nothing.
+    loadGraph.mockResolvedValue(RENAMED);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_hash: preAnalysis() });
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it("a MATCHING identity expectation writes", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: preIdentity()! });
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it("CONTRAST: a caller that sends neither is unaffected, byte for byte", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED });
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it("⭐ AN UNKNOWN FIELD IS IGNORED, so the caller and route can land in either order", async () => {
+    // The route has no body schema (`req.body as Record<string, unknown>`), so a
+    // caller may start sending this before the route enforces it. Pinned because
+    // the rollout depends on it.
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, some_future_field: "x" });
+    expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+
+  it("a malformed identity expectation is refused before any database work", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: "" });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.code).toBe("EXPECTED_GRAPH_IDENTITY_HASH_INVALID");
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("a base that cannot be read cannot adjudicate an identity expectation: 503, never an unconditional write", async () => {
+    loadGraph.mockRejectedValue(new Error("db blip"));
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: "anything" });
+    expect(res.statusCode).toBe(503);
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
+
+/**
+ * ⛔⛔ THE SEAM TEST — the one the suite above could not have failed.
+ *
+ * Every test in the block above derives its expectation from
+ * `computeExpectedGraphCasHashes(...).expectedGraphIdentityHash`, which is the
+ * route's INTERNAL comparison value: a bare 64-hex string, because
+ * `hashesForRawGraph` already extracted `.value`
+ * (`context/graph-cas-conflict.ts:186`). No caller has that. The only
+ * documented source is the READ ROUTE, and it emits the producer's own return
+ * value — the identity.v1 ENVELOPE (`assist.v1.scenario-graph.ts:536-538`
+ * returning `GraphIdentityHash | null`).
+ *
+ * So the suite pinned the opposite of what the wire does, and an adversarial
+ * cross-PR audit found it: CEE #1743's `readGraph` did
+ * `String(r.json.graph_identity_hash ?? '')` on that object and would have sent
+ * the literal `"[object Object]"` on every Agent frame write. Both ends of one
+ * new seam, neither able to see the other, both green.
+ *
+ * These tests therefore bind to the PRODUCER, never to the internal helper.
+ */
+describe("register — the identity expectation accepts the shape the WIRE actually carries", () => {
+  /** Exactly what the read route puts on the wire for this graph. */
+  const wireIdentity = () => computeGraphIdentityHash(SERVER_PRE_IMPORT as never);
+
+  it("⭐⭐ PREMISE, asserted rather than assumed: the wire carries an ENVELOPE OBJECT and the route compares its `.value`", () => {
+    const onTheWire = wireIdentity();
+    // If this ever becomes a bare string the tests below are testing nothing, so
+    // it fails loudly rather than passing for the wrong reason.
+    expect(typeof onTheWire).toBe("object");
+    expect(onTheWire).not.toBeNull();
+    expect(onTheWire?.kind).toBe("graph_identity_hash");
+    expect(typeof onTheWire?.value).toBe("string");
+    expect(onTheWire?.value).toHaveLength(64);
+    // ⭐ The bridge: the envelope's `.value` IS the internal comparison space.
+    // Nothing is invented by accepting the envelope.
+    expect(onTheWire?.value).toBe(
+      computeExpectedGraphCasHashes(SERVER_PRE_IMPORT).expectedGraphIdentityHash,
+    );
+    // ⛔ And the defect, executed: this is what a caller that stringified it sent.
+    expect(String(onTheWire)).toBe("[object Object]");
+  });
+
+  it("⛔⛔ THE DEFECT: a caller echoing the read route's `graph_identity_hash` UNALTERED is accepted", async () => {
+    // The one workflow this field exists for. Before the fix this was a 422 —
+    // the field was unusable from its only documented source.
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, {
+      graph: IMPORTED,
+      expected_graph_identity_hash: wireIdentity(),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it("⛔ and the SAME echo refuses when the server moved — the envelope is compared, not merely tolerated", async () => {
+    // Discriminates "accepts the shape" from "actually checks it". A route that
+    // parsed the envelope and then ignored it would pass the test above.
+    const renamed = JSON.parse(JSON.stringify(SERVER_PRE_IMPORT)) as WireGraph;
+    (renamed.nodes as { label?: string }[])[0].label = "renamed by a colleague";
+    const stale = wireIdentity();
+    loadGraph.mockResolvedValue(renamed);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: stale });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().details.failed_expectation).toBe("identity");
+    expect(res.json().details.expected_graph_identity_hash).toBe(stale?.value);
+    expect(res.json().details.current_graph_identity_hash).toBe(
+      computeExpectedGraphCasHashes(renamed).expectedGraphIdentityHash,
+    );
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("⛔ the 409 does NOT name a cause it has not established", async () => {
+    // A rename, a delete and an unparseable persisted graph all reach this
+    // branch. The old copy said "someone edited it" in all three.
+    loadGraph.mockResolvedValue({ nodes: "not a graph" });
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: wireIdentity() });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().message).not.toMatch(/someone edited/i);
+    expect(res.json().message).toMatch(/not the one this was based on/i);
+    await app.close();
+  });
+
+  it("an object without a usable `value` is refused 422 before any database work", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, {
+      graph: IMPORTED,
+      expected_graph_identity_hash: { kind: "graph_identity_hash", value: 17 },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.code).toBe("EXPECTED_GRAPH_IDENTITY_HASH_INVALID");
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
+
+/**
+ * ⭐⭐ EXPLICIT `null` ASSERTS ABSENCE — and before the fix it was the widest
+ * hole in the whole field.
+ *
+ * `!= null` excludes `null` AND `undefined`, so an explicit
+ * `expected_graph_identity_hash: null` skipped the validator, normalised to
+ * `undefined`, and took an UNCONDITIONAL 200 write with no error. And `null` is
+ * precisely what the read route returns for the empty scenario this route exists
+ * to populate — so the caller most in need of the check (first write into an
+ * empty model) was the one guaranteed not to get it.
+ */
+describe("register — `null` means 'I expect no graph', and omitting the key still means 'do not check'", () => {
+  it("⛔⛔ THE DEFECT: `null` + a graph that has since appeared is REFUSED, not written", async () => {
+    loadGraph.mockResolvedValue(SERVER_PRE_IMPORT);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: null });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().details.code).toBe("GRAPH_STALE");
+    expect(res.json().details.failed_expectation).toBe("absence");
+    expect(res.json().details.current_graph_identity_hash).toBe(
+      computeExpectedGraphCasHashes(SERVER_PRE_IMPORT).expectedGraphIdentityHash,
+    );
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("⭐ POSITIVE: `null` against a genuinely empty scenario writes — the assertion holds, so the write proceeds", async () => {
+    loadGraph.mockResolvedValue(null);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: null });
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it("⭐ CONTRAST: OMITTING the key is still unaffected, byte for byte — the two cases are distinguished", async () => {
+    // The compatibility promise in the route's docblock. `hasOwnProperty` is what
+    // separates "sent null" from "sent nothing"; without it this test and the two
+    // above cannot all pass.
+    loadGraph.mockResolvedValue(SERVER_PRE_IMPORT);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED });
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it("a base that cannot be read cannot adjudicate an absence claim either: 503, never an unconditional write", async () => {
+    loadGraph.mockRejectedValue(new Error("db blip"));
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: null });
+    expect(res.statusCode).toBe(503);
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
+
+/**
+ * A caller that sends BOTH expectations must be able to tell which one refused
+ * it, and to resync from the same response. Previously each 409 carried only its
+ * own pair, so a caller reading `details.current_graph_hash` after an identity
+ * refusal got `undefined` — indistinguishable from "the server has no graph".
+ */
+describe("register — a 409 says WHICH expectation failed and carries both pairs", () => {
+  it("an identity refusal still reports the analysis pair", async () => {
+    const renamed = JSON.parse(JSON.stringify(SERVER_PRE_IMPORT)) as WireGraph;
+    (renamed.nodes as { label?: string }[])[0].label = "renamed";
+    const preAnalysis = computeExpectedGraphCasHashes(SERVER_PRE_IMPORT).expectedGraphAnalysisHash;
+    loadGraph.mockResolvedValue(renamed);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, {
+      graph: IMPORTED,
+      expected_graph_hash: preAnalysis,             // still matches — labels are not in that projection
+      expected_graph_identity_hash: wireIdentityOf(SERVER_PRE_IMPORT),
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().details.failed_expectation).toBe("identity");
+    // ⭐ The analysis pair is present and EQUAL — which is the caller's proof that
+    // the analysis expectation was not the one that failed.
+    expect(res.json().details.expected_graph_hash).toBe(preAnalysis);
+    expect(res.json().details.current_graph_hash).toBe(preAnalysis);
+    await app.close();
+  });
+
+  it("an analysis refusal still reports the identity pair", async () => {
+    const structural = JSON.parse(JSON.stringify(SERVER_PRE_IMPORT)) as WireGraph;
+    structural.nodes = structural.nodes.slice(1);
+    loadGraph.mockResolvedValue(structural);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, {
+      graph: IMPORTED,
+      expected_graph_hash: computeExpectedGraphCasHashes(SERVER_PRE_IMPORT).expectedGraphAnalysisHash,
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().details.failed_expectation).toBe("analysis");
+    expect(res.json().details.current_graph_identity_hash).toBe(
+      computeExpectedGraphCasHashes(structural).expectedGraphIdentityHash,
+    );
+    await app.close();
+  });
+});
+
+function wireIdentityOf(g: WireGraph) {
+  return computeGraphIdentityHash(g as never);
+}
