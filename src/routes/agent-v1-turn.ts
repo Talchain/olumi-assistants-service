@@ -27,7 +27,7 @@ import { withRunStateFreshness } from '../orchestrator-v5/agent-lane/analysis-re
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
-import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
+import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
@@ -695,7 +695,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
   const callModel: CallModel = async (req) => onceMoreOnTransportFailure('conversation', async () => {
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
-    assertProviderAllowed('openai', 'agent-v1-turn.callModel', { model: budget.model, purpose: 'conversation' });
+    /**
+     * ⭐ THE HANDLE IS KEPT SO CACHING CAN BE MEASURED AT ALL.
+     *
+     * This return value was discarded, and with it the only way to answer "is the
+     * instruction prefix being cached, and by how much" on a real turn. The prefix is
+     * structurally cacheable — `AGENT_INSTRUCTIONS` is a pure constant with zero
+     * interpolations and `AGENT_TOOLS` is a module-level readonly array — but
+     * "structurally cacheable" is a claim about the SOURCE, not a measurement of the
+     * PROVIDER. `normaliseProviderUsage` reads `input_tokens_details.cached_tokens`,
+     * the Responses API's own cache field, so this turns an assumption into a number
+     * on every turn.
+     *
+     * ⚠ Bound BY HANDLE, never to "the last call": this route makes 4-6
+     * conversation calls per turn, and attributing a cache hit to the wrong one is the
+     * quietest possible way to make the measurement wrong.
+     */
+    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', { model: budget.model, purpose: 'conversation' });
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
@@ -716,7 +732,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const text = await r.text();
       throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
     }
-    return (await r.json()) as { output: Record<string, unknown>[] };
+    const j = (await r.json()) as { output: Record<string, unknown>[]; usage?: unknown };
+    // Never throws, and records nothing for a malformed payload, so a successful call
+    // cannot be turned into a failed one by the measurement of it.
+    recordProviderUsage(usageHandle, j.usage);
+    // The usage sidecar is read above and is not part of the transport contract.
+    return { output: j.output };
   });
 
   /**
