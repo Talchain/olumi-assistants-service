@@ -135,8 +135,23 @@ export interface ReceiptSummary {
   readonly source_turn_id: string | null;
 }
 
+/**
+ * ⭐ PROPOSAL-OWNED PARTIAL PROGRESS (independent review of #1788, 5806071796). A partial write
+ * moves the model's hash, so a retry of the SAME proposal was refused as `superseded` before it
+ * could add what was missing. What THIS proposal's own write landed is recorded with the canonical
+ * revision it left; a retry continues only from exactly that revision. Any other revision means
+ * someone else changed the model since — still `superseded`, never bypassed.
+ */
+export interface PartialProgress {
+  /** The canonical revision this proposal's own partial write left. */
+  readonly revision: string;
+  /** The operation paths confirmed landed from readback. */
+  readonly landed: readonly string[];
+  readonly receipts: readonly ReceiptSummary[];
+}
+
 export type AuthorisationDecision =
-  | { readonly status: 'execute'; readonly proposal: StructuredProposal }
+  | { readonly status: 'execute'; readonly proposal: StructuredProposal; readonly continuation?: PartialProgress }
   /** The model moved since the proposal was made. */
   | { readonly status: 'superseded'; readonly expected: string; readonly actual: string }
   /** Applied already under this identity — return the original outcome. */
@@ -166,6 +181,8 @@ export class ProposalStore {
   private readonly items = new Map<string, StructuredProposal>();
   /** Applied proposals, with the receipts their writes produced (empty when none was minted). */
   private readonly applied = new Map<string, readonly ReceiptSummary[]>();
+  /** Proposals whose own write landed only in part, with what landed and the revision it left. */
+  private readonly partial = new Map<string, PartialProgress>();
   private order: string[] = [];
 
   put(p: StructuredProposal): StructuredProposal {
@@ -184,6 +201,12 @@ export class ProposalStore {
 
   markApplied(id: string, receipts: readonly ReceiptSummary[] = []): void {
     this.applied.set(id, receipts);
+    this.partial.delete(id);
+  }
+
+  /** Record what THIS proposal's own write landed, and the canonical revision that left. */
+  markPartial(id: string, progress: PartialProgress): void {
+    this.partial.set(id, progress);
   }
 
   /**
@@ -215,6 +238,12 @@ export class ProposalStore {
     if (computeProposalId(content) !== p.proposal_id) return { status: 'integrity_failed' };
     if (this.applied.has(p.proposal_id)) {
       return { status: 'already_applied', proposal: p, receipts: this.applied.get(p.proposal_id) ?? [] };
+    }
+    const partial = this.partial.get(p.proposal_id);
+    if (partial !== undefined) {
+      // Continue ONLY from the revision this proposal's own partial write left.
+      if (partial.revision === req.current_graph_identity_hash) return { status: 'execute', proposal: p, continuation: partial };
+      return { status: 'superseded', expected: partial.revision, actual: req.current_graph_identity_hash };
     }
     if (p.base_graph_identity_hash !== req.current_graph_identity_hash) {
       return {

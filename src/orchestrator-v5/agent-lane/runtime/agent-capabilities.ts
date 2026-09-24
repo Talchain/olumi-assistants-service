@@ -1043,21 +1043,20 @@ export function createAgentCapabilities(
         const optionId = String(ops[0].path);
         const nodeValue = (ops[0].value ?? {}) as { label?: unknown };
         const operationId = authorisationTurnId(decision.proposal.proposal_id);
-        let baseHash = decision.proposal.base_graph_identity_hash;
-
         /**
-         * ⛔ CONTINUATION MUST NOT RE-ADD THE NODE (Codex, exact head 5c908d1a).
-         * A partial leaves the proposal unapplied ON PURPOSE so the user can retry —
-         * but the option is already there by then, and `structural_add` refuses
-         * `node_id_collision` (`structural-add.ts:452`). So the node write is SKIPPED
-         * when the node already exists, and the retry proceeds to the missing links.
+         * ⛔ A RETRY CONTINUES FROM THIS PROPOSAL'S OWN RECORDED PROGRESS (independent review of
+         * #1788, 5806071796) — never from "a node with that id exists", which does not prove the
+         * proposal owns it. `ProposalStore.authorise` admits a continuation only when the model is
+         * still at the revision this proposal's own partial write left; the operations it already
+         * landed are skipped, the rest are applied from that revision, and its receipts carry over.
          */
-        const beforeAdd = await readGraph(ctx.scenario_id);
-        const alreadyThere = (beforeAdd?.nodes ?? []).some((n) => n.id === optionId);
-        const receipts: ReceiptSummary[] = [];
+        const cont = decision.continuation;
+        const landedBefore = new Set(cont?.landed ?? []);
+        let baseHash = cont !== undefined ? before.graph_hash : decision.proposal.base_graph_identity_hash;
+        const receipts: ReceiptSummary[] = [...(cont?.receipts ?? [])];
         let receiptUnreadable = false;
         let addRes: { status: number; json: Record<string, unknown> } | null = null;
-        if (!alreadyThere) {
+        if (!landedBefore.has(optionId)) {
           addRes = await dispatch('/orchestrate/v2/turn', {
             kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
             event: { kind: 'structural_add', node_id: optionId, node_kind: 'option',
@@ -1078,10 +1077,13 @@ export function createAgentCapabilities(
 
         const linked: string[] = [];
         const notLinked: { factor: string; detail: string }[] = [];
+        const landedNow: string[] = [optionId];
         for (const edgeOp of ops.slice(1)) {
           const [, factorId] = String(edgeOp.path).split('::');
           const factorNode = (afterAdd?.nodes ?? []).find((n) => n.id === factorId);
           const factorLabel = String(factorNode?.label ?? factorId);
+          // Landed by THIS proposal's earlier partial write: kept, never written twice.
+          if (landedBefore.has(String(edgeOp.path))) { linked.push(factorLabel); landedNow.push(String(edgeOp.path)); continue; }
           const direction = (edgeOp.value as { direction?: unknown } | undefined)?.direction === 'negative' ? 'negative' : 'positive';
           const edgeRes = await dispatch('/orchestrate/v2/turn', {
             kind: 'system_event', turn_id: authorisationTurnId(`${decision.proposal.proposal_id}:${factorId}`),
@@ -1095,6 +1097,7 @@ export function createAgentCapabilities(
           const present = (afterAdd?.edges ?? []).some((e) => e.from === optionId && e.to === factorId);
           if (present) {
             linked.push(factorLabel);
+            landedNow.push(String(edgeOp.path));
             baseHash = afterAdd?.graph_hash ?? baseHash;
             const r = receiptSummaryOf(edgeRes.json);
             if (r.summary !== null) receipts.push(r.summary);
@@ -1121,6 +1124,11 @@ export function createAgentCapabilities(
          */
         const complete = notLinked.length === 0;
         if (complete) proposals.markApplied(decision.proposal.proposal_id, receipts);
+        // A partial records what THIS proposal landed and the revision it left, so approving the
+        // SAME proposal again continues from there and adds only what is missing.
+        else if (afterAdd?.graph_hash !== undefined) {
+          proposals.markPartial(decision.proposal.proposal_id, { revision: afterAdd.graph_hash, landed: landedNow, receipts });
+        }
         return {
           ok: complete,
           mutated: true,

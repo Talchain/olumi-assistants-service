@@ -41,11 +41,21 @@ function receipt(rev: number) {
       identity_projection_version: '1',
       identity_normaliser_version: '1',
       graph_schema_version: '3',
+      // The remaining REQUIRED fields of the strict v1 schema (mutation-receipt.ts) — without them
+      // every receipt parsed to nothing and any receipt COUNT here was vacuous.
+      analysis_affecting_hash: 'b'.repeat(64),
+      actor: { kind: 'system' },
+      creation: { kind: 'committed_mutation' },
+      source_turn_id: `turn-${rev}`,
+      lineage: { kind: 'unknown' },
+      undo_version_id: null,
+      event_id: `event-${rev}`,
     },
   };
 }
 
-function fakeProduct(refuseEdgeTo: string | null = null) {
+function fakeProduct(refuseEdgeToInit: string | null = null) {
+  let refuseEdgeTo = refuseEdgeToInit;
   let nodes: N[] = [
     { id: 'goal', kind: 'goal', label: 'Increase velocity' },
     { id: 'dev_headcount', kind: 'factor', label: 'Developer headcount' },
@@ -72,7 +82,11 @@ function fakeProduct(refuseEdgeTo: string | null = null) {
     }
     return { status: 200, json: { graph: { nodes, edges }, graph_hash: `h${rev}` } };
   };
-  return { d, read: () => ({ nodes, edges }), refusedStale, writes };
+  /** Stop refusing (the served cause of a refused link has cleared). */
+  const allowAll = () => { refuseEdgeTo = null; };
+  /** Someone ELSE changes the model: a new revision this proposal did not write. */
+  const foreignEdit = () => { nodes = [...nodes, { id: 'unrelated', kind: 'factor', label: 'Unrelated' }]; rev += 1; };
+  return { d, read: () => ({ nodes, edges }), refusedStale, writes, allowAll, foreignEdit };
 }
 
 const ASK = {
@@ -202,5 +216,84 @@ describe('an approved add is complete, replayable and honest about a partial', (
     await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
     expect(p.read().nodes.filter((n) => n.kind === 'option').length).toBe(1);
     expect(p.writes.filter((w) => w === 'structural_add').length).toBe(addWrites);
+  });
+});
+
+/**
+ * ⛔ Independent review of #1788 (5806071796): after a partial, the proposal's OWN write moved the
+ * hash, so a retry of that same proposal was refused `superseded` before it reached the missing
+ * link — the promised continuation was unreachable, and the old spec (no second node) was satisfied
+ * by a superseded no-op. These pin the OUTCOME: the missing link lands, the proposal completes with
+ * every receipt, and a foreign edit still refuses.
+ */
+describe('a partially added option is completed by approving the SAME proposal again', () => {
+  it('CONTROL: the fixture receipt is schema-valid, so receipt counts below measure something', async () => {
+    const { receiptSummaryOf } = await import('../runtime/agent-capabilities.js');
+    expect(receiptSummaryOf(receipt(7))).toMatchObject({ summary: { version: 7 }, unreadable: false });
+  });
+
+  const partial = async () => {
+    const p = fakeProduct('lead_time');
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const prop = await caps.proposeNewOption(ctx, ASK);
+    const first = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(first.ok, 'the control: the first approval really was partial').toBe(false);
+    return { p, caps, id: String(prop.proposal_id), first };
+  };
+
+  it('RED: the retry LANDS the missing link, completes the proposal, and every receipt is kept — no second node, no duplicate link', async () => {
+    const { p, caps, id, first } = await partial();
+    p.allowAll();
+    const retry = await caps.authoriseChange(ctx, { proposal_id: id });
+    expect(retry, JSON.stringify(retry).slice(0, 300)).toMatchObject({ ok: true, applied: true });
+    const { nodes, edges } = p.read();
+    expect(nodes.filter((n) => n.kind === 'option')).toHaveLength(1);
+    const optionId = nodes.find((n) => n.kind === 'option')!.id;
+    expect(edges.filter((e) => e.from === optionId).map((e) => e.to).sort()).toEqual(['dev_headcount', 'lead_time']);
+    expect(p.writes.filter((w) => w === 'structural_add')).toHaveLength(1);
+    expect(p.writes.filter((w) => w === 'structural_add_edge')).toHaveLength(2);
+    const firstVersions = (first.receipts as { version: number }[]).map((r) => r.version);
+    const allVersions = (retry.receipts as { version: number }[]).map((r) => r.version);
+    expect(allVersions.slice(0, firstVersions.length), 'the original receipts carry over').toEqual(firstVersions);
+    expect(allVersions).toHaveLength(3); // node + two links
+    const again = await caps.authoriseChange(ctx, { proposal_id: id });
+    expect(again, 'now complete: it replays').toMatchObject({ ok: true, already_applied: true });
+    expect((again.receipts as { version: number }[]).map((r) => r.version)).toEqual(allVersions);
+    expect(p.writes).toHaveLength(3);
+  });
+
+  it('CONTRAST: someone else changed the model after the partial → still superseded, nothing written', async () => {
+    const { p, caps, id } = await partial();
+    p.allowAll();
+    p.foreignEdit();
+    const writes = p.writes.length;
+    const retry = await caps.authoriseChange(ctx, { proposal_id: id });
+    expect(retry).toMatchObject({ ok: false, refusal: 'superseded' });
+    expect(p.writes).toHaveLength(writes);
+  });
+
+  it('CONTRAST: a fully completed proposal replays with its identical receipts and writes nothing', async () => {
+    const p = fakeProduct(null);
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const prop = await caps.proposeNewOption(ctx, ASK);
+    const done = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(done).toMatchObject({ ok: true, applied: true });
+    const writes = p.writes.length;
+    const again = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(again).toMatchObject({ ok: true, already_applied: true });
+    expect(again.receipts).toEqual(done.receipts);
+    expect(p.writes).toHaveLength(writes);
+  });
+
+  it('the authoritative status line names what landed and what remains — never "unknown reason"', async () => {
+    const { first } = await partial();
+    const { narrateWriteOutcome } = await import('../write-outcome.js');
+    const status = narrateWriteOutcome('', [{ name: 'authorise_change' }], [first]).status ?? '';
+    expect(status).toMatch(/^Partly saved/);
+    expect(status).toContain('"Hire a contractor" was added and linked to Developer headcount');
+    expect(status).toContain('not yet linked to Lead time');
+    expect(status).toContain('adds only the missing link');
+    expect(status).not.toMatch(/unknown reason/);
   });
 });
