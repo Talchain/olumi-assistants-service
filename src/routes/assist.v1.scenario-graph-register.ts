@@ -294,6 +294,36 @@ export default async function route(app: FastifyInstance) {
       }
       const callerExpectedGraphHash =
         typeof body.expected_graph_hash === "string" ? body.expected_graph_hash : undefined;
+      /**
+       * ⭐⭐ THE IDENTITY-SPACE EXPECTATION. Additive, optional, and it closes a
+       * counterexample the analysis-space one provably cannot.
+       *
+       * ⛔ THE GAP, MEASURED. `expected_graph_hash` is compared in ANALYSIS space
+       * (`computeAnalysisAffectingGraphHash`), whose projection EXCLUDES labels.
+       * So a caller that reads a graph, thinks, and writes a whole-graph snapshot
+       * back can have an intervening RENAME pass the comparison and be silently
+       * overwritten by its stale copy of that node. Reviewed counterexample on
+       * CEE #1743: "caller reads label L, another writer renames it, frame update
+       * follows — retain the new label or refuse, never restore L."
+       *
+       * ⭐ EVERY PIECE ALREADY EXISTED; only the comparison was missing. The read
+       * route returns `graph_identity_hash` (`assist.v1.scenario-graph.ts:536`),
+       * this route already COMPUTES `expectedGraphIdentityHash` from its own base
+       * read (`:412-425`) and hands it to the atomic RPC (`:645`) — it simply
+       * never checked it against anything the caller claimed.
+       *
+       * ⚠ IT IS A SEPARATE FIELD, NOT A WIDENING OF THE OTHER. The two hashes
+       * answer different questions over different projections and must never be
+       * substituted (see the read route's own warning at `:551`). A caller may
+       * send either, both, or neither; sending nothing is unaffected, byte for
+       * byte.
+       */
+      if (body.expected_graph_identity_hash != null
+        && (typeof body.expected_graph_identity_hash !== "string" || body.expected_graph_identity_hash.length === 0)) {
+        return invalid("EXPECTED_GRAPH_IDENTITY_HASH_INVALID", "`expected_graph_identity_hash` must be a non-empty string when supplied.");
+      }
+      const callerExpectedIdentityHash =
+        typeof body.expected_graph_identity_hash === "string" ? body.expected_graph_identity_hash : undefined;
       const brief = normaliseBriefText(body.brief_text);
       if (brief.truncated) {
         return invalid("BRIEF_INVALID", "`brief_text` exceeds the supported brief length.");
@@ -484,6 +514,49 @@ export default async function route(app: FastifyInstance) {
                 "BAD_INPUT",
                 "This model changed since it was read. Nothing was written — read it again first.",
                 { code: "GRAPH_STALE", expected_graph_hash: callerExpectedGraphHash, current_graph_hash: expectedGraphAnalysisHash ?? null },
+                requestId,
+              ),
+            );
+        }
+      }
+
+      /**
+       * The identity-space half of the same rule, and it refuses the case the
+       * block above cannot see. Same failure mode on an unreadable base: a read
+       * we could not perform cannot adjudicate an expectation, so it is our
+       * outage (503) rather than a write we cannot justify.
+       *
+       * ⚠ `GRAPH_STALE` is kept as the code because it is the same fact to a
+       * caller — the model moved, nothing was written — and callers already
+       * branch on it. The identity fields distinguish WHICH expectation failed
+       * for anyone who needs to know.
+       */
+      if (callerExpectedIdentityHash !== undefined) {
+        if (expectedGraphIdentityHash === undefined) {
+          return unavailable();
+        }
+        if (expectedGraphIdentityHash !== callerExpectedIdentityHash) {
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.expected_graph_identity_hash_stale",
+              request_id: requestId,
+              scenario_id: scenarioId,
+              expected: callerExpectedIdentityHash,
+              current: expectedGraphIdentityHash ?? null,
+            },
+            "Graph registration — the model's identity changed since the caller read it (a rename or another non-analysis edit); nothing written",
+          );
+          return reply
+            .code(409)
+            .send(
+              buildErrorV1(
+                "BAD_INPUT",
+                "This model changed since it was read — someone edited it. Nothing was written; read it again first.",
+                {
+                  code: "GRAPH_STALE",
+                  expected_graph_identity_hash: callerExpectedIdentityHash,
+                  current_graph_identity_hash: expectedGraphIdentityHash ?? null,
+                },
                 requestId,
               ),
             );

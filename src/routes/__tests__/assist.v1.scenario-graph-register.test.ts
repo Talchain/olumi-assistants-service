@@ -1295,3 +1295,115 @@ describe("register — an optional caller expectation makes the write conditiona
     await app.close();
   });
 });
+
+/**
+ * ⭐⭐ THE IDENTITY-SPACE EXPECTATION — it refuses the case the analysis-space one
+ * provably cannot.
+ *
+ * ⛔ THE COUNTEREXAMPLE, from the reviewed finding on CEE #1743: "caller reads
+ * label L, another writer renames it, frame update follows — retain the new label
+ * or refuse, never restore L." `expected_graph_hash` is compared over
+ * `computeAnalysisAffectingGraphHash`, whose projection EXCLUDES labels — so a
+ * rename leaves it UNCHANGED and the stale whole-graph write sails through.
+ *
+ * The first test below is the load-bearing one, and it is built to be
+ * DISCRIMINATING: the same pair of graphs is asserted to have an IDENTICAL
+ * analysis hash and a DIFFERENT identity hash. If that premise ever stops
+ * holding, the test fails loudly rather than passing for the wrong reason.
+ */
+describe("register — the IDENTITY expectation catches what the analysis one cannot", () => {
+  /** The server's graph after a colleague renamed one node — nothing else. */
+  const RENAMED = (() => {
+    const g = JSON.parse(JSON.stringify(SERVER_PRE_IMPORT)) as WireGraph;
+    const n = (g.nodes as { id: string; label?: string }[])[0];
+    n.label = `${n.label ?? ""} (renamed by a colleague)`;
+    return g;
+  })();
+
+  const preAnalysis = () => computeExpectedGraphCasHashes(SERVER_PRE_IMPORT).expectedGraphAnalysisHash;
+  const preIdentity = () => computeExpectedGraphCasHashes(SERVER_PRE_IMPORT).expectedGraphIdentityHash;
+  const renamedIdentity = () => computeExpectedGraphCasHashes(RENAMED).expectedGraphIdentityHash;
+
+  it("⭐ PREMISE, asserted rather than assumed: a rename moves the IDENTITY hash and leaves the ANALYSIS hash alone", () => {
+    // Without this the headline test could pass because the route refused for
+    // some unrelated reason. It also documents exactly why a second hash exists.
+    expect(computeExpectedGraphCasHashes(RENAMED).expectedGraphAnalysisHash).toBe(preAnalysis());
+    expect(renamedIdentity()).not.toBe(preIdentity());
+    expect(typeof preIdentity()).toBe("string");
+  });
+
+  it("⛔⛔ THE DEFECT: a caller's stale IDENTITY expectation is refused 409, even though its analysis expectation still matches", async () => {
+    // The server has moved (a rename). The caller's analysis hash is STILL
+    // CORRECT — that is the whole problem — so only the identity expectation can
+    // refuse this write.
+    loadGraph.mockResolvedValue(RENAMED);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, {
+      graph: IMPORTED,
+      expected_graph_hash: preAnalysis(),        // still matches: labels are not in this projection
+      expected_graph_identity_hash: preIdentity(), // stale: the rename moved it
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().details.code).toBe("GRAPH_STALE");
+    expect(res.json().details.expected_graph_identity_hash).toBe(preIdentity());
+    expect(res.json().details.current_graph_identity_hash).toBe(renamedIdentity());
+    // ⭐ NOTHING was written — the colleague's rename survives.
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("⭐ CONTRAST: the same request WITHOUT the identity expectation is accepted — proving the analysis hash alone cannot refuse it", async () => {
+    // This is the before-picture, and it is what makes the test above a finding
+    // rather than an assertion about nothing.
+    loadGraph.mockResolvedValue(RENAMED);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_hash: preAnalysis() });
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it("a MATCHING identity expectation writes", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: preIdentity()! });
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it("CONTRAST: a caller that sends neither is unaffected, byte for byte", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED });
+    expect(res.statusCode).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it("⭐ AN UNKNOWN FIELD IS IGNORED, so the caller and route can land in either order", async () => {
+    // The route has no body schema (`req.body as Record<string, unknown>`), so a
+    // caller may start sending this before the route enforces it. Pinned because
+    // the rollout depends on it.
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, some_future_field: "x" });
+    expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+
+  it("a malformed identity expectation is refused before any database work", async () => {
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: "" });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().details.code).toBe("EXPECTED_GRAPH_IDENTITY_HASH_INVALID");
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("a base that cannot be read cannot adjudicate an identity expectation: 503, never an unconditional write", async () => {
+    loadGraph.mockRejectedValue(new Error("db blip"));
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: "anything" });
+    expect(res.statusCode).toBe(503);
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
