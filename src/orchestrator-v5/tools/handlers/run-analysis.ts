@@ -1798,12 +1798,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // and kept entirely separate from it (trap 21: two authorities, two
     // questions, named apart rather than aligned).
     //
-    // Reconcile the exact analysed set. Recover existing source quotes only by
-    // canonical ID from this same snapshot; labels never manufacture lineage.
-    // Readable enumeration without validated bindings remains unverified.
+    // Reconcile the final wire set AFTER the analysable-option gate and value
+    // projection. snapshot.options can include a value-less option the gate
+    // excluded from PLoT. Recover existing source quotes only by canonical ID
+    // from this same snapshot; labels never manufacture lineage.
     const intakeReconciliation = deriveIntakeOptionReconciliation(
       snapshot.briefText,
-      snapshot.options ?? snapshot.rawPersistedGraph ?? snapshot.graph,
+      finalWireOptions,
       snapshot.rawPersistedGraph ?? snapshot.graph,
     );
     // ⚠ NO TELEMETRY EVENT HERE, AND THAT IS A DISCLOSED GAP RATHER THAN AN

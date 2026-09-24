@@ -41,7 +41,8 @@ describe('2.579 wiring — the handler actually consumes the intake axis', () =>
     // BOUND TO THE INPUTS BY IDENTITY. A derivation fed something other than
     // `snapshot.briefText` is a different claim wearing the same call.
     expect(source).toContain('snapshot.briefText');
-    expect(source).toContain('snapshot.options ?? snapshot.rawPersistedGraph ?? snapshot.graph');
+    expect(source).toContain('snapshot.briefText,\n      finalWireOptions,');
+    expect(source).toContain('options: finalWireOptions,');
     expect(source).toContain('snapshot.rawPersistedGraph ?? snapshot.graph,');
     expect(source).not.toContain('readGraphOptionLabels(');
   });

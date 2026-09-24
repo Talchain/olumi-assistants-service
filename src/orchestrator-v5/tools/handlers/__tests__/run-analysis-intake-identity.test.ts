@@ -57,11 +57,16 @@ describe('run_analysis handler — source-bound intake identity', () => {
     value: 0.05, label: 'Customer churn', unit: 'fraction', provenance: 'explicit',
   }];
 
-  async function run(rawPersistedGraph: Record<string, unknown>, brief = briefText) {
-    const plotClient = makePlotClient(happyFixture as unknown as V2RunResponseEnvelope);
+  async function run(
+    rawPersistedGraph: Record<string, unknown>,
+    brief = briefText,
+    options = makeScenarioSnapshot({}).options,
+    response = happyFixture,
+  ) {
+    const plotClient = makePlotClient(response as unknown as V2RunResponseEnvelope);
     const handler = createRunAnalysisHandler({
       plotClient,
-      scenarioReader: makeScenarioReader(makeScenarioSnapshot({ briefText: brief, rawPersistedGraph })),
+      scenarioReader: makeScenarioReader(makeScenarioSnapshot({ briefText: brief, rawPersistedGraph, options })),
     });
     const outcome = await handler(makeInvocation());
     const fact = outcome.handler_facts[0]!;
@@ -70,7 +75,7 @@ describe('run_analysis handler — source-bound intake identity', () => {
     expect(isAllowedRunAnalysisAssistantText(outcome.assistant_text!)).toBe(true);
     expect(outcome.llm_calls_used).toBe(0);
     expect(plotClient.run).toHaveBeenCalledTimes(1);
-    return { outcome, result: fact.result };
+    return { outcome, result: fact.result, plotClient };
   }
 
   it('withholds and discloses unverified identity on the actual handler egress', async () => {
@@ -106,4 +111,53 @@ describe('run_analysis handler — source-bound intake identity', () => {
     expect(outcome.assistant_text).not.toContain('scored highest');
     if (!bound) expect(outcome.assistant_text).toContain('does not establish which options correspond');
   });
+
+  it.each([
+    { configured: false, bound: true, withConstraint: false, expectedIds: ['opt_a', 'opt_b'], expected: 'missing' },
+    { configured: false, bound: true, withConstraint: true, expectedIds: ['opt_a', 'opt_b'], expected: 'missing' },
+    { configured: true, bound: true, withConstraint: false, expectedIds: ['opt_a', 'opt_b', 'opt_c'], expected: 'reconciled' },
+    { configured: true, bound: true, withConstraint: true, expectedIds: ['opt_a', 'opt_b', 'opt_c'], expected: 'reconciled' },
+    { configured: true, bound: false, withConstraint: false, expectedIds: ['opt_a', 'opt_b', 'opt_c'], expected: 'unverified' },
+  ])('reconciles the real final wire set: C configured=$configured bound=$bound churn=$withConstraint', async ({ configured, bound, withConstraint, expectedIds, expected }) => {
+    const brief = 'The options are keeping pricing as it is, raising prices, or introducing a premium tier.';
+    const thirdNode = {
+      id: 'opt_c', kind: 'option', label: 'Premium tier', is_baseline: false,
+      ...(bound ? { source_quote: 'introducing a premium tier' } : {}),
+    };
+    const canonical = { nodes: [...boundNodes, thirdNode], ...(withConstraint ? { goal_constraints: churn } : {}) };
+    const options = [...makeScenarioSnapshot({}).options!, {
+      id: 'opt_c', option_id: 'opt_c', label: 'Premium tier', is_baseline: false,
+      interventions: configured ? { f: 0.5 } : {},
+    }];
+    const response = configured ? {
+      ...happyFixture,
+      option_comparison: [
+        happyFixture.option_comparison[0]!,
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.33 },
+        { option_id: 'opt_c', option_label: 'Premium tier', win_probability: 0.05 },
+      ],
+    } : happyFixture;
+    const { outcome, result, plotClient } = await run(canonical, brief, options, response);
+    const payload = vi.mocked(plotClient.run).mock.calls[0]![0];
+    expect((payload.options as { id: string }[]).map((option) => option.id)).toEqual(expectedIds);
+    expect(result.constraint_verdict?.may_name_leading_option).toBe(expected === 'reconciled' && !withConstraint);
+    if (withConstraint) {
+      expect(result.constraint_verdict?.constraint_verdict_state).toBe('unevaluated');
+      expect(outcome.assistant_text).toContain('Customer churn');
+      expect(outcome.assistant_text).toContain('could not be checked');
+      expect(outcome.assistant_text).not.toContain('scored highest');
+    }
+    expect(outcome.assistant_text).not.toMatch(/not in the model|Add it|Add them/);
+    if (expected === 'missing') {
+      expect(outcome.assistant_text).toContain('not included in this comparison: “introducing a premium tier”');
+      expect(outcome.assistant_text).toContain('Check whether it should be included');
+    } else if (expected === 'unverified') {
+      expect(outcome.assistant_text).toContain('does not establish which options correspond');
+      expect(outcome.assistant_text).not.toContain('candidate is missing');
+    } else {
+      if (!withConstraint) expect(outcome.assistant_text).toContain('Option A scored highest');
+      expect(outcome.assistant_text).not.toMatch(/candidate is missing|does not establish/);
+    }
+  });
+
 });
