@@ -95,8 +95,12 @@ if other:
     print("  ⚠ ALSO unframed, but declaring something else — NOT item 1 and NOT scored here:")
     for lbl, dc in other:
         print("      %-34s declared=%s" % (str(lbl)[:34], dc))
-    print("      Whether an unframed factor with this declaration is ANALYSABLE is UNVERIFIED.")
-    print("      Drive a Run against it before treating it as either a defect or acceptable.")
+    print("      MEASURED 24 Sep on served 1e7e08a: an unframed `raw_count` factor does NOT")
+    print("      block the Run. Admission gave admitted=true mode=comparative_leader")
+    print("      reasons=[READY_TO_COMPARE,...]; the Run reached run_state=complete_current")
+    print("      with blocked_unusable=false and NO baseline_scale_unresolved anywhere.")
+    print("      So this is ANALYSABLE and is NOT item 1. Any OTHER declaration seen here")
+    print("      is still unverified — drive a Run before calling it a defect.")
 PY
 
 # ── 2. register (owner-attributed), then exercise the identity expectation.
