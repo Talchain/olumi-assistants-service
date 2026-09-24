@@ -22,6 +22,7 @@ const caps = (over: Partial<AgentCapabilities> = {}): AgentCapabilities => ({
   proposeAssumptions: async () => ({ ok: true, mutated: false, proposal_id: 'prop_a' }),
   // #1788's add-option capability — a REQUIRED member; without it the typed mock no longer satisfies AgentCapabilities.
   proposeNewOption: async () => ({ ok: true, mutated: false, proposal_id: 'prop_n' }),
+  proposeRemoveRiskLink: async () => ({ ok: true, mutated: false, proposal_id: 'prop_r' }),
   proposeOptionInterventions: async () => ({ ok: true, mutated: false, proposal_id: 'prop_i' }),
   proposeStartingPoint: async () => ({ ok: true, mutated: false, proposal_id: 'prop_s' }),
   ...over,
