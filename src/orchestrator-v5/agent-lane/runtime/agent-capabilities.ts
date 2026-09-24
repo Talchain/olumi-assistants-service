@@ -1463,7 +1463,7 @@ export function createAgentCapabilities(
          * basis therefore survives only in the proposal and in what the Agent
          * says, so the result below tells it to say it.
          */
-        const applied: { factor: string; requested: number; recorded: number | null; no_write_recorded?: boolean }[] = [];
+        const applied: { factor: string; requested: number; recorded: number | null }[] = [];
         const failures: { factor: string; detail: string }[] = [];
         const receipts: ReceiptSummary[] = [];
         /**
@@ -1567,8 +1567,13 @@ export function createAgentCapabilities(
           applied.push({
             factor: node?.label ?? o.path,
             requested: typeof req === 'number' ? req : Number.NaN,
+            // ⛔ NO EXTRA KEY ON THIS ROW. An earlier version added `no_write_recorded: true`
+            // to rows with no own-write evidence, and `adopt-assumptions.test.ts` — a
+            // DIFFERENT file, whose reader set I had not derived — asserts this row's exact
+            // shape: "expected [{…(3)},{…(4)}] to deeply equal [{…(3)},{…(3)}]". `recorded:
+            // null` already carries the whole meaning, so the diagnostic key is dropped
+            // rather than the contract widened.
             recorded: ownWrite.get(o.path) === true && storedNative !== undefined ? storedNative : null,
-            ...(ownWrite.get(o.path) === true ? {} : { no_write_recorded: true }),
           });
         }
         const landed = applied.filter((a) => a.recorded !== null);
