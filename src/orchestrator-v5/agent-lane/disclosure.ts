@@ -107,6 +107,7 @@ export function valueChangeDisclosures(facts: {
     readonly recorded: number | null;
   }[];
   readonly ranges_added: readonly { readonly factor: string; readonly range: number }[];
+  readonly ranges_not_attached?: readonly { readonly factor: string; readonly range: number }[];
 } | null | undefined): readonly string[] {
   if (facts === null || facts === undefined) return [];
   const owed: string[] = [];
@@ -134,6 +135,28 @@ export function valueChangeDisclosures(facts: {
         'Note: the analysis needed a range for some factors and Olumi chose one so it could run — ' +
         `${shown.join('; ')}.${andMore(hidden)} ` +
         'Those ranges are not yours. Tell me the right ones and I will replace them.'),
+    );
+  }
+
+  /**
+   * ⛔⛔ A VALUE THAT SAVED WITH NO RANGE IS THE ONE THE USER MUST BE TOLD ABOUT.
+   *
+   * The value write and the range write are two registrations; the first can
+   * land and the second refuse. When that happens the values ARE saved and the
+   * analysis is STILL blocked — and the wording that shipped before said
+   * "nothing was written", which invites the user to redo a write that succeeded.
+   *
+   * ⚠ OPTIONAL BY DESIGN: the producing field (`ranges_not_attached`) is emitted
+   * by the partial-outcome repair on #1743. Absent, this discloses nothing and
+   * changes no behaviour, so the two PRs are independent in either merge order.
+   */
+  const refused = (facts.ranges_not_attached ?? []).map((r) => r.factor);
+  if (refused.length > 0) {
+    owed.push(
+      within(refused, (shown, hidden) =>
+        'Note: your values were saved and are unchanged, but the analysis still needs a range for ' +
+        `${shown.join('; ')}.${andMore(hidden)} ` +
+        'Do not re-enter the values — tell me the range and I will attach it.'),
     );
   }
 
