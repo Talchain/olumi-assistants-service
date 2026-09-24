@@ -1,111 +1,16 @@
 /**
- * ROADMAP 2.579 — DID THE INTAKE KEEP EVERY OPTION THE USER ENUMERATED?
- *
- * ═══════════════════════════════════════════════════════════════════════════
- * THE MEASURED DEFECT (Codex expert session, 5 Aug 2026, run3 of
- * `PHASE0-EVIDENCE-2026-07-28/expert-session-2026-08-05-raw/`, CEE `e82738b`).
- *
- * The user's brief enumerated FIVE options:
- *
- *   "The options are a second production oven line, an automated packing cell,
- *    refrigerated delivery vans, a new retail concession, or an
- *    energy-efficiency retrofit."
- *
- * The drafted graph carried FOUR — `a new retail concession` was not there. The
- * analysis then shipped "Energy-Efficiency Retrofit currently leads by 9
- * percentage points", with `may_name_leading_option: true` on 6/6 wire
- * occurrences.
- *
- * That headline is a claim about which option is BEST. It cannot be true over a
- * candidate set that is missing a candidate: the option that was dropped was
- * never given a chance to win. The per-option numbers computed on the four that
- * WERE captured are real and stay — what is false is the RANKING.
- *
- * ═══════════════════════════════════════════════════════════════════════════
- * ⚠ WHY THIS MODULE EXISTS AND WHY NOTHING ALREADY IN THE TREE COULD BE REUSED.
- *
- * The row's first investigation concluded the product "diagnosed its own
- * omission and ranked anyway". IT DID NOT. The sentence that reads like a
- * diagnosis is a `bias_signal` block, `type: narrow_framing`, `target_refs: []`
- * — and `draft-bias-signal-blocks.ts` says in its own header that it projects
- * the draft LLM's already-emitted `coaching.bias_signals` verbatim and NEVER
- * synthesises. An LLM said "one option is missing" and happened to be right.
- * No field anywhere carried the fact.
- *
- * Every candidate carrier already in the tree is THE WRONG ORACLE (trap 13c):
- *
- *   - `narrow_framing` is a generic four-value code that also fires for binary
- *     framing, i.e. for briefs with no missing option at all;
- *   - `brief_completeness: partial` was measured TRUE in the failing run and
- *     means "the brief was light on detail" — it fires on most briefs;
- *   - `strengthen_items.action_type === 'add_option'` fires as WIDENING advice
- *     ("consider a further option"), which is the OPPOSITE claim.
- *
- * Gating a truth surface on any of them would trade a product that ranks on an
- * LLM's say-so for one that SUPPRESSES on an LLM's say-so. So this module reads
- * neither the LLM nor any coaching field. It compares TWO PIECES OF CANONICAL
- * PERSISTED STATE — the user's own brief text and the graph's own option labels
- * — and it is deterministic, pure, and identity-matched. Never a count
- * heuristic: "five nouns in, four options out" is not evidence about WHICH
- * option went missing, and the disclosure has to be able to name it.
- *
- * ═══════════════════════════════════════════════════════════════════════════
- * ⚠ NOT PERSISTED, DELIBERATELY — DERIVED AT THE POINT OF THE CLAIM.
- *
- * `run_analysis`'s `result.enrichment` is a byte-for-byte pass-through of the
- * PLoT envelope, enforced by `scripts/validate-handler-ownership.sh` §6, so
- * there is no CEE-owned enrichment slot to stamp. The alternative — a sixth
- * `ConstraintVerdictState` — is BLOCKED AT THE PIN, measured by execution
- * rather than read off a comment (see {@link INTAKE_IS_NOT_A_CONSTRAINT_VERDICT}).
- *
- * This is not a workaround; it is the estate's own pattern. `withheld-reason-
- * tail.ts` records the same decision for the ratified constraints it names:
- * they are re-read from persisted `goal_constraints` rather than copied onto
- * the fact, because "a second copy of a label is a second thing to drift"
- * (CLAUDE.md trap 12). The brief and the option labels are canonical persisted
- * state; a copy of them on the fact would be a mirror.
- */
-
-/**
- * How the intake's option set compares with the graph's.
- *
- * THREE ANSWERS, NOT A BOOLEAN, for the same reason `ConstraintVerdictState`
- * has five: "we could not tell" is a distinct answer from "yes" and from "no",
- * and collapsing it either way states something false. Here the third answer is
- * `not_applicable`, and it is by far the most common — a brief that does not
- * enumerate its options in so many words gives this module NOTHING to reconcile,
- * and a module with nothing to reconcile must have no opinion, not a lenient one
- * and not a strict one.
+ * Reconcile explicit brief candidates against the options actually analysed.
+ * Labels and their token overlap are display text, never identity evidence.
+ * An existing source quote is usable only when it names one exact, unique
+ * brief candidate and is bound to one unique canonical option ID. Missing or
+ * conflicting lineage withholds the ranking without asserting an omission.
+ * No model calls, new persisted state, or inferred aliases.
  */
 export type IntakeCompletenessState =
-  /**
-   * There is no enumeration to reconcile against. Reached when the brief is
-   * absent or blank, when it carries no explicit options-enumeration cue, when
-   * fewer than two candidates survive extraction, when the graph carries no
-   * option labels, or when NOT ONE extracted candidate reconciles with an
-   * option label (see {@link deriveIntakeOptionReconciliation}, rule 3).
-   *
-   * Byte-identical to the pre-2.579 product on this path, and it is the default
-   * for every brief this module cannot read with confidence.
-   */
-  | 'not_applicable'
-  /**
-   * The brief enumerated options and EVERY one of them reconciles with an
-   * option on the graph. The candidate set is as complete as the brief says it
-   * should be, so nothing is withheld on intake grounds.
-   *
-   * ⚠ THIS IS NOT A COMPLETENESS CERTIFICATE. It says the options the user
-   * SPELLED OUT all survived; it says nothing about an option the user held in
-   * their head, mentioned in a later turn, or expressed some other way. No copy
-   * built on this state may claim the model is complete.
-   */
-  | 'reconciled'
-  /**
-   * The brief enumerated options, at least one of them reconciles with the
-   * graph (so the two vocabularies demonstrably line up), and at least one does
-   * NOT. A candidate the user named is absent from the set being ranked.
-   */
-  | 'options_missing';
+  | 'not_applicable' // No readable explicit enumeration to reconcile.
+  | 'reconciled' // Every enumerated candidate has a validated binding.
+  | 'options_missing' // Complete binding of the analysed set proves an omission.
+  | 'identity_unverified'; // Coverage cannot be established from saved lineage.
 
 /**
  * May a leading option be NAMED as the answer, per intake state? Exhaustive by
@@ -123,6 +28,7 @@ export const INTAKE_MAY_NAME_LEADING_OPTION: Readonly<
   not_applicable: true,
   reconciled: true,
   options_missing: false,
+  identity_unverified: false,
 });
 
 /**
@@ -185,11 +91,11 @@ export const INTAKE_IS_NOT_A_CONSTRAINT_VERDICT = true as const;
 
 import type { PersistedClaimSafety } from './constraint-feasibility.js';
 
-/** One option the brief spelled out, as extracted and as normalised. */
+/** One option the brief spelled out. Tokens aid extraction, never identity. */
 export interface EnumeratedOption {
   /** The brief's own words, trimmed. Never re-worded; used to NAME the gap. */
   readonly text: string;
-  /** Normalised content tokens, in first-seen order. The matching key. */
+  /** Normalised content tokens used only to recognise non-empty candidates. */
   readonly tokens: readonly string[];
 }
 
@@ -262,9 +168,8 @@ const ENUMERATION_CUES: readonly string[] = Object.freeze([
 ]);
 
 /**
- * Tokens carrying no identity. Stripped before matching so "a second production
- * oven line" and "Second Production Oven Line" reconcile, and so a candidate
- * made only of these words is discarded rather than matched against everything.
+ * Extraction-only stopwords. These tokens decide whether an enumeration item
+ * has content; they must never decide whether two options are the same.
  */
 const STOPWORDS: ReadonlySet<string> = new Set([
   'a',
@@ -307,8 +212,7 @@ const MAX_CANDIDATE_WORDS = 10;
  */
 const MAX_CANDIDATES = 12;
 
-/** Fraction of shared tokens above which two labels are the same option. */
-const MATCH_JACCARD_FLOOR = 0.5;
+
 
 /**
  * Cut a raw enumeration tail at the end of its sentence.
@@ -361,14 +265,7 @@ function cutAtSentenceEnd(tail: string): string {
   return tail;
 }
 
-/**
- * Normalise one label to its identity tokens.
- *
- * Lowercases; treats hyphens, en-dashes, slashes and underscores as spaces (so
- * "Energy-Efficiency Retrofit" and "energy efficiency retrofit" agree); drops
- * every other non-alphanumeric; removes stopwords; and de-pluralises tokens
- * longer than three characters so "vans" reconciles with "van".
- */
+/** Extraction-only content tokens; no label-to-option identity authority. */
 export function normaliseOptionTokens(value: string): string[] {
   const words = value
     .toLowerCase()
@@ -385,27 +282,6 @@ export function normaliseOptionTokens(value: string): string[] {
     tokens.push(stem);
   }
   return tokens;
-}
-
-/**
- * Do these two token sets designate the SAME option?
- *
- * Subset in either direction, or half the union shared. Subset matters more
- * than the ratio does: a drafter routinely shortens ("a second production oven
- * line" ⇒ "Second Production Oven Line" is exact, but "an automated packing
- * cell" ⇒ "Packing Cell" is a strict subset), and it also routinely lengthens
- * ("refrigerated delivery vans" ⇒ "Refrigerated Delivery Vans Fleet").
- */
-function sameOption(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length === 0 || b.length === 0) return false;
-  const setA = new Set(a);
-  const setB = new Set(b);
-  let shared = 0;
-  for (const t of setA) if (setB.has(t)) shared += 1;
-  if (shared === 0) return false;
-  if (shared === setA.size || shared === setB.size) return true;
-  const union = setA.size + setB.size - shared;
-  return shared / union >= MATCH_JACCARD_FLOOR;
 }
 
 /**
@@ -482,58 +358,114 @@ export function extractEnumeratedOptions(briefText: string | null | undefined): 
   return out;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** The supplied options array is authoritative; nodes are a legacy/draft fallback. */
+function readOptionRecords(source: unknown): readonly unknown[] {
+  if (Array.isArray(source)) return source;
+  if (!isRecord(source)) return [];
+  if (Array.isArray(source.options)) return source.options;
+  return Array.isArray(source.nodes)
+    ? source.nodes.filter((node: unknown) => isRecord(node) && node.kind === 'option')
+    : [];
+}
+
+function optionId(option: unknown): string | null {
+  if (!isRecord(option)) return null;
+  const id = option.id ?? option.option_id;
+  if (typeof id !== 'string' || !/^[a-z0-9_:-]+$/.test(id)) return null;
+  if (option.id !== undefined && option.option_id !== undefined && option.id !== option.option_id) {
+    return null;
+  }
+  return id;
+}
+
+/** Read only existing provenance carriers, never labels or origin flags alone. */
+function sourceQuotes(option: Record<string, unknown>): unknown[] {
+  const quotes: unknown[] = [];
+  if (option.source_quote !== undefined) quotes.push(option.source_quote);
+  if (isRecord(option.provenance)) {
+    if (option.provenance.source_quote !== undefined) quotes.push(option.provenance.source_quote);
+    if (option.provenance.brief_quote !== undefined) {
+      // brief_quote is a source binding only for the declared extraction origin.
+      quotes.push(option.provenance.source === 'brief_extraction'
+        ? option.provenance.brief_quote : null);
+    }
+  }
+  return quotes;
+}
+
 /**
- * ⭐ THE reconciliation — the single owner of "does the candidate set match what
- * the user enumerated?".
- *
- * PRECEDENCE, and every rule fails toward `not_applicable` (no opinion, today's
- * behaviour) rather than toward a withhold:
- *
- *   1. No brief, no enumeration cue, fewer than two candidates, or no graph
- *      option labels ⇒ `not_applicable`. There is nothing to compare.
- *   2. Match every candidate against every label by IDENTITY (normalised
- *      content tokens), never by count. Five-in / four-out is not evidence
- *      about WHICH option went missing, and a disclosure that cannot name the
- *      gap cannot offer a repair.
- *   3. ZERO candidates matched ⇒ `not_applicable`. This is the load-bearing
- *      precision guard and it is not an invention: it is the rule
- *      `deriveConstraintVerdict` already uses at its own unenforced seam —
- *      "a single match proves the id spaces DO line up, so any remaining
- *      unmatched item is genuinely unmatched". Zero overlap means the two
- *      vocabularies do not line up at all, which is a statement about this
- *      module's reading of the brief, NOT about the graph. Asserting a missing
- *      option from it would be the LLM-say-so failure mode wearing deterministic
- *      clothes.
- *   4. At least one matched and at least one did not ⇒ `options_missing`.
- *   5. Otherwise ⇒ `reconciled`.
- *
- * PURE. No I/O, no clock, no LLM, no coaching field.
+ * Sources are kept separate so duplicate IDs within a carrier remain ambiguous.
+ * A node and an options record may share the same ID, but conflicting quotes
+ * still invalidate the binding. Joining here uses the canonical ID only.
+ */
+function provenanceGroups(source: unknown): readonly (readonly unknown[])[] {
+  if (Array.isArray(source)) return [source];
+  if (!isRecord(source)) return [];
+  const groups: (readonly unknown[])[] = [];
+  if (Array.isArray(source.options)) groups.push(source.options);
+  if (Array.isArray(source.nodes)) {
+    groups.push(source.nodes.filter((node: unknown) => isRecord(node) && node.kind === 'option'));
+  }
+  return groups;
+}
+
+/**
+ * A missing candidate is provable only after EVERY analysed option has a
+ * unique, validated source binding. An unbound option could be the apparently
+ * missing candidate under an authored label. Unknown never grants permission.
+ * provenanceSource may restore quotes lost in the analysis projection, joined
+ * solely by the same option ID from the same scenario snapshot.
  */
 export function deriveIntakeOptionReconciliation(
   briefText: string | null | undefined,
-  optionLabels: readonly string[],
+  optionsSource: unknown,
+  provenanceSource?: unknown,
 ): IntakeOptionReconciliation {
   const enumerated = extractEnumeratedOptions(briefText);
   if (enumerated.length < 2) return reconciliation('not_applicable');
-
-  const labelTokens = optionLabels
-    .map((label) => normaliseOptionTokens(label))
-    .filter((tokens) => tokens.length > 0);
-  if (labelTokens.length === 0) return reconciliation('not_applicable');
-
-  const missing: EnumeratedOption[] = [];
-  let matched = 0;
-  for (const candidate of enumerated) {
-    if (labelTokens.some((tokens) => sameOption(candidate.tokens, tokens))) {
-      matched += 1;
-    } else {
-      missing.push(candidate);
+  const unknownIdentity = () => reconciliation('identity_unverified', { enumerated });
+  if (typeof briefText !== 'string') return unknownIdentity();
+  const options = readOptionRecords(optionsSource);
+  if (options.length === 0) return unknownIdentity();
+  const groups = provenanceGroups(provenanceSource ?? optionsSource);
+  const seenIds = new Set<string>();
+  const bound = new Set<EnumeratedOption>();
+  for (const option of options) {
+    const id = optionId(option);
+    if (id === null || !isRecord(option) || seenIds.has(id)) return unknownIdentity();
+    seenIds.add(id);
+    const quotes = sourceQuotes(option);
+    for (const group of groups) {
+      const matching = group.filter((entry) => isRecord(entry) && (entry.id === id || entry.option_id === id));
+      if (matching.length > 1 || (matching.length === 1 && optionId(matching[0]) !== id)) return unknownIdentity();
+      if (matching.length === 1 && isRecord(matching[0])) {
+        quotes.push(...sourceQuotes(matching[0]));
+      }
     }
+    if (quotes.length === 0 || quotes.some((quote) => typeof quote !== 'string' || quote.length === 0)) {
+      return unknownIdentity();
+    }
+    const uniqueQuotes = new Set(quotes as string[]);
+    if (uniqueQuotes.size !== 1) return unknownIdentity();
+    const quote = [...uniqueQuotes][0]!;
+    const matches = enumerated.filter((candidate) => candidate.text === quote);
+    // Exact text alone is insufficient when its source occurrence is ambiguous.
+    const at = briefText.indexOf(quote);
+    if (matches.length !== 1 || at < 0 || briefText.indexOf(quote, at + 1) !== -1) {
+      return unknownIdentity();
+    }
+    const candidate = matches[0]!;
+    if (bound.has(candidate)) return unknownIdentity();
+    bound.add(candidate);
   }
-
-  if (matched === 0) return reconciliation('not_applicable', { enumerated });
-  if (missing.length > 0) return reconciliation('options_missing', { enumerated, missing });
-  return reconciliation('reconciled', { enumerated });
+  const missing = enumerated.filter((candidate) => !bound.has(candidate));
+  return missing.length > 0
+    ? reconciliation('options_missing', { enumerated, missing })
+    : reconciliation('reconciled', { enumerated });
 }
 
 /**

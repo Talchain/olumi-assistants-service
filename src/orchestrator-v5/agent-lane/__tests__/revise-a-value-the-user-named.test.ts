@@ -118,3 +118,140 @@ describe('the user can change an assumption the analysis named', () => {
     expect(p.read().find((n) => n.id === 'monthly_churn_rate')?.observed_state?.value).toBe(4);
   });
 });
+
+/**
+ * ⛔ THE FOUR DEFECTS CODEX TRACED (5810763729, 24 Sep) — the native/model mismatch,
+ * the dropped `raw_value`, the readback that counted an untouched value as saved, and
+ * the automatic Run. Acceptance, stated as Paul stated it: approve changing 70 to 50
+ * on a factor whose declared scale is 100 → store raw 50 and model 0.5 → read back 50
+ * → Run only when explicitly asked → the value survives a reload.
+ *
+ * Bound by IDENTITY throughout: the exact node id, the exact pair on the wire, the
+ * exact figures in the label. A value predicate another number could satisfy would
+ * not discriminate here, because 50 and 0.5 are both "a number that changed".
+ */
+const FRAMED: Node[] = [
+  {
+    id: 'evidence_strength', kind: 'factor', label: 'Evidence strength',
+    // The frame a constructed model actually carries: native 70 read against a 100 scale.
+    observed_state: { value: 0.7, raw_value: 70, cap: 100, declared_scale: 'unit_interval', unit: 'points' },
+  },
+];
+
+const RECEIPT = (turnId: string, sequence = 3) => ({
+  schema: 'model_version_mutation_receipt.v1',
+  scenario_id: SCENARIO,
+  mutation_id: '11111111-1111-4111-8111-111111111111',
+  version_id: '22222222-2222-4222-8222-222222222222',
+  sequence,
+  graph: { nodes: [{ id: 'evidence_strength', kind: 'factor', label: 'Evidence strength' }], edges: [] },
+  full_hash: 'a'.repeat(64),
+  hash_algorithm: 'sha256',
+  identity_projection_version: 'identity.v1',
+  identity_normaliser_version: '1',
+  graph_schema_version: 'graph_v3',
+  analysis_affecting_hash: 'b'.repeat(64),
+  actor: { kind: 'unknown' },
+  creation: { kind: 'committed_mutation' },
+  source_turn_id: turnId,
+  lineage: { kind: 'known', parent_version_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', root_version_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff' },
+  undo_version_id: null,
+  event_id: 'model_version_created_mutation_11111111-1111-4111-8111-111111111111',
+});
+
+/**
+ * The product for a framed factor. `writes` decides whether the write is honoured:
+ * 'receipt' commits and answers with a real receipt; 'refused' answers 200 with NO
+ * receipt and leaves the stored value untouched — the exact shape that used to be
+ * reported as "Saved" because the old value read back as a number.
+ */
+function framedProduct(writes: 'receipt' | 'refused') {
+  const posted: Record<string, unknown>[] = [];
+  const nodes: Node[] = FRAMED.map((n) => ({ ...n, observed_state: { ...n.observed_state } }));
+  let hash = 'h0';
+  const d: InternalDispatch = async (path, body) => {
+    const b = (body ?? {}) as Record<string, unknown>;
+    if (path === '/orchestrate/v2/turn' && b.kind === 'system_event') {
+      const e = b.event as Record<string, unknown>;
+      posted.push(e);
+      if (writes === 'refused') return { status: 200, json: {} };
+      // The canonical writer stores the coherent triple it was sent.
+      const n = nodes.find((x) => x.id === e.target_id);
+      if (n !== undefined) {
+        n.observed_state = {
+          ...n.observed_state,
+          value: e.value as number,
+          ...(typeof e.raw_value === 'number' ? { raw_value: e.raw_value } : {}),
+        };
+      }
+      hash = 'h1';
+      return { status: 200, json: { model_version_receipt: RECEIPT(String(b.turn_id)) } };
+    }
+    return { status: 200, json: { graph: { nodes, edges: [] }, graph_hash: hash } };
+  };
+  return { d, posted, read: () => nodes };
+}
+
+describe('a value the user revises is saved on its own frame, and only called saved when it was', () => {
+  it('⭐ ACCEPTANCE: 70 → 50 on a declared scale of 100 stores raw 50 and model 0.5, and reads back 50', async () => {
+    const p = framedProduct('receipt');
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+
+    const proposed = await caps.proposeAssumptions(ctx, {
+      assumptions: [{ factor_label: 'Evidence strength', value: 50, unit: 'points', basis: 'the user said 50', revise: true }],
+    });
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+
+    // (1) The approval shows the user's OWN number, not the model's divisor.
+    expect(proposed.assumptions).toEqual([
+      { factor: 'Evidence strength', value: 50, unit: 'points', basis: 'the user said 50', replaces: 70 },
+    ]);
+    expect(String(proposed.public_label)).toContain('70 points → 50 points');
+    expect(String(proposed.public_label), 'the model divisor must never reach the chip').not.toContain('0.7');
+
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    expect(applied.ok, JSON.stringify(applied)).toBe(true);
+    expect(applied.applied).toBe(true);
+
+    // (2) The wire carries the coherent pair — this is what was dropped.
+    const edit = p.posted.find((e) => e.kind === 'factor_value_edit');
+    expect(edit, 'a factor_value_edit must have been posted').toBeDefined();
+    expect(edit!.target_id).toBe('evidence_strength');
+    expect(edit!.value, 'model value on the factor’s own 100 scale').toBeCloseTo(0.5, 10);
+    expect(edit!.raw_value, 'the user’s native figure, untouched').toBe(50);
+
+    // (3) What is stored, and what the user is told, are both the native figure.
+    expect(p.read()[0]!.observed_state).toMatchObject({ value: 0.5, raw_value: 50, cap: 100 });
+    expect(applied.values).toEqual([{ factor: 'Evidence strength', requested: 50, recorded: 50 }]);
+  });
+
+  it('⛔ RED: a refused write is NOT reported as saved, though the old value still reads back', async () => {
+    const p = framedProduct('refused');
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const proposed = await caps.proposeAssumptions(ctx, {
+      assumptions: [{ factor_label: 'Evidence strength', value: 50, unit: 'points', basis: 'the user said 50', revise: true }],
+    });
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+
+    // The stored value is untouched and still numeric — the old readback called this "Saved".
+    expect(p.read()[0]!.observed_state).toMatchObject({ value: 0.7, raw_value: 70 });
+    expect(applied.applied, 'nothing landed, so nothing may claim it did').toBe(false);
+    expect(applied.refusal).toBe('not_applied');
+    expect(String(applied.detail)).toContain('unchanged');
+  });
+
+  it('⚠ CONTROL: an UNCAPPED factor is passed through natively — no divide, no clamp', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const proposed = await caps.proposeAssumptions(ctx, {
+      assumptions: [{ factor_label: 'Monthly churn rate', value: 6, unit: '%', basis: 'the user asked', revise: true }],
+    });
+    expect(proposed.assumptions).toEqual([
+      { factor: 'Monthly churn rate', value: 6, unit: '%', basis: 'the user asked', replaces: 4 },
+    ]);
+    await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const edit = (p.posted as Record<string, unknown>[]).find((e) => e?.kind === 'factor_value_edit');
+    expect(edit!.value, 'an uncapped input reaches the writer exactly as the user gave it').toBe(6);
+    expect(edit!.raw_value, 'and carries no invented frame').toBeUndefined();
+  });
+});

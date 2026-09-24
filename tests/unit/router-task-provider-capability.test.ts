@@ -17,9 +17,12 @@ import {
 /**
  * Provider capability coherence for router-resolved tasks.
  *
- * Two tasks declare a provider constraint in ROUTER_TASK_PROVIDER_CAPABILITIES
- * (critique_graph, explain_diff): only Anthropic and the deterministic Fixtures
- * adapter implement them. `requireTaskModelAssignmentCapability` enforces that
+ * Two tasks appear in ROUTER_TASK_PROVIDER_CAPABILITIES (critique_graph,
+ * explain_diff). ⚠ As of the OpenAI critiqueGraph implementation they are NOT
+ * the same shape any more: critique_graph lists anthropic/openai/fixtures,
+ * while explain_diff remains anthropic/fixtures because
+ * OpenAIAdapter.explainDiff still throws. The map records which providers
+ * IMPLEMENT a task, so that asymmetry is the point, not an inconsistency. `requireTaskModelAssignmentCapability` enforces that
  * at resolution time — BEFORE any adapter is constructed — so a task whose
  * winning model resolves to OpenAI fails with MODEL_PROVIDER_MISMATCH and the
  * OpenAI `*_not_supported` stubs are never reached through the router.

@@ -848,8 +848,8 @@ export const EXECUTABLE_RUNTIME_TASKS = Object.freeze(
  * authority lets both router execution and admin reporting consume one fact.
  */
 export const ROUTER_TASK_PROVIDER_CAPABILITIES = Object.freeze({
-  critique_graph: Object.freeze(['anthropic', 'fixtures'] as const),
-  explain_diff: Object.freeze(['anthropic', 'fixtures'] as const),
+  critique_graph: Object.freeze(['anthropic', 'openai', 'fixtures'] as const),
+  explain_diff: Object.freeze(['anthropic', 'openai', 'fixtures'] as const),
 } as const satisfies Partial<
   Record<
     ExecutableRuntimeTask,

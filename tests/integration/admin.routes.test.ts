@@ -198,7 +198,13 @@ describe("PATCH /admin/prompts/:id", () => {
     }
   });
 
-  it("rejects an OpenAI critique modelConfig atomically using the task capability", async () => {
+  // Repointed from an OpenAI model to a DISABLED one. critique_graph now
+  // implements OpenAI, so `gpt-4o` is a legitimate pin there and no longer
+  // demonstrates an atomic rejection. `test-disabled-model` is registered with
+  // `enabled: false`, so `resolveModelAssignment` still throws — which keeps
+  // this test proving what it was written to prove: the admin route rejects an
+  // unserviceable modelConfig atomically, leaving the record untouched.
+  it("rejects an unserviceable critique modelConfig atomically using the model guard", async () => {
     const id = "critique_graph_default";
     const before = await app.inject({
       method: "GET",
@@ -212,7 +218,10 @@ describe("PATCH /admin/prompts/:id", () => {
       url: `/admin/prompts/${id}`,
       headers: ADMIN_HEADERS,
       payload: {
-        modelConfig: { staging: "gpt-4o", production: "gpt-4o" },
+        modelConfig: {
+          staging: "test-disabled-model",
+          production: "test-disabled-model",
+        },
       },
     });
     expect(rejected.statusCode).toBe(400);
@@ -220,8 +229,10 @@ describe("PATCH /admin/prompts/:id", () => {
       error: "validation_error",
       field: "modelConfig",
     });
-    expect(rejected.json().message).toContain("MODEL_PROVIDER_MISMATCH");
-    expect(rejected.json().message).toContain("does not implement task 'critique_graph'");
+    expect(rejected.json().message).toContain("MODEL_DISABLED");
+    // Bound by IDENTITY, not just the code: the message must name the model it
+    // rejected, so a guard that fired for some other reason cannot pass here.
+    expect(rejected.json().message).toContain("test-disabled-model");
 
     const after = await app.inject({
       method: "GET",

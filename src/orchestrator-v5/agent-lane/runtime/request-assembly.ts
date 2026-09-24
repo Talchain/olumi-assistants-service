@@ -26,7 +26,7 @@
  * change nothing. Approval authority lives in the durable proposal machinery,
  * not in a blob that travelled with a request.
  */
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 import { AGENT_TOOLS, toolsFor, type AgentLaneMode, type ToolDefinition } from './agent-tools.js';
 
@@ -179,6 +179,47 @@ function computeBinding(p: Omit<CanonicalContextPacket, 'binding'>, secret: stri
   return createHmac('sha256', secret)
     .update(JSON.stringify(canonicalise(bindingPayload(p))))
     .digest('hex');
+}
+
+/**
+ * ⭐ THE SERVER SECRET, AND WHY IT IS NOT A CREDENTIAL.
+ *
+ * `ContextExpectation.binding_secret` had no source: the signer
+ * ({@link issueContextPacket}) and the verifier were both here and both tested,
+ * with no configuration key and no production caller. That read as "blocked on a
+ * credential somebody has to issue", and it is not.
+ *
+ * A per-process random key satisfies the binding's stated purpose exactly —
+ * "a packet is evidence the SERVER assembled this state, not a claim anyone can
+ * make" — because:
+ *   · the packet NEVER leaves the process. Every reference to
+ *     `CanonicalContextPacket` outside the tests is this module and `agent-loop`;
+ *     nothing serialises it into a response and nothing parses it from a request.
+ *   · a packet has no life beyond its own turn anyway. `assessContextFreshness`
+ *     compares `graph_revision` and `captured_at_turn` against what the server
+ *     believes NOW, so one that outlived a restart would be `stale` regardless of
+ *     which key signed it.
+ *   · the failure mode is fail-safe. `agent-loop` states it: "a forged or stale
+ *     one simply keeps the read tool." An unverifiable packet costs the saving,
+ *     never authority — and `claimedGrants` is ignored by design.
+ *
+ * So the property required is "no code path can mint a verifying packet without
+ * going through the signer", and a key this process alone holds gives that. A
+ * configured, shared, restart-stable secret would only be needed if a packet had
+ * to verify somewhere it was not signed, which the first point rules out. If that
+ * ever changes — a packet handed to a client, or verified on another instance —
+ * this must become configuration, and the packet would then need an expiry, since
+ * the freshness check above would no longer bound its lifetime.
+ *
+ * ⚠ Deliberately NOT read from the environment. An operator-set value here would
+ * be a credential to rotate and leak with no benefit over a random one, and a
+ * MISSING env var would silently hand every request an empty-string secret —
+ * which still verifies, against itself, while looking configured.
+ */
+let processBindingSecret: string | undefined;
+export function contextBindingSecret(): string {
+  processBindingSecret ??= randomBytes(32).toString('hex');
+  return processBindingSecret;
 }
 
 /**

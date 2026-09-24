@@ -197,7 +197,7 @@ describe('cold/post-invalidation prompt model pins', () => {
     });
   });
 
-  it('critique_graph rejects a cold invalid OpenAI store pin before adapter/network use', async () => {
+  it('critique_graph now SERVES a cold OpenAI store pin, because its adapter implements the task', async () => {
     const promptIndex = await import('../../src/prompts/index.js');
     const promptLoader = await import('../../src/prompts/loader.js');
     vi.spyOn(promptLoader, 'isPromptManagementEnabled').mockReturnValue(true);
@@ -213,13 +213,27 @@ describe('cold/post-invalidation prompt model pins', () => {
     const snapshot = await getSystemPromptSnapshot('critique_graph');
     const pin = snapshot.meta.modelConfig?.production;
 
-    expect(() =>
-      getAdapterWithResolution('critique_graph', pin, 'store_model_config'),
-    ).toThrowError(
-      expect.objectContaining({
-        code: 'MODEL_PROVIDER_MISMATCH',
-        model: 'gpt-4o',
-      }),
+    // INVERTED with the capability widening. The cold path still READS the pin
+    // — which is what this test exists to prove — but an OpenAI pin on
+    // critique_graph is no longer a mismatch, so the assertion is that it
+    // resolves rather than that it throws.
+    //
+    // ⚠ The rejection path has NOT been dropped: it moved to explain_diff in
+    // tests/unit/llm-router.test.ts, which exercises the same
+    // requireTaskModelAssignmentCapability guard through the same
+    // 'store_model_config' origin. It cannot be exercised here because
+    // explain_diff is a code-constant prompt with no PMS record, so
+    // getSystemPromptSnapshot('explain_diff') has nothing to resolve.
+    const resolved = getAdapterWithResolution(
+      'critique_graph',
+      pin,
+      'store_model_config',
     );
+    expect(resolved.adapter.name).toBe('openai');
+    expect(resolved.resolution).toMatchObject({
+      provider: 'openai',
+      resolved_model: 'gpt-4o',
+      resolution_source: 'store_model_config',
+    });
   });
 });

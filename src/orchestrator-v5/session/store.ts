@@ -267,6 +267,13 @@ export interface CommittedTurnRecord {
   readonly assistant_message: string | null;
   readonly user_message: string | null;
   readonly llm_calls_used: number;
+  /**
+   * The resumable actions persisted atomically WITH this exact turn (the same
+   * `pending_actions` JSONB the short-confirm resumer reads for the latest turn).
+   * A replay of this turn reads them to re-offer what the original response offered.
+   * Tolerant: an unparseable entry is dropped; absent/non-array reads as `[]`.
+   */
+  readonly pending_actions?: readonly PendingAction[];
 }
 
 export interface SessionStore {

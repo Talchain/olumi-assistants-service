@@ -23,34 +23,41 @@
  * seam, deliberately.
  */
 
+import { withRunStateFreshness } from '../orchestrator-v5/agent-lane/analysis-ready-freshness.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
-import { OPENAI_ONLY, assertProviderAllowed, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
+import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
+import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
+import { withCurrentGraphHash } from '../orchestrator-v5/agent-lane/analysis-freshness-stamp.js';
 import { BOARD_EDIT_PREFIX, HistoryStore, historyFromDurableTurns, needsDurableSeed } from '../orchestrator-v5/agent-lane/history-store.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
 import { log } from '../utils/telemetry.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
-import { runAgentTurn, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
+import { runAgentTurn, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
-import { assessCanonicalAnalysisReadiness } from '../orchestrator/tools/analysis-ready-helper.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { disclosuresFor, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
-import { narrateWriteOutcome, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { narrateWriteOutcome, notAdoptedLine, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
-import { approvalChipsFor } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { AMEND_CHIP, approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
+import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
+import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
+import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
 
@@ -100,6 +107,50 @@ export const AGENT_TURN_CLAIM_WAIT = {
 /** The conversation of record stays Olumi's; this is a per-process cache. */
 const histories = new HistoryStore();
 const proposals = new ProposalStore();
+
+type OfferedAction = SuggestedAction;
+/**
+ * ⛔ A REPLAY RE-OFFERS THE ORIGINAL TYPED ACTIONS, RE-VALIDATED ON TODAY'S STATE (independent
+ * review of #1792, 5806213240). The durable row keeps the words only, so a retry of the same
+ * `turn_id` after a lost response answered with no Run and no approve control — at exactly the
+ * moment a replay matters. What a turn offered is remembered here, per scenario and turn, and a
+ * replay offers only what is STILL true: an approve chip whose proposal is still outstanding, and
+ * the Run offer only when today's canonical readiness admits a run and no current analysis exists.
+ * Nothing is inferred from the words.
+ *
+ * ⚠ TWO CARRIERS, BECAUSE THE TWO CHIPS HAVE DIFFERENT LIFETIMES (Codex 5806428423). An approve
+ * chip names a proposal that lives in THIS process (`ProposalStore`), so it is remembered here and
+ * fails closed after a restart. The Run offer does not depend on any proposal once the approval has
+ * landed, so it is ALSO persisted durably, as the same `run_analysis` pending action a conventional
+ * Run chip persists, atomically with the answer row, and re-read from that exact row on replay
+ * (bounded by the pending action's own 10-minute lifetime). Neither is ever reconstructed from
+ * present readiness alone: a Run is re-offered only if the ORIGINAL turn offered it.
+ */
+const OFFERED_ACTIONS_MAX = 500;
+const offeredActions = new Map<string, readonly OfferedAction[]>();
+function rememberOffered(key: string, actions: readonly OfferedAction[]): void {
+  offeredActions.delete(key);
+  if (offeredActions.size >= OFFERED_ACTIONS_MAX) {
+    const oldest = offeredActions.keys().next().value;
+    if (oldest !== undefined) offeredActions.delete(oldest);
+  }
+  offeredActions.set(key, actions);
+}
+
+/** The originally offered actions that are still valid on the CURRENT state, in their original order. */
+export function stillValidOffers(
+  offered: readonly OfferedAction[],
+  now: { outstandingProposalIds: ReadonlySet<string>; analysisReady: unknown; analysisState: unknown },
+): OfferedAction[] {
+  const approvals = offered.filter((a) => {
+    const id = typedApprovalOf({ chip: { id: a.id } });
+    return id !== undefined && now.outstandingProposalIds.has(id);
+  });
+  const runKind = (now.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
+  const run = offered.some((a) => a.id === RUN_OFFER_CHIP.id)
+    && admitsRunOffer(now.analysisReady) && runKind !== 'complete_current';
+  return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : [])];
+}
 const sessions = new SessionBindingRegistry();
 
 /**
@@ -229,7 +280,14 @@ const AGENT_INSTRUCTIONS = [
    * ordering is sensitive to, and let the user change it and see how much it matters.
    */
   'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one; say which option leads in this model and how firmly. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding.',
-  'When the user asks to change an assumption after an analysis \u2014 which is the whole point of naming the ones the ordering turns on \u2014 call propose_assumptions with `revise: true` on that factor and the number THEY gave, then authorise_change once they confirm. Show them the current value and the new one. Never set `revise` to push a figure of your own over theirs, and after it applies, run_analysis in the same turn and say what moved.',
+  'When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each — then authorise_change once they confirm. It adds the option and its links ONLY: say plainly that it cannot be compared until it states what it does to each factor, and offer propose_option_interventions for that. Never invent the direction; if you are not sure which way it pushes a factor, ask.',
+  /*
+   * \u26d4 NO AUTOMATIC RUN AFTER A REVISION (Codex 5810763729, 24 Sep). This
+   * instruction used to end "after it applies, run_analysis in the same turn and
+   * say what moved", which spends a compute run the user never asked for. A
+   * revision and a Run are two decisions; the user makes both.
+   */
+  'When the user asks to change an assumption after an analysis \u2014 which is the whole point of naming the ones the ordering turns on \u2014 call propose_assumptions with `revise: true` on that factor and the number THEY gave, then authorise_change once they confirm. Show them the current value and the new one. Never set `revise` to push a figure of your own over theirs, After it applies, confirm what was saved and say that the earlier analysis now describes the previous model \u2014 then STOP: do NOT call run_analysis in the same turn. Offer to re-run it and wait for them to ask.',
   'History entries that begin \u201c(Board edit\u201d are changes the user made directly on the canvas. When the user asks about \u201cmy change\u201d, start from the most recent board edit, and read the current state before explaining what it did.',
   'British English. Concise but substantive.',
 ].join(' ');
@@ -239,7 +297,83 @@ const AGENT_INSTRUCTIONS = [
  * the `draft_graph` the canvas draws. Shared by a live turn and a replay, so a
  * replayed answer is shown against the SAME current state a fresh one would be.
  */
-async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown }> {
+/** @internal Exported for testing. */
+/**
+ * A message that can be a brief: typed into the composer (no product chip), and long
+ * enough to describe a decision. The EMPTY-MODEL test that makes it the brief is done
+ * against the persisted graph, never guessed from the words.
+ */
+/**
+ * ⭐ THE EXPLICIT RUN, OFFERED AFTER A CHANGE THE MODEL CAN NOW ANALYSE (RC #63; Codex
+ * 5805970015: "served Agent approval calls approvalChipsFor after authorise_change and that
+ * helper returns no chips"). The approval fast path applies the user's values and — by design
+ * — runs nothing; without this the user had no Run to press on the Agent route. The same
+ * shape as the product's own Run chip (`edit-graph-dispatch.ts` RUN_ANALYSIS_CHIP), so the UI
+ * echoes `{ id, action_type }` and the click takes fast path 3.
+ */
+export const RUN_OFFER_CHIP = {
+  id: 'agent-run-analysis',
+  label: 'Run analysis',
+  message: 'Run analysis.',
+  action_type: 'run_analysis',
+} as const;
+
+/**
+ * Whether the canonical readiness in THIS response admits a run. `may_run` is the admission
+ * verdict (`resolveRunAdmission(...).willProceed`) and wins whenever it is present — a `ready`
+ * status with `may_run: false` is not offered. Only when it is absent does the stricter
+ * `status === 'ready'` decide, as the UI's own affordance does. Nothing else is inferred.
+ */
+export function admitsRunOffer(analysisReady: unknown): boolean {
+  const ar = (analysisReady ?? {}) as { may_run?: unknown; status?: unknown };
+  return typeof ar.may_run === 'boolean' ? ar.may_run : ar.status === 'ready';
+}
+
+/**
+ * ⭐ INTERPRETER v0.2 — THE ARCHITECTURE OWNER'S BANKED TEXT, VERBATIM (RC #63 5803995225:
+ * "Interpreter v0.2 is the current prompt candidate"). Source: Talchain/olumi-programme-docs
+ * `openai/capability-v01/ANALYSIS_INTERPRETER_PROFILE_v0_2.md` lines 9-33, blob
+ * 344896ef92177b7308c1d632699bd98bae10c6b7 (programme-docs main 4961b2d1); sha256 of this
+ * string begins 3d979e8406693be4 (pinned by test). APPENDED to the Agent instructions on
+ * fast path 3's single interpreting call, as the profile specifies ("appended only for the
+ * existing Agent final-response path when explaining canonical analysis. No extra model
+ * call."). Prompt text is owned by Paul + ChatGPT; this file only carries it. When CEE #1787
+ * (the packaged profile) lands, this constant is replaced by its import.
+ */
+export const INTERPRETER_V02_BANKED: string = "Explain the current **model-relative** analysis. Do not make the user's decision.\n\n**Finding first.** State the most useful conclusion supported by the supplied analysis, then briefly: why it appears, what is not settled, and at most one next reasoning step when justified.\n\n### Hard grounding rules\n\n- Use only supplied canonical analysis, provenance, currentness and claim permissions. Unknown stays unknown.\n- Keep comparison/outcomes, sensitivity, robustness, constraint satisfaction, before/after deltas and evidence provenance as different meanings. Never substitute one for another.\n- Never call an option objectively best, the winner, the right decision or Olumi's recommendation merely because it leads in the model.\n- Never convert a point result into a probability or invert a local switch/perturbation probability into overall stability.\n- Never claim an edit was tested unless the analysed revision/inputs include it.\n- Identical analytical inputs producing the same result show repeatability under those settings, **not** new validation or increased confidence.\n- A changed input may produce no material output change. Report that without inventing an effect.\n- For before/after comparisons, use only **precomputed supplied deltas**. Do not calculate new differences, ratios, annualisations, margins or unit conversions in prose.\n- Attribute a delta to one edit only when the supplied comparison is explicitly compatible and the relevant units, option identities, analysis/projection semantics and engine settings are held constant. Otherwise say the isolated effect is not established.\n- Preserve exact constraint operators and units. Equality does not satisfy a strict `<` or `>` condition.\n- If only a subset of options was analysed, keep conclusions inside that subset and name exclusions.\n- If the result is stale, present it only as historical. If rerun/action eligibility is unknown, do not imply a current control is available; say a current analysis would be needed.\n- If sensitivity or a flip threshold was not computed, do not invent it.\n- **A first-tested assumption that flips an ordering establishes only that this tested change can flip that ordering. It does NOT establish validation priority, importance, largest effect or best next investigation. Never say \"validate X first\" or equivalent on that basis alone.** If comparable effect size, uncertainty and evidence cost/value are absent, say investigation priority is not established.\n- One edge's perturbation/switch metric is not aggregate stability or factor sensitivity.\n- If a method is declined or applicability is unknown, answer the user's question without starting or completing the method.\n- Do not invent exercise horizons, required counts, missing business dimensions, benchmarks, operating assumptions or retrospective rationales.\n\nKeep the response compact: finding first, then 1–3 grounded points/caveats. Do not force a next step.\n";
+
+/** The UI's Run control: a typed `run_analysis` chip. Words alone never take fast path 3. */
+/**
+ * What the user reads when the run was ATTEMPTED but its one interpreting call failed or said
+ * nothing: composed from the run's own DOMAIN outcome, never from a model.
+ *
+ * ⛔ `ok` is the HTTP status of the attempt, NOT a completed analysis (independent review of
+ * #1786, 5805649773): a blocked Run answers HTTP 200 with no `analysis_result`, so `ok:true`
+ * would have told that user "the analysis ran". `ran` is the presence of a result; when it
+ * is absent, Olumi's own explanation (`what_is_missing`) is passed through, not re-worded.
+ * No visibility claim is made about results the reply does not carry. Copy: Experience Design
+ * (#63 5806021014).
+ */
+export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown; refusal?: unknown; status?: unknown; what_is_missing?: unknown }): string {
+  if (ran.ran === true) {
+    return 'The analysis finished, but I couldn’t explain it this time. You can ask me to explain the result.';
+  }
+  const missing = typeof ran.what_is_missing === 'string' ? ran.what_is_missing.trim() : '';
+  if (missing !== '') return `The analysis didn’t run. ${missing}`;
+  const code = typeof ran.refusal === 'string' && ran.refusal !== ''
+    ? ran.refusal
+    : typeof ran.status === 'string' && ran.status !== '' && ran.status !== 'unknown' ? ran.status : '';
+  const why = code !== '' ? ` (${code.replace(/_/g, ' ')})` : '';
+  return `The analysis didn’t run this time${why}. Nothing in the model was changed — ask me what it still needs.`;
+}
+
+export function typedRunOf(body: Record<string, unknown>): boolean {
+  const chip = body['chip'] as { action_type?: unknown; id?: unknown } | null | undefined;
+  // The Agent's own Run offer is recognised by its id too, in case a client echoes only the id.
+  return (body['kind'] === undefined || body['kind'] === 'message') && (chip?.action_type === 'run_analysis' || chip?.id === RUN_OFFER_CHIP.id);
+}
+
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -301,20 +435,51 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
        * (`turn 1: analysis_ready.options=0, expected >= 2`), which is how
        * the gap surfaced.
        *
-       * `assessCanonicalAnalysisReadiness` is the ONE readiness authority
-       * named in CLAUDE.md and it is a pure function of the graph — no LLM,
-       * no network, no second orchestrator turn — so this costs a function
+       * The canonical readiness builder is a pure function of the graph — no
+       * LLM, no network, no second orchestrator turn — so this costs a function
        * call, not twenty seconds. The graph read's own `analysis_ready`
        * still wins when it has one, because that reflects a real run.
+       *
+       * ⛔⛔ IT MUST BE THE BUILDER, NOT THE BARE ASSESSMENT — this is the
+       * WHOLE readiness payload for this lane.
+       *
+       * This read `assessCanonicalAnalysisReadiness(...).analysisReady`, which
+       * does NOT compute `may_run`; only
+       * `canonicalAnalysisReadyFrom(resolveRunAdmission(g), g)` — i.e.
+       * `buildCanonicalAnalysisReadyFromGraph` — does. And
+       * `/assist/v1/scenarios/:id/graph` never sends `analysis_ready` at all
+       * (its 200 carries `graph_hash`, `layout_present`, `not_modelled` …), so
+       * the branch above is ALWAYS taken: every readiness payload an Agent-lane
+       * user receives came from here.
+       *
+       * The consequence is not subtle. The client gates the Run affordance on
+       * `admitsRunAffordance(status, may_run) = status === 'ready' || may_run
+       * === true`. With `may_run` absent it falls back to the stricter `status`
+       * term — and measured over the full population of 15,255 persisted models,
+       * 3,168 (20.77%) are `may_run: true` under a NON-ready status. (An
+       * earlier revision said 27.0% from a 400-row `updated_at DESC` slice;
+       * that was recency bias.) Those users can run the
+       * analysis and are never offered it, on the very turn this fallback was
+       * added to serve: straight after a 60-90 s construction.
+       *
+       * ⚠ NOT A SECOND ASSESSMENT. `resolveRunAdmission` exposes the assessment
+       * it derived from, precisely so a caller needing both does not run the
+       * assessor twice.
        */
       if (analysisReady === undefined && after.json.graph !== undefined) {
         try {
-          const assessed = assessCanonicalAnalysisReadiness(after.json.graph);
-          if (assessed.analysisReady !== undefined) analysisReady = assessed.analysisReady;
+          const canonical = buildCanonicalAnalysisReadyFromGraph(after.json.graph);
+          if (canonical !== undefined) analysisReady = canonical;
         } catch {
           // Readiness is a disclosure, never a gate on the user's answer.
         }
       }
+      // ⭐ State the run's freshness where the UI reads it (#63 5800618648): the
+      // read route's `analysis_ready` carries no `freshness`, so a turn that
+      // wrote and then ran left the UI saying "Model changed" over its own run.
+      // Restates `run_state` from this SAME readback, after the
+      // readiness fallback above so an assessed `analysis_ready` is stamped too — see the helper.
+      analysisReady = withRunStateFreshness(analysisReady, analysisState, { graphHash, analysisResult });
       // Only when it actually has content: an empty graph must not overwrite
       // whatever the client already has hydrated.
       /**
@@ -378,6 +543,12 @@ async function readBackState(dispatch: InternalDispatch, scenarioId: string): Pr
       'agent-lane: could not read the current model back — the client will not learn this turn\u2019s revision, so a delete gesture stands down',
     );
   }
+
+  // ⭐ ONE AUTHORITATIVE STATE: `graphHash` and `analysisReady` come from the
+  // SAME dispatch above, so the stamp cannot describe a different model. See
+  // the helper's header for why `graph_hash_at_run` is never set here.
+  analysisReady = withCurrentGraphHash(analysisReady, graphHash);
+
   return { graphHash, analysisReady, draftGraph, analysisState, analysisResult };
 }
 
@@ -388,9 +559,17 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
  * and the message itself (trimmed). Stored as the turn row's `request_hash`, so
  * an exact retry replays and a reused id carrying a different message refuses.
  */
-export function agentTurnRequestHash(scenarioId: string, userId: string | null, message: string): string {
+export function agentTurnRequestHash(scenarioId: string, userId: string | null, message: string, operation?: string): string {
+  /**
+   * ⛔ A TYPED OPERATION IS PART OF WHAT WAS ASKED (independent review of #1782,
+   * 5804375960). Two approval chips carry the SAME words ("Yes, use those.") for
+   * DIFFERENT proposals, so a hash of the words alone let a reused turn_id replay
+   * approval A's answer for a request to approve B. The operation is bound only when
+   * present, so an ordinary message hashes exactly as before and its retries still
+   * replay.
+   */
   const digest = createHash('sha256')
-    .update(JSON.stringify({ v: 1, scenario_id: scenarioId, subject: userId, message: message.trim() }))
+    .update(JSON.stringify({ v: 1, scenario_id: scenarioId, subject: userId, message: message.trim(), ...(operation !== undefined ? { operation } : {}) }))
     .digest('hex');
   return `agent_turn:${digest}`;
 }
@@ -459,6 +638,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         instructions: req.instructions,
         input: req.input,
         tools: req.tools,
+        // Fast path 3 answers over a run Olumi already made: it may interpret, never act.
+        ...((req as { tool_choice?: unknown }).tool_choice === 'none' ? { tool_choice: 'none' } : {}),
         max_output_tokens: req.max_output_tokens,
       }),
     });
@@ -585,6 +766,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...finaliseV5Response(composedRefusal, { scenarioId }),
           _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0, stopped_reason: 'read_only_preview' },
           _provider_calls: recordedProviderCalls(),
+        ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
         });
       }
 
@@ -621,6 +803,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           forwarded_kind: kind,
         },
         _provider_calls: recordedProviderCalls(),
+        ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
       });
     }
 
@@ -710,15 +893,26 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined,
     );
 
-    const requestHash = agentTurnRequestHash(scenarioId, userId, message);
+    const approvedProposal = typedApprovalOf(body);
+    const requestHash = agentTurnRequestHash(scenarioId, userId, message, approvedProposal !== undefined ? `approve:${approvedProposal}` : undefined);
     /** The response a replay returns: the ORIGINAL words, on today's state, with no model call. */
     const replayed = async (prior: CommittedTurnRecord) => {
+      const state = await readBackState(dispatch, scenarioId);
+      const remembered = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) ?? [] : [];
+      // The durable carrier: this exact row's persisted Run offer, still within its lifetime.
+      const durableRun = (prior.pending_actions ?? []).some((pa) =>
+        pa.chip_id === RUN_OFFER_CHIP.id && pa.action.kind === 'run_analysis' && !isPendingActionExpired(pa, Date.now()));
+      const offered = durableRun && !remembered.some((a) => a.id === RUN_OFFER_CHIP.id) ? [...remembered, RUN_OFFER_CHIP] : remembered;
       const composedReplay = composeDirectAnswerResponse({
         assistant_text: prior.assistant_message ?? 'That request was already completed.',
         stage: 'frame',
         answerKind: 'substantive',
+        suggested_actions: stillValidOffers(offered, {
+          outstandingProposalIds: new Set(proposals.outstanding(scenarioId, userId).map((o) => o.proposal_id)),
+          analysisReady: state.analysisReady,
+          analysisState: state.analysisState,
+        }),
       });
-      const state = await readBackState(dispatch, scenarioId);
       return {
         ...finaliseV5Response(composedReplay, { scenarioId }),
         ...(state.graphHash !== undefined ? { graph_hash: state.graphHash } : {}),
@@ -728,6 +922,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         _diagnostic_trace: { exit_path: 'agent_lane_v1', agent_mode: mode, hops: 0, stopped_reason: 'replayed', tools_called: [], replayed: true },
         _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0, stopped_reason: 'replayed', replayed: true, turn_id: turnId },
         _provider_calls: recordedProviderCalls(),
+        ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
       };
     };
     // Set only when THIS request owns the turn — used to release it if nothing ran.
@@ -850,8 +1045,145 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const history = histories.get(sessionId);
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
 
-    let result;
-    try {
+    /**
+     * ⭐ FAST PATH 2 — A TYPED APPROVAL IS APPLIED, NOT INTERPRETED (RC #63 5803960423 /
+     * 5803995225). Measured in Paul's staging test: "Use as starting assumptions" took
+     * ~29 s, 4 provider calls and 3 tool hops, and ran an analysis nobody asked for. The
+     * chip names exactly one proposal (`approvalChipsFor`), so there is nothing for a
+     * model to decide: the SAME `authorise_change` capability applies THAT proposal, with
+     * every ownership, integrity and CAS check the Agent's own call would get, and the
+     * status the user reads is composed from the result (`write-outcome`). Zero model
+     * calls, no implicit analysis. Words alone never take this path.
+     */
+    let fastPath: 'approve' | 'run' | undefined;
+    let result: AgentTurnResult | undefined;
+    if (approvedProposal !== undefined) {
+      const fastStartedAt = Date.now();
+      const applied = await dispatchTool(
+        'authorise_change', JSON.stringify({ proposal_id: approvedProposal }),
+        { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }, capabilities, mode,
+      );
+      /**
+       * ⛔ THE TYPED IDENTITY STAYS AUTHORITATIVE, EVEN WHEN THE PROPOSAL IS GONE
+       * (independent review of #1782, 5804375960). Handing a click that consented to A
+       * to the Agent as its generic words let the Agent authorise whichever proposal was
+       * still outstanding (B), and run an analysis. A missing proposal (a deploy, an
+       * eviction) is answered honestly here: nothing written, no model call, no
+       * analysis; the user can ask for a fresh proposal and approve THAT.
+       */
+      {
+        fastPath = 'approve';
+        const call = {
+          name: 'authorise_change', ok: applied.ok === true, mutated: applied.mutated === true, proposal_id: approvedProposal,
+          ...(typeof applied.outcome === 'string' ? { outcome: applied.outcome } : {}),
+          ...(typeof applied.refusal === 'string' ? { refusal: applied.refusal } : {}),
+        };
+        /**
+         * The capability's own next-step sentence rides with the status (#1788's add-option returns
+         * one: the option "cannot be compared yet"). Nothing reads the tool result on this path, so
+         * without this the user read "Saved" and nothing about what still blocks the comparison.
+         * Server-authored text only — never model prose.
+         */
+        const followUp = typeof applied.follow_up === 'string' ? applied.follow_up.trim() : '';
+        const said = [narrateWriteOutcome('', [call], [applied]).status ?? '', followUp].filter((x) => x !== '').join(' ');
+        const ms = Date.now() - fastStartedAt;
+        result = {
+          // The reply the user reads is composed from this text plus Olumi's status line.
+          assistant_text: followUp,
+          // The Agent's next turn sees the approval and what Olumi said about it.
+          items: [
+            ...(history ?? []),
+            { role: 'user', content: [{ type: 'input_text', text: message }] },
+            { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: said }] },
+          ],
+          tool_calls: [call],
+          tool_results: [applied],
+          mutated: applied.mutated === true,
+          hops: 0,
+          stopped_reason: 'answered',
+          timing: { total_ms: ms, provider_ms: 0, tool_ms: ms, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 1, hops: 0 },
+        };
+      }
+    }
+    /**
+     * ⭐ FAST PATH 3 — AN EXPLICIT RUN IS RUN, THEN INTERPRETED ONCE (RC #63 5803960423 /
+     * 5803995225). Measured in Paul's staging test: an explicit analysis took ~18 s, 3
+     * provider calls and 2 tool hops — the Agent decided to call the analysis the user had
+     * just asked for. The Run control is a TYPED chip (`action_type: 'run_analysis'`), so
+     * the SAME `run_analysis` capability runs (deterministic PLoT/ISL, no model), and ONE
+     * model call interprets its result with `tool_choice: 'none'` — it can explain, never
+     * act. A refused run is explained by that same one call. The pair is kept in history
+     * so the Agent's next turn knows the run happened.
+     */
+    if (result === undefined && approvedProposal === undefined && typedRunOf(body)) {
+      const fastStartedAt = Date.now();
+      const ran = await dispatchTool('run_analysis', JSON.stringify({ reason: 'the user pressed Run' }),
+        { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }, capabilities, mode);
+      /**
+       * ⛔ THE INTERPRETER IS GIVEN THE CLAIM PERMISSIONS, NOT LEFT TO INFER THEM. v0.2 says
+       * "use only supplied … currentness and claim permissions", and the run's own tool result
+       * carries no `analysis_state`, so `leader_claim` (and a withheld reason) never reached the
+       * call. The canonical state is read back from the persisted graph after the run — the
+       * SAME reader the response's final readback uses — and handed over beside the run.
+       */
+      let canonicalAfterRun: { analysis_state?: unknown; analysis_ready?: unknown } = {};
+      try {
+        const st = await readBackState(dispatch, scenarioId);
+        canonicalAfterRun = { ...(st.analysisState !== undefined ? { analysis_state: st.analysisState } : {}), ...(st.analysisReady !== undefined ? { analysis_ready: st.analysisReady } : {}) };
+      } catch { canonicalAfterRun = {}; }
+      const runForInterpreter = { ...ran, canonical_state: canonicalAfterRun };
+      const callId = `fast_run_${req.id}`.replace(/[^A-Za-z0-9_-]/g, '_');
+      const priorAndRun = [
+        ...(history ?? []),
+        { role: 'user', content: [{ type: 'input_text', text: message }] },
+        { type: 'function_call', name: 'run_analysis', call_id: callId, arguments: JSON.stringify({ reason: 'the user pressed Run' }) },
+        { type: 'function_call_output', call_id: callId, output: JSON.stringify(runForInterpreter) },
+      ];
+      /**
+       * ⛔ THE RUN IS NEVER HANDED TO THE AGENT AFTER IT HAS HAPPENED (independent review of
+       * #1786, 5805279370). A failed or empty interpretation used to fall through to the
+       * ordinary tool-enabled turn with the ORIGINAL message and history — dropping the run
+       * it had just made, so the Agent could run the analysis a SECOND time, or act. The run
+       * stands, and only its explanation is missing: the user is told exactly that, from
+       * the run's own result, and nothing else is called.
+       */
+      const providerStartedAt = Date.now();
+      let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
+      try {
+        const resp = await callModel({
+          instructions: `${AGENT_INSTRUCTIONS}\n\n${INTERPRETER_V02_BANKED}`,
+          input: priorAndRun,
+          tools: toolsFor(mode),
+          max_output_tokens: budget.max_output_tokens,
+          tool_choice: 'none',
+        } as never);
+        const out = (resp.output ?? []) as { type?: string; content?: { type?: string; text?: string }[] }[];
+        const answer = out.filter((o) => o.type === 'message').flatMap((o) => o.content ?? [])
+          .filter((c) => c.type === 'output_text').map((c) => c.text ?? '').join('');
+        // ⛔ THE REASONING ITEM TRAVELS WITH ITS MESSAGE (served `f828a61`, witness c9: every turn after a
+        // Run was refused "Item 'msg_…' of type 'message' was provided without its required 'reasoning'
+        // item", HTTP 502). Kept in output order, exactly as the Agent loop keeps its whole output.
+        if (answer.trim().length > 0) interpreted = { answer, messages: out.filter((o) => o.type === 'reasoning' || o.type === 'message') as Record<string, unknown>[] };
+        else log.warn({ scenario_id: scenarioId }, 'agent-lane: fast-path interpretation was empty — answering from the run itself');
+      } catch (err) {
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: fast-path interpretation failed — answering from the run itself');
+      }
+      fastPath = 'run';
+      const ms = Date.now() - fastStartedAt;
+      const providerMs = Math.min(Date.now() - providerStartedAt, ms);
+      const text = interpreted?.answer ?? interpretationUnavailableText(ran);
+      result = {
+        assistant_text: text,
+        items: [...priorAndRun, ...(interpreted?.messages ?? [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }])],
+        tool_calls: [{ name: 'run_analysis', ok: ran.ok === true, mutated: false, ...(typeof ran.refusal === 'string' ? { refusal: ran.refusal } : {}) }],
+        tool_results: [ran],
+        mutated: false,
+        hops: 1,
+        stopped_reason: 'answered',
+        timing: { total_ms: ms, provider_ms: providerMs, tool_ms: Math.max(0, ms - providerMs), overhead_ms: 0, tool_provider_ms: 0, provider_calls: 1, tool_calls: 1, hops: 1 },
+      };
+    }
+    if (result === undefined) try {
       result = await runAgentTurn(
         {
           ctx: { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id },
@@ -902,19 +1234,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * status line is composed from the authoritative results; an unsupported
      * write claim is removed when nothing landed. See `write-outcome.ts`.
      */
-    const narration = narrateWriteOutcome(text, result.tool_calls, result.tool_results);
-    const composed = composeDirectAnswerResponse({
-      // ⛔ A proposal id is a binding for authorise_change, never text a user reads or
-      // types (display-ids.ts). Applied here, before the answer row is written, so a
-      // replay returns exactly what the user first saw.
-      assistant_text: withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, owed), narration.status)),
-      stage: 'frame',
-      answerKind: 'substantive',
-      // One click approves the ONE proposal just offered — the same words as typing "yes".
-      suggested_actions: approvalChipsFor(result.tool_calls),
-    });
-    const finalised = finaliseV5Response(composed, { scenarioId });
-
     /**
      * The minimum the canvas needs to notice the model moved.
      *
@@ -926,9 +1245,34 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * nothing errors.
      *
      * Read back from the persisted graph, not from what a tool returned: the
-     * hash the client caches must be the hash the product would serve it.
+     * hash the client caches must be the hash the product would serve it. Read
+     * BEFORE the reply is composed, because the Run offer below keys on the
+     * readiness this same response carries.
      */
     const { graphHash, analysisReady, draftGraph, analysisState, analysisResult } = await readBackState(dispatch, scenarioId);
+    // Offered only after a change, only when that change was not already analysed this turn,
+    // and only when the canonical readiness in THIS response admits a run.
+    const offerRun = result.mutated
+      && !result.tool_calls.some((c) => c.name === 'run_analysis')
+      && admitsRunOffer(analysisReady);
+
+    const offeredNow: OfferedAction[] = [...approvalChipsFor(result.tool_calls), ...(offerRun ? [RUN_OFFER_CHIP] : [])];
+    if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
+
+    const narration = narrateWriteOutcome(text, result.tool_calls, result.tool_results);
+    const composed = composeDirectAnswerResponse({
+      // ⛔ A proposal id is a binding for authorise_change, never text a user reads or
+      // types (display-ids.ts). Applied here, before the answer row is written, so a
+      // replay returns exactly what the user first saw.
+      // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
+      assistant_text: withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, owed),
+        [narration.status, notAdoptedLine(result.tool_calls, result.tool_results)].filter((x): x is string => x !== null && x !== '').join(' ') || null)),
+      stage: 'frame',
+      answerKind: 'substantive',
+      // One click approves the ONE proposal just offered — the same words as typing "yes".
+      suggested_actions: offeredNow,
+    });
+    const finalised = finaliseV5Response(composed, { scenarioId });
 
     const existingBlocks = Array.isArray((finalised as { blocks?: unknown[] }).blocks)
       ? (finalised as { blocks: unknown[] }).blocks
@@ -960,11 +1304,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           handler_id: null,
           request_hash: requestHash,
           response_emitted: true,
-          llm_calls_used: result.hops + 1,
+          llm_calls_used: fastPath === 'approve' ? 0 : fastPath === 'run' ? 1 : result.hops + 1,
           duration_ms: Date.now() - startedAt,
           handler_facts: [],
           userMessage: message,
           assistantMessage: String((finalised as { assistant_text?: unknown }).assistant_text ?? text),
+          // The Run offer, durably, with THIS answer row — so a replay after a restart can re-offer it.
+          ...(offerRun
+            ? { pending_actions: derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: new Date().toISOString(), ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) }
+            : {}),
           },
         });
         if (outcome.priorTurnConflict === true) {
@@ -1017,6 +1365,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        */
       _diagnostic_trace: {
         exit_path: 'agent_lane_v1',
+        ...(fastPath !== undefined ? { fast_path: fastPath } : {}),
         agent_mode: mode,
         hops: result.hops,
         stopped_reason: result.stopped_reason,
@@ -1031,6 +1380,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         hops: result.hops,
         stopped_reason: result.stopped_reason,
         ...(turnId !== undefined ? { turn_id: turnId, durability } : {}),
+        /**
+         * ⭐ WHICH VERSION THIS TURN PRODUCED, so a surface can reconcile what it
+         * is showing against what was actually saved. `mutated: true` said the
+         * model changed and never said what it became.
+         *
+         * Read back from the tools that performed the writes — `tool_results`
+         * already carries the full results — so nothing here is minted, and an
+         * empty list is reported honestly rather than filled in.
+         */
+        receipts: collectTurnReceipts(result.tool_results),
       },
       /**
        * ⭐ EVERY GENERATIVE ATTEMPT THIS TURN MADE, off the provider policy's ledger
@@ -1039,6 +1398,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * failure even though it was `refused_before_network`.
        */
       _provider_calls: recordedProviderCalls(),
+        ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
     });
   };
   app.post('/agent/v1/turn', (req: FastifyRequest, reply: FastifyReply) =>

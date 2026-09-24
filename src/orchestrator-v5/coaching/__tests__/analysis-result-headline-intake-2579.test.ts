@@ -29,7 +29,6 @@ import { buildIntakeOptionDisclosure } from '../intake-option-disclosure.js';
 import {
   applyIntakeToLeaderPermission,
   deriveIntakeOptionReconciliation,
-  readGraphOptionLabels,
 } from '../../../orchestrator/context/intake-option-reconciliation.js';
 
 /** Verbatim from the capture's driver (`expert-pass.mjs:5`). */
@@ -44,12 +43,13 @@ const BAKERY_BRIEF =
  * run_analysis handler forwards. Labels read out of the session's own wire
  * capture (`run3/wire.json`), not invented here.
  */
+// Synthetic source bindings augment the captured labels for definitive controls.
 const FOUR_OPTION_GRAPH = {
   options: [
-    { id: 'opt_oven', option_id: 'opt_oven', label: 'Second Production Oven Line' },
-    { id: 'opt_pack', option_id: 'opt_pack', label: 'Automated Packing Cell' },
-    { id: 'opt_vans', option_id: 'opt_vans', label: 'Refrigerated Delivery Vans' },
-    { id: 'opt_retro', option_id: 'opt_retro', label: 'Energy-Efficiency Retrofit' },
+    { id: 'opt_oven', option_id: 'opt_oven', label: 'Second Production Oven Line', source_quote: 'a second production oven line' },
+    { id: 'opt_pack', option_id: 'opt_pack', label: 'Automated Packing Cell', source_quote: 'an automated packing cell' },
+    { id: 'opt_vans', option_id: 'opt_vans', label: 'Refrigerated Delivery Vans', source_quote: 'refrigerated delivery vans' },
+    { id: 'opt_retro', option_id: 'opt_retro', label: 'Energy-Efficiency Retrofit', source_quote: 'an energy-efficiency retrofit' },
   ],
 };
 
@@ -57,7 +57,7 @@ const FOUR_OPTION_GRAPH = {
 const FIVE_OPTION_GRAPH = {
   options: [
     ...FOUR_OPTION_GRAPH.options,
-    { id: 'opt_conc', option_id: 'opt_conc', label: 'New Retail Concession' },
+    { id: 'opt_conc', option_id: 'opt_conc', label: 'New Retail Concession', source_quote: 'a new retail concession' },
   ],
 };
 
@@ -72,7 +72,7 @@ const BAKERY_ENRICHMENT: Record<string, unknown> = {
 };
 
 function headlineInputFor(graph: unknown, brief: string | undefined) {
-  const intake = deriveIntakeOptionReconciliation(brief, readGraphOptionLabels(graph));
+  const intake = deriveIntakeOptionReconciliation(brief, graph);
   return {
     intake,
     input: {
@@ -80,6 +80,7 @@ function headlineInputFor(graph: unknown, brief: string | undefined) {
       leading_option_id: 'opt_retro',
       status_kind: 'ok' as const,
       intake_options_missing: intake.state === 'options_missing',
+      intake_identity_unverified: intake.state === 'identity_unverified',
     },
   };
 }
@@ -169,4 +170,11 @@ describe('2.579 — the user is told WHICH option and WHAT to do, at the wire', 
     // And the summary must not itself name a leader on a withheld turn.
     expect(summary).not.toContain('Energy-Efficiency Retrofit');
   });
+});
+
+it('withholds the headline for unknown identity while retaining a distinct cause', () => {
+  const { intake, input } = headlineInputFor({ options: FOUR_OPTION_GRAPH.options.map(({ source_quote: _quote, ...option }) => option) }, BAKERY_BRIEF);
+  expect(intake.state).toBe('identity_unverified');
+  expect(buildAnalysisResultHeadline(input)).toBeNull();
+  expect(describeAnalysisHeadline(input).reason).toBe('intake_identity_unverified');
 });

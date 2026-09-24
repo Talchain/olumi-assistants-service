@@ -20,6 +20,8 @@ const caps = (over: Partial<AgentCapabilities> = {}): AgentCapabilities => ({
   // Same reason as buildModelFromBrief above: every member the interface
   // declares must be present, or the stub is not standing in for anything.
   proposeAssumptions: async () => ({ ok: true, mutated: false, proposal_id: 'prop_a' }),
+  // #1788's add-option capability — a REQUIRED member; without it the typed mock no longer satisfies AgentCapabilities.
+  proposeNewOption: async () => ({ ok: true, mutated: false, proposal_id: 'prop_n' }),
   proposeOptionInterventions: async () => ({ ok: true, mutated: false, proposal_id: 'prop_i' }),
   proposeStartingPoint: async () => ({ ok: true, mutated: false, proposal_id: 'prop_s' }),
   ...over,
