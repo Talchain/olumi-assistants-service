@@ -90,7 +90,8 @@ import { planNewOption, newOptionFollowUp } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
-import { structuralFacts } from '../structural-facts.js';
+import { baselineLabelledOptionId, structuralFacts } from '../structural-facts.js';
+import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, findConstructionVersion, type CallStructuredModel } from './build-model.js';
@@ -136,13 +137,46 @@ interface GraphRead {
     interventions?: Record<string, unknown>;
     changes?: unknown;
   }[];
-  readonly edges: { from: string; to: string }[];
+  /** `origin` is read only to recognise a repair-authored edge (`isRepairAuthoredOptionFactorEdge`). */
+  readonly edges: { from: string; to: string; origin?: unknown }[];
   readonly analysis_state: unknown;
   /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
   readonly raw: Record<string, unknown>;
 }
 
 const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$/, '').trim();
+
+/**
+ * ⛔ A HELD STATUS QUO GETS NO LEVELS (Paul's ruling; admission, MG #1838).
+ *
+ * An option that carries on as now is connected to the factors the other options
+ * act on by repair edges with NO level: each factor stays at its starting value.
+ * Readiness already excludes those edges from its level mapping. A level written
+ * there is harmful, not harmless (RC): a later correction to the factor's starting
+ * value would leave the status quo at the OLD figure, so "Maintain current
+ * staffing" would silently model cutting staff.
+ *
+ * Returns `${optionId}::${factorId}` for every pair whose option→factor edges are
+ * ALL repair-authored — the same test readiness applies (a pair with any ordinary
+ * edge is mapped), through the ONE authority, never a copy of it.
+ */
+function heldStatusQuoPairs(g: Pick<GraphRead, 'nodes' | 'edges'>): ReadonlySet<string> {
+  // The LABEL test is per option (`baselineLabelledOptionId`: exactly one option reads
+  // as carrying on as now — review of #1849, blocker 2). The REPAIR test is per PAIR,
+  // the granularity readiness uses (`analysis-ready.ts:780` skips each repair edge on
+  // its own): a status quo the user has since linked to one more factor keeps its
+  // other pairs held (review of #1849 at 1a32b120 — all-or-nothing re-opened RC's harm).
+  const id = baselineLabelledOptionId(g.nodes as never);
+  if (id === null) return new Set();
+  const kinds = new Map(g.nodes.map((n) => [n.id, n.kind] as const));
+  const repaired = new Set<string>();
+  const ordinary = new Set<string>();
+  for (const e of g.edges) {
+    if (e.from !== id || kinds.get(e.to) !== 'factor') continue;
+    (isRepairAuthoredOptionFactorEdge(e, kinds) ? repaired : ordinary).add(`${e.from}::${e.to}`);
+  }
+  return new Set([...repaired].filter((k) => !ordinary.has(k)));
+}
 
 /**
  * ⭐ ONE PROJECTION of a persisted node into what the Agent is shown — used by
@@ -558,11 +592,14 @@ export function createAgentCapabilities(
   const missingPairs = async (ctx: AgentToolContext, levelPaths: ReadonlySet<string>): Promise<{ option: string; factor: string }[] | null> => {
     const g = await readGraph(ctx.scenario_id);
     if (g === null) return null;
+    const held = heldStatusQuoPairs(g);
     const missing: { option: string; factor: string }[] = [];
     for (const o of g.nodes.filter((n) => n.kind === 'option')) {
       const has = (o.interventions ?? {}) as Record<string, unknown>;
       for (const f of linkedFactorsOf(g as never, o.id)) {
         if (has[f.id] !== undefined || levelPaths.has(`${o.id}::${f.id}`)) continue;
+        // A held status quo is complete with no level (`heldStatusQuoPairs`).
+        if (held.has(`${o.id}::${f.id}`)) continue;
         missing.push({ option: o.label, factor: String(f.label ?? f.id) });
       }
     }
@@ -976,6 +1013,7 @@ export function createAgentCapabilities(
       }
       const byLabel = (l: string, kind: string) =>
         g.nodes.find((n) => n.kind === kind && (norm(n.label) === norm(l) || norm(n.description) === norm(l)));
+      const held = heldStatusQuoPairs(g);
 
       const unresolved: string[] = [];
       const unframed: { factor: string; detail: string }[] = [];
@@ -1029,6 +1067,20 @@ export function createAgentCapabilities(
           notLinked.push({
             option: option.label, factor: factor.label,
             acts_on: linked.map((f) => String(f.label ?? f.id)),
+          });
+          continue;
+        }
+        // ⛔ A held status quo takes no level the AGENT supplies (`heldStatusQuoPairs`):
+        // not accepted, never an operation. ⭐ The USER's own correction is the
+        // exception (independent review of #1849, 5820560331): the Agent is told to
+        // say the user can correct the held reading, so what they say must be
+        // recordable. `user_stated` is opt-in per level, on the same terms as
+        // `revise` — only when the user said it and gave the level — and it still
+        // reaches the user as a proposal to approve, never a write.
+        if (held.has(`${option.id}::${factor.id}`) && i?.user_stated !== true) {
+          notAccepted.push({
+            option: option.label, factor: factor.label, value: i?.value,
+            reason: `${option.label} is held at its starting values — carrying on as now sets no level, so none is recorded for ${factor.label}. Leave it out, unless the user themselves said carrying on changes ${factor.label} and gave the level: then send it with user_stated: true.`,
           });
           continue;
         }

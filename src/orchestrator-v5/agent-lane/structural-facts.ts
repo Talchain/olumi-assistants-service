@@ -13,6 +13,9 @@
  * may repeat to the user as facts.
  */
 
+import { isRepairAuthoredOptionFactorEdge } from '../../graph/repair-authored-edge.js';
+import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
+
 export interface GraphNodeLike {
   readonly id: string;
   readonly kind?: string;
@@ -25,6 +28,8 @@ export interface GraphNodeLike {
 export interface GraphEdgeLike {
   readonly from: string;
   readonly to: string;
+  /** Read only to recognise a repair-authored edge (`isRepairAuthoredOptionFactorEdge`). */
+  readonly origin?: unknown;
 }
 
 export interface StructuralFacts {
@@ -63,6 +68,13 @@ export interface StructuralFacts {
    * moment the model is described, rather than at the end of the journey.
    */
   readonly options_that_change_nothing: readonly string[];
+  /**
+   * ⭐ A HELD STATUS QUO — carrying on as now, each factor at its starting value
+   * (Paul's ruling; admission, MG #1838). An option that sets nothing, whose
+   * option→factor edges (at least one) are ALL repair-authored. It is complete with
+   * no level, so it is NOT in `options_that_change_nothing` and is never asked for one.
+   */
+  readonly status_quo_held: readonly string[];
   readonly goal_label: string | null;
 }
 
@@ -79,6 +91,48 @@ function reachable(adjacency: Map<string, string[]>, from: string): Set<string> 
   return seen;
 }
 
+
+/**
+ * The ONE option whose label reads as carrying on as now (`labelMatchesBaseline`,
+ * readiness's idiom list), or null when none or two do — ambiguity is not
+ * guessed. The LABEL half of "held", shared by `heldStatusQuoOptionId` (the
+ * option-level view `structuralFacts` reports) and the level proposer's
+ * PAIR-level test (`heldStatusQuoPairs` in `agent-capabilities.ts`).
+ */
+export function baselineLabelledOptionId(
+  nodes: readonly { id: string; kind?: string; label?: string }[],
+): string | null {
+  const baselines = nodes.filter((n) => n.kind === 'option' && labelMatchesBaseline(n.label ?? ''));
+  return baselines.length === 1 ? baselines[0]!.id : null;
+}
+
+/**
+ * ⛔ THE ONE TEST FOR "THIS OPTION IS A HELD STATUS QUO" on the Agent lane —
+ * read by `structuralFacts` and by the level proposer (`agent-capabilities.ts`).
+ *
+ * The same two conditions #1838's `wireInertStatusQuo` mints under, so the
+ * reader recognises exactly what the constructor wrote:
+ *   1. EXACTLY ONE option's label reads as carrying on as now
+ *      (`labelMatchesBaseline`, readiness's own idiom list). None or two → none
+ *      is held: ambiguity is not resolved by guessing.
+ *   2. That option's option→factor edges are ALL repair-authored
+ *      (`isRepairAuthoredOptionFactorEdge`), and there is at least one.
+ *
+ * ⚠ The repair origin ALONE is not enough (independent review of #1849,
+ * 5820560331): the conventional `fixStatusQuoConnectivity` stamps
+ * `origin: 'repair'` on EVERY disconnected option, whatever its label, so
+ * "Use contractors" would have been called a status quo holding today's values.
+ */
+export function heldStatusQuoOptionId(
+  nodes: readonly { id: string; kind?: string; label?: string }[],
+  edges: readonly GraphEdgeLike[],
+): string | null {
+  const id = baselineLabelledOptionId(nodes);
+  if (id === null) return null;
+  const kinds = new Map(nodes.flatMap((n) => (typeof n.kind === 'string' ? [[n.id, n.kind] as const] : [])));
+  const out = edges.filter((e) => e.from === id && kinds.get(e.to) === 'factor');
+  return out.length > 0 && out.every((e) => isRepairAuthoredOptionFactorEdge(e, kinds)) ? id : null;
+}
 export function structuralFacts(
   nodes: readonly GraphNodeLike[],
   edges: readonly GraphEdgeLike[],
@@ -92,6 +146,16 @@ export function structuralFacts(
   }
   const labelOf = (id: string): string => nodes.find((n) => n.id === id)?.label ?? id;
   const goal = nodes.find((n) => n.kind === 'goal') ?? null;
+  const heldId = heldStatusQuoOptionId(nodes, edges);
+  const isHeld = (optionId: string): boolean => optionId === heldId;
+  const setsNothing = nodes
+    .filter((n) => n.kind === 'option')
+    .filter((n) => {
+      const iv = n.interventions;
+      const hasInterventions = iv !== null && iv !== undefined && Object.keys(iv).length > 0;
+      const hasChanges = Array.isArray(n.changes) && n.changes.length > 0;
+      return !hasInterventions && !hasChanges;
+    });
 
   const reaching: string[] = [];
   const notReaching: string[] = [];
@@ -113,15 +177,8 @@ export function structuralFacts(
     factors_without_a_value: nodes.filter(
       (n) => n.kind === 'factor' && typeof n.observed_state?.value !== 'number',
     ).length,
-    options_that_change_nothing: nodes
-      .filter((n) => n.kind === 'option')
-      .filter((n) => {
-        const iv = n.interventions;
-        const hasInterventions = iv !== null && iv !== undefined && Object.keys(iv).length > 0;
-        const hasChanges = Array.isArray(n.changes) && n.changes.length > 0;
-        return !hasInterventions && !hasChanges;
-      })
-      .map((n) => labelOf(n.id)),
+    options_that_change_nothing: setsNothing.filter((n) => !isHeld(n.id)).map((n) => labelOf(n.id)),
+    status_quo_held: setsNothing.filter((n) => isHeld(n.id)).map((n) => labelOf(n.id)),
     goal_label: goal?.label ?? null,
   };
 }
