@@ -25,6 +25,20 @@ interface FixtureInput {
       precomputed_delta: { option_deltas: Record<string, number>; ordering_changed: boolean; material_change: boolean };
     };
     presentation: { result_card: string; contents?: string };
+    write_history?: { sequence: number; outcome?: string; receipt?: { after: number } }[];
+    pre_conflict_snapshot?: {
+      observed_at_sequence: number;
+      factor: { raw_value: number; range: null };
+      analysis_ready: { may_run: boolean };
+    };
+    post_conflict_readback?: {
+      status: string;
+      authoritative?: boolean;
+      observed_at_sequence?: number;
+      factor?: { raw_value: number; range: { min: number; max: number } };
+      analysis_ready?: { may_run: boolean };
+      analysis_state?: { run_state: { kind: string } };
+    };
   };
 }
 interface FixtureCase {
@@ -54,7 +68,7 @@ describe('Interpreter refinement contrasts remain discriminating', () => {
       expect(item.input).not.toHaveProperty('expected');
       expect(item.input).not.toHaveProperty('soft_max_words');
     }
-    expect([...pairs.values()]).toEqual(Array(7).fill(2));
+    expect([...pairs.values()]).toEqual(Array(8).fill(2));
   });
 
   it('changes the requested detail, not the analysis, in the concision pair', () => {
@@ -128,5 +142,28 @@ describe('Interpreter refinement contrasts remain discriminating', () => {
     const { presentation: _unknownPresentation, ...unknownContext } = unknown.context;
     const { presentation: _visiblePresentation, ...visibleContext } = visible.context;
     expect(unknownContext).toEqual(visibleContext);
+  });
+
+  it('distinguishes historical write success from current state after a real competing change', () => {
+    const unknown = find('PC15_saved_then_conflict_unknown').input;
+    const refreshed = find('PC16_saved_then_conflict_refreshed').input;
+    expect(unknown.run_result).toEqual(refreshed.run_result);
+    expect(unknown.context.write_history).toEqual(refreshed.context.write_history);
+    expect(unknown.context.write_history).toMatchObject([
+      { sequence: 2, outcome: 'saved', receipt: { after: 50 } },
+      { sequence: 3 },
+      { sequence: 4, outcome: 'refused' },
+    ]);
+    expect(unknown.context.post_conflict_readback).toEqual({ status: 'unavailable' });
+    expect(refreshed.context.pre_conflict_snapshot).toEqual(unknown.context.pre_conflict_snapshot);
+    expect(refreshed.context.pre_conflict_snapshot).toMatchObject({
+      observed_at_sequence: 3, factor: { raw_value: 50, range: null }, analysis_ready: { may_run: false },
+    });
+    const readback = refreshed.context.post_conflict_readback!;
+    expect(readback.authoritative).toBe(true);
+    expect(readback.observed_at_sequence).toBeGreaterThan(4);
+    expect(readback.factor).toMatchObject({ raw_value: 40, range: { min: 0, max: 100 } });
+    expect(readback.analysis_ready?.may_run).toBe(true);
+    expect(readback.analysis_state?.run_state.kind).toBe('never_run');
   });
 });

@@ -10,7 +10,8 @@
     ],
     "observed_initial_answer_words": 321,
     "observed_analysis_answer_words": 282,
-    "scope_limit": "The Interpreter profile affects post-analysis explanation, not first-brief construction or runtime action availability."
+    "scope_limit": "The Interpreter profile affects post-analysis explanation, not first-brief construction or runtime action availability.",
+    "additional_regression_source": "Independent review of CEE #1743 at a6dc18bea0b398ced01a32f9ea2feb168ecef986; issuecomment-5806305332. These are authored temporal controls, not executed runtime race tests."
   },
   "cases": [
     {
@@ -1082,6 +1083,245 @@
         "avoid": [
           "Repeating all card content by default.",
           "Dropping the incomplete-assessment qualifier."
+        ],
+        "soft_max_words": 90
+      }
+    },
+    {
+      "id": "PC15_saved_then_conflict_unknown",
+      "contrast_group": "post_conflict_readback",
+      "input": {
+        "question": "Did my change save, and what should I do next?",
+        "run_result": {
+          "ok": true,
+          "ran": false,
+          "status": "blocked",
+          "result": null,
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "never_run"
+              },
+              "leader_claim": {
+                "permitted": false,
+                "withheld_reason": "not_run"
+              }
+            }
+          },
+          "what_is_missing": "The earlier analysis attempt was blocked by a missing factor range.",
+          "blockers": [
+            "missing_factor_range"
+          ]
+        },
+        "context": {
+          "constraints": {
+            "requested": false,
+            "items": []
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 70,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [],
+          "presentation": {
+            "result_card": "unknown"
+          },
+          "transport_status": 200,
+          "analysis_snapshot_sequence": 1,
+          "write_history": [
+            {
+              "sequence": 2,
+              "operation": "set_factor_value",
+              "outcome": "saved",
+              "receipt": {
+                "revision": "r8",
+                "factor": "Feature value perception",
+                "before": 70,
+                "after": 50,
+                "unit": "out of 100"
+              }
+            },
+            {
+              "sequence": 3,
+              "operation": "read_canonical_state",
+              "revision": "r8"
+            },
+            {
+              "sequence": 4,
+              "operation": "set_factor_range",
+              "outcome": "refused",
+              "error": "GRAPH_STALE",
+              "applied": false
+            }
+          ],
+          "pre_conflict_snapshot": {
+            "observed_at_sequence": 3,
+            "revision": "r8",
+            "factor": {
+              "label": "Feature value perception",
+              "raw_value": 50,
+              "unit": "out of 100",
+              "range": null
+            },
+            "analysis_ready": {
+              "may_run": false,
+              "blockers": [
+                "missing_factor_range"
+              ]
+            }
+          },
+          "post_conflict_readback": {
+            "status": "unavailable"
+          }
+        }
+      },
+      "expected": {
+        "must": [
+          "Distinguish the earlier successful save of 50 from the later refused range write.",
+          "Say the current value, range and readiness are unknown without post-conflict readback.",
+          "Treat the missing-range and blocked-analysis snapshot as historical."
+        ],
+        "avoid": [
+          "Nothing was saved, rollback, or the successful value write was undone.",
+          "The approved value is unchanged, only the range is missing, or analysis is still blocked.",
+          "Advice to skip value entry, supply a range or rerun based on the stale snapshot."
+        ],
+        "soft_max_words": 90
+      }
+    },
+    {
+      "id": "PC16_saved_then_conflict_refreshed",
+      "contrast_group": "post_conflict_readback",
+      "input": {
+        "question": "Did my change save, and what should I do next?",
+        "run_result": {
+          "ok": true,
+          "ran": false,
+          "status": "blocked",
+          "result": null,
+          "canonical_state": {
+            "analysis_state": {
+              "run_state": {
+                "kind": "never_run"
+              },
+              "leader_claim": {
+                "permitted": false,
+                "withheld_reason": "not_run"
+              }
+            }
+          },
+          "what_is_missing": "The earlier analysis attempt was blocked by a missing factor range.",
+          "blockers": [
+            "missing_factor_range"
+          ]
+        },
+        "context": {
+          "constraints": {
+            "requested": false,
+            "items": []
+          },
+          "assumptions": [
+            {
+              "factor": "Feature value perception",
+              "raw_value": 70,
+              "unit": "out of 100",
+              "origin": "ai_proposed",
+              "adoption": "user_approved",
+              "evidence_status": "estimate"
+            }
+          ],
+          "available_actions": [],
+          "presentation": {
+            "result_card": "unknown"
+          },
+          "transport_status": 200,
+          "analysis_snapshot_sequence": 1,
+          "write_history": [
+            {
+              "sequence": 2,
+              "operation": "set_factor_value",
+              "outcome": "saved",
+              "receipt": {
+                "revision": "r8",
+                "factor": "Feature value perception",
+                "before": 70,
+                "after": 50,
+                "unit": "out of 100"
+              }
+            },
+            {
+              "sequence": 3,
+              "operation": "read_canonical_state",
+              "revision": "r8"
+            },
+            {
+              "sequence": 4,
+              "operation": "set_factor_range",
+              "outcome": "refused",
+              "error": "GRAPH_STALE",
+              "applied": false
+            }
+          ],
+          "pre_conflict_snapshot": {
+            "observed_at_sequence": 3,
+            "revision": "r8",
+            "factor": {
+              "label": "Feature value perception",
+              "raw_value": 50,
+              "unit": "out of 100",
+              "range": null
+            },
+            "analysis_ready": {
+              "may_run": false,
+              "blockers": [
+                "missing_factor_range"
+              ]
+            }
+          },
+          "post_conflict_readback": {
+            "status": "available",
+            "authoritative": true,
+            "observed_at_sequence": 5,
+            "revision": "r9",
+            "factor": {
+              "label": "Feature value perception",
+              "raw_value": 40,
+              "unit": "out of 100",
+              "range": {
+                "min": 0,
+                "max": 100,
+                "unit": "out of 100"
+              }
+            },
+            "analysis_ready": {
+              "may_run": true,
+              "blockers": []
+            },
+            "analysis_state": {
+              "run_state": {
+                "kind": "never_run"
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "must": [
+          "Acknowledge the earlier save of 50 and the refusal of this operation's range write.",
+          "Use the later authoritative readback: current value 40, range 0–100 already present and readiness allows analysis, though no analysis has run.",
+          "Make the difference between the intended saved value and current value understandable."
+        ],
+        "avoid": [
+          "Current state remains unknown despite the supplied authoritative reread.",
+          "The old value remains unchanged, a range still needs adding, or analysis is still blocked.",
+          "A claim that this refused range operation attached the range, that the historical save never happened, or that readiness means analysis completed.",
+          "Unsupported control or mutation promises."
         ],
         "soft_max_words": 90
       }
