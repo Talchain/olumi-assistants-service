@@ -97,9 +97,17 @@ import { buildModelFromBrief, findConstructionVersion, type CallStructuredModel 
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
+import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 
 /** Marks a compound starting point, so a newer one can replace it before approval. */
 const STARTING_POINT_BASIS = 'a starting point \u2014 values and what each option sets \u2014 for the user to adopt or correct in one approval';
+
+/**
+ * The `observed_state.source` an adopted Olumi assumption is stored with. Typed
+ * against the shared contract's vocabulary, so it cannot drift to a literal the
+ * product does not know. See `applyCompound` for why it exists.
+ */
+const ADOPTED_ASSUMPTION_SOURCE: KnownObservedStateSourceLiteral = 'user_assumption';
 
 /** One internal dispatch, so every path is the product's own. */
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
@@ -414,6 +422,32 @@ export function createAgentCapabilities(
       framed.push({ factor: n.label, value: raw, range });
       return { ...n, observed_state: { ...os, value: raw / range, raw_value: raw, cap: range, declared_scale: 'unit_interval' } };
     });
+    /**
+     * ⛔ AN ADOPTED ASSUMPTION IS STORED AS AN ASSUMPTION, NOT AS THE USER'S OWN
+     * FIGURE (panel #63 5811761386 item 6). `applyFactorValueEdit` stamps
+     * `USER_EDIT_SOURCE` (`user_override`) because the inspector it was built for
+     * is where the user TYPES the number. Registered as-is, one "yes" to Olumi's
+     * proposed values stored them as the user's own: "User edited" in the UI,
+     * `user_stated` to the readiness authority — and a single such parameter
+     * licenses a comparative-leader claim (`analysis-admission.ts`).
+     *
+     * `user_assumption` is the contract's own literal for it (0.55
+     * `OBSERVED_STATE_SOURCE_LITERALS`; CEE's `ObservedStateV3` accepts it; the UI
+     * labels it "Your assumption"; `obligation-provenance.ts` classifies it
+     * `user_ratified` — a human act, not authorship). Nothing is invented and no
+     * measurement is claimed. This path can stamp it because THIS capability
+     * composes the registered bytes. A USER-authored proposal keeps the writer's
+     * stamp. ⚠ The single-kind `set_factor_value` path below cannot: it writes
+     * through `factor_value_edit`, which has no field to carry this.
+     */
+    if (parent.provenance.authored_by === 'model_proposed') {
+      workingNodes = workingNodes.map((n) => {
+        if (!valueOps.some((o) => o.path === n.id)) return n;
+        const os = n.observed_state;
+        if (os === undefined || typeof os.value !== 'number') return n;
+        return { ...n, observed_state: { ...os, source: ADOPTED_ASSUMPTION_SOURCE } };
+      });
+    }
 
     // ONE conditional write for every value (and any range they need).
     const receipts: ReceiptSummary[] = [];
@@ -514,8 +548,11 @@ export function createAgentCapabilities(
       ...(all
         ? {
             not_represented:
-              'These values and levels are the user\u2019s adopted assumptions, not measurements, and the model records no mark ' +
-              'distinguishing the two \u2014 say so when you describe what changed.',
+              parent.provenance.authored_by === 'model_proposed'
+                ? 'These values and levels are the user\u2019s adopted assumptions, not measurements. The values are stored as the ' +
+                  'user\u2019s assumptions; the option levels carry no such mark \u2014 say so when you describe what changed.'
+                : 'These values and levels are the user\u2019s adopted assumptions, not measurements, and the model records no mark ' +
+                  'distinguishing the two \u2014 say so when you describe what changed.',
           }
         : {
             refusal: valuesLanded || levelsRecorded > 0 ? 'partially_applied' : 'not_applied',
@@ -1521,6 +1558,13 @@ export function createAgentCapabilities(
          * and silent about WHAT IT RESTS ON. The
          * basis therefore survives only in the proposal and in what the Agent
          * says, so the result below tells it to say it.
+         *
+         * ⛔ OPEN GAP (panel #63 5811761386 item 6): so an adopted Olumi value
+         * lands here as `user_override` — the user's own figure — where the
+         * compound path above now stores `user_assumption`. The fix belongs at
+         * the writer — a server-set adoption stamp threaded in the way
+         * `appliedProvenance` is for a panel answer — not in a second
+         * caller-side write that would leave the value mislabelled in between.
          */
         const applied: { factor: string; requested: number; recorded: number | null }[] = [];
         const failures: { factor: string; detail: string }[] = [];
