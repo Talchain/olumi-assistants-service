@@ -40,7 +40,10 @@ import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
 import { log } from '../utils/telemetry.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
-import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
+import { finaliseV5Response, type FinaliserContext } from '../orchestrator-v5/response-finaliser.js';
+import { loadPriorFactsWithReadState } from '../orchestrator-v5/build-turn-context.js';
+import { deriveAnalysisFreshness } from '../orchestrator-v5/context/freshness.js';
+import type { SessionStore } from '../orchestrator-v5/session/store.js';
 import { runAgentTurn, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
@@ -57,7 +60,7 @@ import { AMEND_CHIP, approvalChipsFor, typedApprovalOf } from '../orchestrator-v
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
 import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
-import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import { dispatchTool, type AgentCapabilities, type ToolResult } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import type { GraphV3T } from '../schemas/cee-v3.js';
 
@@ -209,6 +212,34 @@ const MUTATION_INSTRUCTION =
 /** Marks a board edit in the Agent's history — defined beside `needsDurableSeed`, which must recognise it. */
 export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.js';
 
+/**
+ * ⛔ (8) A LEADER IS NAMED ONLY WHEN OLUMI PERMITS IT (Panel, #63 5811761386, served b53f0980): the
+ * reply said "…favours adding the £89 Enterprise tier" beside `analysis_state.leader_claim.permitted:
+ * false`, because the instruction said "say which option leads … and how firmly" with no condition. The
+ * permission is Olumi's (`leader_claim`, composed from the run's own persisted verdict), and it reaches
+ * the model on every path that reports an analysis: `canonical_state` on a run result (fast path 3 and
+ * the Agent's own run_analysis call) and `analysis` from get_canonical_state. Absent ⇒ withheld.
+ */
+export const LEADER_CLAIM_INSTRUCTION =
+  'Whether you may say which option leads is Olumi\u2019s decision, not yours: read `leader_claim` in the analysis state '
+  + '(`canonical_state.analysis_state` on a run result, `analysis` from get_canonical_state). Only when `leader_claim.permitted` '
+  + 'is true may you say which option leads in this model and how firmly. When it is false, or you have not been given it, say '
+  + 'plainly that no option can be named as leading yet and why, in plain words from its `withheld_reason`, and do not name, rank '
+  + 'or favour any option \u2014 not directly, not by comparing their figures, and not with words such as \u201cfavours\u201d or \u201cahead\u201d.';
+
+/**
+ * ⛔ (9) APPROVAL SAVES; IT NEVER PROMISES OR STARTS A RUN (Panel, #63 5811761386): the approval ask read
+ * "…and I'll save it and run the comparison", because this list said "After authorise_change … call
+ * run_analysis in the SAME turn" — against fast path 2 (a typed approval makes zero model calls and runs
+ * nothing) and the acceptance rule "no automatic Run on approval". After a change the model can analyse,
+ * the route offers the typed Run analysis chip (`RUN_OFFER_CHIP`); the user decides when to run.
+ */
+export const NO_RUN_ON_APPROVAL_INSTRUCTION =
+  'After authorise_change applies values or option levels, do NOT call run_analysis: approving saves the change and nothing else. '
+  + 'Never say or promise that you will run the analysis or the comparison once the user approves \u2014 not when you ask for approval '
+  + 'and not after it. Say what was saved and, if the model still cannot be compared, exactly what is left and the fastest way to supply '
+  + 'it. When it can be compared, Olumi offers the user a Run analysis control; say they can use it when they want to see what the change does.';
+
 const AGENT_INSTRUCTIONS = [
   'You are Olumi, a strategic reasoning layer. Improve human strategic judgement rather than deciding for the user.',
   'Answer the user’s actual question directly and naturally.',
@@ -266,10 +297,11 @@ const AGENT_INSTRUCTIONS = [
    */
   'When the user asks for ideas or other options, offer three to five the model does not already hold, preferring non-obvious ones, and give each one line on what it would change or which assumption it would test. Say plainly that none has been added to the model, and offer to add any the user picks.',
   /*
-   * ⛔ MEASURED on Paul's 22 Sep session: fourteen values were applied and the
-   * analysis was never run again, so nothing the user could see had moved.
+   * ⚠ This used to say "call run_analysis in the SAME turn" (Paul's 22 Sep session: fourteen values
+   * applied, the analysis never run again, nothing visible moved). The visible-movement gap is now closed
+   * by the typed Run offer after a change, not by an implicit run — see NO_RUN_ON_APPROVAL_INSTRUCTION.
    */
-  'After authorise_change applies values or option levels, call run_analysis in the SAME turn and report what it now says \u2014 or, if it still refuses, exactly what is left and the fastest way to supply it. The user asked for a model they can compare, not for a write.',
+  NO_RUN_ON_APPROVAL_INSTRUCTION,
   'get_canonical_state returns a `structure` block computed from the persisted model: which options reach the goal, which cannot, what is unconnected, and how many FACTORS have no value (only factors can hold one). These are facts, not estimates \u2014 use them, and say them plainly when they explain why an analysis cannot run.',
   'When a tool tells you something was not represented, say so.',
   /*
@@ -320,7 +352,9 @@ const AGENT_INSTRUCTIONS = [
    * the vocabulary itself casts the finding as picking an answer. The useful move is the one the science supports: point at what the
    * ordering is sensitive to, and let the user change it and see how much it matters.
    */
-  'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one; say which option leads in this model and how firmly. Then name the one or two assumptions the ordering is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding.',
+  'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one.',
+  LEADER_CLAIM_INSTRUCTION,
+  'Then name the one or two assumptions the result is most sensitive to, say whether each came from the user or from you, and invite the user to change one and see how much it matters. When the result is fragile or a near tie, say that this uncertainty is itself the finding.',
   'When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each — then authorise_change once they confirm. It adds the option and its links ONLY: say plainly that it cannot be compared until it states what it does to each factor, and offer propose_option_interventions for that. Never invent the direction; if you are not sure which way it pushes a factor, ask.',
   'History entries that begin \u201c(Board edit\u201d are changes the user made directly on the canvas. When the user asks about \u201cmy change\u201d, start from the most recent board edit, and read the current state before explaining what it did.',
   'British English. Concise but substantive.',
@@ -619,6 +653,68 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
   return { graphHash, analysisReady, draftGraph, analysisState, analysisResult };
+}
+
+/**
+ * ⛔ A RUN RESULT CARRIES THE CLAIM PERMISSIONS OF THE STATE IT PRODUCED. The run capability returns the
+ * analysis block and readiness but no `analysis_state`, so `leader_claim` never reached a model reading a
+ * run — on fast path 3 (whose inline read this replaces, unchanged) AND on the Agent's own `run_analysis` call, where
+ * LEADER_CLAIM_INSTRUCTION would otherwise have nothing to read and the pre-run `analysis` from
+ * get_canonical_state could license a leader the new run withholds. ONE helper for both: the canonical
+ * state is read back from the persisted graph after the run, by the SAME reader the response's final
+ * readback uses. A failed readback yields `{}`, which the instruction reads as withheld.
+ */
+async function withPostRunCanonicalState(ran: ToolResult, dispatch: InternalDispatch, scenarioId: string): Promise<ToolResult> {
+  let canonicalAfterRun: { analysis_state?: unknown; analysis_ready?: unknown } = {};
+  try {
+    const st = await readBackState(dispatch, scenarioId);
+    canonicalAfterRun = { ...(st.analysisState !== undefined ? { analysis_state: st.analysisState } : {}), ...(st.analysisReady !== undefined ? { analysis_ready: st.analysisReady } : {}) };
+  } catch { canonicalAfterRun = {}; }
+  return { ...ran, canonical_state: canonicalAfterRun };
+}
+
+/** True when a `run_analysis` call on THIS turn produced a result (`ran`), not merely answered HTTP 200. */
+function completedRunThisTurn(result: AgentTurnResult): boolean {
+  return result.tool_results.some((r, i) => result.tool_calls[i]?.name === 'run_analysis' && (r as { ran?: unknown }).ran === true);
+}
+
+/**
+ * ⭐ (7) A RE-RUN SAYS WHAT CHANGED (Panel, #63 5811761386, served b53f0980). This route finalised with
+ * `{ scenarioId }` only, so `attachRunDelta` always took its `prior_facts_absent` exit and an Agent re-run
+ * never carried `run_delta`, while Conventional threads `priorFacts` (route-v2.ts `sendFinalised200(…,
+ * { …, freshness, priorFacts })`, the executor's own window).
+ *
+ * ⚠ FACTS ALONE ARE NOT ENOUGH, MEASURED: `priorFacts` with no derivation over them makes the finaliser's
+ * run-fact binding `analysis_run_identity_unconfirmed`, and `attachRunDelta` then skips — so the facts
+ * travel WITH the freshness derived over the SAME array, exactly as route-v2 does. Neither is new:
+ *   · the facts: `loadPriorFactsWithReadState`, the reader `readScenarioAnalysis` uses to compose the
+ *     `analysis_state` / `analysis_result` this response already ships (the final readback);
+ *   · the derivation: `deriveAnalysisFreshness` over those facts and the readback's `graph_hash`, which is
+ *     `computeAnalysisAffectingGraphHash` of the persisted graph — the token `graph_hash_at_run` carries.
+ *   · the leader permission: THIS response's own `analysis_state.leader_claim.permitted`, so the delta can
+ *     never name a leader the verdict beside it withholds (the producer conjoins each run's own verdict).
+ *
+ * ⛔ GATED LIKE THE EXECUTOR (turn-executor.ts, `handlerFactsForCommit.some(isSuccessfulRunAnalysisFact)`):
+ * only a turn that COMPLETED a run, only on a readback that could vouch for a CURRENT result, and only when
+ * the derivation is `fresh`. Anything else supplies nothing and the finaliser stamps nothing — the
+ * contract's absence, never a partial block.
+ */
+export async function runDeltaContextFor(input: {
+  readonly store: SessionStore;
+  readonly scenarioId: string;
+  readonly requestId: string;
+  readonly ranThisTurn: boolean;
+  readonly graphHash: string | undefined;
+  readonly analysisState: unknown;
+  readonly analysisResult: unknown;
+}): Promise<Pick<FinaliserContext, 'priorFacts' | 'freshness' | 'mayNameLeadingOption'>> {
+  if (!input.ranThisTurn || input.graphHash === undefined || input.analysisState === undefined || input.analysisResult === undefined) return {};
+  const read = await loadPriorFactsWithReadState(input.scenarioId, input.requestId, input.store);
+  if (read.status !== 'ok') return {};
+  const freshness = deriveAnalysisFreshness(read.facts, input.graphHash, undefined, { priorFactsReadOk: true });
+  if (freshness.freshness !== 'fresh') return {};
+  const permitted = (input.analysisState as { leader_claim?: { permitted?: unknown } } | null)?.leader_claim?.permitted === true;
+  return { priorFacts: read.facts, freshness, mayNameLeadingOption: permitted };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1099,6 +1195,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       return dispatch(path, body);
     };
     const capabilities = createAgentCapabilities(countingDispatch, proposals, callStructured, mode);
+    // The Agent's own run_analysis reads the post-run claim permissions too (see withPostRunCanonicalState).
+    const agentCapabilities: AgentCapabilities = {
+      ...capabilities,
+      runAnalysis: async (ctx, args) => withPostRunCanonicalState(await capabilities.runAnalysis(ctx, args), dispatch, scenarioId),
+    };
     // A session whose in-process history holds no user message (a restart, a
     // deploy, an eviction — or only a board-edit note appended since) is seeded
     // from the durable conversation, ahead of whatever is already held — see
@@ -1197,12 +1298,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * call. The canonical state is read back from the persisted graph after the run — the
        * SAME reader the response's final readback uses — and handed over beside the run.
        */
-      let canonicalAfterRun: { analysis_state?: unknown; analysis_ready?: unknown } = {};
-      try {
-        const st = await readBackState(dispatch, scenarioId);
-        canonicalAfterRun = { ...(st.analysisState !== undefined ? { analysis_state: st.analysisState } : {}), ...(st.analysisReady !== undefined ? { analysis_ready: st.analysisReady } : {}) };
-      } catch { canonicalAfterRun = {}; }
-      const runForInterpreter = { ...ran, canonical_state: canonicalAfterRun };
+      const runForInterpreter = await withPostRunCanonicalState(ran, dispatch, scenarioId);
       const callId = `fast_run_${req.id}`.replace(/[^A-Za-z0-9_-]/g, '_');
       const priorAndRun = [
         ...(history ?? []),
@@ -1267,7 +1363,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           maxOutputTokens: budget.max_output_tokens,
           mode,
         },
-        capabilities,
+        agentCapabilities,
         callModel,
       );
     } catch (err) {
@@ -1374,7 +1470,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // One click approves the ONE proposal just offered — the same words as typing "yes".
       suggested_actions: offeredNow,
     });
-    const finalised = finaliseV5Response(composed, { scenarioId });
+    const runDelta = await runDeltaContextFor({
+      store, scenarioId, requestId: String(req.id), ranThisTurn: completedRunThisTurn(result), graphHash, analysisState, analysisResult,
+    });
+    const finalised = finaliseV5Response(composed, { scenarioId, ...runDelta });
 
     const existingBlocks = Array.isArray((finalised as { blocks?: unknown[] }).blocks)
       ? (finalised as { blocks: unknown[] }).blocks
