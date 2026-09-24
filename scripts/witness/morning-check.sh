@@ -36,8 +36,25 @@ say(){ printf '%s\n' "$*"; }
 KEY=$(grep -m1 '^ASSIST_API_KEY=' "$ENVF" 2>/dev/null | cut -d= -f2- | tr -d '"'"'"' \r')
 if [ "${#KEY}" -ne 64 ]; then say "STOP: ASSIST_API_KEY not resolved from $ENVF (got ${#KEY} chars)"; exit 2; fi
 
-SERVED=$(curl -s --max-time 20 "$BASE/healthz" | sed -n 's/.*"build":"\([0-9a-f]*\)".*/\1/p')
-[ -n "$SERVED" ] || { say "STOP: could not read the served build from $BASE/healthz"; exit 2; }
+# ⛔ RETRY /healthz. A single read failed this script once with "could not read the
+# served build", and the service was FINE — 200 on every retry, deploy `live`. The
+# witness had simply started while a deploy was rolling (e81aea1 went live at
+# 07:37:43Z). A transient blip must not look like an outage to whoever runs this in
+# the morning; that is the same instrument fragility this script exists to catch in
+# the product. Five tries over ~40s covers a restart; a real outage still stops.
+SERVED=""
+for attempt in 1 2 3 4 5; do
+  SERVED=$(curl -s --max-time 20 "$BASE/healthz" | sed -n 's/.*"build":"\([0-9a-f]*\)".*/\1/p')
+  [ -n "$SERVED" ] && break
+  say "   /healthz gave no build (try ${attempt}/5) — a deploy may be rolling; retrying in 10s"
+  sleep 10
+done
+if [ -z "$SERVED" ]; then
+  say "STOP: $BASE/healthz returned no build on 5 tries over ~50s."
+  say "      Check the service is up before reading anything below as a product failure:"
+  say "        curl -s $BASE/healthz"
+  exit 2
+fi
 say "SERVED CEE: $SERVED"
 
 # Which fast paths does the SERVED source actually carry?
