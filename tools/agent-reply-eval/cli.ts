@@ -98,7 +98,7 @@ function main(): void {
     currentBuild: a.currentBuild,
     command,
     capturesLocation:
-      '`CAPTURES_DIR` = the construction-witness `raw/` directory of the 23–24 Sep acceptance-witness runs (estate path `output/paul-test-20260923/construction-witness/raw`; local evidence, not in this repository). Default selection (no `--include`): c19, c19w, c16, c17, c18 and every held-out `g*` capture; the directory’s earlier `c*` captures are not scored',
+      '`CAPTURES_DIR` = the construction-witness `raw/` directory of the 23–24 Sep acceptance-witness runs (local evidence outside this repository). Default selection (no `--include`): c19, c19w, c16, c17, c18 and every held-out `g*` capture; the directory’s earlier `c*` captures are not scored',
     controlVocabulary: { hits: vocabHits, turnsWithHits: vocabTurns, turns: replies },
   });
   if (a.report !== null) {
