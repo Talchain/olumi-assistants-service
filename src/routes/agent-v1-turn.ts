@@ -259,6 +259,32 @@ const STARTING_POINT_CHIP = {
 } as const;
 
 /**
+ * ⭐ THE EXPLICIT RUN, OFFERED AFTER A CHANGE THE MODEL CAN NOW ANALYSE (RC #63; Codex
+ * 5805970015: "served Agent approval calls approvalChipsFor after authorise_change and that
+ * helper returns no chips"). The approval fast path applies the user's values and — by design
+ * — runs nothing; without this the user had no Run to press on the Agent route. The same
+ * shape as the product's own Run chip (`edit-graph-dispatch.ts` RUN_ANALYSIS_CHIP), so the UI
+ * echoes `{ id, action_type }` and the click takes fast path 3.
+ */
+export const RUN_OFFER_CHIP = {
+  id: 'agent-run-analysis',
+  label: 'Run analysis',
+  message: 'Run analysis.',
+  action_type: 'run_analysis',
+} as const;
+
+/**
+ * Whether the canonical readiness in THIS response admits a run. `may_run` is the admission
+ * verdict (`resolveRunAdmission(...).willProceed`) and wins whenever it is present — a `ready`
+ * status with `may_run: false` is not offered. Only when it is absent does the stricter
+ * `status === 'ready'` decide, as the UI's own affordance does. Nothing else is inferred.
+ */
+export function admitsRunOffer(analysisReady: unknown): boolean {
+  const ar = (analysisReady ?? {}) as { may_run?: unknown; status?: unknown };
+  return typeof ar.may_run === 'boolean' ? ar.may_run : ar.status === 'ready';
+}
+
+/**
  * ⭐ INTERPRETER v0.2 — THE ARCHITECTURE OWNER'S BANKED TEXT, VERBATIM (RC #63 5803995225:
  * "Interpreter v0.2 is the current prompt candidate"). Source: Talchain/olumi-programme-docs
  * `openai/capability-v01/ANALYSIS_INTERPRETER_PROFILE_v0_2.md` lines 9-33, blob
@@ -296,8 +322,9 @@ export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown
 }
 
 export function typedRunOf(body: Record<string, unknown>): boolean {
-  const chip = body['chip'] as { action_type?: unknown } | null | undefined;
-  return (body['kind'] === undefined || body['kind'] === 'message') && chip?.action_type === 'run_analysis';
+  const chip = body['chip'] as { action_type?: unknown; id?: unknown } | null | undefined;
+  // The Agent's own Run offer is recognised by its id too, in case a client echoes only the id.
+  return (body['kind'] === undefined || body['kind'] === 'message') && (chip?.action_type === 'run_analysis' || chip?.id === RUN_OFFER_CHIP.id);
 }
 
 export function isFirstBriefCandidate(body: Record<string, unknown>, message: string): boolean {
@@ -1193,19 +1220,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * status line is composed from the authoritative results; an unsupported
      * write claim is removed when nothing landed. See `write-outcome.ts`.
      */
-    const narration = narrateWriteOutcome(text, result.tool_calls, result.tool_results);
-    const composed = composeDirectAnswerResponse({
-      // ⛔ A proposal id is a binding for authorise_change, never text a user reads or
-      // types (display-ids.ts). Applied here, before the answer row is written, so a
-      // replay returns exactly what the user first saw.
-      assistant_text: withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, owed), narration.status)),
-      stage: 'frame',
-      answerKind: 'substantive',
-      // One click approves the ONE proposal just offered — the same words as typing "yes".
-      suggested_actions: fastPath === 'first_brief' && result.mutated ? [STARTING_POINT_CHIP] : approvalChipsFor(result.tool_calls),
-    });
-    const finalised = finaliseV5Response(composed, { scenarioId });
-
     /**
      * The minimum the canvas needs to notice the model moved.
      *
@@ -1217,9 +1231,32 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * nothing errors.
      *
      * Read back from the persisted graph, not from what a tool returned: the
-     * hash the client caches must be the hash the product would serve it.
+     * hash the client caches must be the hash the product would serve it. Read
+     * BEFORE the reply is composed, because the Run offer below keys on the
+     * readiness this same response carries.
      */
     const { graphHash, analysisReady, draftGraph, analysisState, analysisResult } = await readBackState(dispatch, scenarioId);
+    // Offered only after a change, only when that change was not already analysed this turn,
+    // and only when the canonical readiness in THIS response admits a run.
+    const offerRun = result.mutated
+      && fastPath !== 'first_brief'
+      && !result.tool_calls.some((c) => c.name === 'run_analysis')
+      && admitsRunOffer(analysisReady);
+
+    const narration = narrateWriteOutcome(text, result.tool_calls, result.tool_results);
+    const composed = composeDirectAnswerResponse({
+      // ⛔ A proposal id is a binding for authorise_change, never text a user reads or
+      // types (display-ids.ts). Applied here, before the answer row is written, so a
+      // replay returns exactly what the user first saw.
+      assistant_text: withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, owed), narration.status)),
+      stage: 'frame',
+      answerKind: 'substantive',
+      // One click approves the ONE proposal just offered — the same words as typing "yes".
+      suggested_actions: fastPath === 'first_brief' && result.mutated
+        ? [STARTING_POINT_CHIP]
+        : [...approvalChipsFor(result.tool_calls), ...(offerRun ? [RUN_OFFER_CHIP] : [])],
+    });
+    const finalised = finaliseV5Response(composed, { scenarioId });
 
     const existingBlocks = Array.isArray((finalised as { blocks?: unknown[] }).blocks)
       ? (finalised as { blocks: unknown[] }).blocks
