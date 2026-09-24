@@ -1,0 +1,191 @@
+{
+ "robustness": {
+  "level": "high",
+  "near_tie": {
+   "gap": 0.6821999999999999,
+   "is_tie": false,
+   "threshold": 0.1,
+   "top_option_id": "7d4a880d",
+   "tied_option_ids": [
+    "7d4a880d"
+   ],
+   "second_option_id": "825169cc"
+  },
+  "is_robust": true,
+  "confidence": 0.8411,
+  "robust_edges": [
+   {
+    "to_id": "aa289540",
+    "edge_id": "192577e2->aa289540",
+    "from_id": "192577e2",
+    "to_label": "Revenue Is Flat and Churn Is Rising",
+    "from_label": "Churn Acceleration Risk",
+    "alternative_winner_id": null,
+    "alternative_winner_label": null
+   }
+  ],
+  "fragile_edges": [
+   {
+    "to_id": "aa289540",
+    "edge_id": "794d0013->aa289540",
+    "from_id": "794d0013",
+    "visible": true,
+    "severity": "warning",
+    "to_label": "Revenue Is Flat and Churn Is Rising",
+    "from_label": "Revenue Growth",
+    "switch_probability": 0.3164,
+    "alternative_winner_id": "825169cc",
+    "alternative_winner_label": "Status Quo (Hold Current Strategy)",
+    "marginal_switch_probability": 0
+   },
+   {
+    "to_id": "4093c4ef",
+    "edge_id": "6a643f89->4093c4ef",
+    "from_id": "6a643f89",
+    "visible": true,
+    "severity": "warning",
+    "to_label": "Customer Retention",
+    "from_label": "Product-Market Fit Signal",
+    "switch_probability": 0.3128,
+    "alternative_winner_id": "825169cc",
+    "alternative_winner_label": "Status Quo (Hold Current Strategy)",
+    "marginal_switch_probability": 0
+   },
+   {
+    "to_id": "aa289540",
+    "edge_id": "4093c4ef->aa289540",
+    "from_id": "4093c4ef",
+    "visible": true,
+    "severity": "warning",
+    "to_label": "Revenue Is Flat and Churn Is Rising",
+    "from_label": "Customer Retention",
+    "switch_probability": 0.3072,
+    "alternative_winner_id": "825169cc",
+    "alternative_winner_label": "Status Quo (Hold Current Strategy)",
+    "marginal_switch_probability": 0
+   },
+   {
+    "to_id": "794d0013",
+    "edge_id": "4ea36046->794d0013",
+    "from_id": "4ea36046",
+    "visible": true,
+    "severity": "warning",
+    "to_label": "Revenue Growth",
+    "from_label": "Average Contract Value",
+    "switch_probability": 0.2688,
+    "alternative_winner_id": "825169cc",
+    "alternative_winner_label": "Status Quo (Hold Current Strategy)",
+    "marginal_switch_probability": 0
+   },
+   {
+    "to_id": "794d0013",
+    "edge_id": "34f696ea->794d0013",
+    "from_id": "34f696ea",
+    "visible": true,
+    "severity": "warning",
+    "to_label": "Revenue Growth",
+    "from_label": "Enterprise Sales Capacity",
+    "switch_probability": 0.24,
+    "alternative_winner_id": "825169cc",
+    "alternative_winner_label": "Status Quo (Hold Current Strategy)",
+    "marginal_switch_probability": 0
+   },
+   {
+    "to_id": "aa289540",
+    "edge_id": "767b9662->aa289540",
+    "from_id": "767b9662",
+    "visible": true,
+    "severity": "warning",
+    "to_label": "Revenue Is Flat and Churn Is Rising",
+    "from_label": "Enterprise Sales Execution Risk",
+    "switch_probability": 0.2376,
+    "alternative_winner_id": "825169cc",
+    "alternative_winner_label": "Status Quo (Hold Current Strategy)",
+    "marginal_switch_probability": 0
+   },
+   {
+    "to_id": "794d0013",
+    "edge_id": "bc936d4c->794d0013",
+    "from_id": "bc936d4c",
+    "visible": true,
+    "severity": "warning",
+    "to_label": "Revenue Growth",
+    "from_label": "Sales Cycle Length",
+    "switch_probability": 0.2004,
+    "alternative_winner_id": "825169cc",
+    "alternative_winner_label": "Status Quo (Hold Current Strategy)",
+    "marginal_switch_probability": 0
+   },
+   {
+    "to_id": "4093c4ef",
+    "edge_id": "5222539b->4093c4ef",
+    "from_id": "5222539b",
+    "visible": true,
+    "severity": "warning",
+    "to_label": "Customer Retention",
+    "from_label": "SMB Churn Rate",
+    "switch_probability": 0.1636,
+    "alternative_winner_id": "825169cc",
+    "alternative_winner_label": "Status Quo (Hold Current Strategy)"
+   },
+   {
+    "to_id": "192577e2",
+    "edge_id": "5222539b->192577e2",
+    "from_id": "5222539b",
+    "visible": true,
+    "severity": "warning",
+    "to_label": "Churn Acceleration Risk",
+    "from_label": "SMB Churn Rate",
+    "switch_probability": 0.1592,
+    "alternative_winner_id": "825169cc",
+    "alternative_winner_label": "Status Quo (Hold Current Strategy)"
+   },
+   {
+    "to_id": "794d0013",
+    "edge_id": "7841c89e->794d0013",
+    "from_id": "7841c89e",
+    "visible": true,
+    "severity": "warning",
+    "to_label": "Revenue Growth",
+    "from_label": "Enterprise Market Demand",
+    "switch_probability": 0.1516,
+    "alternative_winner_id": "825169cc",
+    "alternative_winner_label": "Status Quo (Hold Current Strategy)",
+    "marginal_switch_probability": 0
+   },
+   {
+    "to_id": "767b9662",
+    "edge_id": "34f696ea->767b9662",
+    "from_id": "34f696ea",
+    "visible": false,
+    "severity": "warning",
+    "to_label": "Enterprise Sales Execution Risk",
+    "from_label": "Enterprise Sales Capacity",
+    "switch_probability": 0.112,
+    "alternative_winner_id": "825169cc",
+    "alternative_winner_label": "Status Quo (Hold Current Strategy)",
+    "marginal_switch_probability": 0
+   },
+   {
+    "to_id": "767b9662",
+    "edge_id": "bc936d4c->767b9662",
+    "from_id": "bc936d4c",
+    "visible": false,
+    "severity": "warning",
+    "to_label": "Enterprise Sales Execution Risk",
+    "from_label": "Sales Cycle Length",
+    "switch_probability": 0.0324,
+    "alternative_winner_id": "825169cc",
+    "alternative_winner_label": "Status Quo (Hold Current Strategy)",
+    "marginal_switch_probability": 0
+   }
+  ],
+  "display_verdict": "robust",
+  "confidence_basis": "recommendation_stability_uncalibrated",
+  "recommended_option_id": "7d4a880d",
+  "display_verdict_reason": "this run held up under the changes we tested",
+  "recommended_option_label": "Hybrid: Retain SMB, Pilot Enterprise Tier",
+  "recommended_option_compliance": "not_applicable",
+  "recommended_option_compliance_reason": "no limits were set for this decision"
+ }
+}
