@@ -17,6 +17,19 @@ describe('approval chips', () => {
     for (const c of chips) expect((c as { action_type?: unknown }).action_type).toBeUndefined();
   });
 
+  /**
+   * ⭐ An added option (#1788's `propose_new_option`) gets the same one-click, typed approval
+   * as every other proposal, so its "yes" takes fast path 2 (0 model calls) rather than a
+   * full Agent turn. Without an entry here the proposal was offered with NO chip at all.
+   */
+  it('RED: a proposed NEW OPTION → a typed approve chip carrying its proposal id, and the amend chip', () => {
+    const chips = approvalChipsFor([{ name: 'propose_new_option', ok: true, proposal_id: 'prop_abc123' }]);
+    expect(chips.map((c) => [c.id, c.label, c.message])).toEqual([
+      ['agent-approve-proposal:prop_abc123', 'Add this option', 'Yes, add that option.'],
+      ['agent-amend-proposal', 'Change something first', 'Before you apply it, I want to change some of it.'],
+    ]);
+  });
+
   it('CONTRAST: two proposals pending → no chip (a "yes" would be ambiguous)', () => {
     expect(approvalChipsFor([
       { name: 'propose_assumptions', ok: true, proposal_id: 'prop_1' },

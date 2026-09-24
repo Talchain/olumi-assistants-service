@@ -23,6 +23,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_assumptions: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
   propose_option_interventions: { label: 'Use as starting option levels', message: 'Yes, use those.' },
   propose_model_change: { label: 'Make this change', message: 'Yes, make that change.' },
+  // #1788's add-option proposal: the same typed, zero-call approval as every other proposal.
+  propose_new_option: { label: 'Add this option', message: 'Yes, add that option.' },
 };
 
 export const AMEND_CHIP: SuggestedAction = {
