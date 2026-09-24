@@ -165,7 +165,7 @@ const RECEIPT = (turnId: string, sequence = 3) => ({
  * receipt and leaves the stored value untouched — the exact shape that used to be
  * reported as "Saved" because the old value read back as a number.
  */
-function framedProduct(writes: 'receipt' | 'refused') {
+function framedProduct(writes: 'receipt' | 'refused' | 'committed_no_receipt') {
   const posted: Record<string, unknown>[] = [];
   const nodes: Node[] = FRAMED.map((n) => ({ ...n, observed_state: { ...n.observed_state } }));
   let hash = 'h0';
@@ -185,6 +185,9 @@ function framedProduct(writes: 'receipt' | 'refused') {
         };
       }
       hash = 'h1';
+      // The egress validator DELETES the receipt when it is the only field that fails
+      // (validators/b1.ts:128) — the write is committed and the 200 carries no receipt.
+      if (writes === 'committed_no_receipt') return { status: 200, json: {} };
       return { status: 200, json: { model_version_receipt: RECEIPT(String(b.turn_id)) } };
     }
     return { status: 200, json: { graph: { nodes, edges: [] }, graph_hash: hash } };
@@ -238,6 +241,23 @@ describe('a value the user revises is saved on its own frame, and only called sa
     expect(applied.applied, 'nothing landed, so nothing may claim it did').toBe(false);
     expect(applied.refusal).toBe('not_applied');
     expect(String(applied.detail)).toContain('unchanged');
+  });
+
+  it('⛔ RED: a COMMITTED write with no receipt is still saved — the degradable-egress case', async () => {
+    // Keying `ownWrite` on the receipt ALONE would report "not saved" for a write that
+    // landed, which is worse than the defect item 4 fixes. `model_version_receipt` is the
+    // single DEGRADABLE_EGRESS_FIELD (validators/b1.ts:128): when it is the only field that
+    // fails egress validation it is deleted and the rest of the response passes. The second
+    // signal is the canonical hash moving across this op's own dispatch.
+    const p = framedProduct('committed_no_receipt');
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const proposed = await caps.proposeAssumptions(ctx, {
+      assumptions: [{ factor_label: 'Evidence strength', value: 50, unit: 'points', basis: 'the user said 50', revise: true }],
+    });
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    expect(p.read()[0]!.observed_state, 'the write really did land').toMatchObject({ value: 0.5, raw_value: 50 });
+    expect(applied.applied, 'a committed write with a degraded receipt must still read as saved').toBe(true);
+    expect(applied.values).toEqual([{ factor: 'Evidence strength', requested: 50, recorded: 50 }]);
   });
 
   it('⚠ CONTROL: an UNCAPPED factor is passed through natively — no divide, no clamp', async () => {

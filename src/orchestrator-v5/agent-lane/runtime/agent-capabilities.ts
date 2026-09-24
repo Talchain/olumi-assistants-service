@@ -1466,10 +1466,31 @@ export function createAgentCapabilities(
         const applied: { factor: string; requested: number; recorded: number | null; no_write_recorded?: boolean }[] = [];
         const failures: { factor: string; detail: string }[] = [];
         const receipts: ReceiptSummary[] = [];
-        /** Did THIS approval's own write for that factor produce a receipt? See item 4 below. */
+        /**
+         * Did THIS approval's own write for that factor actually land? See item 4 below.
+         *
+         * ⛔ A RECEIPT ALONE IS NOT A SUFFICIENT SIGNAL, and keying only on it would turn a
+         * real save into "not saved" — the opposite of the defect item 4 fixes, and worse.
+         * `model_version_receipt` is the single `DEGRADABLE_EGRESS_FIELD`
+         * (`validators/b1.ts:128`): when it is the ONLY field that fails egress validation,
+         * it is DELETED and the rest of the response passes. That is reachable today — its
+         * own docblock says the durable fix (not minting >200-character labels) has not
+         * landed. So a committed write can answer 200 with no receipt.
+         *
+         * Hence TWO independent signals, either of which is sufficient: this op's receipt,
+         * or the canonical graph hash moving across this op's own dispatch. The hash is read
+         * per op, which also keeps the chain accurate when one approval carries several.
+         *
+         * ⚠ The `priorTurnConflict` path in `commit.ts:1746-1766` also strips the receipt,
+         * but there the write genuinely did not happen for THIS request, and the hash will
+         * not have moved either — so both signals correctly read false and that case stays
+         * reported as not saved, which is what that branch exists to say.
+         */
         const ownWrite = new Map<string, boolean>();
         /** The frame the factor already carries, read from the pre-write state. */
         const beforeById = new Map((before.nodes ?? []).map((n) => [n.id, n]));
+        /** The canonical revision this loop has advanced to, so each op's own move is visible. */
+        let carriedHash = before.graph_hash;
         const capOf = (id: string): number | undefined => {
           const c = ((beforeById.get(id)?.observed_state ?? {}) as { cap?: unknown }).cap;
           return typeof c === 'number' && c > 0 ? c : undefined;
@@ -1500,7 +1521,10 @@ export function createAgentCapabilities(
           if (rc.unreadable) failures.push({ factor: o.path, detail: 'a receipt arrived but could not be read' });
           // ⛔ OWN-WRITE EVIDENCE, PER OP (Codex 5810763729 item 4). A later read alone
           // cannot tell "my write landed" from "the old number was already there".
-          ownWrite.set(o.path, r.status === 200 && rc.summary !== null);
+          const afterOp = await readGraph(ctx.scenario_id);
+          const moved = afterOp !== null && afterOp.graph_hash !== carriedHash;
+          if (afterOp !== null) carriedHash = afterOp.graph_hash;
+          ownWrite.set(o.path, r.status === 200 && (rc.summary !== null || moved));
         }
 
         // ⛔ CONFIRMED FROM STATE. The handler may rescale what it was sent
