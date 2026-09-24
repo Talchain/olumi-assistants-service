@@ -25,19 +25,25 @@ const order: string[] = [];
 /** The latest ANSWER row for a scenario — claim rows excluded, exactly as the production read excludes them. */
 const latestRow = (sid: string = SCENARIO): Row | undefined =>
   [...order].reverse().map((k) => rows.get(k)!).find((r) => r.scenario_id === sid && !r.turn_id.endsWith(':claim'));
+/** A row's pending actions as the production reads return them: JSONB round-trip, the REAL parser, this scenario only. */
+const parsedPending = async (row: Row | undefined, sid: string): Promise<unknown[]> => {
+  const { parsePendingAction } = await import('../../session/pending-action.js');
+  const raw = row ? (JSON.parse(JSON.stringify(row.pending_actions)) as unknown[]) : [];
+  return raw.map((x) => parsePendingAction(x)).filter((x) => x !== null && x.scenario_id === sid);
+};
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
-  readCommittedTurn: vi.fn(async (sid: string, turnId: string) => rows.get(`${sid}:${turnId}`) ?? null),
+  // The committed row a REPLAY is answered from, with its pending actions parsed exactly as
+  // `supabase-store.ts` readCommittedTurn parses them (real parser, foreign-scenario entries dropped).
+  readCommittedTurn: vi.fn(async (sid: string, turnId: string) => {
+    const row = rows.get(`${sid}:${turnId}`);
+    return row === undefined ? null : { ...row, pending_actions: await parsedPending(row, sid) };
+  }),
   // The latest committed ANSWER row's pending actions, JSON round-tripped as the JSONB column returns them
   // AND passed through the REAL parser, exactly as `supabase-store.ts` readMostRecentPendingActions does
   // (Codex #1823 5812296935: a raw-JSON mock hid that the parser drops an item the store would drop). Claim
   // rows are excluded, as the production query's `NOT turn_id LIKE '%:claim'` excludes them.
-  readMostRecentPendingActions: vi.fn(async (sid: string) => {
-    const { parsePendingAction } = await import('../../session/pending-action.js');
-    const latest = latestRow(sid);
-    const raw = latest ? (JSON.parse(JSON.stringify(latest.pending_actions)) as unknown[]) : [];
-    return raw.map((x) => parsePendingAction(x)).filter((x) => x !== null);
-  }),
+  readMostRecentPendingActions: vi.fn(async (sid: string) => parsedPending(latestRow(sid), sid)),
   append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; pending_actions?: unknown[] }) => {
     const k = `${w.scenario_id}:${w.turn_id}`;
     if (!rows.has(k)) {
@@ -56,7 +62,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 });
 
 type Chip = { id: string; label: string; message: string };
-type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string }; _agent: { tool_calls: { name: string; ok: boolean; refusal?: string }[] } };
+type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string }; _agent: { tool_calls: { name: string; ok: boolean; refusal?: string }[]; replayed?: boolean } };
 type Carrier = { chip_id: string; emitted_at_iso: string; expires_at_iso: string; expires_at_turn_count: number; preconditions: { graph_hash?: string };
   action: { kind: string; proposal_ref: string; inline_patch: { agent_proposal: { proposal_id: string; user_id: string | null; public_label: string } } } };
 /** The approval carrier a row persisted, if any. */
@@ -67,6 +73,9 @@ describe('a pending approval survives a restart', () => {
   let edges: { from: string; to: string }[] = [];
   /** Every call that could write the model: a forwarded turn to the product's orchestrator. */
   let writes = 0;
+  /** The CANONICAL writes: every `system_event` dispatched, and every graph register (none is expected here). */
+  let systemEvents = 0;
+  let registers = 0;
   let proposeNext = true;
   async function buildRouteApp(): Promise<FastifyInstance> {
     vi.resetModules();
@@ -76,9 +85,12 @@ describe('a pending approval survives a restart', () => {
       graph: { nodes: [{ id: 'f1', kind: 'factor', label: 'Team size' }, { id: 'o1', kind: 'outcome', label: 'Velocity' }], edges },
       graph_hash: `h${edges.length}`,
     }));
+    // Counted, and never served: a write this harness did not expect fails loudly instead of "landing".
+    a.post('/assist/v1/scenarios/:id/graph/register', async (_req, reply) => { registers += 1; return reply.code(503).send({ code: 'NOT_SERVED_BY_THIS_HARNESS' }); });
     a.post('/orchestrate/v2/turn', async (req) => {
       writes += 1;
       const b = req.body as { kind?: string; event?: { from: string; to: string } };
+      if (b.kind === 'system_event') systemEvents += 1;
       if (b.kind === 'system_event' && b.event) edges = [...edges, { from: b.event.from, to: b.event.to }];
       return { assistant_text: 'ok', blocks: [], graph_hash: `h${edges.length}` };
     });
@@ -99,8 +111,12 @@ describe('a pending approval survives a restart', () => {
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
   });
+  // The route's module graph is transformed ONCE, here, not inside the first test's 60 s budget: on a loaded
+  // machine that first transform alone overran it, and the timed-out test's still-running turns then wrote
+  // into the next test's scenario.
+  beforeAll(async () => { await import('../../../routes/agent-v1-turn.js'); }, 600_000);
   afterAll(() => { vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { edges = []; writes = 0; proposeNext = true; identity = { mode: 'off' }; nextScenario(); });
+  beforeEach(() => { edges = []; writes = 0; systemEvents = 0; registers = 0; proposeNext = true; identity = { mode: 'off' }; nextScenario(); });
   afterEach(() => { vi.useRealTimers(); });
 
   /** One process: build the app, run `fn`, close it. A new call is a restarted process (fresh module state). */
@@ -265,6 +281,103 @@ describe('a pending approval survives a restart', () => {
       await askIn(a, 'And if we undo that?');
       expect(carrierIn(latestRow()), 'never resurrected by a return to the base').toBeUndefined();
     });
+  }, 60_000);
+
+  // ── (e) A LOST RESPONSE, RETRIED ON A FRESH PROCESS (Codex #1823 5819308426, blocker 1) ────────────
+  // The client never saw the answer, so it re-sends the SAME committed turn (same turn_id, same body), and
+  // the retry reaches a restarted process. The replay must be the original answer — including a way to
+  // approve what it proposed — and must never write again.
+  const PROPOSING_MESSAGE = 'Should team size drive velocity?';
+  const approveChipOf = (t: Body): Chip | undefined => t.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
+  const canonical = () => ({ systemEvents, registers, writes, edges: edges.length });
+
+  it('(e) RED: the PROPOSING response is lost → the same turn_id retried on a fresh process replays WITH the exact approve chip → approve → saved exactly once', async () => {
+    const turnId = randomUUID();
+    const original = await inProcess((a) => turn(a, { message: PROPOSING_MESSAGE, turn_id: turnId }));
+    const offered = approveChipOf(original);
+    expect(offered, 'the control: the original answer offered the approve chip').toBeDefined();
+    const beforeRetry = canonical();
+    const replay = await inProcess((a) => turn(a, { message: PROPOSING_MESSAGE, turn_id: turnId }));
+    expect(replay._agent.replayed, 'the control: the retry took the REPLAY path, not a second run').toBe(true);
+    expect(replay.assistant_text, 'the replay is the original answer').toBe(original.assistant_text);
+    expect(canonical(), 'a replay writes nothing').toEqual(beforeRetry);
+    // The exact chip the original answer offered — id, label and message — and its amend companion.
+    expect(replay.suggested_actions.map((c) => [c.id, c.label, c.message])).toEqual([
+      [offered!.id, offered!.label, offered!.message],
+      ['agent-amend-proposal', 'Change something first', 'Before you apply it, I want to change some of it.'],
+    ]);
+    expectSaved(await approveOnFreshProcess(approveChipOf(replay)!));
+    expect(systemEvents, 'saved exactly once: ONE canonical write').toBe(1);
+    expect(registers).toBe(0);
+  }, 60_000);
+
+  it('(e) RED: the APPROVAL response is lost → the same approval turn retried on a fresh process is REPLAYED — zero duplicate canonical writes', async () => {
+    const approve = await propose();
+    const approvalTurn = randomUUID();
+    const approvalBody = { message: approve.message, source: 'chip', chip: { id: approve.id }, turn_id: approvalTurn };
+    expectSaved(await inProcess((a) => turn(a, approvalBody)));
+    const afterFirst = canonical();
+    expect(afterFirst.systemEvents, 'the control: the approval really wrote, once').toBe(1);
+    const replay = await inProcess((a) => turn(a, approvalBody));
+    expect(replay._agent.replayed, 'the control: the retry took the REPLAY path').toBe(true);
+    expect(replay._agent.tool_calls, 'nothing was authorised again').toEqual([]);
+    expect(canonical(), 'ZERO duplicate canonical writes — no system_event, no register, no dispatch at all').toEqual(afterFirst);
+    expect(edges).toEqual([{ from: 'f1', to: 'o1' }]);
+    expect(approveChipOf(replay), 'an applied proposal is never re-offered').toBeUndefined();
+  }, 60_000);
+
+  it('(e) CONTRAST: a lost QUESTION response replays with NO approve chip — the row carried the offer, but that answer never showed it', async () => {
+    const approve = await propose();
+    const turnId = randomUUID();
+    await inProcess((a) => turn(a, { message: 'What would that change for the team?', turn_id: turnId }));
+    expect(carrierIn(latestRow())?.chip_id, 'the control: the question row carries the offer').toBe(approve.id);
+    const replay = await inProcess((a) => turn(a, { message: 'What would that change for the team?', turn_id: turnId }));
+    expect(replay._agent.replayed).toBe(true);
+    expect(approveChipOf(replay), 'a replay offers only what the original answer offered').toBeUndefined();
+  }, 60_000);
+
+  it('(e) CONTRAST: the model moved since → the lost proposing response replays WITHOUT the approve chip, nothing written', async () => {
+    const turnId = randomUUID();
+    const original = await inProcess((a) => turn(a, { message: PROPOSING_MESSAGE, turn_id: turnId }));
+    expect(approveChipOf(original), 'the control: it was offered').toBeDefined();
+    edges = [{ from: 'o1', to: 'f1' }];
+    const before = canonical();
+    const replay = await inProcess((a) => turn(a, { message: PROPOSING_MESSAGE, turn_id: turnId }));
+    expect(replay._agent.replayed).toBe(true);
+    expect(replay.suggested_actions.filter((c) => c.id.startsWith('agent-approve-proposal:') || c.id === 'agent-amend-proposal')).toEqual([]);
+    expect(canonical()).toEqual(before);
+  }, 60_000);
+
+  // ── (f) PROPOSAL → RUN → RESTART → APPROVAL (Codex #1823 5819308426, blocker 2) ─────────────────────
+  const RUN_CHIP = { id: 'agent-run-analysis', action_type: 'run_analysis' };
+  const runIn = async (a: FastifyInstance): Promise<Body> => {
+    const t = await turn(a, { message: 'Run analysis.', source: 'chip', chip: RUN_CHIP });
+    expect(t._diagnostic_trace.fast_path, 'the control: the typed Run path').toBe('run');
+    expect(t._agent.tool_calls).toEqual([expect.objectContaining({ name: 'run_analysis', ok: true })]);
+    return t;
+  };
+
+  it('(f) RED: propose | restart | Run on a FRESH worker | restart | approve → SAVED once; the Run row carried the offer and the Run answer kept the chip', async () => {
+    const approve = await propose();
+    // The Run lands on a worker that never saw the offer: nothing process-local knows about it.
+    const run = await inProcess(runIn);
+    expect(carrierIn(latestRow())?.chip_id, 'the RUN row — now the latest — still carries the offer').toBe(approve.id);
+    expect(carrierIn(latestRow())?.action.inline_patch.agent_proposal.proposal_id).toBe(approve.id.slice('agent-approve-proposal:'.length));
+    expect(approveChipOf(run), 'the Run answer keeps the exact approve chip').toEqual(approve);
+    expect(systemEvents, 'the Run wrote nothing canonical').toBe(0);
+    expectSaved(await approveOnFreshProcess(approve));
+    expect(systemEvents, 'saved exactly once').toBe(1);
+  }, 60_000);
+
+  it('(f) the ordinary order stays explicit: propose | restart | approve → SAVED | restart | explicit Run → runs, carries no stale offer, writes nothing more', async () => {
+    const approve = await propose();
+    expectSaved(await approveOnFreshProcess(approve));
+    const afterApproval = canonical();
+    const run = await inProcess(runIn);
+    expect(approveChipOf(run), 'an applied proposal is never re-offered by the Run').toBeUndefined();
+    expect(carrierIn(latestRow()), 'nor carried by the Run row').toBeUndefined();
+    expect(canonical().systemEvents, 'the Run adds no canonical write').toBe(afterApproval.systemEvents);
+    expect(edges).toEqual([{ from: 'f1', to: 'o1' }]);
   }, 60_000);
 });
 

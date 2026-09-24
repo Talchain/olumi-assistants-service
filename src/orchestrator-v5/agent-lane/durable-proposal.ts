@@ -40,6 +40,7 @@ import {
   PENDING_ACTION_ASK_WALL_TTL_MS,
   type PendingAction,
 } from '../session/pending-action.js';
+import { approvalChipIdFor } from './approval-chips.js';
 import { computeProposalId, type ProposalStore, type StructuredProposal } from './proposal.js';
 
 /**
@@ -67,11 +68,21 @@ export const AGENT_PROPOSAL_CARRIER_WALL_TTL_MS = PENDING_ACTION_ASK_WALL_TTL_MS
 
 type ApproveChip = { readonly id: string; readonly label: string; readonly message: string };
 
+/**
+ * ⛔ WHETHER THE ANSWER THIS ROW RECORDS SHOWED THE APPROVE CHIP. A carrier rides a row for two reasons: the
+ * turn OFFERED the chip (a proposal, or a Run that kept it), or the turn only CARRIED it forward so a restart
+ * can still find it (a plain question, whose answer showed no chip). A replay re-offers only what the original
+ * answer offered (#1792's rule for the Run offer), so it needs to tell the two apart — see
+ * {@link offeredApproveChipOnRow}.
+ */
+const OFFERED_ON_THIS_ROW = 'offered_on_this_row';
+
 /** The pending action that carries one offered proposal with its answer row. */
 export function proposalPendingAction(
   proposal: StructuredProposal,
   chip: ApproveChip,
   ctx: { readonly scenario_id: string; readonly emitted_at_iso: string },
+  offeredOnThisRow = true,
 ): PendingAction {
   const emitted = Date.parse(ctx.emitted_at_iso);
   return {
@@ -81,7 +92,10 @@ export function proposalPendingAction(
     action: {
       kind: 'apply_proposed_change',
       proposal_ref: chip.id,
-      inline_patch: { agent_proposal: JSON.parse(JSON.stringify(proposal)) as Record<string, unknown> },
+      inline_patch: {
+        agent_proposal: JSON.parse(JSON.stringify(proposal)) as Record<string, unknown>,
+        ...(offeredOnThisRow ? { [OFFERED_ON_THIS_ROW]: true } : {}),
+      },
       public_label: chip.label,
       public_message: chip.message,
     },
@@ -192,7 +206,41 @@ export function carrierForAnswerRow(input: {
     current_graph_identity_hash: input.currentGraphHash,
   });
   if (decision.status !== 'execute' || decision.continuation !== undefined) return undefined;
-  return proposalPendingAction(decision.proposal, carried.chip, ctx);
+  // Carried, not offered: this turn's answer showed no approve chip, so a replay of it shows none either.
+  return proposalPendingAction(decision.proposal, carried.chip, ctx, false);
+}
+
+/**
+ * ⛔ THE APPROVE CHIP A REPLAY RE-OFFERS, READ FROM THE REPLAYED ROW ITSELF (Codex #1823 5819308426).
+ *
+ * A proposing answer lost in transit is retried with the same `turn_id`, and the retry can reach a restarted
+ * process. The replay re-offered the approve chip only from the process-local `offeredActions`, so it showed
+ * the proposal's words with no way to approve them — although the row it replays had persisted the exact
+ * chip beside the proposal.
+ *
+ * This returns only the chip's WORDS — its id, label and message exactly as the original answer offered
+ * them — and only when THAT answer offered it (a carried-forward carrier returns nothing). Whether it is
+ * still offered is not decided here: the caller applies the same predicate as every replay, which admits
+ * it only while its proposal is the one awaiting a yes for this subject and the store would execute it on
+ * today's revision. The store is refilled from the latest answer row BEFORE the replay, so a proposal
+ * applied, superseded or dropped since is never re-offered.
+ */
+export function offeredApproveChipOnRow(
+  pending: readonly PendingAction[] | undefined,
+  subject: { readonly scenario_id: string; readonly user_id: string | null },
+): ApproveChip | undefined {
+  for (const pa of pending ?? []) {
+    if (pa.action.kind !== 'apply_proposed_change' || pa.scenario_id !== subject.scenario_id) continue;
+    const patch = pa.action.inline_patch as { agent_proposal?: { proposal_id?: unknown; scenario_id?: unknown; user_id?: unknown } } & Record<string, unknown>;
+    if (patch[OFFERED_ON_THIS_ROW] !== true) continue;
+    const p = patch.agent_proposal;
+    if (typeof p?.proposal_id !== 'string' || p.scenario_id !== subject.scenario_id || p.user_id !== subject.user_id) continue;
+    if (pa.chip_id !== approvalChipIdFor(p.proposal_id)) continue;
+    const { public_label: label, public_message: message } = pa.action as { public_label?: unknown; public_message?: unknown };
+    if (typeof label !== 'string' || typeof message !== 'string') continue;
+    return { id: pa.chip_id, label, message };
+  }
+  return undefined;
 }
 
 /**
