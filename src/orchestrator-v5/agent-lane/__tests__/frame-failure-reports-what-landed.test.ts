@@ -221,3 +221,33 @@ describe('⛔ THE COMPETING WRITER CONTROL — a refusal means the model MOVED',
     expect(frame.detail).toContain('do not tell the user their figures are safe');
   });
 });
+
+
+describe('⛔ THE FIELD NAME CARRIES ITS OWN GUARANTEE', () => {
+  it('⭐ `ranges_not_attached` appears ONLY when a readback verified the absence', async () => {
+    // CHANGES_REQUIRED on #1751 f028650d: a consumer cannot distinguish a
+    // verified absence from an intended one, so it inferred "still needs a
+    // range" from the field alone. The contract is fixed HERE: no verification,
+    // no field.
+    const { r } = await authorise({ frameRefusal: true, readbackFails: true });
+    expect(r.ranges_not_attached).toBeUndefined();
+    expect(r.analysis_still_blocked_for).toBeUndefined();
+    expect(r.current_state_unknown).toBe(true);
+    expect(r.partially_applied).toBe(true);
+  });
+
+  it('⭐ a verified absence DOES carry the field, and no unknown marker', async () => {
+    const { r } = await authorise({ frameRefusal: true });
+    const notAttached = (r.ranges_not_attached ?? []) as { factor: string }[];
+    expect(notAttached.length).toBeGreaterThan(0);
+    expect(r.current_state_unknown).toBeUndefined();
+  });
+
+  it('⛔ a competing writer that SUPPLIED the range removes it from the field', async () => {
+    // The discriminator between "verified" and "intended": this factor is no
+    // longer unranged, so the field must not name it.
+    const { r } = await authorise({ frameRefusal: true, competingWriter: 'attaches_range' });
+    const notAttached = ((r.ranges_not_attached ?? []) as { factor: string }[]).map((f) => f.factor);
+    expect(notAttached).not.toContain('Monthly churn rate');
+  });
+});

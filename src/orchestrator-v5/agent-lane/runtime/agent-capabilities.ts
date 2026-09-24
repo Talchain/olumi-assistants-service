@@ -1313,6 +1313,20 @@ export function createAgentCapabilities(
          *  failure can name which factors still have no range, instead of the
          *  reply implying nothing was written at all. */
         let rangesNotAttached: { factor: string; value: number; range: number }[] = [];
+        /**
+         * ⛔ THE FIELD NAME MUST CARRY ITS OWN GUARANTEE. A consumer cannot tell a
+         * verified absence from an intended one, so `ranges_not_attached` is
+         * emitted ONLY when a post-refusal readback confirmed the factor still has
+         * no range. When the readback fails this is set instead, and the consumer
+         * says the present state is unknown rather than advising.
+         *
+         * CHANGES_REQUIRED on #1751 `f028650d`: the deterministic consumer turned
+         * that event field into a present-state claim ("unchanged", "still needs a
+         * range", "do not re-enter") with no readback between the refusal and the
+         * sentence. Fixing only the consumer would leave the next consumer free to
+         * make the same mistake; the contract is fixed here.
+         */
+        let currentStateUnknown = false;
         if (needsFrame.length > 0 && afterSet !== null) {
           const frameById = new Map<string, number>();
           for (const n of needsFrame) {
@@ -1391,6 +1405,10 @@ export function createAgentCapabilities(
                  */
                 const fresh = await readGraph(ctx.scenario_id);
                 if (fresh === null) {
+                  // Nothing here is verified, so nothing is claimed: the list is
+                  // dropped and the unknown marker travels in its place.
+                  rangesNotAttached = [];
+                  currentStateUnknown = true;
                   failures.push({
                     factor: 'scale_frame',
                     detail: savedSomething
@@ -1471,6 +1489,10 @@ export function createAgentCapabilities(
            * `partially_applied` is this file's existing word for it (`:395`,
            * `:463`). Present only when it is true, so its presence is the signal.
            */
+          // ⚠ PRESENT-STATE UNKNOWN, stated rather than implied by an absence.
+          // Travels even when `ranges_not_attached` is empty, which is exactly
+          // when a consumer must not advise.
+          ...(currentStateUnknown ? { partially_applied: true, current_state_unknown: true } : {}),
           ...(rangesNotAttached.length > 0
             ? {
               partially_applied: true,
