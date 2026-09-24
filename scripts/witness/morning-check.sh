@@ -279,28 +279,31 @@ say ""
 # bind ambiguously.
 # ⛔ THE PRODUCT MUST NOT TELL THE USER THEIR OWN FIGURE WAS NOT MODELLED.
 #
-# `not_modelled.quantities` is NOT a dark diagnostic — I checked that the wrong way
-# first (GitHub code search: 0 hits) and the sound method refuted it: `rg -a` over a
-# fresh DGAI clone finds `not_modelled` in 26 files, `notModelled` in 22. The pipeline
-# ends in `components/results/contextIntegrity/WhatIWasGivenSection.tsx`, mounted by
-# `AnalysisNewTabBody.tsx`, and `notModelledNotices.ts:151` filters rows
-# SPECIFICALLY for the `absent` outcome. So these verdicts are rendered, in a section
-# called "What I Was Given".
+# `not_modelled.quantities` IS rendered. I first checked that the wrong way — GitHub
+# code search returned 0 for `not_modelled` in DecisionGuideAI even with controls
+# firing at 46 on the same index — and `rg -a` over a fresh clone found it in 26
+# files, ending in `contextIntegrity/WhatIWasGivenSection.tsx`, mounted by
+# `AnalysisNewTabBody.tsx`, with `notModelledNotices.ts:151` filtering rows
+# SPECIFICALLY for the `absent` outcome.
 #
-# And they are wrong. Measured over six briefs: `matched_node_id` was null on EVERY
-# item, and 7 of 8 `absent` verdicts were for quantities demonstrably in the graph —
-# because the agent lane emits `goal_constraints` WITHOUT the `source_quote` the
-# tracker's oracle requires (`not-modelled-manifest.ts:1601` skips any row lacking it),
-# so it never matches a constraint it could have matched.
+# ⚠ THE CAUSE IS NOT THE MISSING `source_quote`. I said it was, in a commit message
+# and on #63, and this gate's own first run refuted me:
+#     £900k -> in_model (matched: gtm_budget)
+#     £3m   -> absent  (matched: none)
+# £900k anchors through `gtm_budget`'s `display_value: "£900k"` — a LABEL/VALUE
+# surface the tracker declares it searches ("node and option values, caps, units,
+# labels and encoding maps"). No constraint row and no quote were needed. So
+# `source_quote` on constraints would not have fixed this, and my earlier six-brief
+# "matched_node_id null on every item" was measured PRE-APPROVAL, before the value
+# was on a node at all — a stage where `absent` is arguably honest.
 #
-# This brief states "Budget is £900k either way" and "£3m of new ARR", and both survive
-# into the model — £900k as a `goal_constraints` row, £3m as the goal threshold. So an
-# `absent` verdict here is a FALSE claim about the user's own input, on the one surface
-# whose purpose is honesty about what was received.
-#
-# Fix: carry `source_quote` on agent-lane constraints. `buildCandidateSchema()` never
-# asks the model for it — `build-model.ts`, leased. Free on the reload payload already
-# read above, so this gate costs nothing.
+# ⭐ THE REAL CAUSE: £3m lives ONLY as `new_arr.goal_threshold_raw: 3000000`, and the
+# goal node's `goal_threshold_*` fields are NOT in that declared surface list — not a
+# value, cap, unit, label or encoding map by name. So a figure the user stated as
+# their goal, which the model holds as its goal, is reported as never modelled.
+# The fix belongs in the tracker's anchoring surfaces
+# (`cee/context-integrity/not-modelled-manifest.ts` — shared with Conventional, so it
+# wants care), NOT in the leased constructor schema.
 say "8b) the fidelity manifest must not call the user's own figures absent"
 Q_TOTAL=$(jqv "$RELOAD" '.not_modelled.quantities.total // 0')
 Q_ABSENT=$(jqv "$RELOAD" '.not_modelled.quantities.absent // 0')
@@ -311,8 +314,10 @@ gate "no stated figure is reported absent" "$([ "${Q_ABSENT:-0}" = "0" ] && echo
   "this brief's £900k and £3m both survive into the model, so absent>0 is a false claim shown in \"What I Was Given\""
 if [ "${Q_ABSENT:-0}" != "0" ] && [ "${Q_TOTAL:-0}" != "0" ]; then
   say "   ⛔ rendered by WhatIWasGivenSection (mounted in AnalysisNewTabBody)."
-  say "      Cause: agent-lane goal_constraints carry no source_quote, so the tracker's"
-  say "      oracle skips every constraint row. Fix in build-model.ts's schema (leased)."
+  say "      A figure anchors through a node's value/label (£900k -> gtm_budget). One that"
+  say "      lives ONLY as the goal threshold (goal_threshold_raw) has no anchoring surface,"
+  say "      so it reads absent. Fix: not-modelled-manifest.ts's surface list, NOT the"
+  say "      constructor schema — source_quote was my wrong first diagnosis."
 fi
 say ""
 
