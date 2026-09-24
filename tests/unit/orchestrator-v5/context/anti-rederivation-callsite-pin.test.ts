@@ -273,7 +273,32 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // No extra I/O: the same prior facts are re-projected against the committed
     // hash, and the healthy-empty/degraded distinction is preserved exactly as
     // the note above requires.
-    'src/orchestrator-v5/system-events/dispatch.ts': 8,
+    // 2026-09-24 F4 (Codex, #63 5821693599): 8 → 9 (+1 CALL, no new import) —
+    // `replyForAttemptThatWroteNothing`, the one shared reply for the
+    // structural_add / structural_delete / edge_strength_edit writers when the
+    // commit resolved but THIS attempt wrote nothing (`thisAttemptWrote ===
+    // false`: a replay, or a reused-id conflict). It derives freshness against
+    // the REREAD SNAPSHOT's hash (`CommitResult.persistedAnalysisGraphHash` on
+    // that branch), which is a genuinely new input, not a re-derivation of one
+    // already held:
+    //
+    //   · the frame is unreachable here for the reason recorded above (a system
+    //     event never builds one);
+    //   · the three writers' own post-commit derivations run only AFTER their
+    //     receipt checks, which this branch must never reach (they would attest
+    //     "verified" off a snapshot, or 500 a known no-write). Hoisting them above
+    //     the branch would rewrite three writers' success paths to save one line;
+    //     taking the count down is the frame-consumer migration's job, not this fix's;
+    //   · omitting it is not an option: the reply stamps the snapshot's
+    //     `analysisReady`, and readiness without freshness is exactly the #63
+    //     item-15 defect (a surface that clears "stale" on that field alone).
+    //
+    // ONE call serves all three writers — deliberately one helper, not three
+    // copies. Same honesty rule: a healthy read gives a real verdict, a degraded
+    // read gives `unknown` / `derivation_failed`, never a fabricated `none`. No
+    // extra I/O: the facts were read before the commit. Migrate with the
+    // frame-consumer audit; do not add more.
+    'src/orchestrator-v5/system-events/dispatch.ts': 9,
     // 2026-09-24 MG&Q: +1 (one call) — `dispatchFactorValueEdit` now derives the
     // wire freshness for a factor-value edit, exactly as the edge_strength_edit
     // writer in this same file already does. Programme #63 item 15: the value
