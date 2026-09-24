@@ -264,7 +264,8 @@ describe("the split required gate is wired so it cannot pass without every test"
     expect(tests.strategy["fail-fast"]).toBe(false);
 
     const run = tests.steps.find((s: any) => typeof s.run === "string" && /\bpnpm test:required\b/.test(s.run)).run;
-    expect(run).toContain("--shard=${{ matrix.shard }}/${{ strategy.job-total }}");
+    // LIVE CONTROL C (throwaway head, never merged): static flag check disabled so the RUNTIME guard is tested alone.
+    // expect(run).toContain("--shard=${{ matrix.shard }}/${{ strategy.job-total }}");
     expect(run).toContain("--outputFile.json=.vitest-reports/shard-${{ matrix.shard }}.json");
 
     const guard = gate.steps.find((s: any) => typeof s.run === "string" && s.run.includes("assert-required-shards-complete.mjs")).run;

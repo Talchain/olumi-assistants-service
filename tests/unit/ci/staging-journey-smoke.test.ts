@@ -521,7 +521,8 @@ describe("Core/Drafting release hold is bounded and restores without a push", ()
     expect(
       ci.jobs["required-tests"].steps.some((step: any) =>
         typeof step.run === "string" &&
-        step.run.startsWith("pnpm test:required --shard=${{ matrix.shard }}/${{ strategy.job-total }} ")),
+        // LIVE CONTROL C (throwaway head): static flag check disabled so the RUNTIME guard is tested alone.
+        step.run.startsWith("pnpm test:required --shard=${{ matrix.shard }}/")),
     ).toBe(true);
     // Feature branches get CI through their PR; a `feat/**` push trigger ran it twice per SHA.
     expect(ci.on.push.branches).toEqual(["main", "staging"]);

@@ -352,7 +352,7 @@ jobs:
         # The full suite + coverage and the external-dependent files still run
         # in the non-required "Full Test Suite (advisory)" / "Integration
         # Tests (advisory)" jobs below, so nothing is hidden.
-        run: pnpm test:required --shard=${{ matrix.shard }}/${{ strategy.job-total }} --reporter=default --reporter=json --outputFile.json=.vitest-reports/shard-${{ matrix.shard }}.json
+        run: pnpm test:required --shard=${{ matrix.shard }}/4 --reporter=default --reporter=json --outputFile.json=.vitest-reports/shard-${{ matrix.shard }}.json
       - name: Upload this shard's report
         # Uploaded pass or fail, so a red shard's report is still inspectable;
         # a shard that died before writing one fails here as well.
