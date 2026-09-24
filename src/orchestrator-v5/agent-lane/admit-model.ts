@@ -371,6 +371,38 @@ function framedObservedState(f: {
 }
 
 /**
+ * ⛔ AN AI ESTIMATE IS OLUMI'S FIGURE — KEPT, AND NEVER PASSED OFF AS THE USER'S.
+ *
+ * A factor the builder ESTIMATED (`baseline_known: false`, a finite
+ * `baseline_value`) used to be dropped outright: the baseline branch below wrote
+ * `observed_state` only for a KNOWN baseline, so a freshly built model had
+ * nothing for a provisional first analysis to start from.
+ *
+ * ⭐ THE SHAPE IS CAPLESS, AND THAT IS BINDING. `{ value: raw / c, raw_value,
+ * unit?, source: 'cee_inference' }` beside the node's `scale_frame: c` — exactly
+ * what `set_factor_value` writes when a user adopts a value on a framed factor
+ * (`construction-range-carrier.test.ts`). NO `observed_state.cap` and NO
+ * `declared_scale`: a capped shape would let Olumi's own guessed range refuse the
+ * user's later correction through the revise path (#1767).
+ *
+ * `source` is written LAST, after every spread, so an estimate can never inherit
+ * `brief_extraction` from a factor the user named. An estimate that cannot be
+ * framed (no usable range, negative, or above the range) stays MISSING — it is
+ * never written unframed, which would raise a blocking scale issue over a number
+ * the user never gave.
+ */
+function estimatedObservedState(
+  f: { baseline_known: boolean; baseline_value: number | null; unit: string | null },
+  c: number | null | undefined,
+): Record<string, unknown> | null {
+  if (f.baseline_known) return null;
+  const raw = f.baseline_value;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+  if (typeof c !== 'number' || !Number.isFinite(c) || c <= 1 || raw < 0 || raw > c) return null;
+  return { value: raw / c, raw_value: raw, ...(f.unit ? { unit: f.unit } : {}), source: 'cee_inference' };
+}
+
+/**
  * ⭐ A DEFAULT FRAME, DERIVED FROM THE DATA AND DISCLOSED — the backstop.
  *
  * The builder is required to state a `plausible_max` for every factor, and a
@@ -454,18 +486,24 @@ export function admitCandidateModel(
    */
   const capByLabel = new Map<string, number>();
   const largestByLabel = new Map<string, number>();
-  const noteMagnitude = (label: string, v: unknown): void => {
+  /** Labels whose derived frame rests on at least one figure the USER stated. */
+  const userStatedFigureLabels = new Set<string>();
+  const noteMagnitude = (label: string, v: unknown, provenance: string): void => {
     if (typeof v !== 'number' || !Number.isFinite(v)) return;
     largestByLabel.set(label, Math.max(largestByLabel.get(label) ?? 0, Math.abs(v)));
+    if (provenance === 'explicit') userStatedFigureLabels.add(label);
   };
   for (const f of model.factors) {
     if (typeof f.plausible_max === 'number' && Number.isFinite(f.plausible_max) && f.plausible_max > 1) {
       capByLabel.set(f.label, f.plausible_max);
     }
-    if (f.baseline_known) noteMagnitude(f.label, f.baseline_value);
+    // ⛔ ONLY A KNOWN BASELINE. An AI estimate (`baseline_known: false`) must never
+    // derive its own frame: a guess that sets the scale it is then read against
+    // is a guess dressed as a measurement.
+    if (f.baseline_known) noteMagnitude(f.label, f.baseline_value, f.provenance);
   }
   for (const o of model.options) {
-    for (const iv of o.interventions ?? []) noteMagnitude(iv.factor_label, iv.value);
+    for (const iv of o.interventions ?? []) noteMagnitude(iv.factor_label, iv.value, iv.provenance);
   }
   const defaultedFrames: { label: string; frame: number }[] = [];
   for (const [label, largest] of largestByLabel) {
@@ -549,6 +587,12 @@ export function admitCandidateModel(
         ...(f.baseline_known && typeof f.baseline_value === 'number'
           ? { observed_state: framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }) }
           : {}),
+        // An ESTIMATE is kept on the same frame `scale_frame` carries below, as
+        // Olumi's (`estimatedObservedState`). A known baseline never reaches it.
+        ...((): Record<string, unknown> => {
+          const os = estimatedObservedState(f, capFor(f.label) ?? f.plausible_max);
+          return os === null ? {} : { observed_state: os };
+        })(),
         // ⭐ THE FRAME TRAVELS WITH THE NODE, not only with the baseline. A
         // factor with no value today still needs its range, because the value
         // a user adopts LATER is normalised against it, and so is every level
@@ -653,8 +697,9 @@ export function admitCandidateModel(
     if (seen.has(id)) continue;
     seen.add(id);
     inference_classes[id] = inferenceClassFor(e.provenance);
-    // A factor whose baseline is NOT known gets no observed_state at all —
-    // an absent value is the honest record; a zero would be a measurement.
+    // A factor with NO baseline value gets no observed_state at all — an absent
+    // value is the honest record; a zero would be a measurement. (An ESTIMATED
+    // value is kept, stamped as Olumi's: `estimatedObservedState`.)
     const label = shortLabel(e.label);
     if (label !== e.label) {
       loss.push({
@@ -724,6 +769,11 @@ export function admitCandidateModel(
     if (fid !== undefined && c !== undefined) capByFactorId.set(fid, c);
   }
   for (const d of defaultedFrames) {
+    // "Your own figures" only when a figure the user stated fed the frame; when
+    // every figure is Olumi's, saying so is the honest record.
+    const whose = userStatedFigureLabels.has(d.label)
+      ? 'your own figures are stored unchanged beside it.'
+      : "the figures it was taken from are Olumi's own estimates, not figures you gave, and are stored unchanged beside it.";
     loss.push({
       field_path: `nodes[${ids.get(d.label) ?? d.label}].observed_state.cap`,
       before: null,
@@ -732,7 +782,7 @@ export function admitCandidateModel(
         `No range was stated for "${d.label}", and a number above 1 with no range cannot be analysed ` +
         `at all \u2014 nor can a range be added afterwards. A range of 0 to ${d.frame} has been used, taken ` +
         'from the largest figure the model already holds for it. That is a unit of measurement, not a ' +
-        'forecast or a limit, and your own figures are stored unchanged beside it.',
+        `forecast or a limit, and ${whose}`,
       severity: 'warn',
     } as RepairEntry);
   }
