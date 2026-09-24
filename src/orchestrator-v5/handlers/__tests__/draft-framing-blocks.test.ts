@@ -212,7 +212,7 @@ describe('buildDraftFramingBlocks — the FRAME/IDEATE complement', () => {
   });
 
   // ── 7. ANTI-COLLISION (§6 / trap 21) ───────────────────────────────────
-  it('T9 is SILENT while the intake reconciler reports options_missing', () => {
+  it('T9 is silent while the intake identity is unverified', () => {
     const brief =
       'We are choosing between three routes: electrify the fleet, subcontract the routes, or buy a rival depot.';
     const graph = graphWith(['Electrify the fleet', 'Subcontract the routes']);
@@ -221,7 +221,7 @@ describe('buildDraftFramingBlocks — the FRAME/IDEATE complement', () => {
     // PIN THE PRECONDITION IN-TEST (trap 13b third face): assert the reconciler
     // really is in options_missing on this fixture BEFORE asserting suppression,
     // so the silence is provably the gate's doing and not the fixture's failure.
-    expect(deriveIntakeOptionReconciliation(brief, optionLabels).state).toBe('options_missing');
+    expect(deriveIntakeOptionReconciliation(brief, optionLabels).state).toBe('identity_unverified');
 
     expect(
       build({ strengthenItems: [CAPTURED_ADD_OPTION], graph, briefText: brief }),
@@ -279,4 +279,18 @@ describe('buildDraftFramingBlocks — the FRAME/IDEATE complement', () => {
     expect(out[0]!.signal_id).not.toContain('str_status_quo');
     expect(out[0]!.title).toBe(CAPTURED_ADD_OPTION.label);
   });
+});
+
+it('keeps framing silent for a proven omission and restores it for reconciled lineage', () => {
+  const briefText = 'The options are electrify the fleet, subcontract the routes, or buy a rival depot.';
+  const nodes = [
+    { id: 'opt-0', kind: 'option', label: 'Electric fleet', source_quote: 'electrify the fleet' },
+    { id: 'opt-1', kind: 'option', label: 'Subcontract', source_quote: 'subcontract the routes' },
+  ];
+  const graph = { nodes, edges: [] };
+  expect(deriveIntakeOptionReconciliation(briefText, graph).state).toBe('options_missing');
+  expect(build({ graph, briefText })).toEqual([]);
+  const complete = { nodes: [...nodes, { id: 'opt-2', kind: 'option', label: 'Depot acquisition', source_quote: 'buy a rival depot' }], edges: [] };
+  expect(deriveIntakeOptionReconciliation(briefText, complete).state).toBe('reconciled');
+  expect(build({ graph: complete, briefText })).toHaveLength(1);
 });

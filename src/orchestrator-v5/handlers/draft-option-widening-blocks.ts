@@ -497,10 +497,7 @@ function countOptionNodes(graph: GraphV3T | null | undefined): number {
  * OPPOSITE claim". This module never reads `strengthen_items`.
  */
 function isRepairState(briefText: string | null | undefined, graph: GraphV3T | null | undefined): boolean {
-  return (
-    deriveIntakeOptionReconciliation(briefText, readGraphOptionLabels(graph)).state ===
-    'options_missing'
-  );
+  return !deriveIntakeOptionReconciliation(briefText, graph).mayNameLeadingOption;
 }
 
 /** Compose the body. Returns null when nothing that fits can be said honestly. */

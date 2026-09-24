@@ -305,6 +305,26 @@ describe('the receipt', () => {
     expect(result.impact).toBe('high')
   })
 
+  /**
+   * ⛔ A LONG LABEL MUST NOT MAKE THE RECEIPT INVALID (served `8b2495e`, witness c12, 24 Sep 08:16Z):
+   * "Connected Bring in an experienced contractor for six months to Implementation capacity" is 86
+   * characters, `safe_summary` is `.max(80)`, so the writer refused its own receipt (`fact_invalid`) and
+   * the user's approved option landed with NO link. The siblings (`structural_add`, `structural_rename`)
+   * already bound the summary; this writer did not.
+   */
+  it('RED: long labels still land, with a summary inside the receipt\u2019s own bound', () => {
+    const g = persistedGraph() as { nodes: { id: string; label: string }[] }
+    g.nodes = g.nodes.map((n) => (n.id === 'fac_churn' ? { ...n, label: 'Bring in an experienced contractor for six months' } : n))
+    g.nodes = g.nodes.map((n) => (n.id === 'goal_revenue' ? { ...n, label: 'Implementation capacity and delivery' } : n))
+    const r = run({ base_graph_hash: baseHashOf(g) }, g)
+    expect(r.kind, r.kind === 'refused' ? r.reason : '').toBe('mutated')
+    if (r.kind !== 'mutated') return
+    const result = (r.handlerFacts[0] as { result: { safe_summary: string } }).result
+    expect(result.safe_summary.length).toBeLessThanOrEqual(80)
+    expect(result.safe_summary, 'the destination is still named').toContain('Implementation capacity')
+    expect(EditGraphHandlerFactSchema.safeParse(r.handlerFacts[0]).success).toBe(true)
+  })
+
   it('names both ends in a form a person recognises', () => {
     const r = run()
     if (r.kind !== 'mutated') throw new Error('expected a mutation')

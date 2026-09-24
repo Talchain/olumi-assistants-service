@@ -53,6 +53,11 @@ export {
 export { DECISION_RECORDS_HARD_CAP } from './store-adapter.js';
 export type {
   CreateDecisionRecordWrite,
+  ChosenOptionDecisionWrite,
+  NotReadyPositionDecisionWrite,
+  DecisionRecordDecisionWrite,
+  DecisionRecordReasoningTextWrite,
+  DecisionRecordPredictionWrite,
   DecisionRecordWriteOutcome,
   DecisionRecordStorePort,
   DecisionRecordRead,

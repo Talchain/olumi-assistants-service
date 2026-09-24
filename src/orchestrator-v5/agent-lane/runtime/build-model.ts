@@ -435,6 +435,51 @@ export async function buildModelFromBrief(
     };
   }
 
+  /**
+   * ⛔⛔ THE CALLER'S EMPTY-GRAPH GUARD WENT STALE WHILE THIS WAS THINKING.
+   *
+   * `agent-capabilities.ts` refuses `model_already_exists` when the graph already
+   * has nodes — but it reads that BEFORE calling in here, and the generative call
+   * above takes tens of seconds. So a person who starts a build from a brief and
+   * then adds a node on the canvas, well inside that window, had their node
+   * REPLACED: this registration writes the whole graph, and `operation_id` only
+   * de-duplicates an IDENTICAL construction, so it cannot see a different writer.
+   *
+   * ⚠ IT HAS TO BE HERE, NOT AT THE CALL SITE. My first attempt put the re-check
+   * after `buildModelFromBrief` returned — which is too late, because the
+   * registration happens inside this function. A check after the write cannot
+   * prevent the write.
+   *
+   * ⚠ THIS NARROWS THE WINDOW; IT DOES NOT CLOSE IT. What remains is this read to
+   * the route's own read — milliseconds — instead of a person's think-time plus a
+   * model call. Said plainly, because a re-read presented as a fix is how a race
+   * gets forgotten.
+   *
+   * ⛔ AND IT CANNOT BE CLOSED CAS-STYLE FROM A CALLER, measured not assumed:
+   * `computeExpectedGraphCasHashes` returns `analysis=null` for `null`,
+   * `undefined` AND `{nodes:[],edges:[]}`, so a caller cannot express "I expect no
+   * graph" — any expectation on a creation write would 409 every construction.
+   * Closing it needs an assert-absent convention or create-only semantics at the
+   * write boundary: the atomic-writer lease, not this file.
+   *
+   * ⭐ A FAILED READ DOES NOT REFUSE. Degrading to today's behaviour is right —
+   * throwing away a build we have already paid for because a READ failed would
+   * cost the user their turn for no gain.
+   */
+  const stillEmpty = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
+  if (stillEmpty.status === 200) {
+    const g = (stillEmpty.json.graph ?? {}) as { nodes?: unknown[] };
+    if (Array.isArray(g.nodes) && g.nodes.length > 0) {
+      return {
+        ok: false,
+        mutated: false,
+        refusal: 'model_already_exists',
+        detail: 'While that model was being built, something was added to this one — so nothing was written, and '
+          + 'your own change is untouched. Ask me to propose a change to the model you now have.',
+      };
+    }
+  }
+
   const reg = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
     graph,
     brief_text: brief,
@@ -505,6 +550,22 @@ export async function buildModelFromBrief(
       leftOut.length > 0
         ? `${leftOut.length} item(s) from the first draft were left out to keep the model compact: ${leftOut.map((x) => x.label).join('; ')}.`
         : undefined,
+      // ⭐ THE GOAL'S DEADLINE AND DIRECTION, WHICH GraphV3 CANNOT HOLD. `admit-model.ts`
+      // already records each as a warn-level loss with the reason written out; until now
+      // only `projected_field_count` travelled, and a NUMBER is not something the Agent
+      // can turn into a sentence. Measured on served 3f412be across the six estate briefs
+      // in `Docs/v5/evidence/records-v11-cause-not-option-2026-08-30/briefs`: 0 of 6
+      // carried the values OR the loss records anywhere, while `goal_threshold_raw`,
+      // `goal_constraints`, `scale_frame` and `provenance` all did.
+      //
+      // ⛔ The cost is not thinness, it is a disagreement. The Agent narrates from the
+      // brief, so on B2 its prose said "the goal of £3m new ARR within 18 months" while
+      // the model held no horizon at all and `permitted_analysis_mode` was
+      // `quantified_provisional` — figures shown against a deadline the analysis never
+      // received. Saying it is the only honest option while the projection cannot hold it.
+      ...admitted.loss
+        .filter((l) => /\.(horizon_months|goal_operator)$/.test(l.field_path))
+        .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
 }

@@ -78,7 +78,7 @@ import {
 } from './record-id.js';
 import { getDecisionRecordStore } from './index.js';
 import { DecisionRecordSignInRequiredError } from './store-adapter.js';
-import type { CreateDecisionRecordWrite } from './store-adapter.js';
+import type { ChosenOptionDecisionWrite, CreateDecisionRecordWrite } from './store-adapter.js';
 
 /** Versioned regime prefix for decision.graph_hash — binding on producer
  *  AND reviewer (migration header + seam memo §2.1). The in-value prefix
@@ -138,7 +138,9 @@ export type DecisionRecordSkipReason =
 export type BuiltDecisionRecord =
   | {
       readonly kind: 'write';
-      readonly write: CreateDecisionRecordWrite;
+      /** Ambient capture records the analysis LEADER, so it only ever builds
+       *  the chosen-option branch — never a not-ready position. */
+      readonly write: CreateDecisionRecordWrite<ChosenOptionDecisionWrite>;
       /** true when PLoT sent a decision_brief.analysis_summary that failed
        *  the strict contract parse and was dropped (disclosed, not fatal). */
       readonly analysisSummaryDropped: boolean;
