@@ -18,7 +18,7 @@
 import { describe, it, expect } from 'vitest';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { Ajv } from 'ajv';
-import { buildCandidateSchema, buildModelFromBrief, retrySchemaPinningGoal, type CallStructuredModel } from '../runtime/build-model.js';
+import { BUILD_INSTRUCTIONS, buildCandidateSchema, buildModelFromBrief, retrySchemaPinningGoal, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
@@ -35,16 +35,16 @@ function pricing(goal: Partial<CandidateModel['goal']> = {}): CandidateModel {
     constraints: [],
     options: [
       { label: 'Raise to £59', provenance: 'explicit', changes: [],
-        interventions: [{ factor_label: 'Pro plan price', value: 59, unit: 'GBP', provenance: 'explicit' }] },
+        interventions: [{ factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
       { label: 'Raise to £55', provenance: 'explicit', changes: [],
-        interventions: [{ factor_label: 'Pro plan price', value: 55, unit: 'GBP', provenance: 'explicit' }] },
+        interventions: [{ factor_label: 'Pro plan price', value: 55, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
     ],
     factors: [
       { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 200 },
     ],
     risks: [], outcomes: [],
     links: [{ from: 'Pro plan price', to: 'Monthly recurring revenue', direction: 'positive', provenance: 'inferred' }],
-  } as CandidateModel;
+  } as unknown as CandidateModel;
 }
 
 /** The production contract: the candidate must pass the real strict schema, as the model's output would. */
@@ -160,6 +160,13 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
     const run = resolveRunAdmission(graph);
     const analysed = (run.canonicalGraph as { nodes: { id: string; observed_state?: Record<string, unknown> }[] }).nodes.find((n) => n.id === GOAL);
     expect(analysed?.observed_state).toMatchObject({ baseline: 0.8, raw_value: 20000, source: 'brief_extraction' });
+  });
+
+  it('the instructions ask for the goal\u2019s current level, allow a provisional estimate marked as Olumi\u2019s (#1841), and never the target', () => {
+    const goalLine = BUILD_INSTRUCTIONS.split('\n').find((l) => l.includes('goal.baseline_value')) ?? BUILD_INSTRUCTIONS;
+    expect(goalLine).toContain('baseline_provenance "explicit"');
+    expect(goalLine).toContain('baseline_provenance "ai_proposed"');
+    expect(goalLine).toContain('never the target');
   });
 
   it('RED (efficacy): the production schema REQUIRES the goal\u2019s current level, and the retry pins it', () => {

@@ -10,7 +10,7 @@ import { narrateWriteOutcome } from '../write-outcome.js';
 // This is a no-provider contract fixture, not a claim about generated model quality.
 function hiring() {
   return {
-    goal: { metric: 'Productivity', operator: '>=', target_stated: false, value: null, unit: '%', horizon_months: null, provenance: 'explicit' },
+    goal: { metric: 'Productivity', operator: '>=', target_stated: false, value: null, unit: '%', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit' },
     constraints: [],
     options: [
       { label: 'Hire a tech lead', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Tech leads', value: 1, value_kind: 'additional', unit: 'people', provenance: 'explicit' }] },
