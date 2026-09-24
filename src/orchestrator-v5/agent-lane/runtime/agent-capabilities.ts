@@ -1492,9 +1492,10 @@ export function createAgentCapabilities(
       if (ops[0]?.op === 'set_option_intervention') {
         /**
          * ⚠ THIS EVENT IS CAS-GATED AND `factor_value_edit` IS NOT — it carries
-         * a REQUIRED `base_graph_hash`. Each applied edit moves the hash, so
-         * the current one is re-read between edits; sending the proposal's base
-         * for all of them refuses every edit after the first with a divergence
+         * a REQUIRED `base_graph_hash`. Each applied edit moves the hash, so the
+         * next edit carries the revision our OWN preceding write reported (never a
+         * re-read, which would adopt another writer's edit); sending the proposal's
+         * base for all of them refuses every edit after the first with a divergence
          * that is really our own preceding write.
          */
         const applied: { option: string; factor: string; requested: number; recorded: number | null }[] = [];
@@ -1651,6 +1652,8 @@ export function createAgentCapabilities(
         }
         const rebased = framedHere.length > 0 ? await readGraph(ctx.scenario_id) : null;
         let baseHash = rebased?.graph_hash ?? before.graph_hash;
+        /** The levels THIS approval's own writes committed — see the read-back below. */
+        const ownLevelWrite = new Set<string>();
         for (let i = 0; i < ops.length; i += 1) {
           const o = ops[i];
           const [optionId, factorId] = o.path.split('::');
@@ -1664,7 +1667,6 @@ export function createAgentCapabilities(
             event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: baseHash },
           });
           const rc = receiptSummaryOf(r.json);
-          if (rc.summary !== null) receipts.push(rc.summary);
           if (rc.unreadable) failures.push({ path: o.path, detail: 'a receipt arrived but could not be read' });
           if (r.status !== 200) {
             failures.push({ path: o.path, detail: `http ${r.status}` });
@@ -1686,8 +1688,21 @@ export function createAgentCapabilities(
             // graph moved because WE moved it, within this same authorisation.
             continue;
           }
-          const mid = await readGraph(ctx.scenario_id);
-          if (mid !== null) baseHash = mid.graph_hash;
+          // ⭐ ADVANCE ONLY TO THE REVISION *OUR* WRITE REPORTS COMMITTING. A re-read here
+          // adopted whatever the model held by then — including another writer's edit
+          // landing just after ours — and the next op then passed CAS on a model the user
+          // never approved (the #1712 shape `applyCompound` already refuses). The served
+          // committed response carries its own persisted `graph_hash`; a 200 without one
+          // is the writer's verified no-op, which moved nothing, so the base stays put.
+          const committedHash = typeof r.json.graph_hash === 'string' && r.json.graph_hash.length > 0 ? r.json.graph_hash : null;
+          if (committedHash === null) {
+            failures.push({ path: o.path, detail: 'not recorded by this approval: the write reported no committed revision' });
+            continue;
+          }
+          baseHash = committedHash;
+          ownLevelWrite.add(o.path);
+          // A receipt is reported only beside its own committed write.
+          if (rc.summary !== null) receipts.push(rc.summary);
         }
 
         const afterSet = await readGraph(ctx.scenario_id);
@@ -1702,14 +1717,22 @@ export function createAgentCapabilities(
             option: option?.label ?? optionId,
             factor: byId.get(factorId)?.label ?? factorId,
             requested: typeof stored === 'number' ? stored : Number.NaN,
-            recorded: typeof recorded === 'number' ? recorded : null,
+            // ⛔ ONLY A LEVEL THIS APPROVAL'S OWN WRITE COMMITTED. The read-back alone
+            // counted a REFUSED op as recorded whenever the pair already held a level
+            // (the old one, or another writer's) — the same false "saved" as the value
+            // path. `option_intervention_edit` refuses with 409/422/500 and commits with
+            // its own `graph_hash`, so `ownLevelWrite` is decided from our own response.
+            recorded: ownLevelWrite.has(o.path) && typeof recorded === 'number' ? recorded : null,
           });
         }
         const landed = applied.filter((a) => a.recorded !== null);
         if (landed.length === 0) {
           return {
             ok: false, mutated: false, applied: false, refusal: 'not_applied',
-            detail: 'None of the levels were recorded. The model is unchanged.', failures, interventions: applied,
+            detail:
+              'None of the levels were recorded, so this approval left the model unchanged. Read the model again ' +
+              'before describing it: someone else may have changed it meanwhile.',
+            failures, interventions: applied,
           };
         }
         if (landed.length === applied.length) proposals.markApplied(decision.proposal.proposal_id, receipts);
