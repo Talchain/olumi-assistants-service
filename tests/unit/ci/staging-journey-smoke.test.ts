@@ -523,7 +523,8 @@ describe("Core/Drafting release hold is bounded and restores without a push", ()
         typeof step.run === "string" &&
         step.run.startsWith("pnpm test:required --shard=${{ matrix.shard }}/${{ strategy.job-total }} ")),
     ).toBe(true);
-    expect(ci.on.push.branches).toEqual(["main", "staging", "feat/**"]);
+    // Feature branches get CI through their PR; a `feat/**` push trigger ran it twice per SHA.
+    expect(ci.on.push.branches).toEqual(["main", "staging"]);
     expect(ci.on.pull_request.branches).toEqual(["main", "staging"]);
   });
 

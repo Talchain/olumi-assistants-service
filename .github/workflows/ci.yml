@@ -1,8 +1,18 @@
 name: CI
 
 on:
+  # ⚠ NO `feat/**` PUSH TRIGGER, deliberately (removed 24 Sep 2026).
+  # A feature branch with an open PR ran this whole workflow TWICE per SHA —
+  # once for `push` and once for `pull_request` — and the push copy has no
+  # merge-protection role: branch protection reads the PR's check. Measured
+  # over 48h to 24 Sep 2026 17:00 UTC: 131 of 166 completed `feat/**` push
+  # runs had a `pull_request` run of this workflow on the same head_sha in the
+  # same window (~7,100 job runner-minutes).
+  # The required check `Lint, TypeCheck, Unit Tests` still runs on EVERY PR to
+  # staging or main via `pull_request` below. Open a draft PR to get CI on a
+  # feature branch.
   push:
-    branches: [main, staging, feat/**]
+    branches: [main, staging]
   pull_request:
     branches: [main, staging]
 
