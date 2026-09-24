@@ -1,5 +1,12 @@
 # Leader-claim corpus for the wire gate: real model replies, labelled from outside the author
 
+**v4 (25 Sep 2026, #63 5823878422):** 65 withheld replies, 34 leaking and 31 clean.
+- **Added:** 12 replies at `714677d5` (reps 4–9) and 36 from the 2×2 on `7dd2e983`.
+- **Every label is blind:** a fresh-context classifier on shuffled replies, with the key held separately.
+- **Result on `c933aabf`:** 33 of 34 leaks pass the gate; 31 of 31 clean replies are untouched.
+- `corpus.json` is v4. `gate-results.json` below is v1's (17 replies).
+
+
 **17 visible replies** to the pricing explicit Run, all with the leader withheld (`constraint_verdict_withheld`, mode `comparative_leader`). They are gpt-5.6-terra outputs, OpenAI only.
 - 9 come from `paired/57f903c`: M reps 1–5, C1 reps 1–3 and C2 reps 1–3.
 - 6 come from AI Quality's run on #1854's own stack (`714677d5`, V1 and V2).
