@@ -251,3 +251,92 @@ describe('⛔ THE FIELD NAME CARRIES ITS OWN GUARANTEE', () => {
     expect(notAttached).not.toContain('Monthly churn rate');
   });
 });
+
+/**
+ * ⭐⭐ LIMB 1, THE CALLER-SIDE HALF: an intervening human edit must SURVIVE.
+ *
+ * The owner note's counterexample: "caller reads label L, another writer renames
+ * it, frame update follows — retain the new label or refuse, never restore L."
+ * The register route compares in ANALYSIS space, which excludes labels, so the
+ * comparison cannot catch this. The only caller-side defence is to stop sending
+ * stale bytes: re-read and patch what is actually there.
+ */
+describe('⛔ LIMB 1 (caller half) — an intervening rename is NOT overwritten', () => {
+  /**
+   * ⚠ THE WINDOW HAS TO BE THE RIGHT ONE, AND MY FIRST VERSION OF THIS CONTROL
+   * WAS VACUOUS. It renamed during the value writes, so the `afterSet` read
+   * already contained the rename and BOTH versions preserved it — two mutants
+   * passed. Probed the real order instead:
+   *
+   *   READ(1) propose · READ(2) entry base · VALUE_WRITE · VALUE_WRITE ·
+   *   READ(3) afterSet · READ(4) the re-read under test · REGISTER
+   *
+   * Without the fix there is no READ(4), so the register carries READ(3)'s bytes.
+   * The competing rename therefore has to land AFTER READ(3) is served and
+   * BEFORE the register — i.e. exactly in the window READ(4) exists to close.
+   */
+  function renamingProduct(renameAfterRead: number) {
+    const registered: { nodes: Node[] }[] = [];
+    let nodes: Node[] = BASE.map((n) => ({ ...n }));
+    let rev = 0;
+    let reads = 0;
+    const d: InternalDispatch = async (path, body) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      if (path.endsWith('/graph/register')) {
+        const g = (b as { graph: { nodes: Node[] } }).graph;
+        registered.push({ nodes: g.nodes });
+        nodes = g.nodes;
+        rev += 1;
+        return { status: 200, json: {} };
+      }
+      if (path === '/orchestrate/v2/turn' && b.kind === 'system_event') {
+        const ev = b.event as { target_id: string; value: number };
+        nodes = nodes.map((n) => (n.id === ev.target_id
+          ? { ...n, observed_state: { ...n.observed_state, value: ev.value, raw_value: ev.value } }
+          : n));
+        rev += 1;
+        return { status: 200, json: { assistant_text: 'Updated.' } };
+      }
+      reads += 1;
+      const served = { status: 200, json: { graph: { nodes, edges: [] }, graph_hash: `h${rev}` } };
+      if (reads === renameAfterRead) {
+        // A colleague renames the factor. Invisible to an analysis-space hash,
+        // so nothing can refuse it on our behalf — the only defence is to stop
+        // sending the bytes we read before it happened.
+        nodes = nodes.map((n) => (n.id === 'monthly_churn_rate'
+          ? { ...n, label: 'Churn (renamed by a colleague)' }
+          : n));
+        rev += 1;
+      }
+      return served;
+    };
+    return { d, registered, read: () => nodes, reads: () => reads };
+  }
+
+  async function run(renameAfterRead: number) {
+    const p = renamingProduct(renameAfterRead);
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const prop = await caps.proposeAssumptions(ctx as never, ASK as never);
+    await caps.authoriseChange(ctx as never, { proposal_id: String(prop.proposal_id) } as never);
+    return p;
+  }
+
+  it('⛔ the rename SURVIVES a frame write that follows it — it is not restored', async () => {
+    const p = await run(3);
+    expect(p.reads(), 'the re-read did not happen — control would be vacuous').toBeGreaterThanOrEqual(4);
+    const frameWrite = p.registered[p.registered.length - 1];
+    expect(frameWrite, 'no register happened — vacuous').toBeDefined();
+    const sent = frameWrite.nodes.find((n) => n.id === 'monthly_churn_rate');
+    expect(sent, 'factor absent from the written graph').toBeDefined();
+    // THE DEFECT: a stale whole-graph replay restores 'Monthly churn rate'.
+    expect(sent!.label).toBe('Churn (renamed by a colleague)');
+    expect(p.read().find((n) => n.id === 'monthly_churn_rate')?.label).toBe('Churn (renamed by a colleague)');
+  });
+
+  it('⭐ and the range it went there to attach still landed', async () => {
+    // Preserving the edit must not cost the write its purpose.
+    const p = await run(3);
+    const os = p.read().find((n) => n.id === 'monthly_churn_rate')?.observed_state as { cap?: number } | undefined;
+    expect(os?.cap, 'the range was not attached').toBeGreaterThan(1);
+  });
+});

@@ -1091,8 +1091,46 @@ export function createAgentCapabilities(
           if (typeof f === 'number' && f > 1) frames.set(o.path.split('::')[1], f);
         }
         if (frames.size > 0) {
-          const patched = before.nodes.map((n) => {
-            const range = frames.get(n.id);
+          /**
+           * ⭐⭐ PATCH THE MODEL AS IT IS NOW, NOT AS IT WAS WHEN WE READ IT.
+           *
+           * ⛔ THE COUNTEREXAMPLE THIS CLOSES (owner note 5799139118, limb 1):
+           * this write sends a WHOLE graph built from an earlier read. The
+           * route's expectation is compared in ANALYSIS space, which EXCLUDES
+           * labels — so a rename landing between our read and this write passes
+           * the comparison and is then overwritten by our stale copy of the node.
+           *
+           * ⚠ I previously reported limb 1 as wholly uncloseable caller-side and
+           * left it to the atomic-writer lease. That was too broad. A caller
+           * cannot express an IDENTITY-space expectation — that part is true and
+           * still belongs at the write boundary — but it CAN stop replaying stale
+           * bytes, which is the other half the owner note named: *"a targeted
+           * atomic patch … can avoid replaying the whole stale graph."*
+           *
+           * So: re-read, patch the FRESH nodes, and send those. An intervening
+           * edit is preserved BY CONSTRUCTION rather than by a comparison that
+           * cannot see it. The residual window shrinks from "user think-time plus
+           * a model call" to the milliseconds between this read and the route's
+           * own — and the route's CAS already covers its own read-to-write gap.
+           *
+           * ⛔ AND IT NEVER CLOBBERS A RANGE SOMEONE ELSE SUPPLIED: a factor that
+           * already carries a usable frame in the fresh read is left alone. If
+           * that leaves nothing to do, no write is attempted at all.
+           *
+           * A failed re-read falls back to the earlier read: degrading to
+           * today's behaviour is right, because refusing the whole authorisation
+           * because a READ failed would lose work the user already approved.
+           */
+          const nowRead = await readGraph(ctx.scenario_id);
+          const base = nowRead ?? before;
+          const stillNeeds = new Map<string, number>();
+          for (const [id, range] of frames) {
+            const node = base.nodes.find((n) => n.id === id);
+            if (node !== undefined && frameOf(node) !== null) continue;
+            stillNeeds.set(id, range);
+          }
+          const patched = base.nodes.map((n) => {
+            const range = stillNeeds.get(n.id);
             if (range === undefined) return n;
             const os = (n.observed_state ?? {}) as { value?: number; raw_value?: number };
             const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
@@ -1143,8 +1181,8 @@ export function createAgentCapabilities(
               // hashes `options`, `goal_node_id` and `goal_constraints` too, so the
               // frame write destroyed analysis-affecting content. The value-batch
               // write at `:367` had it right all along — same spread, same reason.
-              graph: { ...before.raw, nodes: patched, edges: before.edges },
-              ...(before.graph_hash !== '' ? { expected_graph_hash: before.graph_hash } : {}),
+              graph: { ...base.raw, nodes: patched, edges: base.edges },
+              ...(base.graph_hash !== '' ? { expected_graph_hash: base.graph_hash } : {}),
             });
             if (reg.status !== 200) {
               const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
@@ -1380,8 +1418,46 @@ export function createAgentCapabilities(
             framed.push({ factor: n.label, value: raw, range });
           }
           if (frameById.size > 0) {
-            const patched = afterSet.nodes.map((n) => {
-              const range = frameById.get(n.id);
+          /**
+             * ⭐⭐ PATCH THE MODEL AS IT IS NOW, NOT AS IT WAS WHEN WE READ IT.
+             *
+             * ⛔ THE COUNTEREXAMPLE THIS CLOSES (owner note 5799139118, limb 1):
+             * this write sends a WHOLE graph built from an earlier read. The
+             * route's expectation is compared in ANALYSIS space, which EXCLUDES
+             * labels — so a rename landing between our read and this write passes
+             * the comparison and is then overwritten by our stale copy of the node.
+             *
+             * ⚠ I previously reported limb 1 as wholly uncloseable caller-side and
+             * left it to the atomic-writer lease. That was too broad. A caller
+             * cannot express an IDENTITY-space expectation — that part is true and
+             * still belongs at the write boundary — but it CAN stop replaying stale
+             * bytes, which is the other half the owner note named: *"a targeted
+             * atomic patch … can avoid replaying the whole stale graph."*
+             *
+             * So: re-read, patch the FRESH nodes, and send those. An intervening
+             * edit is preserved BY CONSTRUCTION rather than by a comparison that
+             * cannot see it. The residual window shrinks from "user think-time plus
+             * a model call" to the milliseconds between this read and the route's
+             * own — and the route's CAS already covers its own read-to-write gap.
+             *
+             * ⛔ AND IT NEVER CLOBBERS A RANGE SOMEONE ELSE SUPPLIED: a factor that
+             * already carries a usable frame in the fresh read is left alone. If
+             * that leaves nothing to do, no write is attempted at all.
+             *
+             * A failed re-read falls back to the earlier read: degrading to
+             * today's behaviour is right, because refusing the whole authorisation
+             * because a READ failed would lose work the user already approved.
+             */
+            const nowRead = await readGraph(ctx.scenario_id);
+            const base = nowRead ?? afterSet;
+            const stillNeeds = new Map<string, number>();
+            for (const [id, range] of frameById) {
+              const node = base.nodes.find((n) => n.id === id);
+              if (node !== undefined && frameOf(node) !== null) continue;
+              stillNeeds.set(id, range);
+            }
+            const patched = base.nodes.map((n) => {
+              const range = stillNeeds.get(n.id);
               if (range === undefined) return n;
               const os = (n.observed_state ?? {}) as { value: number; raw_value?: number };
               const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
@@ -1406,8 +1482,8 @@ export function createAgentCapabilities(
               // hashes `options`, `goal_node_id` and `goal_constraints` too, so the
               // frame write destroyed analysis-affecting content. The value-batch
               // write at `:367` had it right all along — same spread, same reason.
-              graph: { ...afterSet.raw, nodes: patched, edges: afterSet.edges },
-              ...(afterSet.graph_hash !== '' ? { expected_graph_hash: afterSet.graph_hash } : {}),
+              graph: { ...base.raw, nodes: patched, edges: base.edges },
+              ...(base.graph_hash !== '' ? { expected_graph_hash: base.graph_hash } : {}),
             });
             if (reg.status !== 200) {
               const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
