@@ -98,17 +98,22 @@ describe('the agent route actually uses it', () => {
   });
 
   it('⭐ EVERY analysis_ready the route emits comes from the stamped readback', () => {
-    // ⚠ THIS REPLACES A "BOTH BRANCHES ARE STAMPED" ASSERTION. Staging converged
-    // on the final readback — "Readiness of the graph this response returns —
-    // the final readback's only" — so the tool branch no longer exists and the
-    // single stamp inside `readBackState` covers every emitter.
+    // ⚠ THIS ASSERTION HAS NOW EARNED ITS KEEP. It was written pinning TWO
+    // emitters with the note "if a second source is ever reintroduced it will NOT
+    // be stamped, and this RED is the warning". On rebasing onto staging it went
+    // RED: a THIRD emitter had appeared (`:1124`, the post-run canonical readback).
+    // Checked rather than assumed — that one is `st.analysisReady` where
+    // `st = await readBackState(...)`, so the single stamp inside `readBackState`
+    // covers it too. The expected list widens; the invariant does not weaken.
     //
-    // There are TWO emitters, and binding to both is the point: the replay path
-    // (`state.analysisReady`) is the one an inner-branch fix would have missed.
+    // The property pinned is NOT the count. It is that every emitted value is a
+    // `readBackState` output and none comes from the tool result.
     const emitters = [...ROUTE.matchAll(/analysis_ready:\s*([A-Za-z.?]+)/g)].map((m) => m[1]);
-    expect(emitters.sort()).toEqual(['analysisReady', 'state.analysisReady']);
-    // Both names are `readBackState`'s own output, which is stamped before it
-    // returns. Nothing is sourced from the tool result.
+    expect(emitters.length).toBeGreaterThan(0);
+    const READBACK_DERIVED = new Set(['analysisReady', 'state.analysisReady', 'st.analysisReady']);
+    for (const e of emitters) {
+      expect(READBACK_DERIVED.has(e), `emitter \`analysis_ready: ${e}\` is not a readBackState output — it will NOT be stamped`).toBe(true);
+    }
     expect(ROUTE).not.toContain('analysisFromTool?.analysis_ready');
   });
 
