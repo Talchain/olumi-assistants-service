@@ -1,12 +1,6 @@
 /**
- * Agent lane — Olumi discloses what it could not represent. Not the model.
- *
- * ⛔ WHY THIS IS NOT LEFT TO THE AGENT. When the user authorises "add this link",
- * the wire REQUIRES a magnitude (`structural_add_edge` takes
- * `magnitude: z.number().min(0).max(1)` and excludes `unknown` direction), so a
- * direction-only authorisation cannot be expressed and a placeholder strength is
- * written. The tool result says so — but a sentence in a tool result is a
- * suggestion to a language model, and the one guarantee we owe the user is that
+ * Agent lane — Olumi discloses what it could not represent. Not
+hat
  * they are TOLD when the model now holds a number they never gave.
  *
  * So the disclosure is appended deterministically by Olumi, from what actually
@@ -113,6 +107,34 @@ export function valueChangeDisclosures(facts: {
   if (facts === null || facts === undefined) return [];
   const owed: string[] = [];
 
+  /**
+   * ⛔⛔ UNKNOWN WINS BEFORE ANYTHING IS COMPOSED — not after.
+   *
+   * CHANGES_REQUIRED on `044fe50c`, accepted in full. The check used to sit
+   * BELOW the rescaled and range blocks, so one turn could say "the current
+   * model is unknown" and, in the same breath, "those stored figures are the
+   * ones it will compute with" and "tell me the right ranges and I will replace
+   * them". Both of those are PRESENT-STATE claims. A partial write followed by a
+   * failed readback can emit rescaled+unknown from a single operation, so the
+   * contradiction was reachable, not theoretical.
+   *
+   * ⭐ THE RULE: when the producer could not read the model back, the ONLY thing
+   * that may be said is what happened, in the past tense. No figure is named as
+   * current, no range is offered for replacement, and no advice is given —
+   * because every one of those asserts a present state nothing verified.
+   *
+   * The early return is the mechanism: composing first and suppressing later is
+   * what let a claim slip through, so nothing is composed at all.
+   */
+  if (facts.current_state_unknown === true) {
+    return [
+      'Note: this turn recorded changes to your model and then could not read it back, because it changed '
+      + 'underneath the write. Those writes were accepted AT THE TIME. What the model now holds — the values, '
+      + 'their ranges, and whether the analysis can run — is NOT KNOWN. Ask me to re-read it before changing '
+      + 'anything, and do not treat any figure as current until then.',
+    ];
+  }
+
   const rescaled = (facts.rescaled ?? []).map((r) => {
     const where = typeof r.option === 'string' && r.option !== '' ? `${r.factor} for ${r.option}` : r.factor;
     // `null` is "the producer stated no figure" — never printed as a number.
@@ -162,24 +184,12 @@ export function valueChangeDisclosures(facts: {
    * or supplied the range, so every one of those sentences could be false, and
    * the last is advice that can cost the user the version that landed.
    *
-   * Two rules now:
-   *   1. `current_state_unknown` WINS. The producer could not read the model
-   *      back, so this reports the historical event, bound to its own tense, and
-   *      advises nothing.
-   *   2. Otherwise `ranges_not_attached` is READBACK-VERIFIED by contract, so the
-   *      missing range may be stated — but still NOTHING about the values, which
-   *      the readback does not check. No "unchanged", no "do not re-enter".
+   * ⚠ `current_state_unknown` is handled at the TOP of this function, before ANY
+   * present-state claim is composed — see the header there. By the time execution
+   * reaches here it is false, so `ranges_not_attached` is READBACK-VERIFIED by
+   * contract and the missing range may be stated. Still NOTHING about the VALUES,
+   * which the readback does not check: no "unchanged", no "do not re-enter".
    */
-  if (facts.current_state_unknown === true) {
-    owed.push(
-      'Note: this turn saved your values and then could not attach a range, because the model changed ' +
-      'underneath it and could not be read back. Those writes were accepted AT THE TIME; whether the ' +
-      'values are still there, and whether the analysis can run, are not known right now. Ask me to ' +
-      're-read the model before changing anything.',
-    );
-    return owed;
-  }
-
   const refused = (facts.ranges_not_attached ?? []).map((r) => r.factor);
   if (refused.length > 0) {
     owed.push(

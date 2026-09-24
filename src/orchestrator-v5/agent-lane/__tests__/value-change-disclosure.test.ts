@@ -186,7 +186,10 @@ describe('a value that saved with NO range is disclosed too', () => {
     expect(owed).toHaveLength(1);
     const text = owed[0];
     expect(text).toContain('AT THE TIME');
-    expect(text).toContain('not known');
+    // ⚠ Wording tightened when the guard was lifted above every present-state
+    // claim (CHANGES_REQUIRED on 044fe50c): the unknown is now stated in caps as
+    // the headline fact rather than as a trailing qualifier.
+    expect(text).toContain('NOT KNOWN');
     expect(text).not.toContain('unchanged');
     expect(text.toLowerCase()).not.toContain('do not re-enter');
   });
@@ -233,5 +236,93 @@ describe('a value that saved with NO range is disclosed too', () => {
       { ranges_not_attached: [{ factor: 'Bad', range: 1 }, { factor: 'Good', range: 400 }] },
     ]);
     expect(facts.ranges_not_attached.map((r) => r.factor)).toEqual(['Good']);
+  });
+});
+
+/**
+ * ⛔⛔ UNKNOWN MUST WIN OVER *ALL* PRESENT-STATE CLAIMS, NOT JUST ONE.
+ *
+ * CHANGES_REQUIRED on `044fe50c`: the unknown check sat BELOW the rescaled and
+ * range blocks, so one turn could say "the current model is unknown" and, in the
+ * same breath, "those stored figures are the ones it will compute with" and "tell
+ * me the right ranges and I will replace them". A partial write followed by a
+ * failed readback emits rescaled+unknown from a single operation, so the
+ * contradiction was reachable.
+ *
+ * These are the reviewer's own minimum controls: rescaled+unknown and
+ * range+unknown must withhold every current-computation claim and every piece of
+ * advice, while verified-current rescaling stays a positive control.
+ */
+describe('⛔ unknown-state precedence over EVERY present-state claim', () => {
+  const FORBIDDEN_WHEN_UNKNOWN = [
+    'compute with',        // asserts what the model will use now
+    'Tell me if any is wrong',
+    'Tell me the right ones',
+    'not yours',
+    'still needs a range',
+    'as it now stands',
+  ];
+
+  it('⛔ rescaled + unknown: no figure is named as current and no advice is given', () => {
+    const owed = valueChangeDisclosures({
+      rescaled: [{ factor: 'Churn rate', requested: 40, recorded: 0.4 }],
+      ranges_added: [],
+      current_state_unknown: true,
+    });
+    expect(owed).toHaveLength(1);
+    const text = owed[0];
+    expect(text).toContain('NOT KNOWN');
+    expect(text).toContain('AT THE TIME');
+    // The specific stored figure must NOT be presented as current.
+    expect(text).not.toContain('0.4');
+    expect(text).not.toContain('Churn rate');
+    for (const f of FORBIDDEN_WHEN_UNKNOWN) expect(text, `asserted "${f}" with state unknown`).not.toContain(f);
+  });
+
+  it('⛔ ranges_added + unknown: the chosen range is not offered for replacement', () => {
+    const owed = valueChangeDisclosures({
+      rescaled: [],
+      ranges_added: [{ factor: 'Headcount', range: 500 }],
+      current_state_unknown: true,
+    });
+    expect(owed).toHaveLength(1);
+    expect(owed[0]).not.toContain('Headcount');
+    expect(owed[0]).not.toContain('0 to 500');
+    for (const f of FORBIDDEN_WHEN_UNKNOWN) expect(owed[0]).not.toContain(f);
+  });
+
+  it('⛔ ALL THREE at once + unknown still yields exactly one past-tense disclosure', () => {
+    const owed = valueChangeDisclosures({
+      rescaled: [{ factor: 'Churn rate', requested: 40, recorded: 0.4 }],
+      ranges_added: [{ factor: 'Headcount', range: 500 }],
+      ranges_not_attached: [{ factor: 'Seats', range: 200 }],
+      current_state_unknown: true,
+    });
+    expect(owed).toHaveLength(1);
+    for (const leak of ['Churn rate', 'Headcount', 'Seats', '0.4', '500', '200']) {
+      expect(owed[0], `leaked "${leak}" as current`).not.toContain(leak);
+    }
+  });
+
+  it('⭐ POSITIVE CONTROL — verified-current rescaling still says everything it should', () => {
+    // Without this the rule above could be satisfied by disclosing nothing ever.
+    const owed = valueChangeDisclosures({
+      rescaled: [{ factor: 'Churn rate', requested: 40, recorded: 0.4 }],
+      ranges_added: [],
+    });
+    expect(owed).toHaveLength(1);
+    expect(owed[0]).toContain('Churn rate');
+    expect(owed[0]).toContain('stored as 0.4');
+    expect(owed[0]).toContain('compute with');
+  });
+
+  it('⭐ POSITIVE CONTROL — a verified chosen range is still offered for correction', () => {
+    const owed = valueChangeDisclosures({
+      rescaled: [],
+      ranges_added: [{ factor: 'Headcount', range: 500 }],
+    });
+    expect(owed).toHaveLength(1);
+    expect(owed[0]).toContain('Headcount');
+    expect(owed[0]).toContain('not yours');
   });
 });
