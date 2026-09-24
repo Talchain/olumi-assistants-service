@@ -353,7 +353,7 @@ export interface AdditionWithoutTotal {
   readonly factor: string;
   readonly value: number;
   readonly unit?: string;
-  readonly reason: 'baseline_unknown' | 'unit_mismatch' | 'factor_ambiguous' | 'value_kind_unknown';
+  readonly reason: 'baseline_unknown' | 'unit_mismatch' | 'factor_unknown' | 'factor_ambiguous' | 'value_kind_unknown';
   readonly factor_unit?: string;
 }
 export interface DemotedProvenance { readonly option: string; readonly factor: string; readonly value: number }
@@ -363,14 +363,47 @@ function sayAdditionWithoutTotal(a: AdditionWithoutTotal): string {
   const why =
     a.reason === 'baseline_unknown' ? `the current level of "${a.factor}" is not known`
     : a.reason === 'unit_mismatch' ? `it is stated in ${a.unit ?? 'another unit'}, while "${a.factor}" is measured in ${a.factor_unit ?? 'another unit'}`
+    : a.reason === 'factor_unknown' ? `no factor called "${a.factor}" is in the model`
     : a.reason === 'factor_ambiguous' ? `more than one factor is called "${a.factor}"`
     : 'it was not clear whether it is an addition or a total';
   const fix =
     a.reason === 'baseline_unknown' ? `Tell me the current level of "${a.factor}" and it becomes a total.`
     : a.reason === 'unit_mismatch' ? `Say whether those are the same unit and it becomes a total.`
+    : a.reason === 'factor_unknown' ? `Say which factor "${a.option}" changes and it can be connected.`
     : `Say what "${a.option}" sets "${a.factor}" to and it becomes a level.`;
   return `"${a.option}" adds ${amount} to "${a.factor}", but ${why}, so no total was set: the option is kept as ` +
     `changing "${a.factor}", with no level of its own. ${fix}`;
+}
+
+/**
+ * What the first pass had to disclose, carried across an ADOPTED retry (review
+ * 5822933692, B3). A repair retry answers a different question (a risk mechanism,
+ * or size); it must not silently erase a demoted user total or an addition left
+ * with no total. An entry survives while it is still true of the adopted candidate:
+ *  · a demotion, while that option sets that factor with no user-stated level;
+ *  · an addition with no total, while that option sets no level on that factor.
+ * Entries the retry's own preparation found are kept, and never duplicated.
+ */
+export function carryFindingsAcrossRetry<P extends ReturnType<typeof prepareProvisionalCandidate>>(first: P, retry: P): P {
+  const levelOf = (option: string, factor: string) =>
+    retry.candidate.options.find((o) => o.label === option)?.interventions?.find((i) => i.factor_label === factor);
+  const hasOption = (option: string) => retry.candidate.options.some((o) => o.label === option);
+  const key = (x: { option: string; factor: string }) => `${x.option}\u0000${x.factor}`;
+  const demotedKeys = new Set(retry.provenance_demoted.map(key));
+  const additionKeys = new Set(retry.additions_without_total.map(key));
+  return {
+    ...retry,
+    provenance_demoted: [
+      ...retry.provenance_demoted,
+      ...first.provenance_demoted.filter((d) =>
+        !demotedKeys.has(key(d)) && hasOption(d.option) && levelOf(d.option, d.factor)?.provenance !== 'explicit'),
+    ],
+    additions_without_total: [
+      ...retry.additions_without_total,
+      ...first.additions_without_total.filter((a) =>
+        !additionKeys.has(key(a)) && hasOption(a.option) && levelOf(a.option, a.factor) === undefined),
+    ],
+  };
 }
 
 export function prepareProvisionalCandidate(model: CandidateModel): {
@@ -412,6 +445,7 @@ export function prepareProvisionalCandidate(model: CandidateModel): {
         if (factors.length > 0) becameChanges.push(intervention.factor_label);
       };
       if (kind !== 'additional') { unresolved('value_kind_unknown'); continue; }
+      if (factors.length === 0) { unresolved('factor_unknown'); continue; }
       if (factor === undefined) { unresolved('factor_ambiguous'); continue; }
       if (typeof factor.baseline_value !== 'number' || !Number.isFinite(factor.baseline_value)
         || !Number.isFinite(intervention.value) || !Number.isFinite(factor.baseline_value + intervention.value)) {
@@ -511,6 +545,9 @@ export async function buildModelFromBrief(
     return { ok: false, mutated: false, refusal: 'construction_failed', detail: String(err).slice(0, 200) };
   }
 
+  // The drafter's own words, kept for a repair retry: re-preparing a PREPARED
+  // candidate finds nothing (review 5822933692, B3), so the retry sees the original.
+  const firstCandidate = candidate;
   let preparation = prepareProvisionalCandidate(candidate);
   candidate = preparation.candidate;
   let admitted = admitCandidateModel(candidate, {});
@@ -555,7 +592,7 @@ export async function buildModelFromBrief(
         // provenance, wiring, plausible_max and clearly labelled estimates.
         instructions: `${BUILD_INSTRUCTIONS} ${needsSizeRetry ? retryInstruction(size) : ''} Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
         input: repairIssues(preparation).length > 0
-          ? `${brief}\n\nConstruction issues: ${JSON.stringify(repairIssues(preparation))}\nCandidate to repair: ${JSON.stringify(candidate)}`
+          ? `${brief}\n\nConstruction issues: ${JSON.stringify(repairIssues(preparation))}\nCandidate to repair: ${JSON.stringify(firstCandidate)}`
           : brief,
         max_output_tokens: budget.max_output_tokens,
         reasoning_effort: budget.reasoning_effort,
@@ -590,7 +627,10 @@ export async function buildModelFromBrief(
           candidate = retryCandidate;
           admitted = retryAdmitted;
           size = retrySize;
-          preparation = retryPreparation;
+          // ⛔ An adopted retry must not erase what the first pass had to disclose
+          // (review 5822933692, B3): a retry that echoes the prepared candidate
+          // re-prepares to nothing, and the user's 7 would read as Olumi's again.
+          preparation = carryFindingsAcrossRetry(preparation, retryPreparation);
         }
       }
     } catch {

@@ -170,6 +170,73 @@ describe('provisional hiring construction uses real admission and registration p
     expect(prepared.provenance_demoted).toEqual([]);
   });
 
+  /**
+   * B3 (review 5822933692): an ADOPTED repair retry must not erase what the first
+   * pass had to say. The retry here ECHOES the prepared first candidate — exactly
+   * what a model shown the prepared candidate would return — with the risk mechanism
+   * restored, so it is adopted. The live hiring capture takes this path.
+   */
+  const withRiskShortcut = (c: ReturnType<typeof hiring>) => {
+    c.links = c.links.filter((l) => l.to !== 'Onboarding disruption');
+    c.links.push({ from: 'Hire two developers', to: 'Onboarding disruption', direction: 'positive', provenance: 'ai_proposed' });
+    return c;
+  };
+
+  it('B3 RED (B1 on the repair path): an addition with no total is still said after an adopted retry', async () => {
+    const first = hiring(); (first.factors[1] as { baseline_value: number | null }).baseline_value = null;
+    const repaired = hiring(); (repaired.factors[1] as { baseline_value: number | null }).baseline_value = null;
+    const echo = prepareProvisionalCandidate(repaired).candidate;
+    const { result, graph, calls } = await construct(withRiskShortcut(first), echo);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(calls, 'the mechanism repair was attempted').toBe(2);
+    expect(graph?.edges.some((e) => e.from === 'developers' && e.to === 'onboarding_disruption'), 'the retry was ADOPTED').toBe(true);
+    expect(result.additions_without_total).toEqual([expect.objectContaining({ option: 'Hire two developers', factor: 'Developers', value: 2, reason: 'baseline_unknown' })]);
+    expect((result.not_represented as string[]).filter((x) => x.includes('the current level of "Developers" is not known'))).toHaveLength(1);
+  });
+
+  it('B3 RED (B2 on the repair path): a demoted user total is still said after an adopted retry', async () => {
+    const seven = { factor_label: 'Developers', value: 7, value_kind: 'absolute', unit: 'people', provenance: 'explicit' };
+    const first = hiring(); first.options[1].interventions[0] = { ...seven };
+    const repaired = hiring(); repaired.options[1].interventions[0] = { ...seven };
+    const echo = prepareProvisionalCandidate(repaired).candidate;
+    const { result, graph, calls } = await construct(withRiskShortcut(first), echo);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(calls).toBe(2);
+    expect(graph?.edges.some((e) => e.from === 'developers' && e.to === 'onboarding_disruption'), 'the retry was ADOPTED').toBe(true);
+    expect(result.provenance_demoted).toEqual([{ option: 'Hire two developers', factor: 'Developers', value: 7 }]);
+    expect((result.not_represented as string[]).filter((x) => x.includes('your 7'))).toHaveLength(1);
+  });
+
+  it('B3 control: a finding the adopted retry genuinely resolved is NOT carried', async () => {
+    const first = hiring(); (first.factors[1] as { baseline_value: number | null }).baseline_value = null;
+    // The retry states the current headcount, so "hire two" becomes a real total.
+    const { result, graph } = await construct(withRiskShortcut(first), hiring());
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(graph?.edges.some((e) => e.from === 'developers' && e.to === 'onboarding_disruption')).toBe(true);
+    expect(result).not.toHaveProperty('additions_without_total');
+    expect((graph?.nodes.find((n) => n.id === 'hire_two_developers')?.interventions as Record<string, unknown>)).toHaveProperty('developers');
+  });
+
+  it('B3: the repair retry is shown the drafter’s ORIGINAL candidate, not the prepared one', async () => {
+    const first = hiring(); (first.factors[1] as { baseline_value: number | null }).baseline_value = null;
+    const inputs: string[] = [];
+    const dispatch: InternalDispatch = async () => ({ status: 200, json: { graph: { nodes: [], edges: [] } } });
+    let n = 0;
+    await buildModelFromBrief('33333333-3333-4333-8333-333333333333', 'Should I hire?', dispatch,
+      async (req) => { inputs.push(String((req as { input: unknown }).input)); return { text: JSON.stringify(n++ === 0 ? withRiskShortcut(first) : hiring()) }; });
+    expect(inputs).toHaveLength(2);
+    expect(inputs[1]).toContain('"value_kind":"additional"');
+  });
+
+  it('N2: an addition naming a factor that does not exist is said as unknown, not ambiguous', async () => {
+    const c = hiring();
+    c.options[1].interventions[0] = { factor_label: 'Contractors', value: 2, value_kind: 'additional', unit: 'people', provenance: 'explicit' };
+    const { result } = await construct(c);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result.additions_without_total).toEqual([expect.objectContaining({ factor: 'Contractors', reason: 'factor_unknown' })]);
+    expect((result.not_represented as string[]).filter((x) => x.includes('no factor called "Contractors" is in the model'))).toHaveLength(1);
+  });
+
   it('repairs a direct option-risk hypothesis through a factor without dropping its downstream effect', async () => {
     const { result, graph, calls } = await construct(invalidRisk(), hiring());
     expect(result.ok, JSON.stringify(result)).toBe(true);
