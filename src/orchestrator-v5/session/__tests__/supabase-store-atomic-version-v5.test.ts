@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SupabaseSessionStore } from '../supabase-store.js';
-import { GraphStaleWriteError, StateCommitFailedError } from '../store.js';
+import { AtomicPreconditionUnenforceableError, GraphStaleWriteError, StateCommitFailedError } from '../store.js';
 import type { SessionTurnWrite } from '../store.js';
 import { setTestSink, TelemetryEvents } from '../../../utils/telemetry.js';
 
@@ -478,5 +478,66 @@ describe('p_expected_base_known — the caller states whether it KNOWS the base'
         `mode=${mode}: the known-base FACT must not depend on the CAS posture`,
       ).toBe(true);
     }
+  });
+});
+
+/**
+ * ⛔ A CALLER'S PRECONDITION IS ENFORCED FOR THAT WRITE, WHATEVER THE GLOBAL POSTURE
+ * (independent review of #1786, 5805649773). Graph registration's `expected_model_empty`
+ * reads the model as empty, and another author can commit before the fence claim and the
+ * append. Under the default `shadow` posture the v5 SQL guard never ran, so the construction
+ * replaced that model. `requireAtomicExpectedBase` turns the guard on for THIS write only.
+ *
+ * The rpc double below evaluates the v5 guard's own predicate over the arguments the store
+ * sends (20260920210000_v5_append_v5_replay_precedes_cas.sql:263-276, pinned textually by
+ * `append-turn-atomic-v5-replay-precedes-cas-static-guards.test.ts`), against the hash the
+ * scenario row holds at append time.
+ */
+describe('a caller precondition (requireAtomicExpectedBase) is held inside the atomic write', () => {
+  const A_HASH = '1'.repeat(64);
+  let rowHashAtAppend: string | null = null;
+  const sqlGuard = (a: Record<string, unknown>) =>
+    a['p_cas_enforce'] === true &&
+    a['p_expected_base_known'] === true &&
+    rowHashAtAppend !== a['p_expected_graph_identity_hash'] &&
+    a['p_incoming_graph_identity_hash'] !== rowHashAtAppend &&
+    !(rowHashAtAppend === null && a['p_expected_graph_identity_hash'] !== null);
+  beforeEach(() => {
+    rowHashAtAppend = null;
+    rpc.mockImplementation(async (name: string, a: Record<string, unknown>) => {
+      if (name === 'append_turn_atomic_v5' && sqlGuard(a)) {
+        return { data: null, error: { code: OLGC1, message: 'append_turn_atomic_v5: stale graph write' } };
+      }
+      return { data: { turn_row_id: 'turn-row', model_version_receipt: receipt }, error: null };
+    });
+  });
+
+  it('RED: under SHADOW, another model committed after the empty read → the write is refused (GraphStaleWriteError), not applied', async () => {
+    rowHashAtAppend = A_HASH; // A committed between the caller's empty read and this append
+    const store = storeWith('shadow');
+    await expect(store.append(write({ expectedGraphIdentityHash: null, requireAtomicExpectedBase: true }))).rejects.toBeInstanceOf(GraphStaleWriteError);
+    expect(v5Args()).toMatchObject({ p_cas_enforce: true, p_expected_base_known: true, p_expected_graph_identity_hash: null });
+  });
+
+  it('CONTRAST (the lost update this closes): the SAME race without the precondition is written over A under shadow', async () => {
+    rowHashAtAppend = A_HASH;
+    const store = storeWith('shadow');
+    await expect(store.append(write({ expectedGraphIdentityHash: null }))).resolves.toMatchObject({ id: 'turn-row' });
+    expect(v5Args()['p_cas_enforce'], 'the global posture is unchanged for every other write').toBe(false);
+  });
+
+  it('CONTRAST: the model is still empty at append time → the precondition holds and the write lands', async () => {
+    const store = storeWith('shadow');
+    await expect(store.append(write({ expectedGraphIdentityHash: null, requireAtomicExpectedBase: true }))).resolves.toMatchObject({ id: 'turn-row' });
+  });
+
+  it.each([
+    ['no versioned (v5) path for the write', { modelVersion: undefined, expectedGraphIdentityHash: null }],
+    ['no expected base was read', { expectedGraphIdentityHash: undefined }],
+  ])('a writer that cannot hold the precondition refuses BEFORE any read or write: %s', async (_l, over) => {
+    const store = storeWith('shadow');
+    await expect(store.append(write({ ...over, requireAtomicExpectedBase: true } as Partial<SessionTurnWrite>))).rejects.toBeInstanceOf(AtomicPreconditionUnenforceableError);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(selectCalls).toHaveLength(0);
   });
 });

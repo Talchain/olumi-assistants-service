@@ -36,6 +36,7 @@ import {
 import type { SessionLRUCache } from './cache.js';
 import type { InvalidationResult, InvalidationScope } from './invalidation.js';
 import {
+  AtomicPreconditionUnenforceableError,
   GraphStaleWriteError,
   SessionReadError,
   StateCommitFailedError,
@@ -289,6 +290,17 @@ export class SupabaseSessionStore implements SessionStore {
    * harms. A non-graph turn pays no extra read.
    */
   async append(write: SessionTurnWrite): Promise<SessionAppendOutcome> {
+    // ⛔ A caller's precondition is enforced atomically or refused — before ANY read or
+    // write (see `SessionTurnWrite.requireAtomicExpectedBase`). Only the versioned v5
+    // append can hold a known-absent base inside its transaction.
+    if (write.requireAtomicExpectedBase === true) {
+      if (write.modelVersion === undefined) {
+        throw new AtomicPreconditionUnenforceableError('no versioned atomic path for this write');
+      }
+      if (write.expectedGraphIdentityHash === undefined) {
+        throw new AtomicPreconditionUnenforceableError('no expected base was read');
+      }
+    }
     const prior = write.graph == null ? 'new' : await this.classifyPriorTurn(write);
     const outcome = await this.appendThroughRpc(write);
     if (prior === 'replay') return { ...outcome, replayedPriorTurn: true };
@@ -1424,7 +1436,10 @@ export class SupabaseSessionStore implements SessionStore {
       // contract is "no write is ever rejected"; promoting the versioned path
       // to enforce unilaterally would make that false and is "a later
       // explicit, Paul-gated step".
-      p_cas_enforce: rpcMode === 'enforce',
+      // ⛔ A caller's explicit precondition is enforced for THIS write whatever the global
+      // posture — the SQL guard (20260920210000:263-276) runs only under this switch, and
+      // replay is still decided first. Every other write keeps the derived mode.
+      p_cas_enforce: rpcMode === 'enforce' || write.requireAtomicExpectedBase === true,
       p_fence_generation: generation,
       p_version_mutation_id: version.mutation_id,
       p_version_analysis_affecting_hash: version.analysis_affecting_hash,

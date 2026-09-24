@@ -1329,6 +1329,27 @@ describe("register — expected_model_empty makes a first construction condition
       await app.close();
     });
 
+  it("the precondition travels INTO the atomic write (requireAtomicExpectedBase), and only when asked", async () => {
+    loadGraph.mockResolvedValue(null);
+    const app = await buildApp();
+    await post(app, SCENARIO, { graph: IMPORTED, expected_model_empty: true });
+    await post(app, SCENARIO, { graph: IMPORTED });
+    expect(append.mock.calls[0][0].requireAtomicExpectedBase).toBe(true);
+    expect(append.mock.calls[1][0]).not.toHaveProperty("requireAtomicExpectedBase");
+    await app.close();
+  });
+
+  it("a writer that cannot hold the precondition atomically → 503 PRECONDITION_UNENFORCEABLE, never an unconditional write", async () => {
+    loadGraph.mockResolvedValue(null);
+    const { AtomicPreconditionUnenforceableError } = await import("../../orchestrator-v5/session/store.js");
+    append.mockRejectedValue(new AtomicPreconditionUnenforceableError("no versioned atomic path for this write"));
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_model_empty: true });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().details.code).toBe("PRECONDITION_UNENFORCEABLE");
+    await app.close();
+  });
+
   it("CONTRAST: with NO precondition a populated base is written exactly as before", async () => {
     const app = await buildApp();
     const res = await post(app, SCENARIO, { graph: IMPORTED });
@@ -1406,6 +1427,28 @@ describe("construction race — pause B after its empty read, commit A, resume B
     expect(h.registers).toEqual([409]);
     expect(out).toMatchObject({ ok: false, mutated: false, refusal: "model_changed_during_build" });
     expect(await loadGraph(SCENARIO), "A's graph is still the model").toBe(A_GRAPH);
+    await app.close();
+  });
+
+  it("RED (the SECOND window): registration reads EMPTY, A commits before the append → the write must hold the precondition atomically", async () => {
+    // Registration's own server read sees an empty model; A commits straight after it,
+    // before the fence claim and the append. The atomic writer refuses a write whose
+    // requested precondition no longer holds (store + v5 SQL guard: proven in
+    // supabase-store-atomic-version-v5.test.ts), and applies an unflagged one — shadow.
+    let aCommitted = false;
+    loadGraph.mockImplementation(async () => { const g = aCommitted ? A_GRAPH : null; aCommitted = true; return g; });
+    append.mockImplementation(async (w: { requireAtomicExpectedBase?: true; expectedGraphIdentityHash?: string | null }) => {
+      if (aCommitted && w.requireAtomicExpectedBase === true && w.expectedGraphIdentityHash === null) {
+        throw new GraphStaleWriteError("append_turn_atomic_v5: stale graph write", { conflict_category: "analysis_affecting_conflict" });
+      }
+      return { id: "turn-b-overwrote-a" };
+    });
+    const app = await buildApp();
+    const h = harness(app, [{ version_id: "v-a", sequence: 1, creation: { kind: "committed_mutation", source_turn_id: "someone-elses-turn" } }]);
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, h.dispatch as never, generating(() => undefined));
+    expect(h.registers, "refused as a conflict, nothing applied").toEqual([409]);
+    expect(await append.mock.results[0]?.value.catch((e: unknown) => e)).toBeInstanceOf(GraphStaleWriteError);
+    expect(out).toMatchObject({ ok: false, mutated: false, refusal: "model_changed_during_build" });
     await app.close();
   });
 

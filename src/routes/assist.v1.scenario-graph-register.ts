@@ -153,7 +153,7 @@ import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
 import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { registrationRequestHash, registrationTurnId } from "../orchestrator-v5/graph-registration/registration-identity.js";
-import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
+import { AtomicPreconditionUnenforceableError, GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
 import { runWithPendingTurnFence, TurnFenceRejectedError } from "../orchestrator-v5/session/turn-fence.js";
 import { admitCurrentTurnFence } from "../orchestrator/turn-fence-prehandler.js";
 import { normaliseBriefText } from "../orchestrator-v5/session/normalise-brief-text.js";
@@ -691,6 +691,10 @@ export default async function route(app: FastifyInstance) {
             ...(brief.value === undefined ? {} : { briefText: brief.value }),
             expectedGraphIdentityHash,
             expectedGraphAnalysisHash,
+            // The caller's empty-model precondition is held INSIDE the atomic write, whatever
+            // the global CAS posture: the empty read above can go stale before the fence
+            // claim and the append (independent review of #1786, 5805649773).
+            ...(callerExpectsEmptyModel ? { requireAtomicExpectedBase: true as const } : {}),
           },
           });
         });
@@ -754,6 +758,29 @@ export default async function route(app: FastifyInstance) {
               })),
             },
           );
+        }
+        if (err instanceof AtomicPreconditionUnenforceableError) {
+          // The writer could not hold the caller's precondition atomically, so it wrote
+          // nothing. Refused as OUR limitation (503), never downgraded to an unconditional write.
+          log.warn(
+            {
+              event: "v5.scenario_graph_register.precondition_unenforceable",
+              request_id: requestId,
+              scenario_id: scenarioId,
+              err: err.message,
+            },
+            "Graph registration — the caller's precondition cannot be enforced atomically; nothing written",
+          );
+          return reply
+            .code(503)
+            .send(
+              buildErrorV1(
+                "INTERNAL",
+                "This model could not be saved safely right now. Nothing was written.",
+                { code: "PRECONDITION_UNENFORCEABLE" },
+                requestId,
+              ),
+            );
         }
         if (err instanceof GraphStaleWriteError) {
           // Atomic in-transaction CAS refused: the whole turn rolled back and
