@@ -23,6 +23,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_assumptions: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
   propose_option_interventions: { label: 'Use as starting option levels', message: 'Yes, use those.' },
   propose_model_change: { label: 'Make this change', message: 'Yes, make that change.' },
+  // #1788's add-option proposal: the same typed, zero-call approval as every other proposal.
+  propose_new_option: { label: 'Add this option', message: 'Yes, add that option.' },
 };
 
 export const AMEND_CHIP: SuggestedAction = {
@@ -40,6 +42,27 @@ export function approvalChipsFor(
     if (c.ok && typeof c.proposal_id === 'string' && APPROVE[c.name] !== undefined) offered.set(c.proposal_id, c.name);
   }
   if (offered.size !== 1) return [];
-  const approve = APPROVE[[...offered.values()][0]!]!;
-  return [{ id: 'agent-approve-proposal', label: approve.label, message: approve.message }, AMEND_CHIP];
+  const [proposalId, tool] = [...offered.entries()][0]!;
+  const approve = APPROVE[tool]!;
+  // ⭐ THE CHIP CARRIES THE PROPOSAL'S IDENTITY (fast path 2, RC #63 5803995225). The
+  // UI echoes `chip.id` verbatim on the click, so the route applies EXACTLY this
+  // proposal with no model call. The id is never rendered (label/message are).
+  return [{ id: approvalChipIdFor(proposalId), label: approve.label, message: approve.message }, AMEND_CHIP];
+}
+
+const APPROVE_PREFIX = 'agent-approve-proposal:';
+
+/** The approve chip's id for one proposal. */
+export const approvalChipIdFor = (proposalId: string): string => `${APPROVE_PREFIX}${proposalId}`;
+
+/**
+ * The proposal a request's chip names, when (and only when) it is the typed approve
+ * chip. Words alone never approve on this path: "Yes, use those." typed into the
+ * composer still goes to the Agent, which resolves it against what it offered.
+ */
+export function typedApprovalOf(body: unknown): string | undefined {
+  const id = (body as { chip?: { id?: unknown } } | null | undefined)?.chip?.id;
+  if (typeof id !== 'string' || !id.startsWith(APPROVE_PREFIX)) return undefined;
+  const proposalId = id.slice(APPROVE_PREFIX.length);
+  return /^prop_[0-9a-f]{6,64}$/.test(proposalId) ? proposalId : undefined;
 }
