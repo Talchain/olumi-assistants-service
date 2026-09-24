@@ -63,6 +63,7 @@ import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { enforceLeadingOptionClaimsAtWire } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
+import { runTurnCoaching, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import {
   bindRunBlocksToReadback,
   firstAnalysisDeadline,
@@ -1242,13 +1243,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       return outcome;
     };
     /**
-     * The blocks of the LAST analysis this turn ran (first analysis, the Agent's own run, or the typed
-     * Run). Carried to the user ONLY when bound to the final readback — see `bindRunBlocksToReadback`.
+     * The LAST analysis this turn ran (first analysis, the Agent's own run, or the typed Run), as
+     * handed over. Carried to the user ONLY when bound to the final readback — see
+     * `bindRunBlocksToReadback` and `runTurnCoaching`. No trigger ⇒ the user asked for the run.
      */
-    let lastRunBlocks: readonly unknown[] = [];
+    let lastRun: CapturedAnalysis | undefined;
     const capabilities = createAgentCapabilities(
       countingDispatch, proposals, callStructured, mode,
-      (payload) => { lastRunBlocks = Array.isArray(payload.blocks) ? payload.blocks : []; },
+      (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
       { firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }) },
     );
     // A session whose in-process history holds no user message (a restart, a
@@ -1587,7 +1589,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(approvalCarrier !== undefined ? [approvalCarrier] : []),
     ];
 
-    const coachingBound = bindRunBlocksToReadback(lastRunBlocks, { graphHash, analysisState, analysisResult });
+    const lastRunBlocks = Array.isArray(lastRun?.blocks) ? lastRun.blocks : [];
+    const runBound = bindRunBlocksToReadback(lastRunBlocks, { graphHash, analysisState, analysisResult });
+    /**
+     * ⭐ THE RUN-TURN COACHING CARD (CEE #1855), bound to the SAME readback. On this lane the run's own
+     * blocks carry no coaching on the automatic first pass (leader withheld, no decision_review), so
+     * without it the first pass is blank. Only the blocks the contract BUILDS are added: the run's own
+     * blocks stay under `bindRunBlocksToReadback`'s rule above.
+     */
+    const runCoaching = runTurnCoaching(lastRun, { scenarioId, graphHash, analysisState, analysisResult });
+    const coachingBound = [...runBound, ...runCoaching.blocks.filter((b) => !lastRunBlocks.includes(b))];
     const coachingBlocks: unknown[] = coachingBound.length === 0
       ? []
       : sanitiseOlumiResponseForEgress(
@@ -1760,6 +1771,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         tools_called: result.tool_calls.map((c) => c.name),
         write_claims_removed: narration.stripped.length,
         ...(leaderClaimEnforced ? { leader_claim_enforced: true } : {}),
+        /** The run-turn coaching card: shown, or the typed reason it is not (for staging witnesses). */
+        coaching: runCoaching.eligibility,
         /**
          * ⭐ WHAT THE AUTOMATIC FIRST ANALYSIS DID, for witnesses: ran, or why not, how long it took,
          * and the (construction, revision) identity it was bound to. Absent when no construction

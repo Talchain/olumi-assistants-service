@@ -263,8 +263,13 @@ export function createAgentCapabilities(
    * straight back into the model's context: a full analysis payload there
    * would cost thousands of tokens per hop and tell the model nothing its own
    * summary does not already say.
+   *
+   * `scenario_id`, `status` and `trigger` are what the run-turn coaching
+   * contract (`runTurnCoaching`, CEE #1855) binds the run by: without them it
+   * cannot tell that a run happened this turn, or that it was the automatic
+   * first pass. No `trigger` ⇒ the user asked for the run.
    */
-  onAnalysis?: (payload: { analysis_ready?: unknown; blocks?: unknown[] }) => void,
+  onAnalysis?:(payload: { scenario_id: string; status: number; analysis_state?: unknown; analysis_ready?: unknown; blocks?: unknown[]; trigger?: 'auto_first_pass' }) => void,
   /**
    * ⭐ THE AUTOMATIC FIRST ANALYSIS (Paul, 5812069638), injected by the route so the run, its turn
    * deadline and its write accounting stay the route's. Absent → no automatic run (a unit test, or a
@@ -2430,7 +2435,7 @@ export function createAgentCapabilities(
           revisionHash: after.graph_hash,
           requestId: ctx.request_id,
         });
-        if (outcome.ran) onAnalysis?.({ analysis_ready: outcome.analysisReady, blocks: [...outcome.blocks] });
+        if (outcome.ran) onAnalysis?.({ scenario_id: ctx.scenario_id, status: 200, analysis_ready: outcome.analysisReady, blocks: [...outcome.blocks], trigger: 'auto_first_pass' });
         // What the Agent narrates from: the READBACK after the run — its confined summary and the
         // typed leader permission — never the run's own receipt. A failed read describes nothing.
         const postRun = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph`, {}).catch(() => null);
@@ -2565,7 +2570,7 @@ export function createAgentCapabilities(
       const ready = (r.json.analysis_ready ?? {}) as Record<string, unknown>;
       const blocks = (r.json.blocks as { type: string }[] | undefined) ?? [];
       const result = blocks.find((b) => b.type === 'analysis_result');
-      onAnalysis?.({ analysis_ready: r.json.analysis_ready, blocks });
+      onAnalysis?.({ scenario_id: ctx.scenario_id, status: r.status, analysis_state: r.json.analysis_state, analysis_ready: r.json.analysis_ready, blocks });
       return {
         ok: r.status === 200,
         mutated: false,
