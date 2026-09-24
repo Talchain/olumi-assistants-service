@@ -42,6 +42,7 @@
  */
 
 import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
+import { analysisReadyAdmitsRun } from '../admission/analysis-admission.js';
 import type { StageType } from '@talchain/schemas/boundary';
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
@@ -653,7 +654,7 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   // mutation is the more proximate signal of "what the user just did".
   if (
     successfulMutationOnCurrentTurn &&
-    input.analysisReady?.status === 'ready'
+    analysisReadyAdmitsRun(input.analysisReady)
   ) {
     // M2 convergence: prefer the canonical verdict when threaded. On a
     // mutation turn the current handlerFacts hold the mutation (not a
@@ -711,7 +712,7 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   if (
     noopExplanationHandlerJustRan != null &&
     effectiveFreshness === 'stale' &&
-    input.analysisReady?.status === 'ready'
+    analysisReadyAdmitsRun(input.analysisReady)
   ) {
     const curated = curatedHandlerChips(input.validationRegistry);
     const runAnalysis = curated.find((c) => c.handler_id === 'run_analysis');
@@ -807,7 +808,7 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
   // signal, not by re-deriving from priorFacts.
   if (
     preconditionUnmetExplanationFact != null &&
-    input.analysisReady?.status === 'ready'
+    analysisReadyAdmitsRun(input.analysisReady)
   ) {
     const curated = curatedHandlerChips(input.validationRegistry);
     const runAnalysis = curated.find((c) => c.handler_id === 'run_analysis');

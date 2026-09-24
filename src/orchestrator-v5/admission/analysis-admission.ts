@@ -394,6 +394,38 @@ export function permittedAnalysisModeFromAnalysisReady(
  * is real, is not closed, and is written up in full on the `analysis_admission`
  * field in `schemas/analysis-ready.ts`. Read it before widening either side.
  */
+/**
+ * ⭐ MAY A RUN BE OFFERED FOR THIS READINESS? THE ONE PLACE THAT ANSWERS IT.
+ *
+ * ⛔ THIS EXISTS BECAUSE THE ANSWER WAS ALREADY SPELT THREE WAYS, and two of them
+ * disagree with the client:
+ *
+ *   · `agent-v1-turn.ts:385 admitsRunOffer` —
+ *       `typeof may_run === 'boolean' ? may_run : status === 'ready'`
+ *   · `compose/chip-generator.ts:656, :714, :810` — `status === 'ready'` alone
+ *   · DecisionGuideAI `canvas/hooks/useAnalysisReady.ts:74-79 admitsRunAffordance` —
+ *       `status === 'ready' || may_run === true`   ← THE DEPLOYED CLIENT
+ *
+ * The client's rule is the one that decides whether the user sees a control, so it
+ * is the rule CEE must answer with. The two divergences it fixes, measured:
+ *
+ *   · `(status: 'ready', may_run: false)` — the route WITHHOLDS while the UI RENDERS
+ *     the Run. Two Olumi affordances answering differently on one screen.
+ *   · `(status: 'needs_user_mapping', may_run: true)` — the compose chips withhold on
+ *     `status` alone, and over the full population of persisted models **3,168 of
+ *     15,255 (20.77%)** sit in that state: able to run, never offered it.
+ *
+ * ⚠ ABSENCE IS LOAD-BEARING AND IS NOT "NO". `may_run: undefined` means a producer
+ * older than the admission, so the answer falls back to `status` — never to a refusal.
+ * Collapsing undefined to false would withhold the Run from every payload minted
+ * before the field existed.
+ */
+export function analysisReadyAdmitsRun(analysisReady: unknown): boolean {
+  if (analysisReady === null || typeof analysisReady !== 'object') return false;
+  const ar = analysisReady as { may_run?: unknown; status?: unknown };
+  return ar.status === 'ready' || ar.may_run === true;
+}
+
 export function analysisReadyPermitsLeaderNaming(analysisReady: unknown): boolean {
   const admission = (
     analysisReady as { readonly analysis_admission?: unknown } | null | undefined
