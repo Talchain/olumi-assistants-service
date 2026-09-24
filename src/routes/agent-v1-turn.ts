@@ -1338,6 +1338,48 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
       // Readiness of the graph this response returns — the final readback's only.
       ...(analysisReady !== undefined ? { analysis_ready: analysisReady } : {}),
+      /**
+       * ⭐ THE EXPLICIT RUN ENDS IN ONE GROUNDED NEXT REASONING ACTION.
+       *
+       * RC's fast-path brief for this lane: the Run must produce a concise
+       * model-relative interpretation AND one useful next reasoning action, surfacing
+       * DSK-P-003 (Consider-the-Opposite) when eligible. `runAnalysis` now returns
+       * `consider_the_opposite` when the run's own robustness data grounds it — a pure
+       * function of the enrichment, no second model call.
+       *
+       * ⛔ IT WOULD OTHERWISE BE COMPUTED AND DROPPED. FP3's reply is the Interpreter's
+       * answer, not the Agent's, so the instruction telling the Agent to close with it
+       * never applies on the served fast path. The field reaches the Interpreter (it is
+       * spread into `runForInterpreter`), but v0.2's own profile says "Do not force a
+       * next step" — so whether it surfaces is a model choice, not a guarantee.
+       *
+       * ⭐ A CHIP, NOT PROSE, AND THAT IS THE POINT. Prose is a claim; a chip is an
+       * offer the user may decline. Appending a disconfirmation exercise to the
+       * Interpreter's answer would also cut across v0.2's compactness rule. As a chip
+       * the exercise is carried verbatim in `message` — the user's own words if they
+       * take it — while the label stays short.
+       *
+       * ⚠ The text is the selector's, unaltered. It never claims the result is in
+       * doubt: DSK-P-003's contraindications forbid running it on a close call, and the
+       * copy says only that the robustness check flagged the link as a priority to
+       * challenge.
+       */
+      ...(((): Record<string, unknown> => {
+        const counter = result.tool_results
+          .map((r) => (r as { consider_the_opposite?: unknown } | null)?.consider_the_opposite)
+          .find((t): t is string => typeof t === 'string' && t.length > 0);
+        if (counter === undefined) return {};
+        const existing = (finalised as { suggested_actions?: unknown[] }).suggested_actions ?? [];
+        // The client renders the first three; a fourth would be invisible.
+        if (existing.length >= 3) return {};
+        if (existing.some((a) => (a as { id?: string })?.id === 'agent-consider-the-opposite')) return {};
+        return {
+          suggested_actions: [
+            ...existing,
+            { id: 'agent-consider-the-opposite', label: 'Challenge this result', message: counter },
+          ],
+        };
+      })()),
       // The scenario-bound verdict from the FINAL readback governs; otherwise the
       // finaliser's own honest no-context verdict stays (present, never deleted).
       ...(analysisState !== undefined ? { analysis_state: analysisState } : {}),
