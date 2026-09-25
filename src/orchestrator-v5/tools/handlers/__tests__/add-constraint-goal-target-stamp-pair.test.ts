@@ -100,3 +100,60 @@ describe('the goal-join writes the target and its stamp as one pair', () => {
     expect(goalOf(out.mutated_graph)).toMatchObject({ goal_threshold_raw: 20, success_threshold: 20, threshold_source: 'user' });
   });
 });
+
+/**
+ * ⛔ "ALREADY" MUST MEAN WHAT THE USER SEES (#1924 post-merge CHANGES_REQUIRED, #69 5834662051).
+ *
+ * The UI writes the stamp WITHOUT the raw target on every stamp-only surface (`setGoalThresholdAndUpdateNode`:
+ * DefineSuccessModal, HeroSection, OutputsDock, PreAnalysisPanel, GoalThresholdEditor, SuccessTargetLine), and
+ * reads the stamp first. The goal-join called a restatement "unchanged" by comparing the RAW target alone, so a
+ * draft 30 % with a UI-set 20 %, then "at least 30 %" in chat, answered "already at least 30 % — no need to
+ * change it" and left 20 % on screen, on reload and in the Run.
+ */
+function diverged(raw: number, stamp: number | null): GraphV3T {
+  const g = buildD1Fixture() as unknown as { nodes: Goal[] };
+  g.nodes = g.nodes.map((n) => (n.kind === 'goal'
+    ? { ...n, goal_threshold_raw: raw, goal_threshold_unit: '%', goal_threshold_cap: 100, goal_threshold: raw / 100, threshold_source: 'user', success_threshold: stamp }
+    : n));
+  const parsed = GraphV3.safeParse(g);
+  if (!parsed.success) throw new Error('fixture must parse');
+  return parsed.data;
+}
+type Out = { mutated_graph: unknown; handler_facts: Array<{ noop?: boolean }>; assistant_text?: string; blocks?: unknown };
+
+describe('a restatement is "unchanged" only when the target the user reads agrees', () => {
+  it('RED: raw 30 %, stamp 20 % → chat "at least 30 %" writes 30 / user and is NOT a no-op', async () => {
+    const out = (await createAddConstraintHandler()(invocation(diverged(30, 20), goalTarget('at_least', 30)))) as unknown as Out;
+    expect(goalOf(out.mutated_graph)).toMatchObject({ goal_threshold_raw: 30, success_threshold: 30, threshold_source: 'user' });
+    expect(out.handler_facts[0]?.noop).toBe(false);
+    expect(JSON.stringify(out)).not.toMatch(/no need to change it/i);
+  });
+
+  it('CONTROL (the reviewer\'s): raw 30 %, stamp 20 % → "at least 35 %" writes 35 / 35 / user', async () => {
+    const out = (await createAddConstraintHandler()(invocation(diverged(30, 20), goalTarget('at_least', 35)))) as unknown as Out;
+    expect(goalOf(out.mutated_graph)).toMatchObject({ goal_threshold_raw: 35, success_threshold: 35, threshold_source: 'user' });
+  });
+
+  it('RED: an earlier chat 30 % ROW, then the UI sets 20 % locally, then "at least 30 %" again → 30 / user, not a no-op', async () => {
+    const first = (await createAddConstraintHandler()(invocation(buildD1Fixture(), goalTarget('at_least', 30)))) as unknown as Out;
+    const g = GraphV3.safeParse(first.mutated_graph);
+    if (!g.success) throw new Error('first write must parse');
+    expect(g.data.goal_constraints?.some((c) => c.node_id === 'g-revenue' && c.value === 30), 'the precondition: the chat row exists').toBe(true);
+    // The UI's stamp-only surface: the stamp moves to 20, raw and the row stay at 30.
+    const local = { ...g.data, nodes: g.data.nodes.map((n) => (n.kind === 'goal' ? { ...n, success_threshold: 20, threshold_source: 'user' } : n)) } as GraphV3T;
+    const out = (await createAddConstraintHandler()(invocation(local, goalTarget('at_least', 30)))) as unknown as Out;
+    expect(out.handler_facts[0]?.noop).toBe(false);
+    expect(goalOf(out.mutated_graph)).toMatchObject({ goal_threshold_raw: 30, success_threshold: 30, threshold_source: 'user' });
+  });
+
+  it('CONTRAST: raw 30 %, stamp 30 % → "at least 30 %" stays an honest no-op (F9: nothing the user reads moved)', async () => {
+    const out = (await createAddConstraintHandler()(invocation(diverged(30, 30), goalTarget('at_least', 30)))) as unknown as Out;
+    expect(out.handler_facts[0]?.noop).toBe(true);
+    expect(goalOf(out.mutated_graph)).toMatchObject({ goal_threshold_raw: 30, success_threshold: 30 });
+  });
+
+  it('CONTRAST: raw 30 %, stamp cleared (null) → "at least 30 %" stays a no-op — the UI reads raw then', async () => {
+    const out = (await createAddConstraintHandler()(invocation(diverged(30, null), goalTarget('at_least', 30)))) as unknown as Out;
+    expect(out.handler_facts[0]?.noop).toBe(true);
+  });
+});
