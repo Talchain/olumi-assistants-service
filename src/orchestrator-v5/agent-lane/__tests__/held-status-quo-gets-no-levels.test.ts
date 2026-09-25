@@ -507,7 +507,9 @@ describe('(d) the Agent is told a held status quo is never given levels — in t
   it('RED: the starting-point instruction excludes the held status quo', () => {
     expect(instructions[0]).toContain(
       'In that same reply, if any factor has no value or any option sets nothing, call propose_starting_point ONCE with a reasoned ' +
-      'starting value for each such factor and the level each option sets, in the user’s own units. An option in ' +
+      'starting value for each such factor and a level for each option and factor that has none yet, in the user’s own ' +
+      'units. get_canonical_state lists the levels each option already sets (`levels`): quote those as stored, and never ' +
+      'propose again a level that is already stored unless the user asks to change it. An option in ' +
       '`status_quo_held` does not count: it is held at its starting values and is never given levels.',
     );
   });

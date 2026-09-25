@@ -346,6 +346,58 @@ function nativeStartingValue(os: { value?: unknown; raw_value?: unknown; cap?: u
 }
 
 /**
+ * The range an option level on this factor is stored against — THE rule the level writer
+ * divides by (`proposeOptionInterventions`): `observed_state.cap` when positive, else the
+ * factor's stored `scale_frame` when above 1, else none (a level in 0..1 is stored as given).
+ * One function, so the projection that reads a level back can never use a different range
+ * from the write that stored it.
+ */
+function levelFrameOf(factor: { observed_state?: Record<string, unknown>; scale_frame?: unknown } | undefined): number | null {
+  const cap = (factor?.observed_state ?? {}).cap;
+  if (typeof cap === 'number' && Number.isFinite(cap) && cap > 0) return cap;
+  const frame = factor?.scale_frame;
+  return typeof frame === 'number' && Number.isFinite(frame) && frame > 1 ? frame : null;
+}
+
+/**
+ * ⭐ WHAT EACH OPTION SETS, AS STORED (Canonical State RCA D1, #69 5833317225). `projectEntity`
+ * showed values, units and ranges but no option levels, so `get_canonical_state` never told the
+ * Agent what an option already sets: it quoted its own tool arguments and re-proposed levels
+ * blind, and Paul's chat said £38k where the canvas held £39k. Each stored cell is returned in
+ * the user's units by the writer's own range (`levelFrameOf`), with who set it. A cell with no
+ * numeric value is left out, never shown as a zero.
+ */
+const byIdCache = new WeakMap<object, ReadonlyMap<string, GraphRead['nodes'][number]>>();
+function byIdOf(g: Pick<GraphRead, 'nodes'>): ReadonlyMap<string, GraphRead['nodes'][number]> {
+  let m = byIdCache.get(g);
+  if (m === undefined) { m = new Map(g.nodes.map((n) => [n.id, n])); byIdCache.set(g, m); }
+  return m;
+}
+
+export function projectOptionLevels(
+  option: GraphRead['nodes'][number],
+  factorsById: ReadonlyMap<string, GraphRead['nodes'][number]>,
+): Record<string, unknown>[] {
+  if (option.kind !== 'option' || option.interventions === null || typeof option.interventions !== 'object') return [];
+  const out: Record<string, unknown>[] = [];
+  for (const [factorId, raw] of Object.entries(option.interventions)) {
+    const cell = (raw ?? {}) as { value?: unknown; source?: unknown };
+    if (typeof cell.value !== 'number' || !Number.isFinite(cell.value)) continue;
+    const factor = factorsById.get(factorId);
+    const frame = levelFrameOf(factor);
+    const unit = (factor?.observed_state ?? {}).unit;
+    out.push({
+      factor_id: factorId,
+      ...(typeof factor?.label === 'string' && factor.label !== '' ? { factor: factor.label } : {}),
+      level: frame === null ? cell.value : cell.value * frame,
+      ...(typeof unit === 'string' && unit !== '' ? { unit } : {}),
+      ...(typeof cell.source === 'string' && cell.source !== '' ? { set_by: cell.source } : {}),
+    });
+  }
+  return out;
+}
+
+/**
  * ⭐ ONE PROJECTION of a persisted node into what the Agent is shown — used by
  * EVERY tool that hands the Agent entities.
  *
@@ -957,7 +1009,11 @@ export function createAgentCapabilities(
         mutated: false,
         graph_revision: g.graph_hash,
         empty: g.nodes.length === 0,
-        entities: g.nodes.map(projectEntity),
+        entities: g.nodes.map((n) => {
+          // What each option already sets, as stored (RCA D1): quote these, never your own earlier arguments.
+          const levels = projectOptionLevels(n, byIdOf(g));
+          return levels.length > 0 ? { ...projectEntity(n), levels } : projectEntity(n);
+        }),
         existing_links: g.edges.map((e) => `${e.from} -> ${e.to}`),
         // Derived by traversal of the persisted graph — facts, not estimates,
         // and the Agent may state them to the user as facts. Without these it
@@ -1460,9 +1516,7 @@ export function createAgentCapabilities(
          * number and the two levels on one factor sat on two scales. Measured
          * in the replay of Paul's session (repro/FINDINGS.md, turns 3-4).
          */
-        const storedFrame = typeof factor.scale_frame === 'number' && Number.isFinite(factor.scale_frame) && factor.scale_frame > 1
-          ? factor.scale_frame : null;
-        const cap = typeof os.cap === 'number' && Number.isFinite(os.cap) && os.cap > 0 ? os.cap : storedFrame;
+        const cap = levelFrameOf(factor);
         let normalised: number;
         let derivedFrame: number | null = null;
         if (cap !== null) {
