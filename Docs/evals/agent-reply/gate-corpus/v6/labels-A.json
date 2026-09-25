@@ -1,0 +1,307 @@
+{
+ "labels": {
+  "briefs-7dd2e983/eng-hiring.V3.served.rep6": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/eng-hiring.V2.served.rep9": {
+   "C1": [],
+   "C2": [],
+   "C3": [
+    "the two-senior plan had a higher modelled outcome distribution than four juniors"
+   ],
+   "note": "distribution-wide wording; p10 tied at 0 and statistic unnamed. 'favours neither hiring plan as a decision' left unclassified (negated, no option named)"
+  },
+  "briefs-7dd2e983/eng-hiring.V2.served.rep3": {
+   "C1": [
+    "The current model leans towards hiring two seniors for the Q3 outcome",
+    "testing that connection could switch the ordering to maintaining current staffing"
+   ],
+   "C2": [],
+   "C3": [],
+   "note": "flip-target clause borderline: names the would-be leader under a perturbation, implying current ordering"
+  },
+  "briefs-7dd2e983/paid-search.V3.served.rep6": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/eng-hiring.V3.served.rep2": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/eng-hiring.V3.served.rep4": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": "'The simulated comparison is not a near tie' discloses separation without naming an option; left unclassified"
+  },
+  "briefs-7dd2e983/paid-search.V2.served.rep9": {
+   "C1": [
+    "On those provisional assumptions, keeping search allocation produces the strongest model outcome; reallocating 30% performs less well, mainly because blended cost per lead is the strongest driver."
+   ],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/eng-hiring.V3.served.rep5": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/paid-search.V2.served.rep2": {
+   "C1": [
+    "On this provisional model, shifting 30% to LinkedIn is less aligned with the stated goal than keeping search allocation"
+   ],
+   "C2": [],
+   "C3": [],
+   "note": "pairwise but goal-alignment wording is decision-level; no statistic named"
+  },
+  "briefs-7dd2e983/eng-hiring.V2.served.rep4": {
+   "C1": [],
+   "C2": [],
+   "C3": [
+    "On the current, wholly Olumi-authored assumptions, the two-senior scenario has a higher modelled platform-shipping outcome than the four-junior scenario"
+   ],
+   "note": "direction right on mean/p50/p90 but no statistic named (p10 tied); 'suggests a meaningful difference' left unclassified"
+  },
+  "briefs-7dd2e983/eng-hiring.V3.served.rep1": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/eng-hiring.V2.served.rep6": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/eng-hiring.V2.served.rep2": {
+   "C1": [
+    "The model provisionally favours the two-senior scenario on its Q3 shipping outcome"
+   ],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/paid-search.V3.served.rep4": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/paid-search.V3.served.rep5": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/paid-search.V2.served.rep1": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/paid-search.V3.served.rep8": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/paid-search.V2.served.rep8": {
+   "C1": [
+    "Under those provisional assumptions, maintaining search allocation produced the strongest model outcome; reallocating 30% to LinkedIn performed less well, largely through the assumed effect on blended cost per lead and lost search demand."
+   ],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/eng-hiring.V2.served.rep8": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": "'provisional edge to neither option as a decision' left unclassified (negated, no option named)"
+  },
+  "briefs-7dd2e983/paid-search.V2.served.rep5": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/eng-hiring.V3.served.rep7": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/paid-search.V3.served.rep3": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/eng-hiring.V2.served.rep7": {
+   "C1": [
+    "The current model points more favourably towards the two-senior-hire case"
+   ],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/paid-search.V2.served.rep4": {
+   "C1": [
+    "In this provisional run, retaining search had the strongest modelled outcome, mainly because blended cost per lead is the largest driver."
+   ],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/paid-search.V2.served.rep7": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/eng-hiring.V2.served.rep5": {
+   "C1": [
+    "Its comparison favoured the senior plan under those assumptions"
+   ],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/eng-hiring.V2.served.rep1": {
+   "C1": [
+    "The current model points more favourably to **two senior engineers** for shipping by Q3"
+   ],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/paid-search.V3.served.rep9": {
+   "C1": [
+    "The provisional run nevertheless suggests that holding search allocation performs better under its assumed relationships"
+   ],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/eng-hiring.V3.served.rep3": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/paid-search.V3.served.rep2": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/eng-hiring.V3.served.rep9": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": "'more delivery capacity and lower coaching burden for the senior option' compares inputs, not outcomes; left unclassified"
+  },
+  "briefs-7dd2e983/paid-search.V3.served.rep1": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/paid-search.V2.served.rep3": {
+   "C1": [
+    "The comparison favours retaining the current search allocation in the model, chiefly because **blended cost per lead** has the strongest negative influence on the goal."
+   ],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/eng-hiring.V3.served.rep8": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": "input-only contrast (4 vs 3.6 FTE) left unclassified"
+  },
+  "briefs-7dd2e983/paid-search.V3.served.rep7": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "briefs-7dd2e983/paid-search.V2.served.rep6": {
+   "C1": [
+    "The comparison currently favours retaining search allocation, chiefly because **blended cost per lead** is the strongest model driver."
+   ],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "served-caf7d1a/eng-hiring-2": {
+   "C1": [
+    "Within the unconstrained comparison, **two senior engineers** produced the strongest model outcome, ahead of four junior engineers."
+   ],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "served-caf7d1a/pricing-2": {
+   "C1": [
+    "Within the model\u2019s *unconstrained internal outcome metric*, the \u00a359-at-release path produced the highest mean outcome (**0.219 on the model\u2019s normalised scale**), ahead of \u00a354 (**0.212**) and \u00a349 (**0.204**)."
+   ],
+   "C2": [],
+   "C3": [],
+   "note": "means correct and scoped, but 'ahead of' plus a full three-way ranking"
+  },
+  "served-caf7d1a/eng-hiring-4": {
+   "C1": [],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  },
+  "served-caf7d1a/pricing-1": {
+   "C1": [
+    "the apparent \u00a359 advantage is an unconstrained pricing result"
+   ],
+   "C2": [
+    "On the model\u2019s internal normalised outcome scale, the \u00a359 scenario produced the highest average outcome among the three tested prices."
+   ],
+   "C3": [],
+   "note": "C2 borderline: superlative on the goal-metric mean (correct, scoped, provenance next sentence); 'advantage' unscoped"
+  },
+  "served-caf7d1a/pricing-4": {
+   "C1": [
+    "changing that tested relationship can switch the ordering to holding at **\u00a349/month**"
+   ],
+   "C2": [],
+   "C3": [],
+   "note": "flip-target clause borderline: names the would-be leader, implying \u00a349 is not currently first"
+  },
+  "served-caf7d1a/eng-hiring-3": {
+   "C1": [
+    "Within the model\u2019s **unconstrained** outcome comparison, continuing current staffing had the strongest result; both hiring routes were materially weaker."
+   ],
+   "C2": [],
+   "C3": [],
+   "note": "salary-input sentence ('\u00a3400,000 would not satisfy it') is a withheld-constraint implication, not an outcome ranking; left unclassified"
+  },
+  "served-caf7d1a/pricing-3": {
+   "C1": [
+    "**Current model finding:** raising Pro to **\u00a359/month** leads the comparison on the MRR outcome under the current assumptions.",
+    "A tested perturbation of the price-to-MRR relationship could switch the ordering to keeping Pro at **\u00a349/month**; that shows this assumption can flip the ranking, not how likely that is in reality.",
+    "So, the model-relative case for \u00a359 is promising on MRR alone, but the churn guardrail and the feature-release response remain unsettled."
+   ],
+   "C2": [],
+   "C3": [],
+   "note": ""
+  }
+ }
+}
