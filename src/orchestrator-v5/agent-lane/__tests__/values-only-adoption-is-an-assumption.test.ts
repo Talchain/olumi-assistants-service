@@ -95,6 +95,16 @@ describe('values-only approval of Olumi’s figures, through the real writer', (
     expect(censusConfidenceParameters(g as never).confidence_parameters_user_stated).toBe(1);
   });
 
+  it('what the approval tells the Agent: Olumi’s figure, stored as the user’s assumption', async () => {
+    const p = product();
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const proposed = await caps.proposeAssumptions(ctx, { assumptions: OLUMIS });
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    expect(String(applied.not_represented)).toContain('Coordination load is Olumi’s figure that the user adopted as an assumption');
+    expect(String(applied.not_represented)).not.toContain('the user’s own');
+  });
+
   it('NEGATIVE: a replayed approval writes nothing more and relabels nothing', async () => {
     const { p, caps, proposalId } = await adoptValuesOnly();
     const before = { writes: p.writes(), os: p.byId().coordination_load.observed_state };
@@ -190,6 +200,23 @@ describe('a proposal holding BOTH the user’s revision and Olumi’s figure', (
     expect(earnsAuthorshipCredit(structureProvenance(g.nodes.find((n) => n.id === 'team_size'), g))).toBe(true);
     expect(earnsAuthorshipCredit(structureProvenance(g.nodes.find((n) => n.id === 'coordination_load'), g))).toBe(false);
     expect(censusConfidenceParameters(g as never).confidence_parameters_user_stated).toBe(1);
+  });
+
+  it('RED: what the approval tells the Agent separates the two authors, as the stamps do (Codex 5825446207)', async () => {
+    const p = product();
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const proposed = await caps.proposeAssumptions(ctx, {
+      assumptions: [
+        { factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true },
+        { factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
+      ],
+    } as never);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const said = String(applied.not_represented);
+    expect(said).toContain('Team size is the user’s own figure, stored as theirs.');
+    expect(said).toContain('Coordination load is Olumi’s figure that the user adopted as an assumption, not a measurement, stored as the user’s assumption.');
+    expect(said, 'the stamps now DO distinguish them').not.toContain('records no mark');
   });
 
   it('each value op records its own author, inside the proposal’s integrity hash', async () => {

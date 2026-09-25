@@ -165,6 +165,33 @@ describe('adopting Olumi’s starting point stores its values as the user’s AS
     expect(after?.observed_state?.source).toBe('user_override');
   });
 
+  /**
+   * ⛔ A MIXED STARTING POINT (Codex 5825325926 / 5825446207): the user's own revision beside Olumi's
+   * figure, with levels — the compound path. Each value keeps its own author, in the stamp AND in what
+   * the approval tells the Agent.
+   */
+  it('RED: a mixed starting point keeps the user’s revision theirs and says so', async () => {
+    const p = fakeProduct();
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const proposed = await caps.proposeStartingPoint(ctx, {
+      assumptions: [...ASSUMPTIONS, { factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true }],
+      option_levels: LEVELS,
+    } as never);
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    const shown = store.get(String(proposed.proposal_id))!;
+    expect([...new Set(shown.operations.map((o) => o.op))].sort(), 'the compound path').toEqual(['set_factor_value', 'set_option_intervention']);
+    expect(shown.provenance.authored_by).toBe('model_proposed');
+    const applied = await caps.authoriseChange(ctx, { proposal_id: shown.proposal_id });
+    expect(applied.ok, JSON.stringify(applied)).toBe(true);
+    expect(p.byId().team_size.observed_state).toMatchObject({ raw_value: 6, source: 'user_override' });
+    expect(p.byId().coordination_load.observed_state).toMatchObject({ raw_value: 40, source: 'user_assumption' });
+    const said = String(applied.not_represented);
+    expect(said).toContain('Team size is the user’s own figure, stored as theirs.');
+    expect(said).toContain('Coordination load is Olumi’s figure that the user adopted as an assumption');
+    expect(said).toContain('The option levels are the user’s adopted assumptions too');
+  });
+
   it('CONTRAST: a proposal the USER authored is not relabelled — the writer’s own stamp stands', async () => {
     const p = fakeProduct();
     const store = new ProposalStore();
@@ -191,8 +218,9 @@ describe('adopting Olumi’s starting point stores its values as the user’s AS
   it('tells the Agent the values are now marked as assumptions and the levels still are not', async () => {
     const { applied } = await adoptOlumisStartingPoint();
     const note = String(applied.not_represented ?? '');
-    expect(note).toMatch(/values are stored as the user’s assumptions/);
-    expect(note).toMatch(/levels/);
+    // Said per value since Codex 5825446207 (a mixed approval has two authors).
+    expect(note).toMatch(/Coordination load is Olumi’s figure that the user adopted as an assumption, not a measurement, stored as the user’s assumption\./);
+    expect(note).toMatch(/option levels .* carry no such mark/);
     expect(note).not.toMatch(/records no mark distinguishing the two/);
   });
 });

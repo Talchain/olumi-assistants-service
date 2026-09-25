@@ -170,6 +170,26 @@ function valueOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'mo
   return own === 'user_stated' ? 'user_stated' : 'model_proposed';
 }
 
+/**
+ * ⛔ WHAT THE APPROVAL STORED, SAID PER VALUE (Codex pre-review of #1851, 5825446207): the explanation
+ * the Agent repeats must match the stamps `valueOpAuthor` decided. A mixed approval stores the user's
+ * revision as theirs and Olumi's figure as the user's assumption; one sentence calling every value
+ * "the user's adopted assumptions" collapsed the two authors the model now records.
+ */
+function valueAuthorshipNote(ops: readonly ProposalOperation[], proposal: StructuredProposal, labelOf: (id: string) => string): string {
+  const values = ops.filter((o) => o.op === 'set_factor_value');
+  const theirs = values.filter((o) => valueOpAuthor(o, proposal) === 'user_stated').map((o) => labelOf(o.path));
+  const olumis = values.filter((o) => valueOpAuthor(o, proposal) === 'model_proposed').map((o) => labelOf(o.path));
+  const one = (xs: readonly string[], singular: string, plural: string): string => (xs.length === 1 ? singular : plural);
+  const own = theirs.length === 0 ? '' :
+    `${theirs.join(', ')} ${one(theirs, 'is', 'are')} the user\u2019s own ${one(theirs, 'figure', 'figures')}, stored as theirs.`;
+  const adopted = olumis.length === 0 ? '' :
+    `${olumis.join(', ')} ${one(olumis, 'is Olumi\u2019s figure', 'are Olumi\u2019s figures')} that the user adopted as ` +
+    `${one(olumis, 'an assumption', 'assumptions')}, not ${one(olumis, 'a measurement', 'measurements')}, stored as the user\u2019s ` +
+    `${one(olumis, 'assumption', 'assumptions')}.`;
+  return [own, adopted].filter((x) => x !== '').join(' ');
+}
+
 /** One internal dispatch, so every path is the product's own. */
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
 
@@ -767,8 +787,9 @@ export function createAgentCapabilities(
         ? {
             not_represented:
               parent.provenance.authored_by === 'model_proposed'
-                ? 'These values and levels are the user\u2019s adopted assumptions, not measurements. The values are stored as the ' +
-                  'user\u2019s assumptions; the option levels carry no such mark \u2014 say so when you describe what changed.'
+                ? `${valueAuthorshipNote(valueOps, parent, (id) => approvedRead.nodes.find((n) => n.id === id)?.label ?? id)} ` +
+                  'The option levels are the user\u2019s adopted assumptions too, not measurements, but carry no such mark \u2014 ' +
+                  'say so when you describe what changed.'
                 : 'These values and levels are the user\u2019s adopted assumptions, not measurements, and the model records no mark ' +
                   'distinguishing the two \u2014 say so when you describe what changed.',
           }
@@ -2529,8 +2550,10 @@ export function createAgentCapabilities(
             }
             : {}),
           not_represented:
-            'These values are the user\u2019s adopted assumptions, not measurements, and the model records ' +
-            'no mark distinguishing the two \u2014 so say so when you describe what changed' +
+            (decision.proposal.provenance.authored_by === 'model_proposed'
+              ? `${valueAuthorshipNote(ops, decision.proposal, (id) => beforeById.get(id)?.label ?? id)} Say so when you describe what changed`
+              : 'These values are the user\u2019s adopted assumptions, not measurements, and the model records ' +
+                'no mark distinguishing the two \u2014 so say so when you describe what changed') +
             (rescaled.length > 0 ? ', and state every value the model stored differently from the one approved.' : '.') +
             (rangesNotAttached.length > 0
               ? ' \u26a0 This turn could not attach a range to ' +
