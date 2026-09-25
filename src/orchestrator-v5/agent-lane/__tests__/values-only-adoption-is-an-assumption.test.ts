@@ -157,6 +157,11 @@ describe('the user’s own figure stays theirs', () => {
     const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
     expect(applied.ok, JSON.stringify(applied)).toBe(true);
     expect(p.byId().team_size.observed_state?.source).toBe('user_override');
+    // Codex 5825564214: what the approval tells the Agent matches that stamp.
+    const said = String(applied.not_represented);
+    expect(said).toContain('Team size is the user’s own figure, stored as theirs.');
+    expect(said).not.toContain('adopted');
+    expect(said).not.toContain('records no mark');
   });
 });
 

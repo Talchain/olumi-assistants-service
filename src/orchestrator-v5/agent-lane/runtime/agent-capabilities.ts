@@ -786,12 +786,11 @@ export function createAgentCapabilities(
       ...(all
         ? {
             not_represented:
-              parent.provenance.authored_by === 'model_proposed'
-                ? `${valueAuthorshipNote(valueOps, parent, (id) => approvedRead.nodes.find((n) => n.id === id)?.label ?? id)} ` +
-                  'The option levels are the user\u2019s adopted assumptions too, not measurements, but carry no such mark \u2014 ' +
-                  'say so when you describe what changed.'
-                : 'These values and levels are the user\u2019s adopted assumptions, not measurements, and the model records no mark ' +
-                  'distinguishing the two \u2014 say so when you describe what changed.',
+              `${valueAuthorshipNote(valueOps, parent, (id) => approvedRead.nodes.find((n) => n.id === id)?.label ?? id)} ` +
+              (parent.provenance.authored_by === 'model_proposed'
+                ? 'The option levels are the user\u2019s adopted assumptions too, not measurements, but carry no such mark \u2014 '
+                : 'The option levels are the user\u2019s own figures too \u2014 ') +
+              'say so when you describe what changed.',
           }
         : {
             refusal: valuesLanded || levelsRecorded > 0 ? 'partially_applied' : 'not_applied',
@@ -2549,11 +2548,10 @@ export function createAgentCapabilities(
               analysis_still_blocked_for: rangesNotAttached.map((f) => f.factor),
             }
             : {}),
+          // Per value, whoever authored the proposal (Codex 5825564214: a user-only revision was still told
+          // "adopted assumptions … no mark", though it is stored as the user's own figure).
           not_represented:
-            (decision.proposal.provenance.authored_by === 'model_proposed'
-              ? `${valueAuthorshipNote(ops, decision.proposal, (id) => beforeById.get(id)?.label ?? id)} Say so when you describe what changed`
-              : 'These values are the user\u2019s adopted assumptions, not measurements, and the model records ' +
-                'no mark distinguishing the two \u2014 so say so when you describe what changed') +
+            `${valueAuthorshipNote(ops, decision.proposal, (id) => beforeById.get(id)?.label ?? id)} Say so when you describe what changed` +
             (rescaled.length > 0 ? ', and state every value the model stored differently from the one approved.' : '.') +
             (rangesNotAttached.length > 0
               ? ' \u26a0 This turn could not attach a range to ' +
