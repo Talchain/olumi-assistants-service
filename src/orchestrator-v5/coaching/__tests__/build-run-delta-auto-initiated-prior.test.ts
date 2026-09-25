@@ -96,3 +96,26 @@ describe('mayPresentComparedRunVerdicts — the requested-run half, on its own',
     expect(mayPresentComparedRunVerdicts(fact(PRIOR, '1', 'h', '2026-09-24T11:00:00.000Z', buildAutoRunProvenance('d')))).toBe(false);
   });
 });
+
+/**
+ * B6 (5824864161): the CURRENT side of the pair. A user's explicit run followed by an automatic
+ * one (a fresh draft's `auto_post_draft`, or a construction auto-run on a rebuild) makes the
+ * newest two facts (user-requested prior, AUTOMATIC current). The automatic run's scores are
+ * confined whichever side of the pair it sits on.
+ */
+function buildWithAutoCurrent(currentProvenance: object) {
+  const prior = fact(PRIOR, '111', 'hash-a', '2026-09-24T11:00:00.000Z', null);
+  const current = fact(CURRENT, '222', 'hash-b', '2026-09-24T12:00:00.000Z', currentProvenance);
+  return buildRunDelta({ priorFacts: [current, prior], mayNameLeadingOption: true });
+}
+
+describe.each([
+  ['auto_post_construction', () => buildConstructionAutoRunProvenance(K)],
+  ['auto_post_draft', () => buildAutoRunProvenance('draft-turn-abc')],
+])('an AUTO-INITIATED (%s) CURRENT run after a user-requested prior', (_kind, stamp) => {
+  it('RED: no run_delta — the automatic run\'s scores do not ship on the current side either', () => {
+    const out = buildWithAutoCurrent(stamp());
+    expect(out).toEqual({ kind: 'none', reason: 'unrequested_run_in_pair' });
+    expect(JSON.stringify(out)).not.toContain('0.55');
+  });
+});

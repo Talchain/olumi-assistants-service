@@ -112,3 +112,35 @@ describe('CONTRAST: the same pair with a USER-requested prior keeps its comparis
     expect(ask(FLIPPED_CURRENT, null)).not.toContain(WITHHELD_PRIOR_LEADER_COMPARISON_TEXT);
   });
 });
+
+/**
+ * B6 (5824864161): the CURRENT side. (user-requested prior, AUTOMATIC current) — the automatic
+ * run's leader, scores and band are confined on this side too; the user-requested prior's
+ * leader may still be named.
+ */
+function askAutoCurrent(current: V2RunResponseEnvelope, currentProvenance: object) {
+  const out = tryRunComparisonGate({
+    message: 'What changed?',
+    priorFacts: [
+      permittedRun(current, '2026-09-24T12:00:00.000Z', 'h-current', currentProvenance),
+      permittedRun(SAME_LEADER_PRIOR, '2026-09-24T11:00:00.000Z', 'h-prior', null),
+    ],
+    freshness: 'fresh',
+    mayNameLeadingOption: true,
+  });
+  expect(out.matched).toBe(true);
+  if (!out.matched) throw new Error('unreachable');
+  return out.assistant_text;
+}
+
+describe.each(Object.entries(PRIORS))('an AUTO-INITIATED (%s) CURRENT run after a user-requested prior', (_kind, stamp) => {
+  it('RED: no band movement, no percentage, and the automatic run\'s leader is not named', () => {
+    for (const [current, currentLeader] of [[SAME_LEADER_CURRENT, 'Offshore still leads'], [FLIPPED_CURRENT, 'Onshore']] as const) {
+      const text = askAutoCurrent(current, stamp());
+      expect(text).not.toMatch(/where before it was/i);
+      expect(text).not.toMatch(/\d+%|percentage points/);
+      expect(text).not.toMatch(/still leads|has changed|latest result\b.*scored highest|scored highest (?:on|in) the latest/i);
+      if (currentLeader === 'Onshore') expect(text).not.toMatch(/Onshore scored highest/);
+    }
+  });
+});
