@@ -248,6 +248,23 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     expect(inputs).toHaveLength(1);
   });
 
+  it('RED (pre-review 5828705574): a retry that "closes" gaps by DELETING an option\'s actions is not adopted', async () => {
+    const stripped = c22();
+    stripped.options[2] = { ...stripped.options[2]!, changes: [] };
+    const { graph, inputs, result } = await construct(c22(), stripped);
+    expect(inputs).toHaveLength(2);
+    // The first draft is kept: "Hire Both" still acts on all three factors, and is not left changing nothing.
+    for (const f of ['engineering_delivery_capacity', 'technical_leadership_capacity', 'hiring_cost']) {
+      expect(graph.edges.some((e) => e.from === 'hire_both' && e.to === f), `hire_both -> ${f}`).toBe(true);
+    }
+    expect((result.options_that_change_nothing ?? []) as string[]).not.toContain('Hire Both');
+  });
+
+  it('CONTROL: a retry that keeps every action and adds levels is still adopted', async () => {
+    const { graph } = await construct(c22(), covered());
+    expect(Object.keys(node(graph, 'hire_both').interventions ?? {}).sort()).toEqual(['engineering_delivery_capacity', 'hiring_cost', 'technical_leadership_capacity']);
+  });
+
   it('CONTROL: a retry that covers less is not adopted', async () => {
     const worse = c22();
     worse.options[2] = { ...worse.options[2]!, changes: [...worse.options[2]!.changes, 'Onboarding load'] };
