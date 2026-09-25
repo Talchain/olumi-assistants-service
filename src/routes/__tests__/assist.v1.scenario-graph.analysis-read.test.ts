@@ -91,6 +91,8 @@ beforeEach(() => {
 
 import scenarioGraphRoute from "../assist.v1.scenario-graph.js";
 import { computeAnalysisAffectingGraphHash } from "../../orchestrator-v5/context/graph-hash.js";
+import { buildCanonicalAnalysisReadyFromGraph } from "../../orchestrator/tools/analysis-ready-helper.js";
+import { issuesAsWireBlockers } from "../../orchestrator-v5/compose/analysis-state-v1.js";
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -393,9 +395,15 @@ describe("2.1271 — an unreadable fact store never claims the scenario was neve
       .mockResolvedValue({ facts: [], total_count: 0 });
     const app = await buildApp();
     const body = (await read(app)).json() as Record<string, unknown>;
-    expect((body.analysis_state as { run_state: unknown }).run_state).toEqual({
-      kind: "never_run",
-    });
+    // (B) — this route now carries the canonical admission verdict, and this
+    // file's fixture is NOT admitted (options unlinked; see the (B) PRECONDITION
+    // below). A KNOWN-absent run on a blocked model reads `blocked` — exactly what
+    // a turn reply says for the same model — so the twin still discriminates
+    // authoritative absence from the THROWING read above (`unknown_degraded`).
+    // The unsupplied-readiness `never_run` arm is pinned in
+    // `admission-preserves-prior-run.test.ts`.
+    expect((body.analysis_state as { run_state: { kind: string } }).run_state.kind).toBe("blocked");
+    expect((body.analysis_state as { readiness: { status: string } }).readiness.status).toBe("blocked");
   });
 });
 
@@ -455,5 +463,81 @@ describe("2.1271 — the analysis leg is strictly additive to the graph read (pi
     expect(body).not.toHaveProperty("blocks");
     expect(body).not.toHaveProperty("suggested_actions");
     expect(body).not.toHaveProperty("analysis_ready");
+  });
+});
+
+// ─── (B) ONE ADMISSION VERDICT, WITHOUT ERASING THE PRIOR RUN ─────────────────
+//
+// #70 (B): the read route must carry the SAME whole-model admission verdict the
+// turn replies carry (`route-v2.ts` passes `{ readiness: ctx.analysisReady }`),
+// and a blocked model must not lose the fact that an earlier analysis exists.
+// Before (B) the read route passed `{}` — readiness `{unknown, []}` — and, the
+// moment admission was threaded, `composeRunState` would have replaced the
+// prior run with `kind: 'blocked'` (`analysis-state-v1.ts`). This fixture is
+// Paul's shape: options with NO decision→option link (`edges: []`).
+
+type WireState = {
+  run_state: { kind: string };
+  readiness: { status: string; blockers: Array<{ code: string }> };
+  usable_for_prose: boolean;
+  usable_for_followup: boolean;
+  requires_rerun: boolean;
+  blocked_unusable: boolean;
+};
+
+describe("(B) the read route carries the ONE admission verdict and keeps the prior run", () => {
+  it("PRECONDITION — the fixture is genuinely NOT admitted by the canonical authority", () => {
+    const ready = buildCanonicalAnalysisReadyFromGraph(GRAPH);
+    expect(ready?.status).toBe("blocked");
+    expect(ready?.may_run).toBe(false);
+    expect(issuesAsWireBlockers(ready?.readiness_issues).length).toBeGreaterThan(0);
+  });
+
+  it("B1 — readiness is the canonical verdict for THIS graph, not the unsupplied sentinel", async () => {
+    const app = await buildApp();
+    const state = (await read(app)).json().analysis_state as WireState;
+    const ready = buildCanonicalAnalysisReadyFromGraph(GRAPH)!;
+    expect(state.readiness.status).toBe(ready.status);
+    expect(state.readiness.blockers.map((b) => b.code)).toEqual(
+      issuesAsWireBlockers(ready.readiness_issues).map((b) => b.code),
+    );
+  });
+
+  it("B2 — a STALE prior run stays `complete_stale` beside the blocked verdict, and stays usable as context", async () => {
+    readFactsFor.mockResolvedValue([runAnalysisFact({ graphHash: PRE_EDIT_GRAPH_HASH, mayName: true })]);
+    const app = await buildApp();
+    const state = (await read(app)).json().analysis_state as WireState;
+    expect(state.readiness.status).toBe("blocked");
+    expect(state.run_state.kind).toBe("complete_stale");
+    expect(state.blocked_unusable).toBe(false);
+    expect(state.usable_for_prose).toBe(true);
+    expect(state.usable_for_followup).toBe(true);
+  });
+
+  it("B3 — `requires_rerun` is NOT offered while the model is not admitted", async () => {
+    readFactsFor.mockResolvedValue([runAnalysisFact({ graphHash: PRE_EDIT_GRAPH_HASH, mayName: true })]);
+    const app = await buildApp();
+    const state = (await read(app)).json().analysis_state as WireState;
+    expect(state.run_state.kind).toBe("complete_stale");
+    expect(state.requires_rerun).toBe(false);
+  });
+
+  it("CONTRAST — a KNOWN-absent run on a blocked model reads `blocked` (nothing to preserve)", async () => {
+    readFactsFor.mockResolvedValue([]);
+    (store as Record<string, unknown>).readScenarioRunAnalysisFactsFor = vi
+      .fn()
+      .mockResolvedValue({ facts: [], total_count: 0 });
+    const app = await buildApp();
+    const state = (await read(app)).json().analysis_state as WireState;
+    expect(state.run_state.kind).toBe("blocked");
+    expect(state.blocked_unusable).toBe(true);
+  });
+
+  it("an UNREADABLE record on a blocked model keeps `unknown_degraded` — a run may exist behind the failed read", async () => {
+    readFactsFor.mockRejectedValue(new Error("store down"));
+    const app = await buildApp();
+    const state = (await read(app)).json().analysis_state as WireState;
+    expect(state.run_state.kind).toBe("unknown_degraded");
+    expect(state.readiness.status).toBe("blocked");
   });
 });

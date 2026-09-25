@@ -110,6 +110,7 @@ import {
   mayPresentLeaderClaimForFact,
 } from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { deriveAnalysisFreshness, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
 import { isScenarioAnalysisReasoningAuthority } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
@@ -262,10 +263,37 @@ export async function readScenarioAnalysis(
         : null;
     const analysisResult = fact !== null ? buildAnalysisResultBlock(fact) : null;
 
+    // ⭐ (B) THE ONE ADMISSION VERDICT — the SAME authority and the SAME
+    // threading the turn replies use (`route-v2.ts` passes
+    // `{ readiness: ctx.analysisReady }`; the finaliser passes it to both
+    // composers). Before (B) this leg passed `{}`, so every reload read
+    // readiness `{unknown, []}` beside a model the Run control refused.
+    // FAIL-SOFT: a throw here keeps the unsupplied verdict (the pre-(B)
+    // behaviour) instead of losing the whole additive analysis read.
+    let analysisReady: ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>;
+    try {
+      analysisReady = buildCanonicalAnalysisReadyFromGraph(params.graph);
+    } catch (err) {
+      analysisReady = undefined;
+      log.warn(
+        {
+          event: 'v5.scenario_graph.analysis_read_admission_failed',
+          request_id: params.requestId,
+          scenario_id: params.scenarioId,
+          err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+        },
+        'Scenario graph read — admission verdict unavailable; readiness stays unsupplied',
+      );
+    }
+
     const analysisState =
       composeAnalysisStateV1({
-        canonical: canonicalStateFromFreshness(derivation, {}),
+        canonical: canonicalStateFromFreshness(
+          derivation,
+          analysisReady !== undefined ? { readiness: analysisReady } : {},
+        ),
         freshness: derivation,
+        ...(analysisReady !== undefined ? { readiness: analysisReady } : {}),
         ...(historical === null ? {} : {
           runFactBinding: {
             scenarioId: params.scenarioId,

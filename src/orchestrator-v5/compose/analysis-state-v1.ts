@@ -686,7 +686,17 @@ function composeRunState(input: AnalysisStateComposeInput): AnalysisRunState {
 
   // 2. The MODEL is unanalysable — a statement about the model, not a failure
   //    of the engine.
-  if (canonical.status === 'blocked') {
+  // (B) — `blocked` names the RUN only when there is KNOWN to be no run to
+  // describe (`freshness === 'none'`). With a selected prior fact the kind stays
+  // `complete_current` / `complete_stale` below, and the blocking admission
+  // rides in `readiness` (status + blockers). An UNREADABLE record (`unknown`)
+  // keeps `unknown_degraded`: masking it as `blocked` would hide that a run may
+  // exist behind the failed read.
+  if (
+    canonical.status === 'blocked' &&
+    canonical.selected_fact_index === null &&
+    canonical.freshness === 'none'
+  ) {
     return {
       kind: 'blocked',
       reason_code:
