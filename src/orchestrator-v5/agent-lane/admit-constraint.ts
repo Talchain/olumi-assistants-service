@@ -75,14 +75,6 @@ const RELAXES_TO: Record<CandidateOperator, CanonicalOperator> = {
 };
 
 /** True when the candidate operator is strict and the canonical one is not. */
-// A unit written as a word takes a space ("250000 GBP", "5 percentage points"); a symbol unit attaches ("70%",
-// "5% NRR"). A general typographic rule, not a percent special case (unit-scale-class.test.ts pins those).
-function unitSuffix(unit: string | undefined): string {
-  const u = unit?.trim() ?? '';
-  if (u.length === 0) return '';
-  return /^[A-Za-z]/.test(u) ? ` ${u}` : u;
-}
-
 export function isStrictnessLost(op: CandidateOperator): boolean {
   return op === '<' || op === '>';
 }
@@ -128,9 +120,11 @@ export function admitCandidateConstraints(
       operator,
       // Verbatim. The user's number is never adjusted to compensate for the operator.
       value: c.value,
-      // The label is what the guest reads (quoted in the "could not be checked" card), so it states the STORED
-      // bound, in words: built from the widened canonical operator, never the candidate's strict symbol.
-      label: `${c.metric} ${operator === '<=' ? 'at most' : 'at least'} ${c.value}${unitSuffix(c.unit)}`,
+      // ⛔ THE LABEL IS THE LIMIT'S NAME, NOT THE LIMIT (`GoalConstraintSchema.label`: "Human-readable label, e.g.
+      // 'First-year budget cap'"). The bound lives in `operator`/`value`/`unit`, which every consumer renders itself: a
+      // label carrying "< 40000GBP/year" rendered on the canvas as "Annual PA salary < 40000GBP/year ≤ 40,000 GBP/year"
+      // (Canvas D2, 5832368556) and quoted the drafter's strict symbol against the stored "<=".
+      label: c.metric,
       ...(c.unit !== undefined ? { unit: c.unit } : {}),
       provenance: canonicalProvenance(c.provenance),
     };
