@@ -364,6 +364,29 @@ export interface AdditionWithoutTotal {
   readonly factor_unit?: string;
 }
 export interface DemotedProvenance { readonly option: string; readonly factor: string; readonly value: number }
+/**
+ * ⛔ A LIMIT THE USER STATED IS NEVER DROPPED UNSEEN.
+ *
+ * `admit-constraint.ts` withholds a limit whose metric names no node in the admitted model, rather
+ * than attach it to a guessed target — right — and records a warn-level loss. Until now only horizon,
+ * goal_operator, mechanism and status-quo losses reached `not_represented`, so a build that drafted
+ * "under 15% net margin" as a "Net-margin breach" RISK (no "Net margin" node; 1 of 15 live builds on
+ * served 9417228) registered a model with no limit and said nothing: `goal_constraints_carried: 0` is a
+ * count, not a sentence. Named here from the candidate's own words, so the Agent can tell the user
+ * exactly which limit the analysis will not check. No remedy is offered: the withheld limit is not kept.
+ */
+function unattachedLimitLines(model: CandidateModel, loss: readonly { readonly field_path: string; readonly before?: unknown; readonly reason?: string }[]): string[] {
+  const unattached = loss.filter((l) => /^goal_constraints\[.*\]\.node_id$/.test(l.field_path));
+  return unattached.map((l) => {
+    const metric = String(l.before ?? '');
+    const c = (model.constraints ?? []).find((k) => k.metric === metric);
+    const limit = c !== undefined ? `${c.metric} ${c.operator} ${c.value}${c.unit ?? ''}` : metric;
+    // The same rule as `admit-constraint.ts` `isUserAuthored`: only a bound the user stated is called theirs.
+    const users = c !== undefined ? c.provenance === 'explicit' : (l.reason ?? '').startsWith('A limit you stated');
+    const which = users ? `Your limit "${limit}"` : `The limit Olumi proposed ("${limit}")`;
+    return `${which} is not in the model: no part of the model is "${metric}", so the analysis cannot check it.`;
+  });
+}
 /** The user-facing sentence for an addition kept with no total: what is missing, and how to supply it. */
 function sayAdditionWithoutTotal(a: AdditionWithoutTotal): string {
   const amount = `${a.value}${a.unit ? ` ${a.unit}` : ''}`;
@@ -812,6 +835,7 @@ export async function buildModelFromBrief(
     ...(preparation.additions_without_total.length > 0 ? { additions_without_total: preparation.additions_without_total } : {}),
     ...(preparation.provenance_demoted.length > 0 ? { provenance_demoted: preparation.provenance_demoted } : {}),
     not_represented: [
+      ...unattachedLimitLines(candidate, admitted.loss),
       ...preparation.additions_without_total.map(sayAdditionWithoutTotal),
       ...preparation.provenance_demoted.map((d) =>
         `I've treated your ${d.value} for "${d.factor}" in "${d.option}" as a working figure because the current ` +
