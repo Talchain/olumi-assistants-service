@@ -57,8 +57,10 @@
  * split that does not sum to ~100 ("£59 at 60%, £49 at 30%"), and an inline heading margin ("Price-rise
  * lead: about four points" — lexically the served role heading "Slow-ramping lead: …"). Those are kept.
  * A prose split over the OPTIONS whose percentages ("%" or "per cent") sum to ~100 is removed ("the £59
- * path at 71% and holding at 29%", "split 71% to 29% between the £59 path and holding", "across the runs … 71% … 29%");
- * an ascending range or a non-option composition is not. Win shares ARE also removed as
+ * path at 71% and holding at 29%", "split 71% to 29% between the £59 path and holding", "the £59 path and holding came in
+ * at 71% and 29%", "across the runs … took 71% … 29%"), and so is a bare "71/29" split when the sentence says split or win
+ * share and is about the runs or two options; an ascending range, a change ("could drop 70% to 30%") or a non-option
+ * composition is not. Win shares ARE also removed as
  * lists ("label: N%" / "label — N%", per contiguous list summing to ~100, under a ranking heading, or
  * on an option's own label) and as tables (a share header, an option row with a %, or a ranking row). Measured recall is corpus recall (AI
  * Quality v6: 43 real replies plus 6 authored controls), not a general guarantee.
@@ -335,9 +337,25 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
   const saysSplit = /\b(?:split|win[-\s]shares?)\b/i.test(text);
   for (const m of saysSplit ? [] : text.matchAll(/(?<![\d.,])(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent)?\s?(?:-|to)\s?(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent)/gi)) {
     if (Number(m[1]!.replace(',', '.')) < Number(m[2]!.replace(',', '.'))) return false;
+    // A CHANGE, not a split, when a change verb governs it: "Retention could drop 70% to 30% on the £59 path…" (review 5827687841).
+    if (CHANGE_VERB_BEFORE.test(text.slice(Math.max(0, m.index! - 40), m.index))) return false;
   }
+  const optionKeys = (labels.optionLabels ?? []).map(labelKey);
+  const cue = (seg: string): boolean => optionKeys.some((k) => labelKey(seg).includes(k)) || OPTION_CUE.test(seg);
+  const cueCount = (seg: string): number => (seg.match(new RegExp(OPTION_CUE.source, 'gi')) ?? []).length
+    + optionKeys.filter((k) => labelKey(seg).includes(k)).length;
   const hits = [...text.matchAll(new RegExp(PCT, 'gi'))];
-  if (hits.length < 2) return false;
+  if (hits.length < 2) {
+    /**
+     * ⛔ A SPLIT WITH NO % SIGN (review 5827687841 item 2): "The runs split 71/29 between the £59 path and holding."
+     * Only when the sentence SAYS split or win share, the bare pair sums to ~100, and it is about the runs or names
+     * two options — "The team split 60/40 between engineering and support" is kept.
+     */
+    if (!saysSplit) return false;
+    const bare = [...text.matchAll(/(?<![\d.,£$€])(\d{1,3}(?:\.\d+)?)\s*(?:\/|-|to)\s*(\d{1,3}(?:\.\d+)?)(?![\d.,])/g)]
+      .some((m) => { const t = Number(m[1]) + Number(m[2]); return t >= 97 && t <= 103; });
+    return bare && (RUN_SHARE_EXPLICIT.test(text) || cueCount(text) >= 2);
+  }
   const total = hits.map((m) => Number(m[0].replace(/[%\s]|per\s?cent/gi, '').replace(',', '.'))).reduce((a, b) => a + b, 0);
   if (total < 97 || total > 103) return false;
   /**
@@ -357,8 +375,6 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
   let from = 0;
   for (const m of hits) { segments.push(text.slice(from, m.index)); from = m.index! + m[0].length; }
   segments.push(text.slice(from));
-  const optionKeys = (labels.optionLabels ?? []).map(labelKey);
-  const cue = (seg: string): boolean => optionKeys.some((k) => labelKey(seg).includes(k)) || OPTION_CUE.test(seg);
   const used = new Set<number>();
   let bound = 0;
   for (let i = 0; i < hits.length; i += 1) {
@@ -371,11 +387,17 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
    * option AFTER the last percentage, so only one percentage binds. A trailing segment naming at least as many
    * options as there are percentages is the split's own legend.
    */
-  const trailing = segments[segments.length - 1]!;
-  const trailingCues = (trailing.match(new RegExp(OPTION_CUE.source, 'gi')) ?? []).length
-    + optionKeys.filter((k) => labelKey(trailing).includes(k)).length;
-  return trailingCues >= hits.length;
+  if (cueCount(segments[segments.length - 1]!) >= hits.length) return true;
+  /**
+   * ⛔ …AND THE MIRROR: A LEGEND BEFORE THE PERCENTAGES (review 5827687841): "The £59 path and holding came in at 71%
+   * and 29%." Counted as COORDINATED PARTS that each carry a cue, never raw cue words, so one option named twice
+   * ("For the Keep Pro at £49 option, 40% … 60% …": a label plus "option") stays one part and is kept.
+   */
+  return segments[0]!.split(/\band\b|\bor\b|\bvs\.?|\bversus\b|,|:/i).filter(cue).length >= hits.length;
 }
+
+/** A change verb just before a descending pair: the pair is a change ("could drop 70% to 30%"), not a split. */
+const CHANGE_VERB_BEFORE = /\b(?:drops?|dropped|falls?|fell|declines?|declined|decreases?|decreased|shrinks?|shrank|cuts?|reduces?|reduced|rises?|rose|increases?|increased|grows?|grew|climbs?|climbed|moves?|moved|goes\s+(?:up|down)|went\s+(?:up|down)|changes?|changed)\s+(?:[a-z]+\s+){0,2}$/i;
 
 /**
  * The sentence is about how the RUNS came out OVER THE OPTIONS: "win share", "the runs split", or "across / of the
@@ -384,7 +406,8 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
  */
 const RUN_SHARE_EXPLICIT = /\b(?:win[-\s]shares?|runs\s+(?:split|divided))\b/i;
 const RUN_SHARE_SCOPE = /\b(?:of|across|in)\s+(?:the\s+|all\s+|these\s+)?(?:[\d,]+\s+)?(?:modelled\s+|simulated\s+|model\s+|simulation\s+)?runs\b/i;
-const RUN_SHARE_WIN_VERB = /\b(?:took|takes|won|wins|came\s+out|comes\s+out|finished|came\s+(?:first|top|ahead)|prevailed|topped|carried)\b/i;
+/** A winning verb that governs a PERCENTAGE ("took 71%", "came out ahead in 71%"), never "took longer than a year". */
+const RUN_SHARE_WIN_VERB = new RegExp(String.raw`\b(?:took|takes|won|wins|came\s+out|comes\s+out|finished|came\s+(?:first|top|ahead)|prevailed|topped|carried)\s+(?:[a-z]+\s+){0,2}` + PCT, 'i');
 const RUN_SHARE_CUE = { test: (t: string): boolean => RUN_SHARE_EXPLICIT.test(t) || (RUN_SHARE_SCOPE.test(t) && RUN_SHARE_WIN_VERB.test(t)) };
 /** Variation attributed to factors — a driver split, not a win share. */
 const FACTOR_ATTRIBUTION = /\b(?:variance|variation|sensitivit(?:y|ies)|uncertainty|spread|explain(?:s|ed)?|drivers?|comes?\s+from|attributable|due\s+to)\b/i;

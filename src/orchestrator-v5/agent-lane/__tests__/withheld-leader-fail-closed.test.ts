@@ -532,3 +532,39 @@ describe('review of #1871 at 5d1d066e — the respectively-order split', () => {
     expect(out.response.assistant_text).toContain('Churn is the input to check.');
   });
 });
+
+/** Review of #1871 at aae2cac7 (5827687841): the legend BEFORE the percentages, a split with no % sign, and two over-drops. */
+describe('review of #1871 at aae2cac7 — the leading legend', () => {
+  const graph = { nodes: [{ id: 'keep', kind: 'option', label: 'Keep Pro at £49' }, { id: 'raise', kind: 'option', label: 'Raise Pro to £59 at release' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }] };
+  const labels = rankingLabelContext(graph, undefined);
+  const DROP: readonly string[] = [
+    'The £59 path and holding came in at 71% and 29%.',
+    'The £59 path and holding came in at 71% and 29% respectively.',
+    'Raising to £59 and holding: 71% and 29%.',
+    'The two options, raising and holding, scored 71% and 29%.',
+    'Raise Pro to £59 at release and Keep Pro at £49 came in at 71% and 29%.',
+    // No % sign, when the sentence says split / win share and is about the runs or two options.
+    'The runs split 71/29 between the £59 path and holding.',
+    'The runs split 71–29 between the £59 path and holding.',
+    'The win share split 71/29 between raising and holding.',
+  ];
+  const KEEP: readonly string[] = [
+    'For the Keep Pro at £49 option, 40% of capacity is engineering and 60% is support.',
+    'The churn limit is 4%, and 96% of customers stay each month on either option.',
+    'The team split 60/40 between engineering and support.',
+    // Over-drops the delta introduced (non-blocking in the verdict), now kept.
+    'Retention could drop 70% to 30% on the £59 path compared with holding.',
+    'Of the runs, 60% took longer than a year to break even and 40% did not, on both options.',
+  ];
+  it.each(DROP.map((s) => [s] as const))('dropped: %s', (s) => { expect(sentenceRanksOptions(s, labels)).toBe(true); });
+  it.each(KEEP.map((s) => [s] as const))('kept: %s', (s) => { expect(sentenceRanksOptions(s, labels)).toBe(false); });
+  it('RED: through BOTH gates on a withheld turn, the leading-legend split never reaches the user', () => {
+    const analysisReady = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } };
+    const out = enforceAgentLaneLeaderClaimsAtWire(
+      { assistant_text: 'The churn limit was not scored. The £59 path and holding came in at 71% and 29%. Churn is the input to check.', blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } } } as unknown as OlumiResponse,
+      { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'constraint_verdict_withheld', graph, analysisReady },
+    );
+    expect(out.response.assistant_text).not.toMatch(/71%|29%/);
+    expect(out.response.assistant_text).toContain('Churn is the input to check.');
+  });
+});
