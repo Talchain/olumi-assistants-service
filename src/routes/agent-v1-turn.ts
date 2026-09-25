@@ -1836,7 +1836,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * text returned, disclosures included, so a replay is word-for-word.
      */
     let durability: 'recorded' | 'not_recorded' | 'no_turn_id' = 'no_turn_id';
-    if (turnId !== undefined) {
+    /**
+     * ⛔ AN OFFER IS DURABLE EVEN WHEN THE CLIENT NAMED NO TURN (Canonical State's deploy-survival witness,
+     * #69 5833516415 / 5833557327): its turns sent no `turn_id`, so the answer row that carries the offer was
+     * never written, and after a real CEE deploy "Use as starting assumptions" met `unknown_proposal`. The
+     * UI always names its turns (DecisionGuideAI `buildPayload.ts:202`); an API caller need not. So a turn
+     * with no id that has an offer to carry writes its answer row under an id minted HERE, at the end —
+     * no claim, no replay, no fence, exactly as before for everything else about an unnamed turn.
+     */
+    const rowTurnId = turnId ?? (durablePending.length > 0 ? randomUUID() : undefined);
+    if (rowTurnId !== undefined) {
       try {
         // Through the SHARED persistence floor, like every turn row: the one
         // `store.append` stays inside it (C8). No graph rides on this row.
@@ -1846,9 +1855,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           source: 'agent_turn',
           write: {
           scenario_id: scenarioId,
-          // The ANSWER row, under the client's own turn_id; the claim
-          // (`<turn_id>:claim`) was taken before the run.
-          turn_id: turnId,
+          // The ANSWER row, under the client's own turn_id (the claim `<turn_id>:claim` was taken before
+          // the run), or under the id minted above for an unnamed turn that carries an offer.
+          turn_id: rowTurnId,
           // DB CHECK: (turn_class = 'handler') = (handler_id IS NOT NULL) —
           // the graph-register precedent for a turn with no handler.
           turn_class: 'direct_answer',
@@ -1868,10 +1877,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         if (outcome.priorTurnConflict === true) {
           // A concurrent request with the SAME id and a DIFFERENT message won the
           // row. This answer is not the recorded one; say so rather than return it.
-          log.warn({ scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: turn id taken by a different concurrent message');
+          log.warn({ scenario_id: scenarioId, turn_id: rowTurnId }, 'agent-lane: turn id taken by a different concurrent message');
           return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. This reply was not recorded.' });
         }
-        if (outcome.replayedPriorTurn === true && typeof store.readCommittedTurn === 'function') {
+        if (outcome.replayedPriorTurn === true && turnId !== undefined && typeof store.readCommittedTurn === 'function') {
           // An identical concurrent request committed first: ITS answer is the
           // record, so it is the one returned.
           const first = await store.readCommittedTurn(scenarioId, turnId);
@@ -1883,7 +1892,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       } catch (err) {
         // The answer is real and the writes already happened; hiding it would be
         // worse. It is returned, flagged as not durable, and logged loudly.
-        log.error({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: answer could not be recorded — the claim stands, so a retry reports an unknown outcome and never re-runs');
+        log.error({ err: String(err), scenario_id: scenarioId, turn_id: rowTurnId }, 'agent-lane: answer could not be recorded — the claim stands, so a retry reports an unknown outcome and never re-runs');
         durability = 'not_recorded';
       }
     }
@@ -1941,7 +1950,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         mutated: result.mutated,
         hops: result.hops,
         stopped_reason: result.stopped_reason,
-        ...(turnId !== undefined ? { turn_id: turnId, durability } : {}),
+        // An unnamed turn that carried an offer reports its durability too; its minted id is no retry key, so it is not echoed.
+        ...(turnId !== undefined ? { turn_id: turnId, durability } : rowTurnId !== undefined ? { durability } : {}),
         /**
          * ⭐ WHICH VERSION THIS TURN PRODUCED, so a surface can reconcile what it
          * is showing against what was actually saved. `mutated: true` said the
