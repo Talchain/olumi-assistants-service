@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-5",
+ "arm": "A",
+ "rep": 1,
+ "http": 200,
+ "ms": 3463,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13476,
+  "input_tokens_details": {
+   "cache_write_tokens": 10527,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 141,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 13617
+ },
+ "text": "No hiring option can be put forward from this run, because the £400k salary constraint was not assessable and the comparison is very fragile.\n\n- The analysis treats all underlying values as Olumi-authored provisional estimates, not user evidence. Small assumption changes can alter the ordering; platform delivery capacity is the most sensitive model factor.\n- The Q3-shipping objective was also ranked as “higher is better” without an explicitly stated goal direction.\n- The salary limit remains in the model but was excluded: annual salary spend is modelled as a change, not a comparable £/year level. So this run does not establish whether any option stays under **£400k/year**."
+}

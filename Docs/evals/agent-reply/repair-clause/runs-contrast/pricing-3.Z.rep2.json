@@ -1,0 +1,21 @@
+{
+ "state": "pricing-3",
+ "arm": "Z",
+ "rep": 2,
+ "http": 200,
+ "ms": 9863,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 9879,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 9876
+  },
+  "output_tokens": 349,
+  "output_tokens_details": {
+   "reasoning_tokens": 202
+  },
+  "total_tokens": 10228
+ },
+ "text": "No option can be put forward yet: the model compared prices, but could not test your churn limit or whether £20k MRR is reached.\n\n- “Monthly churn < 4%” was left unscored because churn is modelled as a calculated change, not a monthly percentage level; its threshold frame is also unspecified.\n- The £20k/month MRR threshold likewise cannot be aligned to the model’s change-from-origin outputs because no current MRR baseline is recorded.\n- The comparison held up under the tested variations, but it rests largely on provisional Olumi estimates. The most structurally influential assumption is the Pro subscriber base; its source is an Olumi inference, not user evidence."
+}

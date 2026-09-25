@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-5",
+ "arm": "A",
+ "rep": 2,
+ "http": 200,
+ "ms": 6598,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13476,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 13473
+  },
+  "output_tokens": 222,
+  "output_tokens_details": {
+   "reasoning_tokens": 72
+  },
+  "total_tokens": 13698
+ },
+ "text": "This run cannot put either hiring plan forward: the **£400k annual-salary constraint was not assessed**, and the comparison is fragile.\n\n- The model’s ordering can change with small assumption changes; platform delivery capacity is the most sensitive assumption, and it is an Olumi estimate rather than user-supplied evidence.\n- Every material input behind the comparison is machine-authored or unattributed, and the model assumes that a higher goal value means better delivery performance.\n- The salary limit remains recorded but could not be matched to the model’s calculated salary-spend scale, so neither plan has been shown to satisfy it.\n\nClarifying what the £400k cap measures would make the next run materially more decision-relevant."
+}

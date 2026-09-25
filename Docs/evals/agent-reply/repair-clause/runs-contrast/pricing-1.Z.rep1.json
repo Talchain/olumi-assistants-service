@@ -1,0 +1,21 @@
+{
+ "state": "pricing-1",
+ "arm": "Z",
+ "rep": 1,
+ "http": 200,
+ "ms": 6702,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 10078,
+  "input_tokens_details": {
+   "cache_write_tokens": 7095,
+   "cached_tokens": 2980
+  },
+  "output_tokens": 253,
+  "output_tokens_details": {
+   "reasoning_tokens": 116
+  },
+  "total_tokens": 10331
+ },
+ "text": "No option can be put forward yet: the model could not test your under‑4% monthly churn limit, so it did not assess whether any price choice meets the full goal.\n\n- The comparison itself held up under the changes tested, but it ranks by higher modelled MRR—an assumption rather than a stated goal direction—and the £20k threshold was not converted into the analysis frame.\n- Feature-release value is a key uncertainty and is an Olumi-supplied estimate; changing it can alter the ordering in the tested scenarios.\n- The current analysis is therefore a provisional comparison, not an answer to whether £59 preserves churn below 4%."
+}

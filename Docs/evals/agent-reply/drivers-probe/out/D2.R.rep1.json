@@ -1,0 +1,8 @@
+{
+ "arm": "R",
+ "rep": 1,
+ "http": 200,
+ "model": "gpt-5.6-terra",
+ "tool_calls": [],
+ "text": "Challenge the **onboarding-load assumption** first: it is estimated at **4 experienced developer-hours per week**.\n\n- It directly subtracts from delivery capacity and may differ sharply for a tech lead versus two developers.\n- Over only six months, the duration and concentration of that diversion can outweigh nominal headcount gains.\n- The estimate is Olumi-authored, not supplied evidence; it should be split by hire type and onboarding period before trusting the comparison."
+}

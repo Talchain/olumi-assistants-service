@@ -1,0 +1,8 @@
+{
+ "arm": "R",
+ "rep": 2,
+ "http": 200,
+ "model": "gpt-5.6-terra",
+ "tool_calls": [],
+ "text": "Challenge the **onboarding-load estimate: 4 experienced developer-hours per week**.\n\n- It is an Olumi estimate, not your evidence, and it directly offsets delivery capacity in the six-month window.\n- More importantly, a single figure may conceal the key difference: onboarding a tech lead, versus two developers, is likely to require different intensity and duration.\n- If experienced capacity is tight, this assumption could outweigh the added hiring capacity; if it is low, it may barely matter."
+}

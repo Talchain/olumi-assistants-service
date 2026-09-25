@@ -1,0 +1,21 @@
+{
+ "state": "pricing-1",
+ "arm": "Z-honest",
+ "rep": 2,
+ "http": 200,
+ "ms": 3685,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 10114,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 10111
+  },
+  "output_tokens": 140,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 10254
+ },
+ "text": "No option can be put forward yet, because the model could not assess the churn constraint.\n\n- The comparison is robust under the tested changes, but it rests on four Olumi-supplied values rather than your evidence, including active subscribers, new subscribers, churn, and feature-release value.\n- The £20k MRR target was also not scored: its target frame and a current MRR baseline are not recorded.\n- Monthly churn under **4%** remains unchecked; the model calculates churn as an internal change, which cannot be compared with that limit.\n\nThe finding is therefore about this provisional model’s MRR comparison only—not whether the pricing change meets your stated decision criteria."
+}

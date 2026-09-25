@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-5",
+ "arm": "A-honest",
+ "rep": 1,
+ "http": 200,
+ "ms": 4574,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13512,
+  "input_tokens_details": {
+   "cache_write_tokens": 10563,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 215,
+  "output_tokens_details": {
+   "reasoning_tokens": 79
+  },
+  "total_tokens": 13727
+ },
+ "text": "No hiring option can be put forward from this run, because the £400k salary limit could not be checked and the comparison is fragile.\n\n- The options produced almost identical model outcomes; small changes to assumptions could alter the ordering.\n- Platform delivery capacity is the most influential model input. Its value is an Olumi estimate, as are all material estimates in this comparison.\n- The goal’s direction was not explicitly stated, so the analysis assumed that a higher modelled goal value is preferable; it also could not translate annual salary spend into the same frame as the £400k limit.\n\nThis is a provisional model-relative result, not a decision answer."
+}

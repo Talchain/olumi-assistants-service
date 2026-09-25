@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-3",
+ "arm": "Z",
+ "rep": 2,
+ "http": 200,
+ "ms": 3989,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13609,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 13606
+  },
+  "output_tokens": 128,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 13737
+ },
+ "text": "No option can be put forward from this run, because the £400k annual-salary limit was not checkable and was excluded from the comparison.\n\n- The comparison is fragile and rests substantially on Olumi-supplied estimates; delivery capacity, onboarding load and annual salary spend are the key assumptions.\n- The stated salary constraint is recorded but its frame is unknown, and the model cannot align it with the calculated salary-spend measure. It also lacks an attested direction for the Q3 goal.\n- The results therefore describe relative model behaviour only, not whether any hiring plan meets your budget or ships by Q3."
+}

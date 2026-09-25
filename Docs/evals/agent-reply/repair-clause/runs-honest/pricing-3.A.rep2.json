@@ -1,0 +1,21 @@
+{
+ "state": "pricing-3",
+ "arm": "A-honest",
+ "rep": 2,
+ "http": 200,
+ "ms": 4674,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 9881,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 9878
+  },
+  "output_tokens": 253,
+  "output_tokens_details": {
+   "reasoning_tokens": 107
+  },
+  "total_tokens": 10134
+ },
+ "text": "No option can be put forward yet: this run could not test either the £20k MRR target or the monthly-churn limit against its modelled outputs.\n\n- The price comparisons held up under the changes tested, but that robustness does not establish that any option reaches your stated targets.\n- Monthly churn under 4% was left unchecked because churn is calculated within the model, not measured on the same scale as the limit. The £20k/month target also lacks a recorded MRR baseline needed to assess that level.\n- The comparison rests materially on Olumi-authored estimates for Pro subscriber base, new Pro sign-ups, monthly churn and feature-release value; it is not yet validated evidence."
+}

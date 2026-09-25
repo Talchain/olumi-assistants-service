@@ -1,0 +1,21 @@
+{
+ "state": "pricing-3",
+ "arm": "Z-honest",
+ "rep": 2,
+ "http": 200,
+ "ms": 6784,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 9915,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 9912
+  },
+  "output_tokens": 309,
+  "output_tokens_details": {
+   "reasoning_tokens": 185
+  },
+  "total_tokens": 10224
+ },
+ "text": "No option can be put forward from this run because the monthly churn limit was not checkable in the model.\n\n- The comparison is otherwise marked robust under the tested variations, but it answers only the modelled MRR outcome—not whether churn stays strictly below 4%.\n- The strongest structural driver is the Pro subscriber base; its value is an Olumi estimate, not user-provided evidence. New Pro sign-ups and monthly churn are also estimated inputs.\n- The model also assumed that more MRR is the intended direction, rather than checking progress against the £20k target as a level."
+}

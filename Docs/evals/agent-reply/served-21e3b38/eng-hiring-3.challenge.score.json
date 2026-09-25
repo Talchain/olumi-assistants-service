@@ -1,0 +1,79 @@
+{
+ "journey": "eng-hiring-3",
+ "turn": "challenge",
+ "http": 200,
+ "ms": 30445,
+ "usage": {
+  "input_tokens": 12116,
+  "input_tokens_details": {
+   "cache_write_tokens": 10743,
+   "cached_tokens": 1370
+  },
+  "output_tokens": 2075,
+  "output_tokens_details": {
+   "reasoning_tokens": 1489
+  },
+  "total_tokens": 14191
+ },
+ "total": 22,
+ "fails": [
+  "truth_fidelity"
+ ],
+ "top_defect": "It invents that the unscored salary constraint “matters most,” despite the supplied sensitivity results placing platform scope completed ahead of annual salary spend.",
+ "score": {
+  "full": {
+   "scores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "notes": {
+    "concise": "88 words; concise for the request.",
+    "shape": "Gives the recommendation first, followed by brief rationale.",
+    "decisive_caveat": "Retains the material caveat that the salary constraint was not assessed.",
+    "next_move": "One supported move: challenge/validate the salary-cost assumption and its cap mapping.",
+    "questions": "n/a: the user requested a recommendation, not a clarification requiring further information.",
+    "leader_honesty": "No option is described as leading, favoured, or best.",
+    "nothing_invented": "The unsupported priority claim that the salary constraint matters most is invented; the supplied results rank Platform scope completed above Annual salary spend in structural influence.",
+    "attribution": "Correctly identifies the £250k/year salary-spend value and scope-completed input as Olumi-authored/estimated.",
+    "provisional_vs_validated": "Calls the figure an Olumi estimate and does not portray analysis assumptions as validated.",
+    "fidelity": "The £250k/year estimated salary spend, £400k/year cap, unscored constraint, and scope influence align with the supplied state.",
+    "uncertainty": "Clearly notes that the budget constraint could not be assessed.",
+    "useful_next_step": "Challenging the cost-to-cap mapping is useful because the recorded budget limit was withheld from comparison."
+   },
+   "gates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "words": 88,
+   "questions": 0,
+   "requests_for_information": [],
+   "duplicate_statements": 1,
+   "evidence": [
+    {
+     "item": "Unsupported importance claim",
+     "span": "“the constraint that matters most to your decision”",
+     "source": "/blocks/0/enrichment/factor_sensitivity[0] identifies Platform scope completed as influence_rank 1; /blocks/0/enrichment/factor_sensitivity[1] places Annual salary spend at influence_rank 2. No source establishes the salary constraint as most important."
+    },
+    {
+     "item": "Truth-fidelity gate failure",
+     "span": "“the constraint that matters most to your decision”",
+     "source": "/blocks/0/enrichment/factor_sensitivity and /blocks/0/decision_brief/key_assumptions provide no basis for this superlative; the structural ranking instead puts Platform scope completed first."
+    }
+   ]
+  },
+  "top_defect": "It invents that the unscored salary constraint “matters most,” despite the supplied sensitivity results placing platform scope completed ahead of annual salary spend."
+ }
+}

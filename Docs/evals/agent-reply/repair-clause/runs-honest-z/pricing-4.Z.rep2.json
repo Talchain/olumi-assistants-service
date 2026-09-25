@@ -1,0 +1,21 @@
+{
+ "state": "pricing-4",
+ "arm": "Z-honest",
+ "rep": 2,
+ "http": 200,
+ "ms": 6471,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 10486,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 10483
+  },
+  "output_tokens": 322,
+  "output_tokens_details": {
+   "reasoning_tokens": 178
+  },
+  "total_tokens": 10808
+ },
+ "text": "No option can be put forward from this run because the monthly churn limit, **<4% per month**, could not be checked in this model.\n\n- The MRR-only comparison is moderately robust under the tested assumptions, but it is not a valid answer to your combined MRR-and-churn question.\n- Results partly rest on Olumi-authored estimates, and Non‑Pro MRR had no starting value, so the analysis used a default of 0; that makes downstream MRR results unreliable.\n- The price-to-MRR relationship was the most fragile tested link: changing that link could alter the comparison. This is a property of that edge, not an overall measure of stability."
+}

@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-6",
+ "arm": "Z-honest",
+ "rep": 1,
+ "http": 200,
+ "ms": 6190,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 15227,
+  "input_tokens_details": {
+   "cache_write_tokens": 12244,
+   "cached_tokens": 2980
+  },
+  "output_tokens": 220,
+  "output_tokens_details": {
+   "reasoning_tokens": 96
+  },
+  "total_tokens": 15447
+ },
+ "text": "This run cannot answer which hiring plan meets both objectives, because the **£400k/year salary limit was not checkable**.\n\n- All four options were analysed as having no stated effect on annual salary spend, including two seniors and four juniors; those figures are currently unknown.\n- The remaining delivery comparison is provisional and fragile: every material estimate is machine-authored, and the model has not recorded whether more platform delivery is the intended goal direction.\n- Incremental delivery capacity is a key Olumi estimate; changing it can alter the comparison, but investigation priority is not established from this alone."
+}

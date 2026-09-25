@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-6",
+ "arm": "A",
+ "rep": 2,
+ "http": 200,
+ "ms": 5995,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 15157,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 15154
+  },
+  "output_tokens": 191,
+  "output_tokens_details": {
+   "reasoning_tokens": 41
+  },
+  "total_tokens": 15348
+ },
+ "text": "No option can be put forward from this run: the £400k annual-salary limit was not assessed.\n\n- Each option lacked a stated effect on **Annual salary spend**, so the run treated that factor as unchanged; it therefore cannot answer the budget question.\n- The comparison is **very fragile** and rests on four Olumi-supplied estimates, not user-validated inputs. Delivery capacity and onboarding load are also material uncertainties.\n- The model has no stated direction for the delivery goal, so the comparison assumed that a higher goal value is preferable.\n\nA useful next reasoning step is to state the total annual salary spend for each staffing option, including current payroll if the £400k cap is for the whole team."
+}

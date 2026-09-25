@@ -1,0 +1,21 @@
+{
+ "state": "pricing-4",
+ "arm": "A-honest",
+ "rep": 2,
+ "http": 200,
+ "ms": 6223,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 10452,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 10449
+  },
+  "output_tokens": 303,
+  "output_tokens_details": {
+   "reasoning_tokens": 139
+  },
+  "total_tokens": 10755
+ },
+ "text": "No option can be put forward from this run because it could not test your churn constraint.\n\n- The comparison is moderately robust within its assumptions, but **monthly churn under 4%** was left unchecked: the model produces a churn change, not a churn reading on the same scale as your limit.\n- The £20k MRR target was also not scored against the outcomes because current MRR/baseline framing is absent. Non‑Pro MRR defaulted to £0/month; that is Olumi’s placeholder, not a user-provided figure.\n- Results also rest on two machine-supplied values rather than your evidence, including assumptions around churn and feature perception.\n\nSo this is a provisional comparison of price scenarios, not evidence that the £59 rise meets either stated condition."
+}

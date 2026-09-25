@@ -1,0 +1,8 @@
+{
+ "arm": "D",
+ "rep": 2,
+ "http": 200,
+ "model": "gpt-5.6-terra",
+ "tool_calls": [],
+ "text": "Challenge the **onboarding load** assumption first: Olumi estimated **4 experienced developer-hours/week**.\n\n- It is the only stated downside that can quickly erase six‑month delivery gains, especially when hiring two developers.\n- Your actual capacity to mentor, review work and absorb new hires may differ sharply by role and by the first few weeks.\n- All current figures are Olumi estimates, not facts you supplied; delivery capacity and technical-guidance quality are equally influential, but onboarding is the most likely short-horizon constraint."
+}

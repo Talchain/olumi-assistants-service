@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-4",
+ "arm": "A",
+ "rep": 1,
+ "http": 200,
+ "ms": 5961,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13886,
+  "input_tokens_details": {
+   "cache_write_tokens": 10937,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 330,
+  "output_tokens_details": {
+   "reasoning_tokens": 202
+  },
+  "total_tokens": 14216
+ },
+ "text": "No option can be put forward from this run: the £400k annual-salary limit was not assessable, and the model is very fragile.\n\n- The model could not compare its calculated salary-spend change with the **£400k/year** limit, so budget compliance was withheld rather than guessed.\n- It also assumed that more “new platform delivery by Q3” is better; that objective direction was not explicitly stated.\n- Delivery capacity is the most sensitive assumption; it is an Olumi estimate, not user evidence. The options produced nearly identical outcome distributions, so the uncertainty itself is the finding."
+}

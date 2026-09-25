@@ -1,0 +1,86 @@
+{
+ "journey": "eng-hiring-2",
+ "turn": "explicit-run",
+ "http": 200,
+ "ms": 26202,
+ "usage": {
+  "input_tokens": 5009,
+  "input_tokens_details": {
+   "cache_write_tokens": 3636,
+   "cached_tokens": 1370
+  },
+  "output_tokens": 1733,
+  "output_tokens_details": {
+   "reasoning_tokens": 1024
+  },
+  "total_tokens": 6742
+ },
+ "total": 19,
+ "fails": [
+  "truth_fidelity"
+ ],
+ "top_defect": "It falsely says the hiring choices have no modelled links to salary spend or Q3 delivery, when those paths are present; the run is blocked specifically by the unmapped Continue current staffing option.",
+ "score": {
+  "full": {
+   "scores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 0,
+    "uncertainty": 1,
+    "useful_next_step": 2
+   },
+   "notes": {
+    "concise": "90 words; the detail is material to the blocked run.",
+    "shape": "States the outcome first, followed by three focused bullets.",
+    "decisive_caveat": "Keeps the decisive blocker: Continue current staffing lacks a factor mapping.",
+    "next_move": "Provides one supported next move: specify the factor change(s) for Continue current staffing.",
+    "questions": "One implicit request for information: what continuing staffing changes, including the relevant values.",
+    "leader_honesty": "No option is presented as leading or favoured.",
+    "nothing_invented": "Incorrectly asserts that hiring choices have no modelled links to salary spend or Q3 delivery.",
+    "attribution": "Does not misattribute a value or estimate.",
+    "provisional_vs_validated": "Does not portray analysis or assumptions as validated.",
+    "fidelity": "The claim that salary spend and delivery have no modelled link from hiring choices contradicts graph paths from the hiring options through headcount.",
+    "uncertainty": "Acknowledges the missing mapping, but the unsupported assertion that the outcome and constraint cannot be tested overstates the limitation.",
+    "useful_next_step": "Mapping the unmapped option is useful and required to analyse all options."
+   },
+   "gates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "NOT_DECIDABLE",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "words": 90,
+   "questions": 1,
+   "requests_for_information": [
+    "What factor(s) Continue current staffing changes and the value(s) they should take."
+   ],
+   "duplicate_statements": 0,
+   "evidence": [
+    {
+     "item": "Unsupported claim / invented absence of links",
+     "span": "“Salary spend and Q3 delivery still have no modelled link from those hiring choices”",
+     "source": "/draft_graph/edges: hire_two_senior_engineers and hire_one_senior_two_juniors link to senior_engineer_headcount; hire_four_junior_engineers and hire_one_senior_two_juniors link to junior_engineer_headcount; both headcount factors link to effective_delivery_capacity and annual_salary_spend; effective_delivery_capacity links through platform_scope_completed to new_platform_shipped_by_q3."
+    },
+    {
+     "item": "Fidelity failure",
+     "span": "“so the £400k constraint and shipping outcome cannot yet be tested”",
+     "source": "/draft_graph/goal_constraints/0 and /draft_graph/edges: annual_salary_spend is connected to both headcount factors, and the delivery path reaches new_platform_shipped_by_q3. The actual blocking condition is /analysis_ready/blocked_reason: OPTION_NO_FACTOR_EDGES, for Continue current staffing."
+    },
+    {
+     "item": "Truth-fidelity gate failure",
+     "span": "“Salary spend and Q3 delivery still have no modelled link from those hiring choices”",
+     "source": "/draft_graph/edges, as above; this is contradicted by existing modelled causal paths."
+    }
+   ]
+  },
+  "top_defect": "It falsely says the hiring choices have no modelled links to salary spend or Q3 delivery, when those paths are present; the run is blocked specifically by the unmapped Continue current staffing option."
+ }
+}

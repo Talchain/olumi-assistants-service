@@ -1,0 +1,77 @@
+{
+ "journey": "eng-hiring-4",
+ "turn": "challenge",
+ "http": 200,
+ "ms": 20460,
+ "usage": {
+  "input_tokens": 11168,
+  "input_tokens_details": {
+   "cache_write_tokens": 9795,
+   "cached_tokens": 1370
+  },
+  "output_tokens": 1541,
+  "output_tokens_details": {
+   "reasoning_tokens": 942
+  },
+  "total_tokens": 12709
+ },
+ "total": 23,
+ "fails": [],
+ "top_defect": "It should end with one focused question—such as the actual hiring lead time and time to productive contribution—to make the proposed challenge actionable.",
+ "score": {
+  "full": {
+   "scores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 1,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "notes": {
+    "concise": "80 words; concise and includes material caveats.",
+    "shape": "Direct recommendation followed by three short supporting bullets.",
+    "decisive_caveat": "Correctly focuses on pre-Q3 hiring, ramp-up, and onboarding timing, which materially changes whether headcount can affect delivery.",
+    "next_move": "Gives one supported priority: challenge the time-to-productivity assumption first.",
+    "questions": "It does not ask a focused follow-up question; a question about actual hiring lead time and ramp-up would make the challenge actionable.",
+    "leader_honesty": "No option is described as leading, favoured, or best.",
+    "nothing_invented": "The timing and ramp-up gaps, estimates, and salary figures are supported by the model state.",
+    "attribution": "Correctly calls the cited baseline and salary figures Olumi/machine-authored rather than evidence.",
+    "provisional_vs_validated": "Does not present the automatic first-pass analysis or estimates as validated.",
+    "fidelity": "The 10% onboarding burden, 5 senior-equivalent FTE baseline, £250k/year current spend, and £380k/£360k option spends match the supplied state.",
+    "uncertainty": "Appropriately notes missing user-provided timing, ramp-up, and mentoring inputs and distinguishes estimates from evidence.",
+    "useful_next_step": "Challenging time-to-productivity is useful for testing the stated Q3 delivery model without changing or rerunning it."
+   },
+   "gates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "words": 80,
+   "questions": 0,
+   "requests_for_information": [],
+   "duplicate_statements": 0,
+   "evidence": [
+    {
+     "item": "The timing challenge is grounded in the model’s recruitment timing risk and machine-authored causal assumptions.",
+     "span": "“whether seniors or juniors can be hired, onboarded and contribute enough before Q3”",
+     "source": "/blocks/0/enrichment/inference_warnings and /draft_graph/edges"
+    },
+    {
+     "item": "The cited onboarding, capacity, and salary figures match the supplied values and machine sources.",
+     "span": "“10% team-capacity onboarding burden” / “5 senior-equivalent FTE” / “£250k/year” / “£380k” / “£360k”",
+     "source": "/draft_graph/nodes and /analysis_ready/options"
+    }
+   ]
+  },
+  "top_defect": "It should end with one focused question—such as the actual hiring lead time and time to productive contribution—to make the proposed challenge actionable."
+ }
+}

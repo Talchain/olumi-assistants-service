@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-3",
+ "arm": "A-honest",
+ "rep": 1,
+ "http": 200,
+ "ms": 2997,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13611,
+  "input_tokens_details": {
+   "cache_write_tokens": 10662,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 130,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 13741
+ },
+ "text": "No option can be put forward yet, because the £400k annual-salary constraint was not testable in this analysis.\n\n- The comparison is **very low robustness** and rests on three Olumi-supplied inputs rather than your evidence: delivery capacity, onboarding load, and annual salary spend.\n- The model did compare all four scenarios, but it could not align its modelled salary-spend changes with the £400k/year limit; budget compliance was therefore left unscored.\n- The goal’s direction and threshold frame are also unspecified, so the analysis cannot establish whether any scenario actually ships by Q3 within budget."
+}

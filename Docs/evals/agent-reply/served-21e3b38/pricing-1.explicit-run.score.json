@@ -1,0 +1,84 @@
+{
+ "journey": "pricing-1",
+ "turn": "explicit-run",
+ "http": 200,
+ "ms": 26110,
+ "usage": {
+  "input_tokens": 10357,
+  "input_tokens_details": {
+   "cache_write_tokens": 8984,
+   "cached_tokens": 1370
+  },
+  "output_tokens": 1838,
+  "output_tokens_details": {
+   "reasoning_tokens": 1142
+  },
+  "total_tokens": 12195
+ },
+ "total": 17,
+ "fails": [
+  "truth_fidelity"
+ ],
+ "top_defect": "It gives no actionable next step or request for the three missing option-specific Feature release value inputs, despite identifying them as the reason the comparison is incomplete.",
+ "score": {
+  "full": {
+   "scores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 0,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 2,
+    "useful_next_step": 0
+   },
+   "notes": {
+    "concise": "90 words; the three bullets contain material limitations.",
+    "shape": "Clear conclusion first, followed by three short supporting bullets.",
+    "decisive_caveat": "Keeps both decision-changing limitations: the churn constraint was unscored and feature-release effects were unspecified.",
+    "next_move": "No primary action is offered. The result summary supports setting the missing option-specific Feature release value inputs and rerunning.",
+    "questions": "No request for the three missing option-specific Feature release value inputs is made. Those inputs are needed to resolve the stated incompleteness.",
+    "leader_honesty": "No option is presented as leading, favoured, or ranked.",
+    "nothing_invented": "The claims about the unscored churn limit, unchanged feature-release values, and moderate robustness are supported by the run output.",
+    "attribution": "Correctly distinguishes the 60/100 Feature release value as an Olumi-originated estimate rather than user evidence.",
+    "provisional_vs_validated": "Describes the comparison as incomplete and does not portray the run or estimated value as validated.",
+    "fidelity": "The wording “under-4%” denotes a strict less-than condition, whereas the recorded constraint operator is <= 4%. The underlying caveat is otherwise faithful.",
+    "uncertainty": "Appropriately qualifies the result as incomplete and limited to the modelled MRR pathway.",
+    "useful_next_step": "It identifies what is missing but does not tell the user the supported next step: provide option-specific Feature release values and rerun."
+   },
+   "gates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "words": 90,
+   "questions": 0,
+   "requests_for_information": [],
+   "duplicate_statements": 0,
+   "evidence": [
+    {
+     "item": "next_move score 0",
+     "span": "“The run’s apparent comparison is therefore incomplete; its moderate robustness applies only to the modelled MRR pathway, not compliance with your churn limit.”",
+     "source": "blocks[0].summary: “Set those values and run the analysis again to see whether the comparison changes.” The reply provides no corresponding primary next move."
+    },
+    {
+     "item": "questions score 0",
+     "span": "“Each option was also treated as leaving feature-release value unchanged, because no option-specific values were supplied.”",
+     "source": "analysis_ready.blockers[0..2] and analysis_ready.repair_proposal.unresolved_inputs: each requires a Feature release value for one option. The reply does not request these inputs."
+    },
+    {
+     "item": "fidelity score 1 and truth_fidelity FAIL",
+     "span": "“The under-4% monthly-churn limit”",
+     "source": "draft_graph.goal_constraints[0].operator is “<=” with value 4 and unit “%”. “Under-4%” changes the inclusive operator to strict less-than."
+    }
+   ]
+  },
+  "top_defect": "It gives no actionable next step or request for the three missing option-specific Feature release value inputs, despite identifying them as the reason the comparison is incomplete."
+ }
+}

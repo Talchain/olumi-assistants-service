@@ -1,0 +1,21 @@
+{
+ "state": "pricing-4",
+ "arm": "Z-honest",
+ "rep": 1,
+ "http": 200,
+ "ms": 7183,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 10486,
+  "input_tokens_details": {
+   "cache_write_tokens": 7503,
+   "cached_tokens": 2980
+  },
+  "output_tokens": 317,
+  "output_tokens_details": {
+   "reasoning_tokens": 208
+  },
+  "total_tokens": 10803
+ },
+ "text": "No option can be put forward yet, because the model could not test your requirement that monthly churn remain **<4% per month**.\n\n- The price scenarios were compared with moderate robustness, but that result excludes the churn constraint entirely.\n- The comparison also rests partly on Olumi-authored assumptions; notably, Non‑Pro MRR was defaulted to **£0 per month**, not supplied by you.\n- Active Pro subscribers are the model’s most structurally influential factor; its evidence source is not recorded."
+}

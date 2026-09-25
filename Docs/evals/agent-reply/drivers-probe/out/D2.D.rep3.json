@@ -1,0 +1,8 @@
+{
+ "arm": "D",
+ "rep": 3,
+ "http": 200,
+ "model": "gpt-5.6-terra",
+ "tool_calls": [],
+ "text": "Challenge the **onboarding load** first.\n\n- It is an Olumi estimate: **4 experienced developer-hours/week**, with no source recorded.\n- It directly reduces delivery capacity, and two hires may create a larger and longer diversion than a tech lead.\n- Over only six months, the onboarding ramp can outweigh headcount gains; the relevant test is hours per week **and duration**, by hire type.\n\nNo model change or re-run has been made."
+}

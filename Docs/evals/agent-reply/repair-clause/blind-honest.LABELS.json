@@ -1,0 +1,194 @@
+[
+ {
+  "key": "039cfaee5f",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "0b00850699",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "12e97e8f9d",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "13ec7cd531",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "1e33029019",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "21e99c623a",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "2a7adc5d7e",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "2e7608c0fe",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "31b4c712ba",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "36880a5d79",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "426d7ca85a",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "44738785e2",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "4eb1fb914e",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "5bf7170a01",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "6497bf07c0",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "65a228cc0a",
+  "step": "VAGUE",
+  "quote": "The key unresolved reasoning step is to make the salary cap testable in the model",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "66df40ba81",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "66eacb2497",
+  "step": "CONCRETE",
+  "quote": "The next reasoning step is to express annual salary spend as comparable £/year totals so the budget constraint can be assessed.",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "6b2a04dc72",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "76e1963a64",
+  "step": "CONCRETE",
+  "quote": "The next reasoning step is to make the churn constraint measurable in the model",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "7ad8f5779f",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "7d8a32fa5e",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "860e19c29c",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "a0e3d3d51f",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "a303395ef7",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "a6a5542624",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "abd4ccc511",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "ba699600ee",
+  "step": "CONCRETE",
+  "quote": "define how the model should measure the churn limit and MRR target against the analysis outputs",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "d6cd122238",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "d85cc614e7",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "e53959d114",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ },
+ {
+  "key": "eb17748ec9",
+  "step": "NONE",
+  "quote": "",
+  "says_unchecked": "YES"
+ }
+]

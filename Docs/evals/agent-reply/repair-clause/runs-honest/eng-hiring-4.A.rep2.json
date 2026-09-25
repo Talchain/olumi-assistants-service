@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-4",
+ "arm": "A-honest",
+ "rep": 2,
+ "http": 200,
+ "ms": 5389,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13922,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 13919
+  },
+  "output_tokens": 269,
+  "output_tokens_details": {
+   "reasoning_tokens": 93
+  },
+  "total_tokens": 14191
+ },
+ "text": "This run cannot answer which hiring plan meets your brief, because the **£400k/year salary cap was not checkable** in the model and so was excluded from the comparison.\n\n- The comparison is **very fragile**: outcomes were nearly identical, and it rests on six Olumi-supplied estimates rather than evidence you provided. Delivery capacity is the most sensitive assumption.\n- The £0/year starting salary baseline was adopted by you; however, annual salary spend is modelled as a calculated quantity, not in a form that can be tested against the £400k/year limit.\n- The goal direction was also assumed to mean “more platform delivery by Q3 is better”, rather than stated explicitly.\n\nThe key unresolved reasoning step is to make the salary cap testable in the model; until then, no option can be put forward as compliant."
+}

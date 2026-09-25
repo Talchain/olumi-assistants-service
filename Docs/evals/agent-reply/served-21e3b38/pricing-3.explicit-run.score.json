@@ -1,0 +1,82 @@
+{
+ "journey": "pricing-3",
+ "turn": "explicit-run",
+ "http": 200,
+ "ms": 17567,
+ "usage": {
+  "input_tokens": 9522,
+  "input_tokens_details": {
+   "cache_write_tokens": 8149,
+   "cached_tokens": 1370
+  },
+  "output_tokens": 1222,
+  "output_tokens_details": {
+   "reasoning_tokens": 516
+  },
+  "total_tokens": 10744
+ },
+ "total": 20,
+ "fails": [],
+ "top_defect": "The phrase “current 3% monthly-churn starting point” blurs an Olumi-inferred graph value with the run’s explicit warning that churn has no measured starting point of its own.",
+ "score": {
+  "full": {
+   "scores": {
+    "concise": 0,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 1,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "notes": {
+    "concise": "107 words, exceeding the default ~90-word target without needing this much detail.",
+    "shape": "Clear conclusion, followed by three short bullets and one closing next step.",
+    "decisive_caveat": "Retains the decisive limitation: the churn constraint was unscored and therefore cannot support a price recommendation.",
+    "next_move": "Gives one supported next move: define the measurement/frame for the 4% churn limit.",
+    "questions": "No direct request for information is phrased as a question; the closing instruction nevertheless makes the needed clarification clear.",
+    "leader_honesty": "No option is presented as leading or favoured, consistent with leader_claim.permitted=false.",
+    "nothing_invented": "The described options, estimates, excluded constraint, and robustness finding are supported by the run state.",
+    "attribution": "Correctly distinguishes the 3% churn value and other cited inputs as Olumi estimates rather than user measurements.",
+    "provisional_vs_validated": "Does not present modelled or perturbation-based findings as validated evidence.",
+    "fidelity": "“The current 3% monthly-churn starting point” is potentially misleading: the run warning says Monthly churn is calculated and has “no measured starting point of its own,” although the graph does contain an Olumi-inferred 3% observed value.",
+    "uncertainty": "Appropriately identifies both the unresolved constraint frame/alignment and dependence on Olumi estimates.",
+    "useful_next_step": "Clarifying how the 4% limit is expressed in the model directly addresses the constraint-frame warning and enables a meaningful rerun."
+   },
+   "gates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "words": 107,
+   "questions": 0,
+   "requests_for_information": [],
+   "duplicate_statements": 0,
+   "evidence": [
+    {
+     "item": "Constraint was not included in the comparison because it could not be aligned to the analysis output.",
+     "span": "“‘monthly churn < 4%’ could not be aligned with the analysis’s output, so it was excluded from the comparison.”",
+     "source": "/blocks/0/summary and /blocks/0/enrichment/inference_warnings/0"
+    },
+    {
+     "item": "The model contains an Olumi-inferred 3% churn value, but churn is treated as calculated and lacking a measured starting point in the run warning.",
+     "span": "“The current 3% monthly-churn starting point is an Olumi estimate”",
+     "source": "/draft_graph/nodes/6/observed_state and /blocks/0/enrichment/inference_warnings/0"
+    },
+    {
+     "item": "A level-versus-delta frame is missing for the constraint.",
+     "span": "“specify how the 4% churn limit should be measured in this model.”",
+     "source": "/blocks/0/enrichment/inference_warnings/2"
+    }
+   ]
+  },
+  "top_defect": "The phrase “current 3% monthly-churn starting point” blurs an Olumi-inferred graph value with the run’s explicit warning that churn has no measured starting point of its own."
+ }
+}

@@ -1,0 +1,84 @@
+{
+ "journey": "pricing-4",
+ "turn": "explicit-run",
+ "http": 200,
+ "ms": 21616,
+ "usage": {
+  "input_tokens": 9876,
+  "input_tokens_details": {
+   "cache_write_tokens": 8503,
+   "cached_tokens": 1370
+  },
+  "output_tokens": 1301,
+  "output_tokens_details": {
+   "reasoning_tokens": 516
+  },
+  "total_tokens": 11177
+ },
+ "total": 18,
+ "fails": [
+  "truth_fidelity"
+ ],
+ "top_defect": "It changes the recorded “at most 4%” churn constraint into “<4%” and suggests that supplying a churn measure alone would resolve a constraint-frame problem that the run says it would not.",
+ "score": {
+  "full": {
+   "scores": {
+    "concise": 2,
+    "shape": 1,
+    "decisive_caveat": 2,
+    "next_move": 1,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 2,
+    "useful_next_step": 1
+   },
+   "notes": {
+    "concise": "About 103 words; the extra detail is material to why no recommendation can be made.",
+    "shape": "It gives the conclusion first and three bullets, but adds a separate concluding paragraph rather than keeping the response to the requested answer-plus-bullets shape.",
+    "decisive_caveat": "Correctly foregrounds that the churn constraint was not assessable, so option compliance is unknown.",
+    "next_move": "The feature-value clarification is supported. But merely providing a churn measure is incomplete: the result says that setting a current churn value would not fix the frame/derived-node problem; the constraint needs to be attached to an appropriate measurable part of the model.",
+    "questions": "No actual request for information is phrased as a question. Exact span: “The useful next reasoning step is to define how each price-and-release option changes perceived feature value and provide a churn measure...” Source lacking: case truth → analysis_ready.blockers and blocks[0].enrichment.inference_warnings require unresolved user input/constraint clarification.",
+    "leader_honesty": "n/a: It names no option as leading, favoured, or best and gives no win-probability ranking.",
+    "nothing_invented": "The stated unchanged feature-value treatment, Olumi-supplied assumptions, and unassessable constraint are supported by the run result.",
+    "attribution": "Correctly identifies the 50/100 feature value and other assumed inputs as Olumi-supplied rather than validated user evidence.",
+    "provisional_vs_validated": "It explicitly says the assumed inputs are “not validated evidence” and does not overstate the run as validation.",
+    "fidelity": "It says the proposed measure should be tested against “<4%”, while the stored constraint uses operator “<=”, i.e. at most 4%. It also overstates that the £20k threshold was “included” without clarifying that it could not be converted/scored.",
+    "uncertainty": "Appropriately acknowledges unvalidated assumptions, omitted option effects, and unknown constraint compliance.",
+    "useful_next_step": "Defining option-specific feature value is directly useful, but the churn portion should ask where/how the churn limit applies rather than imply a supplied churn measure alone will make it testable."
+   },
+   "gates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "words": 103,
+   "questions": 0,
+   "requests_for_information": [],
+   "duplicate_statements": 0,
+   "evidence": [
+    {
+     "item": "Constraint operator mismatch",
+     "span": "“tested against **<4%**”",
+     "source": "/draft_graph/goal_constraints/0/operator (\"<=\")"
+    },
+    {
+     "item": "Threshold could not be scored in its stated level frame",
+     "span": "“The £20k MRR threshold was included”",
+     "source": "/blocks/0/enrichment/inference_warnings (GOAL_THRESHOLD_NOT_CONVERTIBLE; CONSTRAINT_TARGET_UNRELIABLE)"
+    },
+    {
+     "item": "The proposed churn input is not sufficient on its own",
+     "span": "“provide a churn measure”",
+     "source": "/blocks/0/enrichment/inference_warnings/0/message (setting a current value for Monthly churn rate would not change the issue)"
+    }
+   ]
+  },
+  "top_defect": "It changes the recorded “at most 4%” churn constraint into “<4%” and suggests that supplying a churn measure alone would resolve a constraint-frame problem that the run says it would not."
+ }
+}

@@ -1,0 +1,89 @@
+{
+ "journey": "eng-hiring-2",
+ "turn": "challenge",
+ "http": 200,
+ "ms": 23381,
+ "usage": {
+  "input_tokens": 4969,
+  "input_tokens_details": {
+   "cache_write_tokens": 3596,
+   "cached_tokens": 1370
+  },
+  "output_tokens": 1567,
+  "output_tokens_details": {
+   "reasoning_tokens": 913
+  },
+  "total_tokens": 6536
+ },
+ "total": 20,
+ "fails": [
+  "truth_fidelity"
+ ],
+ "top_defect": "It overclaims that the affordability constraint cannot discriminate among staffing choices despite no analysis having run and no supplied result establishing that conclusion.",
+ "score": {
+  "full": {
+   "scores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 0,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "notes": {
+    "concise": "77 words; appropriately brief for the request.",
+    "shape": "Direct recommendation first, followed by concise explanation.",
+    "decisive_caveat": "Preserves the material distinction between incremental hiring cost and total annual salary spend.",
+    "next_move": "One supported move: challenge the meaning of the £400k annual-salary-spend constraint.",
+    "questions": "n/a: the user asked for an assumption to challenge, not a clarification requiring an answer.",
+    "leader_honesty": "No option is presented as leading or favoured.",
+    "nothing_invented": "It introduces a requirement for role-specific fully loaded costs and asserts that the constraint cannot discriminate, neither of which is established by the supplied state.",
+    "attribution": "Correctly describes £0/year as an adopted/user-overridden assumption rather than a measurement.",
+    "provisional_vs_validated": "Does not portray the unrun model or adopted baseline as validated.",
+    "fidelity": "The £400k/year cap and £0/year observed salary-spend value are accurate, but the claimed inability of the constraint to discriminate is unsupported by the state.",
+    "uncertainty": "Appropriately identifies ambiguity in what annual salary spend includes.",
+    "useful_next_step": "Testing the cap's scope is useful because it changes the interpretation of an explicit goal constraint."
+   },
+   "gates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "words": 77,
+   "questions": 0,
+   "requests_for_information": [],
+   "duplicate_statements": 0,
+   "evidence": [
+    {
+     "item": "Unsupported assertion that affordability cannot distinguish choices",
+     "span": "\"the affordability constraint cannot discriminate between the staffing choices\"",
+     "source": "/analysis_state/run_state (kind: \"never_run\"); /analysis_ready (status: \"blocked\", permitted_analysis_mode: \"none\")"
+    },
+    {
+     "item": "Invented need for detailed role-cost inputs",
+     "span": "\"each role’s fully loaded cost\"",
+     "source": "CASE TRUTH: no role-level or fully loaded salary-cost input, requirement, or readiness issue is supplied"
+    },
+    {
+     "item": "Accurate adopted, non-measured baseline description",
+     "span": "\"annual salary spend at £0/year as your adopted starting assumption ... not as a measurement\"",
+     "source": "/draft_graph/nodes[id=\"annual_salary_spend\"]/observed_state (value: 0, unit: \"£/year\", source: \"user_override\")"
+    },
+    {
+     "item": "Accurate constraint amount and unit",
+     "span": "\"£400k\"",
+     "source": "/draft_graph/goal_constraints[0] (value: 400000, unit: \"GBP/year\", operator: \"<=\")"
+    }
+   ]
+  },
+  "top_defect": "It overclaims that the affordability constraint cannot discriminate among staffing choices despite no analysis having run and no supplied result establishing that conclusion."
+ }
+}

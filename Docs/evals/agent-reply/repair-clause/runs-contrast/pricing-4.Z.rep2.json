@@ -1,0 +1,21 @@
+{
+ "state": "pricing-4",
+ "arm": "Z",
+ "rep": 2,
+ "http": 200,
+ "ms": 8554,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 10450,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 10447
+  },
+  "output_tokens": 312,
+  "output_tokens_details": {
+   "reasoning_tokens": 173
+  },
+  "total_tokens": 10762
+ },
+ "text": "No option can be put forward yet because the model could not assess your “monthly churn under 4%” limit.\n\n- The price comparison itself was moderately robust under the model’s tested variations, but that does not establish compliance with the churn requirement.\n- The outcome also partly rests on a machine default of £0 for non‑Pro MRR, not a user-provided figure; downstream MRR results are therefore unreliable.\n- Active Pro subscribers are the most structurally influential factor, while churn and feature-value inputs are provisional machine-authored estimates. The model also lacks an explicitly recorded goal direction.\n\nThis run is a model-relative comparison, not a decision answer."
+}

@@ -1,0 +1,21 @@
+{
+ "state": "pricing-3",
+ "arm": "A",
+ "rep": 1,
+ "http": 200,
+ "ms": 4675,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 9845,
+  "input_tokens_details": {
+   "cache_write_tokens": 6896,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 223,
+  "output_tokens_details": {
+   "reasoning_tokens": 60
+  },
+  "total_tokens": 10068
+ },
+ "text": "No option can be put forward from this run because it did not test your churn requirement.\n\n- The comparison is robust under the changes tested, but “monthly churn < 4%” could not be scored against the model’s churn output; its measurement frame is unknown.\n- The goal was also ranked as “higher MRR is better” without an explicitly stated goal direction, and the £20k/month threshold could not be evaluated in the analysis samples’ frame.\n- The most sensitive model input is the Pro subscriber base, an Olumi-inferred estimate; new Pro sign-ups and monthly churn are also Olumi estimates. The analysis therefore remains provisional.\n\nThe key unresolved reasoning step is to specify what the 4% churn limit means in the same terms as the model measures it."
+}

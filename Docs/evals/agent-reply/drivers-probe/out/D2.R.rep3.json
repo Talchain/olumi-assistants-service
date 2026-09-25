@@ -1,0 +1,8 @@
+{
+ "arm": "R",
+ "rep": 3,
+ "http": 200,
+ "model": "gpt-5.6-terra",
+ "tool_calls": [],
+ "text": "Challenge the **onboarding load** assumption first: the estimate is **4 experienced developer-hours per week**.\n\n- It is directly tied to your stated risk: senior developers being pulled from delivery.\n- It can differ sharply between a tech lead and two developers, and across their first weeks or months.\n- It determines whether extra capacity arrives soon enough to matter within six months.\n\nThe assumed team size of **5 developers** is also important, but onboarding demand is the more decision-distinguishing uncertainty."
+}

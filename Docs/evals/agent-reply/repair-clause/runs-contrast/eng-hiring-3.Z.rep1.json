@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-3",
+ "arm": "Z",
+ "rep": 1,
+ "http": 200,
+ "ms": 4393,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13609,
+  "input_tokens_details": {
+   "cache_write_tokens": 10626,
+   "cached_tokens": 2980
+  },
+  "output_tokens": 133,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 13742
+ },
+ "text": "No hiring choice can be put forward yet, because the £400k annual-salary limit was not checkable in this analysis.\n\n- The comparison is **very fragile** and rests partly on Olumi-authored estimates, including onboarding effects; delivery capacity is the most sensitive user-provided assumption.\n- The model compared hiring **2 seniors**, **4 juniors**, current staffing, and a mixed option, but did not establish whether any stays under **£400k/year**.\n- The constraint was withheld because annual salary spend is modelled as a change, not a salary figure in £/year; the goal direction was also not explicitly stated."
+}

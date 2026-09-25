@@ -1,0 +1,72 @@
+{
+ "journey": "eng-hiring-3",
+ "turn": "explicit-run",
+ "http": 200,
+ "ms": 33157,
+ "usage": {
+  "input_tokens": 12413,
+  "input_tokens_details": {
+   "cache_write_tokens": 11040,
+   "cached_tokens": 1370
+  },
+  "output_tokens": 2394,
+  "output_tokens_details": {
+   "reasoning_tokens": 1839
+  },
+  "total_tokens": 14807
+ },
+ "total": 19,
+ "fails": [],
+ "top_defect": "It gives no question to obtain the information needed to align the salary constraint with the applicable model input.",
+ "score": {
+  "full": {
+   "scores": {
+    "concise": 1,
+    "shape": 1,
+    "decisive_caveat": 1,
+    "next_move": 2,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "notes": {
+    "concise": "110 words: moderately over the ~90-word default, though most content is material caveat/context.",
+    "shape": "It opens with the conclusion and uses three bullets, but then adds a separate closing paragraph that repeats the constraint point.",
+    "decisive_caveat": "It retains the unscored salary constraint and very-low-robustness caveats, but omits the separate warnings that the goal direction is unstated and the Q3 level threshold cannot be converted to the analysis frame.",
+    "next_move": "Attaching the salary constraint to the model component it actually applies to is supported by the analysis-result summary and inference warning.",
+    "questions": "No actual request for information is asked, despite the default requirement for one question.",
+    "leader_honesty": "No option is presented as leading, favoured, or ranked.",
+    "nothing_invented": "The stated near tie, very-low robustness, inferred mixed option, no-change baseline treatment, and machine-authored inputs are supported by the served state.",
+    "attribution": "Platform scope completed and the named inputs are correctly characterized as Olumi/machine-authored estimates rather than user-supplied figures.",
+    "provisional_vs_validated": "It does not portray the run or its machine-authored inputs as validated.",
+    "fidelity": "The £400k annual-salary constraint and its inability to be assessed are represented consistently with the analysis result.",
+    "uncertainty": "It proportionately flags low robustness, assumption sensitivity, and the untestable constraint.",
+    "useful_next_step": "The proposed constraint-model alignment directly addresses why compliance could not be assessed."
+   },
+   "gates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "words": 110,
+   "questions": 0,
+   "requests_for_information": [],
+   "duplicate_statements": 1,
+   "evidence": [
+    {
+     "item": "questions score 0",
+     "span": "The entire reply contains no interrogative or request for information; its closing sentence is declarative: “The annual-salary constraint needs to be attached to a measurable salary-cost input before it can assess compliance.”",
+     "source": "Evaluation instruction criterion 5 (one question by default)"
+    }
+   ]
+  },
+  "top_defect": "It gives no question to obtain the information needed to align the salary constraint with the applicable model input."
+ }
+}

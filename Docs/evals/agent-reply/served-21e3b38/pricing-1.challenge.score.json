@@ -1,0 +1,77 @@
+{
+ "journey": "pricing-1",
+ "turn": "challenge",
+ "http": 200,
+ "ms": 27340,
+ "usage": {
+  "input_tokens": 10103,
+  "input_tokens_details": {
+   "cache_write_tokens": 8730,
+   "cached_tokens": 1370
+  },
+  "output_tokens": 1695,
+  "output_tokens_details": {
+   "reasoning_tokens": 1034
+  },
+  "total_tokens": 11798
+ },
+ "total": 18,
+ "fails": [],
+ "top_defect": "It incorrectly elevates establishing a churn baseline as the most important action even though the analysis says that baseline would not make the churn constraint testable.",
+ "score": {
+  "full": {
+   "scores": {
+    "concise": 2,
+    "shape": 1,
+    "decisive_caveat": 1,
+    "next_move": 0,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 0
+   },
+   "notes": {
+    "concise": "89 words; concise for the request.",
+    "shape": "It gives an answer first and three bullets, but then adds a separate concluding paragraph, rather than ending after the bullets.",
+    "decisive_caveat": "It notes both Olumi-estimated inputs and that the churn constraint could not be tested, but does not explain the decisive reason the constraint is untestable: Monthly churn is calculated in an incompatible/unanchored frame.",
+    "next_move": "It offers competing priorities rather than one primary move: challenge subscriber count, then feature value, then—“Most importantly”—establish churn baseline.",
+    "questions": "n/a: the user asked for a recommendation, not a clarification; no question was needed.",
+    "leader_honesty": "No option is described as leading, favoured, or otherwise ranked.",
+    "nothing_invented": "The identified estimated values and causal relationships are supported by the graph and analysis.",
+    "attribution": "The 250 subscribers, 60/100 feature value, and 3% churn are correctly described as Olumi estimates rather than user-supplied figures.",
+    "provisional_vs_validated": "It does not portray the analysis or estimates as validated.",
+    "fidelity": "Subscriber count, feature value, churn value, and the inability to test the under-4% churn limit match the supplied state.",
+    "uncertainty": "It appropriately flags that the central inputs are estimates and that the churn constraint was not testable.",
+    "useful_next_step": "“Most importantly, establish a real churn baseline” is not a useful primary repair for the stated constraint: the analysis explicitly says setting a current Monthly churn value would not anchor or make that constraint scorable. Challenging the subscriber estimate would have been a useful sole next move."
+   },
+   "gates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "words": 89,
+   "questions": 0,
+   "requests_for_information": [],
+   "duplicate_statements": 0,
+   "evidence": [
+    {
+     "item": "next_move score 0",
+     "span": "“Next, challenge whether the release is worth 60/100...” / “Most importantly, establish a real churn baseline”",
+     "source": "FULL reply; lacks a single primary next move and conflicts in priority with “Challenge the assumed 250 Pro subscribers first.”"
+    },
+    {
+     "item": "useful_next_step score 0",
+     "span": "“Most importantly, establish a real churn baseline”",
+     "source": "/blocks/0/enrichment/inference_warnings/0/message: “Setting a current value for ‘Monthly churn’ would not change that … it has no measured starting point of its own to anchor to.”"
+    }
+   ]
+  },
+  "top_defect": "It incorrectly elevates establishing a churn baseline as the most important action even though the analysis says that baseline would not make the churn constraint testable."
+ }
+}

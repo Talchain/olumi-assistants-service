@@ -1,0 +1,8 @@
+{
+ "arm": "D",
+ "rep": 1,
+ "http": 200,
+ "model": "gpt-5.6-terra",
+ "tool_calls": [],
+ "text": "Challenge the assumed **onboarding load: 4 experienced developer-hours per week** first.\n\n- It is an Olumi estimate, not a supplied fact, and it directly reduces delivery capacity during a short six‑month window.\n- It may differ sharply between hiring a tech lead and hiring two developers; treating it as one shared load can distort the trade-off.\n- The model also treats technical guidance quality (50/100, an Olumi estimate) as equally influential, but onboarding capacity is the more immediate operational constraint.\n\nWhat would onboarding each hiring route actually require, and for how many weeks?"
+}

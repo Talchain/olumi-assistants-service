@@ -1,0 +1,21 @@
+{
+ "state": "pricing-3",
+ "arm": "A-honest",
+ "rep": 1,
+ "http": 200,
+ "ms": 5415,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 9881,
+  "input_tokens_details": {
+   "cache_write_tokens": 6932,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 250,
+  "output_tokens_details": {
+   "reasoning_tokens": 126
+  },
+  "total_tokens": 10131
+ },
+ "text": "No option can be put forward from this run, because it did not test whether monthly churn stays below 4%.\n\n- The comparison is otherwise robust under the changes tested, but that is not evidence of churn compliance.\n- It also ranked options by higher modelled MRR because the goal direction was not explicitly represented; the £20k/month threshold could not be assessed in the analysis frame.\n- The comparison rests materially on machine-authored estimates for the Pro subscriber base, new Pro sign-ups, monthly churn, and feature-release value. The subscriber-base assumption has the greatest modelled influence."
+}

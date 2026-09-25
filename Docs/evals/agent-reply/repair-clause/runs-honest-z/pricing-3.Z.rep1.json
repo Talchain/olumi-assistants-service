@@ -1,0 +1,21 @@
+{
+ "state": "pricing-3",
+ "arm": "Z-honest",
+ "rep": 1,
+ "http": 200,
+ "ms": 6827,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 9915,
+  "input_tokens_details": {
+   "cache_write_tokens": 6932,
+   "cached_tokens": 2980
+  },
+  "output_tokens": 284,
+  "output_tokens_details": {
+   "reasoning_tokens": 141
+  },
+  "total_tokens": 10199
+ },
+ "text": "No option can be put forward yet, because neither the £20k MRR target nor the strict monthly-churn limit was successfully checked in this run.\n\n- The comparison is modelled as robust under the changes tested, but it ranks outcomes by higher MRR without a recorded goal direction; the £20k/month threshold could not be aligned with the model’s MRR output.\n- Monthly churn under **4%** was left unscored: this model derives churn from other factors rather than measuring it on a comparable scale.\n- The most sensitive model input is the Pro subscriber base, an Olumi estimate rather than user evidence. Investigation priority is not established from this sensitivity alone."
+}

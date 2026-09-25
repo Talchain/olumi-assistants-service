@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-3",
+ "arm": "Z-honest",
+ "rep": 2,
+ "http": 200,
+ "ms": 6569,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13645,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 13642
+  },
+  "output_tokens": 277,
+  "output_tokens_details": {
+   "reasoning_tokens": 138
+  },
+  "total_tokens": 13922
+ },
+ "text": "No hiring option can be put forward from this run, because the £400k annual-salary limit was not checkable in the model.\n\n- The comparison is **fragile/very low robustness** and rests partly on machine-authored assumptions; the goal’s intended direction was also not stated, so the model treated a higher goal value as better.\n- Delivery capacity is the most sensitive assumption. Its **12 productive engineer-month** starting value was accepted by you, but originated as Olumi’s estimate; changing it can change what the model implies.\n- The salary constraint remains recorded but unscored, so this analysis does not establish whether any scenario meets it."
+}

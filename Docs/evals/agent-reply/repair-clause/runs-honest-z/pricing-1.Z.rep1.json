@@ -1,0 +1,21 @@
+{
+ "state": "pricing-1",
+ "arm": "Z-honest",
+ "rep": 1,
+ "http": 200,
+ "ms": 3317,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 10114,
+  "input_tokens_details": {
+   "cache_write_tokens": 7131,
+   "cached_tokens": 2980
+  },
+  "output_tokens": 118,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 10232
+ },
+ "text": "No option can be put forward yet because the model cannot check your churn limit.\n\n- The comparison is robust under the changes tested, but its result rests partly on four machine-supplied assumptions rather than your evidence, including active subscribers, new subscribers, churn, and feature-release value.\n- The £20k MRR target was not scored either: its threshold frame and baseline are unspecified. The model also assumed that higher MRR is the objective.\n- The most sensitive modelled drivers are active Pro subscribers and feature-release value; the latter is an Olumi estimate."
+}

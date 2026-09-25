@@ -1,0 +1,21 @@
+{
+ "state": "pricing-4",
+ "arm": "A-honest",
+ "rep": 1,
+ "http": 200,
+ "ms": 3826,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 10452,
+  "input_tokens_details": {
+   "cache_write_tokens": 7503,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 144,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 10596
+ },
+ "text": "The model cannot put an option forward yet, because it could not test your requirement of monthly churn below 4%.\n\n- The comparison is moderately robust within its assumptions, but it rests partly on Olumi-authored estimates and on **Non‑Pro MRR defaulting to £0/month** because no value was recorded.\n- The model’s outcome is most structurally sensitive to active Pro subscribers; it is also affected by monthly churn, new Pro sign-ups, and perceived feature value. These are provisional model inputs, not validated evidence.\n- The next reasoning step is to make the churn constraint measurable in the model; until then, the £20k MRR and churn requirements cannot be assessed together."
+}

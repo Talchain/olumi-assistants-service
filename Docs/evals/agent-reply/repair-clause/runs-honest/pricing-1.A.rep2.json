@@ -1,0 +1,21 @@
+{
+ "state": "pricing-1",
+ "arm": "A-honest",
+ "rep": 2,
+ "http": 200,
+ "ms": 6155,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 10080,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 10077
+  },
+  "output_tokens": 273,
+  "output_tokens_details": {
+   "reasoning_tokens": 123
+  },
+  "total_tokens": 10353
+ },
+ "text": "No price option can be put forward yet, because the model could not test your under‑4% monthly churn requirement.\n\n- The comparison itself held up under the changes tested, but that is not a check that any option meets both of your stated conditions.\n- The result is particularly dependent on the feature-release value assumption—an Olumi estimate, not recorded evidence—and on active subscribers, new subscribers and churn, which are also modelled rather than observed inputs.\n- The £20k MRR target was not scored either: its threshold frame and the goal’s direction were unspecified in the analysis.\n\nA useful next reasoning step is to define how the model should measure the churn limit and MRR target against the analysis outputs."
+}

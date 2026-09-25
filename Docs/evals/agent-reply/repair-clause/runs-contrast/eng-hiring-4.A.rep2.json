@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-4",
+ "arm": "A",
+ "rep": 2,
+ "http": 200,
+ "ms": 5834,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13886,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 13883
+  },
+  "output_tokens": 216,
+  "output_tokens_details": {
+   "reasoning_tokens": 80
+  },
+  "total_tokens": 14102
+ },
+ "text": "No option can be put forward yet: the £400k annual-salary limit was not checked in this run.\n\n- The model could not compare that limit with its calculated salary-spend measure, so it withheld constraint compliance; the goal direction was also assumed rather than stated.\n- The comparison is **very fragile** and all options produced nearly identical outcomes. Its strongest driver is delivery capacity, based on Olumi’s provisional estimates rather than recorded evidence.\n- The useful next reasoning step is to state the salary rule in operational terms—for example, whether it is total base salary for the hires, and whether the £400k is an absolute annual cap."
+}

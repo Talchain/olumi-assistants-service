@@ -1,0 +1,79 @@
+{
+ "journey": "pricing-2",
+ "turn": "challenge",
+ "http": 200,
+ "ms": 21232,
+ "usage": {
+  "input_tokens": 7663,
+  "input_tokens_details": {
+   "cache_write_tokens": 6290,
+   "cached_tokens": 1370
+  },
+  "output_tokens": 1434,
+  "output_tokens_details": {
+   "reasoning_tokens": 858
+  },
+  "total_tokens": 9097
+ },
+ "total": 20,
+ "fails": [
+  "truth_fidelity"
+ ],
+ "top_defect": "It invents a “next feature release” context and elevates a specific cohort/pricing-study evidence plan as most likely to matter without support in the supplied state.",
+ "score": {
+  "full": {
+   "scores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 1,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 1
+   },
+   "notes": {
+    "concise": "79 words; concise for the request.",
+    "shape": "Answers immediately, followed by a short explanation without a repeated analysis dump.",
+    "decisive_caveat": "Keeps the material caveat that the monthly-churn limit could not be validated/scored.",
+    "next_move": "The primary move—challenge the inferred 3% churn assumption—is supported, but it adds a second investigation into price-to-churn behaviour.",
+    "questions": "n/a: the user asked for a recommendation, not clarification.",
+    "leader_honesty": "No option is described as leading, favoured, or best.",
+    "nothing_invented": "Invents an unsupported timing/context claim and an unsupported assertion about which evidence is most likely to matter.",
+    "attribution": "Correctly identifies the 3% monthly churn value as Olumi's estimate rather than user data.",
+    "provisional_vs_validated": "Does not present the analysis or the churn constraint as validated; it explicitly says the limit could not be validated.",
+    "fidelity": "The 3% monthly churn estimate, £49/£59 price comparison, and under-4% churn limit match the supplied model state.",
+    "uncertainty": "Appropriately flags the unresolved churn-limit validation issue.",
+    "useful_next_step": "Challenging the inferred churn assumption is useful, though the added evidence prescription goes beyond the established model output."
+   },
+   "gates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "words": 79,
+   "questions": 0,
+   "requests_for_information": [],
+   "duplicate_statements": 0,
+   "evidence": [
+    {
+     "item": "Unsupported release context",
+     "span": "“especially around the next feature release”",
+     "source": "CASE TRUTH — draft_graph, analysis_state, and analysis-result block contain no feature release or release timeframe."
+    },
+    {
+     "item": "Unsupported evidence-priority claim",
+     "span": "“cohort churn by plan, before and after comparable pricing or packaging changes, is the evidence most likely to change what the model means”",
+     "source": "CASE TRUTH — analysis-result block identifies Monthly churn rate as the biggest structural driver, but supplies no feature-release, packaging-change, cohort-study, or evidence-priority finding."
+    }
+   ]
+  },
+  "top_defect": "It invents a “next feature release” context and elevates a specific cohort/pricing-study evidence plan as most likely to matter without support in the supplied state."
+ }
+}

@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-4",
+ "arm": "A-honest",
+ "rep": 1,
+ "http": 200,
+ "ms": 5267,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13922,
+  "input_tokens_details": {
+   "cache_write_tokens": 10973,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 245,
+  "output_tokens_details": {
+   "reasoning_tokens": 119
+  },
+  "total_tokens": 14167
+ },
+ "text": "No hiring option can be put forward from this run, because the **£400k/year salary constraint was not assessed**.\n\n- The model cannot currently compare its calculated salary-spend change with that absolute cap, so budget compliance is unknown for every option.\n- The comparison is also **very fragile**: outcomes were nearly identical, and the result depends heavily on **delivery capacity**—an Olumi-inferred estimate, not user evidence.\n- The goal was treated as “more platform delivery progress is better”; that direction was not explicitly stated.\n\nThis is a provisional model result, not a decision."
+}

@@ -1,0 +1,21 @@
+{
+ "state": "pricing-5",
+ "arm": "Z-honest",
+ "rep": 2,
+ "http": 200,
+ "ms": 3396,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 9943,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 9940
+  },
+  "output_tokens": 129,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 10072
+ },
+ "text": "No option can be put forward yet because the model could not assess your “monthly churn < 4%” limit.\n\n- The comparison itself held up under the changes tested, but its result is based largely on Olumi’s provisional inputs, including Pro subscriber count, monthly conversions, churn and other-plan MRR.\n- The model ranks outcomes by higher MRR because the objective direction was not explicitly specified; it also cannot currently align the £20k/month threshold with its projected change scale.\n- The ordering is especially exposed to the assumed price-to-MRR relationship; this is a modelled relationship, not observed pricing evidence."
+}

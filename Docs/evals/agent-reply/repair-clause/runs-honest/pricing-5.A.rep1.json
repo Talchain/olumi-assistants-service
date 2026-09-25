@@ -1,0 +1,21 @@
+{
+ "state": "pricing-5",
+ "arm": "A-honest",
+ "rep": 1,
+ "http": 200,
+ "ms": 6993,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 9909,
+  "input_tokens_details": {
+   "cache_write_tokens": 6960,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 387,
+  "output_tokens_details": {
+   "reasoning_tokens": 242
+  },
+  "total_tokens": 10296
+ },
+ "text": "No option can be put forward yet: the model cannot check your **monthly churn <4%** constraint.\n\n- The price options were compared on the modelled MRR outcome and held up under the tested perturbations, but that does not establish that any option keeps churn below 4%.\n- Reaching **£20,000 MRR** was also not scored: the model lacks the current MRR baseline needed to compare its change-based outcomes with that level, and the goal direction was assumed rather than stated.\n- The comparison is most sensitive to **Pro subscriber count**—an Olumi estimate, not user evidence. The analysis therefore remains a provisional scenario test rather than validated pricing evidence."
+}

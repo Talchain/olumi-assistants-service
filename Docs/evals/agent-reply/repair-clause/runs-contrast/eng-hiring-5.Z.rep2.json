@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-5",
+ "arm": "Z",
+ "rep": 2,
+ "http": 200,
+ "ms": 6976,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13510,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 13507
+  },
+  "output_tokens": 283,
+  "output_tokens_details": {
+   "reasoning_tokens": 147
+  },
+  "total_tokens": 13793
+ },
+ "text": "No hiring option can be put forward from this run: the £400k annual-salary limit was not checkable and the comparison is fragile.\n\n- The model produced nearly identical outcomes across the four staffing cases, so small assumption changes can alter the ordering.\n- **Platform delivery capacity** is the most sensitive assumption; it is Olumi’s estimate, not evidence you supplied.\n- The £400k constraint remained recorded but unscored because annual salary spend is modelled as a derived change rather than a salary-total reading. The model also assumes that a higher “shipped by Q3” value is desirable; that objective direction was not stated."
+}

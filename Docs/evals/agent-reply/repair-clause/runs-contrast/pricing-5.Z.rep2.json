@@ -1,0 +1,21 @@
+{
+ "state": "pricing-5",
+ "arm": "Z",
+ "rep": 2,
+ "http": 200,
+ "ms": 5928,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 9907,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 9904
+  },
+  "output_tokens": 219,
+  "output_tokens_details": {
+   "reasoning_tokens": 105
+  },
+  "total_tokens": 10126
+ },
+ "text": "No option can be put forward yet because the model could not assess the **monthly churn <4%** limit.\n\n- The price-only comparison held up under the changes tested, but it does not establish compliance with that churn constraint.\n- The result rests on four Olumi estimates rather than user evidence, including Pro subscriber count, monthly Pro conversions, monthly churn and other-plan MRR.\n- The ordering is most sensitive to the assumed Pro subscriber count; that is an Olumi estimate. This identifies a tested dependency, not an investigation priority."
+}

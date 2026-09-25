@@ -1,0 +1,94 @@
+{
+ "journey": "eng-hiring-1",
+ "turn": "challenge",
+ "http": 200,
+ "ms": 43155,
+ "usage": {
+  "input_tokens": 12909,
+  "input_tokens_details": {
+   "cache_write_tokens": 11536,
+   "cached_tokens": 1370
+  },
+  "output_tokens": 2897,
+  "output_tokens_details": {
+   "reasoning_tokens": 2070
+  },
+  "total_tokens": 15806
+ },
+ "total": 13,
+ "fails": [
+  "truth_fidelity"
+ ],
+ "top_defect": "It invents “productive engineer-months” as the decisive test even though the model contains only delivery-capacity points and no such recruitment/onboarding calculation.",
+ "score": {
+  "full": {
+   "scores": {
+    "concise": 1,
+    "shape": 2,
+    "decisive_caveat": 0,
+    "next_move": 1,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 0,
+    "uncertainty": 1,
+    "useful_next_step": 2
+   },
+   "notes": {
+    "concise": "104 words: only modestly above the default, but the final salary comparison and some elaboration could be trimmed.",
+    "shape": "Direct answer first, followed by three short bullets and one brief qualifying paragraph.",
+    "decisive_caveat": "It omits that the analysis is fragile/very-low robustness and that the annual-salary constraint was not assessed, both of which materially limit what the sensitivity finding means.",
+    "next_move": "Challenging the capacity assumption is supported, but framing the test in productive engineer-months introduces an unsupported measure.",
+    "questions": "No direct request for information is asked; the italicised question is framed as a test, not a request to the user.",
+    "leader_honesty": "No option is described as leading, favoured, or best.",
+    "nothing_invented": "Productive engineer-months and the implied recruitment/onboarding calculation are not represented quantities in the model.",
+    "attribution": "The response correctly identifies the junior-coordination relationship and salary figures as machine-authored/estimated rather than user evidence.",
+    "provisional_vs_validated": "It does not present the analysis or assumptions as validated.",
+    "fidelity": "The model measures delivery-capacity points, not productive engineer-months; the response substitutes an unsupported unit and calculation.",
+    "uncertainty": "It appropriately notes absent evidence and machine authorship, but does not state the run's fragile/very-low robustness or the unresolved constraint.",
+    "useful_next_step": "Challenge the capacity-to-Q3 linkage, particularly the junior coordination effect; that is relevant to this model and respects the request not to change or rerun it."
+   },
+   "gates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "words": 104,
+   "questions": 0,
+   "requests_for_information": [],
+   "duplicate_statements": 0,
+   "evidence": [
+    {
+     "item": "decisive_caveat",
+     "span": "“It is the model’s most sensitive assumption”",
+     "source": "case truth /blocks/0/enrichment/robustness: level is \"very_low\", display_verdict is \"fragile\"; /blocks/0/inference_warnings includes CONSTRAINT_TARGET_UNRELIABLE"
+    },
+    {
+     "item": "questions",
+     "span": "“The key test is not ‘who is better?’, but: how many productive engineer-months will each route add...?”",
+     "source": "developer scoring instruction, criterion 5: this is not a direct request for information from the user"
+    },
+    {
+     "item": "nothing_invented",
+     "span": "“how many productive engineer-months will each route add before the deadline”",
+     "source": "case truth /draft_graph/nodes/platform_delivery_capacity: its unit is \"delivery-capacity points\"; no engineer-months factor or calculation is supplied"
+    },
+    {
+     "item": "fidelity",
+     "span": "“how many productive engineer-months will each route add before the deadline”",
+     "source": "case truth /draft_graph/nodes/platform_delivery_capacity: observed_state.unit is \"delivery-capacity points\"; /draft_graph/edges contains no engineer-months measure"
+    },
+    {
+     "item": "truth_fidelity",
+     "span": "“how many productive engineer-months will each route add before the deadline, after recruitment and supervision?”",
+     "source": "case truth /draft_graph/nodes/platform_delivery_capacity and /draft_graph/edges: the supplied model has delivery-capacity points and generic Hiring delay risk, but no productive-engineer-month calculation, recruitment lead-time value, or supervision/onboarding measure"
+    }
+   ]
+  },
+  "top_defect": "It invents “productive engineer-months” as the decisive test even though the model contains only delivery-capacity points and no such recruitment/onboarding calculation."
+ }
+}

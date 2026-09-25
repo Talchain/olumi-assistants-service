@@ -1,0 +1,21 @@
+{
+ "state": "pricing-4",
+ "arm": "A",
+ "rep": 1,
+ "http": 200,
+ "ms": 4918,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 10416,
+  "input_tokens_details": {
+   "cache_write_tokens": 7467,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 251,
+  "output_tokens_details": {
+   "reasoning_tokens": 103
+  },
+  "total_tokens": 10667
+ },
+ "text": "This run cannot establish whether any price choice meets your stated churn safeguard, so no option can be put forward.\n\n- The comparison was otherwise moderately robust, but “monthly churn under 4%” was not scored: the model produces a change in churn, not a churn rate on the same scale as the 4% limit.\n- The £20k MRR threshold also lacks a current MRR baseline/frame, and Non‑Pro MRR defaulted to zero. Those make target attainment unreliable.\n- The provisional inputs include Olumi’s estimates for monthly churn and feature value perception; they are assumptions, not measurements.\n\nThe key next reasoning step is to define the churn limit in terms the model can measure."
+}

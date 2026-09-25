@@ -1,0 +1,21 @@
+{
+ "state": "pricing-4",
+ "arm": "A",
+ "rep": 2,
+ "http": 200,
+ "ms": 9813,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 10416,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 10413
+  },
+  "output_tokens": 393,
+  "output_tokens_details": {
+   "reasoning_tokens": 237
+  },
+  "total_tokens": 10809
+ },
+ "text": "No option can be put forward yet: the model could not test your “monthly churn under 4% per month” condition.\n\n- Churn is modelled as a calculated change, not a measured monthly rate on the same scale as your limit, so the constraint was excluded rather than scored incorrectly.\n- The comparison is also provisional because Non‑Pro MRR had no supplied starting value and defaulted to £0/month; downstream MRR results may therefore be unreliable.\n- Active Pro subscribers are the most structurally influential assumption; their source is not recorded. The tested price-to-MRR relationship was also fragile, but that does not establish overall stability.\n\nThe current analysis is a model-relative comparison, not a conclusion on whether to raise the price."
+}

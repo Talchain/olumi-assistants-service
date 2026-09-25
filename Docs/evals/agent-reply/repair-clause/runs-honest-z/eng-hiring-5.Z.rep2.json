@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-5",
+ "arm": "Z-honest",
+ "rep": 2,
+ "http": 200,
+ "ms": 5893,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13546,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 13543
+  },
+  "output_tokens": 279,
+  "output_tokens_details": {
+   "reasoning_tokens": 157
+  },
+  "total_tokens": 13825
+ },
+ "text": "No hiring option can be put forward from this run.\n\n- The **£400k/year annual-salary-spend limit was not checked**: the model treats salary spend as a calculated quantity on a different frame from the constraint, so it was excluded rather than scored incorrectly.\n- The comparison is **fragile** and outcomes were nearly identical. Platform delivery capacity is the most sensitive assumption; it is an Olumi estimate, as are the other inputs behind this provisional run.\n- The goal’s direction was not stated, so the analysis assumed that a higher goal value is preferable."
+}

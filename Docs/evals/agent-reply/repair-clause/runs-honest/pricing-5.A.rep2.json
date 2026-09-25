@@ -1,0 +1,21 @@
+{
+ "state": "pricing-5",
+ "arm": "A-honest",
+ "rep": 2,
+ "http": 200,
+ "ms": 4567,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 9909,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 9906
+  },
+  "output_tokens": 214,
+  "output_tokens_details": {
+   "reasoning_tokens": 80
+  },
+  "total_tokens": 10123
+ },
+ "text": "No option can be put forward yet, because the model could not test your **monthly churn <4%** limit.\n\n- The comparison held up under the tested changes, but that robustness applies only to the model’s MRR comparison—not to compliance with the churn constraint.\n- It also assumes that maximising MRR is the goal; the £20k/month threshold could not be evaluated because the model lacks a current MRR baseline in the required frame.\n- The comparison is most sensitive to **Pro subscriber count**, an Olumi-generated estimate rather than a user-supplied figure. Its investigation priority is not established from this result alone."
+}

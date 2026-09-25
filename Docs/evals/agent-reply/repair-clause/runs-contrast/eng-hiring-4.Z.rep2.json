@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-4",
+ "arm": "Z",
+ "rep": 2,
+ "http": 200,
+ "ms": 3787,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13920,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 13917
+  },
+  "output_tokens": 135,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 14055
+ },
+ "text": "No option can be put forward yet: the £400k annual-salary limit was not checkable in this run, so it was excluded from the comparison.\n\n- The result is **fragile** and rests on six Olumi-supplied values, rather than user evidence. Delivery capacity is the most sensitive assumption; its value source is Olumi’s estimate.\n- The goal direction was not stated, so the comparison assumed that more platform-delivery progress is better.\n- The model’s annual-salary figure is calculated as a change, not an annual total in £/year, so it cannot be tested against **≤ £400k/year**."
+}

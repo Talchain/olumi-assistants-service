@@ -1,0 +1,21 @@
+{
+ "state": "pricing-3",
+ "arm": "A",
+ "rep": 2,
+ "http": 200,
+ "ms": 7202,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 9845,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 9842
+  },
+  "output_tokens": 283,
+  "output_tokens_details": {
+   "reasoning_tokens": 133
+  },
+  "total_tokens": 10128
+ },
+ "text": "The analysis cannot support a £59 decision against your stated guardrail, because it did not test whether churn stays below 4%.\n\n- The churn limit was left unscored: the model produces a change for churn, not a directly comparable monthly-churn level. The £20k MRR target is also not evaluated as a 12‑month outcome, and the model assumed that more MRR is preferable without an explicitly recorded goal direction.\n- Within its incomplete comparison, the result held up under the tested perturbations, but that is not evidence that the churn condition is met.\n- The ordering is most sensitive to the Pro subscriber base, which is a machine-authored estimate with provisional calibration—not recorded user evidence."
+}

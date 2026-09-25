@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-4",
+ "arm": "Z-honest",
+ "rep": 2,
+ "http": 200,
+ "ms": 4013,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13956,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 13953
+  },
+  "output_tokens": 174,
+  "output_tokens_details": {
+   "reasoning_tokens": 46
+  },
+  "total_tokens": 14130
+ },
+ "text": "No hiring option can be put forward yet: the model could not test the **annual salary spend ≤ £400k/year** limit, so that central constraint was excluded from the comparison.\n\n- The comparison is **fragile** and rests on six Olumi-supplied estimates, not user evidence. The most sensitive assumption is **delivery capacity**; it is an Olumi estimate, and changing it can alter the ordering.\n- The analysis also assumed that more platform-delivery progress is better; that objective direction was not stated by you.\n- The £400k limit cannot be checked in this model yet."
+}

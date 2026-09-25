@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-4",
+ "arm": "Z",
+ "rep": 1,
+ "http": 200,
+ "ms": 4128,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13920,
+  "input_tokens_details": {
+   "cache_write_tokens": 10937,
+   "cached_tokens": 2980
+  },
+  "output_tokens": 160,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 14080
+ },
+ "text": "No option can be put forward yet: the model could not check the **annual salary spend ≤ £400k/year** limit, so that constraint was excluded from the comparison.\n\n- The comparison is **fragile** and rests on six Olumi-supplied values, not user evidence. Delivery capacity is the most sensitive assumption; the model’s source for it is Olumi’s estimate.\n- The goal was treated as “more platform delivery progress is better”; that direction was not stated by you.\n- The salary cap is recorded but unscored because annual salary spend is modelled as a change, not a total spend figure in the same frame as £400k/year.\n\nA current analysis needs a spend limit expressed in the model’s comparable terms before it can assess compliance."
+}

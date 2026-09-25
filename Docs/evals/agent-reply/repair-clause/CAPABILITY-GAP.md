@@ -37,3 +37,16 @@ The run says: "Tell me which part of your model it applies to and I will record 
 - **The real missing input is the level or frame:** the current churn level, or whether the cap covers incremental or total payroll. That is what the hiring Agent asked, and what the so-called invented fixes pointed towards.
 
 **A second defect in passing:** the user said "under 4%", but the stored operator is `<=` (label "Monthly churn < 4percent", operator "<=").
+
+## Residual after #1875 (25 Sep 2026, about 03:35Z)
+- **The derived arm is fixed by #1875,** which is honest copy and invites nothing. It rides train C (#1878).
+- **Still unkeepable on the Agent lane:** the root restate ask ("Tell me the limit you meant in your own words and I will record it…") and the `unmeasured_target` ask ("…and I will record it there"). The Agent lane has no `add_constraint` and no constraint re-pointing.
+- **Served frequency, across 475 capture files:**
+
+  | Voice | Distinct "could not be checked" texts |
+  |---|---|
+  | derived arm (old copy) | 54 |
+  | root restate ask | **2** (caf7d1a eng-hiring-2, on a derived target the predicate read as anchored; and g-cdp-778f1fd) |
+  | `unmeasured_target` ask | **0** |
+
+- **Why it is not built tonight:** it is rare on the PoC path, and the fix is lane-aware copy (coaching is shared with the conventional lane, where `add_constraint` exists). That is RC's scheduling call.

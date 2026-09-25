@@ -1,0 +1,21 @@
+{
+ "state": "pricing-5",
+ "arm": "A",
+ "rep": 2,
+ "http": 200,
+ "ms": 6201,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 9873,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 9870
+  },
+  "output_tokens": 227,
+  "output_tokens_details": {
+   "reasoning_tokens": 88
+  },
+  "total_tokens": 10100
+ },
+ "text": "No option can be put forward from this run because neither stated limit was successfully assessed.\n\n- The model compared all three prices, but could not score the **under 4% monthly churn** limit: churn is modelled as a change, not measured on the same scale as that limit.\n- It also could not test the **£20k MRR** threshold because the goal’s starting MRR level and objective direction were not recorded in a compatible form.\n- The result is therefore provisional and rests heavily on Olumi estimates for Pro subscriber count, other-plan MRR, conversions and churn; no assumption is established as the priority to investigate from this run alone."
+}

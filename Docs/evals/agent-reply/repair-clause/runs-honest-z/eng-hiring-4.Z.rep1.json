@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-4",
+ "arm": "Z-honest",
+ "rep": 1,
+ "http": 200,
+ "ms": 6001,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13956,
+  "input_tokens_details": {
+   "cache_write_tokens": 10973,
+   "cached_tokens": 2980
+  },
+  "output_tokens": 214,
+  "output_tokens_details": {
+   "reasoning_tokens": 93
+  },
+  "total_tokens": 14170
+ },
+ "text": "No option can be put forward: the **£400k/year salary limit was not checked** in this model.\n\n- The comparison is **fragile** and the options produced almost identical model outcomes, so the apparent differences are not reliable enough to settle the hiring choice.\n- The result is most sensitive to **delivery capacity**, an Olumi estimate rather than user evidence; the model also relies on six machine-supplied values.\n- The goal direction was not stated, so the analysis assumed that a higher modelled “new platform delivery by Q3” value is better."
+}

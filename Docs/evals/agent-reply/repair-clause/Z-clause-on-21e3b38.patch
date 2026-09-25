@@ -1,0 +1,124 @@
+From 63b4f83cbeebefe3e878f4bd8c59298da9200804 Mon Sep 17 00:00:00 2001
+From: Paul <paulsleepm@gmail.com>
+Date: Fri, 25 Sep 2026 04:21:26 +0100
+Subject: [PATCH] fix(agent): when the run says a limit cannot be checked yet,
+ the Agent suggests no step to make it checkable
+
+One sentence after the fragile/near-tie rule in AGENT_INSTRUCTIONS (both the Agent's own call and the
+explicit Run's interpreting call). Measured on 8 served e39f6e0 Run inputs carrying #1875's honest copy,
+n=2, blind OpenAI labeller: replies inviting a step to make the limit checkable 4/16 -> 0/16; 16/16 still
+say the limit was unchecked. Contrast (legitimate root repair): relays 4/16 -> 2/16, other-fix 3/16 -> 4/16,
+within noise. Pinned on the sent instructions; RED without the clause (2/2).
+
+Supersedes #1872 (its relay sentence assumed a repair the honest copy no longer names).
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+---
+ ...cked-limit-no-remedy-clause-pinned.test.ts | 81 +++++++++++++++++++
+ src/routes/agent-v1-turn.ts                   |  2 +-
+ 2 files changed, 82 insertions(+), 1 deletion(-)
+ create mode 100644 src/orchestrator-v5/agent-lane/__tests__/unchecked-limit-no-remedy-clause-pinned.test.ts
+
+diff --git a/src/orchestrator-v5/agent-lane/__tests__/unchecked-limit-no-remedy-clause-pinned.test.ts b/src/orchestrator-v5/agent-lane/__tests__/unchecked-limit-no-remedy-clause-pinned.test.ts
+new file mode 100644
+index 000000000..01ce8842e
+--- /dev/null
++++ b/src/orchestrator-v5/agent-lane/__tests__/unchecked-limit-no-remedy-clause-pinned.test.ts
+@@ -0,0 +1,81 @@
++/**
++ * ⛔ THE UNCHECKED-LIMIT CLAUSE IS PINNED ON THE WIRE (AI Quality, programme-docs #63 5826106622).
++ *
++ * Once a run says a limit on a derived target "cannot be checked in this model yet" (CEE #1875, RC rulings
++ * #63 5825683899 / 5825841734), the Agent must not close its reply on a step the user cannot take. Measured
++ * on 8 served `e39f6e0` explicit-Run inputs carrying #1875's copy, n=2, blind OpenAI labeller: replies that
++ * invite a step to make the limit checkable went 4/16 → 0/16 with this clause; 16/16 still said the limit
++ * was unchecked. Contrast (a legitimate root repair in the same inputs): relays 4/16 → 2/16, other-fix
++ * 3/16 → 4/16 — within noise. These assertions bind to the instructions the model is actually SENT — the
++ * explicit Run's one interpreting call and the Agent's own call — never to the source text.
++ */
++import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
++import Fastify, { type FastifyInstance } from 'fastify';
++
++const SCENARIO = '6b2d8f3c-4e5a-4b7c-9d0e-1f2a3b4c5d6e';
++const store = {
++  ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
++  readCommittedTurn: vi.fn(async () => null),
++  append: vi.fn(async () => ({ id: 'row-1' })),
++};
++vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
++vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
++  const actual = await importOriginal<Record<string, unknown>>();
++  return { ...actual, resolveUserIdentity: async () => ({ mode: 'off' }) };
++});
++
++/** The measured clause, as the model reads it. */
++const CLAUSE =
++  'When the run says a limit cannot be checked in this model yet, say so plainly and do not suggest any step, input or model change to make it checkable.';
++/** The rule it follows — its placement is part of what was measured. */
++const ANCHOR = 'When the result is fragile or a near tie, say that this uncertainty is itself the finding.';
++
++describe('the unchecked-limit clause reaches the model on every reply-writing call', () => {
++  let app: FastifyInstance;
++  let modelBodies: Record<string, unknown>[] = [];
++  beforeAll(async () => {
++    vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
++      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
++      modelBodies.push(body);
++      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'That limit cannot be checked in this model yet.' }] }] }), { status: 200 });
++    }));
++    vi.resetModules();
++    process.env.AGENT_LANE_ENABLED = 'true';
++    process.env.AGENT_LANE_PREVIEW = 'false';
++    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
++    app = Fastify({ logger: false });
++    app.post('/orchestrate/v2/turn', async () => ({
++      response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: 'h1',
++      blocks: [{ type: 'analysis_result', data: { marker: 'the-run' } }], analysis_ready: { status: 'ready', options: [], blockers: [] },
++    }));
++    app.post('/assist/v1/scenarios/:id/graph', async () => ({
++      graph: { nodes: [{ id: 'g', kind: 'goal', label: 'MRR' }, { id: 'f', kind: 'factor', label: 'Monthly churn' }], edges: [{ from: 'f', to: 'g' }] },
++      graph_hash: 'h1',
++      analysis_state: { run_state: { kind: 'complete_current' }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } },
++    }));
++    await app.register(agentV1TurnRoute);
++    await app.ready();
++  }, 60_000);
++  afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
++  beforeEach(() => { modelBodies = []; });
++
++  it('RED: the explicit Run’s one interpreting call carries the clause, right after the fragile/near-tie rule', async () => {
++    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
++      kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
++    } });
++    expect(r.statusCode).toBe(200);
++    expect(modelBodies, 'exactly one interpreting call').toHaveLength(1);
++    expect(modelBodies[0]!['tool_choice']).toBe('none');
++    const instructions = String(modelBodies[0]!['instructions']);
++    expect(instructions).toContain(`${ANCHOR} ${CLAUSE}`);
++    expect(instructions.split(CLAUSE), 'stated once, not repeated').toHaveLength(2);
++  });
++
++  it('RED: the Agent’s own call (words, not the Run chip) carries the same clause', async () => {
++    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Why could the churn limit not be checked?' } });
++    expect(r.statusCode).toBe(200);
++    const agentCall = modelBodies.find((b) => b['tool_choice'] !== 'none');
++    expect(agentCall, 'the Agent made its own call').toBeDefined();
++    expect(String(agentCall!['instructions'])).toContain(`${ANCHOR} ${CLAUSE}`);
++  });
++});
+diff --git a/src/routes/agent-v1-turn.ts b/src/routes/agent-v1-turn.ts
+index b9c71f7bf..d8584406d 100644
+--- a/src/routes/agent-v1-turn.ts
++++ b/src/routes/agent-v1-turn.ts
+@@ -344,7 +344,7 @@ const AGENT_INSTRUCTIONS = [
+    * the vocabulary itself casts the finding as picking an answer. The useful move is the one the science supports: point at what the
+    * ordering is sensitive to, and let the user change it and see how much it matters.
+    */
+-  'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one. Name a leading option ONLY when the result you are reporting carries `claim_permissions.leader_may_be_named: true`; an earlier analysis read from get_canonical_state carries no such permission, so never name a leader from it. Otherwise do not name, rank or hint at one, and do not quote win percentages as a ranking, whatever else the result contains \u2014 say in plain words why no option can be put forward yet. When `leader_may_be_named` is false, the finding you lead with is why no option can be put forward \u2014 not which option the comparison favours. Do not say, even hedged or \u201con current assumptions\u201d, that any option leads, is favoured, scores or comes out highest, strongest or best, is ahead, or wins in any share of runs; describe robustness and sensitivity without saying which option they favour. When the result reports sensitivity, name the one assumption the ordering is most sensitive to, say whether it comes from the user or is Olumi\u2019s estimate (or that its source is not recorded), and offer to change it. When the result is fragile or a near tie, say that this uncertainty is itself the finding.',
++  'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one. Name a leading option ONLY when the result you are reporting carries `claim_permissions.leader_may_be_named: true`; an earlier analysis read from get_canonical_state carries no such permission, so never name a leader from it. Otherwise do not name, rank or hint at one, and do not quote win percentages as a ranking, whatever else the result contains \u2014 say in plain words why no option can be put forward yet. When `leader_may_be_named` is false, the finding you lead with is why no option can be put forward \u2014 not which option the comparison favours. Do not say, even hedged or \u201con current assumptions\u201d, that any option leads, is favoured, scores or comes out highest, strongest or best, is ahead, or wins in any share of runs; describe robustness and sensitivity without saying which option they favour. When the result reports sensitivity, name the one assumption the ordering is most sensitive to, say whether it comes from the user or is Olumi\u2019s estimate (or that its source is not recorded), and offer to change it. When the result is fragile or a near tie, say that this uncertainty is itself the finding. When the run says a limit cannot be checked in this model yet, say so plainly and do not suggest any step, input or model change to make it checkable.',
+   'When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each — then authorise_change once they confirm. It adds the option and its links ONLY: say plainly that it cannot be compared until it states what it does to each factor, and offer propose_option_interventions for that. Never invent the direction; if you are not sure which way it pushes a factor, ask.',
+   /*
+    * \u26d4 NO AUTOMATIC RUN AFTER A REVISION (Codex 5810763729, 24 Sep). This
+-- 
+2.51.0
+

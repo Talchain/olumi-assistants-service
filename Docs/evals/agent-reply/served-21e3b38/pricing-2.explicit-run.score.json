@@ -1,0 +1,79 @@
+{
+ "journey": "pricing-2",
+ "turn": "explicit-run",
+ "http": 200,
+ "ms": 26304,
+ "usage": {
+  "input_tokens": 7973,
+  "input_tokens_details": {
+   "cache_write_tokens": 6600,
+   "cached_tokens": 1370
+  },
+  "output_tokens": 1693,
+  "output_tokens_details": {
+   "reasoning_tokens": 1034
+  },
+  "total_tokens": 9666
+ },
+ "total": 20,
+ "fails": [
+  "truth_fidelity"
+ ],
+ "top_defect": "It falsely says the £20k MRR threshold’s measurement frame is unspecified, although the state explicitly marks it as a level threshold.",
+ "score": {
+  "full": {
+   "scores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 0,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "notes": {
+    "concise": "119 words, with the extra detail used for material limitations and provenance.",
+    "shape": "Clear conclusion, followed by three short bullets and a brief closing statement.",
+    "decisive_caveat": "Retains the decisive limitation: the monthly-churn constraint was not checkable and therefore cannot support a proposal.",
+    "next_move": "Gives one supported next move: define how the churn limit is measured against the model output.",
+    "questions": "No actual request for information is asked. The closest wording, “The key reasoning gap is to define how the churn limit should be measured,” is a statement rather than a question. The analysis-result summary says, “Tell me which part of your model it applies to”.",
+    "leader_honesty": "n/a: no option is described as leading, favoured, or best, and no ranking percentage is given.",
+    "nothing_invented": "No unsupported edits, actions, rankings, or numerical effects are introduced.",
+    "attribution": "Correctly identifies 3% monthly churn as Olumi-estimated and the subscriber and non-Pro MRR inputs as user-adopted rather than observations.",
+    "provisional_vs_validated": "Does not present the analysis or its inputs as validated.",
+    "fidelity": "Incorrectly says “the £20k threshold’s measurement frame remain unspecified.” The MRR node explicitly has goal_threshold_frame: “level”; the unresolved issue is conversion to the sample frame because MRR lacks an observed baseline, not an unspecified threshold frame.",
+    "uncertainty": "Appropriately distinguishes the unscored churn constraint, estimated churn, adopted assumptions, and unresolved goal interpretation.",
+    "useful_next_step": "Clarifying the applicable measurement/frame for the churn constraint is useful and directly addresses the stated warning."
+   },
+   "gates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "words": 119,
+   "questions": 0,
+   "requests_for_information": [],
+   "duplicate_statements": 0,
+   "evidence": [
+    {
+     "item": "Unsupported claim about the MRR threshold frame",
+     "span": "“the £20k threshold’s measurement frame remain unspecified”",
+     "source": "/draft_graph/nodes[id=mrr]/goal_threshold_frame = \"level\"; /blocks[0]/analysis_result/enrichment/inference_warnings code \"GOAL_THRESHOLD_NOT_CONVERTIBLE\""
+    },
+    {
+     "item": "Missing requested clarification",
+     "span": "“The key reasoning gap is to define how the churn limit should be measured against the model’s churn output.”",
+     "source": "/blocks[0]/analysis_result/summary: “Tell me which part of your model it applies to and I will record it there”"
+    }
+   ]
+  },
+  "top_defect": "It falsely says the £20k MRR threshold’s measurement frame is unspecified, although the state explicitly marks it as a level threshold."
+ }
+}

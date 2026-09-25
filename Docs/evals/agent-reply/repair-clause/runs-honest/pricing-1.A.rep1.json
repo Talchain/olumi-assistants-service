@@ -1,0 +1,21 @@
+{
+ "state": "pricing-1",
+ "arm": "A-honest",
+ "rep": 1,
+ "http": 200,
+ "ms": 6205,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 10080,
+  "input_tokens_details": {
+   "cache_write_tokens": 7131,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 313,
+  "output_tokens_details": {
+   "reasoning_tokens": 177
+  },
+  "total_tokens": 10393
+ },
+ "text": "No option can be put forward from this run because neither stated success condition was scored.\n\n- The £20k MRR threshold could not be aligned to the model’s outcome frame: no MRR baseline or target frame is recorded.\n- The “monthly churn under 4%” limit is untested because churn is modelled as a calculated quantity, not measured on the same scale as that constraint.\n- The comparison is most structurally sensitive to active Pro subscribers; its value is an Olumi inference, not user-supplied evidence. Feature-release value is also provisional and a tested change can alter the ordering, but investigation priority is not established."
+}

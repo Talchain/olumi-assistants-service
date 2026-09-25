@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-3",
+ "arm": "A-honest",
+ "rep": 2,
+ "http": 200,
+ "ms": 8770,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13611,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 13608
+  },
+  "output_tokens": 462,
+  "output_tokens_details": {
+   "reasoning_tokens": 294
+  },
+  "total_tokens": 14073
+ },
+ "text": "No hiring option can be put forward yet: the model did not test the **£400k/year salary cap**, and the comparison is fragile.\n\n- Annual salary spend is modelled as a calculated change, not a £/year total, so the strict constraint **“< £400k/year”** was left unchecked rather than compared on the wrong scale.\n- The outcome also depends on an unstated goal direction; the run treated a higher goal value as preferable.\n- The ordering is most sensitive to **delivery capacity**—including the user-adopted starting assumption of **12 productive engineer-months before Q3**—but the analysis does not establish investigation priority from that alone.\n\nThe next reasoning step is to express annual salary spend as comparable £/year totals so the budget constraint can be assessed."
+}

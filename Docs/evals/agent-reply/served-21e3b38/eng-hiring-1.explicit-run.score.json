@@ -1,0 +1,81 @@
+{
+ "journey": "eng-hiring-1",
+ "turn": "explicit-run",
+ "http": 200,
+ "ms": 25177,
+ "usage": {
+  "input_tokens": 13174,
+  "input_tokens_details": {
+   "cache_write_tokens": 13171,
+   "cached_tokens": 0
+  },
+  "output_tokens": 1618,
+  "output_tokens_details": {
+   "reasoning_tokens": 1034
+  },
+  "total_tokens": 14792
+ },
+ "total": 22,
+ "fails": [
+  "truth_fidelity"
+ ],
+ "top_defect": "It changes the recorded annual salary constraint from “<= £400k/year” to “< £400k/year,” altering the stated limit.",
+ "score": {
+  "full": {
+   "scores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 0,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "notes": {
+    "concise": "102 words, but the extra length is used for material constraint, provenance, and fragility caveats.",
+    "shape": "Clear answer first, followed by three short bullets.",
+    "decisive_caveat": "Correctly foregrounds that the salary constraint was not assessed, which prevents a recommendation/compliance conclusion.",
+    "next_move": "One supported primary move: clarify the scope and expression of the salary constraint.",
+    "questions": "One request for clarification asks for two jointly needed facts about the same unresolved constraint.",
+    "leader_honesty": "Does not name any option as leading, favoured, or best.",
+    "nothing_invented": "The five Olumi-supplied values, delivery-capacity sensitivity, user-adopted zero starting value, and unscored constraint are all supported by the served analysis.",
+    "attribution": "Correctly distinguishes the user-adopted delivery-capacity starting value from Olumi-estimated delivery effects and machine-supplied values.",
+    "provisional_vs_validated": "Describes the comparison as very fragile and does not present it as validated.",
+    "fidelity": "Uses a strict “< £400k/year” operator, while the recorded constraint operator is “<=”.",
+    "uncertainty": "Appropriately communicates fragility, estimated inputs, and the unresolved constraint frame/measure issue.",
+    "useful_next_step": "Clarifying the constraint’s payroll scope and expression is directly useful because the current constraint could not be scored."
+   },
+   "gates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "words": 102,
+   "questions": 1,
+   "requests_for_information": [
+    "Clarify whether the cap covers new hires only or total payroll, and how the salary-spend calculation should be expressed."
+   ],
+   "duplicate_statements": 0,
+   "evidence": [
+    {
+     "item": "Operator mismatch: the reply renders the cap as strict less-than.",
+     "span": "“< £400k/year”",
+     "source": "/draft_graph/goal_constraints/0/operator (value: \"<=\")"
+    },
+    {
+     "item": "The hard truth-fidelity gate fails because the reply changes the constraint operator.",
+     "span": "“the `< £400k/year` limit”",
+     "source": "/draft_graph/goal_constraints/0/operator (value: \"<=\")"
+    }
+   ]
+  },
+  "top_defect": "It changes the recorded annual salary constraint from “<= £400k/year” to “< £400k/year,” altering the stated limit."
+ }
+}

@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-3",
+ "arm": "Z-honest",
+ "rep": 1,
+ "http": 200,
+ "ms": 7201,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 13645,
+  "input_tokens_details": {
+   "cache_write_tokens": 13642,
+   "cached_tokens": 0
+  },
+  "output_tokens": 279,
+  "output_tokens_details": {
+   "reasoning_tokens": 149
+  },
+  "total_tokens": 13924
+ },
+ "text": "No hiring option can be put forward from this run, because the **£400k annual-salary limit was not checkable** in the model and therefore was excluded from the comparison.\n\n- The comparison is also **very low robustness**: its implications are sensitive to delivery capacity, which is a user-adopted assumption of **12 productive engineer-months before Q3**.\n- Onboarding load also materially affects the result, but its value was inferred by Olumi rather than supplied by you.\n- The goal’s direction was not explicitly stated, so the run assumed that a higher goal value means a better outcome."
+}

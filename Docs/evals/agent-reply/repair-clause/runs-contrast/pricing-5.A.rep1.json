@@ -1,0 +1,21 @@
+{
+ "state": "pricing-5",
+ "arm": "A",
+ "rep": 1,
+ "http": 200,
+ "ms": 4852,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 9873,
+  "input_tokens_details": {
+   "cache_write_tokens": 6924,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 259,
+  "output_tokens_details": {
+   "reasoning_tokens": 128
+  },
+  "total_tokens": 10132
+ },
+ "text": "No option can be put forward yet because the model could not test your “monthly churn under 4%” limit.\n\n- The price comparison itself held up under the model’s tested perturbations, but that is not evidence that any option keeps churn below 4%.\n- The result is most sensitive to Pro subscriber count; its value is an Olumi estimate, not user-provided evidence. Other-plan MRR, Pro conversions and churn are also machine-authored estimates.\n- The model also assumed that higher MRR is the objective, rather than verifying whether £20k/month is a threshold to reach within 12 months."
+}

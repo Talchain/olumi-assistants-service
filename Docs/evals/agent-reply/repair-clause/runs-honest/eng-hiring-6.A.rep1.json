@@ -1,0 +1,21 @@
+{
+ "state": "eng-hiring-6",
+ "arm": "A-honest",
+ "rep": 1,
+ "http": 200,
+ "ms": 3790,
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 15193,
+  "input_tokens_details": {
+   "cache_write_tokens": 12244,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 197,
+  "output_tokens_details": {
+   "reasoning_tokens": 65
+  },
+  "total_tokens": 15390
+ },
+ "text": "This run cannot determine whether either hiring plan meets the £400k salary limit, so it cannot put an option forward.\n\n- Annual salary spend could not be checked against the “< £400k/year” constraint; its threshold frame is unknown, and the model measures it only as a calculated change.\n- Salary effects are missing for all four options, so this run treated each as leaving annual salary spend unchanged. The delivery and onboarding inputs are also Olumi estimates, not user-supplied evidence.\n- The comparison is fragile and the model has no stated goal direction for platform delivery, so its provisional ordering is not decision-ready."
+}
