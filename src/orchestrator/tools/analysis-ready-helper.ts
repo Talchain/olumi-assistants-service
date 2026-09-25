@@ -25,6 +25,7 @@ import type { AnalysisBlockerTypeT } from "../../schemas/analysis-ready.js";
 import {
   validateGraphStructure,
   CURRENT_STATE_VIOLATION_MESSAGES,
+  type StructuralViolation,
   type StructuralViolationCode,
 } from "../graph-structure-validator.js";
 // ⚠ CYCLE, DELIBERATE AND FUNCTION-LEVEL. `analysis-ready-core` imports
@@ -715,15 +716,19 @@ function classifyUnresolvedOption(
  * from one owner, `VIOLATION_COPY` — see graph-structure-validator.ts.
  */
 function structuralIssue(
-  code: StructuralViolationCode,
+  violation: StructuralViolation,
   ordinal: number,
 ): CanonicalReadinessIssue {
+  const { code } = violation;
   return {
     issue_id: `structural_${ordinal + 1}`,
     code,
     category: 'graph_structure',
     message: CURRENT_STATE_VIOLATION_MESSAGES[code],
     repairability: 'human_input_required',
+    // (B4) — the element the blocker is about, by id, when the validator knows it.
+    ...(violation.option_id ? { option_id: violation.option_id } : {}),
+    ...(violation.option_label ? { option_label: violation.option_label } : {}),
   };
 }
 
@@ -1400,7 +1405,7 @@ export function assessCanonicalAnalysisReadiness(
     }
     const structural = validateGraphStructure(parsed.data);
     structural.violations.forEach((violation, index) => {
-      blockingIssues.push(structuralIssue(violation.code, index));
+      blockingIssues.push(structuralIssue(violation, index));
     });
 
     const semantic = projectSemanticAnalysisReadyFromGraph(proposalGraph);
