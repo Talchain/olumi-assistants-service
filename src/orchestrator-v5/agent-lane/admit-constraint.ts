@@ -120,7 +120,11 @@ export function admitCandidateConstraints(
       operator,
       // Verbatim. The user's number is never adjusted to compensate for the operator.
       value: c.value,
-      label: `${c.metric} ${c.operator} ${c.value}${c.unit ?? ''}`,
+      // ⛔ THE LABEL IS THE LIMIT'S NAME, NOT THE LIMIT (`GoalConstraintSchema.label`: "Human-readable label, e.g.
+      // 'First-year budget cap'"). The bound lives in `operator`/`value`/`unit`, which every consumer renders itself: a
+      // label carrying "< 40000GBP/year" rendered on the canvas as "Annual PA salary < 40000GBP/year ≤ 40,000 GBP/year"
+      // (Canvas D2, 5832368556) and quoted the drafter's strict symbol against the stored "<=".
+      label: c.metric,
       ...(c.unit !== undefined ? { unit: c.unit } : {}),
       provenance: canonicalProvenance(c.provenance),
     };
@@ -173,5 +177,14 @@ export function admitCandidateConstraints(
     });
   }
 
-  return { constraints: constraints.filter((c) => !contradicted.has(c.node_id)), loss };
+  // ⛔ A RANGE ON ONE METRIC NEEDS TWO NAMES (review 5833797482). The label is the limit's NAME, so a floor and a cap on
+  // the same node would both read "Gross margin" in the "could not be checked" card. On that collision only, the lower
+  // bound is named "<metric> floor" and the upper "<metric> cap" (structural-reconciliation strips both suffixes).
+  const kept = constraints.filter((c) => !contradicted.has(c.node_id));
+  const directions = new Map<string, Set<CanonicalOperator>>();
+  for (const c of kept) directions.set(c.node_id, (directions.get(c.node_id) ?? new Set<CanonicalOperator>()).add(c.operator));
+  const named = kept.map((c) => ((directions.get(c.node_id)?.size ?? 0) > 1 && c.label !== undefined
+    ? { ...c, label: `${c.label} ${c.operator === '>=' ? 'floor' : 'cap'}` }
+    : c));
+  return { constraints: named, loss };
 }

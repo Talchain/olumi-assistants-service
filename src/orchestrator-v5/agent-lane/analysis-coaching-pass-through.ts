@@ -23,6 +23,7 @@ import {
 } from '../coaching/fragile-link-challenge.js';
 import { buildNoFlaggedLinkCard } from '../coaching/no-flagged-link-card.js';
 import { WITHHELD_NEAR_TIE } from '../compose/analysis-state-v1.js';
+import { summaryAsksUserToRepairALimit } from '../coaching/constraint-gap-disclosure.js';
 
 export interface CapturedAnalysis {
   scenario_id: string;
@@ -208,6 +209,11 @@ export function runTurnCoaching(
   }
   if (bound === null) {
     return { blocks: [], eligibility: { eligible: false, reason: 'identity_mismatch' } };
+  }
+  // (2b) ONE next action: when the run's own summary asks the user to repair a
+  // limit, that step IS the turn's next action; no run-turn card competes with it.
+  if (summaryAsksUserToRepairALimit(bound.analysisResult.summary)) {
+    return { blocks: upstream, eligibility: { eligible: false, reason: 'limit_repair_pending' } };
   }
   // (3)–(5) grounding, claim policy, copy — the producer's gates.
   const input: FragileLinkChallengeInput = {

@@ -777,17 +777,11 @@ export async function buildModelFromBrief(
    * registration happens inside this function. A check after the write cannot
    * prevent the write.
    *
-   * ⚠ THIS NARROWS THE WINDOW; IT DOES NOT CLOSE IT. What remains is this read to
-   * the route's own read — milliseconds — instead of a person's think-time plus a
-   * model call. Said plainly, because a re-read presented as a fix is how a race
-   * gets forgotten.
-   *
-   * ⛔ AND IT CANNOT BE CLOSED CAS-STYLE FROM A CALLER, measured not assumed:
-   * `computeExpectedGraphCasHashes` returns `analysis=null` for `null`,
-   * `undefined` AND `{nodes:[],edges:[]}`, so a caller cannot express "I expect no
-   * graph" — any expectation on a creation write would 409 every construction.
-   * Closing it needs an assert-absent convention or create-only semantics at the
-   * write boundary: the atomic-writer lease, not this file.
+   * ⚠ THIS RE-READ ALONE NARROWED THE WINDOW; IT DID NOT CLOSE IT. What remained was
+   * this read to the route's own read. The route has since gained an assert-absent
+   * convention (explicit `null` `expected_graph_identity_hash`), and the
+   * registration below now sends it — see "CREATE-ONLY". This re-read stays: it
+   * refuses before a register call is spent, with the same words.
    *
    * ⭐ A FAILED READ DOES NOT REFUSE. Degrading to today's behaviour is right —
    * throwing away a build we have already paid for because a READ failed would
@@ -807,12 +801,38 @@ export async function buildModelFromBrief(
     }
   }
 
+  /**
+   * ⛔ CREATE-ONLY: THE REGISTRATION ASSERTS THE MODEL IS STILL EMPTY (ChatGPT #69 5834761926 item 1).
+   *
+   * The re-read above leaves the gap from that read to the route's own read. An explicit `null`
+   * `expected_graph_identity_hash` closes it with the route's existing absence contract
+   * (`assist.v1.scenario-graph-register.ts`, "explicit `null` now asserts absence"): the route refuses 409
+   * `GRAPH_STALE` if a graph exists at ITS read, and hands its own read to the atomic writer as a KNOWN-absent
+   * base (`p_expected_base_known`, `append_turn_atomic_v5`), which refuses the same way in CAS `enforce` mode.
+   *
+   * ⚠ THE ROUTE CHECKS ABSENCE BEFORE THE ATOMIC RPC DECIDES A REPLAY, so a retry of THIS construction, already
+   * committed, now meets `GRAPH_STALE` rather than a replayed receipt. It is recovered below exactly as the
+   * `OPERATION_ID_REUSED` loser is: the versions read finds this construction's own version, or it is not ours.
+   */
   const reg = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
     graph,
     brief_text: brief,
     operation_id: constructionOperationId(scenarioId, brief),
+    expected_graph_identity_hash: null,
   });
-  if (reg.status === 409 && (reg.json.details as { code?: unknown } | undefined)?.code === 'OPERATION_ID_REUSED') {
+  const regCode = (reg.json.details as { code?: unknown } | undefined)?.code;
+  if (reg.status === 409 && regCode === 'GRAPH_STALE') {
+    const prior = await findConstructionVersion(dispatch, scenarioId, brief);
+    if (prior !== null) return { ok: true, mutated: false, replayed: true, model_version: prior };
+    return {
+      ok: false,
+      mutated: false,
+      refusal: 'model_already_exists',
+      detail: 'While that model was being built, something was added to this one — so nothing was written, and '
+        + 'your own change is untouched. Ask me to propose a change to the model you now have.',
+    };
+  }
+  if (reg.status === 409 && regCode === 'OPERATION_ID_REUSED') {
     /**
      * ⭐ A CONCURRENT BUILD OF THE SAME CONSTRUCTION ALREADY WON. Both calls passed
      * the empty-graph guard and generated a model — generation is not
