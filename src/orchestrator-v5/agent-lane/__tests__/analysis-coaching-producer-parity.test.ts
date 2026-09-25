@@ -9,7 +9,9 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { deriveAnalysisFreshness } from '../../context/freshness.js';
 import { canonicalStateFromFreshness } from '../../context/canonical-analysis-state.js';
 import { buildAutoRunProvenance } from '../../context/run-initiator.js';
-import { currentAnalysisCoaching } from '../analysis-coaching-pass-through.js';
+import { leaderWithheldOnlyBecauseUnrequested } from '../../compose/unrequested-analysis-confinement.js';
+import { currentAnalysisCoaching, runTurnCoaching } from '../analysis-coaching-pass-through.js';
+import { loadRunTurnFixture } from '../../coaching/__tests__/fragile-link-challenge-fixtures.js';
 
 test('actual provisional producer/finaliser and canonical read may differ in summary for the same run', async()=>{
  const scenarioId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -21,11 +23,46 @@ test('actual provisional producer/finaliser and canonical read may differ in sum
  const analysisReady={status:'ready' as const,goal_node_id:'goal',options:[],analysis_admission:{permitted_analysis_mode:'comparative_leader'}};
  const card={type:'coaching' as const,coaching_kind:'assumption_check' as const,block_id:'00000000-0000-4000-8000-000000000001',signal_id:'fixture',created_at:time,source_handler:'run_analysis',graph_hash_at_generation:hash,freshness:'fresh' as const,title:'Check the assumption',body:'Which evidence supports this assumption?',source:'deterministic_signal' as const,target_refs:[],priority_rank:15};
  const freshness=deriveAnalysisFreshness([fact],hash,undefined,{priorFactsReadOk:true});
- const upstream=finaliseV5Response(composeDirectAnswerResponse({assistant_text:'Provisional result.',stage:'analyse',answerKind:'substantive',blocks:[buildAnalysisResultBlock(fact,analysisReady),card]}),{scenarioId,analysisReady:analysisReady as never,freshness,canonicalState:canonicalStateFromFreshness(freshness,{}),priorFacts:[fact],mayNameLeadingOption:false});
+ const upstream=finaliseV5Response(composeDirectAnswerResponse({assistant_text:'Provisional result.',stage:'analyse',answerKind:'substantive',blocks:[buildAnalysisResultBlock(fact,analysisReady),card]}),{scenarioId,analysisReady:analysisReady as never,freshness,canonicalState:canonicalStateFromFreshness(freshness,{}),priorFacts:[fact],mayNameLeadingOption:false,
+  // The caller that refused states WHY, bound to the same fact (#1876): the finaliser never derives it.
+  leaderWithheldBecauseUnrequested:leaderWithheldOnlyBecauseUnrequested(fact)});
  const canonical=await readScenarioAnalysis({scenarioId,graph,requestId:'coaching-parity'});
  const before=upstream.blocks.find((b): b is Extract<typeof b,{type:'analysis_result'}>=>b.type==='analysis_result');
  expect(before?.summary).not.toEqual((canonical.analysis_result as {summary?:unknown}|null)?.summary);
  expect(upstream.analysis_state?.run_state).toEqual(canonical.analysis_state?.run_state);
  expect(upstream.analysis_state?.leader_claim).toEqual(canonical.analysis_state?.leader_claim);
  expect(currentAnalysisCoaching({scenario_id:scenarioId,status:200,analysis_state:upstream.analysis_state,blocks:upstream.blocks},{scenarioId,graphHash:hash,analysisState:canonical.analysis_state,analysisResult:canonical.analysis_result})).toEqual([card]);
+});
+
+test('no-flagged-link card: the producer/finaliser readback and the canonical read yield the SAME card on an explicit run; the automatic first pass is refused on both', async()=>{
+ const scenarioId='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+ const graph={nodes:[{id:'goal',kind:'goal',label:'Goal',goal_threshold:0.7}],edges:[]};
+ const hash=computeAnalysisAffectingGraphHash(graph as never)!;
+ const served=loadRunTurnFixture('c10').turns.t5!;
+ const time=served.analysis_state.run_state.computed_at;
+ const analysisReady={status:'ready' as const,goal_node_id:'goal',options:[],analysis_admission:{permitted_analysis_mode:'comparative_leader'}};
+ for (const auto of [false,true]) {
+  const fact=RunAnalysisHandlerFactSchema.parse({fact_type:'run_analysis',fact_version:1,noop:false,result:{scenario_id:scenarioId,computed_at:time,graph_hash_at_run:hash,leading_option_id:'option-a',summary:'The model contains unresolved assumptions.',constraint_verdict:{may_name_leading_option:true,constraint_verdict_state:'evaluated_feasible'},enrichment:{analysis_status:'completed',robustness:served.analysis_result.enrichment.robustness,...(auto?{run_provenance:buildAutoRunProvenance('11111111-1111-4111-8111-111111111111')}:{})}}});
+  readFactsFor.mockResolvedValue([fact]);
+  const freshness=deriveAnalysisFreshness([fact],hash,undefined,{priorFactsReadOk:true});
+  const upstream=finaliseV5Response(composeDirectAnswerResponse({assistant_text:'Result.',stage:'analyse',answerKind:'substantive',blocks:[buildAnalysisResultBlock(fact,analysisReady)]}),{scenarioId,analysisReady:analysisReady as never,freshness,canonicalState:canonicalStateFromFreshness(freshness,{}),priorFacts:[fact],mayNameLeadingOption:!auto,
+   // The refusing caller states WHY, bound to the same fact (#1876): the finaliser never derives it.
+   leaderWithheldBecauseUnrequested:!auto?false:leaderWithheldOnlyBecauseUnrequested(fact)});
+  const canonical=await readScenarioAnalysis({scenarioId,graph,requestId:'no-flagged-link-parity'});
+  const producerResult=upstream.blocks.find((b)=>b.type==='analysis_result');
+  const trigger=auto?'auto_first_pass' as const:'explicit_run' as const;
+  const capture={scenario_id:scenarioId,status:200,analysis_state:upstream.analysis_state,blocks:upstream.blocks,trigger};
+  const fromProducer=runTurnCoaching(capture,{scenarioId,graphHash:hash,analysisState:upstream.analysis_state,analysisResult:producerResult});
+  const fromRead=runTurnCoaching(capture,{scenarioId,graphHash:hash,analysisState:canonical.analysis_state,analysisResult:canonical.analysis_result});
+  if (auto) {
+   // The real first-pass pipeline confines the guards away, so the card fails closed on both readbacks.
+   expect(fromProducer).toEqual({blocks:[],eligibility:{eligible:false,reason:'edge_sensitivity_not_evidenced'}});
+   expect(fromRead).toEqual({blocks:[],eligibility:{eligible:false,reason:'edge_sensitivity_not_evidenced'}});
+  } else {
+   expect(fromProducer.eligibility).toEqual({eligible:true});
+   expect(fromProducer.blocks).toHaveLength(1);
+   expect(fromProducer.blocks[0]!.signal_id).toBe(`coach:no_flagged_link:${hash}:${time}:explicit_run`);
+   expect(JSON.stringify(fromRead.blocks)).toBe(JSON.stringify(fromProducer.blocks));
+  }
+ }
 });

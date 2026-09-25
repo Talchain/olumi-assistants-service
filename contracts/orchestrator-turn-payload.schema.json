@@ -206,6 +206,14 @@
                           "unit": {
                             "type": "string"
                           },
+                          "raw_value": {
+                            "type": "number",
+                            "description": "The same level as `value`, in the units `unit` names. For a capped factor `value = raw_value / cap`; with no cap it restates `value`. Absence means no user-scale magnitude was recorded — it is NOT zero and NOT \"equal to value\", and a consumer must not synthesise it. A producer may repair it, because it holds the cap."
+                          },
+                          "cap": {
+                            "type": "number",
+                            "description": "The PER-FACTOR denominator `value` is a coordinate on: `value = raw_value / cap`. It is the only field that converts `value` back into the units `unit` names, and two factors sharing a `unit` routinely carry different caps. It is NOT a bound on the level — a stated level may sit above it. Absence means no denominator was declared, which does NOT mean 1."
+                          },
                           "source": {
                             "type": "string"
                           },

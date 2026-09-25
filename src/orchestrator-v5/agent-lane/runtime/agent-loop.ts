@@ -71,6 +71,12 @@ export interface AgentTurnInput {
     readonly packet: CanonicalContextPacket | null;
     readonly expectation: ContextExpectation;
   };
+  /**
+   * Tools this turn carries no authority for. They are removed from what the
+   * model is offered AND refused at dispatch if it names one anyway, before
+   * any capability is reached. Can only REMOVE: absent means the mode's set.
+   */
+  readonly withheldTools?: readonly string[];
   /** Injected for deterministic tests; defaults to the wall clock. */
   readonly now?: () => number;
 }
@@ -145,6 +151,9 @@ const textOf = (items: readonly Record<string, unknown>[]): string => {
   return t;
 };
 
+/** The refusal a withheld tool returns. It consumed nothing and moved nothing. */
+export const WITHHELD_ON_CHIP_TURN = 'withheld_on_chip_turn';
+
 export async function runAgentTurn(
   input: AgentTurnInput,
   caps: AgentCapabilities,
@@ -152,6 +161,7 @@ export async function runAgentTurn(
 ): Promise<AgentTurnResult> {
   const mode: AgentLaneMode = input.mode ?? 'full';
   const maxHops = input.maxHops ?? DEFAULT_MAX_HOPS;
+  const withheld = new Set(input.withheldTools ?? []);
   const items: unknown[] = [
     ...input.history,
     { role: 'user', content: [{ type: 'input_text', text: input.message }] },
@@ -227,7 +237,7 @@ export async function runAgentTurn(
             mode: input.mode ?? 'full',
             context: input.canonicalContext.packet,
             expectation: input.canonicalContext.expectation,
-          }).tools) as readonly unknown[],
+          }).tools).filter((t) => !withheld.has(t.name)) as readonly unknown[],
       max_output_tokens: input.maxOutputTokens,
     });
     providerMs += Math.max(0, now() - providerStartedAt);
@@ -275,9 +285,13 @@ export async function runAgentTurn(
     for (const call of calls) {
       const toolStartedAt = now();
       toolCallCount += 1;
-      const result: ToolResult = await dispatchTool(
-        String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode,
-      );
+      // Second layer for a withheld tool: a model can name a tool it was not offered.
+      const result: ToolResult = withheld.has(String(call.name))
+        ? {
+            ok: false, mutated: false, refusal: WITHHELD_ON_CHIP_TURN,
+            detail: 'Not from a suggestion button: approving a change and running the analysis each have their own control. Nothing was changed.',
+          }
+        : await dispatchTool(String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode);
       // ⛔ A TOOL'S OWN PROVIDER CALL IS NOT OVERHEAD.
       //
       // `build_model_from_brief` is dispatched as a tool and makes its own

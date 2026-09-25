@@ -273,7 +273,29 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // No extra I/O: the same prior facts are re-projected against the committed
     // hash, and the healthy-empty/degraded distinction is preserved exactly as
     // the note above requires.
-    'src/orchestrator-v5/system-events/dispatch.ts': 8,
+    // 2026-09-25 Canonical State: 8 → 4 (DOWN) — the six writer-reply derivations
+    // (edge_strength_edit, structural_delete, structural_add, structural_add_edge,
+    // factor_value_edit, and the new structural_rename) now share ONE helper,
+    // `deriveWriteReplyFreshness`, because the F1 defect had been fixed one writer
+    // at a time and four still read the 20-row window alone. The remaining
+    // references: the import, the helper's single call, and
+    // option_intervention_edit's two (pre-write referee input + post-commit;
+    // its own follow-up). Nothing re-derives the frame's own value.
+    // 2026-09-25 Canonical State: 4 → 5 (+1, inside the SAME helper) — when the
+    // restore marker (`analysis_invalidated_at`) could not be read, a `fresh`
+    // verdict is unsupported (the marker is the only input that turns a hash
+    // match stale), so `deriveWriteReplyFreshness` replaces it with the
+    // freshness module's own degraded form, `unknown` / `derivation_failed`,
+    // built by `deriveAnalysisFreshness([], …, { priorFactsReadOk: false })`
+    // rather than a hand-written literal, so its invariant 3 holds. Not a new
+    // seam and no extra I/O: the second call runs only on that failed read, and
+    // `stale`/`none` verdicts pass through untouched.
+    // 2026-09-25 F4 (Codex, #63 5821693599): +0 — the no-write reply
+    // (`replyForAttemptThatWroteNothing`, a replay or a reused-id conflict)
+    // derives its freshness against the reread SNAPSHOT's hash through the same
+    // helper, `deriveWriteReplyFreshness`, so it adds no reference. (Its banked
+    // form added a call over the 20-row window with no restore marker.)
+    'src/orchestrator-v5/system-events/dispatch.ts': 5,
     // 2026-09-24 MG&Q: +1 (one call) — `dispatchFactorValueEdit` now derives the
     // wire freshness for a factor-value edit, exactly as the edge_strength_edit
     // writer in this same file already does. Programme #63 item 15: the value
@@ -320,9 +342,12 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // referent here: there is no turn, no frame and no context to thread from.
     // The seam is a pure composition over `loadScenarioAnalysisFactsForRead`
     // (the turn path's own hot-window + durable readers, reconciled) +
-    // `computeAnalysisAffectingGraphHash(the graph this response is returning)`
-    // — the SAME hash function the run path stamps as `graph_hash_at_run`, so
-    // `fresh` on this leg means bit-for-bit what it means on a turn. It is NOT
+    // `deriveDecisionContextGraphHash(the graph this response is returning)`
+    // — the CANONICAL projection (`canonicaliseForAnalysis` →
+    // `GraphStateIngressSchema` → `computeAnalysisAffectingGraphHash`) the run
+    // path stamps as `graph_hash_at_run` (CS-AN-2: this leg once hashed the RAW
+    // bytes, which differ on repaired-shape graphs), so `fresh` on this leg
+    // means bit-for-bit what it means on a turn. It is NOT
     // a second rule about freshness; it is the one function applied to a
     // non-turn caller, which is why the alternative (hand-building a verdict at
     // the route) would have been the mirror this guard exists to prevent.

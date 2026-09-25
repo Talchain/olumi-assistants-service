@@ -34,9 +34,9 @@ function pricing(goal: Partial<CandidateModel['goal']> = {}): CandidateModel {
     },
     constraints: [],
     options: [
-      { label: 'Raise to £59', provenance: 'explicit', changes: [],
+      { label: 'Raise to £59', provenance: 'explicit', is_status_quo: null, changes: [],
         interventions: [{ factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
-      { label: 'Raise to £55', provenance: 'explicit', changes: [],
+      { label: 'Raise to £55', provenance: 'explicit', is_status_quo: null, changes: [],
         interventions: [{ factor_label: 'Pro plan price', value: 55, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] },
     ],
     factors: [

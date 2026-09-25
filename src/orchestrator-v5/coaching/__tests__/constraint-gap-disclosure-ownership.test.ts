@@ -93,9 +93,14 @@ describe('2.653 I-C — the failure is stated as ours, and no diagnosis is asser
     }
   });
 
-  it('the primary message says what WE could not do', () => {
+  it('the primary message says what could not be done, and asserts no cause', () => {
+    // ⛔ 25 Sep 2026 (#69 5831708206): "We could not line it up with anything
+    // this analysis measures" NAMED a cause the inputs cannot establish on a row
+    // nothing scored. The claim is now the observable alone, still about THIS
+    // model rather than a third-party engine.
     const text = buildConstraintDisclosureFromState('unevaluated', ONE);
-    expect(text).toContain('We could not line it up with anything this analysis measures');
+    expect(text).toContain('This model could not check it yet');
+    expect(text).not.toContain('could not line');
   });
 
   it('the identity_unresolved voice is untouched and still distinct from this one', () => {
@@ -111,11 +116,33 @@ describe('2.653 I-C — the failure is stated as ours, and no diagnosis is asser
   });
 });
 
+/**
+ * ⛔ 25 Sep 2026 (R&C; #69 5831581140, 5831686178, 5831708206, 5831722994).
+ * The BUILDER's voices no longer make the offer: nothing this module receives
+ * proves that restating the limit changes the next Run (the per-code decision
+ * is on `UNEVALUATED_REPAIR_STEP`). The one surface below that still makes it is
+ * the UNLABELLED reply-side tail, `compose/withheld-reason-tail.ts:352`, which is
+ * outside that change and still carries the promise; it is pinned here as the
+ * known residual, so whoever fixes it flips this pin deliberately.
+ */
+const builderVoices = (): string[] =>
+  everyUnevaluatedVoice().filter((t) => t !== (composeWithheldReasonTail('unevaluated', [])?.text ?? ''));
+const unlabelledTail = (): string => composeWithheldReasonTail('unevaluated', [])?.text ?? '';
+
 describe('2.653 I-C — the offer is one the product can keep', () => {
-  it('offers to record the limit the user describes', () => {
-    for (const text of everyUnevaluatedVoice()) {
-      expect(text).toContain('Tell me the limit you meant in your own words and I will record it');
+  it('the builder voices make NO offer they cannot prove (25 Sep 2026)', () => {
+    const voices = builderVoices();
+    expect(voices.length, 'precondition: the builder voices speak').toBeGreaterThanOrEqual(4);
+    for (const text of voices) {
+      expect(text).not.toContain('Tell me the limit you meant');
+      expect(text).not.toContain('I will record it');
     }
+  });
+
+  it('KNOWN RESIDUAL: the unlabelled reply-side tail (withheld-reason-tail.ts:352) still offers it', () => {
+    expect(unlabelledTail()).toContain(
+      'Tell me the limit you meant in your own words and I will record it',
+    );
   });
 
   it('⭐ THE CAPABILITY CLAIM IS PINNED TO THE LIVE HANDLER REGISTRY', () => {
@@ -136,16 +163,21 @@ describe('2.653 I-C — the offer is one the product can keep', () => {
     // constraint into two, both then blamed on the user. Saying so is the INV-2
     // discipline #836 established — a repair that cannot touch the defective
     // row must disclose that the row remains.
+    // 25 Sep 2026: the builder's closer is "It stays on the model." with no
+    // repair beside it; the unlabelled tail keeps "this one stays on the model".
+    // Both still disclose the residual.
     for (const text of everyUnevaluatedVoice()) {
-      expect(text).toContain('this one stays on the model');
+      expect(text).toMatch(/\bstays? on the model\b/i);
     }
     // The claim must be TRUE at this tip: no remove-constraint handler exists.
     expect([...getDefaultRegistry().keys()]).not.toContain('remove_constraint');
   });
 
-  it('still tells the user the run has to happen again', () => {
-    for (const text of everyUnevaluatedVoice()) {
-      expect(text).toMatch(/run the analysis again/i);
+  it('the builder voices do NOT tell the user to run again (nothing a re-run is proved to change)', () => {
+    for (const text of builderVoices()) {
+      expect(text).not.toMatch(/run the analysis again/i);
     }
+    // KNOWN RESIDUAL, out of this change: the unlabelled tail still says it.
+    expect(unlabelledTail()).toMatch(/run the analysis again/i);
   });
 });

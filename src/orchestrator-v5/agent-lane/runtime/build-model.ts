@@ -114,13 +114,19 @@ export function buildCandidateSchema(): Record<string, unknown> {
       label: { type: 'string', description: 'A NAME, not a sentence. Keep it under 33 characters where you can.' },
       provenance,
       changes: { type: 'array', description:
-        'Factor labels this option changes when it states no level \u2014 e.g. an option that phases, grandfathers or tests something. Use the factor labels exactly. An option that names nothing here and has no interventions is unreachable from the decision and cannot be analysed.',
+        'Factor labels this option changes when it states no level \u2014 e.g. an option that phases, grandfathers or tests something. Use the factor labels exactly. An option (other than the one marked is_status_quo, which stays empty) that names nothing here and has no interventions is unreachable from the decision and cannot be analysed.',
         items: { type: 'string' } },
       interventions: { type: 'array', description:
         'The factor level this option sets, or a signed addition to its baseline. Distinguish these meanings with value_kind. Preserve user numbers; an estimated level is ai_proposed, never explicit.',
         items: obj({ factor_label: { type: 'string' }, value: { type: 'number' }, value_kind: { type: 'string', enum: ['absolute', 'additional'] }, unit: { type: 'string' }, provenance },
           ['factor_label', 'value', 'value_kind', 'unit', 'provenance']) },
-    }, ['label', 'provenance', 'changes', 'interventions']) },
+      // ⛔ THE HELD STATUS QUO MUST NOT DEPEND ON WORDING (served c673223: "Continue
+      // Current Staffing" was not a readiness idiom, so the turn blocked). The drafter
+      // DECLARES the current-state option; admission reads this first. Strict output
+      // requires every key, so "optional" is `null`.
+      is_status_quo: { anyOf: [{ type: 'boolean' }, { type: 'null' }], description:
+        'true ONLY for the one option that keeps things as they are now (the current state or status quo), whatever it is called. null for every other option. Never true on more than one option.' },
+    }, ['label', 'provenance', 'changes', 'interventions', 'is_status_quo']) },
     factors: { type: 'array', items: obj({
       label: { type: 'string' }, role: { type: 'string', enum: ['controllable', 'observable', 'external'] },
       baseline_known: { type: 'boolean', description: 'True only for a baseline supplied by the user or evidence. A provisional AI estimate keeps this false.' },
@@ -148,9 +154,10 @@ export const BUILD_INSTRUCTIONS = [
   'Preserve exact user facts, numbers, constraint semantics and time horizon. The first model must support a PROVISIONAL calculation before user adoption: provide defensible starting estimates where the brief gives no baseline, mark those factors ai_proposed with baseline_known:false, and explain the uncertainty in unknowns. These are modelling assumptions, never measurements or user-validated facts. If no defensible estimate is possible, leave it null and name the specific unresolved input.',
   'Record the goal metric\u2019s CURRENT level in goal.baseline_value, in the goal unit. When the brief states it: baseline_known true, baseline_provenance "explicit". When it does not, leave baseline_value null with baseline_known false. Do not estimate it: a guessed current level would set the chance of reaching the target on a guess. It is where things stand today, never the target.',
   'For each option fill `interventions` with its factor settings. value_kind:"absolute" means the resulting total or level; value_kind:"additional" means a signed change from the same factor baseline. For hiring, adding two to a proposed baseline of five means total seven, never total two. Record the user-stated addition as explicit but keep an estimated resulting level ai_proposed. Keep one unit and plausible_max frame per factor across all baselines and options.',
+  'Mark the option that keeps things as they are now with is_status_quo:true \u2014 at most one option, whatever it is called \u2014 and give it no levels; every other option has is_status_quo:null.',
   'Connect options to the controllable factors they change, then through supported causal mechanisms to risks and the goal. Never emit a direct option-to-risk link: it cannot be interpreted as an option setting a risk value. Retain each meaningful risk hypothesis, its sign and its downstream path; express its exposure through a causal factor or mediator, rather than deleting the risk or claiming equal exposure.',
-  'EVERY OPTION MUST SAY WHAT IT DOES. An option with no `interventions` AND no `changes` is inert: it can never be compared with another option, whatever values are supplied later, and the whole decision becomes unanswerable. If the brief does not say what an option changes, still name the factors it ACTS ON in `changes` \u2014 that is a structural claim, not a numeric one. '
-  + 'EVERY option must also list, in `changes`, the factors it acts on WITHOUT a stated level. An option that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping.',
+  'EVERY OPTION MUST SAY WHAT IT DOES \u2014 except the one marked is_status_quo, which names no changes and no levels because it keeps things as they are. Any OTHER option (not marked is_status_quo) with no `interventions` AND no `changes` is inert: it can never be compared with another option, whatever values are supplied later, and the whole decision becomes unanswerable. The option marked is_status_quo is meant to be empty \u2014 it is compared by holding today\u2019s levels, so leave it empty. If the brief does not say what an option changes, still name the factors it ACTS ON in `changes` \u2014 that is a structural claim, not a numeric one. '
+  + 'EVERY option (except the one marked is_status_quo) must also list, in `changes`, the factors it acts on WITHOUT a stated level. An option (other than the one marked is_status_quo) that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping.',
   // ⛔ THE EXPLOSION CLAUSE, REPLACED. This previously read: "Then widen: add the
   // options, factors, risks, outcomes and causal mechanisms that materially improve
   // strategic reasoning, including alternatives beyond the user's initial frame."
@@ -183,6 +190,7 @@ export const BUILD_INSTRUCTIONS = [
    */
   'A GOAL TARGET THE BRIEF DOES NOT STATE MUST BE LEFT UNSTATED. If the user named a number to reach \u2014 "to 40%", "by \u00a33m", "under 4 weeks" \u2014 set `target_stated: true` and put that number in `goal.value`. If they only named a DIRECTION \u2014 "increase productivity", "cut churn", "improve velocity" \u2014 then set `target_stated: false` and `goal.value: null`. Never substitute 0, never invent a plausible target, and never treat the absence of a number as a target of zero: a direction with no number is a complete and ordinary goal, and the analysis compares options against it perfectly well. Getting this wrong tells the user they asked for something they did not ask for.',
   'THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like "X Improvement" for a goal called "X change", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all.',
+  'EVERY LIMIT MUST NAME A NODE THE ANALYSIS CAN CHECK. Each `constraints[].metric` must be the EXACT label of a factor or outcome you keep in this model \u2014 a limit whose metric names no node is withheld from the model, and the analysis cannot check it. If the user limits a total such as cost, budget or spend, keep that total in the model as a factor the options set or an outcome their factors feed, wired toward the goal like every other factor, and use its exact label as the metric. Keep the direction the user stated: a budget, cost or spend cap is an upper bound ("<=") and a floor such as a minimum margin is a lower bound (">="); never add the opposite bound to the same limit.',
   // ⛔ THE LINK CONTRACT (#63 ruling 5793252993). There is NO default-positive
   // factor->goal repair in admission, by ruling: a sign nobody stated would be a
   // fabricated belief. So the drafter itself must state every link toward the
@@ -373,6 +381,41 @@ export interface AdditionWithoutTotal {
   readonly factor_unit?: string;
 }
 export interface DemotedProvenance { readonly option: string; readonly factor: string; readonly value: number }
+/**
+ * ⛔ A LIMIT THE USER STATED IS NEVER DROPPED UNSEEN.
+ *
+ * `admit-constraint.ts` withholds a limit whose metric names no node in the admitted model, rather
+ * than attach it to a guessed target — right — and records a warn-level loss. Until now only horizon,
+ * goal_operator, mechanism and status-quo losses reached `not_represented`, so a build that drafted
+ * "under 15% net margin" as a "Net-margin breach" RISK (no "Net margin" node; 1 of 15 live builds on
+ * served 9417228) registered a model with no limit and said nothing: `goal_constraints_carried: 0` is a
+ * count, not a sentence. Named here from the candidate's own words, so the Agent can tell the user
+ * exactly which limit the analysis will not check. No remedy is offered: the withheld limit is not kept.
+ */
+const OPERATOR_WORDS: Readonly<Record<string, string>> = { '>=': 'at least', '<=': 'at most', '>': 'more than', '<': 'less than' };
+function unattachedLimitLines(model: CandidateModel, loss: readonly { readonly field_path: string; readonly before?: unknown }[]): string[] {
+  // Admission withholds BY METRIC (`admit-constraint.ts` resolves `c.metric` to a node, or not), so every
+  // bound on an unattached metric shares that fate. Iterate the BOUNDS, not the loss entries: a loss entry
+  // carries only the metric, and mapping it back by first match repeats one bound and hides the rest, with
+  // the wrong author (pre-review 5828829492: ">= 15%" said twice, Olumi's "<= 30%" never said, and called the user's).
+  const unattached = new Set(loss.filter((l) => /^goal_constraints\[.*\]\.node_id$/.test(l.field_path)).map((l) => String(l.before ?? '')));
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const c of model.constraints ?? []) {
+    if (!unattached.has(c.metric)) continue;
+    // Words, never symbols: this sentence reaches the user (RC 5828938080 §3, Runtime's copy point).
+    const bound = OPERATOR_WORDS[c.operator] ?? c.operator;
+    const unit = c.unit === undefined || c.unit === '' ? '' : c.unit.startsWith('%') ? c.unit : ` ${c.unit}`;
+    const limit = `${c.metric} of ${bound} ${c.value}${unit}`;
+    // The same rule as `admit-constraint.ts` `isUserAuthored`: only a bound the user stated is called theirs.
+    const users = c.provenance === 'explicit';
+    const key = `${users ? 'user' : 'olumi'}\u0000${limit}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push(`${users ? `Your limit "${limit}"` : `The limit Olumi proposed ("${limit}")`} is not in the model: no part of the model is "${c.metric}", so the analysis cannot check it.`);
+  }
+  return lines;
+}
 /** The user-facing sentence for an addition kept with no total: what is missing, and how to supply it. */
 function sayAdditionWithoutTotal(a: AdditionWithoutTotal): string {
   const amount = `${a.value}${a.unit ? ` ${a.unit}` : ''}`;
@@ -534,6 +577,11 @@ function retainsRiskHypotheses(before: CandidateModel, after: CandidateModel): b
   return before.options.every((o) => after.options.some((kept) => kept.label === o.label));
 }
 
+/** The size-only retry's edit rule (measured: `construction-size-retry-edits-first-draft.test.ts`). */
+const SIZE_RETRY_EDITS_FIRST_DRAFT =
+  'Return your previous model with only the items you ADDED beyond the brief removed. Copy every item you keep EXACTLY '
+  + 'as it is in your previous model: the same label, wording, provenance and relationships. Do not rename, merge, reword or re-add anything.';
+
 export async function buildModelFromBrief(
   scenarioId: string,
   brief: string,
@@ -606,10 +654,16 @@ export async function buildModelFromBrief(
         model: budget.model,
         // The delta is APPENDED, so every rule the first pass obeyed still holds —
         // provenance, wiring, plausible_max and clearly labelled estimates.
-        instructions: `${BUILD_INSTRUCTIONS} ${needsSizeRetry ? retryInstruction(size) : ''} Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
+        // ⛔ A SIZE-ONLY RETRY EDITS ITS OWN FIRST DRAFT. Regenerated from the brief alone it renamed the user's
+        // options ("Hire two senior engineers" → "hire 2 senior engineers"), so `keepsEveryUserStatedIdentity`
+        // rejected it every time: measured 0/8 adoptable vs 8/8 when the retry is handed its draft to edit
+        // (construction-size-retry-edits-first-draft.test.ts). A retry with construction issues is unchanged.
+        instructions: repairIssues(preparation).length === 0 && needsSizeRetry
+          ? `${BUILD_INSTRUCTIONS} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT}`
+          : `${BUILD_INSTRUCTIONS} ${needsSizeRetry ? retryInstruction(size) : ''} Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
         input: repairIssues(preparation).length > 0
           ? `${brief}\n\nConstruction issues: ${JSON.stringify(repairIssues(preparation))}\nCandidate to repair: ${JSON.stringify(firstCandidate)}`
-          : brief,
+          : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(firstCandidate)}`,
         max_output_tokens: budget.max_output_tokens,
         reasoning_effort: budget.reasoning_effort,
         schema: retrySchemaPinningGoal(candidate.goal),
@@ -821,6 +875,7 @@ export async function buildModelFromBrief(
     ...(preparation.additions_without_total.length > 0 ? { additions_without_total: preparation.additions_without_total } : {}),
     ...(preparation.provenance_demoted.length > 0 ? { provenance_demoted: preparation.provenance_demoted } : {}),
     not_represented: [
+      ...unattachedLimitLines(candidate, admitted.loss),
       ...preparation.additions_without_total.map(sayAdditionWithoutTotal),
       ...preparation.provenance_demoted.map((d) =>
         `I've treated your ${d.value} for "${d.factor}" in "${d.option}" as a working figure because the current ` +
@@ -849,7 +904,7 @@ export async function buildModelFromBrief(
         // (`admit-model.ts`, `wireInertStatusQuo`), so it must be said and correctable.
         // `observed_state.baseline`: a goal's current level that could not be carried
         // (`admit-model.ts`) — the user is told why, and what would let it count.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

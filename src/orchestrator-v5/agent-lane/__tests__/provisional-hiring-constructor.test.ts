@@ -13,9 +13,9 @@ function hiring() {
     goal: { metric: 'Productivity', operator: '>=', target_stated: false, value: null, unit: '%', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit' },
     constraints: [],
     options: [
-      { label: 'Hire a tech lead', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Tech leads', value: 1, value_kind: 'additional', unit: 'people', provenance: 'explicit' }] },
-      { label: 'Hire two developers', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Developers', value: 2, value_kind: 'additional', unit: 'people', provenance: 'explicit' }] },
-      { label: 'Maintain current staffing', provenance: 'ai_proposed', changes: [], interventions: [] as { factor_label: string; value: number; value_kind: string; unit: string; provenance: string }[] },
+      { label: 'Hire a tech lead', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [{ factor_label: 'Tech leads', value: 1, value_kind: 'additional', unit: 'people', provenance: 'explicit' }] },
+      { label: 'Hire two developers', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [{ factor_label: 'Developers', value: 2, value_kind: 'additional', unit: 'people', provenance: 'explicit' }] },
+      { label: 'Maintain current staffing', provenance: 'ai_proposed', is_status_quo: null, changes: [], interventions: [] as { factor_label: string; value: number; value_kind: string; unit: string; provenance: string }[] },
     ],
     factors: [
       { label: 'Tech leads', role: 'controllable' as const, baseline_known: false, baseline_value: 0, unit: 'people', plausible_max: 5, provenance: 'ai_proposed' },

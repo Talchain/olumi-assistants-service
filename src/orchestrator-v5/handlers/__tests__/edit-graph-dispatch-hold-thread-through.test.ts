@@ -257,6 +257,9 @@ beforeEach(() => {
     // COMMITTED graph rather than its own pre-projection copy. An echo mock
     // writes nothing, so there are no committed bytes to hand back.
     persistedGraph: null,
+    // `CommitResult.thisAttemptWrote` (#1856) is REQUIRED: an echo mock of a
+    // first write has no replay or conflict, so this attempt is the writer.
+    thisAttemptWrote: true,
     // C8-A: `CommitResult` gained the atomic model-version receipt. This echo
     // mock writes no turn row and therefore creates no model version, so `null`
     // is the honest value — the same reasoning as the two fields above.

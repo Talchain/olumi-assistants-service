@@ -45,17 +45,31 @@ describe('the explicit Run is offered after a change the canonical readiness adm
   let proposeNext = true;
   let lastApproveId = '';
   let analysisState: Record<string, unknown> = {};
+  /**
+   * The route's final readback fails while the approval itself verified. After the write there are two graph
+   * reads (measured): the approval's own verification, then the route's readback. Only the second is refused —
+   * refusing the first would make the approval report `not_applied`, and the control would never reach the
+   * condition it exists to test.
+   */
+  let failReadbackAfterWrite = false;
+  let postWriteReads = 0;
+  /** Scripted model outputs for an agent-loop turn, consumed in order before the default behaviour. */
+  let script: Record<string, unknown>[] = [];
   /** A route instance on FRESH modules: an empty process cache and an empty proposal store. */
   async function buildRouteApp(): Promise<FastifyInstance> {
     vi.resetModules();
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     const a = Fastify({ logger: false });
-    a.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: { nodes: [{ id: 'f1', kind: 'factor', label: 'Team size' }, { id: 'o1', kind: 'outcome', label: 'Velocity' }], edges },
-      graph_hash: `h${edges.length}`,
-      analysis_ready: readiness,
-      analysis_state: analysisState,
-    }));
+    a.post('/assist/v1/scenarios/:id/graph', async (_req, reply) => {
+      if (edges.length > 0) postWriteReads += 1;
+      if (failReadbackAfterWrite && postWriteReads >= 2) return reply.code(500).send({ error: 'read failed' });
+      return {
+        graph: { nodes: [{ id: 'f1', kind: 'factor', label: 'Team size' }, { id: 'o1', kind: 'outcome', label: 'Velocity' }, { id: 'f2', kind: 'factor', label: 'Tooling' }], edges },
+        graph_hash: `h${edges.length}`,
+        analysis_ready: readiness,
+        analysis_state: analysisState,
+      };
+    });
     a.post('/orchestrate/v2/turn', async (req) => {
       const b = req.body as { kind?: string; event?: { from: string; to: string }; chip?: { action_type?: string } };
       if (b.kind === 'system_event' && b.event) edges = [...edges, { from: b.event.from, to: b.event.to }];
@@ -70,6 +84,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       modelBodies.push(body);
+      if (body['tool_choice'] !== 'none' && script.length > 0) return new Response(JSON.stringify({ output: [script.shift()] }), { status: 200 });
       if (body['tool_choice'] !== 'none' && proposeNext) {
         proposeNext = false;
         return new Response(JSON.stringify({ output: [{
@@ -84,7 +99,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     app = await buildRouteApp();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { edges = []; runs = 0; modelBodies = []; proposeNext = true; analysisState = {}; nextScenario(); });
+  beforeEach(() => { edges = []; runs = 0; modelBodies = []; proposeNext = true; analysisState = {}; failReadbackAfterWrite = false; postWriteReads = 0; script = []; nextScenario(); });
 
   /** Propose (one Agent turn), then approve through the typed chip (fast path 2). */
   async function proposeThenApprove(approveTurnId?: string): Promise<{ suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string } }> {
@@ -130,6 +145,77 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     const b = await proposeThenApprove();
     expect(edges, 'the approval really applied').toHaveLength(1);
     expect(b.suggested_actions.some((c) => c.action_type === 'run_analysis')).toBe(false);
+  });
+
+  /**
+   * ⛔ P0, 25 Sep (RC #69 5826744045 §2): the served hiring dead end. The approval applied, the readiness is
+   * the served `21e3b38` shape (AI Quality fixture `p0-post-approval-dead-end/dead-end.eng-hiring-2.approve.json`:
+   * `status: blocked`, `may_run: false`, `blockers: null`), and the reply offered NOTHING.
+   */
+  it('RED: approval applied but the model is still blocked (served shape) → the next-step chip, and no Run', async () => {
+    readiness = { status: 'blocked', may_run: false, blockers: null };
+    const b = await proposeThenApprove();
+    expect(edges, 'the approval really applied').toHaveLength(1);
+    expect(b.suggested_actions.some((c) => c.action_type === 'run_analysis')).toBe(false);
+    expect(b.suggested_actions.map((c) => c.id), 'the user always has one reachable next action').toEqual(['agent-suggest-what-it-needs']);
+    expect(runs).toBe(0);
+  });
+
+  it('CONTROL: approval applied and a run is admitted → Run, and NOT the next-step chip', async () => {
+    readiness = { status: 'ready', may_run: true };
+    const b = await proposeThenApprove();
+    expect(b.suggested_actions.map((c) => c.id)).toEqual(['agent-run-analysis']);
+  });
+
+  it('OPPOSITE CONTROL: the approval commits but the readback FAILS → no next-step chip and no Run (unknown is not a refusal)', async () => {
+    readiness = { status: 'ready', may_run: true }; // what the model really is — the route just cannot read it
+    failReadbackAfterWrite = true;
+    const b = await proposeThenApprove() as unknown as { suggested_actions: Chip[]; _agent: { tool_calls: { name: string; mutated: boolean }[] } };
+    expect(edges, 'the approval really committed').toHaveLength(1);
+    expect(b._agent.tool_calls.find((c) => c.name === 'authorise_change')?.mutated, 'PRECONDITION: the approval reports it applied').toBe(true);
+    expect(postWriteReads, 'PRECONDITION: the readback was attempted and refused').toBeGreaterThanOrEqual(2);
+    expect(b.suggested_actions.some((c) => c.id === 'agent-suggest-what-it-needs'), 'no blocked claim on an unknown state').toBe(false);
+    expect(b.suggested_actions.some((c) => c.action_type === 'run_analysis')).toBe(false);
+  });
+
+  it('REPLAY: a remembered next-step chip is re-offered only on a KNOWN refusal, never on an unknown re-read (pre-review 5827131835)', async () => {
+    const { stillValidOffers, NEXT_STEP_AFTER_BLOCKED_RUN_CHIP } = await import('../../../routes/agent-v1-turn.js');
+    const now = (analysisReady: unknown) => ({ outstandingProposalIds: new Set<string>(), analysisReady, analysisState: {}, modelExists: true });
+    const ids = (analysisReady: unknown) => stillValidOffers([NEXT_STEP_AFTER_BLOCKED_RUN_CHIP], now(analysisReady)).map((a) => a.id);
+    expect(ids(undefined), 'the replay read failed: unknown').toEqual([]);
+    expect(ids({}), 'an empty readiness is not a refusal').toEqual([]);
+    expect(ids({ status: 'blocked', may_run: false, blockers: null }), 'still known blocked').toEqual(['agent-suggest-what-it-needs']);
+    expect(ids({ status: 'ready', may_run: true }), 'a collaborator made it runnable').toEqual([]);
+  });
+
+  it('CONTROL: an agent-loop turn that APPLIES one proposal and PROPOSES another offers that approval, not the next-step chip', async () => {
+    readiness = { status: 'blocked', may_run: false, blockers: null }; // a known refusal: the chip WOULD fire but for the waiting approval
+    const t1 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Should team size drive velocity?' } });
+    const first = (t1.json() as { suggested_actions: Chip[] }).suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
+    expect(first, 'the control: a real first proposal').toBeDefined();
+    const proposalId = first!.id.slice('agent-approve-proposal:'.length);
+    script = [
+      { type: 'function_call', name: 'authorise_change', call_id: 'a1', arguments: JSON.stringify({ proposal_id: proposalId }) },
+      { type: 'function_call', name: 'propose_model_change', call_id: 'p2', arguments: JSON.stringify({ from_label: 'Tooling', to_label: 'Velocity', direction: 'positive', rationale: 'Better tools speed delivery.' }) },
+      { type: 'message', content: [{ type: 'output_text', text: 'Applied the first link; the second is ready for your approval.' }] },
+    ];
+    const t2 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Yes, apply that, and should tooling drive velocity too?' } });
+    const b = t2.json() as { suggested_actions: Chip[]; _agent: { tool_calls: { name: string; mutated: boolean }[] } };
+    expect(b._agent.tool_calls.find((c) => c.name === 'authorise_change')?.mutated, 'PRECONDITION: the first approval applied').toBe(true);
+    expect(b.suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:')), 'PRECONDITION: the second proposal is waiting').toBe(true);
+    expect(b.suggested_actions.some((c) => c.id === 'agent-suggest-what-it-needs'), 'the waiting approval is the next action').toBe(false);
+  });
+
+  it('knownNotRunnable, exactly: only a READ refusal counts; unknown or empty is never a refusal', async () => {
+    const { knownNotRunnable } = await import('../../../routes/agent-v1-turn.js');
+    expect(knownNotRunnable(undefined)).toBe(false);
+    expect(knownNotRunnable(null)).toBe(false);
+    expect(knownNotRunnable({})).toBe(false);
+    expect(knownNotRunnable({ may_run: false })).toBe(true);
+    expect(knownNotRunnable({ status: 'blocked', may_run: false, blockers: null })).toBe(true);
+    expect(knownNotRunnable({ status: 'blocked' })).toBe(true);
+    expect(knownNotRunnable({ status: 'ready' })).toBe(false);
+    expect(knownNotRunnable({ status: 'blocked', may_run: true }), 'may_run decides when present').toBe(false);
   });
 
   it('CONTRAST: a turn that changed nothing is not offered a Run, even when a run is admitted', async () => {

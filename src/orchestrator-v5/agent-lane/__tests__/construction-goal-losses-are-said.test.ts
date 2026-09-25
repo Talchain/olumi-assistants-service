@@ -39,9 +39,9 @@ const GTM = (goal: Record<string, unknown>) => ({
     { metric: 'Go-to-market budget', operator: '<=', value: 900000, unit: 'GBP', provenance: 'explicit' },
   ],
   options: [
-    { label: 'Expand outbound sales', provenance: 'explicit', changes: [],
+    { label: 'Expand outbound sales', provenance: 'explicit', is_status_quo: null, changes: [],
       interventions: [{ factor_label: 'Outbound reps', value: 6, unit: 'FTE', provenance: 'explicit' }] },
-    { label: 'Build self-serve motion', provenance: 'explicit', changes: ['Self-serve conversion'], interventions: [] },
+    { label: 'Build self-serve motion', provenance: 'explicit', is_status_quo: null, changes: ['Self-serve conversion'], interventions: [] },
   ],
   factors: [
     { label: 'Outbound reps', role: 'controllable', baseline_known: false, baseline_value: null, unit: 'FTE', provenance: 'explicit', plausible_max: 50 },
