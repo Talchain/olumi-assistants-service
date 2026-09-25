@@ -61,7 +61,7 @@ import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compo
 import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
 import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
-import { enforceLeadingOptionClaimsAtWire } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
+import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runTurnCoaching, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import {
@@ -335,7 +335,7 @@ const AGENT_INSTRUCTIONS = [
    * of three carried `interventions: null`. An option that sets nothing cannot
    * be compared with one that does.
    */
-  'get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model \u2014 do not wait for the analysis to refuse \u2014 ask what that option would actually change, and record the answer with propose_option_interventions. An option in `status_quo_held` is not in that list and is never given levels: say, in one short clause, that carrying on as now holds today\u2019s values, and that the user can say what would change if that is wrong. If they do, record exactly what they said with propose_option_interventions and user_stated: true on that level.',
+  'get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model \u2014 do not wait for the analysis to refuse \u2014 ask what that option would actually change, and record the answer with propose_option_interventions, with user_stated: true on each level the user gave. An option in `status_quo_held` is not in that list and is never given levels: say, in one short clause, that carrying on as now holds today\u2019s values, and that the user can say what would change if that is wrong. If they do, record exactly what they said with propose_option_interventions and user_stated: true on that level.',
   /*
    * ⛔ ANALYSIS IS MODEL-RELATIVE, NEVER A RECOMMENDATION (Paul, 23 Sep: "Olumi is a
    * reasoning-enhancement system, not an answer or decision engine"). Measured on
@@ -1687,6 +1687,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * analysis, `leader_claim.permitted` from the SAME readback is the entitlement, conjoined inside
      * the gate with the admission's `permitted_analysis_mode`. PERMIT-WINS: a permitted turn is
      * returned by reference, byte-identical.
+     *
+     * ⛔ FAIL-CLOSED ON A WITHHELD TURN (AI Quality corpus #63 5823028488; Codex 5823210765): the
+     * shared gate needs the EXACT option label and caught 1 of 13 real paraphrased leaks. So on a
+     * withheld turn every sentence that ranks options is dropped first, whatever it calls the
+     * option, and one deterministic no-leader sentence is appended; then the shared gate runs on
+     * what remains. See `agent-lane/withheld-leader-fail-closed.ts`.
      */
     const analysisBearing = analysisResult !== undefined
       || fa !== undefined
@@ -1694,7 +1700,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let leaderClaimEnforced = false;
     if (analysisBearing) {
       const claim = (analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
-      const enforced = enforceLeadingOptionClaimsAtWire(wireBody, {
+      const enforced = enforceAgentLaneLeaderClaimsAtWire(wireBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1',
         mayNameLeadingOption: claim?.permitted === true,
