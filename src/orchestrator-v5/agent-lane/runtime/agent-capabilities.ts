@@ -16,7 +16,12 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
-import { AGENT_RUN_ANALYSIS_CHIP_ID } from '../../handlers/agent-chip-ids.js';
+import { AGENT_ADD_OPTION_CHIP_ID, AGENT_RUN_ANALYSIS_CHIP_ID } from '../../handlers/agent-chip-ids.js';
+import { buildAddOptionTransaction } from '../../routing/add-option-transaction.js';
+import { GM_HELD_HANDLER_ID, GM_HELD_OPERATIONS_MAX_JSON_CHARS, gmHeldProposalRef } from '../../handlers/edit-graph-referee-gate.js';
+import { PROPOSAL_CAP } from '../../graph-management/types.js';
+import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
+import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 
 /**
  * The durable operation identity for authorising a proposal.
@@ -86,7 +91,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
   }
 }
 
-import { planNewOption, newOptionFollowUp } from '../propose-new-option.js';
+import { planNewOption } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
@@ -576,7 +581,15 @@ export function createAgentCapabilities(
    * deadline and its write accounting stay the route's. Absent → no automatic run (a unit test, or a
    * caller that does not want one). See `../first-analysis.ts` for the rules it enforces.
    */
-  opts: { readonly firstAnalysis?: (input: FirstAnalysisInput) => Promise<FirstAnalysisOutcome> } = {},
+  opts: {
+    readonly firstAnalysis?: (input: FirstAnalysisInput) => Promise<FirstAnalysisOutcome>;
+    /**
+     * The pending actions on the scenario's LATEST answer row, as the session store returns them. The held
+     * add-option proposal lives there (route-v2 minted it), so a `gmh_` approval is confirmed against what the
+     * store actually holds — never against a copy this process remembered. Absent ⇒ a held approval refuses.
+     */
+    readonly readPendingActions?: (scenarioId: string) => Promise<readonly PendingAction[]>;
+  } = {},
 ): AgentCapabilities {
   const readOnly = mode === 'preview';
   const refuseReadOnly = (): ToolResult => ({
@@ -646,6 +659,90 @@ export function createAgentCapabilities(
       edges: (g.edges as GraphRead['edges']) ?? [],
       analysis_state: r.json.analysis_state,
       raw: g,
+    };
+  };
+
+  /**
+   * ⭐ THE HELD ADD-OPTION (C52). The Agent adds an option through the product's own typed add-option
+   * transaction: route-v2 builds option + decision→option edge + option→factor edges (+ the user's levels) as
+   * ONE referee-checked batch and HOLDS it as a `graph_management_held_v1` pending under a deterministic
+   * `gmh_` handle. Approval sends the UI's own confirm for that handle, and route-v2 commits the batch in ONE
+   * write. So the Agent can no longer leave an option unlinked from the decision (Paul's test, 25 Sep).
+   *
+   * The hold is read from the session store's LATEST answer row — the same read route-v2's confirm makes —
+   * so a `gmh_` approval is checked against what the store will actually confirm, never a remembered copy.
+   */
+  const liveHeldHold = async (scenarioId: string, ref: string): Promise<PendingAction | undefined> => {
+    if (opts.readPendingActions === undefined) return undefined;
+    const pendings = await opts.readPendingActions(scenarioId);
+    return pendings.find((p) => p.chip_id === ref
+      && p.action.kind === 'apply_proposed_change'
+      && (p.action as { inline_patch?: { handler_id?: unknown } }).inline_patch?.handler_id === GM_HELD_HANDLER_ID
+      && !isPendingActionExpired(p, Date.now()));
+  };
+  const heldOpsOf = (hold: PendingAction): readonly { op: string; path: string; value?: unknown }[] => {
+    const ops = (hold.action as { inline_patch?: { operations?: unknown } }).inline_patch?.operations;
+    return Array.isArray(ops) ? ops.filter((o): o is { op: string; path: string; value?: unknown } =>
+      o !== null && typeof o === 'object' && typeof (o as { op?: unknown }).op === 'string' && typeof (o as { path?: unknown }).path === 'string') : [];
+  };
+  /** A level is set when the option's intervention for that factor carries a number (either stored shape). */
+  const hasLevel = (node: { interventions?: unknown } | undefined, factorId: string): boolean => {
+    const iv = (node?.interventions as Record<string, unknown> | undefined)?.[factorId];
+    return typeof iv === 'number' || (iv !== null && typeof iv === 'object' && typeof (iv as { value?: unknown }).value === 'number');
+  };
+  /**
+   * Confirm a held add-option exactly as the UI would: the hold's own chip id and its own public message,
+   * verbatim, on the non-composer chip path (the route gate matches the exact copy; a paraphrase or a bare
+   * "yes" would reach the edit model instead). Applied ONLY when the store shows it: the model moved, the
+   * hold is consumed, and every option the hold adds is now in the model.
+   */
+  const confirmHeld = async (ctx: AgentToolContext, ref: string): Promise<ToolResult> => {
+    let hold: PendingAction | undefined;
+    try {
+      hold = await liveHeldHold(ctx.scenario_id, ref);
+    } catch {
+      return { ok: false, mutated: false, refusal: 'not_found', proposal_id: ref,
+        detail: 'The waiting change could not be read, so nothing was applied. Tell the user plainly and offer to try again.' };
+    }
+    if (hold === undefined) {
+      return { ok: false, mutated: false, refusal: 'unknown_proposal', proposal_id: ref,
+        detail: 'That change is no longer waiting (it expired, or the model changed since it was offered), so nothing was applied. Offer to prepare it again.' };
+    }
+    const before = await readGraph(ctx.scenario_id);
+    if (before === null) return { ok: false, mutated: false, refusal: 'not_found', proposal_id: ref };
+    const copy = resolveProposalRenderCopy(hold.action as { kind: string; public_label?: string; public_message?: string });
+    const r = await dispatch('/orchestrate/v2/turn', {
+      kind: 'message', turn_id: authorisationTurnId(`agent_confirm_held:${hold.id}`), scenario_id: ctx.scenario_id,
+      stage: 'frame', turn_class: 'frame', source: 'chip', message: copy.message, chip: { id: ref },
+    });
+    const after = await readGraph(ctx.scenario_id);
+    let stillHeld = true;
+    try { stillHeld = (await liveHeldHold(ctx.scenario_id, ref)) !== undefined; } catch { stillHeld = true; }
+    const optionIds = heldOpsOf(hold).filter((o) => o.op === 'add_node').map((o) => o.path);
+    const landed = after !== null && optionIds.length > 0 && optionIds.every((id) => after.nodes.some((x) => x.id === id));
+    const moved = after !== null && after.graph_hash !== before.graph_hash;
+    if (!(r.status === 200 && moved && !stillHeld && landed)) {
+      return { ok: false, mutated: moved, refusal: 'not_applied', proposal_id: ref,
+        detail: moved
+          ? 'The model changed, but not as that approval described, so it is not reported as added. Read the model again before saying what it holds.'
+          : 'The change was not saved, so the model is as it was. Tell the user plainly; do not describe it as added.' };
+    }
+    approvalAppliedThisRequest = true;
+    const { summary, unreadable } = receiptSummaryOf(r.json);
+    const sentences = optionIds.map((id) => {
+      const node = after!.nodes.find((x) => x.id === id) as { label?: unknown; interventions?: unknown } | undefined;
+      const factorIds = after!.edges.filter((e) => e.from === id).map((e) => e.to)
+        .filter((to) => after!.nodes.some((x) => x.id === to && x.kind === 'factor'));
+      const labelOf = (fid: string): string => String(after!.nodes.find((x) => x.id === fid)?.label ?? fid);
+      const unlevelled = factorIds.filter((fid) => !hasLevel(node, fid)).map(labelOf);
+      return `Added "${String(node?.label ?? id)}", linked from the decision and acting on ${factorIds.map(labelOf).join(', ')}.`
+        + (unlevelled.length > 0 ? ` It does not yet set a level for ${unlevelled.join(', ')}; tell me the figure for each and I'll set it.` : '');
+    });
+    return {
+      ok: true, mutated: true, applied: true, outcome: 'applied', proposal_id: ref,
+      receipts: summary !== null ? [summary] : [],
+      ...(unreadable ? { receipt_unreadable: true } : {}),
+      follow_up: sentences.join(' '),
     };
   };
 
@@ -1675,6 +1772,8 @@ export function createAgentCapabilities(
 
     async authoriseChange(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
+      // A held add-option (C52) is confirmed on the product's own seam, never through the proposal store.
+      if (typeof args?.proposal_id === 'string' && /^gmh_[0-9a-f]{12}$/.test(args.proposal_id)) return confirmHeld(ctx, args.proposal_id);
       const before = await readGraph(ctx.scenario_id);
       if (before === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const decision = proposals.authorise({
@@ -1705,162 +1804,15 @@ export function createAgentCapabilities(
       const ops = decision.proposal.operations;
 
       /**
-       * ⭐ ADD AN OPTION — its own route, BEFORE the compound gate.
-       *
-       * `applyCompound` accepts only `set_factor_value` and
-       * `set_option_intervention` and refuses everything else as
-       * `unsupported_compound`. Creating an entity is a different write family, so
-       * widening that gate would dissolve the property that makes it safe. This
-       * route handles exactly `add_node` + `add_edge` and nothing else.
-       *
-       * ⛔ THE HASH IS RE-READ BETWEEN EVERY WRITE. `structural_add_edge` refuses
-       * `BASE_HASH_DIVERGED` against a stale base, and the node write moves the
-       * hash — so reusing the proposal's base hash for the edges would refuse
-       * every one of them AFTER the user approved. That is the exact shape of the
-       * failure this lane has already met twice.
+       * ⛔ AN OLD-SHAPE ADD-OPTION IS NEVER APPLIED (C52). It wrote the option and its links as separate system
+       * events and never linked it from the decision, so the model it produced could not run (Paul's test,
+       * 25 Sep). New option proposals are held on the product's own seam (`gmh_…`, `confirmHeld`); one
+       * restored from before this change is refused honestly rather than written incompletely.
        */
       if (ops[0]?.op === 'add_node' && ops.slice(1).every((o) => o.op === 'add_edge')) {
-        const optionId = String(ops[0].path);
-        const nodeValue = (ops[0].value ?? {}) as { label?: unknown };
-        const operationId = authorisationTurnId(decision.proposal.proposal_id);
-        /**
-         * ⛔ A RETRY CONTINUES FROM THIS PROPOSAL'S OWN RECORDED PROGRESS (independent review of
-         * #1788, 5806071796) — never from "a node with that id exists", which does not prove the
-         * proposal owns it. `ProposalStore.authorise` admits a continuation only when the model is
-         * still at the revision this proposal's own partial write left; the operations it already
-         * landed are skipped, the rest are applied from that revision, and its receipts carry over.
-         */
-        const cont = decision.continuation;
-        const landedBefore = new Set(cont?.landed ?? []);
-        // The revision this pass was authorised at: the proposal's base, or its own recorded progress.
-        const authorisedRevision = cont !== undefined ? before.graph_hash : decision.proposal.base_graph_identity_hash;
-        /**
-         * ⛔ OWNERSHIP IS PROVEN, NEVER OBSERVED (independent review of #1788, 5807353449 / 5807492503).
-         * `ownRevision` is the last revision this proposal can PROVE it produced: the authorised one, or
-         * the `graph_hash` a write of OURS reports it committed (the served system-event response carries
-         * the persisted graph's analysis hash — the same space as the read route) — and only while a
-         * readback agrees with it. A readback that differs means someone else edited in between: the pass
-         * STOPS dispatching, nothing is written on the observed revision, and progress stays at the last
-         * proven revision, so the next approval is superseded instead of applied to a model the user
-         * never saw. Presence of a link alone never proves this proposal wrote it.
-         */
-        let ownRevision = authorisedRevision;
-        let interleaved = false;
-        const committedHashOf = (res: { json: Record<string, unknown> } | null): string | undefined =>
-          (typeof res?.json.graph_hash === 'string' ? res.json.graph_hash : undefined);
-        const receipts: ReceiptSummary[] = [...(cont?.receipts ?? [])];
-        let receiptUnreadable = false;
-        let addRes: { status: number; json: Record<string, unknown> } | null = null;
-        if (!landedBefore.has(optionId)) {
-          addRes = await dispatch('/orchestrate/v2/turn', {
-            kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
-            event: { kind: 'structural_add', node_id: optionId, node_kind: 'option',
-              label: String(nodeValue.label ?? ''), base_graph_hash: ownRevision },
-          });
-        }
-        let afterAdd = await readGraph(ctx.scenario_id);
-        const optionExists = (afterAdd?.nodes ?? []).some((n) => n.id === optionId);
-        const nodeCommitted = committedHashOf(addRes);
-        if (!optionExists || (addRes !== null && nodeCommitted === undefined)) {
-          return { ok: false, mutated: false, applied: false, refusal: 'not_applied',
-            detail: String(addRes?.json.assistant_text ?? 'The option was not added, so nothing else was attempted.'),
-            http: addRes?.status ?? 0, operation_id: operationId };
-        }
-        if (addRes !== null) {
-          const addReceipt = receiptSummaryOf(addRes.json);
-          if (addReceipt.summary !== null) receipts.push(addReceipt.summary);
-          if (addReceipt.unreadable) receiptUnreadable = true;
-          ownRevision = nodeCommitted as string;
-          if (afterAdd?.graph_hash !== ownRevision) interleaved = true;
-        } else if (afterAdd?.graph_hash !== authorisedRevision) {
-          // A continuation whose model moved after it was authorised: nothing is written.
-          return { ok: false, mutated: false, applied: false, refusal: 'superseded',
-            expected: authorisedRevision, actual: afterAdd?.graph_hash ?? null,
-            detail: 'The model changed after this was approved, so nothing more was written. Look at it again and approve once more.' };
-        }
-
-        const linked: string[] = [];
-        const notLinked: { factor: string; detail: string }[] = [];
-        const landedNow: string[] = [optionId];
-        for (const edgeOp of ops.slice(1)) {
-          const [, factorId] = String(edgeOp.path).split('::');
-          const factorNode = (afterAdd?.nodes ?? []).find((n) => n.id === factorId);
-          const factorLabel = String(factorNode?.label ?? factorId);
-          // Landed by THIS proposal's earlier partial write: kept, never written twice.
-          if (landedBefore.has(String(edgeOp.path))) { linked.push(factorLabel); landedNow.push(String(edgeOp.path)); continue; }
-          if (interleaved) {
-            notLinked.push({ factor: factorLabel, detail: 'not attempted: the model changed while this was being saved' });
-            continue;
-          }
-          const direction = (edgeOp.value as { direction?: unknown } | undefined)?.direction === 'negative' ? 'negative' : 'positive';
-          const edgeRes = await dispatch('/orchestrate/v2/turn', {
-            kind: 'system_event', turn_id: authorisationTurnId(`${decision.proposal.proposal_id}:${factorId}`),
-            scenario_id: ctx.scenario_id, stage: 'frame',
-            event: { kind: 'structural_add_edge', from: optionId, to: factorId,
-              // ⚠ The projection default, exactly as the edge route above records:
-              // the wire requires a magnitude and this is not the user's claim.
-              magnitude: 0.5, effect_direction: direction, base_graph_hash: ownRevision },
-          });
-          const committed = committedHashOf(edgeRes);
-          afterAdd = await readGraph(ctx.scenario_id);
-          const present = (afterAdd?.edges ?? []).some((e) => e.from === optionId && e.to === factorId);
-          if (present && committed !== undefined) {
-            linked.push(factorLabel);
-            landedNow.push(String(edgeOp.path));
-            ownRevision = committed;
-            if (afterAdd?.graph_hash !== committed) interleaved = true; // ours landed; someone edited after it
-            const r = receiptSummaryOf(edgeRes.json);
-            if (r.summary !== null) receipts.push(r.summary);
-            if (r.unreadable) receiptUnreadable = true;
-          } else {
-            notLinked.push({ factor: factorLabel, detail: String(edgeRes.json.assistant_text ?? 'not linked') });
-            if (afterAdd?.graph_hash !== ownRevision) interleaved = true; // refused, and the model moved: not ours
-          }
-        }
-
-        /**
-         * ⛔ AN APPROVED PROPOSAL IS COMPLETE ONLY WHEN THE WHOLE STORED OPERATION SET
-         * IS CONFIRMED FROM READBACK (Codex, exact head 5c908d1a). Three repairs here:
-         *
-         * 1. `markApplied` on completion, so a retry returns `already_applied` with the
-         *    ORIGINAL receipts instead of `superseded`. `ProposalStore.authorise`
-         *    (`proposal.ts:216`) checks the applied map BEFORE the base hash — and this
-         *    write moves that hash — so without this a user who retried was told their
-         *    own completed change was stale, and `outstanding()` kept offering it.
-         * 2. `receipts` is the ARRAY the narration path consumes. It was a single
-         *    OBJECT from `receiptSummaryOf`, and `write-outcome.ts:48-50` reads only an
-         *    array — so `:153-157` said "Saved. No version number was recorded" even
-         *    when the write minted one.
-         * 3. A partial reports through the standard failure shape, never an unqualified
-         *    "Saved". `ok`/`applied` are false and the unlinked factors are named, so
-         *    the status line cannot claim a completion the user did not get.
-         */
-        const complete = notLinked.length === 0;
-        if (complete) proposals.markApplied(decision.proposal.proposal_id, receipts);
-        // A partial records what THIS proposal landed and the revision it left, so approving the
-        // SAME proposal again continues from there and adds only what is missing.
-        else proposals.markPartial(decision.proposal.proposal_id, { revision: ownRevision, landed: landedNow, receipts });
         return {
-          ok: complete,
-          mutated: true,
-          applied: complete,
-          operation_id: operationId,
-          option: { label: String(nodeValue.label ?? ''), linked_to: linked },
-          ...(notLinked.length > 0 ? {
-            not_linked: notLinked,
-            failures: notLinked.map((n) => `${n.factor}: ${n.detail}`),
-            detail:
-              `"${String(nodeValue.label ?? '')}" was added, but ${notLinked.length} of `
-              + `${linked.length + notLinked.length} links were not recorded: `
-              + `${notLinked.map((n) => n.factor).join(', ')}. The option is in the model and `
-              + 'incomplete. Approving the same change again will try only the missing links — it will not add the option twice; '
-              + 'if the model has changed since, it will be refused and you will be asked to confirm again.',
-          } : {}),
-          receipts,
-          ...(receiptUnreadable ? { receipt_unreadable: true } : {}),
-          ...(complete ? { follow_up: newOptionFollowUp({ ok: true, optionId, label: String(nodeValue.label ?? ''),
-            actsOn: linked.map((l) => ({ id: '', label: l, direction: 'positive' as const })),
-            publicLabel: decision.proposal.public_label }) } : {}),
+          ok: false, mutated: false, refusal: 'superseded', proposal_id: decision.proposal.proposal_id,
+          detail: 'That offer to add an option was prepared before an update and can no longer be applied. Nothing was changed. Offer to prepare it again.',
         };
       }
 
@@ -3105,14 +3057,12 @@ export function createAgentCapabilities(
       if (readOnly) return refuseReadOnly();
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const asked = Array.isArray(args?.acts_on)
+        ? args.acts_on.map((x) => (x ?? {}) as { factor_label?: unknown; direction?: unknown; level?: { value?: unknown; unit?: unknown } | null })
+        : [];
       const plan = planNewOption(g.nodes as never, {
         label: String(args?.label ?? ''),
-        acts_on: Array.isArray(args?.acts_on)
-          ? args.acts_on.map((x) => {
-              const a = (x ?? {}) as { factor_label?: unknown; direction?: unknown };
-              return { factor_label: String(a.factor_label ?? ''), direction: a.direction === 'negative' ? 'negative' as const : 'positive' as const };
-            })
-          : [],
+        acts_on: asked.map((a) => ({ factor_label: String(a.factor_label ?? ''), direction: a.direction === 'negative' ? 'negative' as const : 'positive' as const })),
         rationale: String(args?.rationale ?? ''),
       });
       if (!plan.ok) {
@@ -3120,33 +3070,106 @@ export function createAgentCapabilities(
           ...(plan.unresolved_labels ? { unresolved_labels: plan.unresolved_labels } : {}) };
       }
       /**
-       * ⚠ `add_node` FIRST, THEN ONE `add_edge` PER FACTOR — the order is the
-       * write's, not a preference: `structural_add_edge` cannot reference a node
-       * that does not exist yet. The applier below walks them in this order.
+       * ⛔ AN OPTION IS LINKED FROM THE DECISION IT ANSWERS — and only when that decision is unambiguous. With
+       * none, or more than one, nothing is prepared and the user is asked: a guessed parent is a wrong model.
        */
-      const operations: ProposalOperation[] = [
-        { op: 'add_node', path: plan.optionId, value: { kind: 'option', label: plan.label } },
-        ...plan.actsOn.map((f) => ({ op: 'add_edge' as const, path: `${plan.optionId}::${f.id}`, value: { direction: f.direction } })),
-      ];
-      const proposal = createProposal({
-        scenario_id: ctx.scenario_id,
-        user_id: ctx.authenticated_user_id,
-        base_graph_identity_hash: g.graph_hash,
-        operations,
-        provenance: { authored_by: 'user_stated', basis: 'an option the user asked to add' },
-        validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: plan.publicLabel,
+      const decisions = g.nodes.filter((x) => x.kind === 'decision');
+      if (decisions.length !== 1) {
+        return {
+          ok: false, mutated: false, refusal: 'no_single_decision',
+          detail: decisions.length === 0
+            ? 'The model has no decision to add an option to, so nothing was prepared. Tell the user plainly.'
+            : 'The model has more than one decision, so it is not clear which one this option answers. Nothing was prepared; ask the user which decision it is for.',
+        };
+      }
+      const decision = decisions[0]!;
+      /**
+       * ⛔ ONE CHANGE HAS A SIZE LIMIT, checked BEFORE anything is sent. The product holds at most
+       * PROPOSAL_CAP changes in one batch; an option costs one, its decision link one, and one per factor it
+       * acts on. Over the limit the product would refuse the batch, and that refusal takes a path this lane
+       * must never reach — so it is refused here, in plain words, with nothing sent.
+       */
+      if (2 + plan.actsOn.length > PROPOSAL_CAP) {
+        return {
+          ok: false, mutated: false, refusal: 'too_many_links',
+          detail: `One change can add an option acting on at most ${PROPOSAL_CAP - 2} factors; this one names ${plan.actsOn.length}. `
+            + 'Nothing was prepared. Suggest adding it with the factors it changes most, then linking the rest.',
+        };
+      }
+      /**
+       * ⭐ A LEVEL IS WRITTEN ONLY WHEN THE USER STATED IT — never invented to make the model runnable. It is
+       * given in the factor's own units and stored as the product stores it: against the factor's declared
+       * scale when it has one (value = figure ÷ scale, with the figure kept), as the figure otherwise.
+       */
+      const rawNodes = ((g.raw as { nodes?: unknown }).nodes as { id: string; kind?: string; label?: string; description?: string; observed_state?: { cap?: unknown; unit?: unknown } }[] | undefined) ?? [];
+      const norm = (v: unknown): string => String(v ?? '').trim().toLowerCase();
+      const levelById = new Map<string, { value: number; unit?: string }>();
+      for (const a of asked) {
+        const v = a.level?.value;
+        if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+        const f = rawNodes.find((x) => x.kind === 'factor' && (norm(x.label) === norm(a.factor_label) || norm(x.description) === norm(a.factor_label)));
+        if (f !== undefined) levelById.set(f.id, { value: v, ...(typeof a.level?.unit === 'string' && a.level.unit.trim() !== '' ? { unit: a.level.unit.trim() } : {}) });
+      }
+      const interventions = plan.actsOn.map((f) => {
+        const lvl = levelById.get(f.id);
+        if (lvl === undefined) return { factor_id: f.id, value: null };
+        const os = rawNodes.find((x) => x.id === f.id)?.observed_state;
+        const cap = typeof os?.cap === 'number' && Number.isFinite(os.cap) && os.cap > 0 ? os.cap : undefined;
+        if (cap === undefined) return { factor_id: f.id, value: lvl.value };
+        const unit = lvl.unit ?? (typeof os?.unit === 'string' ? os.unit : undefined);
+        return { factor_id: f.id, value: lvl.value / cap, raw_value: lvl.value, ...(unit !== undefined ? { unit } : {}) };
       });
-      proposals.put(proposal);
+      const parameters = { parent_decision_id: decision.id, label: plan.label, option_id: plan.optionId, interventions };
+      // The product's own transaction, run here purely: a spec it would not build is never sent.
+      const built = buildAddOptionTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
+      if (!built.matched || JSON.stringify(built.proposal.operations).length > GM_HELD_OPERATIONS_MAX_JSON_CHARS) {
+        return { ok: false, mutated: false, refusal: 'not_prepared',
+          detail: 'That option could not be prepared as one change, so nothing was sent or changed. Tell the user plainly.' };
+      }
+      const r = await dispatch('/orchestrate/v2/turn', {
+        kind: 'message', turn_id: authorisationTurnId(`agent_add_option:${ctx.scenario_id}:${JSON.stringify(parameters)}`), scenario_id: ctx.scenario_id,
+        stage: 'frame', turn_class: 'frame', source: 'chip', message: `Add the option "${plan.label}".`,
+        chip: { id: AGENT_ADD_OPTION_CHIP_ID, intent: 'add_option', parameters },
+      });
+      /**
+       * ⛔ HELD, OR NOT PROPOSED. The only proof is the product's own handle for THIS option, bound by identity
+       * (`gmh_` over the scenario and this option's id) — and, where the store can be read, the held batch itself
+       * adding this option WITH its decision link. Anything else is a hard failure: never retried in other words.
+       */
+      const ref = gmHeldProposalRef(ctx.scenario_id, `node:${plan.optionId}`);
+      const offered = Array.isArray(r.json.suggested_actions) ? r.json.suggested_actions as { id?: unknown; label?: unknown; message?: unknown }[] : [];
+      const heldChip = r.status === 200 ? offered.find((c) => c?.id === ref) : undefined;
+      let heldBatchOk = heldChip !== undefined;
+      if (heldBatchOk && opts.readPendingActions !== undefined) {
+        try {
+          const hold = await liveHeldHold(ctx.scenario_id, ref);
+          const ops = hold !== undefined ? heldOpsOf(hold) : [];
+          heldBatchOk = ops.some((o) => o.op === 'add_node' && o.path === plan.optionId)
+            && ops.some((o) => o.op === 'add_edge' && o.path === `${decision.id}::${plan.optionId}`);
+        } catch {
+          heldBatchOk = false;
+        }
+      }
+      if (!heldBatchOk) {
+        return { ok: false, mutated: false, refusal: 'not_prepared',
+          detail: 'Olumi could not prepare that option as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
+      }
       return {
         ok: true, mutated: false,
-        proposal_id: proposal.proposal_id,
-        public_label: proposal.public_label,
+        proposal_id: ref,
+        public_label: typeof heldChip!.label === 'string' && heldChip!.label.trim() !== '' ? heldChip!.label : plan.publicLabel,
+        held_message: typeof heldChip!.message === 'string' ? heldChip!.message : '',
         base_revision: g.graph_hash,
-        option: { label: plan.label, acts_on: plan.actsOn.map((a) => a.label) },
+        option: { label: plan.label, linked_from: String(decision.label ?? ''), acts_on: plan.actsOn.map((a) => a.label) },
+        levels: plan.actsOn.map((f) => {
+          const lvl = levelById.get(f.id);
+          return lvl !== undefined
+            ? { factor: f.label, value: lvl.value, ...(lvl.unit !== undefined ? { unit: lvl.unit } : {}), stated_by: 'user' }
+            : { factor: f.label, value: null, still_needed: true };
+        }),
         note:
-          'Nothing has changed yet. Show the user the option and what it will be linked to, never the id, '
-          + 'and call authorise_change with this proposal_id once they agree.',
+          'Nothing has changed yet. Show the user the option, that it is linked from the decision, what it acts on and each '
+          + 'level — saying plainly which have no level yet — never the id, and call authorise_change with this proposal_id once they agree.',
       };
     },
 

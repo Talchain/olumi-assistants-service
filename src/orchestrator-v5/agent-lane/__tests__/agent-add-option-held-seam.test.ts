@@ -1,0 +1,304 @@
+/**
+ * ⭐ (A0) THE AGENT ADDS AN OPTION THROUGH THE PRODUCT'S OWN ATOMIC SEAM (#70 lift; C52, Canonical #69 5839809620).
+ *
+ * Paul's manual test (25 Sep 17:26–17:54Z, scenario cbd15f83): every option the Agent added reached the model with
+ * NO link from the decision — `planNewOption` never resolved one and the apply wrote N separate system events — so
+ * the canonical readiness said `OPTION_NOT_LINKED_TO_DECISION` and Run was (correctly) withheld while the Agent said
+ * "no structural blocker".
+ *
+ * The fix routes the Agent onto the SAME typed add-option transaction the product uses:
+ *   propose → an in-process `/orchestrate/v2/turn` chip turn (`intent: 'add_option'`) → `dispatchAddOptionTransaction`
+ *   → ONE held `graph_management_held_v1` pending (decision→option edge INCLUDED, referee-checked);
+ *   approve → the UI-shaped confirm → `commitGmHeldResume` → ONE commit.
+ * And because pending actions are read from the LATEST answer row only, the Agent's own answer rows carry the live
+ * hold forward (without that, the Agent's row written after the propose silently drops the hold).
+ *
+ * HARNESS (deliberately not a self-authored model of route-v2): the REAL `ceeOrchestratorRouteV2` and the REAL
+ * `agentV1TurnRoute` share one Fastify app; the Agent reaches route-v2 by its own in-process dispatch. The session
+ * store is stateful with the production READ semantics that matter here: pending actions come from the latest
+ * non-claim answer row, JSONB-key-reordered, through the REAL `parsePendingAction`; a committed graph persists.
+ * The scenario graph read (`/assist/v1/scenarios/:id/graph`) is a stub that serves the stored graph with the REAL
+ * hash functions (`computeAnalysisAffectingGraphHash`), since the Agent only compares its own before/after reads.
+ * Every model call to anything but OpenAI throws; route-v2's LLM router throws if touched at all.
+ */
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import Fastify, { type FastifyInstance } from 'fastify';
+import { randomUUID } from 'node:crypto';
+
+let n = 0;
+let SCENARIO = '';
+const nextScenario = () => { n += 1; SCENARIO = `5a0d1c2b-3a4f-4e5d-8c6b-7a8f9e0d2c${String(n).padStart(2, '0')}`; };
+
+type Row = { id: string; scenario_id: string; turn_id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number; turn_class: string; handler_id: string | null; pending_actions: unknown[]; created_at: string };
+const rows = new Map<string, Row>();
+const order: string[] = [];
+let graphOf = new Map<string, unknown>();
+/** The latest ANSWER row for a scenario — claim rows excluded, exactly as the production read excludes them. */
+const latestRow = (sid: string = SCENARIO): Row | undefined =>
+  [...order].reverse().map((k) => rows.get(k)!).find((r) => r.scenario_id === sid && !r.turn_id.endsWith(':claim'));
+/** What a Postgres `jsonb` column gives back: keys shorter-first then bytewise, `undefined` dropped. */
+const jsonbOrder = (v: unknown): unknown =>
+  Array.isArray(v) ? v.map(jsonbOrder)
+    : v !== null && typeof v === 'object'
+      ? Object.fromEntries(Object.keys(v as Record<string, unknown>)
+        .filter((k) => (v as Record<string, unknown>)[k] !== undefined)
+        .sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0))
+        .map((k) => [k, jsonbOrder((v as Record<string, unknown>)[k])]))
+      : v;
+const parsedPending = async (row: Row | undefined, sid: string): Promise<unknown[]> => {
+  const { parsePendingAction } = await import('../../session/pending-action.js');
+  const raw = row ? (jsonbOrder(JSON.parse(JSON.stringify(row.pending_actions))) as unknown[]) : [];
+  return raw.map((x) => parsePendingAction(x)).filter((x) => x !== null && x.scenario_id === sid);
+};
+let tick = 0;
+const store = {
+  ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
+  readCommittedTurn: vi.fn(async (sid: string, turnId: string) => {
+    const row = rows.get(`${sid}:${turnId}`);
+    return row === undefined ? null : { ...row, pending_actions: await parsedPending(row, sid) };
+  }),
+  readMostRecentPendingActions: vi.fn(async (sid: string) => parsedPending(latestRow(sid), sid)),
+  append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; turn_class?: string; handler_id?: string | null; pending_actions?: unknown[]; graph?: unknown }) => {
+    const k = `${w.scenario_id}:${w.turn_id}`;
+    if (!rows.has(k)) {
+      tick += 1;
+      rows.set(k, { id: `row-${rows.size + 1}`, scenario_id: w.scenario_id, turn_id: w.turn_id, request_hash: w.request_hash,
+        assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0,
+        turn_class: w.turn_class ?? 'direct_answer', handler_id: w.handler_id ?? null,
+        pending_actions: jsonbOrder(JSON.parse(JSON.stringify(w.pending_actions ?? []))) as unknown[],
+        created_at: new Date(Date.UTC(2026, 8, 26, 0, 0, tick)).toISOString() });
+      order.push(k);
+      if (w.graph !== undefined && w.graph !== null) graphOf.set(w.scenario_id, jsonbOrder(JSON.parse(JSON.stringify(w.graph))));
+    }
+    return { id: rows.get(k)!.id };
+  }),
+  readRecent: vi.fn(async (sid: string) => [...order].reverse().map((k) => rows.get(k)!).filter((r) => r.scenario_id === sid && !r.turn_id.endsWith(':claim'))),
+  readFactsFor: vi.fn(async () => []),
+  readFactsWithTurnFor: vi.fn(async () => []),
+  readScenarioRunAnalysisFactsFor: vi.fn(async () => ({ facts: [], total_count: 0 })),
+  invalidateScoped: vi.fn(async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] })),
+  invalidateAll: vi.fn(async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] })),
+  storeDraftGraph: vi.fn(async (sid: string, g: unknown) => { graphOf.set(sid, g); }),
+  loadGraph: vi.fn(async (sid: string) => graphOf.get(sid) ?? null),
+  loadGraphAndBriefText: vi.fn(async (sid: string) => ({ graph: graphOf.get(sid) ?? null, briefText: null })),
+  hasPriorTurns: vi.fn(async (sid: string) => order.some((k) => rows.get(k)!.scenario_id === sid)),
+};
+vi.mock('../../session/index.js', () => ({ getSessionStore: () => store, resetSessionStoreForTests: () => {}, SessionReadError: class SessionReadError extends Error {} }));
+vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, resolveUserIdentity: async () => ({ mode: 'off' }) };
+});
+/** route-v2's LLM router: the typed add-option and its confirm are deterministic — ANY use is a failure. */
+const routerCalls: string[] = [];
+const refuse = (what: string) => async () => { routerCalls.push(what); throw new Error(`route-v2 LLM router must not be used on the typed add-option seam (${what})`); };
+vi.mock('../../../adapters/llm/router.js', () => {
+  const adapter = { name: 'test', model: 'test-model', chat: refuse('chat'), chatWithTools: refuse('chatWithTools') };
+  return {
+    getAdapter: () => adapter,
+    getAdapterWithResolution: () => ({ adapter, resolution: { task: 'narrate', resolved_model: 'test-model', resolution_source: 'task_default' as const } }),
+    getMaxTokensFromConfig: () => undefined,
+  };
+});
+vi.mock('../../../adapters/llm/prompt-loader.js', () => ({ getSystemPrompt: async () => 'test system prompt' }));
+
+type Chip = { id: string; label: string; message: string };
+type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string }; _provider_calls?: { provider: string; outcome?: string }[];
+  _agent: { tool_calls: { name: string; ok: boolean; mutated?: boolean; refusal?: string; proposal_id?: string }[] } };
+
+/** A decision, a goal, one factor with a declared scale, two linked options: runnable before anything is added. */
+const seedGraph = (factorCount = 1, decisions = 1) => {
+  const e = (from: string, to: string, mean = 1) => ({ from, to, strength: { mean, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const });
+  // Price is a lever the decision sets: `category: 'controllable'` (the readiness authority blocks an option that
+  // leaves a controllable factor unset — and only then).
+  const factors = Array.from({ length: factorCount }, (_, i) => ({ id: i === 0 ? 'fac_price' : `fac_${i}`, kind: 'factor', label: i === 0 ? 'Price' : `Factor ${i}`,
+    ...(i === 0 ? { category: 'controllable' } : {}), observed_state: { value: 0.245, raw_value: 49, unit: 'GBP', cap: 200 } }));
+  const decs = Array.from({ length: decisions }, (_, i) => ({ id: i === 0 ? 'dec_x' : `dec_${i}`, kind: 'decision', label: i === 0 ? 'Choose a price' : `Other decision ${i}` }));
+  return {
+    nodes: [
+      ...decs,
+      { id: 'goal_x', kind: 'goal', label: 'Revenue', goal_threshold: 0.8 },
+      ...factors,
+      { id: 'opt_a', kind: 'option', label: 'Keep £49', interventions: { fac_price: 0.245 } },
+      { id: 'opt_b', kind: 'option', label: 'Raise to £59', interventions: { fac_price: 0.295 } },
+    ],
+    edges: [e('dec_x', 'opt_a'), e('dec_x', 'opt_b'), e('opt_a', 'fac_price'), e('opt_b', 'fac_price'),
+      ...factors.map((f) => e(f.id, 'goal_x'))],
+    goal_node_id: 'goal_x',
+  };
+};
+
+/** Scripted OpenAI: each Agent model call takes the next reply; anything that is not OpenAI throws. */
+let script: ((body: Record<string, unknown>) => unknown)[] = [];
+let openAiCalls = 0;
+const fnCall = (name: string, args: Record<string, unknown>) => ({ output: [{ type: 'function_call', name, call_id: `c${openAiCalls}`, arguments: JSON.stringify(args) }] });
+const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
+/** The inner requests the Agent sent to route-v2, in order. */
+let inner: Record<string, unknown>[] = [];
+
+describe('(A0) the Agent adds an option through the typed add-option seam — linked from the decision, one approval, one commit', () => {
+  async function buildApp(): Promise<FastifyInstance> {
+    vi.resetModules();
+    const { ceeOrchestratorRouteV2 } = await import('../../../orchestrator/route-v2.js');
+    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+    const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
+    const a = Fastify({ logger: false });
+    a.addHook('preHandler', async (req) => { if (req.url === '/orchestrate/v2/turn') inner.push(req.body as Record<string, unknown>); });
+    a.post('/assist/v1/scenarios/:id/graph', async (req) => {
+      const g = graphOf.get((req.params as { id: string }).id) ?? null;
+      return { graph: g, graph_hash: g === null ? null : computeAnalysisAffectingGraphHash(g as never) };
+    });
+    await a.register(ceeOrchestratorRouteV2);
+    await a.register(agentV1TurnRoute);
+    await a.ready();
+    return a;
+  }
+  let app: FastifyInstance;
+  beforeAll(async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: string }) => {
+      if (!String(url).includes('openai')) throw new Error(`non-OpenAI network call: ${String(url)}`);
+      openAiCalls += 1;
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      const next = script.shift();
+      return new Response(JSON.stringify(next !== undefined ? next(body) : say('Done.')), { status: 200 });
+    }));
+    process.env.AGENT_LANE_ENABLED = 'true';
+    process.env.AGENT_LANE_PREVIEW = 'false';
+    app = await buildApp();
+  }, 600_000);
+  afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; inner = []; routerCalls.length = 0; });
+
+  const turn = async (payload: Record<string, unknown>): Promise<Body> => {
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...payload } });
+    expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
+    return r.json() as Body;
+  };
+  const graphNow = () => graphOf.get(SCENARIO) as { nodes: { id: string; kind: string; label: string; interventions?: Record<string, unknown> }[]; edges: { from: string; to: string }[] };
+  const approveChipOf = (b: Body) => b.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
+  const readiness = async () => {
+    const { buildCanonicalAnalysisReadyFromGraph } = await import('../../../orchestrator/tools/analysis-ready-helper.js');
+    return buildCanonicalAnalysisReadyFromGraph(graphNow()) as { may_run?: boolean; status?: string } | undefined;
+  };
+  /** The hold the Agent's LATEST answer row carries — what the next turn (and route-v2's confirm) will read. */
+  const heldOnLatestRow = async () => {
+    const pendings = (await store.readMostRecentPendingActions(SCENARIO)) as { chip_id: string; action: { kind: string; inline_patch?: { handler_id?: string; operations?: { op: string; path: string }[] } } }[];
+    return pendings.filter((p) => p.action.kind === 'apply_proposed_change' && p.action.inline_patch?.handler_id === 'graph_management_held_v1');
+  };
+  const proposeOptionC = (level: number | undefined) => {
+    script = [
+      () => fnCall('propose_new_option', { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', ...(level !== undefined ? { level: { value: level, unit: 'GBP' } } : {}) }], rationale: 'The user asked for it.' }),
+      () => say('I would add "Test £54 at release", linked from the decision and setting the price. Shall I add it?'),
+    ];
+    return turn({ message: 'Add an option: test £54 at release.' });
+  };
+  const newOption = () => graphNow().nodes.find((x) => x.kind === 'option' && x.label === 'Test £54 at release');
+
+  it('CONTROL (passes at base): the REAL route-v2 in this harness mints ONE gmh_ hold for a typed add-option chip turn, with the decision edge, and no LLM', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const r = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), stage: 'frame', turn_class: 'frame', source: 'chip',
+      message: 'Add the option "Control option".',
+      chip: { id: 'control-add-option', intent: 'add_option', parameters: { parent_decision_id: 'dec_x', label: 'Control option', option_id: 'ctl0001', interventions: [{ factor_id: 'fac_price', value: 0.27, unit: 'GBP', raw_value: 54 }] } },
+    } });
+    expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
+    const held = await heldOnLatestRow();
+    expect(held.map((p) => p.chip_id), r.body.slice(0, 600)).toEqual([expect.stringMatching(/^gmh_[0-9a-f]{12}$/)]);
+    expect(held[0]!.action.inline_patch!.operations!.some((o) => o.op === 'add_edge' && o.path === 'dec_x::ctl0001')).toBe(true);
+    expect(routerCalls).toEqual([]);
+  }, 120_000);
+
+  it('[a] RED: one option with the user\'s £54 → ONE held proposal on the typed rail → one click → linked from the decision, levelled, runnable', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeOptionC(54);
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify({ chips: t1.suggested_actions, tools: t1._agent.tool_calls })).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    // ONE inner write, on the typed rail — never the old N system events.
+    expect(inner.filter((b) => b['kind'] === 'system_event'), 'no structural system events').toEqual([]);
+    expect(inner.filter((b) => (b['chip'] as { intent?: string } | undefined)?.intent === 'add_option')).toHaveLength(1);
+    // [d] the Agent's own answer row (the latest) still carries the hold, with the decision edge IN the held batch.
+    const held = await heldOnLatestRow();
+    expect(held.map((p) => p.chip_id)).toEqual([approve!.id.slice('agent-approve-proposal:'.length)]);
+    const ops = held[0]!.action.inline_patch!.operations!;
+    const optId = ops.find((o) => o.op === 'add_node')!.path;
+    expect(ops.some((o) => o.op === 'add_edge' && o.path === `dec_x::${optId}`), JSON.stringify(ops)).toBe(true);
+    expect(newOption(), 'nothing is written before the approval').toBeUndefined();
+
+    const callsBefore = openAiCalls;
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(openAiCalls - callsBefore, 'a typed approval makes no model call').toBe(0);
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const opt = newOption();
+    expect(opt, JSON.stringify(graphNow().nodes)).toBeDefined();
+    expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === opt!.id), 'linked FROM THE DECISION').toBe(true);
+    expect(graphNow().edges.some((e) => e.from === opt!.id && e.to === 'fac_price')).toBe(true);
+    // [g] the user's £54 on a 0–£200 scale is stored normalised, with its raw figure.
+    expect(JSON.stringify(opt!.interventions)).toMatch(/0\.27/);
+    expect((await readiness())?.may_run, 'runnable after the add').toBe(true);
+    expect(await heldOnLatestRow(), 'the hold is consumed').toEqual([]);
+    // [e] OpenAI only; route-v2's router untouched on both turns.
+    expect(routerCalls).toEqual([]);
+    for (const b of [t1, t2]) for (const p of b._provider_calls ?? []) expect(p.provider).toBe('openai');
+  }, 120_000);
+
+  it('[b] an option with NO stated level is linked from the decision and left honestly unset — the authority names the missing value for THAT option, and the reply names the step', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeOptionC(undefined);
+    const approve = approveChipOf(t1)!;
+    expect(approve.id).toMatch(/gmh_/);
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._agent.tool_calls[0]).toEqual(expect.objectContaining({ ok: true, mutated: true }));
+    const opt = newOption()!;
+    expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === opt.id), 'linked FROM THE DECISION').toBe(true);
+    expect(JSON.stringify(opt.interventions ?? {})).not.toMatch(/\d/);
+    // The ONE readiness authority decides admission (one unset option: runnable, leaving it out). What A0 owns is
+    // that the unknown stays unknown and is NAMED, bound to this option by identity — never filled in.
+    const r = await readiness() as { readiness_issues?: { code: string; option_id?: string; factor_id?: string; repairability?: string }[] } | undefined;
+    expect(r?.readiness_issues, JSON.stringify(r?.readiness_issues)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'MISSING_OPTION_VALUE', option_id: opt.id, factor_id: 'fac_price', repairability: 'human_input_required' }),
+    ]));
+    expect(t2.assistant_text, 'the completion step is named, in plain words').toMatch(/does not yet set a level for Price/);
+    expect(t2.assistant_text, 'no raw codes in user prose').not.toMatch(/\b[A-Z]+(?:_[A-Z]+){2,}\b/);
+  }, 120_000);
+
+  it('[d] a question between the offer and the click does not drop the hold', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const approve = approveChipOf(await proposeOptionC(54))!;
+    script = [() => say('It would test the lower price before rollout.')];
+    await turn({ message: 'What would that change?' });
+    expect((await heldOnLatestRow()).map((p) => p.chip_id), 'the question turn\'s answer row carries the hold').toEqual([approve.id.slice('agent-approve-proposal:'.length)]);
+    const t3 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t3._agent.tool_calls[0]).toEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id)).toBe(true);
+  }, 120_000);
+
+  it('[i] a typed "yes" — the Agent authorises the held proposal by its id and it applies', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeOptionC(54);
+    const ref = t1._agent.tool_calls.find((c) => c.name === 'propose_new_option')?.proposal_id;
+    expect(ref).toMatch(/^gmh_[0-9a-f]{12}$/);
+    script = [() => fnCall('authorise_change', { proposal_id: ref }), () => say('Added.')];
+    const t2 = await turn({ message: 'Yes, add it.' });
+    expect(t2._agent.tool_calls.find((c) => c.name === 'authorise_change'), JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: true }));
+    expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id)).toBe(true);
+  }, 120_000);
+
+  it('refuses, and sends NOTHING, when the model has no single decision to link the option from', async () => {
+    graphOf.set(SCENARIO, seedGraph(1, 2));
+    const t1 = await proposeOptionC(54);
+    const call = t1._agent.tool_calls.find((c) => c.name === 'propose_new_option');
+    expect(call).toEqual(expect.objectContaining({ ok: false, refusal: 'no_single_decision' }));
+    expect(inner, 'no inner turn').toEqual([]);
+    expect(approveChipOf(t1)).toBeUndefined();
+  }, 120_000);
+
+  it('refuses, and sends NOTHING, an option too large to hold as one change (over the 8-change batch cap)', async () => {
+    graphOf.set(SCENARIO, seedGraph(7));
+    script = [
+      () => fnCall('propose_new_option', { label: 'Everything at once', acts_on: Array.from({ length: 7 }, (_, i) => ({ factor_label: i === 0 ? 'Price' : `Factor ${i}`, direction: 'positive' })), rationale: 'x' }),
+      () => say('That is too many links for one change.'),
+    ];
+    const t1 = await turn({ message: 'Add an option that changes everything.' });
+    expect(t1._agent.tool_calls.find((c) => c.name === 'propose_new_option')).toEqual(expect.objectContaining({ ok: false, refusal: 'too_many_links' }));
+    expect(inner).toEqual([]);
+  }, 120_000);
+});

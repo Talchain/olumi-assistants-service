@@ -120,11 +120,11 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     name: 'propose_new_option',
     description:
       'Add an option the user has just asked for, when the model does NOT already have it. '
-      + 'This does NOT change anything: it records an exact proposal and returns its id, which you keep for '
+      + 'This does NOT change anything: it prepares ONE complete change and returns its id, which you keep for '
       + 'authorise_change: show the user the option and what it will be linked to, never the id, before asking them to approve. '
-      + 'Name the factors it would change, using the labels get_canonical_state returned — an option linked to nothing '
-      + 'cannot be compared and blocks the comparison for every other option. '
-      + 'It adds the option and its links ONLY; say what it does to each factor afterwards with propose_option_interventions.',
+      + 'The option is linked from the decision automatically. Name the factors it would change, using the labels '
+      + 'get_canonical_state returned. Give a level ONLY for a figure the user stated, in their own units; never invent one. '
+      + 'A factor with no stated level is added with no level, and you say plainly what is still needed.',
     parameters: obj({
       label: { type: 'string', description: 'The option in the user\u2019s own words.' },
       acts_on: {
@@ -136,6 +136,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
             type: 'string', enum: ['positive', 'negative'],
             description: 'Whether this option pushes the factor up or down. State it; never guess it for the user.',
           },
+          level: obj({
+            value: { type: 'number', description: 'The figure the user stated, in the factor\u2019s own units (e.g. 54 for \u00a354).' },
+            unit: { type: 'string', description: 'The unit the user stated, if any.' },
+          }, ['value']),
         }, ['factor_label', 'direction']),
       },
       rationale: { type: 'string', description: 'Why this option is worth comparing, in the user\u2019s terms.' },

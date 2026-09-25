@@ -58,7 +58,8 @@ import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, typedApprovalOf } from
 import { CarriedProposals, carrierForAnswerRow, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
-import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
+import { isPendingActionExpired, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
+import { GM_HELD_HANDLER_ID } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
 import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
@@ -1169,6 +1170,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const approvedProposal = typedApprovalOf(body);
     const requestHash = agentTurnRequestHash(scenarioId, userId, message, approvedProposal !== undefined ? `approve:${approvedProposal}` : undefined);
     /** The response a replay returns: the ORIGINAL words, on today's state, with no model call. */
+    /** The `gmh_` handles of the product's held add-options still live on the latest answer row (C52). A failed read is none. */
+    const liveHeldRefs = async (sid: string): Promise<string[]> => {
+      if (typeof store.readMostRecentPendingActions !== 'function') return [];
+      try {
+        return (await store.readMostRecentPendingActions(sid))
+          .filter((pa) => pa.action.kind === 'apply_proposed_change'
+            && (pa.action as { inline_patch?: { handler_id?: unknown } }).inline_patch?.handler_id === GM_HELD_HANDLER_ID
+            && !isPendingActionExpired(pa, Date.now()))
+          .map((pa) => pa.chip_id);
+      } catch {
+        return [];
+      }
+    };
     const replayed = async (prior: CommittedTurnRecord) => {
       const state = await readBackState(dispatch, scenarioId);
       const remembered = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) ?? [] : [];
@@ -1192,7 +1206,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         stage: 'frame',
         answerKind: 'substantive',
         suggested_actions: stillValidOffers(offered, {
-          outstandingProposalIds: ((id) => new Set(id !== undefined ? [id] : []))(executableWaitingProposal(scenarioId, userId, state.graphHash)),
+          outstandingProposalIds: new Set([
+            ...((id) => (id !== undefined ? [id] : []))(executableWaitingProposal(scenarioId, userId, state.graphHash)),
+            ...(await liveHeldRefs(scenarioId)),
+          ]),
           analysisReady: state.analysisReady,
           analysisState: state.analysisState,
           // `draft_graph` is read back only when the graph has content.
@@ -1355,7 +1372,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const capabilities = createAgentCapabilities(
       countingDispatch, proposals, callStructured, mode,
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
-      { firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }) },
+      {
+        firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }),
+        // The held add-option (C52) is confirmed against the store's LATEST answer row — the row route-v2 reads.
+        ...(typeof store.readMostRecentPendingActions === 'function'
+          ? { readPendingActions: (sid: string) => store.readMostRecentPendingActions!(sid) }
+          : {}),
+      },
     );
     // A session whose in-process history holds no user message (a restart, a
     // deploy, an eviction — or only a board-edit note appended since) is seeded
@@ -1706,10 +1729,29 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       currentGraphHash: graphHash,
       emittedAtIso,
     });
+    /**
+     * ⛔ THIS ROW MUST CARRY THE PRODUCT'S HELD ADD-OPTION FORWARD (C52). Pending actions are read from the
+     * LATEST answer row only (`supabase-store.ts` readMostRecentPendingActions: `.limit(1)`), and this row is
+     * written AFTER route-v2's row that minted the hold — so a row that carries only the Agent's own items drops
+     * the hold, and the user's approval then finds nothing to confirm. Read at the END of the turn, after every
+     * inner write: a hold this turn confirmed is already consumed and is not carried. Holds go first; the row
+     * holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK). A failed read carries none, loudly.
+     */
+    let liveHolds: PendingAction[] = [];
+    if (typeof store.readMostRecentPendingActions === 'function') {
+      try {
+        liveHolds = (await store.readMostRecentPendingActions(scenarioId)).filter((pa) => pa.action.kind === 'apply_proposed_change'
+          && (pa.action as { inline_patch?: { handler_id?: unknown } }).inline_patch?.handler_id === GM_HELD_HANDLER_ID
+          && !isPendingActionExpired(pa, Date.now()));
+      } catch (err) {
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: live held proposals could not be read — this answer row carries none');
+      }
+    }
     const durablePending = [
-      ...(offerRun ? derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: emittedAtIso, ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) : []),
+      ...liveHolds,
       ...(approvalCarrier !== undefined ? [approvalCarrier] : []),
-    ];
+      ...(offerRun ? derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: emittedAtIso, ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) : []),
+    ].slice(0, PENDING_ACTIONS_PER_TURN_CAP);
 
     const lastRunBlocks = Array.isArray(lastRun?.blocks) ? lastRun.blocks : [];
     const runBound = bindRunBlocksToReadback(lastRunBlocks, { graphHash, analysisState, analysisResult });
