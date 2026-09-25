@@ -230,6 +230,39 @@ describe('RED: coaching blocks are bound to the readback, never appended raw', (
   });
 });
 
+/**
+ * ⛔ R&C served witness `bw-580d135b-7f9a16d-noflag3` (#69 5827198323): a near-tie Run withheld the leader, and a
+ * `strengthen` card ("The leading option is ahead…") still reached the user. Leader-presuming blocks — compose's own
+ * definition — are shown only when `leader_claim.permitted === true`.
+ */
+describe('RED: a card that presumes a leader is bound only when a leader may be named', () => {
+  const current = { run_state: { kind: 'complete_current', computed_at: '2026-09-25T05:10:00.000Z' }, usable_for_chips: true };
+  const withheld = { ...current, leader_claim: { permitted: false, withheld_reason: 'options_do_not_separate', separation: 'near_tie' } };
+  const permitted = { ...current, leader_claim: { permitted: true } };
+  const served = { type: 'coaching', coaching_kind: 'strengthen', block_id: 'coach:lens:pre_mortem', source: 'decision_review_enricher', graph_hash_at_generation: H, title: 'Stress-test', body: 'The leading option is ahead, but not by a wide margin.' };
+  const presuming = [
+    served,
+    ...['narrative', 'robustness', 'scenario_context', 'pre_mortem', 'flip_threshold'].map((k) => ({ type: 'review_card', card_kind: k, graph_hash_at_generation: H, title: k, body: 'b' })),
+    { type: 'evidence', graph_hash_at_generation: H, evidence_gap: 'Confirm the leading option holds if churn rises.' },
+  ];
+  const neutral = [
+    { type: 'review_card', card_kind: 'evidence_priority', graph_hash_at_generation: H, title: 't', body: 'b' },
+    { type: 'coaching', coaching_kind: 'assumption_check', graph_hash_at_generation: H, title: 't', body: 'b' },
+    { type: 'evidence', graph_hash_at_generation: H, evidence_gap: 'Measure monthly churn before the rise.' },
+  ];
+  const result = { type: 'analysis_result' };
+  it('RED: withheld (the served near tie) → every leader-presuming block is dropped; neutral ones stay', () => {
+    const out = bindRunBlocksToReadback([...presuming, ...neutral], { graphHash: H, analysisState: withheld, analysisResult: result });
+    expect(out).toEqual(neutral);
+  });
+  it('RED: no leader_claim at all is not a permission (fail closed)', () => {
+    expect(bindRunBlocksToReadback([served, ...neutral], { graphHash: H, analysisState: current, analysisResult: result })).toEqual(neutral);
+  });
+  it('CONTROL: permitted → the same blocks are all bound', () => {
+    expect(bindRunBlocksToReadback([...presuming, ...neutral], { graphHash: H, analysisState: permitted, analysisResult: result })).toEqual([...presuming, ...neutral]);
+  });
+});
+
 describe('the typed leader permission the Agent is given', () => {
   const ready = (mode: string) => ({ analysis_admission: { structurally_analysable: true, permitted_analysis_mode: mode } });
   it('names a leader only when leader_claim.permitted AND the admission is comparative_leader', () => {
