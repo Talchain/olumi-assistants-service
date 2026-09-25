@@ -37,6 +37,11 @@ import {
   OPTION_OUTCOME_SIGNAL_CAP,
 } from '../analysis-signals.js';
 import { reconcileAnalysisSummaryWithEnrichment } from '../analysis-fallback.js';
+import {
+  buildAutoRunProvenance,
+  buildConstructionAutoRunProvenance,
+  RUN_PROVENANCE_ENRICHMENT_KEY,
+} from '../run-initiator.js';
 import { MAX_PROJECTED_OPTIONS } from '../context-pack-assembler.js';
 // Test-side import ONLY (does not couple the src modules): pins the local
 // sanitiser replica to the routing/tool-schema original it mirrors (F3).
@@ -188,6 +193,7 @@ describe('manifest ↔ PLoT RunResponseV3 (the seam that had no bolt)', () => {
     'coaching_signal_turn_id',
     'coaching_signal_produced_at',
     '_diagnostics',
+    'run_provenance',
   ]);
   const LEGACY_V1_ONLY = new Set(['results']);
   const manifestPlotSection = [...ENRICHMENT_PRODUCER_MANIFEST].filter(
@@ -379,5 +385,30 @@ describe('projection cap parity (context-audit #1 row #6 — was comment-only)',
     // both caps must move with it or this goes RED.
     expect(OPTION_GOAL_FIT_SIGNAL_CAP).toBe(MAX_PROJECTED_OPTIONS);
     expect(OPTION_OUTCOME_SIGNAL_CAP).toBe(MAX_PROJECTED_OPTIONS);
+  });
+});
+
+// ============================================================================
+// The auto-run provenance stamp is a CEE-injected key on the SAME persisted
+// record (chip-click-dispatch.ts stampAutoRunProvenance). Until it was
+// manifested, every auto-run fact fired the unknown-key tripwire — a standing
+// false alarm on exactly the facts the provisional label exists for.
+// ============================================================================
+describe('the auto-run provenance stamp is manifested (CEE-injected)', () => {
+  it('a stamped fact from EITHER initiator fires no unknown-key telemetry', () => {
+    for (const stamp of [
+      buildAutoRunProvenance('draft-turn-abc'),
+      buildConstructionAutoRunProvenance('graph_registration:dddddddd-dddd-4ddd-8ddd-dddddddddddd'),
+    ]) {
+      const enrichment = { analysis_status: 'computed', [RUN_PROVENANCE_ENRICHMENT_KEY]: stamp };
+      expect(findUnknownEnrichmentKeys(enrichment)).toEqual([]);
+    }
+  });
+
+  it('it is manifested as CEE-injected and skipped by the analysis→LLM projection, with a reason', () => {
+    expect(ENRICHMENT_PRODUCER_MANIFEST.has(RUN_PROVENANCE_ENRICHMENT_KEY)).toBe(true);
+    expect(ENRICHMENT_ANALYSIS_LLM_SKIP.get(RUN_PROVENANCE_ENRICHMENT_KEY)?.trim().length ?? 0).toBeGreaterThan(0);
+    // Not a PLoT key: it must not appear in the pinned PLoT response set.
+    expect(PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS.has(RUN_PROVENANCE_ENRICHMENT_KEY)).toBe(false);
   });
 });

@@ -34,6 +34,7 @@
 import { describe, expect, it } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { committedValueWrite } from './fixtures/served-value-write.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440000';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r' };
@@ -78,7 +79,7 @@ function product(opts: { competitorFramesBetweenTheReads?: boolean } = {}) {
         : n));
       rev += 1;
       valueWritesDone = true;
-      return { status: 200, json: { assistant_text: 'Updated.' } };
+      return { status: 200, json: committedValueWrite(ev.target_id) };
     }
     // a READ
     if (valueWritesDone) readsAfterWrites += 1;

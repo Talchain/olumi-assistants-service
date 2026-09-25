@@ -43,6 +43,7 @@ import {
 } from '../build-turn-context.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getSessionStore } from '../session/index.js';
+import { TurnFenceRejectedError } from '../session/turn-fence.js';
 import { executeOptionInterventionEdit } from './option-intervention-edit.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
@@ -181,7 +182,7 @@ export interface DispatchSystemEventResult {
    * remain retryable 500. No graph or turn write lands for this outcome.
    */
   readonly graphConflict?: {
-    readonly recovery_action: 'refresh_and_reconfirm';
+    readonly recovery_action: 'refresh_and_reconfirm' | 'start_new_draft';
     readonly conflict_category: string;
     /**
      * ⚠ ALWAYS ANALYSIS-SPACE (16-hex), NEVER the 64-hex identity hash.
@@ -1888,6 +1889,42 @@ async function dispatchFactorValueEdit(
           conflict_category: err.conflict_category,
           // Analysis-space (16-hex), from a FRESH read, never the 64-hex
           // identity hash the error carries. See readClientRecoverableBaseHash.
+          expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
+        },
+      };
+    }
+    // ⭐ A LATER TURN CLAIMED THIS SCENARIO, OR THE USER STOPPED THIS ONE. The
+    // turn fence refused the write inside the append transaction, so nothing of
+    // this edit landed — a KNOWN refusal, answered with the envelope the message
+    // path already uses for the same error (turn-executor.ts, V5 TURN FENCE —
+    // AMENDMENT A2): 409 GRAPH_DIVERGED, `turn_fence_<verdict>`, and the
+    // per-verdict remedy. Served `caf7d1a` answered it with the retryable 500
+    // below (3 of 5 refused racers, request 5bb2257f), which invited a blind
+    // retry over the turn that superseded this one.
+    //
+    // Only the two CONFLICT verdicts, as the register route draws the line:
+    // `unclaimed` / `unavailable` are infrastructure refusals and keep the
+    // retryable 500 until their code is decided (F5 fixture header).
+    if (err instanceof TurnFenceRejectedError && (err.verdict === 'superseded' || err.verdict === 'stopped')) {
+      log.warn(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          target_id: event.target_id,
+          fence_verdict: err.verdict,
+          generation: err.generation,
+          max_generation: err.maxGeneration,
+        },
+        'V5 factor_value_edit — turn fence refused the graph write; nothing written',
+      );
+      return {
+        response: result.response,
+        commitPerformed: false,
+        graph: null,
+        graphConflict: {
+          recovery_action: err.verdict === 'stopped' ? 'start_new_draft' : 'refresh_and_reconfirm',
+          conflict_category: `turn_fence_${err.verdict}`,
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
         },
       };

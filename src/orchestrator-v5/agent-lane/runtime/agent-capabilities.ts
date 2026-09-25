@@ -91,6 +91,7 @@ import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSumm
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { baselineLabelledOptionId, structuralFacts } from '../structural-facts.js';
+import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
@@ -99,9 +100,113 @@ import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysis
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
+import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
+
+/**
+ * ⭐ DID *THIS* `factor_value_edit` COMMIT A WRITE? Read from its OWN response only.
+ *
+ * What the served `/orchestrate/v2/turn` system-event response carries, derived at
+ * `route-v2.ts` (the `ingress.kind === 'system_event'` branch) and
+ * `system-events/dispatch.ts` (`dispatchFactorValueEdit`):
+ *
+ *   · COMMITTED → HTTP 200, `blocks: [{ type: 'graph_patch', status: 'applied',
+ *     operation: 'set_factor_value', target_id, before, after }]`, `graph_hash` (the
+ *     commit's own persisted hash), `draft_graph`, and a `model_version_receipt` only
+ *     when a version was minted. A guest never gets one (`append_turn_atomic_v5`:
+ *     `v_should_create := v_user_id IS NOT NULL AND …`, else `'model_version_receipt',
+ *     NULL`); it is also flag-dependent and the one `DEGRADABLE_EGRESS_FIELD`.
+ *   · REFUSED → ALSO HTTP 200. The refusal is committed as a turn with no graph
+ *     (`commitPerformed: true, graph: null`), so the body is `blocks: []`, no
+ *     `graph_hash`, no receipt, and copy such as "…so I haven't changed anything."
+ *   · COMMIT FAILED → 500 (`system_event_commit_failed`).
+ *   · REPLAY / REUSED ID → 200, but `commit.ts` rewrites the patch to `status: 'noop'`
+ *     ("nothing was written") and strips the receipt on a reused id.
+ *   · VALUE ALREADY HELD → 200, the handler's own fact says `status: 'noop'`.
+ *
+ * So the one per-operation proof a guest's write carries is the `graph_patch` block
+ * with `status: 'applied'` for THIS target. It is built from this request's own
+ * handler fact and returned only on this request's response, so ANOTHER writer cannot
+ * produce it: their commits move the graph and its hash, which is exactly why neither
+ * the hash nor a read-back of the target is evidence of anything we did.
+ */
+function valueWriteCommittedByThisRequest(
+  res: { status: number; json: Record<string, unknown> },
+  targetId: string,
+): boolean {
+  if (res.status !== 200) return false;
+  const blocks: unknown[] = Array.isArray(res.json.blocks) ? res.json.blocks : [];
+  return blocks.some((b) => {
+    if (b === null || typeof b !== 'object') return false;
+    const p = b as { type?: unknown; operation?: unknown; target_id?: unknown; status?: unknown };
+    return p.type === 'graph_patch' && p.operation === 'set_factor_value' && p.target_id === targetId && p.status === 'applied';
+  });
+}
+
+/**
+ * The native figure THIS request's own committed write stored for `targetId` — from its own
+ * `graph_patch.after` (the handler fact of this request; another writer cannot produce it).
+ * `undefined` when the response carries no usable snapshot.
+ */
+function ownCommittedNative(res: { status: number; json: Record<string, unknown> }, targetId: string): number | undefined {
+  if (!valueWriteCommittedByThisRequest(res, targetId)) return undefined;
+  const blocks: unknown[] = Array.isArray(res.json.blocks) ? res.json.blocks : [];
+  const patch = blocks.find((b) => {
+    const p = (b ?? {}) as { type?: unknown; target_id?: unknown; status?: unknown };
+    return p.type === 'graph_patch' && p.target_id === targetId && p.status === 'applied';
+  }) as { after?: unknown } | undefined;
+  const a = (patch?.after ?? {}) as { value?: unknown; raw_value?: unknown; cap?: unknown };
+  if (typeof a.raw_value === 'number') return a.raw_value;
+  if (typeof a.value === 'number') return typeof a.cap === 'number' && a.cap > 0 ? a.value * a.cap : a.value;
+  return undefined;
+}
 
 /** Marks a compound starting point, so a newer one can replace it before approval. */
 const STARTING_POINT_BASIS = 'a starting point \u2014 values and what each option sets \u2014 for the user to adopt or correct in one approval';
+
+/**
+ * The `observed_state.source` an adopted Olumi assumption is stored with. Typed
+ * against the shared contract's vocabulary, so it cannot drift to a literal the
+ * product does not know. See `applyCompound` for why it exists.
+ */
+const ADOPTED_ASSUMPTION_SOURCE: KnownObservedStateSourceLiteral = 'user_assumption';
+
+/**
+ * ⛔ WHO AUTHORED THIS ONE VALUE — never inferred from the proposal as a whole (Codex
+ * pre-review of #1851, 5825286731). One `propose_assumptions` proposal can hold a revision the
+ * USER named (`revise:true`, their figure) beside a figure OLUMI suggested, and its proposal-wide
+ * `authored_by` is `model_proposed` whenever any figure is Olumi's — so stamping from that one
+ * field recorded the user's own number as an Olumi assumption. Each value op now records its own
+ * author (inside the proposal's integrity hash, `computeProposalId`, so it cannot be edited
+ * undetected). A USER-authored proposal is the user's in every value (only a proposal made
+ * entirely of their figures claims `user_stated`), so an op can only move an Olumi proposal's
+ * value TO the user, never the reverse. An op without the field — a carrier persisted before it
+ * existed — takes the proposal's author.
+ */
+function valueOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'model_proposed' | 'user_stated' {
+  if (proposal.provenance.authored_by === 'user_stated') return 'user_stated';
+  const own = ((op.value ?? {}) as { authored_by?: unknown }).authored_by;
+  return own === 'user_stated' ? 'user_stated' : 'model_proposed';
+}
+
+/**
+ * ⛔ WHAT THE APPROVAL STORED, SAID PER VALUE (Codex pre-review of #1851, 5825446207): the explanation
+ * the Agent repeats must match the stamps `valueOpAuthor` decided. A mixed approval stores the user's
+ * revision as theirs and Olumi's figure as the user's assumption; one sentence calling every value
+ * "the user's adopted assumptions" collapsed the two authors the model now records.
+ */
+function valueAuthorshipNote(ops: readonly ProposalOperation[], proposal: StructuredProposal, labelOf: (id: string) => string): string {
+  const values = ops.filter((o) => o.op === 'set_factor_value');
+  const theirs = values.filter((o) => valueOpAuthor(o, proposal) === 'user_stated').map((o) => labelOf(o.path));
+  const olumis = values.filter((o) => valueOpAuthor(o, proposal) === 'model_proposed').map((o) => labelOf(o.path));
+  const one = (xs: readonly string[], singular: string, plural: string): string => (xs.length === 1 ? singular : plural);
+  const own = theirs.length === 0 ? '' :
+    `${theirs.join(', ')} ${one(theirs, 'is', 'are')} the user\u2019s own ${one(theirs, 'figure', 'figures')}, stored as theirs.`;
+  const adopted = olumis.length === 0 ? '' :
+    `${olumis.join(', ')} ${one(olumis, 'is Olumi\u2019s figure', 'are Olumi\u2019s figures')} that the user adopted as ` +
+    `${one(olumis, 'an assumption', 'assumptions')}, not ${one(olumis, 'a measurement', 'measurements')}, stored as the user\u2019s ` +
+    `${one(olumis, 'assumption', 'assumptions')}.`;
+  return [own, adopted].filter((x) => x !== '').join(' ');
+}
 
 /** One internal dispatch, so every path is the product's own. */
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
@@ -234,6 +339,82 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
             ...(n.provenance === undefined ? {} : { provenance: n.provenance }),
           };
         }
+
+/**
+ * ⛔ A NAME SHARED BY TWO ACCEPTABLE TARGETS NAMES NEITHER.
+ *
+ * Every proposer resolved the Agent's label with a first match — `pool.find(writable)
+ * ?? pool[0]` for values, `nodes.find(...)` for levels and links — so when two
+ * factors share a label, the one that happens to come first in the stored node list
+ * got the user's number, and the approval they were shown named only the label.
+ * Nothing about the user's words chose it; array order did.
+ *
+ * The tool schemas carry labels only (`agent-tools.ts`: `factor_label`,
+ * `option_label`, `from_label`, `to_label`; `additionalProperties: false`), but
+ * `get_canonical_state` shows every entity's `id` (see `projectEntity`). So:
+ *
+ *   1. A string that IS a node id makes that node a candidate — the one way to
+ *      address two entities that read alike (ids are unique; labels are not).
+ *   2. An exact visible LABEL wins over a description match (unchanged).
+ *   3. Among all candidates, exactly one acceptable node → it. MORE THAN ONE (two
+ *      same-label factors, or an id that is also another factor's label) →
+ *      `ambiguous`, with every candidate, and the caller proposes NOTHING for it.
+ *   4. None acceptable → `other` (named, but e.g. a risk), or `none`.
+ *
+ * A label shared by a factor and a risk still resolves to the factor: only ONE of
+ * them is acceptable, so nothing is guessed.
+ */
+type Resolution =
+  | { readonly kind: 'one'; readonly node: GraphRead['nodes'][number] }
+  | { readonly kind: 'ambiguous'; readonly candidates: GraphRead['nodes'] }
+  | { readonly kind: 'other'; readonly node: GraphRead['nodes'][number] }
+  | { readonly kind: 'none' };
+
+function resolveNamed(
+  g: Pick<GraphRead, 'nodes'>,
+  requested: string,
+  accept: (n: GraphRead['nodes'][number]) => boolean,
+): Resolution {
+  const byLabel = g.nodes.filter((n) => norm(n.label) === norm(requested));
+  const pool = byLabel.length > 0 ? byLabel : g.nodes.filter((n) => norm(n.description) === norm(requested));
+  const idHit = g.nodes.find((n) => n.id === requested);
+  const candidates = idHit === undefined ? pool : [idHit, ...pool.filter((n) => n.id !== idHit.id)];
+  const acceptable = candidates.filter(accept);
+  if (acceptable.length > 1) return { kind: 'ambiguous', candidates: acceptable };
+  if (acceptable.length === 1) return { kind: 'one', node: acceptable[0] };
+  return candidates.length > 0 ? { kind: 'other', node: candidates[0] } : { kind: 'none' };
+}
+
+/** One name that matched more than one acceptable entity, with every candidate. */
+type AmbiguousTarget = { readonly requested: string; readonly candidates: readonly Record<string, unknown>[] };
+
+/** One ambiguous request, with what tells its candidates apart — the SAME projection as every other tool. */
+function describeAmbiguity(g: Pick<GraphRead, 'nodes' | 'edges'>, requested: string, candidates: GraphRead['nodes']): AmbiguousTarget {
+  const labelOf = new Map(g.nodes.map((n) => [n.id, n.label]));
+  return {
+    requested,
+    candidates: candidates.map((n) => ({
+      ...projectEntity(n),
+      connected_to: [...new Set(g.edges.flatMap((e) =>
+        e.from === n.id ? [labelOf.get(e.to)] : e.to === n.id ? [labelOf.get(e.from)] : []))]
+        .filter((l): l is string => typeof l === 'string' && l !== '')
+        .sort(),
+    })),
+  };
+}
+
+/** What the Agent is told to do about a name that matched more than one entity. */
+const AMBIGUOUS_NOTE =
+  'More than one entity in the model carries each name in ambiguous_targets, so NOTHING was proposed for it and no ' +
+  'guess was made. Ask the user which one they mean, describing each candidate by what tells it apart (its full ' +
+  'label, current value, what it is connected to), never by its id. Then propose again, passing that entity’s ' +
+  '`id` exactly as given here in place of its label.';
+
+/** The approval-facing disclosure of a name left out as ambiguous (empty when none was). */
+function ambiguousClause(ambiguous: readonly AmbiguousTarget[]): string {
+  if (ambiguous.length === 0) return '';
+  return ` (left out, more than one entity is called this, so the user must say which: ${ambiguous.map((a) => `"${a.requested}"`).join('; ')})`;
+}
 
 export function createAgentCapabilities(
   dispatch: InternalDispatch,
@@ -499,6 +680,30 @@ export function createAgentCapabilities(
       framed.push({ factor: n.label, value: raw, range });
       return { ...n, observed_state: { ...os, value: raw / range, raw_value: raw, cap: range, declared_scale: 'unit_interval' } };
     });
+    /**
+     * ⛔ AN ADOPTED ASSUMPTION IS STORED AS AN ASSUMPTION, NOT AS THE USER'S OWN
+     * FIGURE (panel #63 5811761386 item 6). `applyFactorValueEdit` stamps
+     * `USER_EDIT_SOURCE` (the user's-own-figure stamp) because the inspector it was built for
+     * is where the user TYPES the number. Registered as-is, one "yes" to Olumi's
+     * proposed values stored them as the user's own: "User edited" in the UI,
+     * `user_stated` to the readiness authority — and a single such parameter
+     * licenses a comparative-leader claim (`analysis-admission.ts`).
+     *
+     * `user_assumption` is the contract's own literal for it (0.55
+     * `OBSERVED_STATE_SOURCE_LITERALS`; CEE's `ObservedStateV3` accepts it; the UI
+     * labels it "Your assumption"; `obligation-provenance.ts` classifies it
+     * `user_ratified` — a human act, not authorship). Nothing is invented and no
+     * measurement is claimed. This path can stamp it because THIS capability
+     * composes the registered bytes. A USER-authored proposal keeps the writer's
+     * stamp — decided PER VALUE (`valueOpAuthor`). The single-kind `set_factor_value` path
+     * reaches the same stamp at the writer, through the approved-adoption context.
+     */
+    workingNodes = workingNodes.map((n) => {
+      if (!valueOps.some((o) => o.path === n.id && valueOpAuthor(o, parent) === 'model_proposed')) return n;
+      const os = n.observed_state;
+      if (os === undefined || typeof os.value !== 'number') return n;
+      return { ...n, observed_state: { ...os, source: ADOPTED_ASSUMPTION_SOURCE } };
+    });
 
     // ONE conditional write for every value (and any range they need).
     const receipts: ReceiptSummary[] = [];
@@ -599,8 +804,11 @@ export function createAgentCapabilities(
       ...(all
         ? {
             not_represented:
-              'These values and levels are the user\u2019s adopted assumptions, not measurements, and the model records no mark ' +
-              'distinguishing the two \u2014 say so when you describe what changed.',
+              `${valueAuthorshipNote(valueOps, parent, (id) => approvedRead.nodes.find((n) => n.id === id)?.label ?? id)} ` +
+              (parent.provenance.authored_by === 'model_proposed'
+                ? 'The option levels are the user\u2019s adopted assumptions too, not measurements, but carry no such mark \u2014 '
+                : 'The option levels are the user\u2019s own figures too \u2014 ') +
+              'say so when you describe what changed.',
           }
         : {
             refusal: valuesLanded || levelsRecorded > 0 ? 'partially_applied' : 'not_applied',
@@ -703,9 +911,23 @@ export function createAgentCapabilities(
       if (readOnly) return refuseReadOnly();
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const find = (l: string) => g.nodes.find((n) => norm(n.label) === norm(l) || norm(n.description) === norm(l));
-      const from = find(args.from_label);
-      const to = find(args.to_label);
+      // ⛔ Two entities answering to one name: nothing is proposed, and the Agent asks
+      // (`resolveNamed`). An id is identity; a label beats a description.
+      const fromRes = resolveNamed(g, String(args.from_label ?? ''), () => true);
+      const toRes = resolveNamed(g, String(args.to_label ?? ''), () => true);
+      const ambiguousEnds = [
+        ...(fromRes.kind === 'ambiguous' ? [describeAmbiguity(g, String(args.from_label ?? ''), fromRes.candidates)] : []),
+        ...(toRes.kind === 'ambiguous' ? [describeAmbiguity(g, String(args.to_label ?? ''), toRes.candidates)] : []),
+      ];
+      if (ambiguousEnds.length > 0) {
+        return {
+          ok: false, mutated: false, refusal: 'ambiguous_entity',
+          ambiguous_targets: ambiguousEnds, ambiguous_note: AMBIGUOUS_NOTE,
+          detail: 'Nothing was proposed: more than one entity carries that name.',
+        };
+      }
+      const from = fromRes.kind === 'one' ? fromRes.node : undefined;
+      const to = toRes.kind === 'one' ? toRes.node : undefined;
       if (from === undefined || to === undefined) {
         return {
           ok: false, mutated: false, refusal: 'unresolved_entity',
@@ -774,22 +996,26 @@ export function createAgentCapabilities(
        */
       const writable = (n: { kind?: unknown }) => SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS.includes(String(n.kind));
       // An exact visible LABEL wins over a description match (a factor's description must never
-      // take a value the user named for a risk); among equal matches, the writable kind wins.
-      const find = (l: string) => {
-        const byLabel = g.nodes.filter((n) => norm(n.label) === norm(l));
-        const pool = byLabel.length > 0 ? byLabel : g.nodes.filter((n) => norm(n.description) === norm(l));
-        return pool.find(writable) ?? pool[0];
-      };
+      // take a value the user named for a risk); among equal matches, the ONE writable kind wins —
+      // and two writable matches are AMBIGUOUS, never "the first" (see `resolveNamed`).
       const unresolved: string[] = [];
       const notAFactor: { label: string; kind: string }[] = [];
+      const ambiguous: AmbiguousTarget[] = [];
       const occupied: { label: string; current_value: number }[] = [];
       const seen = new Set<string>();
       const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number }[] = [];
 
       for (const a of input) {
-        const node = find(String(a?.factor_label ?? ''));
-        if (node === undefined) { unresolved.push(String(a?.factor_label ?? '')); continue; }
-        if (!writable(node)) { notAFactor.push({ label: node.label, kind: String(node.kind) }); continue; }
+        const requested = String(a?.factor_label ?? '');
+        const res = resolveNamed(g, requested, writable);
+        if (res.kind === 'none') { unresolved.push(requested); continue; }
+        // ⛔ Two writable factors answer to this name: no op for it, and the Agent asks.
+        if (res.kind === 'ambiguous') {
+          if (!ambiguous.some((x) => x.requested === requested)) ambiguous.push(describeAmbiguity(g, requested, res.candidates));
+          continue;
+        }
+        if (res.kind === 'other') { notAFactor.push({ label: res.node.label, kind: String(res.node.kind) }); continue; }
+        const node = res.node;
         /**
          * ⛔ THE APPROVAL MUST SHOW THE USER'S OWN NUMBER, NOT THE MODEL'S DIVISOR
          * (Codex 5810763729 item 1). `observed_state.value` is the number read against
@@ -849,6 +1075,7 @@ export function createAgentCapabilities(
           ok: false, mutated: false, refusal: 'nothing_to_adopt',
           unresolved_labels: unresolved, already_valued: occupied,
           ...(notAFactor.length > 0 ? { not_a_factor: notAFactor } : {}),
+          ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
           detail:
             'None of those could be adopted. Read the state again and use the labels exactly as they appear; ' +
             'factors that already hold a value are left alone.',
@@ -861,7 +1088,8 @@ export function createAgentCapabilities(
       const operations: ProposalOperation[] = ordered.map((a) => ({
         op: 'set_factor_value',
         path: a.id,
-        value: { value: a.value, unit: a.unit, basis: a.basis },
+        // A revision the user named is theirs; a fresh figure is Olumi's (`valueOpAuthor`).
+        value: { value: a.value, unit: a.unit, basis: a.basis, authored_by: typeof a.replaces === 'number' ? 'user_stated' : 'model_proposed' },
       }));
       /**
        * ⛔ THE APPROVAL MUST SAY WHAT IT REPLACES.
@@ -903,7 +1131,7 @@ export function createAgentCapabilities(
         // offered to them; `leftOutClause` is staging’s disclosure of the labels that
         // were not factors. Both are required — the heading alone drops the disclosure,
         // and staging’s label alone calls a revision an adoption.
-        public_label: heading + ordered.map(describe).join('; ') + leftOutClause(notAFactor),
+        public_label: heading + ordered.map(describe).join('; ') + leftOutClause(notAFactor) + ambiguousClause(ambiguous),
       });
       proposals.put(proposal);
       return {
@@ -920,6 +1148,7 @@ export function createAgentCapabilities(
         // Named, but not something a value can be set on (a risk, an outcome, an option): left out,
         // so the user is never asked to approve a value that cannot be saved.
         ...(notAFactor.length > 0 ? { not_a_factor: notAFactor, not_a_factor_note: NOT_A_FACTOR_NOTE } : {}),
+        ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
         note:
           'Nothing has changed. Show the user each value and what it rests on, say plainly that these are ' +
           'assumptions to adopt or correct and NOT measurements, and call authorise_change with this ' +
@@ -970,6 +1199,10 @@ export function createAgentCapabilities(
       };
       const made = [a, b].filter((r): r is ToolResult => r !== null && r.ok === true && typeof r.proposal_id === 'string');
       if (made.length === 0) return { ok: false, mutated: false, refusal: 'nothing_to_propose', ...refused };
+      // ⛔ A name that matched two entities travels to the joined result from EITHER half,
+      // so the starting point never looks complete at the moment of consent.
+      const ambiguousTargets = [a, b].flatMap((r) => (r !== null && Array.isArray(r.ambiguous_targets) ? r.ambiguous_targets : []));
+      const ambiguity = ambiguousTargets.length > 0 ? { ambiguous_targets: ambiguousTargets, ambiguous_note: AMBIGUOUS_NOTE } : {};
       // Only one half could be proposed: it is an ordinary proposal already.
       if (made.length === 1) {
         const only = proposals.get(made[0].proposal_id as string);
@@ -981,10 +1214,10 @@ export function createAgentCapabilities(
             assumptions: a?.assumptions ?? [], option_levels: b?.interventions ?? [],
             ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked } : {}),
             ...(b !== null && Array.isArray(b.levels_not_accepted) ? { levels_not_accepted: b.levels_not_accepted } : {}),
-            ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor } : {}), ...refused,
+            ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor } : {}), ...ambiguity, ...refused,
           });
         }
-        return { ...made[0], ...refused };
+        return { ...made[0], ...ambiguity, ...refused };
       }
       const halves = made.map((r) => proposals.get(r.proposal_id as string)).filter((p): p is StructuredProposal => p !== undefined);
       if (halves.length !== 2 || halves[0].base_graph_identity_hash !== halves[1].base_graph_identity_hash) {
@@ -999,7 +1232,7 @@ export function createAgentCapabilities(
           assumptions: a?.assumptions ?? [], option_levels: b?.interventions ?? [],
           ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked } : {}),
           ...(b !== null && Array.isArray(b.levels_not_accepted) ? { levels_not_accepted: b.levels_not_accepted } : {}),
-          ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor } : {}), ...refused,
+          ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor } : {}), ...ambiguity, ...refused,
         });
       }
       const compound = createProposal({
@@ -1029,6 +1262,7 @@ export function createAgentCapabilities(
         // review of #1800, 5806926323): when both halves succeed, the value half's omission otherwise
         // never reached the Agent, and the starting point looked complete at the moment of consent.
         ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor, not_a_factor_note: NOT_A_FACTOR_NOTE } : {}),
+        ...ambiguity,
         ...refused,
         note:
           'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +
@@ -1045,8 +1279,13 @@ export function createAgentCapabilities(
       if (input.length === 0) {
         return { ok: false, mutated: false, refusal: 'empty_proposal', detail: 'No interventions were given.' };
       }
-      const byLabel = (l: string, kind: string) =>
-        g.nodes.find((n) => n.kind === kind && (norm(n.label) === norm(l) || norm(n.description) === norm(l)));
+      // Resolved within the kind first (a label on a node of another kind never shadows the
+      // right one), then by `resolveNamed`: an id is identity, a label beats a description,
+      // and two nodes of the kind answering to one name are AMBIGUOUS, never "the first".
+      const optionNodes = { nodes: g.nodes.filter((n) => n.kind === 'option') };
+      const factorNodes = { nodes: g.nodes.filter((n) => n.kind === 'factor') };
+      const ambiguous: AmbiguousTarget[] = [];
+      const ambiguousSeen = new Set<string>();
       const held = heldStatusQuoPairs(g);
 
       const unresolved: string[] = [];
@@ -1070,9 +1309,28 @@ export function createAgentCapabilities(
       }[] = [];
 
       for (const i of input) {
-        const option = byLabel(String(i?.option_label ?? ''), 'option');
-        const factor = byLabel(String(i?.factor_label ?? ''), 'factor');
         const asGiven = { option: String(i?.option_label ?? ''), factor: String(i?.factor_label ?? ''), value: i?.value };
+        const optionRes = resolveNamed(optionNodes, asGiven.option, () => true);
+        const factorRes = resolveNamed(factorNodes, asGiven.factor, () => true);
+        if (optionRes.kind === 'ambiguous' || factorRes.kind === 'ambiguous') {
+          // ⛔ No level for this pair, and no guess at which entity was meant.
+          const which: string[] = [];
+          for (const [kind, requested, res] of [['option', asGiven.option, optionRes], ['factor', asGiven.factor, factorRes]] as const) {
+            if (res.kind !== 'ambiguous') continue;
+            which.push(`${kind} "${requested}"`);
+            if (!ambiguousSeen.has(`${kind}\u0000${requested}`)) {
+              ambiguousSeen.add(`${kind}\u0000${requested}`);
+              ambiguous.push(describeAmbiguity(g, requested, res.candidates));
+            }
+          }
+          notAccepted.push({
+            ...asGiven,
+            reason: `More than one ${which.join(' and more than one ')} is in the model, so this level was left out. Ask the user which one they mean, then propose it again passing that entity\u2019s id in place of its label.`,
+          });
+          continue;
+        }
+        const option = optionRes.kind === 'one' ? optionRes.node : undefined;
+        const factor = factorRes.kind === 'one' ? factorRes.node : undefined;
         if (option === undefined) {
           unresolved.push(`option "${asGiven.option}"`);
           notAccepted.push({ ...asGiven, reason: `No option in the model is labelled "${asGiven.option}". Use an option label exactly as get_canonical_state gives it.` });
@@ -1205,6 +1463,7 @@ export function createAgentCapabilities(
           ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
           ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
           ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
+          ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
           detail: 'Nothing could be recorded. Tell the user exactly which of these it was and why.',
         };
       }
@@ -1224,7 +1483,8 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'model_proposed', basis: 'what each option does, for the user to confirm or correct' },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label:
-          ordered.map((i) => `${i.option.label} sets ${i.factor.label} to ${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`).join('; '),
+          ordered.map((i) => `${i.option.label} sets ${i.factor.label} to ${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`).join('; ') +
+          ambiguousClause(ambiguous),
       });
       proposals.put(proposal);
       return {
@@ -1249,6 +1509,7 @@ export function createAgentCapabilities(
         ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
         ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
         ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
+        ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
         note:
           'Nothing has changed. Show the user the value in THEIR units and what it rests on, then call ' +
           'authorise_change with this proposal_id once they agree.',
@@ -1452,9 +1713,10 @@ export function createAgentCapabilities(
       if (ops[0]?.op === 'set_option_intervention') {
         /**
          * ⚠ THIS EVENT IS CAS-GATED AND `factor_value_edit` IS NOT — it carries
-         * a REQUIRED `base_graph_hash`. Each applied edit moves the hash, so
-         * the current one is re-read between edits; sending the proposal's base
-         * for all of them refuses every edit after the first with a divergence
+         * a REQUIRED `base_graph_hash`. Each applied edit moves the hash, so the
+         * next edit carries the revision our OWN preceding write reported (never a
+         * re-read, which would adopt another writer's edit); sending the proposal's
+         * base for all of them refuses every edit after the first with a divergence
          * that is really our own preceding write.
          */
         const applied: { option: string; factor: string; requested: number; recorded: number | null }[] = [];
@@ -1611,6 +1873,8 @@ export function createAgentCapabilities(
         }
         const rebased = framedHere.length > 0 ? await readGraph(ctx.scenario_id) : null;
         let baseHash = rebased?.graph_hash ?? before.graph_hash;
+        /** The levels THIS approval's own writes committed — see the read-back below. */
+        const ownLevelWrite = new Set<string>();
         for (let i = 0; i < ops.length; i += 1) {
           const o = ops[i];
           const [optionId, factorId] = o.path.split('::');
@@ -1624,7 +1888,6 @@ export function createAgentCapabilities(
             event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: baseHash },
           });
           const rc = receiptSummaryOf(r.json);
-          if (rc.summary !== null) receipts.push(rc.summary);
           if (rc.unreadable) failures.push({ path: o.path, detail: 'a receipt arrived but could not be read' });
           if (r.status !== 200) {
             failures.push({ path: o.path, detail: `http ${r.status}` });
@@ -1646,8 +1909,21 @@ export function createAgentCapabilities(
             // graph moved because WE moved it, within this same authorisation.
             continue;
           }
-          const mid = await readGraph(ctx.scenario_id);
-          if (mid !== null) baseHash = mid.graph_hash;
+          // ⭐ ADVANCE ONLY TO THE REVISION *OUR* WRITE REPORTS COMMITTING. A re-read here
+          // adopted whatever the model held by then — including another writer's edit
+          // landing just after ours — and the next op then passed CAS on a model the user
+          // never approved (the #1712 shape `applyCompound` already refuses). The served
+          // committed response carries its own persisted `graph_hash`; a 200 without one
+          // is the writer's verified no-op, which moved nothing, so the base stays put.
+          const committedHash = typeof r.json.graph_hash === 'string' && r.json.graph_hash.length > 0 ? r.json.graph_hash : null;
+          if (committedHash === null) {
+            failures.push({ path: o.path, detail: 'not recorded by this approval: the write reported no committed revision' });
+            continue;
+          }
+          baseHash = committedHash;
+          ownLevelWrite.add(o.path);
+          // A receipt is reported only beside its own committed write.
+          if (rc.summary !== null) receipts.push(rc.summary);
         }
 
         const afterSet = await readGraph(ctx.scenario_id);
@@ -1662,14 +1938,22 @@ export function createAgentCapabilities(
             option: option?.label ?? optionId,
             factor: byId.get(factorId)?.label ?? factorId,
             requested: typeof stored === 'number' ? stored : Number.NaN,
-            recorded: typeof recorded === 'number' ? recorded : null,
+            // ⛔ ONLY A LEVEL THIS APPROVAL'S OWN WRITE COMMITTED. The read-back alone
+            // counted a REFUSED op as recorded whenever the pair already held a level
+            // (the old one, or another writer's) — the same false "saved" as the value
+            // path. `option_intervention_edit` refuses with 409/422/500 and commits with
+            // its own `graph_hash`, so `ownLevelWrite` is decided from our own response.
+            recorded: ownLevelWrite.has(o.path) && typeof recorded === 'number' ? recorded : null,
           });
         }
         const landed = applied.filter((a) => a.recorded !== null);
         if (landed.length === 0) {
           return {
             ok: false, mutated: false, applied: false, refusal: 'not_applied',
-            detail: 'None of the levels were recorded. The model is unchanged.', failures, interventions: applied,
+            detail:
+              'None of the levels were recorded, so this approval left the model unchanged. Read the model again ' +
+              'before describing it: someone else may have changed it meanwhile.',
+            failures, interventions: applied,
           };
         }
         if (landed.length === applied.length) proposals.markApplied(decision.proposal.proposal_id, receipts);
@@ -1716,35 +2000,34 @@ export function createAgentCapabilities(
          * and silent about WHAT IT RESTS ON. The
          * basis therefore survives only in the proposal and in what the Agent
          * says, so the result below tells it to say it.
+         *
+         * ✅ CLOSED AT THE WRITER (review of #1851, B2; RC #63 5825007295): an adopted Olumi
+         * value that arrives WITHOUT levels is stamped `user_assumption` by the writer
+         * itself, from a server-internal approved-adoption context (below;
+         * `approved-adoption-context.ts`) — the same verified-identity idea as
+         * `appliedProvenance`, carried in-process instead of on the wire. Routing it through
+         * the compound path was tried first and rejected: it changes this path's per-value
+         * identity, partial-outcome and disclosure behaviour.
          */
         const applied: { factor: string; requested: number; recorded: number | null }[] = [];
         const failures: { factor: string; detail: string }[] = [];
         const receipts: ReceiptSummary[] = [];
         /**
-         * Did THIS approval's own write for that factor actually land? See item 4 below.
+         * Did THIS approval's own write for that factor actually land? Decided per
+         * operation by `valueWriteCommittedByThisRequest` — see its docblock for what the
+         * served response carries and why nothing else can satisfy it.
          *
-         * ⛔ A RECEIPT ALONE IS NOT A SUFFICIENT SIGNAL, and keying only on it would turn a
-         * real save into "not saved" — the opposite of the defect item 4 fixes, and worse.
-         * `model_version_receipt` is the single `DEGRADABLE_EGRESS_FIELD`
-         * (`validators/b1.ts:128`): when it is the ONLY field that fails egress validation,
-         * it is DELETED and the rest of the response passes. That is reachable today — its
-         * own docblock says the durable fix (not minting >200-character labels) has not
-         * landed. So a committed write can answer 200 with no receipt.
-         *
-         * Hence TWO independent signals, either of which is sufficient: this op's receipt,
-         * or the canonical graph hash moving across this op's own dispatch. The hash is read
-         * per op, which also keeps the chain accurate when one approval carries several.
-         *
-         * ⚠ The `priorTurnConflict` path in `commit.ts:1746-1766` also strips the receipt,
-         * but there the write genuinely did not happen for THIS request, and the hash will
-         * not have moved either — so both signals correctly read false and that case stays
-         * reported as not saved, which is what that branch exists to say.
+         * ⛔⛔ IT USED TO BE `r.status === 200 && (receipt || graph_hash moved)`, and that
+         * reported refused writes as saved. A refused `factor_value_edit` answers HTTP 200
+         * (the refusal is committed as a turn), a guest gets no receipt, and the graph hash
+         * moves for ANY writer — so an unrelated edit landing in the same window turned a
+         * refusal into "Saved", and the old value read back became the "recorded" figure.
          */
         const ownWrite = new Map<string, boolean>();
+        /** What THIS approval's own committed write stored, per target — the historical fact. */
+        const ownNative = new Map<string, number>();
         /** The frame the factor already carries, read from the pre-write state. */
         const beforeById = new Map((before.nodes ?? []).map((n) => [n.id, n]));
-        /** The canonical revision this loop has advanced to, so each op's own move is visible. */
-        let carriedHash = before.graph_hash;
         const capOf = (id: string): number | undefined => {
           const c = ((beforeById.get(id)?.observed_state ?? {}) as { cap?: unknown }).cap;
           return typeof c === 'number' && c > 0 ? c : undefined;
@@ -1753,7 +2036,8 @@ export function createAgentCapabilities(
           const o = ops[i];
           const v = (o.value ?? {}) as { value?: number; unit?: string };
           if (typeof v.value !== 'number') { failures.push({ factor: o.path, detail: 'no value stored on the proposal' }); continue; }
-          const r = await dispatch('/orchestrate/v2/turn', {
+          const approvedValue = v.value;
+          const send = () => dispatch('/orchestrate/v2/turn', {
             kind: 'system_event',
             turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#${i}`),
             scenario_id: ctx.scenario_id,
@@ -1764,21 +2048,43 @@ export function createAgentCapabilities(
               // Same coherent {model, native} pair as the compound path — see the note
               // there. Only when the factor already carries a cap.
               ...(capOf(o.path) !== undefined
-                ? { value: v.value / (capOf(o.path) as number), raw_value: v.value }
-                : { value: v.value }),
+                ? { value: approvedValue / (capOf(o.path) as number), raw_value: approvedValue }
+                : { value: approvedValue }),
               ...(v.unit !== undefined && v.unit !== '' ? { unit: v.unit } : {}),
             },
           });
+          // ⭐ OLUMI'S FIGURE, ADOPTED, IS STORED AS AN ASSUMPTION (review of #1851, B2; RC #63
+          // 5825007295). This proposal was verified by `proposals.authorise` above (scenario,
+          // user, base revision), so its identity rides the in-process dispatch as a
+          // server-internal context — never a wire field — and the writer stamps
+          // `user_assumption` for exactly this target and value. A value the USER authored
+          // (a revision they named, even inside a proposal that also holds Olumi's figures —
+          // `valueOpAuthor`) sends no context: the writer's own stamp is the truth.
+          const r = valueOpAuthor(o, decision.proposal) === 'model_proposed'
+            ? await runWithApprovedAdoption(
+              { scenarioId: ctx.scenario_id, proposalId: decision.proposal.proposal_id, targetId: o.path, rawValue: approvedValue },
+              send,
+            )
+            : await send();
+          // ⛔ OWN-WRITE EVIDENCE, PER OP, FROM THIS REQUEST'S OWN RESPONSE (Codex
+          // 5810763729 item 4). A later read cannot tell "my write landed" from "the old
+          // number was already there" or "someone else wrote it".
+          const own = valueWriteCommittedByThisRequest(r, o.path);
           if (r.status !== 200) failures.push({ factor: o.path, detail: `http ${r.status}` });
+          else if (!own) {
+            // A 200 that is not this op's committed write: a refusal (committed as a turn,
+            // nothing written) or a no-op. Olumi's own words say which, so they travel.
+            const said = typeof r.json.assistant_text === 'string' ? r.json.assistant_text.trim() : '';
+            failures.push({ factor: o.path, detail: said !== '' ? said : 'not recorded by this approval' });
+          }
           const rc = receiptSummaryOf(r.json);
-          if (rc.summary !== null) receipts.push(rc.summary);
+          // A receipt is reported only alongside this op's own committed write, so the
+          // result can never pair "not recorded" with "saved as version N".
+          if (own && rc.summary !== null) receipts.push(rc.summary);
           if (rc.unreadable) failures.push({ factor: o.path, detail: 'a receipt arrived but could not be read' });
-          // ⛔ OWN-WRITE EVIDENCE, PER OP (Codex 5810763729 item 4). A later read alone
-          // cannot tell "my write landed" from "the old number was already there".
-          const afterOp = await readGraph(ctx.scenario_id);
-          const moved = afterOp !== null && afterOp.graph_hash !== carriedHash;
-          if (afterOp !== null) carriedHash = afterOp.graph_hash;
-          ownWrite.set(o.path, r.status === 200 && (rc.summary !== null || moved));
+          ownWrite.set(o.path, own);
+          const mine = ownCommittedNative(r, o.path);
+          if (mine !== undefined) ownNative.set(o.path, mine);
         }
 
         // ⛔ CONFIRMED FROM STATE. The handler may rescale what it was sent
@@ -1787,6 +2093,7 @@ export function createAgentCapabilities(
         // that difference is exactly the thing a user must not discover later.
         const afterSet = await readGraph(ctx.scenario_id);
         const byId = new Map((afterSet?.nodes ?? []).map((n) => [n.id, n]));
+        const superseded: { id: string; factor: string; saved: number; now: number }[] = [];
         for (const o of ops) {
           const node = byId.get(o.path);
           const sos = (node?.observed_state ?? {}) as { value?: unknown; raw_value?: unknown; cap?: unknown };
@@ -1801,7 +2108,8 @@ export function createAgentCapabilities(
            * held 0.7 still reads a number back after a refused write, so the refusal was
            * reported as "Saved", and the number shown was the model's divisor rather than
            * the user's own. So: read the native figure (`raw_value`, else the model value
-           * scaled back up by the cap), and require this approval's own receipt.
+           * scaled back up by the cap), and require THIS operation's own committed write
+           * (`ownWrite`, from its own response — never a receipt-or-hash guess).
            *
            * ⚠ A RESCALE IS STILL REPORTED, NOT SUPPRESSED. When the handler stores a
            * different number from the one approved, `recorded` carries what is actually
@@ -1829,12 +2137,42 @@ export function createAgentCapabilities(
             // rather than the contract widened.
             recorded: ownWrite.get(o.path) === true && storedNative !== undefined ? storedNative : null,
           });
+          /**
+           * ⛔ SAVED BY US, THEN CHANGED BY SOMEONE ELSE (Codex pre-review of #1851, 5825735512).
+           * Our write committed, but the fresh read holds a different figure from the one OUR
+           * commit stored: another writer changed the same target in between. The row then keeps
+           * what THIS approval saved (the historical fact) — never the other writer's figure as a
+           * "rescale" — and the present state is reported separately. Nothing after this point
+           * frames, re-reads or describes that target as this approval's.
+           */
+          const mine = ownNative.get(o.path);
+          const last = applied[applied.length - 1]!;
+          if (ownWrite.get(o.path) === true && mine !== undefined && storedNative !== undefined && Math.abs(storedNative - mine) > 1e-9 * Math.max(1, Math.abs(mine))) {
+            last.recorded = mine;
+            superseded.push({ id: o.path, factor: last.factor, saved: mine, now: storedNative });
+          }
         }
         const landed = applied.filter((a) => a.recorded !== null);
+        /**
+         * ⛔ EVERYTHING AFTER THE VALUE WRITES FOLLOWS WHAT THIS APPROVAL COMMITTED, NOT WHAT IT
+         * PROPOSED (Codex pre-review of #1851, 5825603926). With one value landed and another
+         * refused, the range framing below selected every PROPOSAL op, so it could rescale and
+         * register the refused target — a write to a factor whose own write was just refused — and
+         * the note said the refused value was "stored". Aligned with `applied` by index.
+         */
+        const supersededIds = new Set(superseded.map((x) => x.id));
+        const landedOps = ops.filter((o, i) => applied[i] !== undefined && applied[i]!.recorded !== null && !supersededIds.has(o.path));
+        const notLandedLabels = ops
+          .filter((_, i) => applied[i] === undefined || applied[i]!.recorded === null)
+          .map((o) => beforeById.get(o.path)?.label ?? o.path);
         if (landed.length === 0) {
           return {
             ok: false, mutated: false, applied: false, refusal: 'not_applied',
-            detail: 'None of the values were recorded. The model is unchanged.',
+            // ⛔ NOT "the model is unchanged": a refusal proves only that THIS approval
+            // wrote nothing. Another writer may have changed the model in the same window.
+            detail:
+              'None of the values were recorded, so this approval left the model unchanged. Read the model again ' +
+              'before describing it: someone else may have changed it meanwhile.',
             failures, values: applied,
           };
         }
@@ -1864,7 +2202,7 @@ export function createAgentCapabilities(
          * that number untouched, and it is reported so the Agent says it.
          */
         const needsFrame = (afterSet?.nodes ?? []).filter((n) => {
-          if (!ops.some((o) => o.path === n.id)) return false;
+          if (!landedOps.some((o) => o.path === n.id)) return false;
           const os = (n.observed_state ?? {}) as { value?: unknown; cap?: unknown };
           // ⛔ A factor that already carries a stored range was written ON it
           // by the value handler. A level above 1 there is the honest truth
@@ -2201,7 +2539,7 @@ export function createAgentCapabilities(
           if (finalRead === null) recordedUnread = true;
           for (let i = 0; i < ops.length; i += 1) {
             const row = applied[i];
-            if (row === undefined || row.recorded === null) continue;
+            if (row === undefined || row.recorded === null || supersededIds.has(ops[i].path)) continue;
             const node = finalById.get(ops[i].path);
             const finalValue = node?.observed_state?.value;
             if (typeof finalValue === 'number') {
@@ -2227,6 +2565,7 @@ export function createAgentCapabilities(
           revision_before: before.graph_hash,
           revision_after: afterSet?.graph_hash ?? before.graph_hash,
           ...(failures.length > 0 ? { failures } : {}),
+          ...(superseded.length > 0 ? { changed_since_by_another_writer: superseded.map(({ factor, saved, now }) => ({ factor, saved, now })) } : {}),
           ...(rescaled.length > 0
             ? { rescaled_by_the_model: rescaled, must_disclose_rescaling: true }
             : {}),
@@ -2259,9 +2598,18 @@ export function createAgentCapabilities(
               analysis_still_blocked_for: rangesNotAttached.map((f) => f.factor),
             }
             : {}),
+          // Per value, whoever authored the proposal (Codex 5825564214: a user-only revision was still told
+          // "adopted assumptions … no mark", though it is stored as the user's own figure).
           not_represented:
-            'These values are the user\u2019s adopted assumptions, not measurements, and the model records ' +
-            'no mark distinguishing the two \u2014 so say so when you describe what changed' +
+            `${valueAuthorshipNote(landedOps, decision.proposal, (id) => beforeById.get(id)?.label ?? id)}` +
+            (notLandedLabels.length > 0
+              ? ` ${notLandedLabels.join(', ')} ${notLandedLabels.length === 1 ? 'was' : 'were'} NOT recorded by this approval.`
+              : '') +
+            (superseded.length > 0
+              ? ' ' + superseded.map((x) => `${x.factor} was saved by this approval as ${x.saved}, but someone else has since changed it to ${x.now}`).join('; ') +
+                ' — describe it from the model as it now stands, not as this approval\u2019s figure.'
+              : '') +
+            ' Say so when you describe what changed' +
             (rescaled.length > 0 ? ', and state every value the model stored differently from the one approved.' : '.') +
             (rangesNotAttached.length > 0
               ? ' \u26a0 This turn could not attach a range to ' +

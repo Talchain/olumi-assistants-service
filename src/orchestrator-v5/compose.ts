@@ -924,6 +924,20 @@ export const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
   // the over-suppression failure the acceptance criteria weight equally with
   // the leak.
   'conditional_winners',
+  // schemas 0.58.0 — `run_provenance`, the provisional-run marker
+  // (context/run-initiator.ts). CEE-authored, NOT a PLoT key: the auto-run
+  // dispatch stamps it on a SERVER-initiated run's fact, and until now this
+  // list stripped it, so the browser saw an automatic first pass over
+  // machine-authored estimates as an ordinary analysis. Keeping it here serves
+  // BOTH paths from one producer: the Agent turn's block IS the scenario-graph
+  // readback's block, and the reload read builds it with
+  // `buildAnalysisResultBlock` → this projection.
+  //
+  // Withheld ruling `pass_through`: the stamp names no option, and "nobody
+  // asked for this and none of it is confirmed" is exactly what must survive a
+  // withheld leader. Both claim projections already pass unknown keys through.
+  // Its members avoid INTERNAL_ENRICHMENT_KEYS by construction (no hash member).
+  'run_provenance',
 ] as const;
 
 // POST-P0 COACHING-CONTRACT FOLLOW-UP (do not silently drop from the product
