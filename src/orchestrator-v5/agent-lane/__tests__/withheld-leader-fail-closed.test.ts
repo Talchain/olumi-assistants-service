@@ -258,7 +258,7 @@ describe('review of #1871 — withheld is exactly the shared gate’s withhold a
   const reply = 'Raise Pro to £59 at release is ahead on MRR. Monthly churn is assumed at 3%.';
   const gate = (o: { permitted: boolean; separated: boolean; mode: string; reason?: string }) => enforceAgentLaneLeaderClaimsAtWire(
     { assistant_text: reply, blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: o.permitted, ...(o.separated ? { separation: 'separated' } : {}), ...(o.reason ? { withheld_reason: o.reason } : {}) } } } as unknown as OlumiResponse,
-    { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: o.permitted, separationEstablished: o.separated, ...(o.reason ? { leaderClaimWithheldReason: o.reason } : {}), analysisReady: ready(o.mode) },
+    { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: o.permitted, separationEstablished: o.separated, ...(o.reason ? { leaderClaimWithheldReason: o.reason } : {}), graph: undefined, analysisReady: ready(o.mode) },
   ).response.assistant_text;
 
   it('SEPARABLE PROVISIONAL (entitled, separated, quantified_provisional): caveat, not withhold — nothing is removed', () => {
