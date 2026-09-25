@@ -119,9 +119,12 @@ describe('the constructor declares the status quo, and admission holds it whatev
 
   it('CONTROL: two flagged options are never guessed between — neither is held', async () => {
     const second: Opt = { label: 'Retain monolith', provenance: 'ai_proposed', changes: [], interventions: [], is_status_quo: true };
-    const { graph } = await build(hiring({ label: 'Continue Current Staffing' }, [second]));
+    // An inert idiom option too: two declarations are a contradiction, not a cue to fall back.
+    const idiom: Opt = { label: 'Status quo', provenance: 'ai_proposed', changes: [], interventions: [], is_status_quo: null };
+    const { graph } = await build(hiring({ label: 'Continue Current Staffing' }, [second, idiom]));
     expect(heldEdges(graph, 'continue_current_staffing')).toEqual([]);
     expect(heldEdges(graph, 'retain_monolith')).toEqual([]);
+    expect(heldEdges(graph, 'status_quo')).toEqual([]);
   });
 
   it('CONTROL: a flag outranks an idiom — flagged "Continue Current Staffing" is held, an unflagged "Status quo" is not', async () => {
@@ -129,6 +132,56 @@ describe('the constructor declares the status quo, and admission holds it whatev
     const { graph } = await build(hiring({ label: 'Continue Current Staffing' }, [idiom]));
     expect(heldEdges(graph, 'continue_current_staffing')).toHaveLength(2);
     expect(heldEdges(graph, 'status_quo')).toEqual([]);
+  });
+
+  /**
+   * B1 (review 5825562938): one WRONG flag must never block a status quo base held.
+   * A declared option that cannot be held (it acts, or there is nothing to hold it
+   * against) falls back to the idiom list — exactly base's behaviour for that model.
+   */
+  it('B1 RED (misflag pair): a flagged ACTING option does not stop an idiom status quo being held', async () => {
+    const model = hiring({ label: 'Maintain current staffing', is_status_quo: null });
+    const misflagged = { ...model, options: model.options.map((o) => (o.label === 'Hire Two Developers' ? { ...o, is_status_quo: true } : o)) } as CandidateModel;
+    const { graph } = await build(misflagged);
+    expect(heldEdges(graph, 'maintain_current_staffing')).toHaveLength(2);
+    expect(assessCanonicalAnalysisReadiness(graph).blockingIssues.map((i) => i.code)).toEqual([]);
+    // The misflagged lever is not stamped, and neither is the idiom-held option.
+    expect(graph.nodes.find((n) => n.id === 'hire_two_developers')).not.toHaveProperty('is_baseline');
+    expect(graph.nodes.find((n) => n.id === 'maintain_current_staffing')).not.toHaveProperty('is_baseline');
+  });
+
+  it('B1 control (same model, no misflag): the idiom status quo is held, as on base', async () => {
+    const { graph } = await build(hiring({ label: 'Maintain current staffing', is_status_quo: null }));
+    expect(heldEdges(graph, 'maintain_current_staffing')).toHaveLength(2);
+    expect(assessCanonicalAnalysisReadiness(graph).blockingIssues.map((i) => i.code)).toEqual([]);
+  });
+
+  it('B1 (pure): a declared option that acts falls back to the idioms', () => {
+    const nodes = [
+      { id: 'a', kind: 'option', label: 'Raise price' },
+      { id: 'sq', kind: 'option', label: 'Status quo' },
+      { id: 'f1', kind: 'factor', label: 'F1' },
+    ];
+    const levels = new Map([['a', { f1: {} }]]);
+    // "a" is declared but it acts (it sets F1), so the idiom "Status quo" is held instead.
+    expect(wireInertStatusQuo(nodes, [{ from: 'a', to: 'f1' }], levels, new Set(['a']))).toEqual({ optionId: 'sq', factorIds: ['f1'] });
+  });
+
+  /**
+   * B2 (review 5825562938): the instructions must not contradict each other. The
+   * "EVERY option must name what it changes" rule now exempts the declared status
+   * quo, so obeying both never gives the status quo `changes`.
+   */
+  it('B2 RED: the "every option names its changes" rule exempts the option marked is_status_quo', () => {
+    const everyOption = BUILD_INSTRUCTIONS.slice(BUILD_INSTRUCTIONS.indexOf('EVERY OPTION MUST SAY WHAT IT DOES'));
+    expect(everyOption).toContain('except the one marked is_status_quo');
+    expect(everyOption.slice(0, everyOption.indexOf('this is not optional bookkeeping'))).toContain('except the one marked is_status_quo');
+  });
+
+  it('B2 control (recorded): a flagged option that still names changes is treated as acting — not held, not stamped — so nothing is invented for it', async () => {
+    const { graph } = await build(hiring({ label: 'Continue Current Staffing', changes: ['Developers hired', 'Tech leads hired'] }));
+    expect(heldEdges(graph, 'continue_current_staffing')).toEqual([]);
+    expect(graph.nodes.find((n) => n.id === 'continue_current_staffing')).not.toHaveProperty('is_baseline');
   });
 
   it('the pure helper reads the flag through the baseline-identity reader, idioms only as fallback', () => {

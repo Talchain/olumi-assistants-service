@@ -517,26 +517,37 @@ export function wireInertStatusQuo(
   declaredStatusQuoIds: ReadonlySet<string> = new Set(),
 ): { optionId: string; factorIds: string[] } | null {
   const options = nodes.filter((n) => n.kind === 'option');
+  const factorIds = new Set(nodes.filter((n) => n.kind === 'factor').map((n) => n.id));
+  /** The factors this option would be held against, or null if it cannot be held (it acts, or nothing to hold). */
+  const holdAgainst = (statusQuo: { id: string }): string[] | null => {
+    if (edges.some((e) => e.from === statusQuo.id && factorIds.has(e.to))) return null;
+    const others = options.filter((o) => o.id !== statusQuo.id);
+    const basis = new Set<string>();
+    for (const o of others) {
+      for (const fid of Object.keys(interventionsByOption.get(o.id) ?? {})) if (factorIds.has(fid)) basis.add(fid);
+    }
+    if (basis.size === 0) {
+      const otherIds = new Set(others.map((o) => o.id));
+      for (const e of edges) if (otherIds.has(e.from) && factorIds.has(e.to)) basis.add(e.to);
+    }
+    return basis.size === 0 ? null : [...basis];
+  };
   // ⭐ THE DRAFTER'S DECLARATION FIRST (served c673223: "Continue Current Staffing"
-  // is not an idiom, and the turn blocked). Two declared → null: never guess. The
-  // idiom list is only the fallback when nothing is declared; no idiom is added.
+  // is not an idiom, and the turn blocked). Two declared → null: never guess.
+  // ⛔ ONE WRONG FLAG MUST NOT BLOCK WHAT BASE HELD (review 5825562938, B1): a single
+  // declared option that cannot be held (it acts, or there is nothing to hold it
+  // against) falls back to the idiom list, exactly as if nothing were declared. No
+  // idiom is added.
   const declared = options.filter((o) => declaredStatusQuoIds.has(o.id));
   if (declared.length > 1) return null;
-  const matches = declared.length === 1 ? declared : options.filter((o) => labelMatchesBaseline(o.label ?? ''));
+  if (declared.length === 1) {
+    const held = holdAgainst(declared[0]!);
+    if (held !== null) return { optionId: declared[0]!.id, factorIds: held };
+  }
+  const matches = options.filter((o) => labelMatchesBaseline(o.label ?? ''));
   if (matches.length !== 1) return null;
-  const statusQuo = matches[0]!;
-  const factorIds = new Set(nodes.filter((n) => n.kind === 'factor').map((n) => n.id));
-  if (edges.some((e) => e.from === statusQuo.id && factorIds.has(e.to))) return null;
-  const others = options.filter((o) => o.id !== statusQuo.id);
-  const basis = new Set<string>();
-  for (const o of others) {
-    for (const fid of Object.keys(interventionsByOption.get(o.id) ?? {})) if (factorIds.has(fid)) basis.add(fid);
-  }
-  if (basis.size === 0) {
-    const otherIds = new Set(others.map((o) => o.id));
-    for (const e of edges) if (otherIds.has(e.from) && factorIds.has(e.to)) basis.add(e.to);
-  }
-  return basis.size === 0 ? null : { optionId: statusQuo.id, factorIds: [...basis] };
+  const held = holdAgainst(matches[0]!);
+  return held === null ? null : { optionId: matches[0]!.id, factorIds: held };
 }
 
 /**
