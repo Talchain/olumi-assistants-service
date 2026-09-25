@@ -1089,6 +1089,17 @@ async function dispatchEdgeStrengthEdit(
       // body on every one of those paths.
       responseForWire = committed?.response ?? response;
     } catch (err) {
+      // A later turn claimed this scenario, or the user stopped this one. The
+      // refusal wrote nothing either way, so this is a KNOWN outcome: the typed
+      // 409, never the retryable 500 below (F5 residual). See turnFenceConflict.
+      const fenceConflict = await turnFenceConflict(err, {
+        requestId,
+        eventKind: event.kind,
+        scenarioId: payload.scenario_id,
+      });
+      if (fenceConflict !== null) {
+        return { response, commitPerformed: false, graph: null, graphConflict: fenceConflict };
+      }
       log.error(
         {
           request_id: requestId,
@@ -1497,6 +1508,17 @@ async function dispatchStructuralDelete(
       // writer's exit above (a bare `vi.fn()` stub resolves to `undefined`).
       responseForWire = committed?.response ?? response;
     } catch (err) {
+      // A later turn claimed this scenario, or the user stopped this one. The
+      // refusal wrote nothing either way, so this is a KNOWN outcome: the typed
+      // 409, never the retryable 500 below (F5 residual). See turnFenceConflict.
+      const fenceConflict = await turnFenceConflict(err, {
+        requestId,
+        eventKind: event.kind,
+        scenarioId: payload.scenario_id,
+      });
+      if (fenceConflict !== null) {
+        return { response, commitPerformed: false, graph: null, graphConflict: fenceConflict };
+      }
       log.error(
         {
           request_id: requestId,
@@ -1857,6 +1879,17 @@ async function dispatchFactorValueEdit(
         coaching_state: null,
       });
     } catch (err) {
+      // A later turn claimed this scenario, or the user stopped this one. The
+      // refusal wrote nothing either way, so this is a KNOWN outcome: the typed
+      // 409, never the retryable 500 below (F5 residual). See turnFenceConflict.
+      const fenceConflict = await turnFenceConflict(err, {
+        requestId,
+        eventKind: event.kind,
+        scenarioId: payload.scenario_id,
+      });
+      if (fenceConflict !== null) {
+        return { response: result.response, commitPerformed: false, graph: null, graphConflict: fenceConflict };
+      }
       log.error(
         {
           request_id: requestId,
@@ -2588,6 +2621,17 @@ async function dispatchStructuralRename(
         coaching_state: null,
       });
     } catch (err) {
+      // A later turn claimed this scenario, or the user stopped this one. The
+      // refusal wrote nothing either way, so this is a KNOWN outcome: the typed
+      // 409, never the retryable 500 below (F5 residual). See turnFenceConflict.
+      const fenceConflict = await turnFenceConflict(err, {
+        requestId,
+        eventKind: event.kind,
+        scenarioId: payload.scenario_id,
+      });
+      if (fenceConflict !== null) {
+        return { response, commitPerformed: false, graph: null, graphConflict: fenceConflict };
+      }
       log.error(
         {
           request_id: requestId,
@@ -2900,6 +2944,17 @@ async function dispatchStructuralAdd(
         coaching_state: null,
       });
     } catch (err) {
+      // A later turn claimed this scenario, or the user stopped this one. The
+      // refusal wrote nothing either way, so this is a KNOWN outcome: the typed
+      // 409, never the retryable 500 below (F5 residual). See turnFenceConflict.
+      const fenceConflict = await turnFenceConflict(err, {
+        requestId,
+        eventKind: event.kind,
+        scenarioId: payload.scenario_id,
+      });
+      if (fenceConflict !== null) {
+        return { response, commitPerformed: false, graph: null, graphConflict: fenceConflict };
+      }
       log.error(
         {
           request_id: requestId,
@@ -3234,6 +3289,17 @@ async function dispatchStructuralAddEdge(
         coaching_state: null,
       });
     } catch (err) {
+      // A later turn claimed this scenario, or the user stopped this one. The
+      // refusal wrote nothing either way, so this is a KNOWN outcome: the typed
+      // 409, never the retryable 500 below (F5 residual). See turnFenceConflict.
+      const fenceConflict = await turnFenceConflict(err, {
+        requestId,
+        eventKind: event.kind,
+        scenarioId: payload.scenario_id,
+      });
+      if (fenceConflict !== null) {
+        return { response, commitPerformed: false, graph: null, graphConflict: fenceConflict };
+      }
       log.error(
         {
           request_id: requestId,
