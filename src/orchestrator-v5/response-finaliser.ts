@@ -79,6 +79,7 @@
  */
 
 import type { OlumiResponse } from '@talchain/schemas/boundary';
+import { leaderWithheldOnlyBecauseUnrequested } from './compose/unrequested-analysis-confinement.js';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { config } from '../config/index.js';
@@ -597,6 +598,12 @@ function attachAnalysisState(
     freshness: ctx.analysisStateFreshness ?? ctx.freshness,
     readiness: ctx.analysisReady,
     mayNameLeadingOption: ctx.mayNameLeadingOption,
+    // The same cause the reload names for the same run (one predicate, beside the
+    // admission): a permitted verdict withheld only because nobody asked for it.
+    withheldBecauseUnrequested:
+      selectedRun !== null &&
+      selectedRun.fact.fact_type === 'run_analysis' &&
+      leaderWithheldOnlyBecauseUnrequested(selectedRun.fact),
     // Read from the body as it will ship, not from the fact: when the
     // withheld-claim projection has redacted `near_tie`, the separation half
     // is genuinely unknown to the consumer and `leader_claim` must say so.

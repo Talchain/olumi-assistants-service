@@ -97,7 +97,10 @@ import {
   readRawRobustnessFromResponseBody,
   projectAnalysisBlocksForRunBinding,
 } from '../orchestrator-v5/compose/analysis-state-v1.js';
-import { mayPresentLeaderClaimForFact } from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
+import {
+  leaderWithheldOnlyBecauseUnrequested,
+  mayPresentLeaderClaimForFact,
+} from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { deriveAnalysisFreshness, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
 import { isScenarioAnalysisReasoningAuthority } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
@@ -235,6 +238,10 @@ export async function readScenarioAnalysis(
         // answers. The shared admission is the fix; copying the conjunction here
         // would have been the mirror.
         mayNameLeadingOption: fact !== null ? mayPresentLeaderClaimForFact(fact) : false,
+        // WHY it is withheld, when the fact can prove it: its own constraint verdict
+        // permitted a leader and nobody asked for this run (the automatic first
+        // pass). Otherwise the constraint token stands (#63 5825404689).
+        withheldBecauseUnrequested: fact !== null && leaderWithheldOnlyBecauseUnrequested(fact),
         rawRobustness:
           analysisResult !== null
             ? readRawRobustnessFromResponseBody({ blocks: [analysisResult] })

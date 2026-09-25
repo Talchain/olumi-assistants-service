@@ -61,6 +61,7 @@ import {
   WITHHELD_SEPARATION_UNAVAILABLE,
   WITHHELD_RUN_IDENTITY_UNCONFIRMED,
   WITHHELD_RUN_IDENTITY_CONFLICT,
+  WITHHELD_UNREQUESTED_ANALYSIS,
   composeAnalysisStateV1,
   leaderClaimReasonKind,
   readRawRobustnessFromResponseBody,
@@ -251,6 +252,9 @@ describe('S6 — separation_unavailable is NOT EVALUATED, not WITHHELD', () => {
         new Set([
           WITHHELD_CONSTRAINT_VERDICT, WITHHELD_NEAR_TIE, WITHHELD_SEPARATION_UNAVAILABLE,
           WITHHELD_RUN_IDENTITY_UNCONFIRMED, WITHHELD_RUN_IDENTITY_CONFLICT,
+          // 2026-09-25: the automatic first pass's cause, named apart from a real
+          // constraint verdict (#63 5825404689).
+          WITHHELD_UNREQUESTED_ANALYSIS,
         ]),
       );
 
