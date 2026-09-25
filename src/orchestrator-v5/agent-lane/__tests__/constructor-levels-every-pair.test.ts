@@ -260,6 +260,32 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     expect((result.options_that_change_nothing ?? []) as string[]).not.toContain('Hire Both');
   });
 
+  /**
+   * Pre-review 5829011280: gaps are counted as a total, so a retry that supplies
+   * the seven levels while ERASING a baseline the user stated (40 story points)
+   * improved the count and was adopted. A user's number is never a repair's to drop.
+   */
+  const stated40 = <T extends ReturnType<typeof c22>>(c: T, baseline: number | null, known: boolean): T => {
+    c.factors[0] = { ...factor('Engineering delivery capacity', baseline, 100, 'story points'), baseline_known: known, provenance: 'explicit' };
+    return c;
+  };
+
+  it('RED (pre-review 5829011280): a retry that erases a user-stated baseline is not adopted, however many gaps it closes', async () => {
+    const { graph, result } = await construct(stated40(c22(), 40, true), stated40(covered(), null, false));
+    const capacity = node(graph, 'engineering_delivery_capacity');
+    expect(capacity.observed_state).toMatchObject({ raw_value: 40, source: 'brief_extraction' });
+    // The first draft was kept, so its value questions stand, honestly.
+    expect(missingValues(graph).length).toBeGreaterThan(0);
+    expect(result.ok).toBe(true);
+  });
+
+  it('CONTROL: a retry that keeps the user-stated 40 and adds the levels is adopted, with the 40 still the user\'s', async () => {
+    const { graph } = await construct(stated40(c22(), 40, true), stated40(covered(), 40, true));
+    expect(node(graph, 'engineering_delivery_capacity').observed_state).toMatchObject({ raw_value: 40, source: 'brief_extraction' });
+    expect(Object.keys(node(graph, 'hire_both').interventions ?? {}).sort()).toEqual(['engineering_delivery_capacity', 'hiring_cost', 'technical_leadership_capacity']);
+    expect(missingValues(graph)).toEqual([]);
+  });
+
   it('CONTROL: a retry that keeps every action and adds levels is still adopted', async () => {
     const { graph } = await construct(c22(), covered());
     expect(Object.keys(node(graph, 'hire_both').interventions ?? {}).sort()).toEqual(['engineering_delivery_capacity', 'hiring_cost', 'technical_leadership_capacity']);
