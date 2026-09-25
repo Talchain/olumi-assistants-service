@@ -79,6 +79,7 @@ import {
   confineUnrequestedAnalysisBlock,
   mayPresentLeaderClaimForFact,
 } from './compose/unrequested-analysis-confinement.js';
+import { analysisReadyPermitsLeaderNaming } from './admission/analysis-admission.js';
 import { projectTiedOptionOrderingForTransport } from './compose/tied-option-ordering.js';
 import { projectCritiquesForTransport } from './compose/sanitise-enrichment.js';
 import type { LabelResolverContext } from './compose/resolve-label.js';
@@ -1235,6 +1236,7 @@ export function toSafeTransportEnrichment(
  */
 function buildAnalysisResultBlockUnconfined(
   fact: RunAnalysisHandlerFact,
+  analysisReady?: unknown,
 ): Extract<OlumiResponse['blocks'][number], { type: 'analysis_result' }> {
   const { leading_option_id, summary, win_probabilities, enrichment, graph_hash_at_run } =
     fact.result;
@@ -1272,7 +1274,18 @@ function buildAnalysisResultBlockUnconfined(
   // a leader this very block had just nulled. `mayPresentLeaderClaimForFact` is
   // the one shared admission; see
   // `compose/unrequested-analysis-confinement.ts` for that history.
-  const mayNameLeadingOption = mayPresentLeaderClaimForFact(fact);
+  //
+  // ⭐ AND THE MODEL'S ADMISSION, a THIRD closing the fact cannot answer: may
+  // this MODEL name a leader at all (`analysis_admission.permitted_analysis_mode`)?
+  // Served on CEE 92b1bf8 (RC #63 5826475400): a `quantified_provisional`
+  // admission beside this block's `leading_option_id`, a "scored highest"
+  // summary and a "slightly ahead" headline. Read through the ONE predicate the
+  // prose chokepoints use, never a second copy; it FAILS OPEN on an absent or
+  // unreadable admission, so every caller that passes none is byte-identical.
+  // `composeLeaderClaim` reads the same predicate off the same payload, so the
+  // block and `analysis_state.leader_claim` still answer one question.
+  const mayNameLeadingOption =
+    mayPresentLeaderClaimForFact(fact) && analysisReadyPermitsLeaderNaming(analysisReady);
   // E2 (ROADMAP 1.272) — the permission is read BEFORE the clone and the
   // drop-set is a frozen module constant, so on a withheld turn the blobs that
   // `projectTransportEnrichmentForWithheldClaim` discards whole are never
@@ -1388,7 +1401,7 @@ export function buildAnalysisResultBlock(
   analysisReady?: unknown,
 ): Extract<OlumiResponse['blocks'][number], { type: 'analysis_result' }> {
   return confineUnrequestedAnalysisBlock(
-    buildAnalysisResultBlockUnconfined(fact),
+    buildAnalysisResultBlockUnconfined(fact, analysisReady),
     fact,
     analysisReady,
   );
