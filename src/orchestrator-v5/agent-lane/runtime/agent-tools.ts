@@ -267,7 +267,8 @@ export interface AgentCapabilities {
   runAnalysis(ctx: AgentToolContext, args: { reason: string }): Promise<ToolResult>;
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
-    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
+    // `revise` is in the tool's schema (above) and read by the capability (`a?.revise === true`); the type now says so.
+    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string; revise?: boolean }[];
   }): Promise<ToolResult>;
   proposeNewOption(ctx: AgentToolContext, args: {
     label: string; acts_on: { factor_label: string; direction: 'positive' | 'negative' }[]; rationale: string;
