@@ -16,6 +16,7 @@
 import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, authorisationTurnId, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { renormaliseOptionInterventionsForCapChange } from '../../tools/handlers/d1-shared/renormalise-interventions-for-cap-change.js';
 
 /**
  * Every option wired to every factor. The real product only records a level on
@@ -331,6 +332,112 @@ describe('authorise_change records the STORED levels', () => {
     expect(said).toContain('a read afterwards could not confirm what the model holds now');
     expect(applied.revision_after, 'our own committed revision, never the pre-approval one').toBe('h1');
     expect(said).not.toMatch(/was NOT|left the model unchanged/);
+  });
+
+  /**
+   * Another writer extends Pro plan price's range 200 → 400 the way the product does it: the factor's range moves and
+   * the PRODUCTION renormaliser rescales every option level on it to KEEP its absolute value (0.27 → 0.135, still £54).
+   */
+  const extendPriceRange = (ns: Node[]): Node[] => {
+    const g = { nodes: ns.map((n) => ({ ...n, interventions: n.interventions == null ? n.interventions : { ...n.interventions } })) };
+    const count = renormaliseOptionInterventionsForCapChange(g as never, 'pro_plan_price', 200, 400);
+    expect(count, 'PRECONDITION: the production renormaliser rewrote the levels').toBeGreaterThan(0);
+    return g.nodes.map((n) => (n.id === 'pro_plan_price' ? { ...n, observed_state: { ...n.observed_state, cap: 400, value: 49 / 400 } } : n));
+  };
+  const cell = (p: ReturnType<typeof fakeProduct>) => p.read().find((n) => n.id === 'phase_increase')?.interventions?.pro_plan_price;
+
+  /** ⛔ Review of #1881 at 29391976 (5826841372) + Codex 5826779118: a range change is not a changed level. */
+  it('RED: another writer extending the range keeps our £54 — nothing is reported as changed since', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(extendPriceRange)), new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(cell(p), 'PRECONDITION: the renormaliser kept the absolute').toEqual({ value: 54 / 400, raw_value: 54 });
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, applied: true, recorded_count: 1 });
+    expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+    expect(applied).not.toHaveProperty('current_state_unknown');
+    expect(String(applied.not_represented)).not.toContain('someone else');
+  });
+
+  it('OPPOSITE CONTROL: the range extended AND the level really changed to £60 — reported as £60, in the new range', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(onOurWrite(p, () => {
+      p.foreign(extendPriceRange);
+      p.foreign((ns) => ns.map((n) => (n.id === 'phase_increase' ? { ...n, interventions: { ...(n.interventions ?? {}), pro_plan_price: { value: 0.15, raw_value: 60 } } } : n)));
+    }), new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied.changed_since_by_another_writer).toEqual([
+      { option: 'Phase Pro price increase', factor: 'Pro plan price', saved: 54, now: 60, unit: 'GBP/month' },
+    ]);
+  });
+
+  it('RED: the range cannot be established now — the current level is unknown, never an invented amount', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign((ns) => ns.map((n) => {
+      if (n.id === 'pro_plan_price') return { ...n, observed_state: { value: 0.3, unit: 'GBP/month' } };
+      if (n.id === 'phase_increase') return { ...n, interventions: { pro_plan_price: { value: 0.3 } } };
+      return n;
+    }))), new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1, current_state_unknown: true });
+    expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+  });
+
+  it('RED: a stamped absolute that disagrees with the range is unknown, not a quoted amount', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(onOurWrite(p, () => {
+      p.foreign(extendPriceRange);
+      p.foreign((ns) => ns.map((n) => (n.id === 'phase_increase' ? { ...n, interventions: { pro_plan_price: { value: 0.135, raw_value: 99 } } } : n)));
+    }), new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied, JSON.stringify(applied)).toMatchObject({ current_state_unknown: true });
+    expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+  });
+
+  it('RED: a read with no revision is never "moved" — a differing level there is unknown, not another writer', async () => {
+    const p = fakeProduct({ storeAs: (v) => Number((v + 0.005).toFixed(3)) });
+    let wrote = false;
+    const d: InternalDispatch = async (path, body) => {
+      const r = await p.d(path, body);
+      if (path === '/orchestrate/v2/turn' && (body as { kind?: string }).kind === 'system_event') { wrote = true; return r; }
+      return wrote && path.endsWith('/graph') ? { ...r, json: { ...r.json, graph_hash: '' } } : r;
+    };
+    const caps = createAgentCapabilities(d, new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1, current_state_unknown: true });
+    expect(String(applied.not_represented)).not.toContain('someone else');
+  });
+
+  it('RED: a read with no revision and the level ABSENT is unknown — never "someone else removed it"', async () => {
+    const p = fakeProduct();
+    let wrote = false;
+    const d: InternalDispatch = async (path, body) => {
+      const r = await p.d(path, body);
+      if (path === '/orchestrate/v2/turn' && (body as { kind?: string }).kind === 'system_event') { wrote = true; return r; }
+      if (!wrote || !path.endsWith('/graph')) return r;
+      const g = r.json.graph as { nodes: Node[] };
+      return { ...r, json: { ...r.json, graph_hash: '', graph: { ...g, nodes: g.nodes.map((n) => (n.id === 'phase_increase' ? { ...n, interventions: {} } : n)) } } };
+    };
+    const caps = createAgentCapabilities(d, new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1, current_state_unknown: true });
+    expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+  });
+
+  it('a deleted option is named from the approved read, never by its id', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign((ns) => ns.filter((n) => n.id !== 'phase_increase'))), new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied.changed_since_by_another_writer).toEqual([
+      { option: 'Phase Pro price increase', factor: 'Pro plan price', saved: 54, now: null, unit: 'GBP/month' },
+    ]);
+    expect(String(applied.not_represented)).not.toContain('phase_increase');
   });
 
   /** ⛔ Absent at OUR OWN revision is not "someone removed it" — nobody else wrote. Unknown, never an invented writer. */

@@ -1951,7 +1951,9 @@ export function createAgentCapabilities(
          * only when the model moved past OUR last committed revision (`baseHash`), so the handler's own
          * normalisation is never mistaken for another writer.
          */
-        const movedPastUs = afterSet !== null && typeof afterSet.graph_hash === 'string' && afterSet.graph_hash !== baseHash;
+        // An empty hash is a read that cannot say which revision it saw: never "moved", never "ours" (review 5826841372).
+        const hashKnown = afterSet !== null && typeof afterSet.graph_hash === 'string' && afterSet.graph_hash !== '';
+        const movedPastUs = hashKnown && afterSet!.graph_hash !== baseHash;
         /** In the USER's scale and unit (review of #1881, 5826400426): the Agent quotes these, never 0.27 for £54. */
         const levelsChangedSince: { option: string; factor: string; saved: number; now: number | null; unit?: string }[] = [];
         let levelsUnread = false;
@@ -1964,8 +1966,9 @@ export function createAgentCapabilities(
           const recorded = typeof iv === 'number' ? iv : (iv as { value?: unknown } | undefined)?.value;
           const stored = ((o.value ?? {}) as { raw?: number }).raw;
           applied.push({
-            option: option?.label ?? optionId,
-            factor: byId.get(factorId)?.label ?? factorId,
+            // A node another writer deleted is named from the approved read, never by its id (review 5826841372).
+            option: option?.label ?? beforeNodeById.get(optionId)?.label ?? optionId,
+            factor: byId.get(factorId)?.label ?? beforeNodeById.get(factorId)?.label ?? factorId,
             requested: typeof stored === 'number' ? stored : Number.NaN,
             // ⛔ ONLY A LEVEL THIS APPROVAL'S OWN WRITE COMMITTED. The read-back alone
             // counted a REFUSED op as recorded whenever the pair already held a level
@@ -1988,23 +1991,53 @@ export function createAgentCapabilities(
             const cap = typeof opv.cap === 'number' && opv.cap > 0 ? opv.cap : undefined;
             const toUser = (x: number): number => tidy(cap !== undefined ? x * cap : x);
             const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(b));
+            const sameAbs = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(b));
             // What we saved, as the user said it: their own figure when the write committed exactly what was sent.
             const savedUser = typeof opv.normalised === 'number' && same(mine, opv.normalised) && Number.isFinite(row.requested)
               ? row.requested : toUser(mine);
             const unitRaw = ((byId.get(factorId) ?? beforeNodeById.get(factorId))?.observed_state as { unit?: unknown } | undefined)?.unit;
             const unit = typeof unitRaw === 'string' && unitRaw.trim() !== '' ? unitRaw.trim() : undefined;
             const current = typeof recorded === 'number' ? recorded : null;
-            const changed = (now: number | null): void => {
+            /**
+             * ⛔ WHAT THE MODEL HOLDS NOW, IN ITS OWN FRAME (review 5826841372; Codex 5826779118). Another writer's
+             * consented range change renormalises every option level on the factor to KEEP its absolute value
+             * (`renormaliseOptionInterventionsForCapChange`): 0.27 of 200 becomes 0.135 of 400, still £54. Read with
+             * the proposal's old range that was "someone cut it to £27". So the current level is converted with the
+             * FRESH factor's range, cross-checked against the absolute the renormaliser stamps (`raw_value`); a frame
+             * that cannot be established, or the two disagreeing, is unknown — never an invented amount.
+             */
+            const freshOs = (byId.get(factorId)?.observed_state ?? {}) as { cap?: unknown };
+            const freshFrameRaw = byId.get(factorId)?.scale_frame;
+            const freshCap = typeof freshOs.cap === 'number' && Number.isFinite(freshOs.cap) && freshOs.cap > 0 ? freshOs.cap
+              : typeof freshFrameRaw === 'number' && Number.isFinite(freshFrameRaw) && freshFrameRaw > 1 ? freshFrameRaw : undefined;
+            const ivRawValue = (iv as { raw_value?: unknown } | undefined)?.raw_value;
+            const stampedAbs = typeof ivRawValue === 'number' && Number.isFinite(ivRawValue) ? ivRawValue : undefined;
+            const currentAbs = ((): number | undefined => {
+              if (current === null) return undefined;
+              if (freshCap !== undefined) {
+                const fromFrame = current * freshCap;
+                return stampedAbs === undefined || sameAbs(stampedAbs, fromFrame) ? tidy(fromFrame) : undefined;
+              }
+              if (stampedAbs !== undefined) return tidy(stampedAbs);
+              // A level on a factor that had no range then and has none now is already on the user's 0–1 scale.
+              return cap === undefined ? tidy(current) : undefined;
+            })();
+            const unknown = (): void => { row.recorded = mine; levelsUnread = true; };
+            const changed = (nowUser: number | null): void => {
               row.recorded = mine;
-              levelsChangedSince.push({ option: row.option, factor: row.factor, saved: savedUser, now: now === null ? null : toUser(now), ...(unit !== undefined ? { unit } : {}) });
+              levelsChangedSince.push({ option: row.option, factor: row.factor, saved: savedUser, now: nowUser, ...(unit !== undefined ? { unit } : {}) });
             };
             if (current === null) {
               // Absent now, or the read failed. Only a model read as moved past OUR commit can say someone else
               // removed it; otherwise what it holds now is unknown — never an invented writer, never "not recorded".
               if (movedPastUs) changed(null);
-              else { row.recorded = mine; levelsUnread = true; }
-            } else if (movedPastUs && !same(current, mine)) {
-              changed(current);
+              else unknown();
+            } else if (!hashKnown) {
+              if (!same(current, mine)) unknown();
+            } else if (movedPastUs) {
+              row.recorded = mine;
+              if (currentAbs === undefined) unknown();
+              else if (!sameAbs(currentAbs, savedUser)) changed(currentAbs);
             }
           }
         }
@@ -2042,7 +2075,7 @@ export function createAgentCapabilities(
                 `${x.option} \u2192 ${x.factor} was saved by this approval, but someone else has since ` +
                 (x.now === null ? 'removed it' : 'changed it')).join('; ') +
                 ' \u2014 say so, and describe it from the model as it now stands, not as this approval\u2019s level ' +
-                '(changed_since_by_another_writer has both figures in the user\u2019s units). '
+                '(changed_since_by_another_writer has the figures in the user\u2019s units). '
               : '') +
             (levelsUnread ? 'These levels were saved, but a read afterwards could not confirm what the model holds now, so do not describe its current levels. ' : '') +
             (landed.length < applied.length ? 'The levels that were recorded are' : 'What each option does is now recorded') +
