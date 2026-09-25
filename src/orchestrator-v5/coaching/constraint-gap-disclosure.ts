@@ -63,9 +63,7 @@
 
 import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
 import {
-  RUN_AGAIN_CLOSER,
   UNMEASURED_TARGET_LEAD_IN,
-  unmeasuredTargetRepairAsk,
   unmeasuredTargetRepairStep,
 } from './constraint-gap-copy.js';
 import { passesAssistantTextContentDefences } from './assistant-text-defences.js';
@@ -289,11 +287,10 @@ const UNEVALUATED_REPAIR_STEP =
  *     rather than about a third-party engine the user cannot reach;
  *   - that restating the limit cannot supply what is missing — the precise
  *     thing the session disproved, said before the user spends a turn on it;
- *   - the REPAIR, which is not new copy: it is
- *     {@link unmeasuredTargetRepairAsk}, the ratified ask the sibling voice
- *     already speaks, because *"name the part of your model this applies to"*
- *     is exactly the move that can land here. One set of words for one fact
- *     (CLAUDE.md trap 12), imported rather than respelled.
+ *   - the MISSING INPUT, {@link derivedTargetMissingInput}: a starting level, or the frame the
+ *     limit is meant in. (This arm first reused the sibling voice's "name the part of your model
+ *     this applies to" ask; a served probe on 25 Sep showed that ask cannot land here, because
+ *     the limit already sits on the derived target the user would name. #63 5825511095.)
  *   - and it still DISCLOSES THE RESIDUAL — "this one stays on the model" —
  *     because there is no conversational remove/replace (ROADMAP 2.659) and a
  *     repair that cannot touch the defective row must say the row remains.
@@ -307,7 +304,28 @@ function unanchoredTargetRepairStep(total: number): string {
     total === 1
       ? ' The part of your model it points at is worked out from other parts, so it has no measured starting point of its own, and restating the limit cannot give it one.'
       : ' The parts of your model they point at are worked out from other parts, so they have no measured starting point of their own, and restating the limits cannot give them one.';
-  return `${cause}${unmeasuredTargetRepairAsk(total)}${RUN_AGAIN_CLOSER}`;
+  return `${cause}${derivedTargetMissingInput(total)}`;
+}
+
+/**
+ * ⛔ THE ASK NAMES WHAT IS MISSING, NOT "WHICH PART" (RC #63 5825523678; served probe 5825511095).
+ *
+ * This arm is spoken only on PROOF that the limit already sits on a derived target. So "tell me which
+ * part of your model it applies to" cannot land here: on served `e39f6e0` the user answered it in both
+ * standard journeys ("…applies to Monthly churn", "…applies to Annual salary spend"), the limit was
+ * already bound to exactly that node, and the re-run stayed unchecked (2/2). What the target lacks is a
+ * starting LEVEL, or the FRAME the limit is meant in (the whole amount, or only what the options add).
+ *
+ * ⚠ AND IT INVITES NO ANSWER THE CONVERSATION CANNOT RECORD. Until the OpenAI Agent lane can put a
+ * starting level on a derived target (RC item 2, OpenAI Runtime), the copy says so plainly rather than
+ * asking a question whose answer would be dropped — a remedy in copy must be a reachable control. It
+ * still DISCLOSES THE RESIDUAL ("stays on the model"). No re-run instruction: re-running cannot help
+ * until the level exists. The sibling `unmeasured_target` voice keeps its ratified ask unchanged.
+ */
+function derivedTargetMissingInput(total: number): string {
+  return total === 1
+    ? ' Checking it needs a starting level for that part, such as its value today, or a statement of whether the limit covers the whole amount or only what the options add; that cannot be added from this conversation yet, so this one stays on the model unchecked.'
+    : ' Checking them needs a starting level for those parts, such as their values today, or a statement of whether each limit covers the whole amount or only what the options add; that cannot be added from this conversation yet, so these stay on the model unchecked.';
 }
 
 /**

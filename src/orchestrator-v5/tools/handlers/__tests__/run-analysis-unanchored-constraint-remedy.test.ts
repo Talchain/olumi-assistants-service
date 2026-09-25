@@ -78,8 +78,16 @@ const TEST_REQUEST_ID = 'req-unanchored-constraint-remedy';
  * re-typed from the source, so this file pins what the USER received.
  */
 const FUTILE_REMEDY = 'Tell me the limit you meant in your own words and I will record it';
-/** The ratified copy the actionable arm reuses (`constraint-gap-copy.ts`). */
+/**
+ * The sibling voice's ask, which this arm first reused. A served probe (25 Sep, `e39f6e0`, #63
+ * 5825511095) showed it cannot land here: the limit already sits on the derived target the user
+ * would name, and the re-run stayed unchecked in both standard journeys. So this arm must NOT say it.
+ */
 const REPOINT_ASK = 'Tell me which part of your model it applies to and I will record it there';
+/** What a derived target actually lacks — a starting level, or the frame the limit is meant in. */
+const MISSING_INPUT = 'Checking it needs a starting level for that part, such as its value today, or a statement of whether the limit covers the whole amount or only what the options add';
+/** And no answer is invited that this conversation cannot record (RC 5825523678). */
+const NOT_FROM_HERE = 'that cannot be added from this conversation yet';
 
 /** The limit, at the label and the brief span the session actually carried. */
 const CONSTRAINT_ID = 'constraint_goal_nrr_min';
@@ -294,13 +302,17 @@ describe('a limit on an UNANCHORABLE target is not told to restate itself', () =
     expect(v.summary).not.toContain(FUTILE_REMEDY);
   });
 
-  it('ARM A: it is told WHY, and given the move that can actually land', async () => {
+  it('ARM A: it is told WHY, and what is actually missing — never the "which part" ask that cannot land', async () => {
     const v = await runSummary(DERIVED_TARGET_GRAPH);
 
     // The cause, in the product's own register: the target is computed.
     expect(v.summary).toContain('worked out from other parts');
-    // The actionable repair, reusing the ratified ask rather than a new twin.
-    expect(v.summary).toContain(REPOINT_ASK);
+    // What the target lacks, and plainly that it cannot be supplied from here yet.
+    expect(v.summary).toContain(MISSING_INPUT);
+    expect(v.summary).toContain(NOT_FROM_HERE);
+    // The re-point ask is disproved on this arm (served probe), and re-running cannot help yet.
+    expect(v.summary).not.toContain(REPOINT_ASK);
+    expect(v.summary).not.toContain('Then run the analysis again');
     // And the residual is still disclosed: the bad row is not silently removed.
     expect(v.summary).toContain('this one stays on the model');
   });
