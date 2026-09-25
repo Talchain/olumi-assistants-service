@@ -66,6 +66,15 @@ describe('the build line says what was saved and what was not', () => {
     expect(n.status).not.toContain(OLD_LINE);
   });
 
+  it('RED: with NO returned version, the line claims no version and still says the figures are not recorded', () => {
+    // Independent review 5832147341: "as version N" only on an actual returned version — never invented.
+    const n = narrateWriteOutcome('These are starting assumptions, not measurements. Shall I record them?',
+      [{ name: 'build_model_from_brief' }, { name: 'propose_starting_point' }],
+      [{ ok: true, mutated: true }, { ok: true, mutated: false, proposal_id: 'prop_bbbbbb' }]);
+    expect(n.status).toBe('I saved the model I drafted. The figures above are not recorded until you approve them.');
+    expect(n.status).not.toMatch(/version/);
+  });
+
   it('RED: the tails (left out, open questions, context factors) stay intact after the new line', () => {
     const built = { ...BUILT, left_out_to_stay_compact: [{ label: 'Office space' }], open_questions: ['Who covers holidays'], treated_as_context: ['Recruitment fee'] };
     const n = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }, { name: 'propose_option_interventions' }], [built, { ok: true, mutated: false, proposal_id: 'prop_bbbbbb' }]);
