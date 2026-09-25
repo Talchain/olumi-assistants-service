@@ -710,3 +710,53 @@ describe('review of #1871 at 18a706e2 — a quantifier over the options, then a 
     'Raising and holding alike keep 96% of customers and lose 4%.',
   ])('CONTROL: the figure applies to every option, so it is kept: %s', (s) => { expect(wire(s)).toContain(s); });
 });
+
+/**
+ * Review of #1871 at b2b3d3c2 (5828786795): when the quantified phrase LISTS the options and a bare pair follows with
+ * nothing but function or share words in between, the figures are distributed over the options, not shared by them.
+ */
+describe('review of #1871 at b2b3d3c2 — a bare pair after a listed phrase is distributed', () => {
+  const graph = { nodes: [{ id: 'keep', kind: 'option', label: 'Keep Pro at £49' }, { id: 'raise', kind: 'option', label: 'Raise Pro to £59 at release' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }] };
+  const analysisReady = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } };
+  const wire = (sentence: string) => enforceAgentLaneLeaderClaimsAtWire(
+    { assistant_text: `The churn limit was not scored. ${sentence} Churn is the input to check.`, blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } } } as unknown as OlumiResponse,
+    { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'constraint_verdict_withheld', graph, analysisReady },
+  ).response.assistant_text;
+  it.each([
+    // The reviewer's rows.
+    'For both raising and holding, 71% and 29% respectively.',
+    'For both raising and holding, the shares are 71% and 29% respectively.',
+    'For both Keep Pro at £49 and Raise Pro to £59 at release, 29% and 71% respectively.',
+    'Under either the £59 path or holding, 71% and 29% respectively.',
+    'For raising and holding alike, 71% and 29% respectively.',
+    'For both raising and holding, 71% and 29%.',
+    'For both raising and holding: 71% vs 29%.',
+    'For both raising and holding, 71% versus 29%.',
+    'For both raising and holding, 71%/29%.',
+    'On both the £59 path and holding 71% to 29%.',
+    // The same class, found on self-review.
+    'For each of raising and holding, 71% and 29% respectively.',
+    'For both raising and holding: 71% and 29%.',
+    'On both the £59 path and holding, 71% and 29%.',
+    'Raising and holding alike: 71% to 29%.',
+    // Ascending: a pair after a listed phrase is its split in either order, never a range.
+    'Raising and holding alike: 29% to 71%.',
+    'Under either raising or holding, 71% vs 29%.',
+    'For both raising and holding, the win share is 71% and 29%.',
+    '71% and 29% across both the £59 path and holding.',
+  ])('RED: removed through BOTH gates: %s', (s) => { expect(wire(s)).not.toMatch(/71%|29%/); });
+  it.each([
+    'On both the £59 path and holding, 96% of customers stay and 4% churn.',
+    'On both the £59 path and holding, churn could fall 70% to 30%.',
+    'On both the £59 path and holding, retention ranges 30% to 70%.',
+    'Raising and holding alike keep 96% of customers and lose 4%.',
+    // The reviewer's KEEPs.
+    'On both the £59 path and holding, 96% of customers stay and 4% churn, the same as today.',
+    'For both raising and holding, 96% of customers stay and 4% churn.',
+    'On both the £59 path and holding, 96% and 95% of customers stay respectively.',
+    'Under either option, retention moves from 90% to 92%; holding keeps the price.',
+    'On both options, churn falls 5% to 3%, whether we raise or hold.',
+    // No option is named, so there is no legend to distribute over (the named residual).
+    'Across both paths, 71% and 29%.',
+  ])('CONTROL: kept: %s', (s) => { expect(wire(s)).toContain(s); });
+});
