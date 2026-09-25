@@ -1342,3 +1342,45 @@ describe('follow-up of #1871 — a markdown table is judged row by row (residual
     expect(linesOf(out)).toContain(CAVEAT);
   });
 });
+
+/**
+ * Post-merge review of #1920 (5834268638; RC 5834279977): a status quo paraphrased without a word of its label kept its
+ * win share once the leader's row went. The held baseline has a closed set of names of its own; only the WHOLE head
+ * counts, so a level whose head merely starts with one of them stays.
+ */
+describe('post-merge review of #1920 — a paraphrased status quo gives its share', () => {
+  const STAFFING_NODES = [{ id: 'o1', kind: 'option', label: 'Hire a Tech Lead' }, { id: 'o2', kind: 'option', label: 'Maintain Current Staffing' }, { id: 'f1', kind: 'factor', label: 'Development capacity' }, { id: 'f2', kind: 'factor', label: 'Monthly churn' }];
+  const LEAD = '- Hire a Tech Lead leads at 55%';
+  it('RED (the reviewer\'s exact list): "- Status quo: 45%" goes with its ranked sibling', () => {
+    const out = withheldGate(`${LEAD}\n- Status quo: 45%\n\n${CAVEAT}`, STAFFING_NODES);
+    expect(out).not.toMatch(/55%|45%/);
+    expect(linesOf(out)).toContain(CAVEAT);
+  });
+  it.each([
+    '- **Status quo:** **45%**',
+    '- The status quo: 45%',
+    '- Baseline: 45%',
+    '- Do nothing: 45%',
+    '- Business as usual: 45%',
+    '- Current approach: 45%',
+  ])('RED, a status-quo name as the whole head: %s', (row) => {
+    const out = withheldGate(`${LEAD}\n${row}\n\n${CAVEAT}`, STAFFING_NODES);
+    expect(out).not.toMatch(/55%|45%/);
+    expect(linesOf(out)).toContain(CAVEAT);
+  });
+  it.each([
+    '- Churn assumption: 4%',
+    '- Baseline churn: 4%',
+    '- Status quo churn: 4%',
+    '- Development capacity: 60%',
+    '- Status quo: 45% retained each month',
+  ])('CONTROL, a level stays in the same ranked list: %s', (row) => {
+    const out = withheldGate(`${LEAD}\n${row}\n\n${CAVEAT}`, STAFFING_NODES);
+    expect(out).not.toContain('55%');
+    expect(linesOf(out)).toContain(row);
+  });
+  it('CONTROL: with no ranked sibling, a levels list keeps "Status quo: 45%" (the sweep only follows a dropped ranking)', () => {
+    const text = `- Status quo: 45%\n- Monthly churn: 4%\n\n${CAVEAT}`;
+    expect(linesOf(withheldGate(text, STAFFING_NODES))).toContain('- Status quo: 45%');
+  });
+});
