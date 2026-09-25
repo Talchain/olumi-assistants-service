@@ -1952,7 +1952,11 @@ export function createAgentCapabilities(
          * normalisation is never mistaken for another writer.
          */
         const movedPastUs = afterSet !== null && typeof afterSet.graph_hash === 'string' && afterSet.graph_hash !== baseHash;
-        const levelsChangedSince: { option: string; factor: string; saved: number; now: number }[] = [];
+        /** In the USER's scale and unit (review of #1881, 5826400426): the Agent quotes these, never 0.27 for £54. */
+        const levelsChangedSince: { option: string; factor: string; saved: number; now: number | null; unit?: string }[] = [];
+        let levelsUnread = false;
+        const beforeNodeById = new Map((before.nodes ?? []).map((n) => [n.id, n]));
+        const tidy = (x: number): number => Number(x.toPrecision(6));
         for (const o of ops) {
           const [optionId, factorId] = o.path.split('::');
           const option = byId.get(optionId);
@@ -1972,10 +1976,36 @@ export function createAgentCapabilities(
           });
           const mine = ownLevel.get(o.path);
           const row = applied[applied.length - 1]!;
-          if (movedPastUs && ownLevelWrite.has(o.path) && mine !== undefined && typeof recorded === 'number'
-            && Math.abs(recorded - mine) > 1e-9 * Math.max(1, Math.abs(mine))) {
-            row.recorded = mine;
-            levelsChangedSince.push({ option: row.option, factor: row.factor, saved: mine, now: recorded });
+          /**
+           * ⛔ A LEVEL THIS APPROVAL COMMITTED IS NEVER "NOT RECORDED" (review of #1881 5826400426; Codex
+           * 5826386917). Our own 200 + committed hash is the proof; the read-back only says what the model
+           * holds NOW. So an own-written row keeps OUR level, and the present state is reported beside it:
+           * changed by someone else (numeric), removed by someone else (absent), or unknown (read failed).
+           */
+          if (ownLevelWrite.has(o.path) && mine !== undefined) {
+            // The op's `cap` is the range the level was divided by (stated, or derived from the figure); none ⇒ already 0–1.
+            const opv = (o.value ?? {}) as { cap?: unknown; normalised?: unknown };
+            const cap = typeof opv.cap === 'number' && opv.cap > 0 ? opv.cap : undefined;
+            const toUser = (x: number): number => tidy(cap !== undefined ? x * cap : x);
+            const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(b));
+            // What we saved, as the user said it: their own figure when the write committed exactly what was sent.
+            const savedUser = typeof opv.normalised === 'number' && same(mine, opv.normalised) && Number.isFinite(row.requested)
+              ? row.requested : toUser(mine);
+            const unitRaw = ((byId.get(factorId) ?? beforeNodeById.get(factorId))?.observed_state as { unit?: unknown } | undefined)?.unit;
+            const unit = typeof unitRaw === 'string' && unitRaw.trim() !== '' ? unitRaw.trim() : undefined;
+            const current = typeof recorded === 'number' ? recorded : null;
+            const changed = (now: number | null): void => {
+              row.recorded = mine;
+              levelsChangedSince.push({ option: row.option, factor: row.factor, saved: savedUser, now: now === null ? null : toUser(now), ...(unit !== undefined ? { unit } : {}) });
+            };
+            if (current === null) {
+              // Absent now, or the read failed. Only a model read as moved past OUR commit can say someone else
+              // removed it; otherwise what it holds now is unknown — never an invented writer, never "not recorded".
+              if (movedPastUs) changed(null);
+              else { row.recorded = mine; levelsUnread = true; }
+            } else if (movedPastUs && !same(current, mine)) {
+              changed(current);
+            }
           }
         }
         const landed = applied.filter((a) => a.recorded !== null);
@@ -1997,19 +2027,25 @@ export function createAgentCapabilities(
           requested_count: applied.length,
           interventions: applied,
           revision_before: before.graph_hash,
-          revision_after: afterSet?.graph_hash ?? before.graph_hash,
+          // A failed read is not a model that never moved: our last committed revision is the one we can prove.
+          revision_after: afterSet?.graph_hash ?? baseHash,
           ...(failures.length > 0 ? { failures } : {}),
           ...(levelsChangedSince.length > 0 ? { changed_since_by_another_writer: levelsChangedSince } : {}),
+          ...(levelsUnread ? { current_state_unknown: true } : {}),
           ...(framedHere.length > 0 ? { ranges_added_for_analysis: framedHere } : {}),
           not_represented:
             (landed.length < applied.length
               ? `Only some levels were recorded by this approval; ${applied.filter((a) => a.recorded === null).map((a) => `${a.option} \u2192 ${a.factor}`).join(', ')} ${applied.length - landed.length === 1 ? 'was' : 'were'} NOT. `
               : '') +
             (levelsChangedSince.length > 0
-              ? levelsChangedSince.map((x) => `${x.option} \u2192 ${x.factor} was saved by this approval as ${x.saved}, but someone else has since changed it to ${x.now}`).join('; ') +
-                ' \u2014 describe it from the model as it now stands, not as this approval\u2019s level. '
+              ? levelsChangedSince.map((x) =>
+                `${x.option} \u2192 ${x.factor} was saved by this approval, but someone else has since ` +
+                (x.now === null ? 'removed it' : 'changed it')).join('; ') +
+                ' \u2014 say so, and describe it from the model as it now stands, not as this approval\u2019s level ' +
+                '(changed_since_by_another_writer has both figures in the user\u2019s units). '
               : '') +
-            (landed.length < applied.length ? 'The levels that were recorded' : 'What each option does is now recorded') +
+            (levelsUnread ? 'These levels were saved, but a read afterwards could not confirm what the model holds now, so do not describe its current levels. ' : '') +
+            (landed.length < applied.length ? 'The levels that were recorded are' : 'What each option does is now recorded') +
             ' from what the user said, not measured. The model ' +
             'stores each level against the factor\u2019s stated range, so quote the user\u2019s own number back ' +
             'to them, not the normalised one.' +
