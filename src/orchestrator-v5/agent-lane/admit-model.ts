@@ -25,6 +25,7 @@ import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.j
 import type { InterventionV3T } from '../../schemas/cee-v3.js';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
+import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
@@ -115,6 +116,12 @@ export interface CandidateModel {
      * changes and stays silent on BY HOW MUCH.
      */
     changes?: readonly string[];
+    /**
+     * The drafter's declaration that this is the one option that keeps things as
+     * they are (strict output sends `null` otherwise). Read by `wireInertStatusQuo`
+     * BEFORE the label idioms, so a held status quo never depends on wording.
+     */
+    is_status_quo?: boolean | null;
   }[];
   readonly factors: readonly { label: string; role: 'controllable' | 'observable' | 'external'; baseline_known: boolean; baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null }[];
   readonly risks: readonly { label: string; provenance: string }[];
@@ -200,6 +207,13 @@ export interface AdmittedNode {
    * scenario returned 500 until this was fixed.
    */
   provenance?: 'from_brief' | 'ai_inferred' | 'user_set';
+  /**
+   * `cee-v3.ts` option field. Written ONLY on the option the drafter DECLARED as the
+   * status quo (`is_status_quo`) and that was wired as held — readiness's own first
+   * baseline signal, so a declared status quo is held whatever its label. The idiom
+   * fallback writes no stamp (readiness recognises the idiom itself).
+   */
+  is_baseline?: boolean;
   /** Normalised 0-1, per the contract. The stated number goes in `_raw`. */
   goal_threshold_raw?: number;
   goal_threshold_cap?: number;
@@ -500,23 +514,40 @@ export function wireInertStatusQuo(
   nodes: readonly { id: string; kind?: string; label?: string }[],
   edges: readonly { from: string; to: string }[],
   interventionsByOption: ReadonlyMap<string, Readonly<Record<string, unknown>>>,
+  declaredStatusQuoIds: ReadonlySet<string> = new Set(),
 ): { optionId: string; factorIds: string[] } | null {
   const options = nodes.filter((n) => n.kind === 'option');
+  const factorIds = new Set(nodes.filter((n) => n.kind === 'factor').map((n) => n.id));
+  /** The factors this option would be held against, or null if it cannot be held (it acts, or nothing to hold). */
+  const holdAgainst = (statusQuo: { id: string }): string[] | null => {
+    if (edges.some((e) => e.from === statusQuo.id && factorIds.has(e.to))) return null;
+    const others = options.filter((o) => o.id !== statusQuo.id);
+    const basis = new Set<string>();
+    for (const o of others) {
+      for (const fid of Object.keys(interventionsByOption.get(o.id) ?? {})) if (factorIds.has(fid)) basis.add(fid);
+    }
+    if (basis.size === 0) {
+      const otherIds = new Set(others.map((o) => o.id));
+      for (const e of edges) if (otherIds.has(e.from) && factorIds.has(e.to)) basis.add(e.to);
+    }
+    return basis.size === 0 ? null : [...basis];
+  };
+  // ⭐ THE DRAFTER'S DECLARATION FIRST (served c673223: "Continue Current Staffing"
+  // is not an idiom, and the turn blocked). Two declared → null: never guess.
+  // ⛔ ONE WRONG FLAG MUST NOT BLOCK WHAT BASE HELD (review 5825562938, B1): a single
+  // declared option that cannot be held (it acts, or there is nothing to hold it
+  // against) falls back to the idiom list, exactly as if nothing were declared. No
+  // idiom is added.
+  const declared = options.filter((o) => declaredStatusQuoIds.has(o.id));
+  if (declared.length > 1) return null;
+  if (declared.length === 1) {
+    const held = holdAgainst(declared[0]!);
+    if (held !== null) return { optionId: declared[0]!.id, factorIds: held };
+  }
   const matches = options.filter((o) => labelMatchesBaseline(o.label ?? ''));
   if (matches.length !== 1) return null;
-  const statusQuo = matches[0]!;
-  const factorIds = new Set(nodes.filter((n) => n.kind === 'factor').map((n) => n.id));
-  if (edges.some((e) => e.from === statusQuo.id && factorIds.has(e.to))) return null;
-  const others = options.filter((o) => o.id !== statusQuo.id);
-  const basis = new Set<string>();
-  for (const o of others) {
-    for (const fid of Object.keys(interventionsByOption.get(o.id) ?? {})) if (factorIds.has(fid)) basis.add(fid);
-  }
-  if (basis.size === 0) {
-    const otherIds = new Set(others.map((o) => o.id));
-    for (const e of edges) if (otherIds.has(e.from) && factorIds.has(e.to)) basis.add(e.to);
-  }
-  return basis.size === 0 ? null : { optionId: statusQuo.id, factorIds: [...basis] };
+  const held = holdAgainst(matches[0]!);
+  return held === null ? null : { optionId: matches[0]!.id, factorIds: held };
 }
 
 /**
@@ -1207,12 +1238,24 @@ export function admitCandidateModel(
    * authority are written: the only claim made is the one disclosed below, and
    * it is correctable.
    */
-  const heldStatusQuo = wireInertStatusQuo(nodes, [...topologyEdges, ...mechanismEdges], interventionsByOption);
+  // Read through the shared baseline-identity reader, so "is this the status quo?"
+  // has one truth table across the estate.
+  const declaredStatusQuoIds = new Set(
+    model.options
+      .filter((o) => readIsBaseline({ ...(typeof o.is_status_quo === 'boolean' ? { is_baseline: o.is_status_quo } : {}) }) === true)
+      .map((o) => ids.get(o.label))
+      .filter((id): id is string => id !== undefined),
+  );
+  const heldStatusQuo = wireInertStatusQuo(nodes, [...topologyEdges, ...mechanismEdges], interventionsByOption, declaredStatusQuoIds);
   const heldStatusQuoEdges = (heldStatusQuo?.factorIds ?? []).map((factorId) => ({
     ...topo(heldStatusQuo!.optionId, factorId),
     origin: REPAIR_AUTHORED_ORIGIN,
     provenance: { source: 'cee_hypothesis', reasoning: CONNECTIVITY_REPAIR_WIRING_REASON },
   }));
+  if (heldStatusQuo !== null && declaredStatusQuoIds.has(heldStatusQuo.optionId)) {
+    const declaredNode = nodes.find((n) => n.id === heldStatusQuo.optionId);
+    if (declaredNode !== undefined) declaredNode.is_baseline = true;
+  }
   if (heldStatusQuo !== null) {
     const optionLabel = labelById.get(heldStatusQuo.optionId) ?? heldStatusQuo.optionId;
     const names = heldStatusQuo.factorIds.map((id) => labelById.get(id) ?? id);
