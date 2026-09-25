@@ -354,3 +354,33 @@ describe('served survey — real replies on withheld turns', () => {
     expect(dropRankingSentences(text).text).toBe('The ordering is most sensitive to:\n\n2. **Runway** — a slower burn buys time.');
   });
 });
+
+/** Codex 5825866849: one option's share under a ranking heading, and a lone option share row. */
+describe('a single option share row', () => {
+  const graph = { nodes: [{ id: 'raise', kind: 'option', label: 'Raise to £59' }, { id: 'keep', kind: 'option', label: 'Keep £49' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }] };
+  const labels = rankingLabelContext(graph, undefined);
+  it('RED: a ranking heading takes its value rows with it', () => {
+    const text = 'Win share in the modelled runs:\n- Raise to £59: 71%.\n\nThe churn limit was not scored.';
+    expect(dropRankingSentences(text, labels).text).toBe('The churn limit was not scored.');
+  });
+  it('RED: a lone "<option>: N%" row is dropped even without a heading', () => {
+    const text = 'Here is where things stand.\n\n- Raise to £59: 71%.\n\nThe churn limit was not scored.';
+    expect(dropRankingSentences(text, labels).text).toBe('Here is where things stand.\n\nThe churn limit was not scored.');
+  });
+  it('CONTROL: a factor’s own percentage row under a neutral heading stays', () => {
+    const text = 'Current assumptions:\n- Monthly churn: 4%.\n\nThe churn limit was not scored.';
+    expect(dropRankingSentences(text, labels).text).toBe(text);
+  });
+  it('CONTROL: a caveat list survives its ranking heading — only value rows go with it', () => {
+    const text = 'Why this model favours Raise to £59:\n- It assumes churn stays at 3%, which was not measured.\n- Raise to £59: 71%.';
+    expect(dropRankingSentences(text, labels).text).toBe('- It assumes churn stays at 3%, which was not measured.');
+  });
+  it('through BOTH wire gates on a withheld turn, 71% never reaches the user', () => {
+    const out = enforceAgentLaneLeaderClaimsAtWire(
+      { assistant_text: 'Win share in the modelled runs:\n- Raise to £59: 71%.\n\nThe churn limit was not scored.', blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } } } as unknown as OlumiResponse,
+      { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'constraint_verdict_withheld', graph, analysisReady: { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } } },
+    );
+    expect(out.response.assistant_text).not.toContain('71%');
+    expect(out.response.assistant_text).toContain('The churn limit was not scored.');
+  });
+});

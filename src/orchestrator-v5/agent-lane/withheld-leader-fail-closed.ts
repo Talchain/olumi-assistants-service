@@ -309,6 +309,8 @@ export interface RankingLabelContext {
   readonly rankingShapedLabels: readonly string[];
   /** Capitalised single words from those labels that trip the vocabulary alone ("Lead" in "Hire a Lead Engineer"). */
   readonly rankingShapedLabelWords: readonly string[];
+  /** The OPTIONS' own labels — a lone "<option>: 71%" row is that option's share (Codex 5825866849). */
+  readonly optionLabels?: readonly string[];
 }
 
 const NO_LABELS: RankingLabelContext = { rankingShapedLabels: [], rankingShapedLabelWords: [] };
@@ -345,7 +347,22 @@ export function rankingLabelContext(graph: unknown, analysisReady: unknown): Ran
       if (word.length >= MIN_LABEL_LENGTH && /^\p{Lu}/u.test(word) && rankingCodesInBlanked(word).length > 0) words.add(word);
     }
   }
-  return { rankingShapedLabels: labels, rankingShapedLabelWords: [...words] };
+  const options = new Set<string>();
+  const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes) {
+      const o = n as { kind?: unknown; label?: unknown } | null;
+      if (o?.kind === 'option' && typeof o.label === 'string' && o.label.trim().length >= MIN_LABEL_LENGTH) options.add(o.label.trim());
+    }
+  }
+  const readyOptions = (analysisReady as { options?: unknown } | null | undefined)?.options;
+  if (Array.isArray(readyOptions)) {
+    for (const o of readyOptions) {
+      const label = (o as { label?: unknown } | null)?.label;
+      if (typeof label === 'string' && label.trim().length >= MIN_LABEL_LENGTH) options.add(label.trim());
+    }
+  }
+  return { rankingShapedLabels: labels, rankingShapedLabelWords: [...words], optionLabels: [...options] };
 }
 
 function escapeRegExp(s: string): string {
@@ -492,6 +509,11 @@ function finerSentences(unit: string): string[] {
   return out;
 }
 
+/** A row that is only "label: number" — its meaning comes from whatever introduced it. */
+const VALUE_ROW = /^[\s\-+•*\d.)]*[^:|\n]{2,80}?:\s*[£$€]?\s?\d[\d,.]*\s?(?:%|k|m|bn|x|pp)?[\s.;,)]*$/i;
+
+const labelKey = (s: string): string => classificationCopy(s).replace(/\s+/g, ' ').trim().toLowerCase();
+
 /** "Raise to £59: 71%." — one option's share, as the whole unit. */
 const SHARE_UNIT = /^[\s\-+•*\d.)]*[^:|\n]{2,80}?:\s*(\d+(?:[.,]\d+)?)\s?%[\s.;,)]*$/;
 
@@ -524,6 +546,43 @@ function unitsRankingAsAWhole(segs: ReadonlyArray<{ sep: string } | { units: str
       for (const r of rows) unitsOf(r)!.forEach((_, j) => forced.add(`${r}:${j}`));
     }
     i = k;
+  }
+  /**
+   * ⛔ ROWS WHOSE MEANING IS THEIR HEADING (Codex 5825866849: "Win share in the modelled runs:" then
+   * "- Raise to £59: 71%."). Dropping the ranking heading left the bare "71%" row. So when a unit ending
+   * in ":" is dropped as ranking, the VALUE rows beneath it ("label: number") go with it. A full-sentence
+   * item under it is still judged on its own, so a caveat list survives its heading.
+   */
+  for (let i = 0; i < segs.length; i += 1) {
+    const us = unitsOf(i);
+    const heading = us?.filter((u) => /\S/.test(u)).at(-1);
+    if (heading === undefined || !/:\s*$/.test(classificationCopy(heading).trim()) || !sentenceRanksOptions(heading, labels)) continue;
+    let k = i + 1;
+    if (segs[k] !== undefined && 'sep' in segs[k]!) k += 1;
+    while (k < segs.length) {
+      const row = unitsOf(k);
+      if (row === undefined) {
+        const g = segs[k];
+        if (g !== undefined && 'sep' in g && g.sep === '\n') { k += 1; continue; }
+        break;
+      }
+      if (!VALUE_ROW.test(classificationCopy(row.join('')).trim())) break;
+      row.forEach((_, j) => forced.add(`${k}:${j}`));
+      k += 1;
+    }
+  }
+  /** A lone "<option label>: N%" row is that option's share, heading or not. */
+  const optionKeys = new Set((labels.optionLabels ?? []).map(labelKey));
+  if (optionKeys.size > 0) {
+    segs.forEach((g, r) => {
+      if (!('units' in g)) return;
+      g.units.forEach((u, j) => {
+        const copy = classificationCopy(u);
+        if (SHARE_UNIT.exec(copy) === null) return;
+        const head = copy.replace(/^[\s\-+•*\d.)]*/, '').split(':')[0] ?? '';
+        if (optionKeys.has(labelKey(head))) forced.add(`${r}:${j}`);
+      });
+    });
   }
   // Grouped per CONTIGUOUS run (served: a win-share list and an ownership list in one reply summed to
   // 317 together, so neither was recognised). A run ends at anything but a share unit or a single newline.
