@@ -663,6 +663,11 @@ describe('POST /orchestrate/v2/turn — structural_add under a REUSED turn id an
     expect.soft(prose, `A: the conflict keeps commit.ts's refusal prose (${observed})`).toMatch(
       /did not make that change/i,
     );
+    // A structural write has no value target, so commit.ts's "couldn't read the
+    // current value" tail is false beside a snapshot the reply presents.
+    expect.soft(prose, `A: no "couldn't read" tail beside a presented snapshot (${observed})`).not.toMatch(
+      /couldn't read the current value/i,
+    );
 
     // ── THE NON-PROSE CARRIERS DESCRIBE THE SNAPSHOT, NEVER THE CANDIDATE ────
     // (a) readiness is built from the STORED graph (X, no Y). `blockers` and
@@ -957,6 +962,9 @@ describe('POST /orchestrate/v2/turn — structural_add under a REUSED turn id an
     );
     expect.soft(prose, `REPLAY: prose must not refuse a genuine replay (${observed})`).not.toMatch(
       /did not make that change/i,
+    );
+    expect.soft(prose, `REPLAY: no "couldn't read" tail beside a presented snapshot (${observed})`).not.toMatch(
+      /couldn't read the current value/i,
     );
     expect.soft(prose, `REPLAY: prose must not confirm a NEW add (${observed})`).not.toContain(`Added '${X.label}'`);
     expect.soft(prose, `REPLAY: prose must not say this attempt saved it (${observed})`).not.toMatch(/That's saved/);
@@ -1395,6 +1403,7 @@ describe('POST /orchestrate/v2/turn — structural_add under a REUSED turn id an
     const prose = String(r2.body.assistant_text ?? '');
     expect.soft(prose, `RENAME A: prose must not confirm R2's rename (${observed})`).not.toContain(`to '${RN.r2}'`);
     expect.soft(prose, `RENAME A: the conflict keeps commit.ts's refusal prose (${observed})`).toMatch(/did not make that change/i);
+    expect.soft(prose, `RENAME A: no "couldn't read" tail (${observed})`).not.toMatch(/couldn't read the current value/i);
     expect.soft(r2.body.model_version_receipt, `RENAME A: no receipt for R2 (${observed})`).toBeUndefined();
     expect.soft(attestations(RENAME_COMMITTED, 'renamed_node_id', RN.id), `RENAME A: no success attestation (${observed})`).toBe(0);
     expectNoProviderReached();
@@ -1481,6 +1490,7 @@ describe('POST /orchestrate/v2/turn — structural_add under a REUSED turn id an
     expect.soft(retry.status, `RENAME REPLAY: not a failure (${observed})`).toBe(200);
     const prose = String(retry.body.assistant_text ?? '');
     expect.soft(prose, `RENAME REPLAY: says already recorded (${observed})`).toMatch(/already been recorded/i);
+    expect.soft(prose, `RENAME REPLAY: no "couldn't read" tail (${observed})`).not.toMatch(/couldn't read the current value/i);
     expect.soft(prose, `RENAME REPLAY: never says THIS attempt saved it (${observed})`).not.toMatch(/That change is saved/);
     expect.soft((retry.body.model_version_receipt as Record<string, unknown> | undefined)?.version_id, `RENAME REPLAY: the original receipt (${observed})`).toBe(VERSION_IDS[0]);
     expect.soft(
@@ -1550,6 +1560,7 @@ describe('POST /orchestrate/v2/turn — structural_add under a REUSED turn id an
     const prose = String(r2.body.assistant_text ?? '');
     expect.soft(prose, `EDGE A: prose must not confirm R2's connection (${observed})`).not.toMatch(/I've connected/);
     expect.soft(prose, `EDGE A: the conflict keeps commit.ts's refusal prose (${observed})`).toMatch(/did not make that change/i);
+    expect.soft(prose, `EDGE A: no "couldn't read" tail (${observed})`).not.toMatch(/couldn't read the current value/i);
     expect.soft(r2.body.model_version_receipt, `EDGE A: no receipt for R2 (${observed})`).toBeUndefined();
     expect.soft(attestations(EDGE_COMMITTED, 'edge_to', E2.to), `EDGE A: no success attestation (${observed})`).toBe(0);
     expectNoProviderReached();
@@ -1637,6 +1648,7 @@ describe('POST /orchestrate/v2/turn — structural_add under a REUSED turn id an
     expect.soft(retry.status, `EDGE REPLAY: not a failure (${observed})`).toBe(200);
     const prose = String(retry.body.assistant_text ?? '');
     expect.soft(prose, `EDGE REPLAY: says already recorded (${observed})`).toMatch(/already been recorded/i);
+    expect.soft(prose, `EDGE REPLAY: no "couldn't read" tail (${observed})`).not.toMatch(/couldn't read the current value/i);
     expect.soft(prose, `EDGE REPLAY: never says THIS attempt connected it (${observed})`).not.toMatch(/I've connected/);
     expect.soft((retry.body.model_version_receipt as Record<string, unknown> | undefined)?.version_id, `EDGE REPLAY: the original receipt (${observed})`).toBe(VERSION_IDS[0]);
     expect.soft(
