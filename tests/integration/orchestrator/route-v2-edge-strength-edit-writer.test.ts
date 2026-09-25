@@ -1108,12 +1108,14 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
   // under the same turn id replays too. "Already recorded" is said only when the
   // reread edge carries the requested mean, direction AND user-set provenance;
   // the three cases pin each side of the writer's `requestedChangeVisibleIn`.
-  it('F4: a REPLAY says "already recorded" only when the reread edge carries the requested strength and user-set provenance', async () => {
+  it('F4: a REPLAY with no receipt naming this turn never says "already recorded"; it says the change is in the model only when the reread edge carries the requested strength and user-set provenance', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       throw new Error('fetch attempted in a no-provider test');
     });
     const NOT_IN_MODEL =
       'Nothing new was written just now, and that change is not in the model at the moment.';
+    const IN_MODEL =
+      'Nothing new was written just now, and the model already reflects that change.';
     const post = async (event: Record<string, unknown>, suffix: string) => {
       const response = await app.inject({
         method: 'POST',
@@ -1146,7 +1148,10 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
         strength: { mean: -0.7 },
         provenance: { source: 'user_specified' },
       });
-      expect(String(visible.assistant_text)).toMatch(/already been recorded/i);
+      // Visible, but no receipt names this turn: in the model, attributed to no one.
+      expect(String(visible.assistant_text)).not.toMatch(/already been recorded/i);
+      expect(String(visible.assistant_text)).toBe(IN_MODEL);
+      expect(visible.model_version_receipt).toBeUndefined();
 
       // (3) confirm_current, tuple unchanged by design, provenance NOT stamped in
       //     the store — the stamp is the whole change, so it is not visible.

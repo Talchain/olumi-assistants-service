@@ -1048,7 +1048,7 @@ describe('POST /orchestrate/v2/turn — structural_delete (a deleted option stay
   // the same request hash — a committed REFUSAL row included. So "already
   // recorded" may be said only when the reread snapshot shows the removal; the
   // pair below pins both sides of the writer's `requestedChangeVisibleIn`.
-  it('F4: a REPLAY whose removal is NOT in the reread snapshot does not say "already recorded"; a replay whose removal IS keeps it', async () => {
+  it('F4: a REPLAY whose removal is NOT in the reread snapshot does not say "already recorded"; one whose removal IS, with no receipt naming this turn, says the model already reflects it', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       throw new Error('fetch attempted in a no-provider test');
     });
@@ -1073,7 +1073,8 @@ describe('POST /orchestrate/v2/turn — structural_delete (a deleted option stay
       expect(nv.model_version_receipt).toBeUndefined();
       expect(nodeIds(nv.draft_graph as Record<string, unknown>)).toContain('o-launch');
 
-      // (2) visible — the store holds the removal (the original commit wrote it).
+      // (2) visible — the store holds the removal — but no receipt names this turn,
+      //     so the reply cannot say WHO removed it (#1906 pre-review 5831122178).
       persisted = buildPersistedGraph();
       appendMock.mockImplementationOnce(async (write: { graph?: unknown }) => {
         persisted = write.graph;
@@ -1084,7 +1085,11 @@ describe('POST /orchestrate/v2/turn — structural_delete (a deleted option stay
       expect(nodeIds(persisted as Record<string, unknown>)).not.toContain('o-launch');
       expect(visible.statusCode).toBe(200);
       const v = body200(visible);
-      expect(String(v.assistant_text)).toMatch(/already been recorded/i);
+      expect(String(v.assistant_text)).not.toMatch(/already been recorded/i);
+      expect(String(v.assistant_text)).toBe(
+        'Nothing new was written just now, and the model already reflects that change.',
+      );
+      expect(v.model_version_receipt).toBeUndefined();
       expect(nodeIds(v.draft_graph as Record<string, unknown>)).not.toContain('o-launch');
 
       expect(llmChatMock).not.toHaveBeenCalled();

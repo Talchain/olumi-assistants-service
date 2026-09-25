@@ -443,6 +443,12 @@ const REPLAY_CHANGE_NOT_IN_MODEL =
 /** …and on a replay whose reread FAILED: the change cannot be checked either way. */
 const REPLAY_CHANGE_UNCHECKABLE =
   "Nothing new was written just now, and I couldn't read the model to check whether that change is in it.";
+/**
+ * …and on a replay whose requested change IS in the snapshot but no receipt
+ * names THIS turn as its author: true whoever made the change.
+ */
+const REPLAY_CHANGE_IN_MODEL_UNATTRIBUTED =
+  'Nothing new was written just now, and the model already reflects that change.';
 
 let app: FastifyInstance;
 let fetchSpy: ReturnType<typeof vi.spyOn>;
@@ -1047,6 +1053,164 @@ describe('POST /orchestrate/v2/turn — structural_add under a REUSED turn id an
       analysisHash(stored),
     );
     expect.soft(committedAttestationsFor(X.id), `REFUSAL-REPLAY: no success attestation (${observed})`).toBe(0);
+
+    expectNoProviderReached();
+  });
+
+  // ── REPLAY OF A REFUSAL + THE SAME CHANGE BY A FOREIGN WRITER — visible is not "mine" ─
+  // Independent pre-review 5831122178 on #1906: the change being visible in
+  // today's reread does not say WHO made it.
+
+  it('REPLAY OF A REFUSAL, FOREIGN SAME CHANGE: my add of X was REFUSED under turn T; the identical retry under T reads a model without X, a FOREIGN writer adds exactly X before its append, and the store flags replayedPriorTurn — X is in the model, but T never wrote it, so the reply must not say "already recorded"', async () => {
+    // ── derive the foreign writer's bytes through the REAL route, then discard ─
+    const base = buildBaseGraph();
+    expect((await send(addEvent(X, base), PREP_FOREIGN)).status).toBe(200);
+    expect(fake.landed).toEqual([PREP_FOREIGN]);
+    const foreignGraph = jsonCopy(fake.graph);
+    expect(hasNode(foreignGraph, X.id)).toBe(true);
+    resetFake();
+    appendMock.mockClear();
+    logInfoSpy.mockClear();
+    loadGraphSnapshots.length = 0;
+
+    // ── the refusal, committed under T (no saved model yet) ─────────────────
+    fake.owned = true;
+    fake.graph = null;
+    const first = await send(addEvent(X, base), MINE);
+    expect(first.status).toBe(200);
+    expect(String(first.body.assistant_text ?? '')).toMatch(/no saved model/i);
+    expect(fake.rows.has(MINE), 'the refusal row committed under T').toBe(true);
+    expect(fake.rows.get(MINE)?.receipt).toBeUndefined();
+    expect(fake.landed).toEqual([]);
+
+    // ── a model now exists without X; the foreign add of X lands AFTER the
+    //    retry's base read and BEFORE its append ──────────────────────────────
+    fake.graph = jsonCopy(base);
+    const readsBeforeRetry = loadGraphSnapshots.length;
+    let appendsWhenForeignLanded: number | undefined;
+    fake.afterNextRead = () => {
+      appendsWhenForeignLanded = appendMock.mock.calls.length;
+      fake.graph = jsonCopy(foreignGraph);
+      fake.rows.set(FOREIGN, { id: `row-${FOREIGN}`, request_hash: 'sha256:foreign-add-x' });
+    };
+    const retry = await send(addEvent(X, base), MINE);
+
+    // ── PREMISE, proven inside the test ─────────────────────────────────────
+    const mineIdx = appendIndicesFor(MINE);
+    expect(mineIdx).toHaveLength(2);
+    const retryWrite = appendMock.mock.calls[mineIdx[1]!]![0];
+    // (a) the SAME request, built on a model WITHOUT X, reaching the append with X;
+    expect(retryWrite.request_hash).toBe(appendMock.mock.calls[mineIdx[0]!]![0].request_hash);
+    expect(hasNode(loadGraphSnapshots[readsBeforeRetry], X.id)).toBe(false);
+    expect(hasNode(retryWrite.graph, X.id)).toBe(true);
+    // (b) the foreign add landed before the retry's append was attempted;
+    expect(fake.afterNextRead, 'the interleaving hook must have run').toBeUndefined();
+    expect(appendsWhenForeignLanded).toBe(mineIdx[1]);
+    // (c) the store flags a REPLAY of T's REFUSAL row: no receipt, nothing written;
+    const outcome = await outcomeAt(mineIdx[1]!);
+    expect(outcome.replayedPriorTurn).toBe(true);
+    expect(outcome.priorTurnConflict).toBeUndefined();
+    expect(outcome.modelVersionReceipt).toBeUndefined();
+    expect(fake.replayed).toEqual([MINE]);
+    expect(fake.landed).toEqual([]);
+    // (d) X IS in the model — put there by the FOREIGN writer, never by T.
+    const stored = fake.graph;
+    expect(identityOf(stored)).toBe(identityOf(foreignGraph));
+    expect(hasNode(stored, X.id)).toBe(true);
+    const commitReplayLogs = logInfoSpy.mock.calls.filter(
+      (c: unknown[]) => typeof c[1] === 'string' && (c[1] as string).startsWith('V5 commit — this turn REPLAYED'),
+    ).length;
+    expect(commitReplayLogs, 'the log probe must see the commit\'s replay line in this run').toBe(1);
+
+    const observed =
+      `observed: status=${retry.status}, reply draft_graph nodes=[${
+        retry.body.draft_graph === undefined ? 'absent' : nodeIds(retry.body.draft_graph).join(',')
+      }], reply graph_hash=${String(retry.body.graph_hash)}, stored hash=${analysisHash(stored)}, ` +
+      `assistant_text=${JSON.stringify(retry.body.assistant_text ?? null)}`;
+
+    // ── TRUTHFUL: nothing written; the change is there, attributed to no one ─
+    expect.soft(retry.status, `FOREIGN-SAME: not a server failure (${observed})`).toBe(200);
+    const prose = String(retry.body.assistant_text ?? '');
+    expect.soft(
+      prose,
+      `FOREIGN-SAME: prose attributes the FOREIGN add to T ("already recorded") (${observed})`,
+    ).not.toMatch(/already been recorded/i);
+    expect.soft(prose, `FOREIGN-SAME: prose says what is true now (${observed})`).toBe(
+      REPLAY_CHANGE_IN_MODEL_UNATTRIBUTED,
+    );
+    expect.soft(prose, `FOREIGN-SAME: prose must not confirm the add (${observed})`).not.toContain(`Added '${X.label}'`);
+    expect.soft(prose, `FOREIGN-SAME: prose must not say the add is saved (${observed})`).not.toMatch(/That's saved/);
+    expect.soft(retry.body.model_version_receipt, `FOREIGN-SAME: no receipt (${observed})`).toBeUndefined();
+    // The stored snapshot, for display — truthfully WITH X.
+    expect.soft(hasNode(retry.body.draft_graph, X.id), `FOREIGN-SAME: X on display (${observed})`).toBe(true);
+    expect.soft(retry.body.graph_hash, `FOREIGN-SAME: the stored graph's hash (${observed})`).toBe(
+      analysisHash(stored),
+    );
+    expect.soft(committedAttestationsFor(X.id), `FOREIGN-SAME: no success attestation (${observed})`).toBe(0);
+
+    expectNoProviderReached();
+  });
+
+  // ── GUEST REPLAY — a genuine replay with no receipt to prove it ────────
+
+  it('GUEST REPLAY: a genuine replay of my committed add on an UNOWNED scenario — no receipt exists to prove the earlier write was this request\'s, so the reply says the model already reflects the change and attributes it to no one', async () => {
+    fake.owned = false;
+    const base = jsonCopy(fake.graph);
+    const original = await send(addEvent(X, base), MINE);
+    expect(original.status).toBe(200);
+    expect(fake.landed).toEqual([MINE]);
+    const originalRow = fake.rows.get(MINE);
+    expect(originalRow?.receipt, 'guest control: an unowned scenario mints no receipt').toBeUndefined();
+    const originalGraph = jsonCopy(fake.graph);
+    expect(hasNode(originalGraph, X.id)).toBe(true);
+    resetFake();
+    appendMock.mockClear();
+    logInfoSpy.mockClear();
+    loadGraphSnapshots.length = 0;
+
+    const readsBeforeRetry = loadGraphSnapshots.length;
+    let appendsWhenOriginalLanded: number | undefined;
+    fake.afterNextRead = () => {
+      appendsWhenOriginalLanded = appendMock.mock.calls.length;
+      fake.graph = jsonCopy(originalGraph);
+      fake.rows.set(MINE, originalRow!);
+    };
+    const retry = await send(addEvent(X, base), MINE);
+
+    // ── PREMISE ─────────────────────────────────────────────────────────────
+    const mineIdx = appendIndicesFor(MINE);
+    expect(mineIdx).toHaveLength(1);
+    const retryWrite = appendMock.mock.calls[mineIdx[0]!]![0];
+    expect(retryWrite.request_hash).toBe(originalRow!.request_hash);
+    expect(hasNode(loadGraphSnapshots[readsBeforeRetry], X.id)).toBe(false);
+    expect(hasNode(retryWrite.graph, X.id)).toBe(true);
+    expect(fake.afterNextRead, 'the interleaving hook must have run').toBeUndefined();
+    expect(appendsWhenOriginalLanded).toBe(mineIdx[0]);
+    const outcome = await outcomeAt(mineIdx[0]!);
+    expect(outcome.replayedPriorTurn).toBe(true);
+    expect(outcome.modelVersionReceipt).toBeUndefined();
+    expect(fake.landed).toEqual([]);
+    const stored = fake.graph;
+    expect(hasNode(stored, X.id)).toBe(true);
+
+    const observed =
+      `observed: status=${retry.status}, reply graph_hash=${String(retry.body.graph_hash)}, ` +
+      `stored hash=${analysisHash(stored)}, assistant_text=${JSON.stringify(retry.body.assistant_text ?? null)}`;
+
+    expect.soft(retry.status, `GUEST REPLAY: a replay is not a failure (${observed})`).toBe(200);
+    const prose = String(retry.body.assistant_text ?? '');
+    expect.soft(prose, `GUEST REPLAY: no receipt, so no authorship claim (${observed})`).toBe(
+      REPLAY_CHANGE_IN_MODEL_UNATTRIBUTED,
+    );
+    expect.soft(prose, `GUEST REPLAY: must not refuse a genuine replay (${observed})`).not.toMatch(
+      /did not make that change/i,
+    );
+    expect.soft(retry.body.model_version_receipt, `GUEST REPLAY: no receipt (${observed})`).toBeUndefined();
+    expect.soft(hasNode(retry.body.draft_graph, X.id), `GUEST REPLAY: X on display (${observed})`).toBe(true);
+    expect.soft(retry.body.graph_hash, `GUEST REPLAY: the stored graph's hash (${observed})`).toBe(
+      analysisHash(stored),
+    );
+    expect.soft(committedAttestationsFor(X.id), `GUEST REPLAY: no success attestation (${observed})`).toBe(0);
 
     expectNoProviderReached();
   });
