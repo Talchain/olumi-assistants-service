@@ -59,10 +59,12 @@ function fakeProduct(opts: {
   storeAs?: (sent: number) => number;
   /** Return the production-shaped committed response: the persisted `draft_graph` beside `graph_hash`. */
   draftGraph?: boolean;
+  /** Nodes beyond BASE (a precise-figure factor, say). */
+  extraNodes?: Node[];
 } = {}) {
   const posted: { turn_id: string; event: Record<string, unknown> }[] = [];
   const registered: { nodes: Node[] }[] = [];
-  let nodes: Node[] = BASE.map((n) => ({ ...n, interventions: n.interventions == null ? n.interventions : { ...n.interventions } }));
+  let nodes: Node[] = [...BASE, ...(opts.extraNodes ?? [])].map((n) => ({ ...n, interventions: n.interventions == null ? n.interventions : { ...n.interventions } }));
   let rev = 0;
   const d: InternalDispatch = async (path, body) => {
     const b = (body ?? {}) as Record<string, unknown>;
@@ -427,6 +429,43 @@ describe('authorise_change records the STORED levels', () => {
     const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
     expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1, current_state_unknown: true });
     expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+  });
+
+  /**
+   * ⛔ Review of #1881 at 6868825f (5827673705): rounding to 6 significant figures BEFORE comparing made a precise
+   * figure never equal to itself, so an UNRELATED write (a goal rename) read as "someone else changed your level".
+   */
+  describe('a precise figure is compared un-rounded', () => {
+    const ARR: Node = { id: 'arr', kind: 'factor', label: 'Annual revenue', observed_state: { value: 0.5, raw_value: 1_000_000, cap: 2_000_000, unit: 'GBP' } };
+    const askArr = (value: number) => ({ interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Annual revenue', value, basis: 'the user\u2019s figure' }] });
+    const renameGoal = (ns: Node[]): Node[] => ns.map((n) => (n.id === 'mrr' ? { ...n, label: 'Monthly recurring revenue (renamed)' } : n));
+    it.each([1_234_567, 1_234_567.5])('RED: £%s, then an unrelated write — nothing is reported as changed', async (v) => {
+      const p = fakeProduct({ extraNodes: [ARR] });
+      const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(renameGoal)), new ProposalStore());
+      const prop = await caps.proposeOptionInterventions(ctx, askArr(v));
+      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1 });
+      expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+      expect(String(applied.not_represented)).not.toContain('someone else');
+    });
+    it('RED: the product stores its own normalisation of a precise figure, then an unrelated write — still nothing changed', async () => {
+      // The saved-level fallback (committed level x range) is compared un-rounded too: its rounded twin is only reported.
+      const p = fakeProduct({ extraNodes: [ARR], draftGraph: true, storeAs: (x) => x + 3e-8 });
+      const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(renameGoal)), new ProposalStore());
+      const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_567));
+      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1 });
+      expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+    });
+    it('CONTROL: a precise figure that someone really changed is reported, the new figure rounded for reading', async () => {
+      const p = fakeProduct({ extraNodes: [ARR] });
+      const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(setLevel('phase_increase', 'arr', 0.75))), new ProposalStore());
+      const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_567));
+      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      expect(applied.changed_since_by_another_writer).toEqual([
+        { option: 'Phase Pro price increase', factor: 'Annual revenue', saved: 1_234_567, now: 1_500_000, unit: 'GBP' },
+      ]);
+    });
   });
 
   it('a deleted option is named from the approved read, never by its id', async () => {

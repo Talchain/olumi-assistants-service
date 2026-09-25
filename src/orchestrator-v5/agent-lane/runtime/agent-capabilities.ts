@@ -1989,12 +1989,18 @@ export function createAgentCapabilities(
             // The op's `cap` is the range the level was divided by (stated, or derived from the figure); none ⇒ already 0–1.
             const opv = (o.value ?? {}) as { cap?: unknown; normalised?: unknown };
             const cap = typeof opv.cap === 'number' && opv.cap > 0 ? opv.cap : undefined;
-            const toUser = (x: number): number => tidy(cap !== undefined ? x * cap : x);
+            /**
+             * ⛔ COMPARE UN-ROUNDED; ROUND ONLY WHAT IS REPORTED (review of #1881 at 6868825f, 5827673705). `tidy`
+             * (6 significant figures) applied before the comparison made a precise figure — £1,234,567 — never equal
+             * to itself, so ANY unrelated write that moved the graph read as "someone else changed your level".
+             */
+            const toAbs = (x: number): number => (cap !== undefined ? x * cap : x);
             const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(b));
             const sameAbs = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(b));
             // What we saved, as the user said it: their own figure when the write committed exactly what was sent.
-            const savedUser = typeof opv.normalised === 'number' && same(mine, opv.normalised) && Number.isFinite(row.requested)
-              ? row.requested : toUser(mine);
+            const savedAsSent = typeof opv.normalised === 'number' && same(mine, opv.normalised) && Number.isFinite(row.requested);
+            const savedAbs = savedAsSent ? row.requested : toAbs(mine);
+            const savedUser = savedAsSent ? row.requested : tidy(toAbs(mine));
             const unitRaw = ((byId.get(factorId) ?? beforeNodeById.get(factorId))?.observed_state as { unit?: unknown } | undefined)?.unit;
             const unit = typeof unitRaw === 'string' && unitRaw.trim() !== '' ? unitRaw.trim() : undefined;
             const current = typeof recorded === 'number' ? recorded : null;
@@ -2016,11 +2022,11 @@ export function createAgentCapabilities(
               if (current === null) return undefined;
               if (freshCap !== undefined) {
                 const fromFrame = current * freshCap;
-                return stampedAbs === undefined || sameAbs(stampedAbs, fromFrame) ? tidy(fromFrame) : undefined;
+                return stampedAbs === undefined || sameAbs(stampedAbs, fromFrame) ? fromFrame : undefined;
               }
-              if (stampedAbs !== undefined) return tidy(stampedAbs);
+              if (stampedAbs !== undefined) return stampedAbs;
               // A level on a factor that had no range then and has none now is already on the user's 0–1 scale.
-              return cap === undefined ? tidy(current) : undefined;
+              return cap === undefined ? current : undefined;
             })();
             const unknown = (): void => { row.recorded = mine; levelsUnread = true; };
             const changed = (nowUser: number | null): void => {
@@ -2037,7 +2043,7 @@ export function createAgentCapabilities(
             } else if (movedPastUs) {
               row.recorded = mine;
               if (currentAbs === undefined) unknown();
-              else if (!sameAbs(currentAbs, savedUser)) changed(currentAbs);
+              else if (!sameAbs(currentAbs, savedAbs)) changed(tidy(currentAbs));
             }
           }
         }
