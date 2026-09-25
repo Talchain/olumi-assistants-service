@@ -80,11 +80,37 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
     });
   });
 
-  it('RED: an ESTIMATED current value is carried as Olumi’s — cee_inference', async () => {
-    const { goal } = await registeredGoal(pricing({ baseline_known: false, baseline_value: 15000 }));
-    expect(goal.observed_state).toStrictEqual({
-      value: 0.6, baseline: 0.6, unit: 'GBP', source: 'cee_inference', raw_value: 15000, cap: 25000,
-    });
+  /**
+   * ⛔ OLUMI'S OWN GUESS MUST NEVER SET THE CHANCE OF REACHING THE USER'S GOAL
+   * (review 5824085993; RC ruling 5824518762, fix (a)). An ESTIMATED current level is
+   * withheld from the goal — so no Goal fit rests on it — and the user is told, with
+   * the one step that makes it count. The PAIR below is the discriminator: the same
+   * figure, stated, is carried and says nothing; estimated, it is withheld and said.
+   */
+  it('RED (pair, estimate): an ESTIMATED current level is withheld from Goal fit and said', async () => {
+    const { goal, graph, out } = await registeredGoal(pricing({ baseline_known: false, baseline_value: 15000, baseline_provenance: 'ai_proposed' }));
+    expect(goal).not.toHaveProperty('observed_state');
+    const analysed = (resolveRunAdmission(graph).canonicalGraph as { nodes: { id: string; observed_state?: unknown }[] }).nodes.find((n) => n.id === GOAL);
+    expect(analysed, 'the analysis input has no baseline to score against').not.toHaveProperty('observed_state');
+    const said = (out.not_represented as string[]).filter((x) => x.includes("Olumi's own estimate"));
+    expect(said, JSON.stringify(out.not_represented)).toHaveLength(1);
+    expect(said[0]).toContain('15000');
+    expect(said[0]).toContain('Tell me the current level');
+  });
+
+  it('CONTROL (pair, stated): the same figure STATED is carried, and nothing is said about an estimate', async () => {
+    const { goal, graph, out } = await registeredGoal(pricing({ baseline_known: true, baseline_value: 15000, baseline_provenance: 'explicit' }));
+    expect(goal.observed_state).toMatchObject({ baseline: 0.6, raw_value: 15000, source: 'brief_extraction' });
+    const analysed = (resolveRunAdmission(graph).canonicalGraph as { nodes: { id: string; observed_state?: Record<string, unknown> }[] }).nodes.find((n) => n.id === GOAL);
+    expect(analysed?.observed_state).toMatchObject({ baseline: 0.6, source: 'brief_extraction' });
+    expect((out.not_represented as string[]).filter((x) => x.includes("Olumi's own estimate"))).toEqual([]);
+  });
+
+  it('a target-only brief ("we want £20k MRR") is still admissible on turn 1 — with no current level, and with an estimate withheld', async () => {
+    for (const goal of [{}, { baseline_known: false, baseline_value: 15000, baseline_provenance: 'ai_proposed' }]) {
+      const { graph } = await registeredGoal(pricing(goal));
+      expect(resolveRunAdmission(graph).willProceed, JSON.stringify(goal)).toBe(true);
+    }
   });
 
   it('RED: a stated value that the model itself inferred is not the user’s either', () => {
@@ -129,7 +155,7 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
     for (const operator of ['<=', '<']) {
       const { goal, out } = await registeredGoal(pricing({ operator, value: 5, unit: '%', baseline_known: true, baseline_value: 4 }));
       expect(goal, operator).not.toHaveProperty('observed_state');
-      expect((out.not_represented as string[]).filter((s) => s.includes('stay at or below')), operator).toHaveLength(1);
+      expect((out.not_represented as string[]).filter((s) => s.includes(operator === '<' ? 'stay below 5' : 'stay at or below 5')), operator).toHaveLength(1);
     }
   });
 
@@ -162,11 +188,23 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
     expect(analysed?.observed_state).toMatchObject({ baseline: 0.8, raw_value: 20000, source: 'brief_extraction' });
   });
 
-  it('the instructions ask for the goal\u2019s current level, allow a provisional estimate marked as Olumi\u2019s (#1841), and never the target', () => {
-    const goalLine = BUILD_INSTRUCTIONS.split('\n').find((l) => l.includes('goal.baseline_value')) ?? BUILD_INSTRUCTIONS;
-    expect(goalLine).toContain('baseline_provenance "explicit"');
-    expect(goalLine).toContain('baseline_provenance "ai_proposed"');
-    expect(goalLine).toContain('never the target');
+  it('the instructions ask for the goal\u2019s current level only as the brief states it — never an estimate, never the target', () => {
+    expect(BUILD_INSTRUCTIONS).toContain('goal.baseline_value');
+    expect(BUILD_INSTRUCTIONS).toContain('baseline_provenance "explicit"');
+    expect(BUILD_INSTRUCTIONS).toContain('Do not estimate it');
+    expect(BUILD_INSTRUCTIONS).not.toContain('baseline_provenance "ai_proposed"');
+    expect(BUILD_INSTRUCTIONS).toContain('never the target');
+  });
+
+  it('wording: a current level off the target\u2019s scale is not called "above the target"; a strict "<" is not called "at or below"', () => {
+    const neg = admitCandidateModel(pricing({ baseline_known: true, baseline_value: -5 }));
+    const [a] = neg.loss.filter((l) => l.field_path === `nodes[${GOAL}].observed_state.baseline`);
+    expect(a?.reason).not.toContain('already above the target');
+    expect(a?.reason).toContain('outside');
+    const lt = admitCandidateModel(pricing({ operator: '<', value: 5, unit: '%', baseline_known: true, baseline_value: 4 }));
+    const [b] = lt.loss.filter((l) => l.field_path === `nodes[${GOAL}].observed_state.baseline`);
+    expect(b?.reason).toContain('stay below 5');
+    expect(b?.reason).not.toContain('at or below');
   });
 
   it('RED (efficacy): the production schema REQUIRES the goal\u2019s current level, and the retry pins it', () => {

@@ -685,7 +685,22 @@ export function admitCandidateModel(
          * is carried and honoured end to end. The target itself is kept as before.
          */
         const scoresTheRightTail = model.goal.operator === '>=';
-        if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)) {
+        /**
+         * ⛔ AND ONLY A LEVEL THE BRIEF STATES (review 5824085993; RC ruling 5824518762,
+         * fix (a)). An estimate of the goal's current level would set the chance of
+         * reaching the user's target on Olumi's own guess, and nothing downstream says
+         * so for a goal (the inferred-value disclosure covers factors only). So an
+         * estimate is withheld from Goal fit and said, with the one step that makes it
+         * count. A target-only brief stays admissible: only the Goal-fit figure waits.
+         */
+        const estimated = model.goal.baseline_known !== true;
+        if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && estimated) {
+          withheld(
+            `Olumi's own estimate of the current level of "${model.goal.metric}" (${baselineRaw}) was not used, ` +
+            `so no chance of reaching ${raw} is shown: that figure would rest on a guess, not on anything you ` +
+            `said. Tell me the current level of "${model.goal.metric}" and the chance of reaching it can be shown.`,
+          );
+        } else if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)) {
           const admission = scoresTheRightTail
             ? admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap })
             : null;
@@ -698,7 +713,7 @@ export function admitCandidateModel(
             );
           } else if (admission === null) {
             withheld(
-              `"${model.goal.metric}" is a goal to stay at or below ${raw}, and the chance of meeting a ` +
+              `"${model.goal.metric}" is a goal to stay ${model.goal.operator === '<' ? 'below' : 'at or below'} ${raw}, and the chance of meeting a ` +
               'goal of that kind cannot be calculated correctly yet, so its current level ' +
               `(${baselineRaw}) was not used for that. The options can still be compared on everything ` +
               'else; no chance of meeting the goal will be shown.',
@@ -714,6 +729,12 @@ export function admitCandidateModel(
               raw_value: baselineRaw,
               cap: resolved.cap,
             };
+          } else if (admission.reason === 'baseline_off_cap_scale') {
+            withheld(
+              `The current level of "${model.goal.metric}" (${baselineRaw}) is outside the range the target of ${raw} ` +
+              `is measured on (0 to ${resolved.cap}), so the chance of reaching the target cannot be shown. The target ` +
+              'is kept. If either figure is wrong, say which and it can be corrected.',
+            );
           } else {
             withheld(
               `The current level of "${model.goal.metric}" (${baselineRaw}) is already above the target ` +
