@@ -585,27 +585,6 @@ export const DECISIONS: readonly Decision[] = [
   //
   // The parse-survival test it cited is unaffected and still pins the strip
   // behaviour that made the declaration necessary in the first place.
-  {
-    id: "orphan:threshold_source",
-    status: "ACCEPTED",
-    decision:
-      "PRESERVED BY DESIGN (25 Sep 2026). The UI writes it on the goal node at " +
-      "register, as who stated the goal target; CEE neither reads nor writes it, and " +
-      "field-safety.ts denies every producer from setting it (ruling J2). Declared " +
-      "only so a turn-path re-parse stops SILENTLY DELETING it — served on CEE " +
-      "`bed9a0c`, an unrelated structural_add erased the user's stated target. " +
-      "Pinned by goal-target-stamp-survives-mutation.test.ts. If CEE gains a " +
-      "reader, this finding disappears and this record must be deleted.",
-  },
-  {
-    id: "orphan:success_threshold",
-    status: "ACCEPTED",
-    decision:
-      "PRESERVED BY DESIGN — the target value paired with orphan:threshold_source, " +
-      "the UI's durable per-goal source of truth when `threshold_source === 'user'`. " +
-      "Same reason, same pin; a malformed value is dropped as before, never a new " +
-      "reason to refuse a stored graph.",
-  },
 ];
 
 // ============================================================================
