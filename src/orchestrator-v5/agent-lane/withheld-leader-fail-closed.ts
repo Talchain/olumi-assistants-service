@@ -380,28 +380,76 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
    * and the first content word must begin an option ("On both the £59 and £49 paths", "on either path"). "alike"
    * modifies the phrase just BEFORE it ("raising and holding alike"). "both customer cohorts" is not the options.
    */
-  const startsWithOption = (rest: string): boolean => {
-    const words = rest.trim().split(/\s+/);
+  const OPTION_WORD = new RegExp(`^${OPTION_CUE.source}$`, 'i');
+  /**
+   * The quantified noun phrase after "both / either / each / all": determiners, numbers and prices, then option words
+   * or a label. It ENDS at punctuation, at a generic plural head ("paths", "options"), or at the first word that is
+   * neither — so "both paths raising over holding" is "both paths", and "both the £59 path and holding," is all of it.
+   * Returns the index just past the phrase, or -1 when its first content word does not begin an option.
+   */
+  const quantifiedOptionPhraseEnd = (words: readonly string[]): number => {
     let i = 0;
-    while (i < words.length && QUANTIFIER_SKIP.test(words[i]!.replace(/[,;:.!?]+$/, ''))) i += 1;
-    const tail = words.slice(i).join(' ');
-    return new RegExp(`^${OPTION_CUE.source}`, 'i').test(tail) || optionKeys.some((k) => k.length > 0 && tail.startsWith(k));
+    let sawOption = false;
+    while (i < words.length) {
+      const raw = words[i]!;
+      const w = raw.replace(/[,;:.!?]+$/, '');
+      const endsHere = w !== raw;
+      if (QUANTIFIER_SKIP.test(w)) { i += 1; if (endsHere) break; continue; }
+      const rest = words.slice(i).join(' ');
+      const label = optionKeys.find((k) => k.length > 0 && rest.startsWith(k));
+      if (label !== undefined) { i += label.split(' ').length; sawOption = true; if (/[,;:.!?]$/.test(words[i - 1] ?? '')) break; continue; }
+      if (OPTION_WORD.test(w)) { i += 1; sawOption = true; if (endsHere || GENERIC_PLURAL_OPTION_NOUN.test(w)) break; continue; }
+      break;
+    }
+    return sawOption ? i : -1;
   };
+  /**
+   * The same phrase read BACKWARDS from "alike": "raising and holding alike", "the £59 and £49 paths alike". Returns the
+   * index where it starts, or -1 when the word before "alike" is not an option.
+   */
+  const optionPhraseStartBefore = (words: readonly string[]): number => {
+    let i = words.length;
+    let sawOption = false;
+    while (i > 0) {
+      const raw = words[i - 1]!;
+      if (i < words.length && /[,;:.!?]$/.test(raw)) break;
+      const w = raw.replace(/[,;:.!?]+$/, '');
+      const head = words.slice(0, i).join(' ').replace(/[,;:.!?]+$/, '');
+      const label = optionKeys.find((k) => k.length > 0 && head.endsWith(k));
+      if (label !== undefined) { i -= label.split(' ').length; sawOption = true; continue; }
+      if (OPTION_WORD.test(w)) { i -= 1; sawOption = true; continue; }
+      if (sawOption && QUANTIFIER_SKIP.test(w)) { i -= 1; continue; }
+      break;
+    }
+    return sawOption ? i : -1;
+  };
+  /**
+   * ⛔ THE FIGURE APPLIES TO EVERY OPTION only when a quantifier scopes the options AND no option is named anywhere else in
+   * the passage (review 5828487458). "On both the £59 path and holding, 96% … 4% churn" applies to both; "Across both
+   * paths, raising over holding: 71% to 29%" and "Raising over holding across both paths: 71% to 29%" scope the options
+   * and set them against each other — so do "Raising and holding alike were modelled; the £59 path over holding: …" and
+   * "Raising over holding, both paths alike: …". What the quantifier modifies is its phrase ("for both customer cohorts"
+   * is not the options — 5828272340), and the phrase ends at its head noun, not at the punctuation.
+   */
   const appliesToAllOptions = (seg: string): boolean => {
     const key = labelKey(seg);
-    for (const m of key.matchAll(/\b(?:on|for|across|in|under|with|to)\s+(?:both|either|each|all)\b/g)) {
-      if (startsWithOption(key.slice(m.index! + m[0].length))) return true;
-    }
-    for (const m of key.matchAll(/\beither\b/g)) {
-      if (startsWithOption(key.slice(m.index! + m[0].length))) return true;
+    const namedOutside = (before: string, after: string): boolean => optionRefs(before) > 0 || optionRefs(after) > 0;
+    const scopes = [
+      ...key.matchAll(/\b(?:on|for|across|in|under|with|to)\s+(?:both|either|each|all)\b/g),
+      ...key.matchAll(/\beither\b/g),
+    ];
+    for (const m of scopes) {
+      const words = key.slice(m.index! + m[0].length).trim().split(/\s+/).filter((w) => w.length > 0);
+      const end = quantifiedOptionPhraseEnd(words);
+      if (end >= 0 && !namedOutside(key.slice(0, m.index), words.slice(end).join(' '))) return true;
     }
     for (const m of key.matchAll(/\balike\b/g)) {
-      const before = key.slice(0, m.index).trim().split(/\s+/).pop() ?? '';
-      if (new RegExp(`${OPTION_CUE.source}$`, 'i').test(before) || optionKeys.some((k) => k.length > 0 && key.slice(0, m.index).trim().endsWith(k))) return true;
+      const words = key.slice(0, m.index).trim().split(/\s+/).filter((w) => w.length > 0);
+      const begin = optionPhraseStartBefore(words);
+      if (begin >= 0 && !namedOutside(words.slice(0, begin).join(' '), key.slice(m.index! + m[0].length))) return true;
     }
     return false;
   };
-  /** A passage naming two or more options AS A LEGEND — not a figure that applies to all of them. */
   const isLegend = (seg: string, need: number): boolean => !appliesToAllOptions(seg) && optionRefs(seg) >= need;
   for (const m of saysSplit ? [] : text.matchAll(/(?<![\d.,])(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent)?\s?(?:-|to)\s?(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent)/gi)) {
     // A pair right after a two-option legend is that legend's split, whichever order it is in ("Raising vs holding: 29-71%").
@@ -474,10 +522,12 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
 }
 
 /** What may follow a SHARE's percentage: English function words (a closed class) and the share/likelihood/ranking words. */
-const FUNCTION_OR_SHARE_WORD = /^(?:and|or|nor|but|yet|so|to|for|of|in|on|at|by|from|with|without|into|onto|over|under|against|between|among|across|per|than|then|while|whereas|when|if|as|vs|versus|compared|respectively|each|apiece|alone|overall|the|a|an|this|that|these|those|its|their|is|was|are|were|be|been|being|has|have|had|share|shares|chance|chances|probability|probabilities|likelihood|odds|likely|win|wins|won|winning|lead|leads|led|ahead|behind|more|less|higher|lower|better|worse|top|first|second)$/i;
+const FUNCTION_OR_SHARE_WORD = /^(?:and|or|nor|but|yet|so|to|for|of|in|on|at|by|from|with|without|into|onto|over|under|against|between|among|across|per|than|then|while|whereas|when|if|as|vs|versus|compared|respectively|each|apiece|alone|overall|the|a|an|this|that|these|those|its|their|is|was|are|were|be|been|being|has|have|had|share|shares|chance|chances|probability|probabilities|likelihood|odds|likely|win|wins|won|winning|support|backing|approval|favour|favor|favourability|favorability|confidence|certainty|preference|preferences|vote|votes|runs|draws|simulations|samples|trials|lead|leads|led|ahead|behind|more|less|higher|lower|better|worse|top|first|second)$/i;
 
 /** A generic option noun: after another reference it names the same option ("the holding option"). */
 const GENERIC_OPTION_NOUN = /^(?:path|paths|option|options|choice|choices|route|routes|alternative|alternatives|scenario|scenarios)$/i;
+/** A generic PLURAL option noun heads its own phrase: "both paths" ends there. */
+const GENERIC_PLURAL_OPTION_NOUN = /^(?:paths|options|choices|routes|alternatives|scenarios)$/i;
 /** Words a quantifier's noun phrase may open with before its head: determiners, "and"/"of", numbers and prices. */
 const QUANTIFIER_SKIP = /^(?:the|of|and|or|these|those|two|three|four|its|their|our|[£$€]?\d[\d,.]*[kmb]?)$/i;
 

@@ -660,3 +660,53 @@ describe('pre-review of #1871 at f36e7fea — a metric per option is not a share
     expect(sentenceRanksOptions('The £59 path has 71% and holding 29%.', labels)).toBe(true);
   });
 });
+
+/**
+ * Review of #1871 at 18a706e2 (5828487458): a quantifier that really scopes the options exempts the figure only when the
+ * sentence does not then set the options against each other. The phrase ends at its head noun, not at punctuation.
+ */
+describe('review of #1871 at 18a706e2 — a quantifier over the options, then a split', () => {
+  const graph = { nodes: [{ id: 'keep', kind: 'option', label: 'Keep Pro at £49' }, { id: 'raise', kind: 'option', label: 'Raise Pro to £59 at release' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }] };
+  const analysisReady = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } };
+  const wire = (sentence: string) => enforceAgentLaneLeaderClaimsAtWire(
+    { assistant_text: `The churn limit was not scored. ${sentence} Churn is the input to check.`, blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } } } as unknown as OlumiResponse,
+    { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'constraint_verdict_withheld', graph, analysisReady },
+  ).response.assistant_text;
+  it.each([
+    // Item 1: the reviewer's eight rows.
+    'Across both paths, raising over holding: 71% to 29%.',
+    'Across all options, raising over holding: 71% to 29%.',
+    'Across both paths, the £59 path and holding came in at 71% and 29%.',
+    'On both options, the £59 path against holding: 71% and 29%.',
+    'With both options modelled, the £59 path over holding: 71% to 29%.',
+    'In all scenarios, the £59 path over holding: 71% to 29%.',
+    'For each option in the runs, the £59 path over holding: 71% to 29%.',
+    'Under either option set, raising/holding: 71%/29%.',
+    // The phrase boundary is its head noun, not punctuation.
+    'Across both paths raising over holding: 71% to 29%.',
+    'On both options the £59 path against holding: 71% and 29%.',
+    // A plural head ends the phrase, so the names after it are not part of the scope.
+    'Across both paths raising and holding: 71% to 29%.',
+    // The same class from the other side: options named BEFORE the quantifier are set against each other.
+    'Raising over holding across both paths: 71% to 29%.',
+    'The £59 path and holding, across both paths: 71% and 29%.',
+    'Raising over holding for both cohorts: 71% to 29%.',
+    'Raising over holding, both paths alike: 71% to 29%.',
+    // Item 2: "alike", then a later clause that splits.
+    'Raising and holding alike were modelled; the £59 path over holding: 71% to 29%.',
+    // Item 3: a preference or run count is a share, not a metric.
+    'The £59 path has 71% support and holding 29% support.',
+    'The £59 path gets 71% preference and holding 29% preference.',
+    'The £59 path took 71% runs and holding 29% runs.',
+    'The £59 path has 71% backing and holding 29% backing.',
+    'The £59 path carries 71% confidence and holding 29% confidence.',
+  ])('RED: removed through BOTH gates: %s', (s) => { expect(wire(s)).not.toMatch(/71%|29%/); });
+  it.each([
+    'On both the £59 and £49 paths, 96% of customers stay and 4% churn.',
+    'On both the £59 path and holding, 96% of customers stay and 4% churn.',
+    'Across both paths, 96% of customers stay and 4% churn.',
+    'Across both paths 96% of customers stay and 4% churn.',
+    'Under either option, 96% of customers stay and 4% churn.',
+    'Raising and holding alike keep 96% of customers and lose 4%.',
+  ])('CONTROL: the figure applies to every option, so it is kept: %s', (s) => { expect(wire(s)).toContain(s); });
+});
