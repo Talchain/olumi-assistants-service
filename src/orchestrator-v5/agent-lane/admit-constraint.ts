@@ -75,6 +75,11 @@ const RELAXES_TO: Record<CandidateOperator, CanonicalOperator> = {
 };
 
 /** True when the candidate operator is strict and the canonical one is not. */
+function unitSuffix(unit: string | undefined): string {
+  if (unit === undefined || unit.trim() === '') return '';
+  return unit.trim() === '%' ? '%' : ` ${unit.trim()}`;
+}
+
 export function isStrictnessLost(op: CandidateOperator): boolean {
   return op === '<' || op === '>';
 }
@@ -120,7 +125,9 @@ export function admitCandidateConstraints(
       operator,
       // Verbatim. The user's number is never adjusted to compensate for the operator.
       value: c.value,
-      label: `${c.metric} ${c.operator} ${c.value}${c.unit ?? ''}`,
+      // The label is what the guest reads (quoted in the "could not be checked" card), so it states the STORED
+      // bound, in words: built from the widened canonical operator, never the candidate's strict symbol.
+      label: `${c.metric} ${operator === '<=' ? 'at most' : 'at least'} ${c.value}${unitSuffix(c.unit)}`,
       ...(c.unit !== undefined ? { unit: c.unit } : {}),
       provenance: canonicalProvenance(c.provenance),
     };
