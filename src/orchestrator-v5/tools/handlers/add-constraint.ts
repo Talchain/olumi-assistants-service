@@ -1330,6 +1330,12 @@ export function createAddConstraintHandler(): HandlerFn {
               goalNode.goal_threshold_unit,
             );
             goalNode.goal_threshold_raw = params.value; // user units (display + has_goal_target)
+            // ⛔ THE TARGET AND THE UI'S STAMP ARE ONE PAIR (#1921 follow-up, #69 5834364983). NodeV3 now
+            // keeps `threshold_source` + `success_threshold` through every write, and the UI reads a stated
+            // target from that stamp first — so moving the raw target without it left a stale figure on
+            // screen after a reload. This row is `provenance: 'explicit'` (the user stated it): the pair is theirs.
+            goalNode.success_threshold = params.value;
+            goalNode.threshold_source = 'user';
             // Unit is ALWAYS reconciled (review hardening): the node's
             // threshold unit follows the constraint row's effective unit.
             // Gate-1 doctrine note: with `existing?.unit` now in the
