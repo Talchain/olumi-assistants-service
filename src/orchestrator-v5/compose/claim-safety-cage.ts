@@ -331,3 +331,114 @@ export function hasReducedSamplesDisclosure(
   }
   return false;
 }
+
+/**
+ * PLoT's two goal-frame warning codes. PLoT is the producer: both ride its
+ * warning channel (a Tier-3 deny field), and PLoT mirrors them into
+ * `decision_brief.warning_codes`. No shared warning-code constant module exists
+ * in this repo, so they are defined here, beside the only code that reads them.
+ *
+ *   GOAL_DIRECTION_UNATTESTED       no objective sense was stated for the goal
+ *                                   node, so PLoT ranked by the largest goal
+ *                                   value, which is an assumption and not the
+ *                                   team's stated aim.
+ *   GOAL_THRESHOLD_NOT_CONVERTIBLE  the stated goal level could not be converted
+ *                                   into the samples' frame (the goal node has no
+ *                                   observed baseline), so no option was tested
+ *                                   against it.
+ */
+const PLOT_GOAL_DIRECTION_UNATTESTED = 'GOAL_DIRECTION_UNATTESTED';
+const PLOT_GOAL_THRESHOLD_NOT_CONVERTIBLE = 'GOAL_THRESHOLD_NOT_CONVERTIBLE';
+
+const DIRECTION_UNATTESTED_WARNING_CODES: ReadonlySet<string> = new Set([
+  PLOT_GOAL_DIRECTION_UNATTESTED,
+]);
+
+const THRESHOLD_NOT_CONVERTIBLE_WARNING_CODES: ReadonlySet<string> = new Set([
+  PLOT_GOAL_THRESHOLD_NOT_CONVERTIBLE,
+]);
+
+/**
+ * The one presence test both goal-frame helpers share: does the warning channel
+ * carry an entry whose CODE is a member of `codes`? Reads nothing else from an
+ * entry (not its `field`, `message` or `severity`).
+ *
+ * ⚠ MEMBERSHIP, NEVER A PREFIX. PLoT sends other GOAL_* codes on the same
+ * channel that say nothing about whether the goal was tested, e.g.
+ * GOAL_ANCESTOR_DATA_GAP (served PLoT 5039cca: root ancestors of the goal
+ * defaulted to zero). A `startsWith('GOAL_')` test would withdraw the goal frame
+ * on every such run; the F4 control in the headline spec pins that it does not.
+ */
+function warningChannelCarriesAny(
+  response: Record<string, unknown>,
+  codes: ReadonlySet<string>,
+): boolean {
+  const arr = response['inference_warnings'];
+  if (!Array.isArray(arr)) return false;
+  return arr.some((entry) => {
+    if (entry === null || typeof entry !== 'object') return false;
+    const code = (entry as Record<string, unknown>).code;
+    return typeof code === 'string' && codes.has(code);
+  });
+}
+
+/**
+ * Did PLoT say it was not told which way the goal points
+ * (GOAL_DIRECTION_UNATTESTED), so it ranked by the largest goal value, an
+ * assumption rather than the team's stated aim?
+ *
+ * ONE CODE, deliberately (R&C round 2, R3-1). Round 1 exported an either-code
+ * helper; the headline could not then tell "direction assumed" apart once
+ * GOAL_THRESHOLD_NOT_CONVERTIBLE was also present, and dropped the direction
+ * clause. Whenever this is true the headline says the direction was assumed.
+ *
+ * Same construction and same claim-safety class as
+ * {@link hasReducedSamplesDisclosure}: a presence-only membership test on the
+ * CODE. Nothing here reads, stores or interpolates a value or any wording from
+ * the entries (the entries' `field` and `message` name the goal node, and none
+ * of that is used). Its only effect downstream is to WITHDRAW a claim: the
+ * run_analysis headline stops saying "against your goal" and adds one fixed
+ * sentence. It adds no number and names nothing from the field. The
+ * objective-contradiction tail withdraws the same frame, but it receives the
+ * headline builder's derived verdict (`describeGoalFrame`), never this boolean.
+ *
+ * ⚠ THE CHANNEL, NOT THE PROJECTION. `decision_brief.warning_codes` carries the
+ * same codes, and reading it would pass the Tier-3 static scan because its key
+ * is not a deny key. That would be laundering the channel through its own
+ * projection, so it is deliberately not read.
+ *
+ * Lives in the cage for the reason its sibling does: the cage stays the sole
+ * owner of the deny-key literal, so the producer that consumes this boolean
+ * carries none. Consumption is pinned to exactly ONE call site,
+ * `coaching/analysis-result-headline.ts`
+ * (tests/contract/untestable-goal-disclosure-single-site.guard.test.ts). A
+ * second consumer needs a fresh claim-safety review, not a new import.
+ */
+export function hasGoalDirectionUnattestedDisclosure(
+  response: Record<string, unknown>,
+): boolean {
+  return warningChannelCarriesAny(response, DIRECTION_UNATTESTED_WARNING_CODES);
+}
+
+/**
+ * Did PLoT say the stated goal LEVEL could not be converted into the samples'
+ * frame (GOAL_THRESHOLD_NOT_CONVERTIBLE)? Then no option was tested against the
+ * level, so "could not test whether any option reaches your goal" is true
+ * whatever else the envelope carries.
+ *
+ * It exists because the two codes license DIFFERENT sentences. With
+ * GOAL_DIRECTION_UNATTESTED alone, on a run that did carry attainment data,
+ * attainment WAS computed; what was assumed is the direction ("options were
+ * ranked by largest goal value. That is an assumption", PLoT's own warning text
+ * on served c1ddb50 and 5039cca). Saying attainment could not be tested there
+ * would be false.
+ *
+ * The same presence-only membership test as
+ * {@link hasGoalDirectionUnattestedDisclosure}, on the other code, pinned to the
+ * same single consumer by the same guard.
+ */
+export function hasGoalThresholdNotConvertibleDisclosure(
+  response: Record<string, unknown>,
+): boolean {
+  return warningChannelCarriesAny(response, THRESHOLD_NOT_CONVERTIBLE_WARNING_CODES);
+}

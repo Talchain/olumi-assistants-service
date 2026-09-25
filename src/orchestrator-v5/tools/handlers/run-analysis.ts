@@ -148,6 +148,7 @@ import {
 import {
   buildAnalysisResultHeadline,
   describeAnalysisHeadline,
+  describeGoalFrame,
 } from '../../coaching/analysis-result-headline.js';
 // ⭐ THE WITHHELD-SEPARABILITY DISCLOSURE. See its module docstring: the
 // headline builder computed `separation` and `contenders`, withheld the
@@ -1916,6 +1917,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       unsetOptionEffectFactorIds: unsetOptionEffectFactorIds(unsetOptionEffects),
     };
     const headline = buildAnalysisResultHeadline(headlineInput);
+    // ⛔ THE GOAL FRAME THE HEADLINE WAS COMPOSED UNDER (R&C round 1, F1). The
+    // objective-contradiction tail below must not say "against your goal" where
+    // this headline has withdrawn it, nor assert attainment while the frame is
+    // withdrawn (R&C round 2, R3-2). Same pure builder, same input: one
+    // derivation for both halves of the summary. It does not touch the leader
+    // permission, which stays `headline !== null`.
+    const goalFrame = describeGoalFrame(headlineInput);
     // D-ask-1 (2.11 P0-1) disclosure — claim-safety-critical: when the run
     // only completed because the scaffold filled placeholder interventions,
     // the summary MUST say those numbers are defaults and point at the
@@ -2085,6 +2093,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       snapshot.rawPersistedGraph,
       resultRecords,
       headline !== null,
+      goalFrame,
     );
     // ⭐ THE UNSET-OPTION-EFFECT DISCLOSURE, LAST OF THE FIVE.
     //
