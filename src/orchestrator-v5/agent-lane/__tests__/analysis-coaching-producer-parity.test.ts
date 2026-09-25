@@ -10,6 +10,7 @@ import { deriveAnalysisFreshness } from '../../context/freshness.js';
 import { canonicalStateFromFreshness } from '../../context/canonical-analysis-state.js';
 import { buildAutoRunProvenance } from '../../context/run-initiator.js';
 import { currentAnalysisCoaching } from '../analysis-coaching-pass-through.js';
+import { leaderWithheldOnlyBecauseUnrequested } from '../../compose/unrequested-analysis-confinement.js';
 
 test('actual provisional producer/finaliser and canonical read may differ in summary for the same run', async()=>{
  const scenarioId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -21,7 +22,9 @@ test('actual provisional producer/finaliser and canonical read may differ in sum
  const analysisReady={status:'ready' as const,goal_node_id:'goal',options:[],analysis_admission:{permitted_analysis_mode:'comparative_leader'}};
  const card={type:'coaching' as const,coaching_kind:'assumption_check' as const,block_id:'00000000-0000-4000-8000-000000000001',signal_id:'fixture',created_at:time,source_handler:'run_analysis',graph_hash_at_generation:hash,freshness:'fresh' as const,title:'Check the assumption',body:'Which evidence supports this assumption?',source:'deterministic_signal' as const,target_refs:[],priority_rank:15};
  const freshness=deriveAnalysisFreshness([fact],hash,undefined,{priorFactsReadOk:true});
- const upstream=finaliseV5Response(composeDirectAnswerResponse({assistant_text:'Provisional result.',stage:'analyse',answerKind:'substantive',blocks:[buildAnalysisResultBlock(fact,analysisReady),card]}),{scenarioId,analysisReady:analysisReady as never,freshness,canonicalState:canonicalStateFromFreshness(freshness,{}),priorFacts:[fact],mayNameLeadingOption:false});
+ const upstream=finaliseV5Response(composeDirectAnswerResponse({assistant_text:'Provisional result.',stage:'analyse',answerKind:'substantive',blocks:[buildAnalysisResultBlock(fact,analysisReady),card]}),{scenarioId,analysisReady:analysisReady as never,freshness,canonicalState:canonicalStateFromFreshness(freshness,{}),priorFacts:[fact],mayNameLeadingOption:false,
+  // The caller that refused states WHY, bound to the same fact (#1876): the finaliser never derives it.
+  leaderWithheldBecauseUnrequested:leaderWithheldOnlyBecauseUnrequested(fact)});
  const canonical=await readScenarioAnalysis({scenarioId,graph,requestId:'coaching-parity'});
  const before=upstream.blocks.find((b): b is Extract<typeof b,{type:'analysis_result'}>=>b.type==='analysis_result');
  expect(before?.summary).not.toEqual((canonical.analysis_result as {summary?:unknown}|null)?.summary);
