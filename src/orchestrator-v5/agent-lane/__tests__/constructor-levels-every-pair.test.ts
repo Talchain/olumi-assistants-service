@@ -182,6 +182,44 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     expect(inputs[1]).not.toContain('Continue Current Staffing ->');
   });
 
+  /**
+   * Pre-review 5828364580: an option can act on a factor through `links` alone
+   * (`Hire Two Developers -> Engineering capacity`), repeated in neither `changes`
+   * nor `interventions`. Admission admits that option→factor edge, so readiness
+   * asks for its level — the gap check must see the same pair.
+   */
+  function linkedOnly() {
+    const c = c22();
+    c.factors = [factor('Engineering capacity', 40, 100, 'story points')];
+    c.options = [
+      { label: 'Hire Two Developers', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [] },
+      { label: 'Continue Current Staffing', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [] },
+    ];
+    c.links = [
+      { from: 'Hire Two Developers', to: 'Engineering capacity', direction: 'positive', provenance: 'ai_proposed' },
+      { from: 'Engineering capacity', to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed' },
+    ];
+    return c;
+  }
+
+  it('RED (pre-review 5828364580): an option acting on a factor through `links` ALONE is a level gap, and the retry is spent on it', async () => {
+    const p = prepareProvisionalCandidate(linkedOnly() as unknown as CandidateModel);
+    expect(p.level_gaps).toEqual([{ option: 'Hire Two Developers', factor: 'Engineering capacity' }]);
+    const levelled = linkedOnly();
+    levelled.options[0] = { ...levelled.options[0]!, interventions: [est('Engineering capacity', 52, 'story points')] };
+    const { graph, inputs } = await construct(linkedOnly(), levelled);
+    expect(inputs).toHaveLength(2);
+    expect(inputs[1]).toContain('Hire Two Developers -> Engineering capacity');
+    expect(Object.keys(node(graph, 'hire_two_developers').interventions ?? {})).toEqual(['engineering_capacity']);
+    expect(missingValues(graph)).toEqual([]);
+  });
+
+  it('CONTROL: a status quo linked to a factor through `links` is still never asked for a level', () => {
+    const c = linkedOnly();
+    c.links.push({ from: 'Continue Current Staffing', to: 'Engineering capacity', direction: 'positive', provenance: 'ai_proposed' });
+    expect(prepareProvisionalCandidate(c as unknown as CandidateModel).level_gaps.filter((g) => g.option === 'Continue Current Staffing')).toEqual([]);
+  });
+
   it('CONTROL (#1841 B1): a user addition on an unknown baseline still degrades — no retry, no invented total, no baseline asked for', async () => {
     const c = c22();
     c.factors = [factor('Developers', null, 50, 'people'), factor('Hiring cost', 0, 500000, 'GBP')];
