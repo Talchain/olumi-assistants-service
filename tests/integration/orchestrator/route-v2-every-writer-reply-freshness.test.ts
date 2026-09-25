@@ -20,6 +20,7 @@
  * from the window — so a RED below is the source of the facts, not the harness.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { RunAnalysisHandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
@@ -71,7 +72,10 @@ const storeState: {
   rows: StoredRow[];
   durableFails: boolean;
   recentFails: boolean;
-} = { rows: [], durableFails: false, recentFails: false };
+  /** The DB-stamped restore marker (`scenarios.analysis_invalidated_at`), or null. */
+  analysisInvalidatedAt: string | null;
+  markerFails: boolean;
+} = { rows: [], durableFails: false, recentFails: false, analysisInvalidatedAt: null, markerFails: false };
 
 let windowSize = 20; // replaced in beforeAll by the REAL SESSION_READ_WINDOW_DEFAULT
 let persisted: unknown = buildPersistedGraph();
@@ -117,6 +121,12 @@ const fakeStore = {
       })),
       total_count: all.length,
     };
+  },
+  // The same port the reload reads (`scenario-graph-analysis-read.ts`); the real
+  // store THROWS on a database error or a malformed timestamp.
+  readAnalysisInvalidatedAt: async () => {
+    if (storeState.markerFails) throw new Error('analysis_invalidated_at read unavailable (test)');
+    return storeState.analysisInvalidatedAt;
   },
   loadGraph: async () => persisted,
   // The structural writers read the latest pending actions (integrity-strict) before any
@@ -249,6 +259,8 @@ const PRE_HASH = computeAnalysisAffectingGraphHash(buildPersistedGraph() as neve
 
 function eventFor(writer: string): Record<string, unknown> {
   switch (writer) {
+    case 'factor_value_edit':
+      return { kind: 'factor_value_edit', target_id: 'f-budget', value: 0.6, raw_value: 60000, unit: '£' };
     case 'edge_strength_edit':
       return { kind: 'edge_strength_edit', from: 'f-budget', to: 'g-revenue', magnitude: 0.7,
         direction_intent: 'preserve', expected: { mean: 0.4, effect_direction: 'positive' }, intent: 'set' };
@@ -297,6 +309,8 @@ describe('every system-event writer states freshness from the scenario record', 
     persisted = buildPersistedGraph();
     storeState.durableFails = false;
     storeState.recentFails = false;
+    storeState.analysisInvalidatedAt = null;
+    storeState.markerFails = false;
   });
 
   describe.each(HASH_MOVING.map((w, i) => [w, i] as const))('%s (hash-moving)', (writer, i) => {
@@ -344,6 +358,77 @@ describe('every system-event writer states freshness from the scenario record', 
       expect(body.analysis_state?.run_state?.kind).not.toBe('unknown_degraded');
       expect(body.analysis_state?.run_state?.cause).not.toBe('no_graph_this_turn');
       expect(body.analysis_state?.run_state?.kind).not.toBe('never_run');
+    });
+  });
+
+  /**
+   * A RESTORE AFTER THE RUN: the reply must read the restore marker exactly as
+   * the reload does (`scenario-graph-analysis-read.ts` → `deriveAnalysisFreshness`
+   * `analysisInvalidatedAt`). A byte-identical hash can still be stale when the
+   * user restored an earlier version after the run (A → analyse → B → restore A).
+   *
+   * Uniform construction for every writer, so no fixture guesses the post-write
+   * bytes: write once to learn the hash this write LANDS on, stamp the run with
+   * exactly that hash, then repeat the same write from the same state. The bytes
+   * match the run, so ONLY the marker can make the reply stale.
+   *   RED      marker NEWER than the run → stale / model_restored_after_analysis;
+   *   CONTROL  marker OLDER than the run → fresh (the comparison is by time, not presence);
+   *   CONTROL  the marker read FAILS → fails open to fresh, the write still commits
+   *            (the turn path's rule, build-turn-context.ts: a false stale is the worse direction).
+   * (Independent Review CHANGES_REQUIRED 5827685385 on #1892 @ 42368b66: restore → rename said fresh.)
+   */
+  const ALL_WRITERS = ['factor_value_edit', ...HASH_MOVING, 'structural_rename'] as const;
+  describe.each(ALL_WRITERS.map((w, i) => [w, i] as const))('%s after a restore', (writer) => {
+    // Ingress requires a UUID turn id; every send here gets a fresh one.
+    async function sendTurn() {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: { kind: 'system_event', turn_id: randomUUID(), scenario_id: SCENARIO_ID, stage: 'analyse', event: eventFor(writer) },
+      });
+      return { status: res.statusCode, body: JSON.parse(res.body) as Record<string, any> };
+    }
+    async function landedHash(): Promise<string> {
+      storeState.rows = [];
+      const { status, body } = await sendTurn();
+      expect(status, `premise: ${writer} commits (${JSON.stringify(body).slice(0, 300)})`).toBe(200);
+      expect(typeof body.graph_hash, 'premise: the write committed a graph').toBe('string');
+      appendMock.mockClear();
+      return body.graph_hash as string;
+    }
+    const BEFORE_RUN = '2026-09-24T08:00:00.000Z';
+    const AFTER_RUN = '2026-09-24T09:30:00.000Z';
+
+    it('RED: marker NEWER than the run, bytes land on the analysed hash → stale / model_restored_after_analysis', async () => {
+      const landed = await landedHash();
+      storeState.rows = [...newerRows(SESSION_READ_WINDOW_DEFAULT - 1), runRow(landed)];
+      storeState.analysisInvalidatedAt = AFTER_RUN;
+      const { status, body } = await sendTurn();
+      expect(status).toBe(200);
+      expect(appendMock).toHaveBeenCalledTimes(1);
+      expect(body.graph_hash, 'premise: the write landed on the analysed hash').toBe(landed);
+      expect(body.analysis_ready?.freshness, `${writer} called a restored model's analysis current`).toBe('stale');
+      expect(body.analysis_ready?.freshness_reason).toBe('model_restored_after_analysis');
+    });
+
+    it('CONTROL: marker OLDER than the run → fresh (bound by time, not by presence)', async () => {
+      const landed = await landedHash();
+      storeState.rows = [...newerRows(SESSION_READ_WINDOW_DEFAULT - 1), runRow(landed)];
+      storeState.analysisInvalidatedAt = BEFORE_RUN;
+      const { body } = await sendTurn();
+      expect(body.graph_hash).toBe(landed);
+      expect(body.analysis_ready?.freshness).toBe('fresh');
+    });
+
+    it('CONTROL: the marker read FAILS → fails open (fresh), the write still commits', async () => {
+      const landed = await landedHash();
+      storeState.rows = [...newerRows(SESSION_READ_WINDOW_DEFAULT - 1), runRow(landed)];
+      storeState.markerFails = true;
+      const { status, body } = await sendTurn();
+      expect(status).toBe(200);
+      expect(appendMock).toHaveBeenCalledTimes(1);
+      expect(body.graph_hash).toBe(landed);
+      expect(body.analysis_ready?.freshness).toBe('fresh');
     });
   });
 });
