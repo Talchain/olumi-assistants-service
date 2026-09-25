@@ -164,7 +164,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
             description:
               'Set true ONLY when the user has just said that carrying on as now would itself change this ' +
               'factor, and gave the level. It permits a level on an option in `status_quo_held`; the user ' +
-              'still approves it. Omit it in every other case.',
+              'still approves it. Omit it in every other case, and never use it to restate the factor’s ' +
+              'starting value: carrying on as now already keeps that, so such a level is not recorded.',
           },
         }, ['option_label', 'factor_label', 'value', 'basis']),
       },
@@ -204,7 +205,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
             description:
               'Set true ONLY when the user has just said that carrying on as now would itself change this ' +
               'factor, and gave the level. It permits a level on an option in `status_quo_held`; the user ' +
-              'still approves it. Omit it in every other case.',
+              'still approves it. Omit it in every other case, and never use it to restate the factor’s ' +
+              'starting value: carrying on as now already keeps that, so such a level is not recorded.',
           },
         }, ['option_label', 'factor_label', 'value', 'basis']),
       },
@@ -244,6 +246,16 @@ export interface ToolResult {
   readonly [k: string]: unknown;
 }
 
+/**
+ * Server-internal input to the level proposer — never read from tool arguments
+ * (`dispatchTool` passes two). `startingValues`: factor id → the native figure
+ * the SAME starting point proposes for it, so a held status-quo level that only
+ * restates that figure is recognised before anyone is asked to approve it.
+ */
+export interface ProposeLevelsInternal {
+  readonly startingValues?: ReadonlyMap<string, number>;
+}
+
 export interface AgentCapabilities {
   getCanonicalState(ctx: AgentToolContext): Promise<ToolResult>;
   proposeModelChange(ctx: AgentToolContext, args: {
@@ -260,7 +272,7 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
     interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
-  }): Promise<ToolResult>;  proposeStartingPoint(ctx: AgentToolContext, args: {
+  }, internal?: ProposeLevelsInternal): Promise<ToolResult>;  proposeStartingPoint(ctx: AgentToolContext, args: {
     assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
     option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
   }): Promise<ToolResult>;
