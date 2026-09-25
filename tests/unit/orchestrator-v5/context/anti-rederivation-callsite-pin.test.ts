@@ -273,7 +273,15 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // No extra I/O: the same prior facts are re-projected against the committed
     // hash, and the healthy-empty/degraded distinction is preserved exactly as
     // the note above requires.
-    'src/orchestrator-v5/system-events/dispatch.ts': 8,
+    // 2026-09-25 Canonical State: 8 → 4 (DOWN) — the six writer-reply derivations
+    // (edge_strength_edit, structural_delete, structural_add, structural_add_edge,
+    // factor_value_edit, and the new structural_rename) now share ONE helper,
+    // `deriveWriteReplyFreshness`, because the F1 defect had been fixed one writer
+    // at a time and four still read the 20-row window alone. The remaining
+    // references: the import, the helper's single call, and
+    // option_intervention_edit's two (pre-write referee input + post-commit;
+    // its own follow-up). Nothing re-derives the frame's own value.
+    'src/orchestrator-v5/system-events/dispatch.ts': 4,
     // 2026-09-24 MG&Q: +1 (one call) — `dispatchFactorValueEdit` now derives the
     // wire freshness for a factor-value edit, exactly as the edge_strength_edit
     // writer in this same file already does. Programme #63 item 15: the value
