@@ -568,3 +568,48 @@ describe('review of #1871 at aae2cac7 — the leading legend', () => {
     expect(out.response.assistant_text).toContain('Churn is the input to check.');
   });
 });
+
+/** Review of #1871 at 8f45ee2e (5827973102): a legend is DISTINCT OPTION REFERENCES, whatever word joins them. */
+describe('review of #1871 at 8f45ee2e — a legend is counted, not parsed', () => {
+  const graph = { nodes: [{ id: 'keep', kind: 'option', label: 'Keep Pro at £49' }, { id: 'raise', kind: 'option', label: 'Raise Pro to £59 at release' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }] };
+  const labels = rankingLabelContext(graph, undefined);
+  const DROP: readonly string[] = [
+    'The £59 path over holding: 71% to 29%.',
+    'The £59 path against holding: 71% and 29%.',
+    'The £59 path compared with holding came in at 71% and 29%.',
+    'Raising/holding: 71%/29%.',
+    'Raise Pro to £59 at release against Keep Pro at £49: 71% and 29%.',
+    // Joining words on no list: the count does not depend on the joiner.
+    'The £59 path, then holding: 71% and 29%.',
+    'Raising & holding: 71% and 29%.',
+    // Item 2: one % sign on the last number, either order, and the count form.
+    'Raising vs holding: 71-29%.',
+    'Raising vs holding: 29-71%.',
+    'The £59 path and holding: 71 and 29 per cent.',
+    'The £59 path won 71 of 100 runs and holding 29.',
+  ];
+  const KEEP: readonly string[] = [
+    'For the Keep Pro at £49 option, 40% of capacity is engineering and 60% is support.',
+    'Retention could drop 70% to 30% on the £59 path compared with holding.',
+    'The team split 60/40 between engineering and support.',
+    'Churn could fall 70% to 30% over a year on either path.',
+    'The churn limit is 4%, and 96% of customers stay each month on either option.',
+    'We split the 2025/26 budget between the £59 path and holding.',
+    'Both options split 50/50 on the retention question.',
+    // Item 3: the figure applies to every option named.
+    'On both the £59 path and holding, 96% of customers stay and 4% churn.',
+    'For raising and holding alike, churn is 4% and retention 96%.',
+    'The £59 path’s conversion could be 40% to 60%.',
+  ];
+  it.each(DROP.map((s) => [s] as const))('dropped: %s', (s) => { expect(sentenceRanksOptions(s, labels)).toBe(true); });
+  it.each(KEEP.map((s) => [s] as const))('kept: %s', (s) => { expect(sentenceRanksOptions(s, labels)).toBe(false); });
+  it('RED: through BOTH gates on a withheld turn, "X over Y: 71% to 29%" never reaches the user', () => {
+    const analysisReady = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } };
+    const out = enforceAgentLaneLeaderClaimsAtWire(
+      { assistant_text: 'The churn limit was not scored. The £59 path over holding: 71% to 29%. Churn is the input to check.', blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } } } as unknown as OlumiResponse,
+      { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'constraint_verdict_withheld', graph, analysisReady },
+    );
+    expect(out.response.assistant_text).not.toMatch(/71%|29%/);
+    expect(out.response.assistant_text).toContain('Churn is the input to check.');
+  });
+});

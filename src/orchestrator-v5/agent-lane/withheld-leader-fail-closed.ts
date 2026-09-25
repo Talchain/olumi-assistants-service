@@ -58,9 +58,11 @@
  * lead: about four points" — lexically the served role heading "Slow-ramping lead: …"). Those are kept.
  * A prose split over the OPTIONS whose percentages ("%" or "per cent") sum to ~100 is removed ("the £59
  * path at 71% and holding at 29%", "split 71% to 29% between the £59 path and holding", "the £59 path and holding came in
- * at 71% and 29%", "across the runs … took 71% … 29%"), and so is a bare "71/29" split when the sentence says split or win
- * share and is about the runs or two options; an ascending range, a change ("could drop 70% to 30%") or a non-option
- * composition is not. Win shares ARE also removed as
+ * at 71% and 29%", "the £59 path over holding: 71% to 29%", "across the runs … took 71% … 29%" — a legend is counted as
+ * distinct option references, whatever joins them), and so is a bare pair ("71/29", "71-29%", "71 and 29 per cent")
+ * after a two-option legend or in a sentence that says split or win share, and a count ("won 71 of 100 runs"); an
+ * ascending range, a change ("could drop 70% to 30%"), a figure that applies to every option ("on both…", "…alike") or
+ * a non-option composition is not. Win shares ARE also removed as
  * lists ("label: N%" / "label — N%", per contiguous list summing to ~100, under a ranking heading, or
  * on an option's own label) and as tables (a share header, an option row with a %, or a ranking row). Measured recall is corpus recall (AI
  * Quality v6: 43 real replies plus 6 authored controls), not a general guarantee.
@@ -276,6 +278,8 @@ const RANKING_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegE
       'i',
     ),
   },
+  // The count form of the same claim: "won 71 of 100 runs" is "71% of runs" (review 5827973102 item 2).
+  { code: 'count_of_runs', re: /\b\d{1,5}\s+(?:out\s+)?of\s+(?:the\s+)?[\d,]+\s+(?:(?:modelled|simulated|sampled|model)\s+)?(?:runs|simulations|draws|trials|samples|iterations)\b/i },
   {
     code: 'share_of_runs',
     re: new RegExp(
@@ -335,15 +339,44 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
   if (new RegExp(`\\b(?:between\\s+${RANGE_NUM}\\s+and|from\\s+${RANGE_NUM}\\s+to)\\s+\\d|\\banywhere\\b`, 'i').test(text)) return false;
   // A sentence that SAYS split or win share is never excused as a range; its cues decide ("the runs split 29% to 71% …").
   const saysSplit = /\b(?:split|win[-\s]shares?)\b/i.test(text);
+  const optionKeys = (labels.optionLabels ?? []).map(labelKey);
+  const cue = (seg: string): boolean => optionKeys.some((k) => labelKey(seg).includes(k)) || OPTION_CUE.test(seg);
+  /**
+   * ⛔ HOW MANY DISTINCT OPTIONS A PASSAGE NAMES, WHATEVER JOINS THEM (reviews 5827687841, 5827973102). Splitting on a
+   * list of joining words ("and / or / vs …") leaked every word not on the list ("over", "against", "compared with",
+   * "/"), one round at a time. So references are counted directly: each option label, and each option-shaped word
+   * not inside a label — except a generic noun right after a reference ("…at £49 option", "raising path"), which
+   * names the SAME option. So "For the Keep Pro at £49 option, 40% … 60% …" names one option.
+   */
+  const optionRefs = (seg: string): number => {
+    const key = labelKey(seg);
+    const spans: [number, number][] = [];
+    for (const k of optionKeys) {
+      for (let i = key.indexOf(k); i >= 0 && k.length > 0; i = key.indexOf(k, i + k.length)) spans.push([i, i + k.length]);
+    }
+    for (const m of key.matchAll(new RegExp(OPTION_CUE.source, 'gi'))) {
+      const a = m.index!, b = a + m[0].length;
+      if (!spans.some(([x, y]) => a < y && b > x)) spans.push([a, b]);
+    }
+    spans.sort((x, y) => x[0] - y[0]);
+    let refs = 0;
+    let prevEnd = -1;
+    for (const [a, b] of spans) {
+      if (prevEnd >= 0 && GENERIC_OPTION_NOUN.test(key.slice(a, b)) && /^\s*$/.test(key.slice(prevEnd, a))) { prevEnd = b; continue; }
+      refs += 1;
+      prevEnd = b;
+    }
+    return refs;
+  };
+  /** A passage naming two or more options AS A LEGEND — not a figure that applies to both ("on both…", "…alike"). */
+  const isLegend = (seg: string, need: number): boolean => !APPLIES_TO_ALL.test(seg) && optionRefs(seg) >= need;
   for (const m of saysSplit ? [] : text.matchAll(/(?<![\d.,])(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent)?\s?(?:-|to)\s?(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent)/gi)) {
+    // A pair right after a two-option legend is that legend's split, whichever order it is in ("Raising vs holding: 29-71%").
+    if (isLegend(text.slice(0, m.index), 2)) continue;
     if (Number(m[1]!.replace(',', '.')) < Number(m[2]!.replace(',', '.'))) return false;
     // A CHANGE, not a split, when a change verb governs it: "Retention could drop 70% to 30% on the £59 path…" (review 5827687841).
     if (CHANGE_VERB_BEFORE.test(text.slice(Math.max(0, m.index! - 40), m.index))) return false;
   }
-  const optionKeys = (labels.optionLabels ?? []).map(labelKey);
-  const cue = (seg: string): boolean => optionKeys.some((k) => labelKey(seg).includes(k)) || OPTION_CUE.test(seg);
-  const cueCount = (seg: string): number => (seg.match(new RegExp(OPTION_CUE.source, 'gi')) ?? []).length
-    + optionKeys.filter((k) => labelKey(seg).includes(k)).length;
   const hits = [...text.matchAll(new RegExp(PCT, 'gi'))];
   if (hits.length < 2) {
     /**
@@ -351,10 +384,10 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
      * Only when the sentence SAYS split or win share, the bare pair sums to ~100, and it is about the runs or names
      * two options — "The team split 60/40 between engineering and support" is kept.
      */
-    if (!saysSplit) return false;
-    const bare = [...text.matchAll(/(?<![\d.,£$€])(\d{1,3}(?:\.\d+)?)\s*(?:\/|-|to)\s*(\d{1,3}(?:\.\d+)?)(?![\d.,])/g)]
-      .some((m) => { const t = Number(m[1]) + Number(m[2]); return t >= 97 && t <= 103; });
-    return bare && (RUN_SHARE_EXPLICIT.test(text) || cueCount(text) >= 2);
+    // …and one % sign on the LAST number after a two-option legend: "Raising vs holding: 71-29%", "…: 71 and 29 per cent" (5827973102).
+    const pairs = [...text.matchAll(/(?<![\d.,£$€])(\d{1,3}(?:\.\d+)?)\s*(?:%|per\s?cent)?\s*(?:\/|-|to|and)\s*(\d{1,3}(?:\.\d+)?)(?![\d.,])/gi)]
+      .filter((m) => { const t = Number(m[1]) + Number(m[2]); return t >= 97 && t <= 103; });
+    return pairs.some((m) => (saysSplit && (RUN_SHARE_EXPLICIT.test(text) || optionRefs(text) >= 2)) || isLegend(text.slice(0, m.index), 2));
   }
   const total = hits.map((m) => Number(m[0].replace(/[%\s]|per\s?cent/gi, '').replace(',', '.'))).reduce((a, b) => a + b, 0);
   if (total < 97 || total > 103) return false;
@@ -387,14 +420,19 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
    * option AFTER the last percentage, so only one percentage binds. A trailing segment naming at least as many
    * options as there are percentages is the split's own legend.
    */
-  if (cueCount(segments[segments.length - 1]!) >= hits.length) return true;
+  if (isLegend(segments[segments.length - 1]!, hits.length)) return true;
   /**
    * ⛔ …AND THE MIRROR: A LEGEND BEFORE THE PERCENTAGES (review 5827687841): "The £59 path and holding came in at 71%
    * and 29%." Counted as COORDINATED PARTS that each carry a cue, never raw cue words, so one option named twice
    * ("For the Keep Pro at £49 option, 40% … 60% …": a label plus "option") stays one part and is kept.
    */
-  return segments[0]!.split(/\band\b|\bor\b|\bvs\.?|\bversus\b|,|:/i).filter(cue).length >= hits.length;
+  return isLegend(segments[0]!, hits.length);
 }
+
+/** A generic option noun: after another reference it names the same option ("the holding option"). */
+const GENERIC_OPTION_NOUN = /^(?:path|paths|option|options|choice|choices|route|routes|alternative|alternatives|scenario|scenarios)$/i;
+/** The figure applies to every option named ("on both the £59 path and holding", "raising and holding alike"). */
+const APPLIES_TO_ALL = /\b(?:on|for|across|in|under|with|to)\s+(?:both|either|each|all)\b|\balike\b|\beither\s+(?:option|path|choice|route)\b/i;
 
 /** A change verb just before a descending pair: the pair is a change ("could drop 70% to 30%"), not a split. */
 const CHANGE_VERB_BEFORE = /\b(?:drops?|dropped|falls?|fell|declines?|declined|decreases?|decreased|shrinks?|shrank|cuts?|reduces?|reduced|rises?|rose|increases?|increased|grows?|grew|climbs?|climbed|moves?|moved|goes\s+(?:up|down)|went\s+(?:up|down)|changes?|changed)\s+(?:[a-z]+\s+){0,2}$/i;
