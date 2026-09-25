@@ -21,7 +21,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
   return { ...actual, resolveUserIdentity: async () => ({ mode: 'off' }) };
 });
 /** The measured sentence (AI Quality, 25 Sep: qualified 4/4 vs 3/4 without it, 0/8 recommendations). */
-const PROVISIONAL_RULE = 'If it also carries `provisional: true`, that separation rests on Olumi\'s own starting estimates: you may say which option the comparison separates only as a provisional finding on those estimates, in the same sentence, never as a recommendation or the best choice, and keep any condition the run could not check.';
+const PROVISIONAL_RULE = 'If a result that may be named also carries `provisional: true`, that separation rests on Olumi\'s own starting estimates: you may say which option the comparison separates only as a provisional finding on those estimates, in the same sentence, never as a recommendation or the best choice, and keep any condition the run could not check.';
 
 const ready = (mode: string) => ({ analysis_admission: { structurally_analysable: true, permitted_analysis_mode: mode } });
 
@@ -91,5 +91,18 @@ describe('the Agent is told how to use `provisional` (the flag is worded, not me
     const out = (bodies[0]!['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
     const run = JSON.parse(String(out?.output ?? '{}')) as { claim_permissions?: { leader_may_be_named?: boolean; provisional?: true } };
     expect(run.claim_permissions).toMatchObject({ leader_may_be_named: true, provisional: true });
+  });
+
+  it('ORDER: "Otherwise" still follows the permission sentence, and the provisional rule refines a nameable result AFTER the prohibition (review 5830350204)', async () => {
+    // Placed before "Otherwise", the provisional rule re-bound it: an ordinary permitted leader was told to withhold
+    // (measured 2/4 "no option can be put forward"). Writing "When … not true" instead let a WITHHELD run name the
+    // separated option (3/4, blind-labelled). This order measured 0/4 and 0/4 (provisional-clause/labels-1900.json).
+    bodies = [];
+    await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: '6b2d8f3a-1c4e-4f5a-9b7c-2d3e4f5a6b7c', message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } });
+    const sent = String(bodies[0]!['instructions']);
+    const anchor = 'never name a leader from it.';
+    expect(sent.slice(sent.indexOf(anchor) + anchor.length).trimStart().startsWith('Otherwise do not name, rank or hint at one'), 'Otherwise binds to the permission').toBe(true);
+    const tail = 'say in plain words why no option can be put forward yet.';
+    expect(sent.slice(sent.indexOf(tail) + tail.length).trimStart().startsWith(PROVISIONAL_RULE), 'the provisional rule comes after the prohibition').toBe(true);
   });
 });
