@@ -414,6 +414,9 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS, pri
     const first = figs[0]!, last = figs[figs.length - 1]!;
     const before = text.slice(0, first[0]);
     const after = text.slice(last[1]).split(CLAUSE_BREAK)[0] ?? '';
+    // Figures INTERLEAVED with the options ("the £59 path has 40% retention, while holding has 60% retention") are each
+    // bound to their own option: the binding and metric rules below decide those, never this list rule.
+    if (figs.slice(1).some((f, i) => optionRefs(text.slice(figs[i]![1], f[0])) > 0)) continue;
     const leads = optionRefs(before) >= 2 || QUANTIFIED_OPTIONS.test(before);
     // Options named only AFTER the pair may be the frame of a change: "Retention could drop 70% to 30% on the £59 path
     // compared with holding" (review 5827687841). A change verb exempts only there — never after a leading list or
@@ -630,7 +633,7 @@ const FIGURE_NOUN = /^(?:results?|outcomes?|figures?|numbers?|splits?|scores?|re
 /** What links a measure to the figure after it: "retention IS 96%", "renews AT 96%", "churn OF 4%". */
 const FIGURE_LINK = /^(?:is|are|was|were|be|been|being|at|of|by|to|around|about|roughly|nearly|approximately|just|only|some)$/i;
 /** Where a gap between two figures divides: its last joiner or clause break. */
-const GAP_JOINER = /[,;:\u2013\u2014/&]|\b(?:and|or|but|nor|while|whereas|than|versus|vs|against|over|to|then|with)\b/gi;
+const GAP_JOINER = /[,;:\u2013\u2014/&]|[.!?](?=\s)|\b(?:and|or|but|nor|while|whereas|than|versus|vs|against|over|to|then|with)\b/gi;
 /** A clause break: a figure's own measure is not looked for across one. */
 const CLAUSE_BREAK = /[,;:.!?()\u2013\u2014]/;
 /** Hedges, degree words and quantifiers: they modify a figure; they never say what it measures. */
@@ -1011,10 +1014,31 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
   const forced = unitsRankingAsAWhole(segs, labels);
   let dropped = 0;
   let prior = '';
+  /**
+   * ⛔ A SPLIT ACROSS TWO SENTENCES (self-review of ae56cf4b): "The £59 path gets 71%. Holding gets the other 29%." Each
+   * sentence alone holds one figure and ranks nothing. So two ADJACENT sentences with one percentage each are read
+   * as one passage too; if the passage splits the options, both go.
+   */
+  const ONE_PCT = new RegExp(`^(?:(?!${PCT}).)*${PCT}(?:(?!${PCT}).)*$`, 'is');
+  const pairDrop = new Set<string>();
+  {
+    let before = '';
+    let prev: { key: string; text: string; prior: string } | null = null;
+    segs.forEach((seg, r) => {
+      if ('sep' in seg) { before += seg.sep; return; }
+      seg.units.forEach((u, j) => {
+        const key = `${r}:${j}`;
+        const one = /\S/.test(u) && !PROTECTED_SENTENCES.has(u.trim()) && ONE_PCT.test(u);
+        if (one && prev !== null && sentenceRanksOptions(`${prev.text.trim()} ${u.trim()}`, labels, prev.prior)) { pairDrop.add(prev.key); pairDrop.add(key); }
+        prev = one ? { key, text: u, prior: before } : (/\S/.test(u) ? null : prev);
+        before += u;
+      });
+    });
+  }
   const lines: Array<Seg | null> = segs.map((seg, r) => {
     if ('sep' in seg) { prior += seg.sep; return seg; }
     const drop = seg.units.map((u, j) => {
-      const ranks = forced.has(`${r}:${j}`) || (/\S/.test(u) && !PROTECTED_SENTENCES.has(u.trim()) && sentenceRanksOptions(u, labels, prior));
+      const ranks = forced.has(`${r}:${j}`) || pairDrop.has(`${r}:${j}`) || (/\S/.test(u) && !PROTECTED_SENTENCES.has(u.trim()) && sentenceRanksOptions(u, labels, prior));
       prior += u;
       return ranks;
     });

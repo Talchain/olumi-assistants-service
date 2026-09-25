@@ -952,3 +952,38 @@ describe('review of #1871 at 03795a50 — the ordering carries across sentences'
     expect(gate(`The churn limit was not scored. ${s} Churn is the input to check.`)).toContain(s);
   });
 });
+
+/**
+ * Self-review of #1871 at ae56cf4b: figures interleaved with the options are bound one-to-one (the metric and binding
+ * rules decide them, so a per-option metric stays kept after a sentence naming both options), and a split written
+ * across TWO sentences, one figure each, is read as one passage.
+ */
+describe('self-review of #1871 at ae56cf4b — interleaved figures, and a split across two sentences', () => {
+  const graph = { nodes: [{ id: 'keep', kind: 'option', label: 'Keep Pro at £49' }, { id: 'raise', kind: 'option', label: 'Raise Pro to £59 at release' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }] };
+  const analysisReady = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } };
+  const gate = (text: string) => enforceAgentLaneLeaderClaimsAtWire(
+    { assistant_text: text, blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } } } as unknown as OlumiResponse,
+    { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'constraint_verdict_withheld', graph, analysisReady },
+  ).response.assistant_text;
+  it.each([
+    // v6 class C2 after a sentence naming both options: kept (an over-drop at ae56cf4b).
+    ['We compared raising and holding.', 'The £59 path has 40% retention, while holding has 60% retention.'],
+    ['We compared raising and holding.', 'The £59 path shows 40% uptake and holding 60% uptake.'],
+    ['We compared raising and holding.', 'On the supplied retention metric, the £59 path has 40% retention, while holding has 60% retention.'],
+    // Two sentences, each with its own measure: kept.
+    ['We compared raising and holding.', 'The churn limit is 4%. Retention is 96%.'],
+    ['We compared raising and holding.', 'The £59 path has 40% retention. Holding has 60% retention.'],
+  ])('CONTROL: %s → "%s" is kept', (lead, rest) => { expect(gate(`${lead} ${rest}`)).toContain(rest); });
+  it.each([
+    'The £59 path gets 71%. Holding gets the other 29%.',
+    'Raising: 71%. Holding: 29%.',
+    'Raising came out at 71%. Holding came out at 29%.',
+    'Raising wins 71% of runs. Holding wins 29%.',
+    'Raise Pro to £59 at release: 71%. Keep Pro at £49: 29%.',
+  ])('RED: a split across two sentences — both halves go: %s', (pair) => {
+    const out = gate(`The churn limit was not scored. ${pair} Churn is the input to check.`);
+    expect(out).not.toMatch(/71%|29%/);
+    expect(out).toContain('The churn limit was not scored.');
+    expect(out).toContain('Churn is the input to check.');
+  });
+});
