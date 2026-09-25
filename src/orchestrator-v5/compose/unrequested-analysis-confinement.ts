@@ -286,6 +286,21 @@ export function mayPresentLeaderClaimForFact(fact: RunAnalysisHandlerFact): bool
 }
 
 /**
+ * WHY {@link mayPresentLeaderClaimForFact} said no, when THIS module can prove
+ * it: the fact's own constraint verdict PERMITTED a leader, and the only failing
+ * half is that nobody asked for the analysis. The `leader_claim` composer names
+ * that `unrequested_analysis_withheld` instead of `constraint_verdict_withheld`,
+ * which consumers render as "the check against your limits declined" — shown
+ * on served c673223 for a brief that set no limits (#63 5825404689).
+ *
+ * Lives HERE, beside the admission, so the constraint-verdict leaf keeps its one
+ * production call site and every surface reads one answer (reload + finaliser).
+ */
+export function leaderWithheldOnlyBecauseUnrequested(fact: RunAnalysisHandlerFact): boolean {
+  return mayNameLeadingOptionForFact(fact) && !wasAnalysisRequestedByUser(fact);
+}
+
+/**
  * The `analysis_result` block summary for a run nobody asked for.
  *
  * Says the two things that are unambiguously true and are exactly what the

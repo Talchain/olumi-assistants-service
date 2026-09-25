@@ -56,3 +56,55 @@ export function approvedAdoptionSourceFor(
   if (typeof rawValue !== 'number' || !Number.isFinite(rawValue) || rawValue !== a.rawValue) return undefined;
   return APPROVED_ADOPTION_SOURCE;
 }
+
+/**
+ * ⭐ THE SAME IDENTITY FOR AN OPTION LEVEL (RC #69 5830102377 / 5830255884; pre-reviews
+ * 5830279122, 5830301003). MEASURED on served `c1ddb50`: every option level one "Use as
+ * starting assumptions" wrote came back `source: 'user_specified'` — 5 of 5 hiring cells, 3 of 3
+ * eng-hiring — so the canvas marked Olumi's proposed levels "Set by you". The level writer
+ * (`option_intervention_edit`) was built for the inspector, where the user TYPES the level, and
+ * its encoder defaults every cell to `user_specified`.
+ *
+ * `InterventionV3.source` has no adoption literal (`brief_extraction | cee_hypothesis |
+ * user_specified`), so an adopted Olumi level STAYS Olumi's: `cee_hypothesis`, the one member the
+ * encoder already preserves (`PRESERVED_INTERVENTION_SOURCES`) and the provenance authority
+ * classes as the model speaking. It can only NARROW a claim, never widen one. A level the user
+ * gave (`user_stated` on the proposal) runs with no context and keeps the writer's stamp.
+ *
+ * Matched on the same scenario, option, factor and model-scale value the write carries.
+ */
+export interface ApprovedLevelAdoption {
+  readonly scenarioId: string;
+  readonly proposalId: string;
+  readonly optionId: string;
+  readonly factorId: string;
+  /** The approved level on the model scale — exactly what the write sends. */
+  readonly modelValue: number;
+}
+
+/** Olumi's own level, adopted: the contract's model-authored member. */
+export const APPROVED_LEVEL_ADOPTION_SOURCE = 'cee_hypothesis' as const;
+
+const levelStore = new AsyncLocalStorage<ApprovedLevelAdoption>();
+
+/** Run ONE verified approved level write inside its adoption identity. */
+export function runWithApprovedLevelAdoption<T>(adoption: ApprovedLevelAdoption, fn: () => Promise<T>): Promise<T> {
+  return levelStore.run(adoption, fn);
+}
+
+/**
+ * The stamp for THIS level write if — and only if — it is the approved adoption the context
+ * names: same scenario, option, factor and value. Otherwise `undefined` (the writer keeps its own).
+ */
+export function approvedLevelSourceFor(
+  scenarioId: string,
+  optionId: string,
+  factorId: string,
+  modelValue: unknown,
+): typeof APPROVED_LEVEL_ADOPTION_SOURCE | undefined {
+  const a = levelStore.getStore();
+  if (a === undefined) return undefined;
+  if (a.scenarioId !== scenarioId || a.optionId !== optionId || a.factorId !== factorId) return undefined;
+  if (typeof modelValue !== 'number' || !Number.isFinite(modelValue) || modelValue !== a.modelValue) return undefined;
+  return APPROVED_LEVEL_ADOPTION_SOURCE;
+}
