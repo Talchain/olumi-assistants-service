@@ -525,6 +525,11 @@ function retainsRiskHypotheses(before: CandidateModel, after: CandidateModel): b
   return before.options.every((o) => after.options.some((kept) => kept.label === o.label));
 }
 
+/** The size-only retry's edit rule (measured: `construction-size-retry-edits-first-draft.test.ts`). */
+const SIZE_RETRY_EDITS_FIRST_DRAFT =
+  'Return your previous model with only the items you ADDED beyond the brief removed. Copy every item you keep EXACTLY '
+  + 'as it is in your previous model: the same label, wording, provenance and relationships. Do not rename, merge, reword or re-add anything.';
+
 export async function buildModelFromBrief(
   scenarioId: string,
   brief: string,
@@ -597,10 +602,16 @@ export async function buildModelFromBrief(
         model: budget.model,
         // The delta is APPENDED, so every rule the first pass obeyed still holds —
         // provenance, wiring, plausible_max and clearly labelled estimates.
-        instructions: `${BUILD_INSTRUCTIONS} ${needsSizeRetry ? retryInstruction(size) : ''} Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
+        // ⛔ A SIZE-ONLY RETRY EDITS ITS OWN FIRST DRAFT. Regenerated from the brief alone it renamed the user's
+        // options ("Hire two senior engineers" → "hire 2 senior engineers"), so `keepsEveryUserStatedIdentity`
+        // rejected it every time: measured 0/8 adoptable vs 8/8 when the retry is handed its draft to edit
+        // (construction-size-retry-edits-first-draft.test.ts). A retry with construction issues is unchanged.
+        instructions: repairIssues(preparation).length === 0 && needsSizeRetry
+          ? `${BUILD_INSTRUCTIONS} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT}`
+          : `${BUILD_INSTRUCTIONS} ${needsSizeRetry ? retryInstruction(size) : ''} Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
         input: repairIssues(preparation).length > 0
           ? `${brief}\n\nConstruction issues: ${JSON.stringify(repairIssues(preparation))}\nCandidate to repair: ${JSON.stringify(firstCandidate)}`
-          : brief,
+          : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(firstCandidate)}`,
         max_output_tokens: budget.max_output_tokens,
         reasoning_effort: budget.reasoning_effort,
         schema: retrySchemaPinningGoal(candidate.goal),
