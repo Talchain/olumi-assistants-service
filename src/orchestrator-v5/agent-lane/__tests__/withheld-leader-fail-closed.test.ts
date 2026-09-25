@@ -185,3 +185,109 @@ describe('the Agent-lane wire gate — withheld vs permitted', () => {
     expect(twice.response.assistant_text).toBe(once.assistant_text);
   });
 });
+
+/**
+ * ⛔ REVIEW OF #1871 (5825379110) and the Codex challenge (5825405499): synthetic probes the first head
+ * kept, each with a same-family control that must stay kept, so neither direction is vacuous.
+ */
+describe('review of #1871 — the classifier in both directions', () => {
+  const MUST_DROP: readonly string[] = [
+    'The current model points more favourably to two senior engineers for shipping by Q3.',
+    'The current model leans towards hiring two seniors for the Q3 outcome.',
+    'Until then, the apparent £59 advantage is an unconstrained pricing result.',
+    'So, the model-relative case for £59 is promising on MRR alone.',
+    'Changing that relationship can switch the ordering to holding at £49/month.',
+    'The £59 route has the greatest modelled MRR of the three.',
+    'Raising to £59 delivers more MRR than keeping £49.',
+    'The phased rise has better odds of reaching £20k.',
+    'Raising to £59 dominates keeping £49 on every run.',
+    'Holding at £49 is the most robust option here.',
+    'Keeping £49 is the safer bet.',
+    'The £59 path comes out first on MRR.',
+    'Raising to £59 is my pick.',
+    // Codex 5825405499: "highest plausible" was blanked whatever followed it.
+    'The highest plausible MRR belongs to the £59-at-release path.',
+    // A positive designation next to a negation word is still a designation.
+    'The model favours £59, and neither of the others comes close.',
+    'This shows which option leads: Raise to £59.',
+    // A scope opening does not license an overall claim in the same sentence.
+    'On the supplied MRR outcome, £59 is the best option.',
+    // An UNSCOPED statistic comparison is not class C2 (fail-safe).
+    'Raise Pro to £59 has a higher modelled median than Hold Pro at £49.',
+  ];
+  const MUST_KEEP: readonly string[] = [
+    'The current model favours neither hiring plan as a decision, because it could not test your strict salary constraint.',
+    'The model gives a provisional edge to neither option as a decision, because it could not test your strict salary limit.',
+    'It cannot test the stated salary constraint, so no option can be treated as leading overall.',
+    'On the supplied MRR outcome, Raise Pro to £59 has a higher modelled median than Hold Pro at £49 (0.285 against 0.270); the churn condition was not scored, so this does not establish which option leads overall.',
+    'On the model’s internal normalised outcome scale, the £59 scenario produced the highest average outcome among the three tested prices.',
+    'The model produced a comparative outcome ranking, but it ranked by “larger MRR outcome” because the MRR goal direction was not usable.',
+    'The highest plausible value for churn is 6% a month.',
+    'The biggest risk is that churn rises after the release.',
+    'Price uncertainty dominates the result.',
+  ];
+  it.each(MUST_DROP.map((s) => [s] as const))('drops: %s', (s) => {
+    expect(sentenceRanksOptions(s)).toBe(true);
+  });
+  it.each(MUST_KEEP.map((s) => [s] as const))('keeps: %s', (s) => {
+    expect(sentenceRanksOptions(s)).toBe(false);
+  });
+
+  it('a win-share distribution is dropped whole; a factor’s own percentages are not', () => {
+    const shares = 'Here is the split.\n\n- Raise to £59: 71%.\n- Keep £49: 29%.\n\nThe churn limit was not scored.';
+    expect(dropRankingSentences(shares).text).toBe('Here is the split.\n\nThe churn limit was not scored.');
+    const factors = 'Current assumptions:\n\n- Monthly churn: 4%.\n- New-Pro conversion: 5%.';
+    expect(dropRankingSentences(factors).text).toBe(factors);
+  });
+
+  it('a table any row of which ranks is dropped whole, not left without its header', () => {
+    const table = 'The runs:\n\n| Option | Win share |\n|---|---|\n| Raise to £59 | 71% |\n| Keep £49 | 29% |\n\nThe churn limit was not scored.';
+    expect(dropRankingSentences(table).text).toBe('The runs:\n\nThe churn limit was not scored.');
+    const factorTable = '| Factor | Value |\n|---|---|\n| Monthly churn | 4% |';
+    expect(dropRankingSentences(factorTable).text).toBe(factorTable);
+  });
+
+  it('a ranking sentence behind an emphasised full stop goes without taking the next sentence', () => {
+    const text = 'It produced the highest mean outcome, ahead of £54 (**0.212**). That comparison reflects price changes only.';
+    expect(dropRankingSentences(text).text).toBe('That comparison reflects price changes only.');
+  });
+});
+
+describe('review of #1871 — withheld is exactly the shared gate’s withhold arm', () => {
+  const ready = (mode: string) => ({ analysis_admission: { structurally_analysable: true, permitted_analysis_mode: mode, reasons: [] } });
+  const reply = 'Raise Pro to £59 at release is ahead on MRR. Monthly churn is assumed at 3%.';
+  const gate = (o: { permitted: boolean; separated: boolean; mode: string; reason?: string }) => enforceAgentLaneLeaderClaimsAtWire(
+    { assistant_text: reply, blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: o.permitted, ...(o.separated ? { separation: 'separated' } : {}), ...(o.reason ? { withheld_reason: o.reason } : {}) } } } as unknown as OlumiResponse,
+    { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: o.permitted, separationEstablished: o.separated, ...(o.reason ? { leaderClaimWithheldReason: o.reason } : {}), analysisReady: ready(o.mode) },
+  ).response.assistant_text;
+
+  it('SEPARABLE PROVISIONAL (entitled, separated, quantified_provisional): caveat, not withhold — nothing is removed', () => {
+    const out = gate({ permitted: true, separated: true, mode: 'quantified_provisional' });
+    expect(out.startsWith(reply)).toBe(true);
+    expect(out).toContain(PROVISIONAL_FIGURES_CAVEAT.trim().slice(0, 40));
+  });
+  it('the AUTOMATIC first run (not entitled) is withheld: the ranking sentence goes', () => {
+    const out = gate({ permitted: false, separated: true, mode: 'quantified_provisional', reason: 'auto_initiated' });
+    expect(out).not.toContain('is ahead on MRR');
+    expect(out).toContain('Monthly churn is assumed at 3%.');
+  });
+  it('quantified_provisional WITHOUT separation is withheld', () => {
+    expect(gate({ permitted: true, separated: false, mode: 'quantified_provisional' })).not.toContain('is ahead on MRR');
+  });
+  it('comparative_leader, entitled: permitted, untouched', () => {
+    expect(gate({ permitted: true, separated: true, mode: 'comparative_leader' })).toBe(reply);
+  });
+});
+
+describe('review of #1871 — the no-leader sentence names the admission’s reason before the claim token', () => {
+  it('Panel 5825404689: constraint_verdict_withheld on an all-estimates admission names the estimates, never "a limit"', () => {
+    const analysisReady = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'quantified_provisional', reasons: [{ field: 'permitted_analysis_mode', code: 'CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED' }] } };
+    const s = agentNoLeaderSentence('constraint_verdict_withheld', analysisReady);
+    expect(s).toContain('every estimate this comparison rests on is still Olumi');
+    expect(s).not.toContain('limit');
+  });
+  it('a real constraint verdict on a comparative admission still names the limit', () => {
+    const analysisReady = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } };
+    expect(agentNoLeaderSentence('constraint_verdict_withheld', analysisReady)).toContain('a limit on your model');
+  });
+});

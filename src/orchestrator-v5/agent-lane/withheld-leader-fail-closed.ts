@@ -22,10 +22,15 @@
  * already runs the wire gate (analysis-bearing turns). The shared Conventional gate is unchanged
  * and still runs afterwards, on the text this module returns.
  *
- * THE PERMISSION IS READ, NEVER RE-DERIVED. "Withheld" is the negation of what the Agent was
- * told: `claimPermissionsFrom` — the one producer of `claim_permissions` — over the body's own
- * `analysis_state`, conjoined with the caller's `mayNameLeadingOption` (the same readback). A
- * turn is permitted only when both say so.
+ * THE PERMISSION IS READ, NEVER RE-DERIVED. "Withheld" is exactly the shared gate's withhold arm,
+ * from the same inputs and the same exported predicates (`agentLaneLeaderWithheld`): this module
+ * changes only how much ranking prose is RECOGNISED there, never whether a turn is withheld. The
+ * separable-provisional population keeps the shared gate's caveat (Paul's "caveat, not withhold").
+ *
+ * WHAT IS KEPT on a withheld turn (leader-safety policy #63 5824816357; AI Quality corpus v6):
+ * a scoped metric comparison that names its metric (class C2), and a sentence explaining why NO
+ * option is put forward ("favours neither…, because…"). Only class C1 — an overall leader, a
+ * ranking, a hint, a recommendation, win shares as ranking evidence — is removed.
  *
  * ⚠ THE CLASSIFIER'S RULE, so the next reader does not widen or narrow it by feel:
  *   - SUPERLATIVES and explicit ranking verbs single out one option, so they are BROAD:
@@ -44,13 +49,15 @@
  *     than the words the estate already treats as a leader claim.
  *
  * ⚠ RESIDUAL — what a vocabulary classifier cannot see, stated so nobody quotes a stronger claim:
- * a designation that uses no ranking word at all ("directional support for £59", "the ordering
- * switches towards keeping £49", "go with the first one"). Those sentences are kept.
+ * a designation that uses no ranking word at all ("directional support for £59", "go with the first
+ * one", a bare "£59 comes first."). Those sentences are kept. Measured recall is corpus recall (AI
+ * Quality v6: 43 real replies plus 6 authored controls), not a general guarantee.
  */
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { log } from '../../utils/telemetry.js';
-import { permittedAnalysisModeFromAnalysisReady } from '../admission/analysis-admission.js';
+import { analysisReadyPermitsLeaderNaming, permittedAnalysisModeFromAnalysisReady } from '../admission/analysis-admission.js';
 import {
+  leaderClaimReasonKind,
   WITHHELD_CONSTRAINT_VERDICT,
   WITHHELD_NEAR_TIE,
   WITHHELD_RUN_IDENTITY_CONFLICT,
@@ -113,11 +120,27 @@ const NON_RANKING_IDIOMS: readonly RegExp[] = [
   /** A NEGATED recommendation is a disclaimer ("…, not a recommendation"). The verb stays ranking. */
   /\b(?:not|no|never|rather\s+than)\s+(?:a\s+|any\s+)?recommendations?\b/gi,
   /** Ranking ASSUMPTIONS by sensitivity is sanctioned content; the route's instruction asks for it. */
-  /\b(?:highest|strongest|biggest|largest)\s+(?:sensitivity|influence|drivers?|levers?|dependency|uncertainty|elasticity)\b/gi,
-  /\bhighest\s+(?:plausible|possible|credible)\b/gi,
+  /\b(?:highest|strongest|biggest|largest|greatest)\s+(?:sensitivity|influence|drivers?|levers?|dependency|uncertainty|elasticity|risks?)\b/gi,
+  /**
+   * Only a VALUE's plausible top, never an option's (Codex challenge on #1871: "The highest plausible MRR belongs
+   * to the £59-at-release path" names the strongest option by paraphrase, so the noun must be a value word).
+   */
+  /\bhighest\s+(?:plausible|possible|credible)\s+(?:values?|estimates?|figures?|levels?|bounds?|cases?|ranges?)\b/gi,
   /\bmost\s+likely\s+(?:values?|estimates?|figures?|ranges?|levels?)\b/gi,
   /** Questions or assumptions "most likely to determine the result" — ranking what matters, not options. */
   /\bmost\s+likely\s+to\s+(?:determine|affect|change|shift|move|matter|drive|influence|decide|flip|alter)\b/gi,
+  /**
+   * ⭐ A DECLINED DESIGNATION EXPLAINS WHY THERE IS NO LEADER — often the most useful sentence on a withheld
+   * turn (AI Quality v6; review of #1871: "The current model favours neither hiring plan as a decision,
+   * because it could not test your strict salary constraint"). Negated forms only: the NEGATION is part of
+   * each pattern, so a positive designation can never be blanked by one of these.
+   */
+  /\b(?:favou?r(?:s|ed|ing)?|prefer(?:s|red|ring)?|backs?|picks?|supports?|recommends?)\s+neither\b/gi,
+  /\bedge\s+to\s+neither\b/gi,
+  /\b(?:no|neither|none\s+of\s+the)\s+(?:single\s+)?(?:options?|plans?|choices?|paths?|alternatives?)\s+(?:can|could|should|may|is|was)\s+(?:yet\s+|now\s+)?(?:be\s+)?(?:(?:treated|described|shown|named|called|put\s+forward|presented|read)\s+as\s+)?(?:the\s+)?(?:leading|leader|lead|ahead|best|winner|winning|favou?red|strongest)\b/gi,
+  /\b(?:(?:does|do|did|can|could|would|will)\s*(?:not|n't)|cannot)\s+(?:yet\s+)?(?:establish|show|tell(?:\s+you)?|say|settle|determine|prove|mean|imply|indicate|decide)\s+(?:which|whether|that)\s+(?:\S+\s+){0,3}?(?:leads?|leading|is\s+(?:ahead|best|better|stronger)|wins?|comes?\s+out\s+ahead)\b/gi,
+  /** Describing the METHOD, not the result: "it ranked by 'larger MRR outcome'". */
+  /\b(?:ranked|ranks|ranking)\s+(?:them\s+|the\s+options\s+)?by\b/gi,
   /** "on top of that", "top-line", "top-down". */
   /\b(?<!\bout\s+)on\s+top\s+of\b/gi,
   /\btop[\s-]+(?:line|down)\b/gi,
@@ -132,7 +155,30 @@ const PCT = String.raw`(?<![\w.])\d+(?:[.,]\d+)?\s?%`;
  */
 const RANKING_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegExp }> = [
   { code: 'lead', re: /\b(?:lead|leads|leading|led|leaders?)\b/i },
-  { code: 'favour', re: /\b(?:favou?rs?|favou?red|favou?ring|favou?rites?|(?:more|most)\s+favou?rable)\b/i },
+  { code: 'favour', re: /\b(?:favou?rs?|favou?red|favou?ring|favou?rites?|favou?rably|(?:more|most)\s+favou?rable)\b/i },
+  /** v6 real replies: "the current model leans towards hiring two seniors". */
+  { code: 'lean', re: /\b(?:lean(?:s|ed|ing)?|tilt(?:s|ed|ing)?|nudg(?:es|ed|ing)?)\s+(?:(?:more|slightly|clearly|somewhat|provisionally|marginally)\s+)*(?:towards?|in\s+favou?r\s+of)\b/i },
+  /** v6 real replies: "the apparent £59 advantage". */
+  {
+    code: 'advantage',
+    re: /\badvantages?\s+(?:over|to|for)\b|\b(?:has|have|had|holds?|held|gives?|gave|keeps?|kept|with|shows?|showed)\s+(?:an?|the|its)\s+(?:\w+\s+)?advantage\b|(?:£\s?\d[\d,.]*k?|\d+\s?%)\s+advantage\b|\b(?:apparent|clear|slight|modest|small|narrow|provisional|overall|decisive|consistent)\s+(?:\S+\s+)?advantage\b/i,
+  },
+  /** v6 real replies: "the model-relative case for £59 is promising on MRR alone". */
+  { code: 'promising', re: /\bcase\s+for\b[^.;!?]{0,80}\b(?:promising|strong|stronger|compelling|attractive|persuasive|convincing)\b|\b(?:more|most)\s+promising\b/i },
+  /** v6 real replies: "could switch the ordering to holding at £49" — names where the order goes. */
+  {
+    code: 'ordering',
+    re: /\b(?:switch|flip|revers|chang|swap|tip|turn)\w*\s+(?:the\s+)?(?:ordering|ranking|order|comparison|result)\s+(?:to|towards|in\s+favou?r\s+of)\b|\b(?:ordering|ranking)\s+(?:would\s+|could\s+|may\s+|might\s+)?(?:switch|flip|revers|chang|swap|tip|turn)\w*\s+(?:to|towards|in\s+favou?r\s+of)\b/i,
+  },
+  {
+    code: 'greatest',
+    re: /\b(?:greatest|largest|biggest)\s+(?:(?:modelled|expected|median|mean|projected|simulated|overall|average|net)\s+)*(?:mrr|revenue|outcomes?|results?|returns?|gains?|upside|value|payoff|benefits?|chances?|probabilit(?:y|ies)|win\s+shares?)\b/i,
+  },
+  { code: 'more_than', re: /\b(?:delivers?|delivered|produces?|produced|yields?|yielded|gives?|gave|generates?|generated|returns?|returned|achieves?|achieved|earns?|earned|brings?|brought)\s+more\s+(?:[\w£$%-]+\s+){0,3}?than\b/i },
+  { code: 'dominates', re: /\bdominat(?:es|ed|ing)\b(?!\s+(?:the\s+)?(?:uncertainty|variance|spread|result|outcome|sensitivity|error|range|picture))|\bdominant\s+(?:option|choice|path|strategy|plan)\b/i },
+  { code: 'robust_pick', re: /\bmost\s+(?:robust|resilient|reliable|dependable)\s+(?:option|choice|path|plan|bet|route|alternative|candidate|of\s+the)\b|\b(?:is|was|looks|comes\s+out\s+as)\s+(?:the\s+)?most\s+(?:robust|resilient|reliable)\b/i },
+  { code: 'first', re: /\b(?:comes?|came|coming)\s+out\s+first\b|\b(?:comes?|came)\s+first\s+(?:in|on|among|across|overall|of\s+the)\b|\b(?:finish(?:es|ed)?|placed?|places|ranks?|ranked)\s+first\b/i },
+  { code: 'pick', re: /\b(?:my|our|olumi's|the\s+model's)\s+(?:top\s+)?(?:pick|choice|recommendation|preference|favourite|favorite)\b/i },
   { code: 'strongest', re: /\bstrongest\b/i },
   {
     code: 'stronger',
@@ -146,7 +192,7 @@ const RANKING_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegE
   { code: 'best', re: /\bbest\b/i },
   {
     code: 'better',
-    re: /\bbetter\s+than\b|\bbetter\s+(?:option|choice|bet|path|route|outcome|result|performer|pick|alternative|fit|candidate|position)s?\b|\b(?:perform(?:s|ed|ing)?|do|does|did|doing|fare[sd]?|faring|scor(?:e|es|ed|ing)|comes?\s+out|came\s+out|fits?|fitted|works?|worked)\s+better\b/i,
+    re: /\bbetter\s+than\b|\bbetter\s+(?:option|choice|bet|path|route|outcome|result|performer|pick|alternative|fit|candidate|position|odds|chances?|prospects?)s?\b|\b(?:perform(?:s|ed|ing)?|do|does|did|doing|fare[sd]?|faring|scor(?:e|es|ed|ing)|comes?\s+out|came\s+out|fits?|fitted|works?|worked)\s+better\b/i,
   },
   { code: 'ahead', re: /\bahead\b/i },
   { code: 'win', re: /\b(?:wins?|winners?|winning)\b/i },
@@ -185,7 +231,7 @@ const RANKING_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegE
     re: /\bbeat(?:s|ing)?\b(?!\s+(?:the|your|its|our|a|that)\s+(?:\S+\s+)?(?:target|goal|limit|threshold|baseline|constraint|budget|benchmark))/i,
   },
   { code: 'model_prefers', re: /\b(?:model|analysis|comparison|results?|simulations?)\s+(?:clearly\s+|slightly\s+|strongly\s+)?prefers?\b/i },
-  { code: 'clear_choice', re: /\b(?:clear|obvious|natural|safest|smartest)\s+(?:choice|pick|option|bet)\b/i },
+  { code: 'clear_choice', re: /\b(?:clear|obvious|natural|safest|smartest|safer|surer|wiser|wisest)\s+(?:choice|pick|option|bet)\b/i },
   { code: 'most_positive', re: /\bmost\s+(?:promising|attractive|competitive|profitable|compelling|lucrative)\b/i },
   { code: 'recommend', re: /\brecommend\w*\b/i },
 ];
@@ -264,6 +310,28 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * ⭐ A SCOPED METRIC COMPARISON IS KEPT (leader-safety policy #63 5824816357, class C2; AI Quality v6).
+ * "On the supplied MRR outcome, Raise Pro to £59 has a higher modelled median than Hold Pro at £49
+ * (0.285 against 0.270); the churn condition was not scored, so this does not establish which option
+ * leads overall" states what the run measured, on a named metric, without an overall preference.
+ * Deleting it deletes honest science.
+ *
+ * Narrow by construction: the sentence must OPEN by naming its metric scope ("On the supplied …
+ * outcome,", "On the model's internal normalised outcome scale,"), and only the statistic comparison
+ * itself ("has a higher modelled median", "produced the highest average outcome") is blanked. Every
+ * other ranking word in the sentence still counts, so "On the supplied MRR outcome, £59 is the best
+ * option" is still dropped, and an unscoped "has a higher median" is still dropped (fail-safe).
+ */
+const METRIC_SCOPE_OPENING =
+  /^[\s\-+•*\d.)]*(?:on|for|in\s+terms\s+of|measured\s+on)\s+(?:the\s+)?(?:supplied|modelled|model's|model|internal|simulated|this\s+run's)\b[^,;:]{0,120}?\b(?:outcome|scale|metric|measure|mrr|revenue|median|mean|average)\b[^,;:]{0,40}[,:]/i;
+const SCOPED_STAT_COMPARISON =
+  /\b(?:has|had|have|produced|produces|shows?|showed|gave|gives|reached|returns?|returned)\s+(?:a|the)\s+(?:higher|highest|lower|lowest)\s+(?:(?:modelled|average|mean|median|expected|simulated|normalised)\s+)*(?:median|mean|average|outcome|value|score)s?\b/gi;
+
+function blankScopedMetricComparison(text: string): string {
+  return METRIC_SCOPE_OPENING.test(text) ? text.replace(SCOPED_STAT_COMPARISON, BLANK) : text;
+}
+
 /** Which ranking patterns a sentence trips, after idioms and ranking-shaped labels are blanked. */
 export function rankingCodesIn(sentence: string, labels: RankingLabelContext = NO_LABELS): string[] {
   if (typeof sentence !== 'string' || sentence.trim() === '') return [];
@@ -273,7 +341,7 @@ export function rankingCodesIn(sentence: string, labels: RankingLabelContext = N
     // Case-SENSITIVE: the capitalised name, never the lower-case verb ("leads the comparison").
     text = text.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegExp(word)}(?![\\p{L}\\p{N}_])`, 'gu'), BLANK);
   }
-  return rankingCodesInBlanked(blankIdioms(text));
+  return rankingCodesInBlanked(blankIdioms(blankScopedMetricComparison(text)));
 }
 
 /** Does this sentence rank options or assert a leader? */
@@ -330,14 +398,22 @@ function admissionModeReasonCode(analysisReady: unknown): string | undefined {
   return typeof r?.code === 'string' ? r.code : undefined;
 }
 
-/** The ONE sentence appended when something was dropped. Typed reason first, then the admission's, then "not recorded". */
+/**
+ * The ONE sentence appended when something was dropped: the ADMISSION's reason first when the
+ * admission refused the comparison, then the typed claim reason, then "not recorded".
+ *
+ * ⚠ Admission first, because the claim token is not specific (Panel, #63 5825404689):
+ * `composeLeaderClaim` writes `constraint_verdict_withheld` for ANY unentitled verdict — including the
+ * automatic first run's "every estimate is Olumi's" — so reading the token first told a user with no
+ * limits in their brief that "a limit on your model was not shown to be met".
+ */
 export function agentNoLeaderSentence(withheldReason: string | undefined, analysisReady: unknown): string {
-  if (withheldReason !== undefined && BY_WITHHELD_REASON[withheldReason] !== undefined) return sentence(BY_WITHHELD_REASON[withheldReason]!);
   const mode = permittedAnalysisModeFromAnalysisReady(analysisReady);
-  if (withheldReason === undefined && mode !== null && mode !== 'comparative_leader') {
+  if (mode !== null && mode !== 'comparative_leader') {
     const code = admissionModeReasonCode(analysisReady);
     if (code !== undefined && BY_ADMISSION_REASON[code] !== undefined) return sentence(BY_ADMISSION_REASON[code]!);
   }
+  if (withheldReason !== undefined && BY_WITHHELD_REASON[withheldReason] !== undefined) return sentence(BY_WITHHELD_REASON[withheldReason]!);
   return sentence(REASON_NOT_RECORDED);
 }
 
@@ -353,6 +429,70 @@ const PROTECTED_SENTENCES: ReadonlySet<string> = new Set(
 );
 
 const LIST_MARKER = /^(\s*(?:[-+•]|\*(?=\s)|\d+[.)])\s+)/;
+
+/**
+ * A sentence boundary the shared splitter keeps inside one unit when the full stop is wrapped in
+ * emphasis or a bracket — "…£49 (**0.204**). That comparison reflects…" is ONE shared unit, so
+ * dropping its ranking sentence took the explanation after it too (AI Quality v6, pricing-2).
+ * Whitespace stays with the piece it precedes, so the pieces join back to the unit byte for byte.
+ */
+const FINER_BOUNDARY = /(?<=[.!?][*_)\]"'\u2019\u201D]*)(?=\s+[*_("'\u2018\u201C]*[A-Z£$])/g;
+
+function finerSentences(unit: string): string[] {
+  const cuts = [...unit.matchAll(FINER_BOUNDARY)].map((m) => m.index!).filter((i) => i > 0 && i < unit.length);
+  if (cuts.length === 0) return [unit];
+  const out: string[] = [];
+  let from = 0;
+  for (const c of cuts) { out.push(unit.slice(from, c)); from = c; }
+  out.push(unit.slice(from));
+  return out;
+}
+
+/** "Raise to £59: 71%." — one option's share, as the whole unit. */
+const SHARE_UNIT = /^[\s\-+•*\d.)]*[^:|\n]{2,80}?:\s*(\d+(?:[.,]\d+)?)\s?%[\s.;,)]*$/;
+
+/**
+ * Units that rank only AS A WHOLE, so no single sentence test sees them (review of #1871):
+ *   - a markdown TABLE any row of which ranks ("| Win share |" as its header) is dropped whole — dropping
+ *     only the header left "| Raise to £59 | 71% |" standing without its label;
+ *   - a win-share DISTRIBUTION — two or more "label: N%" units whose percentages sum to about 100 — is
+ *     dropped whole. A factor's own percentage ("Monthly churn: 4%") never sums to 100 with another.
+ * Returned as `${segIndex}:${unitIndex}` keys.
+ */
+function unitsRankingAsAWhole(segs: ReadonlyArray<{ sep: string } | { units: string[] }>, labels: RankingLabelContext): Set<string> {
+  const forced = new Set<string>();
+  const unitsOf = (k: number): string[] | undefined => {
+    const g = segs[k];
+    return g !== undefined && 'units' in g ? g.units : undefined;
+  };
+  const isRow = (k: number): boolean => /^\s*\|/.test(unitsOf(k)?.join('') ?? '');
+  for (let i = 0; i < segs.length; ) {
+    if (!isRow(i)) { i += 1; continue; }
+    const rows: number[] = [];
+    let k = i;
+    while (k < segs.length) {
+      if (isRow(k)) { rows.push(k); k += 1; continue; }
+      const g = segs[k];
+      if (g !== undefined && 'sep' in g && g.sep === '\n' && isRow(k + 1)) { k += 1; continue; }
+      break;
+    }
+    if (rows.some((r) => unitsOf(r)!.some((u) => sentenceRanksOptions(u, labels)))) {
+      for (const r of rows) unitsOf(r)!.forEach((_, j) => forced.add(`${r}:${j}`));
+    }
+    i = k;
+  }
+  const shares: Array<{ key: string; pct: number }> = [];
+  segs.forEach((g, r) => {
+    if (!('units' in g)) return;
+    g.units.forEach((u, j) => {
+      const m = SHARE_UNIT.exec(classificationCopy(u));
+      if (m !== null) shares.push({ key: `${r}:${j}`, pct: Number(m[1]!.replace(',', '.')) });
+    });
+  });
+  const total = shares.reduce((a, b) => a + b.pct, 0);
+  if (shares.length >= 2 && total >= 97 && total <= 103) for (const x of shares) forced.add(x.key);
+  return forced;
+}
 
 export interface FailClosedProseResult {
   /** The input REFERENCE when nothing was dropped. */
@@ -372,14 +512,15 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
   for (const unit of splitIntoRedactableUnits(text)) {
     if (/^\n+$/.test(unit)) { segs.push({ sep: unit }); continue; }
     const last = segs[segs.length - 1];
-    if (last !== undefined && 'units' in last) last.units.push(unit);
-    else segs.push({ units: [unit] });
+    if (last !== undefined && 'units' in last) last.units.push(...finerSentences(unit));
+    else segs.push({ units: finerSentences(unit) });
   }
 
+  const forced = unitsRankingAsAWhole(segs, labels);
   let dropped = 0;
-  const lines: Array<Seg | null> = segs.map((seg) => {
+  const lines: Array<Seg | null> = segs.map((seg, r) => {
     if ('sep' in seg) return seg;
-    const drop = seg.units.map((u) => /\S/.test(u) && !PROTECTED_SENTENCES.has(u.trim()) && sentenceRanksOptions(u, labels));
+    const drop = seg.units.map((u, j) => forced.has(`${r}:${j}`) || (/\S/.test(u) && !PROTECTED_SENTENCES.has(u.trim()) && sentenceRanksOptions(u, labels)));
     const n = drop.filter(Boolean).length;
     if (n === 0) return seg;
     dropped += n;
@@ -413,11 +554,26 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
   return { text: started ? leading + body : '', droppedSentences: dropped };
 }
 
-/** Is the leader withheld on this Agent turn? The negation of what the Agent was told — never re-derived. */
-export function agentLaneLeaderWithheld(response: OlumiResponse, opts: Pick<WireLeaderClaimEnforcementOpts, 'mayNameLeadingOption' | 'analysisReady'>): boolean {
+/**
+ * Is the leader WITHHELD on this turn — exactly where the shared gate withholds, never wider?
+ *
+ * ⛔ It mirrors the shared gate's own three arms (`enforceLeadingOptionClaimsAtWire`), from the same
+ * inputs, through the same exported predicates, so the two gates cannot disagree about WHETHER; this
+ * module only recognises more of WHAT. In particular the separable-provisional population (entitled,
+ * separated, `quantified_provisional`) is PERMIT-WITH-CAVEAT there — Paul's "caveat, not withhold"
+ * (programme-docs#38 5576895511) — so it is never withheld here. The first version read
+ * `claimPermissionsFrom(...).leader_may_be_named`, which is false for every mode but
+ * `comparative_leader`, and withheld that whole population (review of #1871: 16/16).
+ */
+export function agentLaneLeaderWithheld(
+  opts: Pick<WireLeaderClaimEnforcementOpts, 'mayNameLeadingOption' | 'analysisReady' | 'separationEstablished' | 'leaderClaimWithheldReason'>,
+): boolean {
   if (opts.mayNameLeadingOption !== true) return true;
-  const analysisState = (response as { analysis_state?: unknown }).analysis_state;
-  return claimPermissionsFrom(analysisState, opts.analysisReady).leader_may_be_named !== true;
+  const separableProvisional =
+    opts.separationEstablished === true && permittedAnalysisModeFromAnalysisReady(opts.analysisReady) === 'quantified_provisional';
+  if (separableProvisional) return false;
+  const separationDeclined = leaderClaimReasonKind(opts.leaderClaimWithheldReason) === 'withheld';
+  return !(analysisReadyPermitsLeaderNaming(opts.analysisReady) && !separationDeclined);
 }
 
 type WireField = (typeof WIRE_ENFORCED_PROSE_FIELDS)[number];
@@ -437,7 +593,7 @@ export function enforceAgentLaneLeaderClaimsAtWire(
   let droppedSentences = 0;
   try {
     const text = response.assistant_text;
-    if (typeof text === 'string' && text.length > 0 && agentLaneLeaderWithheld(response, opts)) {
+    if (typeof text === 'string' && text.length > 0 && agentLaneLeaderWithheld(opts)) {
       const projected = dropRankingSentences(text, rankingLabelContext(opts.graph, opts.analysisReady));
       if (projected.droppedSentences > 0) {
         droppedSentences = projected.droppedSentences;
