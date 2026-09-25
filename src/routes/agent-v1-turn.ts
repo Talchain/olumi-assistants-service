@@ -330,13 +330,19 @@ const AGENT_INSTRUCTIONS = [
   'An option that connects to a factor but states no level for it blocks the comparison for EVERY option, not only itself. run_analysis names each one. Offer a level in the user\u2019s own units with propose_option_interventions, exactly as you would a starting assumption, and say it is an assumption to correct.',
   'Give propose_option_interventions the number the USER would say (54, not 0.27). If it answers `no_stated_range`, that factor has no range to read the number against \u2014 say so plainly and do not invent one.',
   /*
+   * ⛔ ONE FIGURE, TWO THINGS (Paul's test on served d5d5839, #69 5832088673). The user said the
+   * £50,000 included a recruitment consultant; the Agent proposed "Hire PA sets annual PA salary
+   * to £50,000/year", recording a one-off fee as a recurring salary.
+   */
+  'When a figure the user gives bundles a one-off cost with a recurring one (a salary that includes a recruitment fee, say) or two different quantities, ask which part is which before you propose it, and never record the bundle as the recurring figure.',
+  /*
    * ⭐ THE BLOCKER THAT SURVIVES EVERY VALUE BEING FILLED IN.
    * Measured live at served 877ae800: eight assumptions adopted, ZERO factors
    * left without a value — and the analysis still refused, because one option
    * of three carried `interventions: null`. An option that sets nothing cannot
    * be compared with one that does.
    */
-  'get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model \u2014 do not wait for the analysis to refuse \u2014 ask what that option would actually change, and record the answer with propose_option_interventions. An option in `status_quo_held` is not in that list and is never given levels: say, in one short clause, that carrying on as now holds today\u2019s values, and that the user can say what would change if that is wrong. If they do, record exactly what they said with propose_option_interventions and user_stated: true on that level.',
+  'get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model \u2014 do not wait for the analysis to refuse \u2014 ask what that option would actually change, and record the answer with propose_option_interventions, with user_stated: true on each level the user gave. An option in `status_quo_held` is not in that list and is never given levels: say, in one short clause, that carrying on as now holds today\u2019s values, and that the user can say what would change if that is wrong. If they do, record exactly what they said with propose_option_interventions and user_stated: true on that level.',
   /*
    * ⛔ ANALYSIS IS MODEL-RELATIVE, NEVER A RECOMMENDATION (Paul, 23 Sep: "Olumi is a
    * reasoning-enhancement system, not an answer or decision engine"). Measured on
@@ -1656,7 +1662,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // A withheld call consumed no proposal and moved nothing: it is not an authorisation, and
     // counting one (it has no proposal id) would strand the proposal it named without its chip.
     const approvalCalls = result.tool_calls.filter((c) => c.refusal !== WITHHELD_ON_CHIP_TURN);
-    const approvals = approvalChipsFor(approvalCalls);
+    // The chip's words come from the STORED proposal it approves and its proposer's own result, never the Agent's prose.
+    const approvals = approvalChipsFor(
+      approvalCalls,
+      (id) => ({ proposal: proposals.get(id), result: result.tool_results.find((r) => r.proposal_id === id) }),
+    );
     // A first analysis the model could not run offers its repair: the approve chip when the Agent
     // proposed the missing values this turn, otherwise the next-step chip.
     const firstAnalysisBlocked = fa !== undefined && !fa.ran && (fa.reason === 'not_admissible' || fa.reason === 'refused')

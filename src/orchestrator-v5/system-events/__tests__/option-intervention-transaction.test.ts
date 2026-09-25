@@ -12,6 +12,7 @@ import type {
 } from '../../session/store.js';
 import type { PendingAction } from '../../session/pending-action.js';
 import { applyOptionInterventionEdit, executeOptionInterventionEdit } from '../option-intervention-edit.js';
+import { runWithApprovedLevelAdoption } from '../../agent-lane/approved-adoption-context.js';
 
 const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const TURN_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
@@ -821,5 +822,65 @@ describe('a no-target entry keeps its unrelated metadata through commit', () => 
     const neighbourBefore = interventionsOfOption(before).other_factor;
     const neighbourAfter = interventionsOfOption(cold).other_factor;
     expect(neighbourAfter).toEqual(neighbourBefore);
+  });
+});
+
+/**
+ * ⛔ AN ADOPTED OLUMI LEVEL IS STORED AS OLUMI'S, NOT "SET BY YOU" (RC #69 5830255884;
+ * pre-review 5830301003). MEASURED on served `c1ddb50`: every level an approval of Olumi's
+ * starting point wrote came back `source: 'user_specified'`. This writer was built for the
+ * inspector, where the user types the level, and its encoder defaults the cell to
+ * `user_specified`. The server-internal adoption context (never a wire field) names the ONE
+ * write that is Olumi's proposed level; only that write keeps `cee_hypothesis`. Read back from
+ * the durable bytes on a cold store, not from the candidate.
+ */
+describe('option-intervention transaction — an adopted Olumi level keeps Olumi\u2019s stamp', () => {
+  const adoption = (over: Partial<{ scenarioId: string; optionId: string; factorId: string; modelValue: number }> = {}) => ({
+    scenarioId: SCENARIO_ID, proposalId: 'prop_adopted', optionId: 'option', factorId: 'factor', modelValue: 0.3, ...over,
+  });
+  const cellOf = (g: ReturnType<typeof canonicalGraph>) =>
+    g.nodes.find(n => n.id === 'option')!.interventions!.factor as Record<string, unknown>;
+
+  it('RED: inside its adoption identity the committed cell reads cee_hypothesis on a cold reload', async () => {
+    const before = canonicalGraph();
+    const persistence = jsonStore(before);
+    const result = await runWithApprovedLevelAdoption(adoption(), () =>
+      executeOptionInterventionEdit(inputFor(before), persistence.fresh()));
+    expect(result.kind).toBe('committed');
+    expect(cellOf(persistence.durableGraph())).toMatchObject({ value: 0.3, source: 'cee_hypothesis' });
+    const mirrored = (persistence.durableGraph().options as Array<Record<string, unknown>>)
+      .find(o => o.id === 'option') as { interventions?: Record<string, unknown> } | undefined;
+    if (mirrored?.interventions?.factor !== undefined) {
+      expect(JSON.stringify(mirrored.interventions.factor)).not.toContain('user_specified');
+    }
+  });
+
+  it('CONTRAST: the inspector\u2019s write (no adoption identity) is still the user\u2019s level', async () => {
+    const before = canonicalGraph();
+    const persistence = jsonStore(before);
+    expect((await executeOptionInterventionEdit(inputFor(before), persistence.fresh())).kind).toBe('committed');
+    expect(cellOf(persistence.durableGraph())).toMatchObject({ value: 0.3, source: 'user_specified' });
+  });
+
+  it.each([
+    ['another value', { modelValue: 0.31 }],
+    ['another factor', { factorId: 'other_factor' }],
+    ['another option', { optionId: 'other_option' }],
+    ['another scenario', { scenarioId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' }],
+  ] as const)('CONTROL: an identity naming %s confers nothing — the write stays user_specified', async (_what, over) => {
+    const before = canonicalGraph();
+    const persistence = jsonStore(before);
+    const result = await runWithApprovedLevelAdoption(adoption(over), () =>
+      executeOptionInterventionEdit(inputFor(before), persistence.fresh()));
+    expect(result.kind).toBe('committed');
+    expect(cellOf(persistence.durableGraph())).toMatchObject({ value: 0.3, source: 'user_specified' });
+  });
+
+  it('CONTROL: a caller cannot hand the writer a stamp — execution derives it, ignoring any supplied source', async () => {
+    const before = canonicalGraph();
+    const persistence = jsonStore(before);
+    const forged = { ...inputFor(before), source: 'cee_hypothesis' } as unknown as Parameters<typeof executeOptionInterventionEdit>[0];
+    expect((await executeOptionInterventionEdit(forged, persistence.fresh())).kind).toBe('committed');
+    expect(cellOf(persistence.durableGraph())).toMatchObject({ value: 0.3, source: 'user_specified' });
   });
 });
