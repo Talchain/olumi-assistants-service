@@ -189,6 +189,22 @@ describe('the constructor declares the status quo, and admission holds it whatev
     expect(BUILD_INSTRUCTIONS).not.toContain('An option with no `interventions` AND no `changes` is inert');
   });
 
+  it('B3 RED (review 5826168440): EVERY text the drafter receives — instructions AND every schema description — scopes "an empty option cannot be analysed" away from the status quo', () => {
+    const descriptions: string[] = [];
+    const walk = (x: unknown): void => {
+      if (Array.isArray(x)) { x.forEach(walk); return; }
+      if (x === null || typeof x !== 'object') return;
+      for (const [k, v] of Object.entries(x)) { if (k === 'description' && typeof v === 'string') descriptions.push(v); else walk(v); }
+    };
+    walk(buildCandidateSchema());
+    expect(descriptions.length).toBeGreaterThan(0);
+    // Both wordings: the backticked instruction form and the plain / schema forms.
+    const emptyOption = /no `?interventions`? (AND|and) no `?changes`?|names nothing here and has no interventions/;
+    const sentences = [BUILD_INSTRUCTIONS, ...descriptions].flatMap((t) => t.split(/(?<=[.;])\s+/)).filter((s) => emptyOption.test(s));
+    expect(sentences.length, 'vacuity: the statements are still sent, scoped').toBeGreaterThanOrEqual(3);
+    for (const s of sentences) expect(s, s).toMatch(/is_status_quo/);
+  });
+
   it('B2 control (recorded): a flagged option that still names changes is treated as acting — not held, not stamped — so nothing is invented for it', async () => {
     const { graph } = await build(hiring({ label: 'Continue Current Staffing', changes: ['Developers hired', 'Tech leads hired'] }));
     expect(heldEdges(graph, 'continue_current_staffing')).toEqual([]);
