@@ -19,6 +19,7 @@ import {
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../../src/orchestrator-v5/context/graph-identity.js';
 import { GraphStaleWriteError } from '../../../src/orchestrator-v5/session/store.js';
+import { log } from '../../../src/utils/telemetry.js';
 
 function buildPersistedGraph() {
   return {
@@ -1043,6 +1044,137 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       },
     });
     expect(response.body).not.toContain('draft_graph');
+  });
+
+  // F4: a REUSED turn id carrying a different request. The store signals
+  // `priorTurnConflict` and writes nothing, so the commit's graph fields are the
+  // reread snapshot (which still holds -0.4). Before the gate, the writer's
+  // readback check compared that snapshot to its own candidate (-0.7) and
+  // answered a KNOWN no-write with a retryable 500 — a retry under the same id
+  // conflicts again. It must answer the commit's corrected reply instead.
+  it('F4: a reused-id CONFLICT answers the commit\'s corrected reply (no success, no retryable 500) and presents the stored snapshot', async () => {
+    const infoSpy = vi.spyOn(log, 'info');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      throw new Error('fetch attempted in a no-provider test');
+    });
+    try {
+      appendMock.mockResolvedValueOnce({ id: 'prior-row', priorTurnConflict: true });
+      const stored = structuredClone(persisted) as ReturnType<typeof buildPersistedGraph>;
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payloadFor(validEvent(), 'f4'),
+      });
+
+      // Premise: the request reached the append WITH a candidate at -0.7, and
+      // the store (whose graph this harness never mutates) still holds -0.4.
+      expect(appendMock).toHaveBeenCalledTimes(1);
+      expect(committedEdge()?.strength).toMatchObject({ mean: -0.7 });
+      expect(await appendMock.mock.results[0]!.value).toMatchObject({ priorTurnConflict: true });
+      expect(persisted).toEqual(stored);
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.body) as Record<string, unknown>;
+      expect(String(body.assistant_text)).toMatch(/did not make that change/i);
+      const patches = ((body.blocks ?? []) as Array<Record<string, unknown>>).filter(
+        (block) => block.type === 'graph_patch',
+      );
+      expect(patches.filter((patch) => patch.status === 'applied')).toEqual([]);
+      expect(body.model_version_receipt).toBeUndefined();
+      // The stored snapshot, for display only — never the unwritten candidate.
+      const draftGraph = body.draft_graph as Record<string, unknown>;
+      const edge = (draftGraph.edges as Array<Record<string, unknown>>).find(
+        (candidate) => candidate.from === 'f-demand' && candidate.to === 'g-growth',
+      );
+      expect(edge).toMatchObject({ strength: { mean: -0.4 } });
+      expect(body.graph_hash).toBe(computeAnalysisAffectingGraphHash(stored as never));
+      // No success attestation for this attempt; the probe does see the
+      // writer's no-write line in the same run (present control).
+      const messages = infoSpy.mock.calls.map((call) => String(call[1]));
+      expect(messages.filter((m) => m.startsWith('V5 edge_strength_edit committed'))).toEqual([]);
+      expect(
+        messages.filter((m) => m.startsWith('V5 edge_strength_edit — this attempt wrote nothing')),
+      ).toHaveLength(1);
+      expect(llmChatMock).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      infoSpy.mockRestore();
+      fetchSpy.mockRestore();
+    }
+  });
+
+  // F4: a replay flag is not proof the edit happened — a committed REFUSAL row
+  // under the same turn id replays too. "Already recorded" is said only when the
+  // reread edge carries the requested mean, direction AND user-set provenance;
+  // the three cases pin each side of the writer's `requestedChangeVisibleIn`.
+  it('F4: a REPLAY says "already recorded" only when the reread edge carries the requested strength and user-set provenance', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      throw new Error('fetch attempted in a no-provider test');
+    });
+    const NOT_IN_MODEL =
+      'Nothing new was written just now, and that change is not in the model at the moment.';
+    const post = async (event: Record<string, unknown>, suffix: string) => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payloadFor(event, suffix),
+      });
+      expect(response.statusCode).toBe(200);
+      return JSON.parse(response.body) as Record<string, unknown>;
+    };
+    const storedEdge = () =>
+      ((persisted as { edges: Array<Record<string, unknown>> }).edges).find(
+        (edge) => edge.from === 'f-demand' && edge.to === 'g-growth',
+      );
+    try {
+      // (1) set -0.7, NOT visible — the store still holds -0.4.
+      appendMock.mockResolvedValueOnce({ id: 'prior-row', replayedPriorTurn: true });
+      const notVisible = await post(validEvent(), 'f5');
+      expect(await appendMock.mock.results[0]!.value).toMatchObject({ replayedPriorTurn: true });
+      expect(storedEdge()).toMatchObject({ strength: { mean: -0.4 } });
+      expect(String(notVisible.assistant_text)).toBe(NOT_IN_MODEL);
+      expect(notVisible.model_version_receipt).toBeUndefined();
+
+      // (2) set -0.7, visible — the store holds the committed edit.
+      appendMock.mockImplementationOnce(async (write: { graph?: unknown }) => {
+        persisted = write.graph;
+        return { id: 'prior-row', replayedPriorTurn: true };
+      });
+      const visible = await post(validEvent(), 'f6');
+      expect(storedEdge()).toMatchObject({
+        strength: { mean: -0.7 },
+        provenance: { source: 'user_specified' },
+      });
+      expect(String(visible.assistant_text)).toMatch(/already been recorded/i);
+
+      // (3) confirm_current, tuple unchanged by design, provenance NOT stamped in
+      //     the store — the stamp is the whole change, so it is not visible.
+      persisted = buildPersistedGraph();
+      appendMock.mockResolvedValueOnce({ id: 'prior-row', replayedPriorTurn: true });
+      const unstamped = await post(
+        validEvent({
+          magnitude: 0.4,
+          expected: { mean: -0.4, effect_direction: 'negative' },
+          intent: 'confirm_current',
+        }),
+        'f7',
+      );
+      expect(committedEdge()).toMatchObject({
+        strength: { mean: -0.4 },
+        provenance: { source: 'user_specified' },
+      });
+      expect(storedEdge()).toMatchObject({
+        strength: { mean: -0.4 },
+        provenance: { source: 'cee_hypothesis' },
+      });
+      expect(String(unstamped.assistant_text)).toBe(NOT_IN_MODEL);
+
+      expect(llmChatMock).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it('commits an honest no-graph refusal without inventing a graph write', async () => {
