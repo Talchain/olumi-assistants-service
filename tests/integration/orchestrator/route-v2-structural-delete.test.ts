@@ -32,6 +32,7 @@ import type { FastifyInstance } from 'fastify';
 
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import { GraphStaleWriteError } from '../../../src/orchestrator-v5/session/store.js';
+import { log } from '../../../src/utils/telemetry.js';
 
 // ── the persisted model ────────────────────────────────────────────────────
 // Two options so a delete leaves the model analysable, plus an edge on each so
@@ -985,5 +986,111 @@ describe('POST /orchestrate/v2/turn — structural_delete (a deleted option stay
     // Both options still present ⇒ the code the previous test asserts is absent.
     expect(issues).not.toContain('FEWER_THAN_TWO_OPTIONS');
     expect(issues).toContain('OPTION_NEEDS_MAPPING');
+  });
+
+  // ══ F4. A REUSED TURN ID WROTE NOTHING — no success, no retryable 500 ═══════
+  // The store signals `priorTurnConflict` and writes nothing (this harness's
+  // write-through is bypassed for the one call), so the commit's graph fields are
+  // the reread snapshot, which still holds `o-launch`. Before the gate the
+  // writer's receipt check read that snapshot and answered a KNOWN no-write with
+  // a retryable 500 — and a retry under the same id conflicts again.
+  it('F4: a reused-id CONFLICT answers the commit\'s corrected reply and presents the stored snapshot, attesting no removal', async () => {
+    const infoSpy = vi.spyOn(log, 'info');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      throw new Error('fetch attempted in a no-provider test');
+    });
+    try {
+      appendMock.mockImplementationOnce(async () => ({ id: 'prior-row', priorTurnConflict: true }));
+      const stored = structuredClone(persisted) as Record<string, unknown>;
+
+      const res = await post(
+        {
+          kind: 'structural_delete',
+          removed_node_ids: ['o-launch'],
+          removed_edges: [],
+          base_graph_hash: currentBaseHash(),
+        },
+        'f4',
+      );
+
+      // Premise: the request reached the append WITH a candidate lacking
+      // o-launch, the store signalled a conflict, and it still holds o-launch.
+      expect(appendMock).toHaveBeenCalledTimes(1);
+      expect(nodeIds(committedGraph())).not.toContain('o-launch');
+      expect(await appendMock.mock.results[0]!.value).toMatchObject({ priorTurnConflict: true });
+      expect(persisted).toEqual(stored);
+      expect(nodeIds(persisted as Record<string, unknown>)).toContain('o-launch');
+
+      expect(res.statusCode).toBe(200);
+      const body = body200(res);
+      expect(String(body.assistant_text)).toMatch(/did not make that change/i);
+      expect(body.model_version_receipt).toBeUndefined();
+      // The stored snapshot, for display only — o-launch is still there.
+      expect(nodeIds(body.draft_graph as Record<string, unknown>)).toContain('o-launch');
+      expect(body.graph_hash).toBe(computeAnalysisAffectingGraphHash(stored as never));
+      // No removal attested for this attempt; the probe sees the writer's
+      // no-write line in the same run (present control).
+      const messages = infoSpy.mock.calls.map((call) => String(call[1]));
+      expect(messages.filter((m) => m.startsWith('V5 structural_delete committed'))).toEqual([]);
+      expect(
+        messages.filter((m) => m.startsWith('V5 structural_delete — this attempt wrote nothing')),
+      ).toHaveLength(1);
+      expect(llmChatMock).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      infoSpy.mockRestore();
+      fetchSpy.mockRestore();
+    }
+  });
+
+  // ══ F4. A REPLAY FLAG IS NOT PROOF THE REMOVAL HAPPENED ═══════════════════
+  // The store flags `replayedPriorTurn` for any prior row under the turn id with
+  // the same request hash — a committed REFUSAL row included. So "already
+  // recorded" may be said only when the reread snapshot shows the removal; the
+  // pair below pins both sides of the writer's `requestedChangeVisibleIn`.
+  it('F4: a REPLAY whose removal is NOT in the reread snapshot does not say "already recorded"; a replay whose removal IS keeps it', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      throw new Error('fetch attempted in a no-provider test');
+    });
+    const removeLaunch = () => ({
+      kind: 'structural_delete',
+      removed_node_ids: ['o-launch'],
+      removed_edges: [],
+      base_graph_hash: currentBaseHash(),
+    });
+    try {
+      // (1) NOT visible — the store still holds o-launch (nothing was written).
+      appendMock.mockImplementationOnce(async () => ({ id: 'prior-row', replayedPriorTurn: true }));
+      const notVisible = await post(removeLaunch(), 'f5');
+      expect(await appendMock.mock.results[0]!.value).toMatchObject({ replayedPriorTurn: true });
+      expect(nodeIds(persisted as Record<string, unknown>)).toContain('o-launch');
+      expect(notVisible.statusCode).toBe(200);
+      const nv = body200(notVisible);
+      expect(String(nv.assistant_text)).not.toMatch(/already been recorded/i);
+      expect(String(nv.assistant_text)).toBe(
+        'Nothing new was written just now, and that change is not in the model at the moment.',
+      );
+      expect(nv.model_version_receipt).toBeUndefined();
+      expect(nodeIds(nv.draft_graph as Record<string, unknown>)).toContain('o-launch');
+
+      // (2) visible — the store holds the removal (the original commit wrote it).
+      persisted = buildPersistedGraph();
+      appendMock.mockImplementationOnce(async (write: { graph?: unknown }) => {
+        persisted = write.graph;
+        return { id: 'prior-row', replayedPriorTurn: true };
+      });
+      const visible = await post(removeLaunch(), 'f6');
+      expect(await appendMock.mock.results[1]!.value).toMatchObject({ replayedPriorTurn: true });
+      expect(nodeIds(persisted as Record<string, unknown>)).not.toContain('o-launch');
+      expect(visible.statusCode).toBe(200);
+      const v = body200(visible);
+      expect(String(v.assistant_text)).toMatch(/already been recorded/i);
+      expect(nodeIds(v.draft_graph as Record<string, unknown>)).not.toContain('o-launch');
+
+      expect(llmChatMock).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 });
