@@ -23,10 +23,15 @@
  * of these would be this estate's chronic defect (the two `generateGraphHash`
  * twins, the six freshness derivations) reproduced at a new surface:
  *
- *   the graph hash      `computeAnalysisAffectingGraphHash` — the SAME function
- *                       `freshness.current_graph_hash` and a run's
- *                       `graph_hash_at_run` are computed with, so `fresh` here
- *                       means bit-for-bit what it means on a turn.
+ *   the graph hash      `deriveDecisionContextGraphHash` — the SAME projection
+ *                       (`canonicaliseForAnalysis` → `GraphStateIngressSchema`
+ *                       → `computeAnalysisAffectingGraphHash`) a run's
+ *                       `graph_hash_at_run` is stamped over and a turn's
+ *                       `freshness.current_graph_hash` is computed with, so
+ *                       `fresh` here means bit-for-bit what it means on a turn.
+ *                       (CS-AN-2: this leg once hashed the RAW bytes, which
+ *                       read a just-completed run as stale on any graph whose
+ *                       option carriers needed promotion.)
  *   the fact read       `loadScenarioAnalysisFactsForRead`: the turn path's
  *                       own hot-window and durable readers, reconciled by
  *                       `reconcileScenarioAnalysisFacts`, with the window's
@@ -90,7 +95,10 @@ import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { AnalysisStateV1 } from '@talchain/schemas/boundary';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
-import { loadScenarioAnalysisFactsForRead } from '../orchestrator-v5/build-turn-context.js';
+import {
+  deriveDecisionContextGraphHash,
+  loadScenarioAnalysisFactsForRead,
+} from '../orchestrator-v5/build-turn-context.js';
 import { buildAnalysisResultBlock } from '../orchestrator-v5/compose.js';
 import {
   composeAnalysisStateV1,
@@ -104,9 +112,7 @@ import {
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { deriveAnalysisFreshness, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
 import { isScenarioAnalysisReasoningAuthority } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
-import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
-import type { GraphStateIngress } from '../orchestrator-v5/boundary/request-extensions.js';
 import { log } from '../utils/telemetry.js';
 
 /** The additive half of the scenario-graph read's 200 body. */
@@ -154,9 +160,49 @@ export async function readScenarioAnalysis(
     // information without spending a store read on it.
     if (params.graph === null || params.graph === undefined) return NOT_ANSWERED;
 
-    const currentGraphHash = computeAnalysisAffectingGraphHash(
-      params.graph as GraphStateIngress,
-    );
+    // ⭐ CS-AN-2 — THE FRESHNESS HASH IS THE CANONICAL ONE, THE HASH THE RUN
+    // STAMPED. `loadScenarioSnapshotForRunAnalysis` hands run_analysis
+    // `rawPersistedGraph: canonicaliseForAnalysis(persistedGraph)`, and
+    // run-analysis.ts stamps `graph_hash_at_run` over that after
+    // `GraphStateIngressSchema.safeParse`. The turn path compares against the
+    // same projection. This leg used to hash the RAW persisted bytes, so on any
+    // graph whose option-intervention carriers need promotion (DGAI autosave
+    // shape: `node.data.interventions`, raw_value-only entries, …) a reload
+    // straight after a successful run said `complete_stale / graph_changed`
+    // and withheld the result the user had just computed.
+    // `deriveDecisionContextGraphHash` is exactly that projection, shared with
+    // the turn path rather than re-assembled here.
+    //
+    // ⚠ ON A GRAPH WHOSE CANONICAL PROJECTION DOES NOT PARSE, THIS FAILS
+    // CLOSED, AND THAT COSTS A RESULT. `deriveDecisionContextGraphHash` returns
+    // null, `deriveAnalysisFreshness` reports `unknown /
+    // current_graph_hash_unavailable`, and the wire says `run_state:
+    // unknown_degraded / no_graph_this_turn` with NO `analysis_result`. That is
+    // the turn path's answer too (turn-executor.ts `selectedGraphForFreshness`
+    // → `currentAnalysisGraphHashForTurn`). It is NOT free: a graph that stops
+    // parsing after its run (a node loses its label — no hashed field moves,
+    // the RAW hash still equals the stamp) loses a result the raw-hash leg
+    // would have served as current. Currency cannot be verified there, so
+    // withholding is the chosen side. And the cause `no_graph_this_turn` is
+    // imprecise on a reload that DID return a graph — a named follow-up, not
+    // fixed here. (Pinned: `scenario-analysis-canonical-hash.test.ts`,
+    // UNPARSEABLE AFTER RUN.)
+    //
+    // ⚠ THIS IS DELIBERATELY NOT THE ROUTE'S WIRE `graph_hash`, and on a
+    // repaired-shape graph the two differ. The wire value
+    // (`assist.v1.scenario-graph.ts`) is the manual-edit compare-and-set base,
+    // and the writers derive their expected base from the RAW persisted graph
+    // (`graph-cas-conflict.ts` `hashesForRawGraph`); moving it would put the
+    // base out of step with the writer on exactly these graphs. The question
+    // here is different — "does this run's result belong
+    // to this model?" — and only the projection the run was stamped over can
+    // answer it. The one hash this leg ships, `analysis_result.
+    // computed_against_hash`, is the fact's own `graph_hash_at_run` (the
+    // canonical stamp), never recomputed here: it states what the run was
+    // computed against, so it must stay the run's value. A consumer comparing
+    // it to the wire `graph_hash` on a repaired-shape graph will see them
+    // differ; `analysis_state.run_state` is the currency verdict.
+    const currentGraphHash = deriveDecisionContextGraphHash(params.graph);
 
     const store = getSessionStore();
     const [{ hotWindow, factSet }, analysisInvalidatedAt] = await Promise.all([
