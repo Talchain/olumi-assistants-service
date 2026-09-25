@@ -152,6 +152,24 @@ const STARTING_POINT_BASIS = 'a starting point \u2014 values and what each optio
  */
 const ADOPTED_ASSUMPTION_SOURCE: KnownObservedStateSourceLiteral = 'user_assumption';
 
+/**
+ * ⛔ WHO AUTHORED THIS ONE VALUE — never inferred from the proposal as a whole (Codex
+ * pre-review of #1851, 5825286731). One `propose_assumptions` proposal can hold a revision the
+ * USER named (`revise:true`, their figure) beside a figure OLUMI suggested, and its proposal-wide
+ * `authored_by` is `model_proposed` whenever any figure is Olumi's — so stamping from that one
+ * field recorded the user's own number as an Olumi assumption. Each value op now records its own
+ * author (inside the proposal's integrity hash, `computeProposalId`, so it cannot be edited
+ * undetected). A USER-authored proposal is the user's in every value (only a proposal made
+ * entirely of their figures claims `user_stated`), so an op can only move an Olumi proposal's
+ * value TO the user, never the reverse. An op without the field — a carrier persisted before it
+ * existed — takes the proposal's author.
+ */
+function valueOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'model_proposed' | 'user_stated' {
+  if (proposal.provenance.authored_by === 'user_stated') return 'user_stated';
+  const own = ((op.value ?? {}) as { authored_by?: unknown }).authored_by;
+  return own === 'user_stated' ? 'user_stated' : 'model_proposed';
+}
+
 /** One internal dispatch, so every path is the product's own. */
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
 
@@ -639,17 +657,15 @@ export function createAgentCapabilities(
      * `user_ratified` — a human act, not authorship). Nothing is invented and no
      * measurement is claimed. This path can stamp it because THIS capability
      * composes the registered bytes. A USER-authored proposal keeps the writer's
-     * stamp. ⚠ The single-kind `set_factor_value` path below cannot: it writes
-     * through `factor_value_edit`, which has no field to carry this.
+     * stamp — decided PER VALUE (`valueOpAuthor`). The single-kind `set_factor_value` path
+     * reaches the same stamp at the writer, through the approved-adoption context.
      */
-    if (parent.provenance.authored_by === 'model_proposed') {
-      workingNodes = workingNodes.map((n) => {
-        if (!valueOps.some((o) => o.path === n.id)) return n;
-        const os = n.observed_state;
-        if (os === undefined || typeof os.value !== 'number') return n;
-        return { ...n, observed_state: { ...os, source: ADOPTED_ASSUMPTION_SOURCE } };
-      });
-    }
+    workingNodes = workingNodes.map((n) => {
+      if (!valueOps.some((o) => o.path === n.id && valueOpAuthor(o, parent) === 'model_proposed')) return n;
+      const os = n.observed_state;
+      if (os === undefined || typeof os.value !== 'number') return n;
+      return { ...n, observed_state: { ...os, source: ADOPTED_ASSUMPTION_SOURCE } };
+    });
 
     // ONE conditional write for every value (and any range they need).
     const receipts: ReceiptSummary[] = [];
@@ -1034,7 +1050,8 @@ export function createAgentCapabilities(
       const operations: ProposalOperation[] = ordered.map((a) => ({
         op: 'set_factor_value',
         path: a.id,
-        value: { value: a.value, unit: a.unit, basis: a.basis },
+        // A revision the user named is theirs; a fresh figure is Olumi's (`valueOpAuthor`).
+        value: { value: a.value, unit: a.unit, basis: a.basis, authored_by: typeof a.replaces === 'number' ? 'user_stated' : 'model_proposed' },
       }));
       /**
        * ⛔ THE APPROVAL MUST SAY WHAT IT REPLACES.
@@ -2000,9 +2017,10 @@ export function createAgentCapabilities(
           // 5825007295). This proposal was verified by `proposals.authorise` above (scenario,
           // user, base revision), so its identity rides the in-process dispatch as a
           // server-internal context — never a wire field — and the writer stamps
-          // `user_assumption` for exactly this target and value. A proposal the USER authored
-          // (a revision they named) sends no context: the writer's own stamp is the truth.
-          const r = decision.proposal.provenance.authored_by === 'model_proposed'
+          // `user_assumption` for exactly this target and value. A value the USER authored
+          // (a revision they named, even inside a proposal that also holds Olumi's figures —
+          // `valueOpAuthor`) sends no context: the writer's own stamp is the truth.
+          const r = valueOpAuthor(o, decision.proposal) === 'model_proposed'
             ? await runWithApprovedAdoption(
               { scenarioId: ctx.scenario_id, proposalId: decision.proposal.proposal_id, targetId: o.path, rawValue: approvedValue },
               send,

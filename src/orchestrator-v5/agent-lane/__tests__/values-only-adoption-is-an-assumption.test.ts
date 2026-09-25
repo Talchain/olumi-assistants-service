@@ -150,6 +150,64 @@ describe('the user’s own figure stays theirs', () => {
   });
 });
 
+/**
+ * ⛔ A MIXED PROPOSAL (Codex pre-review of #1851, 5825286731): one `propose_assumptions` call can
+ * hold the user's own revision beside Olumi's figure, and the proposal-wide `authored_by` is then
+ * `model_proposed`. Authorship is decided per value, so each figure keeps its own author.
+ */
+describe('a proposal holding BOTH the user’s revision and Olumi’s figure', () => {
+  async function adoptMixed() {
+    const p = product();
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const proposed = await caps.proposeAssumptions(ctx, {
+      assumptions: [
+        { factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true },
+        { factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
+      ],
+    } as never);
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    const shown = store.get(String(proposed.proposal_id))!;
+    // PRECONDITIONS, proven not assumed: one proposal, Olumi-authored as a whole, values only.
+    expect(shown.provenance.authored_by).toBe('model_proposed');
+    expect(shown.operations.map((o) => o.path).sort()).toEqual(['coordination_load', 'team_size']);
+    expect(new Set(shown.operations.map((o) => o.op))).toEqual(new Set(['set_factor_value']));
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    expect(applied.ok, JSON.stringify(applied)).toBe(true);
+    expect(p.writes(), 'both values landed').toBe(2);
+    return p;
+  }
+
+  it('RED: the user’s revised figure stays user_override; Olumi’s figure is user_assumption', async () => {
+    const p = await adoptMixed();
+    expect(p.byId().team_size.observed_state).toMatchObject({ raw_value: 6, source: 'user_override' });
+    expect(p.byId().coordination_load.observed_state).toMatchObject({ raw_value: 40, source: 'user_assumption' });
+  });
+
+  it('RED: the census still credits the user’s own figure and does not credit Olumi’s', async () => {
+    const p = await adoptMixed();
+    const g = p.graph();
+    expect(earnsAuthorshipCredit(structureProvenance(g.nodes.find((n) => n.id === 'team_size'), g))).toBe(true);
+    expect(earnsAuthorshipCredit(structureProvenance(g.nodes.find((n) => n.id === 'coordination_load'), g))).toBe(false);
+    expect(censusConfidenceParameters(g as never).confidence_parameters_user_stated).toBe(1);
+  });
+
+  it('each value op records its own author, inside the proposal’s integrity hash', async () => {
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(product().d, store);
+    const proposed = await caps.proposeAssumptions(ctx, {
+      assumptions: [
+        { factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true },
+        { factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
+      ],
+    } as never);
+    const ops = store.get(String(proposed.proposal_id))!.operations;
+    const authorOf = (path: string) => ((ops.find((o) => o.path === path)?.value ?? {}) as { authored_by?: string }).authored_by;
+    expect(authorOf('team_size')).toBe('user_stated');
+    expect(authorOf('coordination_load')).toBe('model_proposed');
+  });
+});
+
 describe('nothing outside the verified approval can claim the adoption stamp', () => {
   const edit = async (graph: unknown, value: number) => {
     const ev = { kind: 'factor_value_edit' as const, target_id: 'coordination_load', value };
