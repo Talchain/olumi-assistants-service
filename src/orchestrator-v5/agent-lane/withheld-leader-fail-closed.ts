@@ -51,11 +51,14 @@
  * ⚠ RESIDUAL — what a vocabulary classifier cannot see, stated so nobody quotes a stronger claim:
  * a designation that uses no ranking word at all ("directional support for £59", "go with the first
  * one", a bare "£59 comes first."), and a PARTIAL win share in prose with no ranking word ("the £59
- * path at 71%" alone), a split written as decimals ("at 0.71 and … 0.29"), a partial multi-option
+ * path at 71%" alone), a split written as decimals ("at 0.71 and … 0.29"), a full split whose options are paraphrased with no option noun,
+ * label or run-share phrase ("the rise took 71% and the current price 29%"), a full split beside a limit percentage that
+ * pushes the sum off ~100 ("… at 71% and holding at 29%, against your 4% limit"), a partial multi-option
  * split that does not sum to ~100 ("£59 at 60%, £49 at 30%"), and an inline heading margin ("Price-rise
  * lead: about four points" — lexically the served role heading "Slow-ramping lead: …"). Those are kept.
  * A prose split over the OPTIONS whose percentages ("%" or "per cent") sum to ~100 is removed ("the £59
- * path at 71% and holding at 29%"); a range or a non-option composition is not. Win shares ARE also removed as
+ * path at 71% and holding at 29%", "split 71% to 29% between the £59 path and holding", "across the runs … 71% … 29%");
+ * an ascending range or a non-option composition is not. Win shares ARE also removed as
  * lists ("label: N%" / "label — N%", per contiguous list summing to ~100, under a ranking heading, or
  * on an option's own label) and as tables (a share header, an option row with a %, or a ranking row). Measured recall is corpus recall (AI
  * Quality v6: 43 real replies plus 6 authored controls), not a general guarantee.
@@ -320,12 +323,29 @@ function blankIdioms(text: string): string {
  * surround them. A factor sentence ("3% a month, against your limit of 4%") never sums to 100.
  */
 function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): boolean {
-  // A RANGE is uncertainty, not a split: "between 45% and 55%", "from 30% to 70%", "40-60%" (review 5826189511).
-  if (/\bbetween\s+[^.;]{0,20}\d[^.;]{0,20}\s+and\s+\d|\bfrom\s+[^.;]{0,20}\d[^.;]{0,20}\s+to\s+\d|\d\s?%?\s?(?:-|to)\s?\d+(?:[.,]\d+)?\s?%|\banywhere\b/i.test(text)) return false;
+  /**
+   * A RANGE is uncertainty, not a split: "between 45% and 55%", "from 30% to 70%", "40-60%" (review 5826189511).
+   * ⛔ Review 5826509657: the bare "X% to Y%" / "X%–Y%" form read "The runs split 71% to 29% …" as a range. A range is
+   * written ascending and a leader-first split descending, so the bare form is a range only when X < Y. And the
+   * "between"/"from" forms need the NUMBER straight after the word, so "between options 1 and 2" is not a range.
+   */
+  const RANGE_NUM = '(?:about\\s+|around\\s+|roughly\\s+|some\\s+)?\\d+(?:[.,]\\d+)?\\s?(?:%|per\\s?cent)?';
+  if (new RegExp(`\\b(?:between\\s+${RANGE_NUM}\\s+and|from\\s+${RANGE_NUM}\\s+to)\\s+\\d|\\banywhere\\b`, 'i').test(text)) return false;
+  // A sentence that SAYS split or win share is never excused as a range; its cues decide ("the runs split 29% to 71% …").
+  const saysSplit = /\b(?:split|win[-\s]shares?)\b/i.test(text);
+  for (const m of saysSplit ? [] : text.matchAll(/(?<![\d.,])(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent)?\s?(?:-|to)\s?(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent)/gi)) {
+    if (Number(m[1]!.replace(',', '.')) < Number(m[2]!.replace(',', '.'))) return false;
+  }
   const hits = [...text.matchAll(new RegExp(PCT, 'gi'))];
   if (hits.length < 2) return false;
   const total = hits.map((m) => Number(m[0].replace(/[%\s]|per\s?cent/gi, '').replace(',', '.'))).reduce((a, b) => a + b, 0);
   if (total < 97 || total > 103) return false;
+  /**
+   * A sentence that says it is about the RUNS' outcome is a win share whatever it calls the options ("Across the
+   * runs, the release-timed rise took 71% and the current price 29%", review 5826509657 item 2) — unless it
+   * attributes variation to factors ("40% of the variance comes from churn"), which is a driver split.
+   */
+  if (RUN_SHARE_CUE.test(text) && !FACTOR_ATTRIBUTION.test(text)) return true;
   /**
    * ⛔ EACH PERCENTAGE MUST BELONG TO ITS OWN OPTION (Codex 5826253038). An option named ANYWHERE was taken as
    * the cue, so "For the Hire Two Developers option, 40% of capacity is engineering and 60% is support" — a
@@ -345,8 +365,29 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
     if (!used.has(i) && cue(segments[i]!)) { used.add(i); bound += 1; continue; }
     if (!used.has(i + 1) && cue(segments[i + 1]!)) { used.add(i + 1); bound += 1; }
   }
-  return bound >= 2;
+  if (bound >= 2) return true;
+  /**
+   * ⛔ "RESPECTIVELY" ORDER (review 5826509657): "split 71% to 29% between the £59 path and holding" names every
+   * option AFTER the last percentage, so only one percentage binds. A trailing segment naming at least as many
+   * options as there are percentages is the split's own legend.
+   */
+  const trailing = segments[segments.length - 1]!;
+  const trailingCues = (trailing.match(new RegExp(OPTION_CUE.source, 'gi')) ?? []).length
+    + optionKeys.filter((k) => labelKey(trailing).includes(k)).length;
+  return trailingCues >= hits.length;
 }
+
+/**
+ * The sentence is about how the RUNS came out OVER THE OPTIONS: "win share", "the runs split", or "across / of the
+ * runs" WITH a winning verb ("…the rise took 71%"). "Across the runs" alone is not enough: "Across the runs, churn
+ * stays under 4% in 97% of cases" is a constraint probability, not a share (it sums to ~100 by coincidence).
+ */
+const RUN_SHARE_EXPLICIT = /\b(?:win[-\s]shares?|runs\s+(?:split|divided))\b/i;
+const RUN_SHARE_SCOPE = /\b(?:of|across|in)\s+(?:the\s+|all\s+|these\s+)?(?:[\d,]+\s+)?(?:modelled\s+|simulated\s+|model\s+|simulation\s+)?runs\b/i;
+const RUN_SHARE_WIN_VERB = /\b(?:took|takes|won|wins|came\s+out|comes\s+out|finished|came\s+(?:first|top|ahead)|prevailed|topped|carried)\b/i;
+const RUN_SHARE_CUE = { test: (t: string): boolean => RUN_SHARE_EXPLICIT.test(t) || (RUN_SHARE_SCOPE.test(t) && RUN_SHARE_WIN_VERB.test(t)) };
+/** Variation attributed to factors — a driver split, not a win share. */
+const FACTOR_ATTRIBUTION = /\b(?:variance|variation|sensitivit(?:y|ies)|uncertainty|spread|explain(?:s|ed)?|drivers?|comes?\s+from|attributable|due\s+to)\b/i;
 
 /** An option-shaped noun or gerund (a split's per-percentage cue). */
 const OPTION_CUE = /\b(?:path|paths|option|options|choice|choices|route|routes|alternative|alternatives|scenario|scenarios|raising|keeping|holding|hiring|launching|building|buying|phasing|staying|expanding|bootstrapping|deferring|piloting)\b/i;

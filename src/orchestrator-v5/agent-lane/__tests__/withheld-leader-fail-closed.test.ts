@@ -480,3 +480,55 @@ describe('review of #1871 at c0da634c', () => {
     expect(sentenceRanksOptions('Keep Pro at £49 came to 29% and Raise Pro to £59 at release to 71%.', labels)).toBe(true);
   });
 });
+
+/** Review of #1871 at 5d1d066e (5826509657): a full split whose options follow the percentages, or are paraphrased. */
+describe('review of #1871 at 5d1d066e — the respectively-order split', () => {
+  const graph = { nodes: [{ id: 'keep', kind: 'option', label: 'Keep Pro at £49' }, { id: 'raise', kind: 'option', label: 'Raise Pro to £59 at release' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }] };
+  const labels = rankingLabelContext(graph, undefined);
+  const DROP: readonly string[] = [
+    'The runs split 71% to 29% between the £59 path and holding.',
+    'The runs split 71%–29% between the £59 path and holding.',
+    'The runs split 71% to 29% between the £59 and £49 paths.',
+    // Found while fixing: options named by NUMBER satisfied the old loose "between … and <digit>" range test.
+    'The runs split 71% to 29% between options 1 and 2.',
+    'The runs split 29% to 71% between holding and the £59 path.',
+    'The runs split 71 per cent to 29 per cent between the £59 path and holding.',
+    'Across the runs, the release-timed rise took 71% and the current price 29%.',
+    'Of the 1,000 modelled runs, the rise came out ahead in 71% and the current price in 29%.',
+    'Win share: 71% and 29% for the rise and the current price.',
+    // No "split", no "runs": only the trailing legend names the options.
+    'The result was 71% to 29% between the £59 path and holding.',
+    'The result was 71% and 29% for Raise Pro to £59 at release and Keep Pro at £49 respectively.',
+  ];
+  const KEEP: readonly string[] = [
+    // The reviewer's KEEP set.
+    'Monthly churn could plausibly sit anywhere between 45% and 55%.',
+    'Conversion is uncertain: somewhere from 30% to 70%.',
+    'Churn could be 40% to 60%.',
+    'Churn could be 40%–60%.',
+    'The £59 path’s conversion could be 40% to 60%.',
+    'On the £59 path conversion is 45%-55%, and holding is similar.',
+    'For the Keep Pro at £49 option, 40% of capacity is engineering and 60% is support.',
+    'In the £59 path, 40% of customers are in Europe and 60% are in the US.',
+    // A driver split across the runs is not a win share.
+    'Across the runs, 40% of the variance comes from churn and 60% from price.',
+    // "Across the runs" with no winning verb is a statement about factors, not a share (it sums to ~100 by chance).
+    'Across the runs, churn stays near 4% and retention near 96%.',
+    // A change, not a split.
+    'Retention could fall from 70% to 30%.',
+    'Raising the price could cut retention 70% to 30%.',
+    'Churn could be between roughly 45% and 55% per cent.',
+  ];
+  it.each(DROP.map((s) => [s] as const))('dropped: %s', (s) => { expect(sentenceRanksOptions(s, labels)).toBe(true); });
+  it.each(KEEP.map((s) => [s] as const))('kept: %s', (s) => { expect(sentenceRanksOptions(s, labels)).toBe(false); });
+  it('RED: through BOTH gates on a withheld turn, the respectively split never reaches the user', () => {
+    const analysisReady = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } };
+    const out = enforceAgentLaneLeaderClaimsAtWire(
+      { assistant_text: 'The churn limit was not scored. The runs split 71% to 29% between the £59 path and holding. Churn is the input to check.', blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } } } as unknown as OlumiResponse,
+      { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'constraint_verdict_withheld', graph, analysisReady },
+    );
+    expect(out.response.assistant_text).not.toMatch(/71%|29%/);
+    expect(out.response.assistant_text).toContain('The churn limit was not scored.');
+    expect(out.response.assistant_text).toContain('Churn is the input to check.');
+  });
+});
