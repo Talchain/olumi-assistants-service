@@ -626,7 +626,7 @@ export function createAgentCapabilities(
     /**
      * ⛔ AN ADOPTED ASSUMPTION IS STORED AS AN ASSUMPTION, NOT AS THE USER'S OWN
      * FIGURE (panel #63 5811761386 item 6). `applyFactorValueEdit` stamps
-     * `USER_EDIT_SOURCE` (`user_override`) because the inspector it was built for
+     * `USER_EDIT_SOURCE` (the user's-own-figure stamp) because the inspector it was built for
      * is where the user TYPES the number. Registered as-is, one "yes" to Olumi's
      * proposed values stored them as the user's own: "User edited" in the UI,
      * `user_stated` to the readiness authority — and a single such parameter
@@ -1945,12 +1945,15 @@ export function createAgentCapabilities(
          * basis therefore survives only in the proposal and in what the Agent
          * says, so the result below tells it to say it.
          *
-         * ⛔ OPEN GAP (panel #63 5811761386 item 6): so an adopted Olumi value
-         * lands here as `user_override` — the user's own figure — where the
-         * compound path above now stores `user_assumption`. The fix belongs at
-         * the writer — a server-set adoption stamp threaded in the way
-         * `appliedProvenance` is for a panel answer — not in a second
-         * caller-side write that would leave the value mislabelled in between.
+         * ⛔ OPEN GAP (panel #63 5811761386 item 6; review of #1851, B2): so an adopted
+         * Olumi value that arrives WITHOUT levels lands here with the writer's
+         * user's-own-figure stamp, where the compound path above now stores
+         * `user_assumption`. Routing it through the compound path instead was tried and
+         * rejected (25 Sep): it changes this path's per-value identity, partial-outcome
+         * and disclosure behaviour. The fix belongs at the writer — an adoption stamp
+         * the server can verify, threaded the way `appliedProvenance` is for a panel
+         * answer — not in a second caller-side write that would leave the value
+         * mislabelled in between.
          */
         const applied: { factor: string; requested: number; recorded: number | null }[] = [];
         const failures: { factor: string; detail: string }[] = [];

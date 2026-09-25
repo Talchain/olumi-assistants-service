@@ -89,6 +89,15 @@ function fakeProduct() {
         rev += 1;
         return { status: 200, json: { assistant_text: 'Recorded.', graph_hash: `h${rev}` } };
       }
+      if (ev.kind === 'factor_value_edit') {
+        // The inspector writer: it stamps the value as the user's own (`USER_EDIT_SOURCE`) and
+        // answers with its own committed patch — the served shape `valueWriteCommittedByThisRequest` reads.
+        const tid = String(ev.target_id);
+        nodes = nodes.map((n) => (n.id === tid
+          ? { ...n, observed_state: { ...(n.observed_state ?? {}), value: ev.value, ...(ev.raw_value !== undefined ? { raw_value: ev.raw_value } : {}), source: 'user_override' } } : n));
+        rev += 1;
+        return { status: 200, json: { assistant_text: 'Saved.', graph_hash: `h${rev}`, blocks: [{ type: 'graph_patch', status: 'applied', operation: 'set_factor_value', target_id: tid }] } };
+      }
       return { status: 400, json: {} };
     }
     return { status: 200, json: { graph: { nodes, edges: wired(nodes) }, graph_hash: `h${rev}` } };
@@ -219,5 +228,32 @@ describe('(vii) after approval, the admission census does not count adopted valu
         ? { ...n, observed_state: { ...n.observed_state, source: 'user_override' } } : n)),
     };
     expect(censusConfidenceParameters(asOverride).confidence_parameters_user_stated).toBe(2);
+  });
+});
+
+/**
+ * ⛔ REVIEW OF #1851 (B2, 5824285143): the stamp covered only the COMPOUND path. Olumi's values
+ * approved WITHOUT levels — a standalone `propose_assumptions`, or a starting point whose level
+ * half was not made — took the single-kind `factor_value_edit` path, and the inspector writer
+ * stamped them `user_override`: counted as the user's own figure, able to license a leader.
+ * ⛔ OPEN for Olumi-authored values-only proposals (the fix belongs at the writer; see the
+ * OPEN GAP note in `agent-capabilities.ts`). Pinned here: a revision the USER named keeps the
+ * writer's path and its user's-own-figure stamp, so the future writer-side adoption stamp
+ * cannot relabel the user's own figure.
+ */
+describe('values-only: a revision the USER named keeps the writer’s path and stamp', () => {
+  it('CONTRAST: a revision the USER named (revise: true, their number) keeps the writer’s user_override', async () => {
+    const p = fakeProduct();
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const proposed = await caps.proposeAssumptions(ctx, {
+      assumptions: [{ factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true }],
+    } as never);
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    expect(store.get(String(proposed.proposal_id))!.provenance.authored_by).toBe('user_stated');
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    expect(applied.ok, JSON.stringify(applied)).toBe(true);
+    expect(p.byId().team_size.observed_state?.source).toBe('user_override');
+    expect(p.registered, 'the writer path, not a register').toHaveLength(0);
   });
 });
