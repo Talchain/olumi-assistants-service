@@ -899,3 +899,56 @@ describe('review of #1871 at c39c789d — the exits, not the leaks, are the clas
     'It came out 71% to 29%.',
   ])('RESIDUAL (named): kept: %s', (s) => { expect(wire(s)).toContain(s); });
 });
+
+/**
+ * Review of #1871 at 03795a50 (5829408359): the reply BEFORE a sentence counts. An earlier "in that order" orders a
+ * later bare pair; an earlier sentence naming both options makes it theirs unless each figure has its own measure.
+ */
+describe('review of #1871 at 03795a50 — the ordering carries across sentences', () => {
+  const graph = { nodes: [{ id: 'keep', kind: 'option', label: 'Keep Pro at £49' }, { id: 'raise', kind: 'option', label: 'Raise Pro to £59 at release' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }] };
+  const analysisReady = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } };
+  const gate = (text: string) => enforceAgentLaneLeaderClaimsAtWire(
+    { assistant_text: text, blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } } } as unknown as OlumiResponse,
+    { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'constraint_verdict_withheld', graph, analysisReady },
+  ).response.assistant_text;
+  it.each([
+    ['We compared Raise Pro to £59 at release and Keep Pro at £49, in that order.', 'The results were 71% and 29%.'],
+    ['We compared raising and holding, in that order.', 'The results were 71% and 29%.'],
+    ['We compared raising and holding, in that order.', 'Success came out 71% and 29%.'],
+    ['We compared raising and holding, in that order.', 'It came out 71% to 29%.'],
+    ['Here are raising and holding, respectively.', 'The results were 71% and 29%.'],
+    // Naming both options earlier, with no ordering word, is enough when the figures have no measure of their own.
+    ['We compared raising and holding.', 'The results were 71% and 29%.'],
+    // An earlier "in that order" orders the figures even when each has its own measure.
+    ['We compared raising and holding, in that order.', 'Retention is 71% and churn 29%.'],
+  ])('RED: %s → "%s" is removed; the lead and the tail stay', (lead, pair) => {
+    const out = gate(`${lead} ${pair} Churn is the input to check.`);
+    expect(out).not.toMatch(/71|29/);
+    expect(out).toContain('Churn is the input to check.');
+  });
+  it.each([
+    // §2: the same measure repeated is no measure of either figure's own.
+    'For both raising and holding, 71% goal attainment and 29% goal attainment respectively.',
+    'For both raising and holding, 71% success rate and 29% success rate respectively.',
+    'For both raising and holding, 71% hit the target and 29% hit the target.',
+    'For both raising and holding, 71% meet the goal and 29% meet the goal respectively.',
+  ])('RED: removed through BOTH gates: %s', (s) => {
+    expect(gate(`The churn limit was not scored. ${s} Churn is the input to check.`)).not.toMatch(/71|29/);
+  });
+  it.each([
+    // Both options named earlier, but each figure has its own measure: kept.
+    ['We compared raising and holding.', 'Retention is 96% and churn 4%.'],
+    ['We compared raising and holding.', 'Across the runs, 96% of customers stay and 4% churn.'],
+    // No option named before it: the over-drop controls stay kept.
+    ['The churn limit was not scored.', 'Annual and monthly plans are 70% and 30% respectively.'],
+    ['The churn limit was not scored.', 'The survey came back 55% and 45%.'],
+  ])('CONTROL: %s → "%s" is kept', (lead, pair) => { expect(gate(`${lead} ${pair}`)).toContain(pair); });
+  it.each([
+    // RESIDUAL, named — kept: pairs not written as percentages are out of this gate's scope.
+    'For both raising and holding, 0.71 and 0.29 respectively.',
+    'For both raising and holding, 71 in 100 and 29 in 100 respectively.',
+    'For both raising and holding, seven in ten and three in ten respectively.',
+  ])('RESIDUAL (named): kept: %s', (s) => {
+    expect(gate(`The churn limit was not scored. ${s} Churn is the input to check.`)).toContain(s);
+  });
+});

@@ -328,7 +328,7 @@ function blankIdioms(text: string): string {
  * percentages in ONE sentence that sum to about 100 are a distribution over the options, whatever words
  * surround them. A factor sentence ("3% a month, against your limit of 4%") never sums to 100.
  */
-function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): boolean {
+function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS, prior = ''): boolean {
   /**
    * A RANGE is uncertainty, not a split: "between 45% and 55%", "from 30% to 70%", "40-60%" (review 5826189511).
    * ⛔ Review 5826509657: the bare "X% to Y%" / "X%–Y%" form read "The runs split 71% to 29% …" as a range. A range is
@@ -387,7 +387,16 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
    * every other exit, the range reading included, and covers every form: "71% and 29%", "29% to 71%", "71-29%",
    * "71/29", "71 and 29 per cent".
    */
-  const ordered = /\b(?:respectively|in\s+that\s+order)\b/i.test(text);
+  /**
+   * ⛔ …AND THE REPLY BEFORE THIS SENTENCE COUNTS (review 5829408359): "We compared raising and holding, in that order.
+   * The results were 71% and 29%." Sentences are classified one at a time, so an ordering or a naming of both options
+   * in an EARLIER sentence is carried in as `prior`. An earlier "respectively" / "in that order" orders these figures
+   * too; an earlier sentence naming two or more options makes a bare ~100 pair here theirs unless each figure has its
+   * own measure ("We compared raising and holding. Retention is 96% and churn 4%." is kept).
+   */
+  const ORDERING = /\b(?:respectively|in\s+that\s+order)\b/i;
+  const ordered = ORDERING.test(text) || ORDERING.test(prior);
+  const priorNames = prior.length > 0 && optionRefs(prior) >= 2;
   const groups: [number, number][][] = [];
   const pct = [...text.matchAll(new RegExp(PCT, 'gi'))];
   const valueOf = (m: string): number => Number(m.replace(/[%\s]|per\s?cent/gi, '').replace(',', '.'));
@@ -410,7 +419,7 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
     // compared with holding" (review 5827687841). A change verb exempts only there — never after a leading list or
     // beside "respectively", where the pair still maps onto the options.
     const trails = !leads && optionRefs(after) >= 2 && !CHANGE_VERB_BEFORE.test(text.slice(Math.max(0, first[0] - 40), first[0]));
-    if (!ordered && !leads && !trails) continue;
+    if (!ordered && !leads && !trails && !priorNames) continue;
     // An even split names no leader: "Both options split 50/50".
     const values = figs.map(([x, y]) => Number(/\d+(?:\.\d+)?/.exec(text.slice(x, y))![0]));
     if (values.every((v) => v === values[0])) continue;
@@ -751,7 +760,7 @@ function blankScopedMetricComparison(text: string): string {
 }
 
 /** Which ranking patterns a sentence trips, after idioms and ranking-shaped labels are blanked. */
-export function rankingCodesIn(sentence: string, labels: RankingLabelContext = NO_LABELS): string[] {
+export function rankingCodesIn(sentence: string, labels: RankingLabelContext = NO_LABELS, prior = ''): string[] {
   if (typeof sentence !== 'string' || sentence.trim() === '') return [];
   let text = classificationCopy(sentence);
   for (const label of labels.rankingShapedLabels) text = text.replace(optionLabelPattern(classificationCopy(label)), BLANK);
@@ -760,13 +769,14 @@ export function rankingCodesIn(sentence: string, labels: RankingLabelContext = N
     text = text.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegExp(word)}(?![\\p{L}\\p{N}_])`, 'gu'), BLANK);
   }
   const codes = rankingCodesInBlanked(blankIdioms(blankScopedMetricComparison(text)));
-  if (isShareSplit(classificationCopy(sentence), labels)) codes.push('share_split');
+  if (isShareSplit(classificationCopy(sentence), labels, classificationCopy(prior))) codes.push('share_split');
   return codes;
 }
 
 /** Does this sentence rank options or assert a leader? */
-export function sentenceRanksOptions(sentence: string, labels: RankingLabelContext = NO_LABELS): boolean {
-  return rankingCodesIn(sentence, labels).length > 0;
+/** `prior` is the reply before this sentence: an ordering or a naming of both options there carries into it. */
+export function sentenceRanksOptions(sentence: string, labels: RankingLabelContext = NO_LABELS, prior = ''): boolean {
+  return rankingCodesIn(sentence, labels, prior).length > 0;
 }
 
 // ── the no-leader sentence ─────────────────────────────────────────────────────────────────────
@@ -1000,9 +1010,14 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
 
   const forced = unitsRankingAsAWhole(segs, labels);
   let dropped = 0;
+  let prior = '';
   const lines: Array<Seg | null> = segs.map((seg, r) => {
-    if ('sep' in seg) return seg;
-    const drop = seg.units.map((u, j) => forced.has(`${r}:${j}`) || (/\S/.test(u) && !PROTECTED_SENTENCES.has(u.trim()) && sentenceRanksOptions(u, labels)));
+    if ('sep' in seg) { prior += seg.sep; return seg; }
+    const drop = seg.units.map((u, j) => {
+      const ranks = forced.has(`${r}:${j}`) || (/\S/.test(u) && !PROTECTED_SENTENCES.has(u.trim()) && sentenceRanksOptions(u, labels, prior));
+      prior += u;
+      return ranks;
+    });
     const n = drop.filter(Boolean).length;
     if (n === 0) return seg;
     dropped += n;
