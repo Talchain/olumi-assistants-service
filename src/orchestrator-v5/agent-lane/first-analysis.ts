@@ -48,7 +48,13 @@ export const FIRST_ANALYSIS_TURN_MESSAGE = 'Run a provisional first analysis of 
 /**
  * ⭐ THE ONE PLACE THE PROVENANCE TRIGGER IS CHOSEN.
  *
- * ⚠ FALLBACK, DELIBERATELY. The right trigger is a `{ constructionTurnId }` initiator
+ * ✅ SWITCHED to `{ constructionTurnId }` → `initiated_by: 'auto_post_construction'` once the typed
+ * marker landed (#1857: `run-initiator.ts` + `chip-click-dispatch.ts`, schemas 0.58.0). The persisted
+ * fact now names the right initiator, and `hasUserSeenRunAnalysisResult` treats it as SEEN (it was
+ * delivered in the user's own build response), so the next explicit Run is narrated as a re-run —
+ * comparison-free against this confined prior (#1857's coaching guard). The fallback's history:
+ *
+ * ⚠ WAS A FALLBACK, DELIBERATELY. The right trigger is a `{ constructionTurnId }` initiator
  * (`auto_post_construction`), which needs `run-initiator.ts` and `chip-click-dispatch.ts` — files
  * owned by another lane, with consent pending on #63. Until that lands the existing post-draft
  * trigger carries K in its `draft_turn_id` slot. That is honest about WHAT happened (the server
@@ -63,7 +69,7 @@ export const FIRST_ANALYSIS_TURN_MESSAGE = 'Run a provisional first analysis of 
  * reads both spellings.
  */
 export function firstAnalysisAutoRunTrigger(constructionTurnId: string): ChipClickAutoRunTrigger {
-  return { draftTurnId: constructionTurnId };
+  return { constructionTurnId };
 }
 
 /** When a first analysis may no longer START in a turn that began at `turnStartedAt`. */

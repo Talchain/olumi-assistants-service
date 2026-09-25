@@ -19,7 +19,7 @@ import { dispatchTool } from '../runtime/agent-tools.js';
 import { constructionOperationId, type CallStructuredModel } from '../runtime/build-model.js';
 import { registrationRequestHash, registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { runFirstAnalysisAfterConstruction } from '../first-analysis.js';
-import { RUN_PROVENANCE_ENRICHMENT_KEY } from '../../context/run-initiator.js';
+import { RUN_PROVENANCE_ENRICHMENT_KEY, buildAutoRunProvenance, buildConstructionAutoRunProvenance } from '../../context/run-initiator.js';
 import { READY_GRAPH } from './fixtures/first-analysis-graphs.js';
 
 const SCENARIO = '21111111-1111-4111-8111-111111111111';
@@ -95,13 +95,14 @@ function product(opts: { reportReplay?: boolean; guest?: boolean } = {}) {
     };
   };
   /** The ONE run orchestration, stubbed: persists the fact the real dispatcher would, from the trigger it was given. */
-  const dispatchRunAnalysis = async (args: { payload: { chip?: { id?: string } }; autoRun?: { draftTurnId: string } }) => {
+  const dispatchRunAnalysis = async (args: { payload: { chip?: { id?: string } }; autoRun?: { draftTurnId: string } | { constructionTurnId: string } }) => {
     runs.push({ autoRun: args.autoRun, chipId: args.payload.chip?.id });
     facts.push({
       fact_type: 'run_analysis', fact_id: `f${facts.length}`, fact_version: 1, noop: false,
       result: {
         scenario_id: SCENARIO, graph_hash_at_run: hash(), summary: 'x',
-        enrichment: args.autoRun !== undefined ? { [RUN_PROVENANCE_ENRICHMENT_KEY]: { initiated_by: 'auto_post_draft', provisional: true, draft_turn_id: args.autoRun.draftTurnId } } : {},
+        // Stamped the way the dispatcher stamps (`chip-click-dispatch.ts`): the production builder for the trigger's kind.
+        enrichment: args.autoRun !== undefined ? { [RUN_PROVENANCE_ENRICHMENT_KEY]: ('constructionTurnId' in args.autoRun ? buildConstructionAutoRunProvenance(args.autoRun.constructionTurnId) : buildAutoRunProvenance(args.autoRun.draftTurnId)) } : {},
       },
     } as unknown as HandlerFact);
     return { outcome: 'ok', response: { assistant_text: 'Ran.', blocks: [{ type: 'analysis_result', summary: 'x' }] }, commitPerformed: true, analysisReady: { status: 'ready' }, graph: null, mayNameLeadingOption: false } as never;
@@ -133,7 +134,7 @@ describe('RED: a retried construction turn gives exactly ONE first analysis', ()
     expect(autoRuns(p)).toHaveLength(1);
     expect(autoRuns(p)[0]!.chipId).toBe('agent-run-analysis');
     // Bound to THIS construction's identity (derived above, never typed).
-    expect(autoRuns(p)[0]!.autoRun).toEqual({ draftTurnId: K });
+    expect(autoRuns(p)[0]!.autoRun).toEqual({ constructionTurnId: K });
     const fa = r.first_analysis as Record<string, unknown>;
     expect(fa).toMatchObject({ ran: true, provisional: true, summary: 'A provisional first pass.' });
     expect(fa.claim_permissions).toEqual({ leader_may_be_named: false, withheld_reason: 'auto_initiated', permitted_analysis_mode: 'quantified_provisional' });
