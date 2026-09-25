@@ -457,6 +457,30 @@ describe('authorise_change records the STORED levels', () => {
       expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1 });
       expect(applied).not.toHaveProperty('changed_since_by_another_writer');
     });
+    /**
+     * ⛔ Pre-review of #1881 at 16a2f19e (5828080522): a relative 1e-6 band hid a collaborator's £1,001 change on
+     * £1,234,564,999, and 6-figure display rounding would have quoted £1,234,570,000 — a figure nobody entered.
+     */
+    const BIG: Node = { id: 'arr', kind: 'factor', label: 'Annual revenue', observed_state: { value: 0.5, raw_value: 1_000_000_000, cap: 2_000_000_000, unit: 'GBP' } };
+    it.each([
+      ['£1,001', 1_234_566_000],
+      ['£1', 1_234_565_000],
+    ])('RED: a collaborator moves our £1,234,564,999 by %s — reported, with THEIR exact figure', async (_l, theirs) => {
+      const p = fakeProduct({ extraNodes: [BIG] });
+      const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(setLevel('phase_increase', 'arr', theirs / 2_000_000_000))), new ProposalStore());
+      const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_564_999));
+      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      expect(applied.changed_since_by_another_writer).toEqual([
+        { option: 'Phase Pro price increase', factor: 'Annual revenue', saved: 1_234_564_999, now: theirs, unit: 'GBP' },
+      ]);
+    });
+    it('CONTROL: the same £1,234,564,999 with only an unrelated write — nothing changed', async () => {
+      const p = fakeProduct({ extraNodes: [BIG] });
+      const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(renameGoal)), new ProposalStore());
+      const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_564_999));
+      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+    });
     it('CONTROL: a precise figure that someone really changed is reported, the new figure rounded for reading', async () => {
       const p = fakeProduct({ extraNodes: [ARR] });
       const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(setLevel('phase_increase', 'arr', 0.75))), new ProposalStore());

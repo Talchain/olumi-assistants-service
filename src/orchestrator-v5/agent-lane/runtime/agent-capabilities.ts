@@ -165,6 +165,22 @@ function ownCommittedNative(res: { status: number; json: Record<string, unknown>
  * the committed post-state its OWN response carries (`draft_graph`; `system-events/dispatch.ts`), or
  * `undefined` when the response carries none.
  */
+/**
+ * ⛔ TWO STORED FIGURES ARE THE SAME FIGURE ONLY UP TO DOUBLE-PRECISION NOISE — never a magnitude-based band (pre-review of
+ * #1881 at 16a2f19e, 5828080522). A relative 1e-6 hid a collaborator's £1,001 change on £1,234,564,999; the value path's
+ * 1e-9 hid £1 on the same figure. The only arithmetic between two stored figures here is a few scale steps (÷range,
+ * ×range, a range change's ×old÷new), whose error is ~1e-15 relative, so 1e-12 tolerates exactly that and nothing a
+ * person could type.
+ */
+const SAME_FIGURE_NOISE = 1e-12;
+function sameFigure(a: number, b: number): boolean {
+  return Math.abs(a - b) <= SAME_FIGURE_NOISE * Math.max(1, Math.abs(a), Math.abs(b));
+}
+/** A figure for the Agent to quote: float noise removed (54.00000000000001 → 54), every digit a person gave kept. */
+function quotable(x: number): number {
+  return Number(x.toPrecision(12));
+}
+
 function committedLevelOf(json: Record<string, unknown>, optionId: string, factorId: string): number | undefined {
   const nodes = ((json.draft_graph ?? {}) as { nodes?: unknown }).nodes;
   if (!Array.isArray(nodes)) return undefined;
@@ -1958,7 +1974,6 @@ export function createAgentCapabilities(
         const levelsChangedSince: { option: string; factor: string; saved: number; now: number | null; unit?: string }[] = [];
         let levelsUnread = false;
         const beforeNodeById = new Map((before.nodes ?? []).map((n) => [n.id, n]));
-        const tidy = (x: number): number => Number(x.toPrecision(6));
         for (const o of ops) {
           const [optionId, factorId] = o.path.split('::');
           const option = byId.get(optionId);
@@ -1990,17 +2005,16 @@ export function createAgentCapabilities(
             const opv = (o.value ?? {}) as { cap?: unknown; normalised?: unknown };
             const cap = typeof opv.cap === 'number' && opv.cap > 0 ? opv.cap : undefined;
             /**
-             * ⛔ COMPARE UN-ROUNDED; ROUND ONLY WHAT IS REPORTED (review of #1881 at 6868825f, 5827673705). `tidy`
+             * ⛔ COMPARE UN-ROUNDED; ROUND ONLY WHAT IS REPORTED (review of #1881 at 6868825f, 5827673705). A 6-figure round
              * (6 significant figures) applied before the comparison made a precise figure — £1,234,567 — never equal
              * to itself, so ANY unrelated write that moved the graph read as "someone else changed your level".
              */
             const toAbs = (x: number): number => (cap !== undefined ? x * cap : x);
-            const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(b));
-            const sameAbs = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(b));
             // What we saved, as the user said it: their own figure when the write committed exactly what was sent.
-            const savedAsSent = typeof opv.normalised === 'number' && same(mine, opv.normalised) && Number.isFinite(row.requested);
-            const savedAbs = savedAsSent ? row.requested : toAbs(mine);
-            const savedUser = savedAsSent ? row.requested : tidy(toAbs(mine));
+            const savedAsSent = typeof opv.normalised === 'number' && sameFigure(mine, opv.normalised) && Number.isFinite(row.requested);
+            // Compared against the EXACT committed level in its range, so the only difference left is scale-step noise.
+            const savedAbs = toAbs(mine);
+            const savedUser = savedAsSent ? row.requested : quotable(savedAbs);
             const unitRaw = ((byId.get(factorId) ?? beforeNodeById.get(factorId))?.observed_state as { unit?: unknown } | undefined)?.unit;
             const unit = typeof unitRaw === 'string' && unitRaw.trim() !== '' ? unitRaw.trim() : undefined;
             const current = typeof recorded === 'number' ? recorded : null;
@@ -2022,7 +2036,7 @@ export function createAgentCapabilities(
               if (current === null) return undefined;
               if (freshCap !== undefined) {
                 const fromFrame = current * freshCap;
-                return stampedAbs === undefined || sameAbs(stampedAbs, fromFrame) ? fromFrame : undefined;
+                return stampedAbs === undefined || sameFigure(stampedAbs, fromFrame) ? fromFrame : undefined;
               }
               if (stampedAbs !== undefined) return stampedAbs;
               // A level on a factor that had no range then and has none now is already on the user's 0–1 scale.
@@ -2039,11 +2053,11 @@ export function createAgentCapabilities(
               if (movedPastUs) changed(null);
               else unknown();
             } else if (!hashKnown) {
-              if (!same(current, mine)) unknown();
+              if (!sameFigure(current, mine)) unknown();
             } else if (movedPastUs) {
               row.recorded = mine;
               if (currentAbs === undefined) unknown();
-              else if (!sameAbs(currentAbs, savedAbs)) changed(tidy(currentAbs));
+              else if (!sameFigure(currentAbs, savedAbs)) changed(quotable(currentAbs));
             }
           }
         }
@@ -2263,7 +2277,7 @@ export function createAgentCapabilities(
            */
           const mine = ownNative.get(o.path);
           const last = applied[applied.length - 1]!;
-          if (ownWrite.get(o.path) === true && mine !== undefined && storedNative !== undefined && Math.abs(storedNative - mine) > 1e-9 * Math.max(1, Math.abs(mine))) {
+          if (ownWrite.get(o.path) === true && mine !== undefined && storedNative !== undefined && !sameFigure(storedNative, mine)) {
             last.recorded = mine;
             superseded.push({ id: o.path, factor: last.factor, saved: mine, now: storedNative });
           }
