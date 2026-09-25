@@ -26,6 +26,7 @@
  */
 
 import type { ToolResult } from './runtime/agent-tools.js';
+import { proposalsAwaitingApproval } from './approval-chips.js';
 
 /** Tools whose result is a WRITE to the user's model. Proposers change nothing. */
 export const WRITE_TOOLS: readonly string[] = ['authorise_change', 'build_model_from_brief'];
@@ -135,13 +136,44 @@ function openQuestionsLine(r: ToolResult): string {
   return ` Questions this model does not answer yet: ${shown}${more}`;
 }
 
+/**
+ * ⛔ A SAVED BUILD MUST NOT READ AS SAVED FIGURES (Paul's test on served `d5d5839`, #69 5832088673).
+ * The reply said "These are starting assumptions, not measurements. Shall I record them?" and Olumi
+ * then said "The model was saved as version 1." The build really was saved; the figures were not —
+ * but the line read as if they had been recorded before he agreed. So when the SAME turn leaves a
+ * proposal awaiting approval after the build, the line says what was saved and what was not.
+ *
+ * Derived from the turn's own tool results by the approve chip's own rule (`proposalsAwaitingApproval`),
+ * never from the model's prose. An authorisation refused before it named any proposal (a call withheld
+ * on a chip turn, a read-only refusal) consumed nothing, so it is not an unknown identity here.
+ */
+const FIGURE_PROPOSERS: readonly string[] = ['propose_starting_point', 'propose_assumptions', 'propose_option_interventions'];
+type AwaitingApproval = 'figures' | 'change' | null;
+function awaitingApproval(toolCalls: readonly { name: string }[], toolResults: readonly ToolResult[]): AwaitingApproval {
+  const calls = toolCalls
+    .map((c, i) => {
+      const r = toolResults[i];
+      return { name: c.name, ok: r?.ok === true, mutated: r?.mutated === true, ...(typeof r?.proposal_id === 'string' ? { proposal_id: r.proposal_id } : {}) };
+    })
+    .filter((c) => !(c.name === 'authorise_change' && !c.ok && !c.mutated && c.proposal_id === undefined));
+  const waiting = [...proposalsAwaitingApproval(calls).values()];
+  if (waiting.length === 0) return null;
+  return waiting.every((t) => FIGURE_PROPOSERS.includes(t)) ? 'figures' : 'change';
+}
+
 /** One authoritative line per write the turn attempted. */
-function statusLine(name: string, r: ToolResult): string {
+function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null): string {
   if (name === 'build_model_from_brief') {
     const v = (r.model_version as { version_number?: unknown } | undefined)?.version_number;
     const vs = typeof v === 'number' ? ` (version ${v})` : '';
     if (r.ok === true && r.replayed === true) return `This model had already been built${vs}; nothing was built twice.`;
-    if (r.ok === true && r.mutated === true) return `The model was saved${typeof v === 'number' ? ` as version ${v}` : ''}.${leftOutLine(r)}${openQuestionsLine(r)}${contextFactorsLine(r)}`;
+    if (r.ok === true && r.mutated === true) {
+      const at = typeof v === 'number' ? ` as version ${v}` : '';
+      const saved = pending === null
+        ? `The model was saved${at}.`
+        : `I saved the model I drafted${at}. ${pending === 'figures' ? 'The figures above are not recorded until you approve them.' : 'What I proposed above is not made until you approve it.'}`;
+      return `${saved}${leftOutLine(r)}${openQuestionsLine(r)}${contextFactorsLine(r)}`;
+    }
     return `The model was not built: ${REFUSAL_WORDS[String(r.refusal)] ?? `it was refused (${String(r.refusal ?? 'unknown')})`}.`;
   }
   const perPart = partsLine(r);
@@ -221,7 +253,8 @@ export function narrateWriteOutcome(
       .trim();
   }
 
-  const lines = writes.map((w) => statusLine(w.name, w.result));
+  const pending = awaitingApproval(toolCalls, toolResults);
+  const lines = writes.map((w) => statusLine(w.name, w.result, pending));
   const status = lines.length > 0
     ? lines.join(' ')
     : stripped.length > 0 ? 'Nothing was saved this turn.' : null;
