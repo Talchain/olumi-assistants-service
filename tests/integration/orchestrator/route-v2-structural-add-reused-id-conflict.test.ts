@@ -1118,4 +1118,322 @@ describe('POST /orchestrate/v2/turn — structural_add under a REUSED turn id an
 
     expectNoProviderReached();
   });
+
+  // ══ F4 EXTENSION — structural_rename and structural_add_edge ══════════════
+  // Codex's consumer-boundary follow-up on #1856 (03:46:54Z): F4 gated add, delete
+  // and edge-strength on `thisAttemptWrote`, but rename and add_edge still attest
+  // success from the post-commit snapshot. On a replay or a reused-id conflict
+  // that snapshot is a REREAD another writer (or this request's own earlier
+  // commit) may already have shaped exactly as asked, so each writer's receipt
+  // check passes for an append that wrote nothing. Same fake store, same
+  // interleaving technique, same expectations as the add cases above.
+
+  // ── rename: fac_price "Unit price" → R1 "Price per seat"; R2 asks "List price"
+  const RN = { id: 'fac_price', from: 'Unit price', r1: 'Price per seat', r2: 'List price' } as const;
+
+  function renameEvent(expected: string, label: string, baseGraph: unknown) {
+    return {
+      kind: 'structural_rename',
+      node_id: RN.id,
+      label,
+      expected_label: expected,
+      base_graph_hash: analysisHash(baseGraph),
+    } as const;
+  }
+
+  function labelOf(graph: unknown, id: string): string | undefined {
+    const nodes = ((graph as { nodes?: unknown[] } | null)?.nodes ?? []) as Array<{ id?: unknown; label?: unknown }>;
+    const n = nodes.find((x) => x.id === id);
+    return typeof n?.label === 'string' ? n.label : undefined;
+  }
+
+  /** The dispatcher's own success attestation lines, by message prefix and one identifying field. */
+  function attestations(prefix: string, field: string, value: unknown): number {
+    return logInfoSpy.mock.calls.filter((c) => {
+      const [obj, msg] = c as [Record<string, unknown> | undefined, unknown];
+      return typeof msg === 'string' && msg.startsWith(prefix) && obj?.[field] === value;
+    }).length;
+  }
+  const RENAME_COMMITTED = 'V5 structural_rename committed';
+  const EDGE_COMMITTED = 'V5 structural_add_edge committed';
+
+  it('F4-EXT RENAME CONTRAST: a FIRST-attempt rename lands and is attested once', async () => {
+    const r1 = await send(renameEvent(RN.from, RN.r1, fake.graph), MINE);
+    expect(r1.status).toBe(200);
+    expect(labelOf(fake.graph, RN.id)).toBe(RN.r1);
+    expect(String(r1.body.assistant_text ?? '')).toContain(`to '${RN.r1}'`);
+    expect(attestations(RENAME_COMMITTED, 'renamed_node_id', RN.id)).toBe(1);
+    expectNoProviderReached();
+  });
+
+  it('F4-EXT RENAME DEFECT A: R2 reuses R1\'s turn id to rename to a DIFFERENT label; the store signals priorTurnConflict and writes nothing — R2 answers a known no-write, not success and not a 500', async () => {
+    fake.owned = true;
+    expect((await send(renameEvent(RN.from, RN.r1, fake.graph), MINE)).status).toBe(200);
+    const storedAfterR1 = jsonCopy(fake.graph);
+    logInfoSpy.mockClear();
+
+    const r2 = await send(renameEvent(RN.r1, RN.r2, storedAfterR1), MINE);
+
+    const mineIdx = appendIndicesFor(MINE);
+    expect(mineIdx).toHaveLength(2);
+    const r2Write = appendMock.mock.calls[mineIdx[1]!]![0];
+    expect(labelOf(r2Write.graph, RN.id), 'R2 reached the append with its candidate label').toBe(RN.r2);
+    expect((await outcomeAt(mineIdx[1]!)).priorTurnConflict).toBe(true);
+    expect(labelOf(fake.graph, RN.id), 'the store holds R1\'s label, not R2\'s').toBe(RN.r1);
+
+    const observed = `observed: status=${r2.status}, assistant_text=${JSON.stringify(r2.body.assistant_text ?? null)}`;
+    expect.soft(r2.status, `RENAME A: a known no-write must not be a server failure (${observed})`).toBeLessThan(500);
+    const prose = String(r2.body.assistant_text ?? '');
+    expect.soft(prose, `RENAME A: prose must not confirm R2's rename (${observed})`).not.toContain(`to '${RN.r2}'`);
+    expect.soft(prose, `RENAME A: the conflict keeps commit.ts's refusal prose (${observed})`).toMatch(/did not make that change/i);
+    expect.soft(r2.body.model_version_receipt, `RENAME A: no receipt for R2 (${observed})`).toBeUndefined();
+    expect.soft(attestations(RENAME_COMMITTED, 'renamed_node_id', RN.id), `RENAME A: no success attestation (${observed})`).toBe(0);
+    expectNoProviderReached();
+  });
+
+  it('F4-EXT RENAME DEFECT B: as A, but a foreign writer renames to exactly R2\'s label between R2\'s base read and its append — the store holds it, and R2 must still claim nothing for itself', async () => {
+    // Foreign bytes derived through the REAL route on a fresh fake, then discarded.
+    expect((await send(renameEvent(RN.from, RN.r1, fake.graph), PREP_R1)).status).toBe(200);
+    expect((await send(renameEvent(RN.r1, RN.r2, fake.graph), PREP_FOREIGN)).status).toBe(200);
+    const foreignGraph = jsonCopy(fake.graph);
+    expect(labelOf(foreignGraph, RN.id)).toBe(RN.r2);
+    resetFake();
+    appendMock.mockClear();
+    loadGraphSnapshots.length = 0;
+
+    fake.owned = true;
+    expect((await send(renameEvent(RN.from, RN.r1, fake.graph), MINE)).status).toBe(200);
+    const storedAfterR1 = jsonCopy(fake.graph);
+    logInfoSpy.mockClear();
+
+    let appendsWhenForeignLanded: number | undefined;
+    fake.afterNextRead = () => {
+      appendsWhenForeignLanded = appendMock.mock.calls.length;
+      fake.graph = jsonCopy(foreignGraph);
+      fake.rows.set(FOREIGN, { id: `row-${FOREIGN}`, request_hash: 'sha256:foreign-rename' });
+    };
+
+    const r2 = await send(renameEvent(RN.r1, RN.r2, storedAfterR1), MINE);
+
+    const mineIdx = appendIndicesFor(MINE);
+    expect(mineIdx).toHaveLength(2);
+    const r2Idx = mineIdx[1]!;
+    expect(fake.afterNextRead, 'the interleaving hook must have run').toBeUndefined();
+    expect(appendsWhenForeignLanded).toBe(r2Idx);
+    expect((await outcomeAt(r2Idx)).priorTurnConflict).toBe(true);
+    expect(labelOf(fake.graph, RN.id), 'the store holds R2\'s label — put there by the FOREIGN writer').toBe(RN.r2);
+
+    const stored = fake.graph;
+    const observed = `observed: status=${r2.status}, graph_hash=${String(r2.body.graph_hash)}, stored hash=${analysisHash(stored)}, assistant_text=${JSON.stringify(r2.body.assistant_text ?? null)}`;
+    expect.soft(r2.status, `RENAME B: a conflict must not be a server failure (${observed})`).toBeLessThan(500);
+    const prose = String(r2.body.assistant_text ?? '');
+    expect.soft(prose, `RENAME B: prose must not confirm R2's rename (${observed})`).not.toContain(`Renamed '${RN.r1}' to '${RN.r2}'`);
+    expect.soft(prose, `RENAME B: prose must not say R2's rename is saved (${observed})`).not.toMatch(/That change is saved/);
+    expect.soft(r2.body.model_version_receipt, `RENAME B: no receipt for R2 (${observed})`).toBeUndefined();
+    if (r2.body.graph_hash !== undefined) {
+      expect.soft(r2.body.graph_hash, `RENAME B: graph_hash is the stored graph's (${observed})`).toBe(analysisHash(stored));
+    }
+    expect.soft(
+      attestations(RENAME_COMMITTED, 'renamed_node_id', RN.id),
+      `RENAME B: dispatcher attested "structural_rename committed … verified" although THIS append wrote nothing (${observed})`,
+    ).toBe(0);
+    expectNoProviderReached();
+  });
+
+  it('F4-EXT RENAME REPLAY: the SAME rename arrives again after it committed between the retry\'s base read and its append — "already recorded", the original receipt, and no attestation for THIS attempt', async () => {
+    fake.owned = true;
+    const base = jsonCopy(fake.graph);
+    expect((await send(renameEvent(RN.from, RN.r1, base), MINE)).status).toBe(200);
+    const originalRow = fake.rows.get(MINE);
+    expect(originalRow?.receipt?.version_id, 'receipt control').toBe(VERSION_IDS[0]);
+    const originalGraph = jsonCopy(fake.graph);
+    const originalVersions = [...fake.versions];
+    resetFake();
+    appendMock.mockClear();
+    logInfoSpy.mockClear();
+    loadGraphSnapshots.length = 0;
+    fake.owned = true;
+
+    fake.afterNextRead = () => {
+      fake.graph = jsonCopy(originalGraph);
+      fake.rows.set(MINE, originalRow!);
+      fake.versions = [...originalVersions];
+    };
+    const retry = await send(renameEvent(RN.from, RN.r1, base), MINE);
+
+    const mineIdx = appendIndicesFor(MINE);
+    expect(mineIdx).toHaveLength(1);
+    expect(appendMock.mock.calls[mineIdx[0]!]![0].request_hash).toBe(originalRow!.request_hash);
+    expect((await outcomeAt(mineIdx[0]!)).replayedPriorTurn).toBe(true);
+    expect(fake.landed).toEqual([]);
+    expect(labelOf(fake.graph, RN.id)).toBe(RN.r1);
+
+    const observed = `observed: status=${retry.status}, assistant_text=${JSON.stringify(retry.body.assistant_text ?? null)}`;
+    expect.soft(retry.status, `RENAME REPLAY: not a failure (${observed})`).toBe(200);
+    const prose = String(retry.body.assistant_text ?? '');
+    expect.soft(prose, `RENAME REPLAY: says already recorded (${observed})`).toMatch(/already been recorded/i);
+    expect.soft(prose, `RENAME REPLAY: never says THIS attempt saved it (${observed})`).not.toMatch(/That change is saved/);
+    expect.soft((retry.body.model_version_receipt as Record<string, unknown> | undefined)?.version_id, `RENAME REPLAY: the original receipt (${observed})`).toBe(VERSION_IDS[0]);
+    expect.soft(
+      attestations(RENAME_COMMITTED, 'renamed_node_id', RN.id),
+      `RENAME REPLAY: dispatcher attested a rename THIS append did not write (${observed})`,
+    ).toBe(0);
+    expectNoProviderReached();
+  });
+
+  // ── add_edge: a second factor so both new edges are acyclic and genuinely new
+  const TEAM = { id: 'fac_team', label: 'Team size' } as const;
+  const E1 = { from: TEAM.id, to: 'goal_revenue' } as const; // R1's connection
+  const E2 = { from: TEAM.id, to: 'fac_price' } as const; //     R2's connection
+
+  function withTeamFactor(graph: unknown): unknown {
+    const g = jsonCopy(graph) as { nodes: unknown[] };
+    g.nodes.push({ id: TEAM.id, kind: 'factor', label: TEAM.label, category: 'controllable', observed_state: { value: 0.5, raw_value: 6, cap: 12 } });
+    return g;
+  }
+  function resetFakeWithTeam() {
+    resetFake();
+    fake.graph = withTeamFactor(fake.graph);
+  }
+  function edgeEvent(e: { from: string; to: string }, baseGraph: unknown) {
+    return {
+      kind: 'structural_add_edge',
+      from: e.from,
+      to: e.to,
+      magnitude: 0.5,
+      effect_direction: 'positive',
+      base_graph_hash: analysisHash(baseGraph),
+    } as const;
+  }
+  function hasEdge(graph: unknown, e: { from: string; to: string }): boolean {
+    const edges = ((graph as { edges?: unknown[] } | null)?.edges ?? []) as Array<{ from?: unknown; to?: unknown }>;
+    return edges.some((x) => x.from === e.from && x.to === e.to);
+  }
+
+  it('F4-EXT ADD_EDGE CONTRAST: a FIRST-attempt connection lands and is attested once', async () => {
+    resetFakeWithTeam();
+    const r1 = await send(edgeEvent(E1, fake.graph), MINE);
+    expect(r1.status).toBe(200);
+    expect(hasEdge(fake.graph, E1)).toBe(true);
+    expect(String(r1.body.assistant_text ?? '')).toContain(`I've connected ${TEAM.label}`);
+    expect(attestations(EDGE_COMMITTED, 'edge_to', E1.to)).toBe(1);
+    expectNoProviderReached();
+  });
+
+  it('F4-EXT ADD_EDGE DEFECT A: R2 reuses R1\'s turn id to add a DIFFERENT connection; the store signals priorTurnConflict and writes nothing — a known no-write, not success and not a 500', async () => {
+    resetFakeWithTeam();
+    fake.owned = true;
+    expect((await send(edgeEvent(E1, fake.graph), MINE)).status).toBe(200);
+    const storedAfterR1 = jsonCopy(fake.graph);
+    logInfoSpy.mockClear();
+
+    const r2 = await send(edgeEvent(E2, storedAfterR1), MINE);
+
+    const mineIdx = appendIndicesFor(MINE);
+    expect(mineIdx).toHaveLength(2);
+    const r2Write = appendMock.mock.calls[mineIdx[1]!]![0];
+    expect(hasEdge(r2Write.graph, E2), 'R2 reached the append with its candidate connection').toBe(true);
+    expect((await outcomeAt(mineIdx[1]!)).priorTurnConflict).toBe(true);
+    expect(hasEdge(fake.graph, E2), 'the store does not hold R2\'s connection').toBe(false);
+
+    const observed = `observed: status=${r2.status}, assistant_text=${JSON.stringify(r2.body.assistant_text ?? null)}`;
+    expect.soft(r2.status, `EDGE A: a known no-write must not be a server failure (${observed})`).toBeLessThan(500);
+    const prose = String(r2.body.assistant_text ?? '');
+    expect.soft(prose, `EDGE A: prose must not confirm R2's connection (${observed})`).not.toMatch(/I've connected/);
+    expect.soft(prose, `EDGE A: the conflict keeps commit.ts's refusal prose (${observed})`).toMatch(/did not make that change/i);
+    expect.soft(r2.body.model_version_receipt, `EDGE A: no receipt for R2 (${observed})`).toBeUndefined();
+    expect.soft(attestations(EDGE_COMMITTED, 'edge_to', E2.to), `EDGE A: no success attestation (${observed})`).toBe(0);
+    expectNoProviderReached();
+  });
+
+  it('F4-EXT ADD_EDGE DEFECT B: as A, but a foreign writer adds exactly R2\'s connection between R2\'s base read and its append — the store holds it, and R2 must still claim nothing for itself', async () => {
+    resetFakeWithTeam();
+    expect((await send(edgeEvent(E1, fake.graph), PREP_R1)).status).toBe(200);
+    expect((await send(edgeEvent(E2, fake.graph), PREP_FOREIGN)).status).toBe(200);
+    const foreignGraph = jsonCopy(fake.graph);
+    expect(hasEdge(foreignGraph, E2)).toBe(true);
+    resetFakeWithTeam();
+    appendMock.mockClear();
+    loadGraphSnapshots.length = 0;
+
+    fake.owned = true;
+    expect((await send(edgeEvent(E1, fake.graph), MINE)).status).toBe(200);
+    const storedAfterR1 = jsonCopy(fake.graph);
+    expect(identityOf(storedAfterR1)).not.toBe(identityOf(foreignGraph));
+    logInfoSpy.mockClear();
+
+    let appendsWhenForeignLanded: number | undefined;
+    fake.afterNextRead = () => {
+      appendsWhenForeignLanded = appendMock.mock.calls.length;
+      fake.graph = jsonCopy(foreignGraph);
+      fake.rows.set(FOREIGN, { id: `row-${FOREIGN}`, request_hash: 'sha256:foreign-edge' });
+    };
+
+    const r2 = await send(edgeEvent(E2, storedAfterR1), MINE);
+
+    const mineIdx = appendIndicesFor(MINE);
+    expect(mineIdx).toHaveLength(2);
+    const r2Idx = mineIdx[1]!;
+    expect(fake.afterNextRead, 'the interleaving hook must have run').toBeUndefined();
+    expect(appendsWhenForeignLanded).toBe(r2Idx);
+    expect((await outcomeAt(r2Idx)).priorTurnConflict).toBe(true);
+    expect(hasEdge(fake.graph, E2), 'the store holds R2\'s connection — put there by the FOREIGN writer').toBe(true);
+
+    const stored = fake.graph;
+    const observed = `observed: status=${r2.status}, graph_hash=${String(r2.body.graph_hash)}, stored hash=${analysisHash(stored)}, assistant_text=${JSON.stringify(r2.body.assistant_text ?? null)}`;
+    expect.soft(r2.status, `EDGE B: a conflict must not be a server failure (${observed})`).toBeLessThan(500);
+    const prose = String(r2.body.assistant_text ?? '');
+    expect.soft(prose, `EDGE B: prose must not confirm R2's connection (${observed})`).not.toMatch(/I've connected/);
+    expect.soft(r2.body.model_version_receipt, `EDGE B: no receipt for R2 (${observed})`).toBeUndefined();
+    if (r2.body.graph_hash !== undefined) {
+      expect.soft(r2.body.graph_hash, `EDGE B: graph_hash is the stored graph's (${observed})`).toBe(analysisHash(stored));
+    }
+    expect.soft(
+      attestations(EDGE_COMMITTED, 'edge_to', E2.to),
+      `EDGE B: dispatcher attested "structural_add_edge committed … verified" although THIS append wrote nothing (${observed})`,
+    ).toBe(0);
+    expectNoProviderReached();
+  });
+
+  it('F4-EXT ADD_EDGE REPLAY: the SAME connection arrives again after it committed between the retry\'s base read and its append — "already recorded", the original receipt, and no attestation for THIS attempt', async () => {
+    resetFakeWithTeam();
+    fake.owned = true;
+    const base = jsonCopy(fake.graph);
+    expect((await send(edgeEvent(E1, base), MINE)).status).toBe(200);
+    const originalRow = fake.rows.get(MINE);
+    expect(originalRow?.receipt?.version_id, 'receipt control').toBe(VERSION_IDS[0]);
+    const originalGraph = jsonCopy(fake.graph);
+    const originalVersions = [...fake.versions];
+    resetFakeWithTeam();
+    appendMock.mockClear();
+    logInfoSpy.mockClear();
+    loadGraphSnapshots.length = 0;
+    fake.owned = true;
+
+    fake.afterNextRead = () => {
+      fake.graph = jsonCopy(originalGraph);
+      fake.rows.set(MINE, originalRow!);
+      fake.versions = [...originalVersions];
+    };
+    const retry = await send(edgeEvent(E1, base), MINE);
+
+    const mineIdx = appendIndicesFor(MINE);
+    expect(mineIdx).toHaveLength(1);
+    expect(appendMock.mock.calls[mineIdx[0]!]![0].request_hash).toBe(originalRow!.request_hash);
+    expect((await outcomeAt(mineIdx[0]!)).replayedPriorTurn).toBe(true);
+    expect(fake.landed).toEqual([]);
+    expect(hasEdge(fake.graph, E1)).toBe(true);
+
+    const observed = `observed: status=${retry.status}, assistant_text=${JSON.stringify(retry.body.assistant_text ?? null)}`;
+    expect.soft(retry.status, `EDGE REPLAY: not a failure (${observed})`).toBe(200);
+    const prose = String(retry.body.assistant_text ?? '');
+    expect.soft(prose, `EDGE REPLAY: says already recorded (${observed})`).toMatch(/already been recorded/i);
+    expect.soft(prose, `EDGE REPLAY: never says THIS attempt connected it (${observed})`).not.toMatch(/I've connected/);
+    expect.soft((retry.body.model_version_receipt as Record<string, unknown> | undefined)?.version_id, `EDGE REPLAY: the original receipt (${observed})`).toBe(VERSION_IDS[0]);
+    expect.soft(
+      attestations(EDGE_COMMITTED, 'edge_to', E1.to),
+      `EDGE REPLAY: dispatcher attested a connection THIS append did not write (${observed})`,
+    ).toBe(0);
+    expectNoProviderReached();
+  });
 });
