@@ -228,11 +228,18 @@ export async function readScenarioAnalysis(
     // "no success in that page" as `none` would be a positive "never analysed"
     // claim, so under `capped` an empty selection stays `unknown`. This is the
     // turn path's own rule (`build-turn-context.ts`, `scenarioAnalysisFactsReadOk`).
+    //
+    // ⚠ AND NEVER FOR THE WINDOW FALLBACK. When the durable read is `degraded`
+    // the hot window is still read — a success in it is positive evidence and is
+    // compared by hash as before — but an EMPTY window is 20 rows, not the
+    // record: a run can sit behind it. So absence there is never authoritative
+    // and an empty selection reads `unknown / derivation_failed`, not
+    // `none / never_run` (Codex pre-review finding 5824695259). `readOk` is
+    // consulted only when no fact is selected, so this changes nothing else.
+    // Same rule as the turn path: only `complete` licenses "never analysed".
     const durableAuthority = isScenarioAnalysisReasoningAuthority(factSet);
     const facts = durableAuthority ? factSet.facts : hotWindow.facts;
-    const factsReadOk = durableAuthority
-      ? factSet.status === 'complete'
-      : hotWindow.status === 'ok';
+    const factsReadOk = factSet.status === 'complete';
     const derivation = deriveAnalysisFreshness(facts, currentGraphHash, undefined, {
       priorFactsReadOk: factsReadOk,
       analysisInvalidatedAt,
