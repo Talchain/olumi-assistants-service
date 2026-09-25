@@ -46,6 +46,7 @@ const loadGraphMock = vi.fn();
 const readMostRecentPendingActionsMock = vi.fn();
 const readRecentMock = vi.fn();
 const readFactsForMock = vi.fn().mockResolvedValue([]);
+const readScenarioRunAnalysisFactsForMock = vi.fn();
 let persisted: unknown = buildPersistedGraph();
 let graphCasRpcEnforce = true;
 const commitReceiptState = vi.hoisted(() => ({
@@ -65,6 +66,11 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     readRecent: readRecentMock,
     readFactsFor: readFactsForMock,
     readMostRecentPendingActions: readMostRecentPendingActionsMock,
+    // The scenario's durable analysis record: COMPLETE and EMPTY — what "never
+    // analysed" means. Without the port the record is degraded, and an empty
+    // 20-row window alone cannot prove absence (every writer's reply now uses the
+    // shared rule, dispatch.ts `deriveWriteReplyFreshness`).
+    readScenarioRunAnalysisFactsFor: readScenarioRunAnalysisFactsForMock,
     loadGraph: loadGraphMock,
     loadGraphAndBriefText: async () => ({ graph: persisted, briefText: null }),
     invalidateScoped: async (_scenarioId: string, scope: unknown) => ({
@@ -284,6 +290,8 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
   beforeEach(() => {
     persisted = buildPersistedGraph();
     graphCasRpcEnforce = true;
+    readScenarioRunAnalysisFactsForMock.mockReset();
+    readScenarioRunAnalysisFactsForMock.mockResolvedValue({ facts: [], total_count: 0 });
     commitReceiptState.mode = 'normal';
     appendMock.mockReset();
     appendMock.mockResolvedValue({ id: 'mock-row-id' });
@@ -590,6 +598,11 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     readRecentMock.mockResolvedValueOnce([{ id: 'prior-run-row' }]);
     readFactsForMock.mockRejectedValueOnce(
       new Error('simulated prior-fact read failure'),
+    );
+    // BOTH reads degraded: a complete durable record would decide on its own (its
+    // absence is authoritative), so "we could not read the history" needs both.
+    readScenarioRunAnalysisFactsForMock.mockRejectedValueOnce(
+      new Error('simulated durable analysis-fact read failure'),
     );
 
     const response = await app.inject({

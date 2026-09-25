@@ -39,6 +39,7 @@ import {
   loadMostRecentPendingActionsIntegrityStrict,
   loadPersistedGraphStrict,
   loadPriorFactsWithReadState,
+  loadScenarioAnalysisFactsForRead,
 } from '../build-turn-context.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getSessionStore } from '../session/index.js';
@@ -54,6 +55,7 @@ import {
   isSuccessfulRunAnalysisFact,
   type FreshnessDerivation,
 } from '../context/freshness.js';
+import { isScenarioAnalysisReasoningAuthority } from '../context/reconcile-scenario-analysis-facts.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import {
   buildAppliedGraphWireField,
@@ -76,6 +78,110 @@ import { applyStructuralRename, findStaleRenamedLabel } from './structural-renam
 // TYPE-ONLY — binds READER_ONLY_CHAT_ROUTE_OPS to the canonical structural-edit
 // grammar at typecheck time without adding a runtime edge into the tools layer.
 import type { StructuralEditOp } from '../tools/propose-structural-edit.js';
+
+/**
+ * ⭐ ONE FRESHNESS DERIVATION FOR EVERY WRITER'S REPLY.
+ *
+ * Each system-event writer used to derive its reply's analysis freshness on its
+ * own, and the F1 defect (#1843) was fixed one writer at a time: the reload,
+ * then factor_value_edit (#1860), while edge_strength_edit, structural_delete,
+ * structural_add and structural_add_edge kept reading the 20-row hot window
+ * alone, and structural_rename derived nothing. Once a run's turn aged out of
+ * the window (every value op and Agent turn is a row), a structural edit's reply
+ * said the scenario had NEVER been analysed, and a rename's said
+ * `unknown_degraded / no_graph_this_turn`.
+ *
+ * The rule, the turn path's (`build-turn-context.ts`) and the reload's
+ * (`scenario-graph-analysis-read.ts`): facts from the scenario's durable record
+ * when it is reasoning authority (`complete | capped`), else the hot window; and
+ * ABSENCE is authoritative only in a COMPLETE record — never under `capped`
+ * (unread history behind the wall) and never in the window fallback (20 rows
+ * can hide an older run). `priorFactsReadOk` is consulted only when no fact is
+ * selected, so a success in the window stays positive evidence compared by hash.
+ *
+ * ⚠ NOT YET `option_intervention_edit`: it also feeds the window's verdict into
+ * its pre-write referee, so moving its source changes write behaviour, not only
+ * the reply. Named follow-up with its own RED case.
+ */
+function deriveWriteReplyFreshness(
+  read: WriteReplyAnalysisInputs,
+  persistedAnalysisGraphHash: string | null,
+): FreshnessDerivation {
+  const durableAuthority = isScenarioAnalysisReasoningAuthority(read.factSet);
+  const derived = deriveAnalysisFreshness(
+    durableAuthority ? read.factSet.facts : read.hotWindow.facts,
+    persistedAnalysisGraphHash,
+    undefined,
+    { priorFactsReadOk: read.factSet.status === 'complete', analysisInvalidatedAt: read.analysisInvalidatedAt },
+  );
+  // ⛔ AN UNREAD RESTORE MARKER NEVER BECOMES A POSITIVE `fresh`. The marker can
+  // only turn a hash MATCH from fresh to stale, so when it could not be read a
+  // `fresh` is unverifiable (a restore may sit behind the failed read), while
+  // every other verdict is untouched. The module's own degraded form is used
+  // (no fact-bound hashes: `unknown` only where data is genuinely missing, its
+  // invariant 3). Independent pre-review 5828334202 on #1892.
+  if (!read.analysisInvalidatedAtReadOk && derived.freshness === 'fresh') {
+    return deriveAnalysisFreshness([], persistedAnalysisGraphHash, undefined, { priorFactsReadOk: false });
+  }
+  return derived;
+}
+
+type WriteReplyAnalysisInputs = Awaited<ReturnType<typeof loadScenarioAnalysisFactsForRead>> & {
+  readonly analysisInvalidatedAt: string | null;
+  /** False when the marker could not be read: `null` above then means "unknown", not "no restore". */
+  readonly analysisInvalidatedAtReadOk: boolean;
+};
+
+/**
+ * EVERY WRITER'S ANALYSIS INPUTS: the facts AND the restore marker, read side by
+ * side exactly as the reload reads them (`scenario-graph-analysis-read.ts`).
+ *
+ * The marker (`scenarios.analysis_invalidated_at`) is the ONLY input that can
+ * make a hash MATCH read `stale`: restore the analysed version after a run
+ * (A → analyse → B → restore A) and the bytes equal A again while the analysis
+ * is no longer about the model the user is looking at. Without it, a write that
+ * lands on the analysed hash — a rename never moves it — replied `fresh` while
+ * the reload said `stale` (Independent Review 5827685385 on #1892).
+ *
+ * ⚠ A FAILED READ NEVER BLOCKS THE WRITE, AND IS NEVER READ AS "NO RESTORE".
+ * The `.catch` is load-bearing: the real store THROWS on a database error or a
+ * malformed timestamp, and `??` cannot catch a rejection. A failed read is
+ * reported as `analysisInvalidatedAtReadOk: false`, and the reply then cannot
+ * claim `fresh` (see `deriveWriteReplyFreshness`): substituting "no restore"
+ * would present a possibly-restored model's analysis as current, while `stale`
+ * would be an unsupported claim in the other direction. Fact history and the
+ * marker are observational only; neither ever authorises or blocks the write.
+ */
+async function loadWriteReplyAnalysisInputs(
+  scenarioId: string,
+  requestId: string,
+): Promise<WriteReplyAnalysisInputs> {
+  // The store lookup sits INSIDE the guarded promise: `getSessionStore()` throws
+  // synchronously when the store is not configured, and a throw outside the
+  // `.catch` would fail the user's write over an observational read. An
+  // unavailable store degrades exactly like a failed read.
+  const markerRead = (async (): Promise<{ readonly value: string | null; readonly ok: boolean }> => ({
+    value: (await getSessionStore()?.readAnalysisInvalidatedAt?.(scenarioId)) ?? null,
+    ok: true,
+  }))();
+  const [read, marker] = await Promise.all([
+    loadScenarioAnalysisFactsForRead(scenarioId, requestId),
+    markerRead.catch((error: unknown) => {
+      log.warn(
+        {
+          event: 'session.read_degraded',
+          read: 'analysis_invalidated_at',
+          request_id: requestId,
+          scenario_id: scenarioId,
+          error_name: error instanceof Error ? error.name : typeof error,
+        },
+        'Restore-invalidation read degraded on a write reply — currency cannot be confirmed',
+      );
+      return { value: null, ok: false };
+    }),
+  ]);
+  return { ...read, analysisInvalidatedAt: marker.value, analysisInvalidatedAtReadOk: marker.ok };
+}
 
 /**
  * Why a system-event turn committed nothing — and why this is a VOCABULARY
@@ -904,19 +1010,19 @@ async function dispatchEdgeStrengthEdit(
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
-  let priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>;
+  let factsRead: WriteReplyAnalysisInputs;
   try {
     // Both reads are authoritative and required before ANY newest-turn append.
     // The integrity-strict pending read rejects a non-array, any invalid entry,
     // or a scenario mismatch. On either failure the prior row remains newest
     // and therefore authoritative: no refusal transcript is appended.
-    [persistedGraph, priorPendingActions, priorFactsRead] = await Promise.all([
+    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
       loadPersistedGraphStrict(payload.scenario_id),
       loadMostRecentPendingActionsIntegrityStrict(
         payload.scenario_id,
         requestId,
       ),
-      loadPriorFactsWithReadState(payload.scenario_id, requestId),
+      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
     ]);
   } catch (err) {
     log.error(
@@ -1203,20 +1309,7 @@ async function dispatchEdgeStrengthEdit(
   // Fact history is observational only: it never authorises or blocks the
   // write. A healthy empty read means canonical `none`; a degraded read must
   // not fabricate that conclusion and therefore emits honest `unknown`.
-  const freshness: FreshnessDerivation =
-    priorFactsRead.status === 'ok'
-      ? deriveAnalysisFreshness(
-          priorFactsRead.facts,
-          persistedAnalysisGraphHash,
-        )
-      : {
-          freshness: 'unknown',
-          reason: 'derivation_failed',
-          selected_fact_index: null,
-          graph_hash_at_run: null,
-          current_graph_hash: persistedAnalysisGraphHash,
-          computed_at: null,
-        };
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -1225,8 +1318,9 @@ async function dispatchEdgeStrengthEdit(
       dispatch_path: 'system_event.edge_strength_edit',
     },
     {
-      prior_fact_count: priorFactsRead.facts.length,
-      prior_fact_read_status: priorFactsRead.status,
+      prior_fact_count: factsRead.hotWindow.facts.length,
+      prior_fact_read_status: factsRead.hotWindow.status,
+      scenario_fact_set_status: factsRead.factSet.status,
       current_turn_fact_count: result.handlerFacts.length,
       intent: event.intent,
     },
@@ -1314,16 +1408,16 @@ async function dispatchStructuralDelete(
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
-  let priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>;
+  let factsRead: WriteReplyAnalysisInputs;
   try {
     // All three reads are authoritative and required before ANY newest-turn
     // append. On failure the prior row stays newest and authoritative: no
     // transcript is appended, because a degraded read gives no trusted base and
     // guessing at one is how a server model gets clobbered.
-    [persistedGraph, priorPendingActions, priorFactsRead] = await Promise.all([
+    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
       loadPersistedGraphStrict(payload.scenario_id),
       loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadPriorFactsWithReadState(payload.scenario_id, requestId),
+      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
     ]);
   } catch (err) {
     log.error(
@@ -1639,17 +1733,7 @@ async function dispatchStructuralDelete(
   // Fact history is observational only: it never authorises or blocks the write.
   // A healthy empty read means canonical `none`; a degraded read must not
   // fabricate that conclusion and therefore emits honest `unknown`.
-  const freshness: FreshnessDerivation =
-    priorFactsRead.status === 'ok'
-      ? deriveAnalysisFreshness(priorFactsRead.facts, persistedAnalysisGraphHash)
-      : {
-          freshness: 'unknown',
-          reason: 'derivation_failed',
-          selected_fact_index: null,
-          graph_hash_at_run: null,
-          current_graph_hash: persistedAnalysisGraphHash,
-          computed_at: null,
-        };
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -1658,8 +1742,9 @@ async function dispatchStructuralDelete(
       dispatch_path: 'system_event.structural_delete',
     },
     {
-      prior_fact_count: priorFactsRead.facts.length,
-      prior_fact_read_status: priorFactsRead.status,
+      prior_fact_count: factsRead.hotWindow.facts.length,
+      prior_fact_read_status: factsRead.hotWindow.status,
+      scenario_fact_set_status: factsRead.factSet.status,
       removed_node_count: result.removedNodeIds.length,
       removed_edge_count: result.removedEdgePairs.length,
     },
@@ -1738,8 +1823,22 @@ async function dispatchFactorValueEdit(
    * `none` ("no run has happened") from a read that simply failed. That is the
    * estate's own named trap: an absence that was never observed reported as an
    * observed absence. The existing `priorFacts` consumer below is unchanged.
+   *
+   * ⭐ AND THE SCENARIO'S ANALYSIS RECORD, NOT ONLY THE LAST 20 ROWS. The window
+   * alone (`readRecent`, SESSION_READ_WINDOW_DEFAULT rows) loses the run once
+   * ~20 value ops / Agent turns have passed, and the reply then said `none`
+   * about an analysis this very edit had just made stale. The composer is the
+   * reload route's own (`routes/scenario-graph-analysis-read.ts`): the turn
+   * path's hot-window and durable readers, reconciled. `hotWindow` is exactly
+   * the window this function always read, so the handler's `priorFacts` input
+   * keeps its meaning; only the freshness below chooses the durable set.
    */
-  const priorFactsRead = await loadPriorFactsWithReadState(payload.scenario_id, requestId);
+  const {
+    hotWindow: priorFactsRead,
+    factSet: analysisFactSet,
+    analysisInvalidatedAt,
+    analysisInvalidatedAtReadOk,
+  } = await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId);
   const priorFacts = priorFactsRead.facts;
 
   const result = await applyFactorValueEdit({
@@ -2002,18 +2101,24 @@ async function dispatchFactorValueEdit(
    * verdict, a degraded read yields `unknown` with `derivation_failed` rather than
    * fabricating `none`. Fact history is observational only and never authorises or
    * blocks the write, so a failed read cannot lose the user's edit.
+   *
+   * THE FACT-SOURCE RULE IS THE RELOAD ROUTE'S (`scenario-graph-analysis-read.ts`):
+   * the durable set when it is reasoning authority (`complete | capped`), else the
+   * hot window. Absence is authoritative only for the `complete` record — under
+   * `capped` unread history sits behind the wall, and in the window fallback the
+   * 20 rows can hide an older run, so an empty selection stays `unknown /
+   * derivation_failed` in both (the turn path's rule, `build-turn-context.ts`).
+   *
+   * AND THE RESTORE MARKER, as the reload reads it (`loadWriteReplyAnalysisInputs`):
+   *   an edit that lands back on an analysed hash after a version restore reads
+   *   `stale / model_restored_after_analysis` here too, never `fresh` while the
+   *   reload says `stale` (#1892, Independent Review 5827685385).
    */
-  const freshness: FreshnessDerivation =
-    priorFactsRead.status === 'ok'
-      ? deriveAnalysisFreshness(priorFactsRead.facts, persistedAnalysisGraphHash)
-      : {
-          freshness: 'unknown',
-          reason: 'derivation_failed',
-          selected_fact_index: null,
-          graph_hash_at_run: null,
-          current_graph_hash: persistedAnalysisGraphHash,
-          computed_at: null,
-        };
+  // The shared rule (`deriveWriteReplyFreshness`): absence only in a COMPLETE record.
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(
+    { hotWindow: priorFactsRead, factSet: analysisFactSet, analysisInvalidatedAt, analysisInvalidatedAtReadOk },
+    persistedAnalysisGraphHash,
+  );
   emitFreshnessTelemetry(
     freshness,
     {
@@ -2407,6 +2512,10 @@ async function dispatchStructuralRename(
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
+  // A rename cannot move the analysis hash, but its reply must still STATE the
+  // verdict: without one the finaliser answered `unknown_degraded /
+  // no_graph_this_turn` beside the graph it had just written.
+  let factsRead: WriteReplyAnalysisInputs;
   try {
     // Both reads are authoritative and required before ANY newest-turn append.
     // On failure the prior row stays newest and authoritative: no transcript is
@@ -2417,9 +2526,10 @@ async function dispatchStructuralRename(
     // a rename moves no hash, so there is no currency verdict to re-derive.
     // Issuing the read anyway would cost a round trip to compute a value that is
     // then discarded.
-    [persistedGraph, priorPendingActions] = await Promise.all([
+    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
       loadPersistedGraphStrict(payload.scenario_id),
       loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
     ]);
   } catch (err) {
     log.error(
@@ -2681,6 +2791,20 @@ async function dispatchStructuralRename(
     },
     'V5 structural_rename committed — canonical graph/fact written atomically, new label verified in the persisted bytes',
   );
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash);
+  emitFreshnessTelemetry(
+    freshness,
+    {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      dispatch_path: 'system_event.structural_rename',
+    },
+    {
+      prior_fact_count: factsRead.hotWindow.facts.length,
+      prior_fact_read_status: factsRead.hotWindow.status,
+      scenario_fact_set_status: factsRead.factSet.status,
+    },
+  );
   return {
     response,
     commitPerformed: true,
@@ -2688,6 +2812,12 @@ async function dispatchStructuralRename(
     // against it. See the `graph` field's doc at the top of this file — passing
     // null does not SKIP the scrub, it runs it blind.
     graph: graphForEgress,
+    // Readiness + freshness TOGETHER: the route stamps `freshness` into
+    // `analysis_ready` only beside a readiness payload, and `analysis_ready.freshness`
+    // is the field the UI clears its local "Model changed" mark on. A label cannot
+    // change readiness, so this restates the model's verdict from the bytes that landed.
+    analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForEgress),
+    freshness,
   };
 }
 
@@ -2725,12 +2855,12 @@ async function dispatchStructuralAdd(
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
-  let priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>;
+  let factsRead: WriteReplyAnalysisInputs;
   try {
-    [persistedGraph, priorPendingActions, priorFactsRead] = await Promise.all([
+    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
       loadPersistedGraphStrict(payload.scenario_id),
       loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadPriorFactsWithReadState(payload.scenario_id, requestId),
+      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
     ]);
   } catch (err) {
     log.error(
@@ -2972,17 +3102,7 @@ async function dispatchStructuralAdd(
   // Fact history is observational only: it never authorises or blocks the write.
   // A healthy empty read means canonical `none`; a degraded read must not
   // fabricate that conclusion and therefore emits honest `unknown`.
-  const freshness: FreshnessDerivation =
-    priorFactsRead.status === 'ok'
-      ? deriveAnalysisFreshness(priorFactsRead.facts, persistedAnalysisGraphHash)
-      : {
-          freshness: 'unknown',
-          reason: 'derivation_failed',
-          selected_fact_index: null,
-          graph_hash_at_run: null,
-          current_graph_hash: persistedAnalysisGraphHash,
-          computed_at: null,
-        };
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -2991,8 +3111,9 @@ async function dispatchStructuralAdd(
       dispatch_path: 'system_event.structural_add',
     },
     {
-      prior_fact_count: priorFactsRead.facts.length,
-      prior_fact_read_status: priorFactsRead.status,
+      prior_fact_count: factsRead.hotWindow.facts.length,
+      prior_fact_read_status: factsRead.hotWindow.status,
+      scenario_fact_set_status: factsRead.factSet.status,
       added_node_kind: result.addedNodeKind,
       left_unquantified: result.leftUnquantified,
     },
@@ -3045,12 +3166,12 @@ async function dispatchStructuralAddEdge(
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
-  let priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>;
+  let factsRead: WriteReplyAnalysisInputs;
   try {
-    [persistedGraph, priorPendingActions, priorFactsRead] = await Promise.all([
+    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
       loadPersistedGraphStrict(payload.scenario_id),
       loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadPriorFactsWithReadState(payload.scenario_id, requestId),
+      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
     ]);
   } catch (err) {
     log.error(
@@ -3278,17 +3399,7 @@ async function dispatchStructuralAddEdge(
     draft_graph: buildAppliedGraphWireField(graphForReadiness),
   };
 
-  const freshness: FreshnessDerivation =
-    priorFactsRead.status === 'ok'
-      ? deriveAnalysisFreshness(priorFactsRead.facts, persistedAnalysisGraphHash)
-      : {
-          freshness: 'unknown',
-          reason: 'derivation_failed',
-          selected_fact_index: null,
-          graph_hash_at_run: null,
-          current_graph_hash: persistedAnalysisGraphHash,
-          computed_at: null,
-        };
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -3297,8 +3408,9 @@ async function dispatchStructuralAddEdge(
       dispatch_path: 'system_event.structural_add_edge',
     },
     {
-      prior_fact_count: priorFactsRead.facts.length,
-      prior_fact_read_status: priorFactsRead.status,
+      prior_fact_count: factsRead.hotWindow.facts.length,
+      prior_fact_read_status: factsRead.hotWindow.status,
+      scenario_fact_set_status: factsRead.factSet.status,
     },
   );
 
