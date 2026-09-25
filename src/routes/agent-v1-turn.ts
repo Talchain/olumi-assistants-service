@@ -54,7 +54,7 @@ import { narrateWriteOutcome, notAdoptedLine, withWriteOutcome } from '../orches
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
-import { AMEND_CHIP, approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
 import { CarriedProposals, carrierForAnswerRow, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
@@ -444,6 +444,36 @@ export function knownNotRunnable(analysisReady: unknown): boolean {
   return typeof ar.may_run === 'boolean' ? ar.may_run === false : typeof ar.status === 'string' && ar.status !== 'ready';
 }
 
+/** The approve chip's id prefix, taken from the chip's own producer — never a copy of its string. */
+const APPROVE_CHIP_ID_PREFIX = approvalChipIdFor('');
+
+/** Does this response offer an approval: is the approve chip among its `suggested_actions`? */
+export function offersApproval(body: { suggested_actions?: unknown }): boolean {
+  const actions = body.suggested_actions;
+  return Array.isArray(actions) && actions.some((a) => {
+    const id = a !== null && typeof a === 'object' ? (a as { id?: unknown }).id : undefined;
+    return typeof id === 'string' && id.startsWith(APPROVE_CHIP_ID_PREFIX);
+  });
+}
+
+/**
+ * Did this turn's calls leave a proposal awaiting the user's yes, WHETHER OR NOT a chip names it?
+ * `approvalChipsFor` is the rule (a proposing tool that succeeded, after the turn's last model change, not
+ * consumed by an authorisation), but it offers a chip only when exactly ONE proposal qualifies: with two
+ * pending it offers none and the Agent asks in words. So it is asked about each proposal ALONE — every other
+ * proposal's id hidden, every call kept in place so order and mutation still count — and never re-derived.
+ */
+export function leavesProposalAwaitingApproval(
+  calls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[],
+): boolean {
+  return calls.some((c, j) => c.name !== 'authorise_change' && typeof c.proposal_id === 'string'
+    && approvalChipsFor(calls.map((d, i) => {
+      if (i === j || d.name === 'authorise_change') return d;
+      const { proposal_id: _hidden, ...rest } = d;
+      return rest;
+    })).length > 0);
+}
+
 /**
  * ⭐ AN ANALYSIS REPLY ARRIVES HEADLINE FIRST (UI contract UI-SEM-090; agreed design #69 5831886008).
  * A Run reply on this route is a finding, a few bullets and often a closing line, and with no sidecar
@@ -468,9 +498,20 @@ export function knownNotRunnable(analysisReady: unknown): boolean {
  *
  * ⛔ CALL IT ON THE FINAL PROSE — after the withheld-leader gate and every other rewrite of
  * `assistant_text` on this route — so a headline or bullet can never carry a sentence a gate removed.
+ *
+ * ⛔ CONSENT BEFORE BREVITY: A TURN THAT ASKS FOR AN APPROVAL IS NEVER SHAPED. The build turn's first pass
+ * with a four-figure starting point, or a proposal made over a current result, would put figure four behind
+ * "Show more" beside the chip that approves all four. So a response whose `suggested_actions` carry the
+ * approve chip (`offersApproval`), or a turn the route says left a proposal awaiting a yes whether or not a
+ * chip names it (`turn.proposalAwaitingApproval`, from `approvalChipsFor`'s own rule), is returned by
+ * reference, byte-identical.
  */
-export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; blocks?: unknown }>(body: T): T {
+export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; blocks?: unknown; suggested_actions?: unknown }>(
+  body: T,
+  turn: { proposalAwaitingApproval?: boolean } = {},
+): T {
   if ('_answer_shape' in body) return body;
+  if (turn.proposalAwaitingApproval === true || offersApproval(body)) return body;
   const blocks = body.blocks;
   const carriesResult = Array.isArray(blocks)
     && blocks.some((b) => b !== null && typeof b === 'object' && (b as { type?: unknown }).type === 'analysis_result');
@@ -1610,7 +1651,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     })();
     // A withheld call consumed no proposal and moved nothing: it is not an authorisation, and
     // counting one (it has no proposal id) would strand the proposal it named without its chip.
-    const approvals = approvalChipsFor(result.tool_calls.filter((c) => c.refusal !== WITHHELD_ON_CHIP_TURN));
+    const approvalCalls = result.tool_calls.filter((c) => c.refusal !== WITHHELD_ON_CHIP_TURN);
+    const approvals = approvalChipsFor(approvalCalls);
     // A first analysis the model could not run offers its repair: the approve chip when the Agent
     // proposed the missing values this turn, otherwise the next-step chip.
     const firstAnalysisBlocked = fa !== undefined && !fa.ran && (fa.reason === 'not_admissible' || fa.reason === 'refused')
@@ -1761,9 +1803,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * ⭐ HEADLINE FIRST ON AN ANALYSIS REPLY — see `withAnalysisAnswerShape`. HERE, and nowhere earlier:
      * this is after the last rewrite of `assistant_text` on this route (write-claim removal, disclosures,
      * proposal-id scrub, the leader gate above), so the shape is built from the prose the user receives,
-     * and before the answer row is written, so a replay returns the same words.
+     * and before the answer row is written, so a replay returns the same words. Never on a turn that asks
+     * for an approval: the route's own offer, or a proposal the chip rule left without a chip.
      */
-    wireBody = withAnalysisAnswerShape(wireBody);
+    wireBody = withAnalysisAnswerShape(wireBody, {
+      proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
+    });
 
     /**
      * ⭐ PERSIST THE TURN BEFORE ANSWERING — the row a lost-response retry is

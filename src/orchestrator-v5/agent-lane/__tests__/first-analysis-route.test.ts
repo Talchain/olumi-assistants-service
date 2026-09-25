@@ -408,6 +408,66 @@ describe('the Agent route runs the first analysis itself, once', () => {
     expect(deriveAnswerTextFromShape(b._answer_shape as never)).toBe(b.assistant_text);
   });
 
+  /**
+   * ⛔ CONSENT BEFORE BREVITY. The build turn that ran the first pass AND offers a starting point for
+   * approval is an analysis-bearing turn, so the shape step would put the proposal's fourth figure behind
+   * "Show more" while the chip beside it asks the user to approve the whole set. A turn that offers an
+   * approval is never shaped: every figure the user is asked to approve stays on the face.
+   */
+  it('RED: a build turn whose first analysis ran AND that offers a four-figure starting point for approval → NO `_answer_shape`; every figure on the face, text byte-identical', async () => {
+    const figures = [
+      '- Delivery reliability today: 70%',
+      '- Hire a tech lead: raises delivery reliability to 85%',
+      '- Hire two developers: raises delivery reliability to 80%',
+      '- Time for a new hire to reach full speed: 3 months',
+    ];
+    const prose = [
+      'I have built the model and run a provisional first pass on it.',
+      '',
+      ...figures,
+      '',
+      'Each figure is an assumption for you to adopt or correct, not a measurement. Approve this set?',
+    ].join('\n');
+    const { synthesiseAnswerShapeFromText } = await import('../../routing/answer-shape.js');
+    const would = synthesiseAnswerShapeFromText(prose)!;
+    expect(would.bullets, 'the control: shaped, the face would carry only three of the four figures').toHaveLength(3);
+    expect(would.detail, 'the control: the fourth figure would go behind "Show more"').toContain(figures[3]);
+
+    const buildAndPropose = () => [
+      callTool('build_model_from_brief', { brief: BRIEF }),
+      callTool('propose_starting_point', {
+        assumptions: [{ factor_label: 'Delivery reliability', value: 70, unit: '%', basis: 'A typical figure for a team this size.' }],
+        option_levels: [
+          { option_label: 'Option A', factor_label: 'Delivery reliability', value: 85, basis: 'A lead raises delivery reliability.' },
+          { option_label: 'Option B', factor_label: 'Delivery reliability', value: 80, basis: 'Two developers raise it less at first.' },
+        ],
+      }),
+      say(prose),
+    ];
+    // THE UNSHAPED REPLY, measured: the SAME turn on a fresh scenario whose readback carries no result block,
+    // which the shape step returns by reference at every head — the reply plus Olumi's own status line.
+    knobs.runStateKind = 'complete_stale';
+    script = buildAndPropose();
+    const unshaped = await turn(app, { message: BRIEF }) as Body & { _answer_shape?: unknown };
+    expect((unshaped.blocks ?? []).some((x) => x.type === 'analysis_result'), 'the contrast control: no result block').toBe(false);
+    expect('_answer_shape' in unshaped).toBe(false);
+    expect(unshaped.assistant_text.startsWith(prose), 'the contrast control: the reply as written leads').toBe(true);
+
+    nextScenario();
+    knobs.runStateKind = 'complete_current';
+    script = buildAndPropose();
+    const b = await turn(app, { message: BRIEF }) as Body & { _answer_shape?: unknown };
+    expect(b._diagnostic_trace.first_analysis, 'the control: the first pass ran').toMatchObject({ ran: true });
+    expect((b.blocks ?? []).some((x) => x.type === 'analysis_result'), 'the control: an analysis-bearing turn').toBe(true);
+    expect(b._agent.tool_calls, 'the control: built, then proposed').toMatchObject([{ name: 'build_model_from_brief', ok: true }, { name: 'propose_starting_point', ok: true }]);
+    const { approvalChipIdFor } = await import('../approval-chips.js');
+    expect(b.suggested_actions.some((c) => c.id.startsWith(approvalChipIdFor(''))), 'the control: the turn offers the approve chip').toBe(true);
+
+    expect('_answer_shape' in b, 'a turn that asks for approval is never shaped').toBe(false);
+    expect(b.assistant_text, 'byte-identical to the unshaped reply').toBe(unshaped.assistant_text);
+    for (const figure of figures) expect(b.assistant_text, `on the face, verbatim: ${figure}`).toContain(figure);
+  });
+
   it('RED: the run’s coaching block is shown when bound to the readback revision and a current run (test 7)', async () => {
     const b = await buildTurn(app);
     expect((b.blocks ?? []).map((x) => x.type)).toEqual(['analysis_result', 'review_card']);

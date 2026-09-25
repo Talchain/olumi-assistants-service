@@ -131,11 +131,11 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   const nextTurnId = () => { turnSeq += 1; return `5d4c3b2a-1f0e-4d9c-8b7a-${String(turnSeq).padStart(12, '0')}`; };
   const say = (text: string) => [{ type: 'message', content: [{ type: 'output_text', text }] }];
   /** The UI's Run control (fast path 3): the analysis runs, then ONE interpreting call answers — scripted here. */
-  const typedRun = async (text: string) => {
+  const typedRun = async (text: string, scenario = SCENARIO) => {
     callModelOutputs = [say(text)];
     const turnId = nextTurnId();
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: turnId,
+      kind: 'message', scenario_id: scenario, message: 'Run analysis.', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: turnId,
     } });
     expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
     expect(callModelOutputs, 'the control: the scripted interpretation was consumed').toEqual([]);
@@ -144,9 +144,9 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     return { b, turnId };
   };
   /** An ordinary composer message the Agent answers directly, with no tool call. */
-  const askedTurn = async (text: string) => {
-    callModelOutputs = [say(text)];
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'What does the analysis say?', turn_id: nextTurnId() } });
+  const askedTurn = async (text: string, scenario = SCENARIO, calls: Record<string, unknown>[][] = []) => {
+    callModelOutputs = [...calls, say(text)];
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: scenario, message: 'What does the analysis say?', turn_id: nextTurnId() } });
     expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
     expect(callModelOutputs, 'the control: the scripted reply was consumed').toEqual([]);
     return r.json() as Body;
@@ -237,6 +237,75 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(b._answer_shape!.bullets).toHaveLength(0);
     expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
     expect(b._answer_shape!.headline).toBe(synth!.headline);
+  });
+
+  /**
+   * ⛔ CONSENT BEFORE BREVITY. A turn that offers an approval is never shaped: the shape would put what the
+   * user is being asked to approve behind "Show more" beside the chip that approves it. Each case runs on its
+   * OWN scenario, because a proposal waits in the process-local store and would reach every later Run.
+   */
+  const proposeLink = (from: string, to: string) => [{
+    type: 'function_call', name: 'propose_model_change', call_id: `p-${from}-${to}`,
+    arguments: JSON.stringify({ from_label: from, to_label: to, direction: 'positive', rationale: 'Timing changes how the price lands.' }),
+  }];
+  /** A proposal reply over a current result: first sentence, four bullets, a closing ask. */
+  const PROPOSAL_REPLY = [
+    'The run turns on how the price rise lands, so I suggest one change to the model before you rely on it.',
+    '',
+    '- Add a link from Price-release alignment to Pro conversion rate (positive)',
+    '- Why: a price rise that lands with the release is easier to accept',
+    '- What it changes: conversion responds to timing as well as to price',
+    '- What it leaves alone: every value in the model stays as it is',
+    '',
+    'Approve this change and I will apply it.',
+  ].join('\n');
+  type Offered = Body & { suggested_actions: { id: string }[]; _agent: { tool_calls: { name: string; ok: boolean }[] } };
+  const APPROVE_PREFIX = async () => (await import('../approval-chips.js')).approvalChipIdFor('');
+  const offersApprove = async (b: Offered) => { const p = await APPROVE_PREFIX(); return b.suggested_actions.some((c) => c.id.startsWith(p)); };
+
+  it('7a. CONSENT: a proposal offered over a current result (bulleted, approve chip) → NOT shaped; text byte-identical', async () => {
+    const would = synthesiseAnswerShapeFromText(PROPOSAL_REPLY)!;
+    expect(would.detail, 'the control: shaped, the fourth bullet would go behind "Show more"').toContain('What it leaves alone');
+
+    const proposed = await askedTurn(PROPOSAL_REPLY, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a10', [proposeLink('Price-release alignment', 'Pro conversion rate')]) as Offered;
+    expect(proposed._agent.tool_calls, 'the control: the proposal was made').toMatchObject([{ name: 'propose_model_change', ok: true }]);
+    expect(carriesResult(proposed), 'the control: over a current result').toBe(true);
+    expect(await offersApprove(proposed), 'the control: the approve chip is offered').toBe(true);
+    expect('_answer_shape' in proposed, 'the proposing turn is not shaped').toBe(false);
+    expect(proposed.assistant_text).toBe(PROPOSAL_REPLY);
+  });
+
+  it('7b. CONSENT: a Run with a bulleted reply that carries a waiting proposal’s approve chip → NOT shaped; text byte-identical', async () => {
+    const SID = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a13';
+    // Setup: the proposal the Run will carry (its own shape is test 7a's business, not asserted here).
+    const proposed = await askedTurn(PROPOSAL_REPLY, SID, [proposeLink('Price-release alignment', 'Pro conversion rate')]) as Offered;
+    expect(await offersApprove(proposed), 'the control: a proposal is waiting').toBe(true);
+
+    const { b } = await typedRun(FOUR_BULLETS.text, SID);
+    const run = b as Offered;
+    expect(carriesResult(run), 'the control: the Run carries the result').toBe(true);
+    expect(await offersApprove(run), 'the control: the Run carries the waiting proposal’s chip').toBe(true);
+    expect('_answer_shape' in run, 'a Run that offers an approval is not shaped').toBe(false);
+    expect(run.assistant_text).toBe(FOUR_BULLETS.text);
+  });
+
+  it('8. CONTROL: the SAME Run with no proposal waiting → shaped (the existing behaviour)', async () => {
+    const { b } = await typedRun(FOUR_BULLETS.text, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a11');
+    expect(await offersApprove(b as Offered), 'the control: nothing to approve').toBe(false);
+    expect(b._answer_shape, 'shaped').toBeDefined();
+    expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
+  });
+
+  it('9. CONSENT: TWO proposals pending, so the chip rule offers no chip → still NOT shaped; text byte-identical', async () => {
+    const proposed = await askedTurn(PROPOSAL_REPLY, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12', [
+      proposeLink('Price-release alignment', 'Pro conversion rate'),
+      proposeLink('Perceived Pro value', 'Pro subscriber base'),
+    ]) as Offered;
+    expect(proposed._agent.tool_calls, 'the control: both proposals were made').toMatchObject([{ name: 'propose_model_change', ok: true }, { name: 'propose_model_change', ok: true }]);
+    expect(carriesResult(proposed), 'the control: over a current result').toBe(true);
+    expect(await offersApprove(proposed), 'the control: two pending, so no approve chip').toBe(false);
+    expect('_answer_shape' in proposed, 'a turn asking for approval in words is not shaped either').toBe(false);
+    expect(proposed.assistant_text).toBe(PROPOSAL_REPLY);
   });
 });
 
