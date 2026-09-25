@@ -75,9 +75,12 @@ const RELAXES_TO: Record<CandidateOperator, CanonicalOperator> = {
 };
 
 /** True when the candidate operator is strict and the canonical one is not. */
+// A unit written as a word takes a space ("250000 GBP", "5 percentage points"); a symbol unit attaches ("70%",
+// "5% NRR"). A general typographic rule, not a percent special case (unit-scale-class.test.ts pins those).
 function unitSuffix(unit: string | undefined): string {
-  if (unit === undefined || unit.trim() === '') return '';
-  return unit.trim() === '%' ? '%' : ` ${unit.trim()}`;
+  const u = unit?.trim() ?? '';
+  if (u.length === 0) return '';
+  return /^[A-Za-z]/.test(u) ? ` ${u}` : u;
 }
 
 export function isStrictnessLost(op: CandidateOperator): boolean {

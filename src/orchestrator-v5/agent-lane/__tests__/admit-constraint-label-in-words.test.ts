@@ -43,6 +43,13 @@ describe('the admitted limit label says the stored bound in words', () => {
     expect(card).not.toMatch(/[<>]=?/);
   });
 
+  it('a word unit takes a space, a symbol unit attaches ("5 percentage points", "5% NRR")', () => {
+    const pp = admit({ metric: 'Gross margin', operator: '<=', value: 5, unit: 'percentage points', provenance: 'explicit' });
+    expect(pp.label).toBe('Gross margin at most 5 percentage points');
+    const nrr = admit({ metric: 'Gross margin', operator: '>=', value: 5, unit: '% NRR', provenance: 'explicit' });
+    expect(nrr.label).toBe('Gross margin at least 5% NRR');
+  });
+
   it('a limit with no unit reads cleanly', () => {
     const a = admit({ metric: 'Gross margin', operator: '>=', value: 3, provenance: 'explicit' });
     expect(a.label).toBe('Gross margin at least 3');
