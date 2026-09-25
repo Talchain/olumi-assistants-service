@@ -66,6 +66,7 @@ export type RunTurnTrigger = (typeof RUN_TURN_TRIGGERS)[number];
 export const RUN_TURN_COACHING_REASONS = [
   'no_run_this_turn',
   'identity_mismatch',
+  'limit_repair_pending',
   'no_groundable_fragile_edge',
   'edge_sensitivity_not_evidenced',
   'claim_not_usable',

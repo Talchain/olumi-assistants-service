@@ -440,6 +440,21 @@ function unanchoredTargetRepairStep(total: number): string {
  * `unevaluated` voice's offer, so the two repair steps no longer disagree about
  * whether the user is presumed to have authored anything.
  */
+/**
+ * ONE NEXT ACTION (AI Conversation #69 5834275139). True when a run summary
+ * carries a limit repair step THIS module emits: the `identity_unresolved`
+ * restate step (singular or plural), or the retired restate-and-rerun promise
+ * that a read-back of a fact persisted before #1912 can still carry. Bound to
+ * the exact step constants below, so no other sentence can satisfy it. The
+ * run-turn coaching card stands down when this is true: the repair step is
+ * the turn's one next action and a robustness probe must not compete with it.
+ */
+export function summaryAsksUserToRepairALimit(summary: unknown): boolean {
+  if (typeof summary !== 'string' || summary.length === 0) return false;
+  return [unresolvedRepairStep(1), unresolvedRepairStep(2), UNEVALUATED_REPAIR_STEP]
+    .some((step) => summary.includes(step.trim()));
+}
+
 function unresolvedRepairStep(total: number): string {
   return total === 1
     ? ' State the condition in your own words and run the analysis again.'
