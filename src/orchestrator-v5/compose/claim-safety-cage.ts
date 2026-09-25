@@ -331,3 +331,62 @@ export function hasReducedSamplesDisclosure(
   }
   return false;
 }
+
+/**
+ * PLoT's two goal-frame warning codes. PLoT is the producer: both ride its
+ * warning channel (a Tier-3 deny field), and PLoT mirrors them into
+ * `decision_brief.warning_codes`. No shared warning-code constant module exists
+ * in this repo, so they are defined here, beside the only code that reads them.
+ *
+ *   GOAL_DIRECTION_UNATTESTED       no objective sense was stated for the goal
+ *                                   node, so PLoT ranked by the largest goal
+ *                                   value, which is an assumption and not the
+ *                                   team's stated aim.
+ *   GOAL_THRESHOLD_NOT_CONVERTIBLE  the stated goal level could not be converted
+ *                                   into the samples' frame (the goal node has no
+ *                                   observed baseline), so no option was tested
+ *                                   against it.
+ */
+const PLOT_GOAL_DIRECTION_UNATTESTED = 'GOAL_DIRECTION_UNATTESTED';
+const PLOT_GOAL_THRESHOLD_NOT_CONVERTIBLE = 'GOAL_THRESHOLD_NOT_CONVERTIBLE';
+
+const UNTESTABLE_GOAL_WARNING_CODES: ReadonlySet<string> = new Set([
+  PLOT_GOAL_DIRECTION_UNATTESTED,
+  PLOT_GOAL_THRESHOLD_NOT_CONVERTIBLE,
+]);
+
+/**
+ * Untestable-goal presence check: did PLoT say this run could not test the
+ * user's goal as stated?
+ *
+ * Same construction and same claim-safety class as
+ * {@link hasReducedSamplesDisclosure}: a presence-only membership test on the
+ * CODE. Nothing here reads, stores or interpolates a value or any wording from
+ * the entries (the entries' `field` and `message` name the goal node, and none
+ * of that is used). Its only effect downstream is to WITHDRAW a claim: the
+ * run_analysis headline stops saying "against your goal" and adds one fixed
+ * sentence. It adds no number and names nothing from the field.
+ *
+ * ⚠ THE CHANNEL, NOT THE PROJECTION. `decision_brief.warning_codes` carries the
+ * same codes, and reading it would pass the Tier-3 static scan because its key
+ * is not a deny key. That would be laundering the channel through its own
+ * projection, so it is deliberately not read.
+ *
+ * Lives in the cage for the reason its sibling does: the cage stays the sole
+ * owner of the deny-key literal, so the producer that consumes this boolean
+ * carries none. Consumption is pinned to exactly ONE call site,
+ * `coaching/analysis-result-headline.ts`
+ * (tests/contract/untestable-goal-disclosure-single-site.guard.test.ts). A
+ * second consumer needs a fresh claim-safety review, not a new import.
+ */
+export function hasUntestableGoalDisclosure(
+  response: Record<string, unknown>,
+): boolean {
+  const arr = response['inference_warnings'];
+  if (!Array.isArray(arr)) return false;
+  return arr.some((entry) => {
+    if (entry === null || typeof entry !== 'object') return false;
+    const code = (entry as Record<string, unknown>).code;
+    return typeof code === 'string' && UNTESTABLE_GOAL_WARNING_CODES.has(code);
+  });
+}

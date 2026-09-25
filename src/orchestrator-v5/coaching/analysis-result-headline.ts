@@ -178,6 +178,10 @@ import { passesAssistantTextContentDefences } from './assistant-text-defences.js
 // whose ruled answer is caveat-not-withhold and which is owned elsewhere. The
 // module header carries the full disclaimer list.
 import { isFieldUnseparable } from './option-separability.js';
+// The untestable-goal presence check is CAGE-OWNED for the same reason as the
+// reduced-samples one: the codes ride PLoT's Tier-3 warning channel, and this
+// producer must never carry that key. It receives a boolean and nothing else.
+import { hasUntestableGoalDisclosure } from '../compose/claim-safety-cage.js';
 
 /**
  * ⚠⚠ 220 + THE COPY DELTA, AND THE DELTA IS DERIVED RATHER THAN TYPED.
@@ -223,6 +227,41 @@ const LEAD_CLAUSE_COPY_DELTA_CHARS =
   LEAD_CLAUSE_OPENING.length - RETIRED_LEAD_CLAUSE_OPENING_CHARS;
 
 export const MAX_HEADLINE_CHARS = 220 + LEAD_CLAUSE_COPY_DELTA_CHARS;
+
+/**
+ * ⛔ WHEN THE RUN COULD NOT TEST THE GOAL, THE LEAD CLAUSE DOES NOT CLAIM IT.
+ *
+ * PLoT says so with GOAL_DIRECTION_UNATTESTED (it ranked by the largest goal
+ * value, an assumption rather than the team's stated aim) or
+ * GOAL_THRESHOLD_NOT_CONVERTIBLE (the stated level could not be converted, so
+ * nothing was tested against it). Measured on served CEE c1ddb50 (#69
+ * 5830649501): both codes on the enrichment, and the headline still read
+ * "Raise to £59 scored highest against your goal in 81% of runs of this model…".
+ *
+ * The statistic, the scope clause and every gate are unchanged. Only the goal
+ * frame is withdrawn ("scored highest in N% of runs of this model", the same
+ * wording the eliminated-options sentence already uses), and one fixed sentence
+ * says why. "Scored highest" stays visible to `LEADER_CLAIM_PATTERNS`, so
+ * withheld-turn redaction still sees the leader.
+ *
+ * "your goal", not a named target: the headline input carries no goal label and
+ * no target value, and the only place the goal is named is the Tier-3 warning
+ * prose, which the cage allows us to presence-test by code and never to read.
+ */
+const UNTESTED_GOAL_LEAD_CLAUSE_OPENING = 'scored highest in';
+const GOAL_UNTESTED_DISCLOSURE =
+  ' The model could not test whether any option reaches your goal.';
+/**
+ * How much SHORTER the withdrawn opening is than the goal-framed one (18). The
+ * cases that carry the lead clause are measured against a cap reduced by this,
+ * so their length verdicts are identical with and without the warnings. That
+ * is a LEADER-PERMISSION property, not a nicety: a near-tie that overflows
+ * returns null, so without the reduction a sentence that overflows today by up
+ * to 18 characters would fit once the codes are present, and the warnings would
+ * turn a withheld leader into a named one.
+ */
+const GOAL_UNTESTED_LEAD_SHORTFALL_CHARS =
+  LEAD_CLAUSE_OPENING.length - UNTESTED_GOAL_LEAD_CLAUSE_OPENING.length;
 
 // ============================================================================
 // Lane 3 narration-completeness tails (Mission B — provisional_doctrine_v0)
@@ -363,6 +402,9 @@ export const MAX_ASSISTANT_TEXT_CHARS =
   NOT_ROBUST_SENTENCE_MAX_CHARS +
   ELIMINATED_SENTENCE_MAX_CHARS +
   REDUCED_SAMPLES_SUFFIX.length +
+  // The untestable-goal sentence rides FIRST of the tails and can co-occur with
+  // every other one. Budgeted whole, like its siblings.
+  GOAL_UNTESTED_DISCLOSURE.length +
   // D-ask-1 (2.11 P0-1): the scaffold disclosure suffix rides AFTER every
   // other tail. Budgeted from the builder's own worst case so an honest
   // disclosure can never knock the summary back to the bland fallback.
@@ -952,9 +994,19 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // tail and the status suffix (mirrored by TAIL_PATTERN in the grammar).
   const reducedSamplesSuffix =
     input.samples_reduced === true ? REDUCED_SAMPLES_SUFFIX : '';
-  const suffix = `${narrationTail}${reducedSamplesSuffix}${statusSuffix(status_kind)}`;
+  // The run could not test the user's goal (see GOAL_UNTESTED_DISCLOSURE). The
+  // sentence rides FIRST of the tails, on every emitted case, budgeted on top
+  // like its siblings. It never decides a case: see `leadCap`.
+  const goalUntestable = hasUntestableGoalDisclosure(enrichment);
+  const goalUntestedSuffix = goalUntestable ? GOAL_UNTESTED_DISCLOSURE : '';
+  const suffix = `${goalUntestedSuffix}${narrationTail}${reducedSamplesSuffix}${statusSuffix(status_kind)}`;
   const lengthCap =
-    MAX_HEADLINE_CHARS + narrationTail.length + reducedSamplesSuffix.length;
+    MAX_HEADLINE_CHARS + goalUntestedSuffix.length + narrationTail.length + reducedSamplesSuffix.length;
+  // The cap for every candidate that carries `leadClause`. Equal to `lengthCap`
+  // unless the goal frame was withdrawn, when it is reduced by exactly the
+  // characters the withdrawal saved, so every length verdict (and therefore the
+  // leader permission) is the one the goal-framed sentence would have got.
+  const leadCap = lengthCap - (goalUntestable ? GOAL_UNTESTED_LEAD_SHORTFALL_CHARS : 0);
   const marginBucket = computeMarginBucket(winner);
   const hasDriver = driverLabel !== null;
   const hasFragility = caution !== null;
@@ -1044,8 +1096,12 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // ⚠ "OF THIS MODEL" IS STILL LOAD-BEARING and is deliberately kept over
   // #1280's "of simulated futures" — see the note above. The scope clause and
   // the goal frame answer different objections and neither replaces the other.
+  //
+  // ⛔ AND ONLY WHILE THE GOAL WAS TESTED. When PLoT says it could not test the
+  // goal as stated, "against your goal" is withdrawn and the statistic is
+  // reported for what it is (see GOAL_UNTESTED_DISCLOSURE).
   const leadPercent = Math.round(winnerProbability * 100);
-  const leadClause = `${LEAD_CLAUSE_OPENING} ${leadPercent}% of runs of this model`;
+  const leadClause = `${goalUntestable ? UNTESTED_GOAL_LEAD_CLAUSE_OPENING : LEAD_CLAUSE_OPENING} ${leadPercent}% of runs of this model`;
 
   // The number-free shed form, kept verbatim for the bands that must not carry
   // a statistic: the Case E floor (every enriching gate declined the run) and
@@ -1153,7 +1209,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       const cautionTail =
         `, but treat this as provisional: ${cautionReasonText(caution)}.${suffix}`;
       const caseA = `${winnerLabel} ${leadClause}${cautionTail}`;
-      if (caseA.length <= lengthCap) {
+      if (caseA.length <= leadCap) {
         return {
           text: caseA,
           descriptor: buildDescriptor('A', 'unknown', { hasDriver, hasFragility, marginBucket }),
@@ -1173,7 +1229,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       // statement, so the PR #221 direction-honest path is not engaged here.
       const driverTail = ` because ${driverLabel} is the strongest driver.${suffix}`;
       const caseBMargin = `${winnerLabel} ${leadClause}${driverTail}`;
-      if (caseBMargin.length <= lengthCap) {
+      if (caseBMargin.length <= leadCap) {
         return {
           text: caseBMargin,
           descriptor: buildDescriptor('B', 'unknown', { hasDriver, hasFragility, marginBucket }),
@@ -1191,7 +1247,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       // No driver, no fragility, but a margin is available — surface it
       // (preferred over a bare probability number per the copy priority order).
       const caseDMargin = `${winnerLabel} ${leadClause}.${suffix}`;
-      if (caseDMargin.length <= lengthCap) {
+      if (caseDMargin.length <= leadCap) {
         return {
           text: caseDMargin,
           descriptor: buildDescriptor('D', 'unknown', { hasDriver, hasFragility, marginBucket }),
@@ -1214,7 +1270,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       const caseD =
         `${winnerLabel} ${leadClause}.` +
         ` Run the follow-up checks before treating this as final.${suffix}`;
-      if (caseD.length <= lengthCap) {
+      if (caseD.length <= leadCap) {
         return {
           text: caseD,
           descriptor: buildDescriptor('D', 'unknown', { hasDriver, hasFragility, marginBucket }),
@@ -1261,7 +1317,8 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       //                  Overclaiming a tie is the mirror-image dishonesty of
       //                  overclaiming a lead; neither is acceptable.
       const caseTied = tieHeadlineText(tieReason, winnerLabel, leadClause, suffix);
-      if (caseTied.length <= lengthCap) {
+      // Only the override shape carries `leadClause`; the margin shape does not.
+      if (caseTied.length <= (tieReason === 'override' ? leadCap : lengthCap)) {
         return {
           text: caseTied,
           descriptor: buildDescriptor('NT', 'low_margin', { hasDriver, hasFragility, marginBucket }),
@@ -1271,7 +1328,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       // 1pp < margin < 5pp: a small but real lead — state it, flag closeness.
       const caseClose =
         `${winnerLabel} ${leadClause}, but the options are close.${suffix}`;
-      if (caseClose.length <= lengthCap) {
+      if (caseClose.length <= leadCap) {
         return {
           text: caseClose,
           descriptor: buildDescriptor('NT', 'low_margin', { hasDriver, hasFragility, marginBucket }),
@@ -1324,7 +1381,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     const marginRaw = winnerProbability - winner.runnerUpProb;
     if (marginRaw > 0) {
       const caseTied = tieHeadlineText(tieReason, winnerLabel, leadClause, suffix);
-      if (caseTied.length <= lengthCap) {
+      if (caseTied.length <= leadCap) {
         return {
           text: caseTied,
           descriptor: buildDescriptor('NT', 'low_margin', { hasDriver, hasFragility, marginBucket }),
@@ -1405,7 +1462,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       // Prefer the margin-bearing shape (Case A grammar); shed the margin under
       // the length cap (Case C grammar) before giving up to Case E.
       const scWithMargin = `${winnerLabel} ${leadClause}${cautionTail}`;
-      if (marginText !== null && scWithMargin.length <= lengthCap) {
+      if (marginText !== null && scWithMargin.length <= leadCap) {
         return {
           text: scWithMargin,
           descriptor: buildDescriptor('SC', 'soft_confidence', { hasDriver, hasFragility, marginBucket }),
@@ -2325,6 +2382,11 @@ const NOT_ROBUST_RE_SRC = NOT_ROBUST_SENTENCES.map(escapeForRegex).join('|');
 const ELIMINATED_RE_SRC =
   ' \\d{1,3} options are effectively eliminated \\(each scored highest in less than 1% of runs\\)\\.';
 const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
+// The untestable-goal sentence rides FIRST of the tails, mirroring `suffix` in
+// computeHeadline. It is a headline PREFIX family (before the status suffix)
+// and rides only on a composed headline, never on the locked template, so it
+// is not exported and not registered on the template branch.
+const GOAL_UNTESTED_RE_SRC = escapeForRegex(GOAL_UNTESTED_DISCLOSURE);
 // D-ask-1 (2.11 P0-1): the scaffold disclosure composes LAST — after every
 // narration tail and status suffix — mirroring the handler's
 // `summary + buildScaffoldDisclosureSuffix(...)` append order.
@@ -2340,7 +2402,7 @@ const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${
 // intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}`
 // in the run_analysis handler.
-const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?(?:${ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC})?(?:${INFERRED_VALUE_DISCLOSURE_RE_SRC})?`;
+const TAIL_PATTERN = `(?:${GOAL_UNTESTED_RE_SRC})?(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?(?:${ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC})?(?:${INFERRED_VALUE_DISCLOSURE_RE_SRC})?`;
 
 /** One disclosure family admitted on the locked-template (withheld) branch. */
 export interface TemplateSuffixDisclosureGrammar {
@@ -2599,7 +2661,16 @@ const CAUTION_REASON_PATTERN =
 // DERIVED from the emitter's own opening, so the grammar cannot drift from the
 // sentence it admits — the failure mode is silent (a rejected headline becomes
 // the locked template, with no error anywhere).
-const LEAD_CLAUSE_RE_SRC = `${LEAD_CLAUSE_OPENING} \\d{1,3}% of runs of this model`;
+//
+// ⛔ TWO ALTERNATIVES, EACH BOUND TO THE UNTESTABLE-GOAL SENTENCE. The goal-
+// framed clause is admitted only when that sentence is ABSENT (a headline that
+// claims the goal and then says the goal could not be tested contradicts
+// itself), and the withdrawn clause only when it is PRESENT (the user is owed
+// the reason the goal frame is gone). The builder emits exactly these two
+// shapes, so the allowlist admits exactly these two.
+const LEAD_CLAUSE_RE_SRC =
+  `(?:${LEAD_CLAUSE_OPENING} \\d{1,3}% of runs of this model(?!.*${GOAL_UNTESTED_RE_SRC})` +
+  `|${UNTESTED_GOAL_LEAD_CLAUSE_OPENING} \\d{1,3}% of runs of this model(?=.*${GOAL_UNTESTED_RE_SRC}))`;
 
 const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   // Case A: winner + margin + provisional caution naming the fragile reason.
