@@ -24,12 +24,13 @@ const factor = (label: string, provenance = 'inferred') => ({
 });
 const link = (from: string, to: string) => ({ from, to, direction: 'positive', provenance: 'inferred' });
 
+type Bound = { metric: string; operator: string; value: number; unit?: string; provenance: string };
 /** `marginAs`: 'outcome' = the limit's metric is a node (control); 'risk' = drafted as a breach risk (draw 8). */
-function candidate(marginAs: 'outcome' | 'risk', constraintProvenance = 'explicit') {
+function candidate(marginAs: 'outcome' | 'risk', constraintProvenance = 'explicit', bounds?: Bound[]) {
   const margin = marginAs === 'outcome' ? 'Net margin' : 'Net-margin breach';
   return {
     goal: { metric: 'Revenue growth', operator: '>', target_stated: false, value: null, unit: '%', horizon_months: null, provenance: 'explicit' },
-    constraints: [{ metric: 'Net margin', operator: '>=', value: 15, unit: '%', provenance: constraintProvenance }],
+    constraints: bounds ?? [{ metric: 'Net margin', operator: '>=', value: 15, unit: '%', provenance: constraintProvenance }],
     options: [
       { label: 'Life sciences specialism', provenance: 'explicit', changes: ['Life sciences focus'], interventions: [], is_status_quo: false },
       { label: 'Contract rate push', provenance: 'explicit', changes: ['Contract bill rate'], interventions: [], is_status_quo: false },
@@ -76,6 +77,26 @@ describe('a stated limit that cannot be attached is said, naming the limit', () 
     expect(lines[0]).toContain('Your limit');
     expect(lines[0]).toContain('Net margin >= 15%');
     expect(lines[0]).toMatch(/cannot check it/);
+  });
+
+  it('TWO bounds on one unattached metric: each is said once, with ITS OWN bound and ITS OWN author (pre-review 5828829492)', async () => {
+    const { r } = await run(candidate('risk', 'explicit', [
+      { metric: 'Net margin', operator: '>=', value: 15, unit: '%', provenance: 'explicit' },
+      { metric: 'Net margin', operator: '<=', value: 30, unit: '%', provenance: 'ai_proposed' },
+    ]));
+    expect(r.goal_constraints_carried, 'PRECONDITION: both withheld').toBe(0);
+    const lines = said(r).concat(((r.not_represented as string[]) ?? []).filter((s) => /Net margin <= 30%/.test(s)));
+    const uniq = [...new Set(lines)];
+    expect(uniq, 'one sentence per bound, no duplicate').toHaveLength(2);
+    expect(uniq.filter((s) => s.includes('Your limit "Net margin >= 15%"'))).toHaveLength(1);
+    expect(uniq.filter((s) => s.includes('The limit Olumi proposed ("Net margin <= 30%")'))).toHaveLength(1);
+    expect(((r.not_represented as string[]) ?? []).filter((s) => /Net margin/.test(s)), 'no repeated sentence').toHaveLength(2);
+  });
+
+  it('the SAME bound drafted twice is said once', async () => {
+    const b = { metric: 'Net margin', operator: '>=', value: 15, unit: '%', provenance: 'explicit' };
+    const { r } = await run(candidate('risk', 'explicit', [b, { ...b }]));
+    expect(((r.not_represented as string[]) ?? []).filter((s) => /Net margin/.test(s))).toHaveLength(1);
   });
 
   it('a limit Olumi proposed (not the user) is said as Olumi\'s, never as "your limit"', async () => {

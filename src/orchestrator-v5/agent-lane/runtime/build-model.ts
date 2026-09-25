@@ -375,17 +375,25 @@ export interface DemotedProvenance { readonly option: string; readonly factor: s
  * count, not a sentence. Named here from the candidate's own words, so the Agent can tell the user
  * exactly which limit the analysis will not check. No remedy is offered: the withheld limit is not kept.
  */
-function unattachedLimitLines(model: CandidateModel, loss: readonly { readonly field_path: string; readonly before?: unknown; readonly reason?: string }[]): string[] {
-  const unattached = loss.filter((l) => /^goal_constraints\[.*\]\.node_id$/.test(l.field_path));
-  return unattached.map((l) => {
-    const metric = String(l.before ?? '');
-    const c = (model.constraints ?? []).find((k) => k.metric === metric);
-    const limit = c !== undefined ? `${c.metric} ${c.operator} ${c.value}${c.unit ?? ''}` : metric;
+function unattachedLimitLines(model: CandidateModel, loss: readonly { readonly field_path: string; readonly before?: unknown }[]): string[] {
+  // Admission withholds BY METRIC (`admit-constraint.ts` resolves `c.metric` to a node, or not), so every
+  // bound on an unattached metric shares that fate. Iterate the BOUNDS, not the loss entries: a loss entry
+  // carries only the metric, and mapping it back by first match repeats one bound and hides the rest, with
+  // the wrong author (pre-review 5828829492: ">= 15%" said twice, Olumi's "<= 30%" never said, and called the user's).
+  const unattached = new Set(loss.filter((l) => /^goal_constraints\[.*\]\.node_id$/.test(l.field_path)).map((l) => String(l.before ?? '')));
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const c of model.constraints ?? []) {
+    if (!unattached.has(c.metric)) continue;
+    const limit = `${c.metric} ${c.operator} ${c.value}${c.unit ?? ''}`;
     // The same rule as `admit-constraint.ts` `isUserAuthored`: only a bound the user stated is called theirs.
-    const users = c !== undefined ? c.provenance === 'explicit' : (l.reason ?? '').startsWith('A limit you stated');
-    const which = users ? `Your limit "${limit}"` : `The limit Olumi proposed ("${limit}")`;
-    return `${which} is not in the model: no part of the model is "${metric}", so the analysis cannot check it.`;
-  });
+    const users = c.provenance === 'explicit';
+    const key = `${users ? 'user' : 'olumi'}\u0000${limit}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push(`${users ? `Your limit "${limit}"` : `The limit Olumi proposed ("${limit}")`} is not in the model: no part of the model is "${c.metric}", so the analysis cannot check it.`);
+  }
+  return lines;
 }
 /** The user-facing sentence for an addition kept with no total: what is missing, and how to supply it. */
 function sayAdditionWithoutTotal(a: AdditionWithoutTotal): string {
