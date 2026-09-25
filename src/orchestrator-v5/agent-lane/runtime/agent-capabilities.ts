@@ -160,6 +160,20 @@ function ownCommittedNative(res: { status: number; json: Record<string, unknown>
   return undefined;
 }
 
+/**
+ * The level THIS request's own committed `option_intervention_edit` stored for (option, factor), from
+ * the committed post-state its OWN response carries (`draft_graph`; `system-events/dispatch.ts`), or
+ * `undefined` when the response carries none.
+ */
+function committedLevelOf(json: Record<string, unknown>, optionId: string, factorId: string): number | undefined {
+  const nodes = ((json.draft_graph ?? {}) as { nodes?: unknown }).nodes;
+  if (!Array.isArray(nodes)) return undefined;
+  const option = nodes.find((n) => (n as { id?: unknown } | null)?.id === optionId) as { interventions?: Record<string, unknown> } | undefined;
+  const iv = option?.interventions?.[factorId];
+  const value = typeof iv === 'number' ? iv : (iv as { value?: unknown } | undefined)?.value;
+  return typeof value === 'number' ? value : undefined;
+}
+
 /** Marks a compound starting point, so a newer one can replace it before approval. */
 const STARTING_POINT_BASIS = 'a starting point \u2014 values and what each option sets \u2014 for the user to adopt or correct in one approval';
 
@@ -1875,6 +1889,8 @@ export function createAgentCapabilities(
         let baseHash = rebased?.graph_hash ?? before.graph_hash;
         /** The levels THIS approval's own writes committed — see the read-back below. */
         const ownLevelWrite = new Set<string>();
+        /** The level each own write committed: from its OWN response's committed post-state when present, else what it sent. */
+        const ownLevel = new Map<string, number>();
         for (let i = 0; i < ops.length; i += 1) {
           const o = ops[i];
           const [optionId, factorId] = o.path.split('::');
@@ -1922,12 +1938,21 @@ export function createAgentCapabilities(
           }
           baseHash = committedHash;
           ownLevelWrite.add(o.path);
+          ownLevel.set(o.path, committedLevelOf(r.json, optionId!, factorId!) ?? v);
           // A receipt is reported only beside its own committed write.
           if (rc.summary !== null) receipts.push(rc.summary);
         }
 
         const afterSet = await readGraph(ctx.scenario_id);
         const byId = new Map((afterSet?.nodes ?? []).map((n) => [n.id, n]));
+        /**
+         * ⛔ SAVED BY US, THEN CHANGED BY SOMEONE ELSE (Codex challenge on #1851, 5825938003): another writer
+         * committed the SAME pair after our write and before this read, so the read shows THEIR level. Detected
+         * only when the model moved past OUR last committed revision (`baseHash`), so the handler's own
+         * normalisation is never mistaken for another writer.
+         */
+        const movedPastUs = afterSet !== null && typeof afterSet.graph_hash === 'string' && afterSet.graph_hash !== baseHash;
+        const levelsChangedSince: { option: string; factor: string; saved: number; now: number }[] = [];
         for (const o of ops) {
           const [optionId, factorId] = o.path.split('::');
           const option = byId.get(optionId);
@@ -1945,6 +1970,13 @@ export function createAgentCapabilities(
             // its own `graph_hash`, so `ownLevelWrite` is decided from our own response.
             recorded: ownLevelWrite.has(o.path) && typeof recorded === 'number' ? recorded : null,
           });
+          const mine = ownLevel.get(o.path);
+          const row = applied[applied.length - 1]!;
+          if (movedPastUs && ownLevelWrite.has(o.path) && mine !== undefined && typeof recorded === 'number'
+            && Math.abs(recorded - mine) > 1e-9 * Math.max(1, Math.abs(mine))) {
+            row.recorded = mine;
+            levelsChangedSince.push({ option: row.option, factor: row.factor, saved: mine, now: recorded });
+          }
         }
         const landed = applied.filter((a) => a.recorded !== null);
         if (landed.length === 0) {
@@ -1967,9 +1999,18 @@ export function createAgentCapabilities(
           revision_before: before.graph_hash,
           revision_after: afterSet?.graph_hash ?? before.graph_hash,
           ...(failures.length > 0 ? { failures } : {}),
+          ...(levelsChangedSince.length > 0 ? { changed_since_by_another_writer: levelsChangedSince } : {}),
           ...(framedHere.length > 0 ? { ranges_added_for_analysis: framedHere } : {}),
           not_represented:
-            'What each option does is now recorded from what the user said, not measured. The model ' +
+            (landed.length < applied.length
+              ? `Only some levels were recorded by this approval; ${applied.filter((a) => a.recorded === null).map((a) => `${a.option} \u2192 ${a.factor}`).join(', ')} ${applied.length - landed.length === 1 ? 'was' : 'were'} NOT. `
+              : '') +
+            (levelsChangedSince.length > 0
+              ? levelsChangedSince.map((x) => `${x.option} \u2192 ${x.factor} was saved by this approval as ${x.saved}, but someone else has since changed it to ${x.now}`).join('; ') +
+                ' \u2014 describe it from the model as it now stands, not as this approval\u2019s level. '
+              : '') +
+            (landed.length < applied.length ? 'The levels that were recorded' : 'What each option does is now recorded') +
+            ' from what the user said, not measured. The model ' +
             'stores each level against the factor\u2019s stated range, so quote the user\u2019s own number back ' +
             'to them, not the normalised one.' +
             (framedHere.length > 0

@@ -177,6 +177,53 @@ describe('the value is read against the factor’s declared range', () => {
 });
 
 describe('authorise_change records the STORED levels', () => {
+  /**
+   * ⛔ Codex challenge on #1851 (5825938003), its exact CAS-shaped sequence: our first level commits at h1;
+   * a collaborator commits the SAME pair at h2; our second level (base h1) is refused 409; the read shows
+   * THEIR level. The row keeps OUR level, theirs is reported as changed since, and the note says both.
+   */
+  it('RED: a collaborator’s level on the same pair after our write is never recorded as ours', async () => {
+    const p = fakeProduct();
+    let interleaved = false;
+    const d: InternalDispatch = async (path, body) => {
+      const b = (body ?? {}) as { kind?: string; event?: { kind?: string; option_id?: string; factor_id?: string } };
+      if (!interleaved && path === '/orchestrate/v2/turn' && b.kind === 'system_event'
+        && b.event?.option_id === 'phase_increase' && b.event.factor_id === 'feature_value') {
+        const own = await p.d(path, body);
+        interleaved = true;
+        const foreign = await p.d(path, { kind: 'system_event', turn_id: 'other-writer', event: {
+          kind: 'option_intervention_edit', option_id: 'phase_increase', factor_id: 'feature_value', value: 0.2, base_graph_hash: 'h1',
+        } });
+        expect(foreign.status, 'PRECONDITION: the other writer really committed on our pair').toBe(200);
+        return own;
+      }
+      return p.d(path, body);
+    };
+    const caps = createAgentCapabilities(d, new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, ASK);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(p.read().find((n) => n.id === 'phase_increase')?.interventions?.feature_value, 'PRECONDITION: theirs is what the model holds').toEqual({ value: 0.2 });
+    expect(applied).toMatchObject({ recorded_count: 1, requested_count: 2, failures: [{ path: 'phase_increase::pro_plan_price', detail: 'http 409' }] });
+    expect(applied.interventions).toEqual([
+      { option: 'Phase Pro price increase', factor: 'Pro feature value', requested: 0.8, recorded: 0.8 },
+      { option: 'Phase Pro price increase', factor: 'Pro plan price', requested: 54, recorded: null },
+    ]);
+    expect(applied.changed_since_by_another_writer).toEqual([{ option: 'Phase Pro price increase', factor: 'Pro feature value', saved: 0.8, now: 0.2 }]);
+    const said = String(applied.not_represented);
+    expect(said).toContain('Phase Pro price increase \u2192 Pro plan price was NOT');
+    expect(said).toContain('Phase Pro price increase \u2192 Pro feature value was saved by this approval as 0.8, but someone else has since changed it to 0.2');
+    expect(said).not.toContain('What each option does is now recorded');
+  });
+
+  it('CONTROL: with no other writer the same approval reports nothing changed since', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, ASK);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+    expect(String(applied.not_represented)).toContain('What each option does is now recorded');
+  });
+
   it('applies every level although each write moves the graph hash', async () => {
     const p = fakeProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
