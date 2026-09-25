@@ -26,6 +26,7 @@ import { describe, it, expect } from 'vitest';
 import type { SystemEventTurnPayload } from '@talchain/schemas/boundary';
 import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { DEFAULT_EXISTS_PROBABILITY, DEFAULT_STD } from '@talchain/schemas';
+import { STRUCTURAL_EDGE_DEFAULTS } from '../../../orchestrator/context/constants.js';
 
 import {
   applyStructuralAddEdge,
@@ -331,5 +332,63 @@ describe('the receipt', () => {
     const result = (r.handlerFacts[0] as { result: Record<string, unknown> }).result
     expect(result.safe_summary).toContain('Customer churn')
     expect(result.safe_summary).toContain('Grow revenue')
+  })
+})
+
+/**
+ * ⭐ A TOPOLOGY LINK GETS THE TOPOLOGY CONSTANTS (Canvas "+ Add option", #63
+ * 5822573728). decision→option and option→factor are graph topology, not causal
+ * beliefs: they are written with STRUCTURAL_EDGE_DEFAULTS, by reference, whatever
+ * magnitude or direction the client sent. Every other pair keeps the causal
+ * defaults (block B above is the opposite control, unchanged).
+ */
+describe('C — a topology link is written as topology', () => {
+  function withDecisionAndNewOption(): Record<string, unknown> {
+    const g = persistedGraph() as { nodes: unknown[] }
+    g.nodes.push({ id: 'dec_main', kind: 'decision', label: 'When to launch' })
+    g.nodes.push({ id: 'opt_wait', kind: 'option', label: 'Wait a quarter' })
+    return g as Record<string, unknown>
+  }
+
+  it('decision → option: STRUCTURAL_EDGE_DEFAULTS, by reference', () => {
+    const g = withDecisionAndNewOption()
+    const edge = landedEdge(
+      run({ from: 'dec_main', to: 'opt_wait', magnitude: 1, effect_direction: 'positive', base_graph_hash: baseHashOf(g) }, g),
+      'dec_main',
+      'opt_wait',
+    )
+    expect(edge.exists_probability).toBe(STRUCTURAL_EDGE_DEFAULTS.exists_probability)
+    expect(edge.strength.mean).toBe(STRUCTURAL_EDGE_DEFAULTS.strength.mean)
+    expect(edge.strength.std).toBe(STRUCTURAL_EDGE_DEFAULTS.strength.std)
+    expect(edge.effect_direction).toBe(STRUCTURAL_EDGE_DEFAULTS.effect_direction)
+  })
+
+  it('option → factor: the same, even when the client sent a negative 0.7', () => {
+    const r = run({ from: 'opt_launch', to: 'fac_churn' })
+    // The dispatcher's post-commit check compares the committed edge to this
+    // value, so it must be the WRITTEN mean, not the client's -0.7.
+    if (r.kind === 'mutated') expect(r.signedMean).toBe(STRUCTURAL_EDGE_DEFAULTS.strength.mean)
+    const edge = landedEdge(r, 'opt_launch', 'fac_churn')
+    expect(edge.exists_probability).toBe(STRUCTURAL_EDGE_DEFAULTS.exists_probability)
+    expect(edge.strength.mean).toBe(STRUCTURAL_EDGE_DEFAULTS.strength.mean)
+    expect(edge.strength.std).toBe(STRUCTURAL_EDGE_DEFAULTS.strength.std)
+    expect(edge.effect_direction).toBe('positive')
+  })
+
+  it('OPPOSITE CONTROL — a factor → goal link (causal) keeps the causal defaults and the user\'s sign', () => {
+    const edge = landedEdge(run(), 'fac_churn', 'goal_revenue')
+    expect(edge.exists_probability).toBe(DEFAULT_EXISTS_PROBABILITY)
+    expect(edge.strength.std).toBe(DEFAULT_STD)
+    expect(edge.strength.mean).toBeLessThan(0)
+  })
+
+  it('still claims the user as the source of the link', () => {
+    const g = withDecisionAndNewOption()
+    const edge = landedEdge(
+      run({ from: 'dec_main', to: 'opt_wait', magnitude: 1, effect_direction: 'positive', base_graph_hash: baseHashOf(g) }, g),
+      'dec_main',
+      'opt_wait',
+    ) as { provenance?: { source?: string } }
+    expect(edge.provenance?.source).toBe('user_specified')
   })
 })
