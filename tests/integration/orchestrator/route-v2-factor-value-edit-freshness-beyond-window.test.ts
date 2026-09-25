@@ -432,11 +432,11 @@ describe('POST /orchestrate/v2/turn — factor_value_edit freshness beyond the r
     // (`complete | capped`); otherwise the hot window, with `factsReadOk` taken
     // from WHICHEVER source was chosen.
 
-    it('durable read FAILS, hot window healthy but holding no run — the rule falls back to the window: none', async () => {
-      // ⚠ PINNED AS THE ROUTE'S RULE YIELDS IT, not as an endorsement. With the
-      // durable set degraded the route keeps "the window behaviour it always
-      // had", and a healthy window with no run in it derives `none`. That is the
-      // same answer the edit reply gave before this change on this input.
+    it('durable read FAILS, hot window healthy but holding no run — unknown / derivation_failed, never none', async () => {
+      // An incomplete 20-row window cannot prove that no run exists: this very
+      // fixture seeds an older successful run behind it (Codex pre-review
+      // finding 5824695259). Absence is authoritative only in a COMPLETE durable
+      // record — see 'window read FAILS, durable set complete and EMPTY' below.
       storeState.durableFails = true;
       storeState.rows = [...newerRows(SESSION_READ_WINDOW_DEFAULT), runRow(PRE_EDIT_HASH)];
 
@@ -444,9 +444,9 @@ describe('POST /orchestrate/v2/turn — factor_value_edit freshness beyond the r
 
       expect(readScenarioRunAnalysisFactsForSpy, 'premise: the durable port was consulted and failed').toHaveBeenCalled();
       const derivation = dispatchDerivation();
-      expect(derivation.freshness).toBe('none');
-      expect(derivation.reason).toBe('no_successful_run_analysis_fact');
-      expect(body.analysis_ready?.freshness).toBe('none');
+      expect(derivation.freshness).toBe('unknown');
+      expect(derivation.reason).toBe('derivation_failed');
+      expect(body.analysis_ready?.freshness).not.toBe('none');
     });
 
     it('durable read FAILS, run still inside the window — the window fallback keeps its stale verdict', async () => {
