@@ -61,7 +61,7 @@ import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compo
 import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
 import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
-import { enforceLeadingOptionClaimsAtWire } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
+import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runTurnCoaching, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import {
@@ -335,7 +335,7 @@ const AGENT_INSTRUCTIONS = [
    * of three carried `interventions: null`. An option that sets nothing cannot
    * be compared with one that does.
    */
-  'get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model \u2014 do not wait for the analysis to refuse \u2014 ask what that option would actually change, and record the answer with propose_option_interventions. An option in `status_quo_held` is not in that list and is never given levels: say, in one short clause, that carrying on as now holds today\u2019s values, and that the user can say what would change if that is wrong. If they do, record exactly what they said with propose_option_interventions and user_stated: true on that level.',
+  'get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model \u2014 do not wait for the analysis to refuse \u2014 ask what that option would actually change, and record the answer with propose_option_interventions, with user_stated: true on each level the user gave. An option in `status_quo_held` is not in that list and is never given levels: say, in one short clause, that carrying on as now holds today\u2019s values, and that the user can say what would change if that is wrong. If they do, record exactly what they said with propose_option_interventions and user_stated: true on that level.',
   /*
    * ⛔ ANALYSIS IS MODEL-RELATIVE, NEVER A RECOMMENDATION (Paul, 23 Sep: "Olumi is a
    * reasoning-enhancement system, not an answer or decision engine"). Measured on
@@ -430,6 +430,17 @@ export const RUN_OFFER_CHIP = {
 export function admitsRunOffer(analysisReady: unknown): boolean {
   const ar = (analysisReady ?? {}) as { may_run?: unknown; status?: unknown };
   return typeof ar.may_run === 'boolean' ? ar.may_run : ar.status === 'ready';
+}
+
+/**
+ * A KNOWN refusal to run: the readiness was read and says no (`may_run: false`, or, when `may_run` is absent,
+ * a stated status other than `ready`). NOT the negation of {@link admitsRunOffer}: a failed or empty readback is
+ * unknown, and an unknown state is never presented as a refusal (#1885 pre-review, #69 5826878223).
+ */
+export function knownNotRunnable(analysisReady: unknown): boolean {
+  if (analysisReady === null || typeof analysisReady !== 'object') return false;
+  const ar = analysisReady as { may_run?: unknown; status?: unknown };
+  return typeof ar.may_run === 'boolean' ? ar.may_run === false : typeof ar.status === 'string' && ar.status !== 'ready';
 }
 
 /**
@@ -1563,11 +1574,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // proposed the missing values this turn, otherwise the next-step chip.
     const firstAnalysisBlocked = fa !== undefined && !fa.ran && (fa.reason === 'not_admissible' || fa.reason === 'refused')
       && approvals.length === 0;
+    /**
+     * ⛔ AN APPROVAL THAT LEAVES THE MODEL UN-RUNNABLE STILL OFFERS A NEXT STEP (P0, 25 Sep; RC #69 5826744045 §2).
+     * Served `21e3b38`, hiring: "Use as starting assumptions" applied (`authorise_change` mutated), the model
+     * stayed `blocked` with `blockers: null` and `may_run: false`, and the reply was "Saved." with NO chip: the
+     * user had nothing to press. The Run offer above correctly declines, so the next-step chip stands in. The
+     * Run turn that followed named the gap and offered this same chip. Not when another approval is waiting,
+     * and only on a KNOWN refusal: a failed readback is unknown and offers nothing (see `knownNotRunnable`).
+     */
+    const approvalLeftBlocked = result.tool_calls.some((c) => c.name === 'authorise_change' && c.mutated === true)
+      && knownNotRunnable(analysisReady)
+      && approvals.length === 0 && carriedApproval.length === 0;
     const offeredNow: OfferedAction[] = [
       ...approvals,
       ...carriedApproval,
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
-      ...(runBlocked || firstAnalysisBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
+      ...(runBlocked || firstAnalysisBlocked || approvalLeftBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
       ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
     ];
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
@@ -1665,6 +1687,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * analysis, `leader_claim.permitted` from the SAME readback is the entitlement, conjoined inside
      * the gate with the admission's `permitted_analysis_mode`. PERMIT-WINS: a permitted turn is
      * returned by reference, byte-identical.
+     *
+     * ⛔ FAIL-CLOSED ON A WITHHELD TURN (AI Quality corpus #63 5823028488; Codex 5823210765): the
+     * shared gate needs the EXACT option label and caught 1 of 13 real paraphrased leaks. So on a
+     * withheld turn every sentence that ranks options is dropped first, whatever it calls the
+     * option, and one deterministic no-leader sentence is appended; then the shared gate runs on
+     * what remains. See `agent-lane/withheld-leader-fail-closed.ts`.
      */
     const analysisBearing = analysisResult !== undefined
       || fa !== undefined
@@ -1672,7 +1700,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let leaderClaimEnforced = false;
     if (analysisBearing) {
       const claim = (analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
-      const enforced = enforceLeadingOptionClaimsAtWire(wireBody, {
+      const enforced = enforceAgentLaneLeaderClaimsAtWire(wireBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1',
         mayNameLeadingOption: claim?.permitted === true,

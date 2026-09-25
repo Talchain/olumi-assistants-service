@@ -35,6 +35,7 @@ import { dispatchChipClickRunAnalysis, type ChipClickAutoRunTrigger } from '../h
 import { AGENT_RUN_ANALYSIS_CHIP_ID } from '../handlers/agent-chip-ids.js';
 import { RUN_PROVENANCE_ENRICHMENT_KEY } from '../context/run-initiator.js';
 import { permittedAnalysisModeFromAnalysisReady } from '../admission/analysis-admission.js';
+import { blockPresumesLeadingOption } from '../compose.js';
 
 /**
  * What must remain of the turn budget for a first analysis to START: a worst-case run (~20 s: PLoT
@@ -262,14 +263,23 @@ export function bindRunBlocksToReadback(
   readback: { readonly graphHash: string | undefined; readonly analysisState: unknown; readonly analysisResult: unknown },
 ): unknown[] {
   if (readback.graphHash === undefined || readback.analysisResult === undefined) return [];
-  const state = readback.analysisState as { run_state?: { kind?: unknown }; usable_for_chips?: unknown } | undefined;
+  const state = readback.analysisState as { run_state?: { kind?: unknown }; usable_for_chips?: unknown; leader_claim?: { permitted?: unknown } } | undefined;
   if (state?.run_state?.kind !== 'complete_current') return [];
   const chipsUsable = state.usable_for_chips === true;
+  /**
+   * ⛔ A CARD THAT PRESUMES A LEADER IS SHOWN ONLY WHEN A LEADER MAY BE NAMED (R&C served witness
+   * `bw-580d135b-7f9a16d-noflag3`, #69 5827198323): on a near-tie Run (`leader_claim.permitted:false`,
+   * `options_do_not_separate`) a `strengthen` card — "The leading option is ahead, but not by a wide margin…" —
+   * reached the user beside a reply saying the options are effectively tied. The Conventional route drops these
+   * whole on a withheld turn (compose's filter); this reads the SAME definition, so the routes cannot disagree.
+   */
+  const leaderMayBeNamed = state.leader_claim?.permitted === true;
   return runBlocks.filter((b) => {
     const block = b as { type?: unknown; graph_hash_at_generation?: unknown; action_intent?: unknown; action_label?: unknown; action_prompt?: unknown } | null;
     if (block === null || typeof block !== 'object' || typeof block.type !== 'string') return false;
     if (!COACHING_BLOCK_TYPES.has(block.type)) return false;
     if (block.graph_hash_at_generation !== readback.graphHash) return false;
+    if (!leaderMayBeNamed && blockPresumesLeadingOption(block as never)) return false;
     const actionBearing = block.action_intent !== undefined || block.action_label !== undefined || block.action_prompt !== undefined;
     return !actionBearing || chipsUsable;
   });
