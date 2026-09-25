@@ -174,34 +174,21 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // So the strict member, the root superRefine and the intent/direction
     // vocabularies this suite exercises are unchanged across the bump.
     //
-    // 0.55.0 → 0.59.0 (`goal_target_edit`, the structured success-target edit;
-    // the jump carries the released 0.56.0 and 0.58.0 and skips 0.57.0, which
-    // is claimed by open schemas PRs and unreleased). ⚠ THE 0.59.0 BYTES ARE A
-    // LOCAL PRE-PUBLISH PACK (see vendor/README.md), so this entry must be
-    // RE-DERIVED against the published tarball when it is swapped in. RE-DERIVED
-    // THE SAME WAY rather than inherited: the 0.55.0 tarball (sha256 `ea61d924…`,
-    // from `git show origin/staging:vendor/…`) and the 0.59.0 tarball (sha256
-    // `fcc40d5c…`) were unpacked and every `dist` file mentioning
-    // `edge_strength_edit` was compared. Log:
-    // reader-diff-059/cee-schemas-055-059-reader-diff.log.
-    //
-    // The FILE SET is identical (the same five files). Measured symmetrically,
-    // line numbers stripped from BOTH sides, LOST and NEW in the same run:
-    //   turn-payload.d.ts  19 → 19 lines, ZERO lost, ZERO new
-    //   turn-payload.js    11 → 11 lines, ZERO lost, ZERO new
-    //   enums.js            3 →  3 lines, ZERO lost, ZERO new
-    //   fixtures/index.js   3 →  3 lines, ZERO lost, ZERO new
-    //   enums.d.ts          1 →  1, and the one line DIFFERS — the
-    //                      `SystemEventKind` literal. Proven APPEND-ONLY by
-    //                      STRING EQUALITY: 0.55's literal with
-    //                      `, "goal_target_edit"` inserted after
-    //                      `"finding_dissent"` is EQUAL to 0.59's.
-    // Controls, same shape as the 0.55.0 entry:
-    //   POSITIVE — `package.json` DOES differ between the two tarballs.
-    //   NEGATIVE — the same construction inserting `goal_target_edit` after
-    //     `"feedback"` does NOT equal 0.59's literal.
-    // The `HandlerFact` `fact_type` literal set is 14 → 14, none added, none
-    // removed: the new member reuses the existing `add_constraint` fact.
+    // 0.58.0 → 0.59.0 (`goal_target_edit`, the structured success-target edit),
+    // RE-DERIVED on 25 Sep against the PUBLISHED registry tarball (sha1
+    // `4c22e40f…`, gitHead `195b64c4`, the schemas #67 merge), not the earlier
+    // local pack. Both published tarballs unpacked; every `dist` file that
+    // mentions `edge_strength_edit` compared, leading whitespace stripped, LOST
+    // and NEW in the same run:
+    //   the FILE SET is identical (the same five files);
+    //   enums.js 3 → 3, turn-payload.d.ts 19 → 19, turn-payload.js 11 → 11,
+    //   fixtures/index.js 3 → 3: ZERO lost, ZERO new;
+    //   enums.d.ts 1 → 1, and the one line DIFFERS — the `SystemEventKind`
+    //   literal. Proven APPEND-ONLY by STRING EQUALITY: 0.58's literal with
+    //   `, "goal_target_edit"` inserted after `"finding_dissent"` EQUALS 0.59's.
+    // Controls: POSITIVE — `package.json` differs between the tarballs, so the
+    // comparator sees a change; NEGATIVE — the same insertion after
+    // `"feedback"` (present in 0.58) does NOT equal 0.59's literal.
     expect(SCHEMA_PACKAGE_VERSION).toBe('0.59.0');
   });
 

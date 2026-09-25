@@ -116,6 +116,11 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     append: appendMock,
     readRecent: readRecentMock,
     readFactsFor: readFactsForMock,
+    // The writer's reply freshness reads the DURABLE run-fact record and the restore marker, as every
+    // system-event writer does (shared `deriveWriteReplyFreshness`). A complete, empty record is the honest
+    // "never run" — without it the read is degraded and the reply says `unknown`, not `none`.
+    readScenarioRunAnalysisFactsFor: async () => ({ facts: [], total_count: 0 }),
+    readAnalysisInvalidatedAt: async () => null,
     readMostRecentPendingActions: async () => [],
     storeDraftGraph: async () => undefined,
     loadGraph: async () => persisted,

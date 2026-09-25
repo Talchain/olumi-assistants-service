@@ -7,7 +7,31 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.58.0.tgz` ← **THE CURRENT PIN**
+### `talchain-schemas-0.59.0.tgz` ← **THE CURRENT PIN**
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
+>
+> Downloaded from GitHub Packages at
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.59.0/4c22e40f411109c3311827ef72e35ba500cd2e07`,
+> the tarball `npm publish` produced from `olumi-schemas` `main`
+> **`195b64c4c09088b3d3716b4856f3ff08fa5c25e8`** (the schemas #67 merge; the
+> registry's own `gitHead` binds that commit), 2026-09-25.
+>
+> **589,267 bytes.** Verified against the registry's published metadata:
+>
+> ```
+> npm shasum (sha1)  4c22e40f411109c3311827ef72e35ba500cd2e07   ← matches
+> integrity (sha512) sha512-XDGXpAY4ROpjqMOdOK7wE58nyPSe/CZcaMUQqvCiKjECEA+i6QLR1aABgprvDKOfGNQ1AfqDBzl3T/6IoV8jvg==   ← matches
+> sha256             5851e23ef7e597d849cfc4ebcbe5df9be89691ad4d4b5c2ccf7d01d93e6d7bf8
+> ```
+>
+> `pnpm install` wrote the same sha512 into `pnpm-lock.yaml`. **What it adds
+> relative to 0.58.0:** one new `SystemEventSchema` member, `goal_target_edit`
+> `{ goal_node_id, constraint_type, raw_value, unit, base_graph_hash }`,
+> appended last (proven append-only in
+> `tests/contract/schemas-0.42-edge-strength-edit-reader.test.ts`).
+
+### `talchain-schemas-0.58.0.tgz` (historical — no longer vendored as of 0.59.0)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
 >
