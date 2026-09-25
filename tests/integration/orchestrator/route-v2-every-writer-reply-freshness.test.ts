@@ -377,6 +377,27 @@ describe('every system-event writer states freshness from the scenario record', 
    *            (the turn path's rule, build-turn-context.ts: a false stale is the worse direction).
    * (Independent Review CHANGES_REQUIRED 5827685385 on #1892 @ 42368b66: restore → rename said fresh.)
    */
+  /**
+   * The downgrade is scoped to `fresh`: the marker can only turn a hash MATCH
+   * from fresh to stale, so a failed marker read cannot change any other verdict.
+   * CONTROL: a hash-moving write with the marker read failing still replies `stale`.
+   */
+  describe.each(['factor_value_edit', ...HASH_MOVING].map((w) => [w] as const))('%s — failed marker read, hash moved', (writer) => {
+    it('CONTROL: stays stale (only `fresh` is unverifiable without the marker)', async () => {
+      storeState.rows = [...newerRows(SESSION_READ_WINDOW_DEFAULT - 1), runRow(PRE_HASH)];
+      storeState.markerFails = true;
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: { kind: 'system_event', turn_id: randomUUID(), scenario_id: SCENARIO_ID, stage: 'analyse', event: eventFor(writer) },
+      });
+      const body = JSON.parse(res.body) as Record<string, any>;
+      expect(res.statusCode).toBe(200);
+      expect(body.graph_hash, 'premise: the write moved the analysis hash').not.toBe(PRE_HASH);
+      expect(body.analysis_ready?.freshness).toBe('stale');
+    });
+  });
+
   const ALL_WRITERS = ['factor_value_edit', ...HASH_MOVING, 'structural_rename'] as const;
   describe.each(ALL_WRITERS.map((w, i) => [w, i] as const))('%s after a restore', (writer) => {
     // Ingress requires a UUID turn id; every send here gets a fresh one.
@@ -420,15 +441,29 @@ describe('every system-event writer states freshness from the scenario record', 
       expect(body.analysis_ready?.freshness).toBe('fresh');
     });
 
-    it('CONTROL: the marker read FAILS → fails open (fresh), the write still commits', async () => {
+    it('RED: the marker read FAILS with a real post-run restore behind it → never `fresh`; unknown / derivation_failed, and the write still commits', async () => {
+      // Independent pre-review 5828334202: substituting "no restore" for an unread
+      // marker turns unknown into a positive `fresh` while the reload says `stale`.
+      const landed = await landedHash();
+      storeState.rows = [...newerRows(SESSION_READ_WINDOW_DEFAULT - 1), runRow(landed)];
+      storeState.analysisInvalidatedAt = AFTER_RUN; // the truth the failed read hides
+      storeState.markerFails = true;
+      const { status, body } = await sendTurn();
+      expect(status).toBe(200);
+      expect(appendMock, 'the write is not blocked by an observational read').toHaveBeenCalledTimes(1);
+      expect(body.graph_hash).toBe(landed);
+      expect(body.analysis_ready?.freshness, `${writer} claimed currency it could not verify`).toBe('unknown');
+      expect(body.analysis_ready?.freshness_reason).toBe('derivation_failed');
+    });
+
+    it('RED: the marker read FAILS with no marker behind it → still unknown (the reader cannot tell the two apart)', async () => {
       const landed = await landedHash();
       storeState.rows = [...newerRows(SESSION_READ_WINDOW_DEFAULT - 1), runRow(landed)];
       storeState.markerFails = true;
       const { status, body } = await sendTurn();
       expect(status).toBe(200);
       expect(appendMock).toHaveBeenCalledTimes(1);
-      expect(body.graph_hash).toBe(landed);
-      expect(body.analysis_ready?.freshness).toBe('fresh');
+      expect(body.analysis_ready?.freshness).toBe('unknown');
     });
   });
 });
