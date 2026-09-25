@@ -65,11 +65,10 @@
  *   · The 20-row `readRecent` window. Every fixture here stays well inside it,
  *     and each read asserts so; a fact pushed OUT of the window is a separate
  *     fixture with a separate defect.
- *   · The durable scenario-wide fact read (`readScenarioRunAnalysisFactsFor`)
- *     that the MESSAGE-turn path uses. Neither route exercised here reads it:
- *     the read route goes through `loadPriorFactsWithReadState`, and the
- *     system-event branch never builds a turn context. That is asserted, not
- *     assumed — see `afterEach`.
+ *   · (Changed with #1843.) The reload route now reads the durable scenario-wide
+ *     fact record (`readScenarioRunAnalysisFactsFor`) and the identified hot
+ *     window (`readFactsWithTurnFor`); both are MODELLED from `db` below. The
+ *     remaining unmodelled read is asserted untouched in `afterEach`.
  *   · A concurrent CAS conflict on the value edit. Separate fixture. The
  *     concurrent writer in P8 lands AFTER this commit, so there is no conflict
  *     for the fake to decide.
@@ -262,11 +261,33 @@ const factParseFailures: string[] = [];
  * the `noop` column (payload-side `noop`, then `false`, as fallbacks), then the
  * strict schema parse — a failure throws, it is never skipped.
  */
+/** A row's creation time: stable per row (from its insertion sequence), newest largest. */
+function rowCreatedAt(row: FakeRow): string {
+  const seq = Number(row.id.slice('row-'.length));
+  return new Date(Date.UTC(2026, 8, 24, 12, 0, 0) + seq * 1000).toISOString();
+}
+
+interface FakeIdentifiedFact {
+  readonly fact: unknown;
+  readonly fact_row_id: string;
+  readonly fact_created_at: string;
+  readonly turn_id: string;
+}
+
 function readFactsLikeTheStore(rowIds: readonly string[], handlerId?: string): unknown[] {
-  const out: unknown[] = [];
+  return readIdentifiedFactsLikeTheStore(db.rows.filter((r) => rowIds.includes(r.id)), handlerId).map((f) => f.fact);
+}
+
+/**
+ * The same strict read, with row identity — what `readFactsWithTurnFor` and
+ * `readScenarioRunAnalysisFactsFor` serve (`fact_row_id`, `fact_created_at`, the
+ * parent `turn_id`). One fact row per stored fact, stable across both reads, so
+ * the reconciler can join the hot window to the durable set.
+ */
+function readIdentifiedFactsLikeTheStore(rows: readonly FakeRow[], handlerId?: string): FakeIdentifiedFact[] {
+  const out: FakeIdentifiedFact[] = [];
   // `db.rows` is newest-first, the real read's `ORDER BY created_at DESC`.
-  for (const row of db.rows) {
-    if (!rowIds.includes(row.id)) continue;
+  for (const row of rows) {
     for (const stored of jsonb(row.handler_facts)) {
       if (handlerId !== undefined && stored.handler_id !== handlerId) continue;
       const payloadObj =
@@ -285,7 +306,7 @@ function readFactsLikeTheStore(rowIds: readonly string[], handlerId?: string): u
         factParseFailures.push(message);
         throw new SessionReadError(message, { cause: parsed.error });
       }
-      out.push(parsed.data);
+      out.push({ fact: parsed.data, fact_row_id: `${row.id}-fact-${out.length}`, fact_created_at: rowCreatedAt(row), turn_id: row.turn_id });
     }
   }
   return out;
@@ -297,28 +318,49 @@ function readFactsLikeTheStore(rowIds: readonly string[], handlerId?: string): u
  * must learn to answer from `db` rather than from a benign empty default.
  */
 const unmodelledReads = {
-  readScenarioRunAnalysisFactsFor: vi.fn(async () => ({ facts: [], total_count: 0 })),
   readNewestAnalysisFactFor: vi.fn(async () => null),
-  readFactsWithTurnFor: vi.fn(async () => []),
+};
+
+/**
+ * Since #1843 the reload route reads the scenario's DURABLE run-analysis record
+ * (`readScenarioRunAnalysisFactsFor`) and the hot window WITH row identity
+ * (`readFactsWithTurnFor`), and reconciles them. Both are modelled from `db`, with
+ * the real contract: newest-first, non-noop `run_analysis` only, exact pre-limit
+ * `total_count`, the caller's lookahead limit.
+ */
+const durableReads = {
+  readFactsWithTurnFor: async (rowIds: readonly string[], handlerId?: string) =>
+    readIdentifiedFactsLikeTheStore(db.rows.filter((r) => rowIds.includes(r.id)), handlerId) as never,
+  readScenarioRunAnalysisFactsFor: async (_scenarioId: string, limit: number) => {
+    const all = readIdentifiedFactsLikeTheStore(db.rows).filter((f) => {
+      const fact = f.fact as { fact_type?: unknown; noop?: unknown };
+      return fact.fact_type === 'run_analysis' && fact.noop !== true;
+    });
+    return {
+      facts: all.slice(0, limit).map(({ turn_id: _t, ...identified }) => identified),
+      total_count: all.length,
+    } as never;
+  },
 };
 
 let windowOverflowed = false;
 
 const store = createMockSessionStore({
   ...unmodelledReads,
+  ...durableReads,
   append: appendSpy as never,
   readRecent: async (scenarioId: string, limit?: number) => {
     const window = limit ?? SESSION_READ_WINDOW_DEFAULT;
     // Every fixture here must sit well inside the window — see the header.
     if (db.rows.length >= window) windowOverflowed = true;
-    return db.rows.slice(0, window).map((r, i) =>
+    return db.rows.slice(0, window).map((r) =>
       makeSessionTurnRow({
         id: r.id,
         scenario_id: scenarioId,
         turn_id: r.turn_id,
         turn_class: r.handler_id === null ? 'direct_answer' : 'handler',
         handler_id: r.handler_id as never,
-        created_at: new Date(Date.UTC(2026, 8, 24, 12, 0, 0) - i * 1000).toISOString(),
+        created_at: rowCreatedAt(r),
       }),
     );
   },

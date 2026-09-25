@@ -90,10 +90,12 @@ import { planNewOption, newOptionFollowUp } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
-import { structuralFacts } from '../structural-facts.js';
+import { baselineLabelledOptionId, structuralFacts } from '../structural-facts.js';
+import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
-import { buildModelFromBrief, findConstructionVersion, type CallStructuredModel } from './build-model.js';
+import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel } from './build-model.js';
+import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
@@ -136,13 +138,46 @@ interface GraphRead {
     interventions?: Record<string, unknown>;
     changes?: unknown;
   }[];
-  readonly edges: { from: string; to: string }[];
+  /** `origin` is read only to recognise a repair-authored edge (`isRepairAuthoredOptionFactorEdge`). */
+  readonly edges: { from: string; to: string; origin?: unknown }[];
   readonly analysis_state: unknown;
   /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
   readonly raw: Record<string, unknown>;
 }
 
 const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$/, '').trim();
+
+/**
+ * ⛔ A HELD STATUS QUO GETS NO LEVELS (Paul's ruling; admission, MG #1838).
+ *
+ * An option that carries on as now is connected to the factors the other options
+ * act on by repair edges with NO level: each factor stays at its starting value.
+ * Readiness already excludes those edges from its level mapping. A level written
+ * there is harmful, not harmless (RC): a later correction to the factor's starting
+ * value would leave the status quo at the OLD figure, so "Maintain current
+ * staffing" would silently model cutting staff.
+ *
+ * Returns `${optionId}::${factorId}` for every pair whose option→factor edges are
+ * ALL repair-authored — the same test readiness applies (a pair with any ordinary
+ * edge is mapped), through the ONE authority, never a copy of it.
+ */
+function heldStatusQuoPairs(g: Pick<GraphRead, 'nodes' | 'edges'>): ReadonlySet<string> {
+  // The LABEL test is per option (`baselineLabelledOptionId`: exactly one option reads
+  // as carrying on as now — review of #1849, blocker 2). The REPAIR test is per PAIR,
+  // the granularity readiness uses (`analysis-ready.ts:780` skips each repair edge on
+  // its own): a status quo the user has since linked to one more factor keeps its
+  // other pairs held (review of #1849 at 1a32b120 — all-or-nothing re-opened RC's harm).
+  const id = baselineLabelledOptionId(g.nodes as never);
+  if (id === null) return new Set();
+  const kinds = new Map(g.nodes.map((n) => [n.id, n.kind] as const));
+  const repaired = new Set<string>();
+  const ordinary = new Set<string>();
+  for (const e of g.edges) {
+    if (e.from !== id || kinds.get(e.to) !== 'factor') continue;
+    (isRepairAuthoredOptionFactorEdge(e, kinds) ? repaired : ordinary).add(`${e.from}::${e.to}`);
+  }
+  return new Set([...repaired].filter((k) => !ordinary.has(k)));
+}
 
 /**
  * ⭐ ONE PROJECTION of a persisted node into what the Agent is shown — used by
@@ -228,14 +263,47 @@ export function createAgentCapabilities(
    * straight back into the model's context: a full analysis payload there
    * would cost thousands of tokens per hop and tell the model nothing its own
    * summary does not already say.
+   *
+   * `scenario_id`, `status` and `trigger` are what the run-turn coaching
+   * contract (`runTurnCoaching`, CEE #1855) binds the run by: without them it
+   * cannot tell that a run happened this turn, or that it was the automatic
+   * first pass. No `trigger` ⇒ the user asked for the run.
    */
-  onAnalysis?: (payload: { analysis_ready?: unknown; blocks?: unknown[] }) => void,
+  onAnalysis?:(payload: { scenario_id: string; status: number; analysis_state?: unknown; analysis_ready?: unknown; blocks?: unknown[]; trigger?: 'auto_first_pass' }) => void,
+  /**
+   * ⭐ THE AUTOMATIC FIRST ANALYSIS (Paul, 5812069638), injected by the route so the run, its turn
+   * deadline and its write accounting stay the route's. Absent → no automatic run (a unit test, or a
+   * caller that does not want one). See `../first-analysis.ts` for the rules it enforces.
+   */
+  opts: { readonly firstAnalysis?: (input: FirstAnalysisInput) => Promise<FirstAnalysisOutcome> } = {},
 ): AgentCapabilities {
   const readOnly = mode === 'preview';
   const refuseReadOnly = (): ToolResult => ({
     ok: false, mutated: false, refusal: 'read_only_preview',
     detail: 'This preview cannot change the model. Nothing has been altered.',
   });
+  /**
+   * The first analysis THIS request ran, and the revision it ran on. Capabilities are created per
+   * request, so this never outlives the build turn: a later explicit Run never sees it.
+   */
+  let firstAnalysisThisRequest: { readonly revisionHash: string; readonly result: ToolResult } | undefined;
+  /**
+   * ⛔ AN APPROVAL RUNS NOTHING — held here, by the server, not by the prompt.
+   *
+   * Paul's ruling (#63 5812069638): later edits and approvals never re-run unless
+   * the user asks. Witnessed on served 8428207 (c19w, 5818452655): an approval in
+   * words became `authorise_change` then `run_analysis` in ONE turn, and the reply
+   * named a leader the typed claim withheld. Removing the prompt instruction was
+   * not enough (re-gate of #1854: a reworded regression survived every test).
+   *
+   * Set when an approval in THIS request applied (or recovered) a change; read by
+   * `runAnalysis`. Per request, like `firstAnalysisThisRequest`, so the NEXT
+   * turn's explicit Run is never suppressed. ⚠ Known cost, priced: a user who
+   * says "apply it and run it" in one message gets the approval plus a Run to
+   * press, never an unrequested run — deciding "did they ask?" from their words
+   * is a natural-language predicate this guard deliberately does not make.
+   */
+  let approvalAppliedThisRequest = false;
   /**
    * Normalise the read route's `graph_identity_hash` to the 64-hex value the
    * register route compares. `''` means "no identity to anchor to" — the route
@@ -558,11 +626,14 @@ export function createAgentCapabilities(
   const missingPairs = async (ctx: AgentToolContext, levelPaths: ReadonlySet<string>): Promise<{ option: string; factor: string }[] | null> => {
     const g = await readGraph(ctx.scenario_id);
     if (g === null) return null;
+    const held = heldStatusQuoPairs(g);
     const missing: { option: string; factor: string }[] = [];
     for (const o of g.nodes.filter((n) => n.kind === 'option')) {
       const has = (o.interventions ?? {}) as Record<string, unknown>;
       for (const f of linkedFactorsOf(g as never, o.id)) {
         if (has[f.id] !== undefined || levelPaths.has(`${o.id}::${f.id}`)) continue;
+        // A held status quo is complete with no level (`heldStatusQuoPairs`).
+        if (held.has(`${o.id}::${f.id}`)) continue;
         missing.push({ option: o.label, factor: String(f.label ?? f.id) });
       }
     }
@@ -976,6 +1047,7 @@ export function createAgentCapabilities(
       }
       const byLabel = (l: string, kind: string) =>
         g.nodes.find((n) => n.kind === kind && (norm(n.label) === norm(l) || norm(n.description) === norm(l)));
+      const held = heldStatusQuoPairs(g);
 
       const unresolved: string[] = [];
       const unframed: { factor: string; detail: string }[] = [];
@@ -1029,6 +1101,20 @@ export function createAgentCapabilities(
           notLinked.push({
             option: option.label, factor: factor.label,
             acts_on: linked.map((f) => String(f.label ?? f.id)),
+          });
+          continue;
+        }
+        // ⛔ A held status quo takes no level the AGENT supplies (`heldStatusQuoPairs`):
+        // not accepted, never an operation. ⭐ The USER's own correction is the
+        // exception (independent review of #1849, 5820560331): the Agent is told to
+        // say the user can correct the held reading, so what they say must be
+        // recordable. `user_stated` is opt-in per level, on the same terms as
+        // `revise` — only when the user said it and gave the level — and it still
+        // reaches the user as a proposal to approve, never a write.
+        if (held.has(`${option.id}::${factor.id}`) && i?.user_stated !== true) {
+          notAccepted.push({
+            option: option.label, factor: factor.label, value: i?.value,
+            reason: `${option.label} is held at its starting values — carrying on as now sets no level, so none is recorded for ${factor.label}. Leave it out, unless the user themselves said carrying on changes ${factor.label} and gave the level: then send it with user_stated: true.`,
           });
           continue;
         }
@@ -2333,6 +2419,45 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'model_not_readable_after_write' };
       }
       /**
+       * ⭐ THE FIRST ANALYSIS, RUN BY OLUMI, ONCE (Paul, 5812069638) — ONLY when this request is the one
+       * whose construction COMMITTED. Every retry shape fails this gate: a new turn id recovers the
+       * version (`mutated: false, replayed: true`), a concurrent twin gets OPERATION_ID_REUSED (the
+       * same), and the registration replay arm answers `mutated: true, replayed: true` — which is why
+       * `replayed !== true` is required and `mutated` alone is not. The runner then checks admission,
+       * the turn deadline and the (K, H) prior fact before the one dispatch.
+       */
+      let firstAnalysis: Record<string, unknown> | undefined;
+      if (built.mutated === true && built.replayed !== true && opts.firstAnalysis !== undefined) {
+        const outcome = await opts.firstAnalysis({
+          scenarioId: ctx.scenario_id,
+          constructionTurnId: registrationTurnId(ctx.scenario_id, constructionOperationId(ctx.scenario_id, brief)),
+          revisionGraph: after.raw,
+          revisionHash: after.graph_hash,
+          requestId: ctx.request_id,
+        });
+        if (outcome.ran) onAnalysis?.({ scenario_id: ctx.scenario_id, status: 200, analysis_ready: outcome.analysisReady, blocks: [...outcome.blocks], trigger: 'auto_first_pass' });
+        // What the Agent narrates from: the READBACK after the run — its confined summary and the
+        // typed leader permission — never the run's own receipt. A failed read describes nothing.
+        const postRun = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph`, {}).catch(() => null);
+        const read = postRun !== null && postRun.status === 200 ? postRun.json : {};
+        firstAnalysis = describeFirstAnalysisForAgent(outcome, {
+          analysisState: read.analysis_state,
+          analysisResult: read.analysis_result,
+          analysisAdmission: read.analysis_admission,
+        });
+        if (outcome.ran) {
+          firstAnalysisThisRequest = {
+            revisionHash: after.graph_hash,
+            result: {
+              ok: true, mutated: false, ran: true, already_run_this_turn: true,
+              ...(firstAnalysis.summary !== undefined ? { summary: firstAnalysis.summary } : {}),
+              claim_permissions: firstAnalysis.claim_permissions,
+              note: 'Olumi already ran the first analysis of this model on this turn, so it was not run again.',
+            },
+          };
+        }
+      }
+      /**
        * ⭐ RETURN THE POST-BUILD STATE, so the Agent does not have to go and
        * fetch it. Measured on the preview path: the first turn called
        * `get_canonical_state`, then `build_model_from_brief`, then
@@ -2348,6 +2473,7 @@ export function createAgentCapabilities(
         // The SAME projection get_canonical_state uses — see projectEntity.
         entities: after.nodes.map(projectEntity),
         structure: structuralFacts(after.nodes, after.edges),
+        ...(firstAnalysis !== undefined ? { first_analysis: firstAnalysis } : {}),
       };
     },
 
@@ -2408,6 +2534,26 @@ export function createAgentCapabilities(
     },
 
     async runAnalysis(ctx, args): Promise<ToolResult> {
+      if (approvalAppliedThisRequest) {
+        return {
+          ok: false, mutated: false, ran: false, refusal: 'run_not_requested',
+          detail:
+            'The approved change is saved. An analysis runs only when the user asks for one, never as part ' +
+            'of an approval. Nothing was analysed: do not describe any result, and tell the user they can ' +
+            'run the analysis when they are ready.',
+        };
+      }
+      /**
+       * The model asked again on the build turn itself: the first analysis of THIS revision already ran in
+       * this request, so it is returned rather than run twice. Verified against a fresh read — if the
+       * model moved since, this is a new analysis and it runs.
+       */
+      if (firstAnalysisThisRequest !== undefined) {
+        const now = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph`, {}).catch(() => null);
+        if (now !== null && now.status === 200 && now.json.graph_hash === firstAnalysisThisRequest.revisionHash) {
+          return firstAnalysisThisRequest.result;
+        }
+      }
       const r = await dispatch('/orchestrate/v2/turn', {
         kind: 'message',
         // Deliberately NOT derived, unlike the authorised write above: asking
@@ -2424,7 +2570,7 @@ export function createAgentCapabilities(
       const ready = (r.json.analysis_ready ?? {}) as Record<string, unknown>;
       const blocks = (r.json.blocks as { type: string }[] | undefined) ?? [];
       const result = blocks.find((b) => b.type === 'analysis_result');
-      onAnalysis?.({ analysis_ready: r.json.analysis_ready, blocks });
+      onAnalysis?.({ scenario_id: ctx.scenario_id, status: r.status, analysis_state: r.json.analysis_state, analysis_ready: r.json.analysis_ready, blocks });
       return {
         ok: r.status === 200,
         mutated: false,
@@ -2435,8 +2581,19 @@ export function createAgentCapabilities(
         blockers: ready.blockers ?? [],
         options: ready.options ?? [],
         ...(result !== undefined ? { result } : {}),
+        // The typed leader permission for THIS run, read from its own wire verdict — so the Agent names a
+        // leader only when `leader_may_be_named` (see the route's reporting instruction).
+        claim_permissions: claimPermissionsFrom(r.json.analysis_state, r.json.analysis_ready),
       };
     },
   };
-  return caps;
+  return {
+    ...caps,
+    // The approval guard's writer: every return path of `authoriseChange`, one place.
+    async authoriseChange(ctx, args): Promise<ToolResult> {
+      const r = await caps.authoriseChange(ctx, args);
+      if (r.applied === true || r.mutated === true) approvalAppliedThisRequest = true;
+      return r;
+    },
+  };
 }
