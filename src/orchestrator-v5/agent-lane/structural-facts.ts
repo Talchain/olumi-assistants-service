@@ -15,6 +15,7 @@
 
 import { isRepairAuthoredOptionFactorEdge } from '../../graph/repair-authored-edge.js';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
+import { readIsBaseline, type BaselineFlagSurfaces } from '../../cee/baseline-identity.js';
 
 export interface GraphNodeLike {
   readonly id: string;
@@ -24,7 +25,15 @@ export interface GraphNodeLike {
   /** What an OPTION sets, keyed by factor id. An option with none does nothing. */
   readonly interventions?: Record<string, unknown> | undefined;
   readonly changes?: unknown;
+  /**
+   * The drafter's DECLARATION that this option is the status quo, on either surface
+   * it can be persisted on. Read ONLY through the shared `readIsBaseline`, never here.
+   */
+  readonly is_baseline?: unknown;
+  readonly data?: unknown;
 }
+/** What the status-quo authority reads of a node. */
+export type StatusQuoNodeLike = Pick<GraphNodeLike, 'id' | 'kind' | 'label' | 'is_baseline' | 'data'>;
 export interface GraphEdgeLike {
   readonly from: string;
   readonly to: string;
@@ -70,7 +79,8 @@ export interface StructuralFacts {
   readonly options_that_change_nothing: readonly string[];
   /**
    * ⭐ A HELD STATUS QUO — carrying on as now, each factor at its starting value
-   * (Paul's ruling; admission, MG #1838). An option that sets nothing, whose
+   * (Paul's ruling; admission, MG #1838). The status quo (`statusQuoOptionId`: the
+   * declared option, else the one idiom-labelled option) when it sets nothing and its
    * option→factor edges (at least one) are ALL repair-authored. It is complete with
    * no level, so it is NOT in `options_that_change_nothing` and is never asked for one.
    */
@@ -93,41 +103,65 @@ function reachable(adjacency: Map<string, string[]>, from: string): Set<string> 
 
 
 /**
- * The ONE option whose label reads as carrying on as now (`labelMatchesBaseline`,
- * readiness's idiom list), or null when none or two do — ambiguity is not
- * guessed. The LABEL half of "held", shared by `heldStatusQuoOptionId` (the
- * option-level view `structuralFacts` reports) and the level proposer's
- * PAIR-level test (`heldStatusQuoPairs` in `agent-capabilities.ts`).
+ * ⛔ THE ONE AUTHORITY ON "WHICH OPTION IS THE STATUS QUO" on the Agent lane — the
+ * option-level view (`heldStatusQuoOptionId`, reported by `structuralFacts` as
+ * `status_quo_held`) and the level proposer's PAIR-level test (`heldStatusQuoPairs` in
+ * `agent-capabilities.ts`: `missingPairs` and both held-level guards) both start here.
+ *
+ * It mirrors the order admission MINTS in (`wireInertStatusQuo`, `admit-model.ts`),
+ * because a reader that recognises less than the writer wrote leaves a held status quo
+ * unheld — SERVED on d5d5839 (pricing fcfaf7e0, #69 5832119174): "Keep £49 Pro Price"
+ * was declared and held by repair edges, this reader was label-only ("keep" is
+ * deliberately not an idiom), and one approval wrote £49 and 0 onto it as levels.
+ *   1. THE DECLARATION FIRST: the options whose persisted node reads
+ *      `readIsBaseline(node) === true` (the shared baseline-identity reader; admission
+ *      stamps `is_baseline` on the declared option it held). Two or more → null:
+ *      contradictory declarations are not guessed between, and — as admission — do
+ *      not fall back to a label. Exactly one, carrying at least one repair-authored
+ *      option→factor edge (`isRepairAuthoredOptionFactorEdge`) → that option.
+ *   2. ⛔ ONE WRONG FLAG MUST NOT BLOCK WHAT BASE HELD (admission's rule, review
+ *      5825562938 B1): a single declared option with no repair-authored edge was not
+ *      held by admission, so the reader falls back, exactly as if nothing were declared,
+ *      to the ONE option whose label reads as carrying on as now
+ *      (`labelMatchesBaseline`, readiness's idiom list). None or two → null.
  */
-export function baselineLabelledOptionId(
-  nodes: readonly { id: string; kind?: string; label?: string }[],
+export function statusQuoOptionId(
+  nodes: readonly StatusQuoNodeLike[],
+  edges: readonly GraphEdgeLike[],
 ): string | null {
-  const baselines = nodes.filter((n) => n.kind === 'option' && labelMatchesBaseline(n.label ?? ''));
-  return baselines.length === 1 ? baselines[0]!.id : null;
+  const options = nodes.filter((n) => n.kind === 'option');
+  // The reader ignores non-boolean junk on either surface, so a persisted node of any shape is safe to hand it.
+  const declared = options.filter((n) => readIsBaseline(n as BaselineFlagSurfaces) === true);
+  if (declared.length > 1) return null;
+  if (declared.length === 1) {
+    const id = declared[0]!.id;
+    const kinds = new Map(nodes.flatMap((n) => (typeof n.kind === 'string' ? [[n.id, n.kind] as const] : [])));
+    if (edges.some((e) => e.from === id && isRepairAuthoredOptionFactorEdge(e, kinds))) return id;
+  }
+  const labelled = options.filter((n) => labelMatchesBaseline(n.label ?? ''));
+  return labelled.length === 1 ? labelled[0]!.id : null;
 }
 
 /**
- * ⛔ THE ONE TEST FOR "THIS OPTION IS A HELD STATUS QUO" on the Agent lane —
- * read by `structuralFacts` and by the level proposer (`agent-capabilities.ts`).
+ * ⛔ THE ONE TEST FOR "THIS OPTION IS A HELD STATUS QUO" at option level on the Agent
+ * lane — read by `structuralFacts`.
  *
- * The same two conditions #1838's `wireInertStatusQuo` mints under, so the
- * reader recognises exactly what the constructor wrote:
- *   1. EXACTLY ONE option's label reads as carrying on as now
- *      (`labelMatchesBaseline`, readiness's own idiom list). None or two → none
- *      is held: ambiguity is not resolved by guessing.
- *   2. That option's option→factor edges are ALL repair-authored
- *      (`isRepairAuthoredOptionFactorEdge`), and there is at least one.
+ * The option is the status quo (`statusQuoOptionId`: declared first, the idiom label as
+ * the fallback — admission's own minting order, so the reader recognises what the
+ * constructor wrote), AND its option→factor edges are ALL repair-authored
+ * (`isRepairAuthoredOptionFactorEdge`), and there is at least one.
  *
  * ⚠ The repair origin ALONE is not enough (independent review of #1849,
  * 5820560331): the conventional `fixStatusQuoConnectivity` stamps
  * `origin: 'repair'` on EVERY disconnected option, whatever its label, so
  * "Use contractors" would have been called a status quo holding today's values.
+ * An option is only a candidate when it is DECLARED or reads as an idiom.
  */
 export function heldStatusQuoOptionId(
-  nodes: readonly { id: string; kind?: string; label?: string }[],
+  nodes: readonly StatusQuoNodeLike[],
   edges: readonly GraphEdgeLike[],
 ): string | null {
-  const id = baselineLabelledOptionId(nodes);
+  const id = statusQuoOptionId(nodes, edges);
   if (id === null) return null;
   const kinds = new Map(nodes.flatMap((n) => (typeof n.kind === 'string' ? [[n.id, n.kind] as const] : [])));
   const out = edges.filter((e) => e.from === id && kinds.get(e.to) === 'factor');

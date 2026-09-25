@@ -90,7 +90,7 @@ import { planNewOption, newOptionFollowUp } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
-import { baselineLabelledOptionId, structuralFacts } from '../structural-facts.js';
+import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { defaultFrameFor } from '../admit-model.js';
@@ -292,6 +292,9 @@ interface GraphRead {
     observed_state?: Record<string, unknown>;
     interventions?: Record<string, unknown>;
     changes?: unknown;
+    /** The drafter's status-quo declaration, read only through `readIsBaseline` (`statusQuoOptionId`). */
+    is_baseline?: unknown;
+    data?: unknown;
   }[];
   /** `origin` is read only to recognise a repair-authored edge (`isRepairAuthoredOptionFactorEdge`). */
   readonly edges: { from: string; to: string; origin?: unknown }[];
@@ -317,12 +320,16 @@ const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$
  * edge is mapped), through the ONE authority, never a copy of it.
  */
 function heldStatusQuoPairs(g: Pick<GraphRead, 'nodes' | 'edges'>): ReadonlySet<string> {
-  // The LABEL test is per option (`baselineLabelledOptionId`: exactly one option reads
-  // as carrying on as now — review of #1849, blocker 2). The REPAIR test is per PAIR,
-  // the granularity readiness uses (`analysis-ready.ts:780` skips each repair edge on
-  // its own): a status quo the user has since linked to one more factor keeps its
-  // other pairs held (review of #1849 at 1a32b120 — all-or-nothing re-opened RC's harm).
-  const id = baselineLabelledOptionId(g.nodes as never);
+  // WHICH option is the status quo is decided per option, by the ONE authority
+  // `statusQuoOptionId` (the declared option first, else exactly one idiom label —
+  // admission's own minting order; review of #1849, blocker 2, for why repair alone
+  // is not enough). ⛔ It was label-only here, so a DECLARED "Keep £49 Pro Price" was
+  // never held and one approval wrote £49 and 0 onto it (served d5d5839, #69 5832119174).
+  // The REPAIR test is per PAIR, the granularity readiness uses (`analysis-ready.ts:780`
+  // skips each repair edge on its own): a status quo the user has since linked to one
+  // more factor keeps its other pairs held (review of #1849 at 1a32b120 — all-or-nothing
+  // re-opened RC's harm).
+  const id = statusQuoOptionId(g.nodes, g.edges);
   if (id === null) return new Set();
   const kinds = new Map(g.nodes.map((n) => [n.id, n.kind] as const));
   const repaired = new Set<string>();
