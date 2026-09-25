@@ -148,6 +148,8 @@ const SCANNED_FILES: Readonly<Record<string, string>> = {
     HERE,
     '../system-events/edge-strength-edit.ts',
   ),
+  // #1859 — the deterministic goal-target writer receipt (goal_target_edit).
+  'system-events/goal-target-edit.ts': resolve(HERE, '../system-events/goal-target-edit.ts'),
   // L16 / walk finding N16 — the bare configure-option deterministic remedy.
   // Caught by `derivedComposeFileDomain()` on the commit that created the file,
   // which is the mechanism working exactly as its header promises.
@@ -945,6 +947,29 @@ const OPTION_LABEL_CLARIFY_SITES: Readonly<Record<string, RegisteredSite>> = {
   },
 };
 
+/**
+ * `src/orchestrator-v5/system-events/goal-target-edit.ts` — #1859, the
+ * deterministic `goal_target_edit` writer. Caught by `derivedComposeFileDomain()`
+ * on the commit that created the file.
+ */
+const GOAL_TARGET_EDIT_SITES: Readonly<Record<string, RegisteredSite>> = {
+  'outcome.assistant_text': {
+    stance: 'structural',
+    why:
+      'ONE site, the same shape as factor-value-edit.ts. The value is the `add_constraint` ' +
+      'handler\'s own receipt, passed straight through as `confirmation`. That text is ' +
+      'assembled DETERMINISTICALLY in tools/handlers/add-constraint.ts (`fragments.join`) from ' +
+      'module formatters over the edited node\'s label and the typed value; the handler declares ' +
+      '`llm_calls_used: 0`, and the route test asserts no LLM adapter, no Anthropic transport and ' +
+      'no fetch is reached. IT CANNOT ASSERT A LEADER: the goal is named by id from the wire ' +
+      'event and must be `kind: goal`; the only other label it can interpolate is the ' +
+      'correction alternative, which `findConstraintTargetAlternative` restricts to ' +
+      '`kind === \'factor\'`. No comparison, ordering, probability or margin. The dispatch ' +
+      'runs no analysis, so it withheld no verdict. Refusal branches compose via the ' +
+      'recoverable-response composers keyed where those files are scanned.',
+  },
+};
+
 const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, RegisteredSite>>>> = {
   'turn-executor.ts': TURN_EXECUTOR_SITES,
   'route-v2.ts': ROUTE_V2_SITES,
@@ -953,6 +978,7 @@ const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, Reg
   'routing/post-analysis-label-intercept.ts': POST_ANALYSIS_LABEL_INTERCEPT_SITES,
   'system-events/factor-value-edit.ts': FACTOR_VALUE_EDIT_SITES,
   'system-events/edge-strength-edit.ts': EDGE_STRENGTH_EDIT_SITES,
+  'system-events/goal-target-edit.ts': GOAL_TARGET_EDIT_SITES,
   'compose/configure-option-clarify-response.ts': CONFIGURE_OPTION_CLARIFY_SITES,
   'compose/repair-value-ask-response.ts': REPAIR_VALUE_ASK_SITES,
   'compose/option-effect-ask-response.ts': OPTION_EFFECT_ASK_SITES,
@@ -1215,7 +1241,9 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // regex and in scope here.
     // Expired-constraint renewal adds the explicit assistant_text: expiryText
     // site; the old regex keys it too, so the comparison includes that site.
-    expect(compared, 'the re-key comparison compared nothing').toBe(46);
+    // #1859 goal_target_edit: 46 -> 47. ONE added file (system-events/goal-target-edit.ts)
+    // with the same `confirmation: outcome.assistant_text` site as factor-value-edit.ts.
+    expect(compared, 'the re-key comparison compared nothing').toBe(47);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -1446,8 +1474,12 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // deriving the domain rather than listing it, once more.
     // Expired-constraint renewal adds one structural site and one distinct key
     // in the already-scanned turn-executor.ts; no existing site is reclassified.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(52);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(48);
+    // ⚠ GOAL_TARGET_EDIT (#1859): 52 -> 53 sites, 48 -> 49 keys, one ADDED file
+    // (system-events/goal-target-edit.ts), registered `structural` with its derivation
+    // (GOAL_TARGET_EDIT_SITES). This ledger failed `pnpm test:required` on the commit
+    // that created the site — the guard found it, not a human.
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(53);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(49);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
       'compose/duplicate-option-label-response.ts',
@@ -1460,6 +1492,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
       'routing/post-analysis-label-intercept.ts',
       'system-events/edge-strength-edit.ts',
       'system-events/factor-value-edit.ts',
+      'system-events/goal-target-edit.ts',
       'turn-executor.ts',
     ]);
   });
