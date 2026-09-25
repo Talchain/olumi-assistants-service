@@ -22,6 +22,8 @@
  *            no marker input, and `analysis_ready.freshness` from the
  *            post-handler derivation, which does not pass it — so a routed turn
  *            also reads complete_current / fresh;
+ *   RED      the same for a CONVERSATIONAL routed turn (a text-only reply, the
+ *            non-execute branch, which reads its own canonical-state memo);
  *   RED      and the MODEL is told `coaching_context.freshness: "fresh"` on that
  *            routed turn (the prompt, not only the wire);
  *   CONTROL  the reload itself (the authority both must agree with);
@@ -41,9 +43,12 @@ import type { ToolCallResponse } from '../../../src/orchestrator-v5/routing/tool
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import { createMockSessionStore } from '../../utils/mock-session-store.js';
 
-const { marker, clarify, coachCall } = vi.hoisted(() => ({
+const { marker, clarify, llm, coachCall } = vi.hoisted(() => ({
   marker: { value: null as string | null },
   clarify: { respond: false },
+  // `execute` routes to a handler; `converse` (a text-only reply) is the
+  // NON-execute branch, which reads a different canonical-state memo.
+  llm: { mode: 'execute' as 'execute' | 'converse' },
   coachCall: vi.fn(),
 }));
 
@@ -156,6 +161,15 @@ vi.mock('../../../src/adapters/llm/router.js', () => {
     chat: async () => ({ content: ANSWER, usage: { input_tokens: 1, output_tokens: 1 } }),
     chatWithTools: (...args: unknown[]) => {
       coachCall(...args);
+      if (llm.mode === 'converse') {
+        return Promise.resolve({
+          content: [{ type: 'text', text: ANSWER }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 10, output_tokens: 20 },
+          model: 'test-model',
+          latencyMs: 1,
+        });
+      }
       return Promise.resolve({
         content: [{
           type: 'tool_use',
@@ -259,6 +273,7 @@ describe('turn path vs reload — a restored model (same hash, newer marker)', (
     vi.clearAllMocks();
     marker.value = null;
     clarify.respond = false;
+    llm.mode = 'execute';
   });
 
   async function clarifyExit() {
@@ -272,6 +287,7 @@ describe('turn path vs reload — a restored model (same hash, newer marker)', (
   }
   async function routedTurn() {
     clarify.respond = false;
+    coachCall.mockClear(); // one routed turn per read of the model's prompt
     const res = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: messageTurn() });
     expect(res.statusCode, res.body).toBe(200);
     expect(coachCall, 'premise: this reply went through the TurnExecutor').toHaveBeenCalledTimes(1);
@@ -310,6 +326,16 @@ describe('turn path vs reload — a restored model (same hash, newer marker)', (
     expect(body.analysis_ready.freshness).toBe('stale');
   });
 
+  it('RED: a CONVERSATIONAL (non-execute) routed turn agrees with the reload too', async () => {
+    marker.value = AFTER_RUN;
+    llm.mode = 'converse';
+    const body = await routedTurn();
+    expect(body.assistant_text, 'premise: the text-only reply was the answer').toContain('reliability');
+    const read = await reload();
+    expect(body.analysis_state.run_state.kind).toBe('complete_stale');
+    expect(body.analysis_state.run_state.kind).toBe(read.analysis_state.run_state.kind);
+  });
+
   it('RED: the model is not told a restored model\'s analysis is fresh', async () => {
     marker.value = AFTER_RUN;
     await routedTurn();
@@ -322,6 +348,8 @@ describe('turn path vs reload — a restored model (same hash, newer marker)', (
     expect((await reload()).analysis_state.run_state.kind).toBe('complete_current');
     expect((await routedTurn()).analysis_state.run_state.kind).toBe('complete_current');
     expect(coachingContextSentToModel()).toMatchObject({ freshness: 'fresh' });
+    llm.mode = 'converse';
+    expect((await routedTurn()).analysis_state.run_state.kind).toBe('complete_current');
   });
 
   it('CONTROL: no marker → complete_current on all three', async () => {
