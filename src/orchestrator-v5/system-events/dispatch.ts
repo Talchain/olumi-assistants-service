@@ -108,16 +108,28 @@ function deriveWriteReplyFreshness(
   persistedAnalysisGraphHash: string | null,
 ): FreshnessDerivation {
   const durableAuthority = isScenarioAnalysisReasoningAuthority(read.factSet);
-  return deriveAnalysisFreshness(
+  const derived = deriveAnalysisFreshness(
     durableAuthority ? read.factSet.facts : read.hotWindow.facts,
     persistedAnalysisGraphHash,
     undefined,
     { priorFactsReadOk: read.factSet.status === 'complete', analysisInvalidatedAt: read.analysisInvalidatedAt },
   );
+  // ⛔ AN UNREAD RESTORE MARKER NEVER BECOMES A POSITIVE `fresh`. The marker can
+  // only turn a hash MATCH from fresh to stale, so when it could not be read a
+  // `fresh` is unverifiable (a restore may sit behind the failed read), while
+  // every other verdict is untouched. The module's own degraded form is used
+  // (no fact-bound hashes: `unknown` only where data is genuinely missing, its
+  // invariant 3). Independent pre-review 5828334202 on #1892.
+  if (!read.analysisInvalidatedAtReadOk && derived.freshness === 'fresh') {
+    return deriveAnalysisFreshness([], persistedAnalysisGraphHash, undefined, { priorFactsReadOk: false });
+  }
+  return derived;
 }
 
 type WriteReplyAnalysisInputs = Awaited<ReturnType<typeof loadScenarioAnalysisFactsForRead>> & {
   readonly analysisInvalidatedAt: string | null;
+  /** False when the marker could not be read: `null` above then means "unknown", not "no restore". */
+  readonly analysisInvalidatedAtReadOk: boolean;
 };
 
 /**
@@ -131,13 +143,14 @@ type WriteReplyAnalysisInputs = Awaited<ReturnType<typeof loadScenarioAnalysisFa
  * lands on the analysed hash — a rename never moves it — replied `fresh` while
  * the reload said `stale` (Independent Review 5827685385 on #1892).
  *
- * ⚠ FAILS OPEN, the turn path's rule (`build-turn-context.ts`): `null` means
- * "no restore invalidation", byte-identical to every writer's behaviour before
- * this read, so a failed read degrades to exactly that — never to a false
- * `stale`, the worse direction. The `.catch` is load-bearing: the real store
- * THROWS on a database error or a malformed timestamp, and `??` cannot catch a
- * rejection. Fact history and the marker are observational only; neither ever
- * authorises or blocks the write.
+ * ⚠ A FAILED READ NEVER BLOCKS THE WRITE, AND IS NEVER READ AS "NO RESTORE".
+ * The `.catch` is load-bearing: the real store THROWS on a database error or a
+ * malformed timestamp, and `??` cannot catch a rejection. A failed read is
+ * reported as `analysisInvalidatedAtReadOk: false`, and the reply then cannot
+ * claim `fresh` (see `deriveWriteReplyFreshness`): substituting "no restore"
+ * would present a possibly-restored model's analysis as current, while `stale`
+ * would be an unsupported claim in the other direction. Fact history and the
+ * marker are observational only; neither ever authorises or blocks the write.
  */
 async function loadWriteReplyAnalysisInputs(
   scenarioId: string,
@@ -147,9 +160,11 @@ async function loadWriteReplyAnalysisInputs(
   // synchronously when the store is not configured, and a throw outside the
   // `.catch` would fail the user's write over an observational read. An
   // unavailable store degrades exactly like a failed read.
-  const markerRead = (async (): Promise<string | null> =>
-    (await getSessionStore()?.readAnalysisInvalidatedAt?.(scenarioId)) ?? null)();
-  const [read, analysisInvalidatedAt] = await Promise.all([
+  const markerRead = (async (): Promise<{ readonly value: string | null; readonly ok: boolean }> => ({
+    value: (await getSessionStore()?.readAnalysisInvalidatedAt?.(scenarioId)) ?? null,
+    ok: true,
+  }))();
+  const [read, marker] = await Promise.all([
     loadScenarioAnalysisFactsForRead(scenarioId, requestId),
     markerRead.catch((error: unknown) => {
       log.warn(
@@ -160,12 +175,12 @@ async function loadWriteReplyAnalysisInputs(
           scenario_id: scenarioId,
           error_name: error instanceof Error ? error.name : typeof error,
         },
-        'Restore-invalidation read degraded on a write reply — treated as no invalidation',
+        'Restore-invalidation read degraded on a write reply — currency cannot be confirmed',
       );
-      return null;
+      return { value: null, ok: false };
     }),
   ]);
-  return { ...read, analysisInvalidatedAt };
+  return { ...read, analysisInvalidatedAt: marker.value, analysisInvalidatedAtReadOk: marker.ok };
 }
 
 /**
@@ -1818,8 +1833,12 @@ async function dispatchFactorValueEdit(
    * the window this function always read, so the handler's `priorFacts` input
    * keeps its meaning; only the freshness below chooses the durable set.
    */
-  const { hotWindow: priorFactsRead, factSet: analysisFactSet, analysisInvalidatedAt } =
-    await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId);
+  const {
+    hotWindow: priorFactsRead,
+    factSet: analysisFactSet,
+    analysisInvalidatedAt,
+    analysisInvalidatedAtReadOk,
+  } = await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId);
   const priorFacts = priorFactsRead.facts;
 
   const result = await applyFactorValueEdit({
@@ -2097,7 +2116,7 @@ async function dispatchFactorValueEdit(
    */
   // The shared rule (`deriveWriteReplyFreshness`): absence only in a COMPLETE record.
   const freshness: FreshnessDerivation = deriveWriteReplyFreshness(
-    { hotWindow: priorFactsRead, factSet: analysisFactSet, analysisInvalidatedAt },
+    { hotWindow: priorFactsRead, factSet: analysisFactSet, analysisInvalidatedAt, analysisInvalidatedAtReadOk },
     persistedAnalysisGraphHash,
   );
   emitFreshnessTelemetry(
