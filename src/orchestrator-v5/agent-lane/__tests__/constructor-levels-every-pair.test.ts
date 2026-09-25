@@ -279,6 +279,15 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     expect(result.ok).toBe(true);
   });
 
+  it('RED (same class): a retry that changes a level the USER stated is not adopted', async () => {
+    const first = stated40(c22(), 40, true);
+    first.options[0] = { ...first.options[0]!, changes: ['Hiring cost'], interventions: [{ factor_label: 'Engineering delivery capacity', value: 52, value_kind: 'absolute', unit: 'story points', provenance: 'explicit' }] };
+    const retry = stated40(covered(), 40, true);
+    retry.options[0] = { ...retry.options[0]!, interventions: [est('Engineering delivery capacity', 60, 'story points'), est('Hiring cost', 140000, 'GBP')] };
+    const { graph } = await construct(first, retry);
+    expect(node(graph, 'hire_two_developers').interventions?.engineering_delivery_capacity).toMatchObject({ value: 0.52, source: 'brief_extraction' });
+  });
+
   it('CONTROL: a retry that keeps the user-stated 40 and adds the levels is adopted, with the 40 still the user\'s', async () => {
     const { graph } = await construct(stated40(c22(), 40, true), stated40(covered(), 40, true));
     expect(node(graph, 'engineering_delivery_capacity').observed_state).toMatchObject({ raw_value: 40, source: 'brief_extraction' });

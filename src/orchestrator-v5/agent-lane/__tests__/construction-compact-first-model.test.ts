@@ -100,6 +100,17 @@ describe('an oversized first model gets exactly ONE bounded retry', () => {
     expect(s.calls).toHaveLength(2);
   });
 
+  it('a compaction that CHANGES a baseline the user stated is not adopted — the model stays oversized and is refused honestly', async () => {
+    const stated = (c: ReturnType<typeof candidate>, v: number) => {
+      c.factors[0] = { ...c.factors[0]!, baseline_known: true, baseline_value: v as never, provenance: 'explicit' };
+      return c;
+    };
+    const s = structuredSequence(stated(candidate(20), 50), stated(candidate(3), 60));
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, dispatcher().d, s.fn);
+    expect(s.calls).toHaveLength(2);
+    expect(out['refusal']).toBe('model_too_large');
+  });
+
   it('passes the budget and the protect-the-brief rule in the retry instruction', async () => {
     const s = structuredSequence(candidate(20), candidate(3));
     await buildModelFromBrief(SCENARIO, BRIEF, dispatcher().d, s.fn);

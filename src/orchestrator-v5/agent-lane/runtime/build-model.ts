@@ -576,6 +576,26 @@ function keepsEveryAction(before: CandidateModel, after: CandidateModel): boolea
   });
 }
 
+/**
+ * ⛔ A RETRY NEVER DROPS OR CHANGES A NUMBER THE USER STATED (pre-review 5829011280).
+ * Gaps are counted as a total, so a retry supplying seven levels while erasing a
+ * stated baseline of 40 "improved" and was adopted; `keepsEveryUserStatedIdentity`
+ * guards names, not numbers. Every user-stated baseline (`baseline_known`, explicit)
+ * and every explicit level must survive with the same value — on ANY retry,
+ * compaction included. Compared on prepared candidates, so an addition already
+ * made a total compares as that total on both sides.
+ */
+function keepsEveryUserNumber(before: CandidateModel, after: CandidateModel): boolean {
+  const baselinesKept = before.factors
+    .filter((f) => f.baseline_known && f.provenance === 'explicit' && typeof f.baseline_value === 'number')
+    .every((f) => after.factors.some((g) => g.label === f.label && g.baseline_known && g.baseline_value === f.baseline_value));
+  const levelsKept = before.options.every((o) => (o.interventions ?? [])
+    .filter((i) => i.provenance === 'explicit')
+    .every((i) => after.options.find((x) => x.label === o.label)?.interventions
+      ?.some((j) => j.factor_label === i.factor_label && j.value === i.value) === true));
+  return baselinesKept && levelsKept;
+}
+
 /** A repair may replace an invalid direct edge, but must preserve its signed path. */
 function retainsRiskHypotheses(before: CandidateModel, after: CandidateModel): boolean {
   const paths = (model: CandidateModel, from: string, to: string): Set<number> => {
@@ -715,7 +735,7 @@ export async function buildModelFromBrief(
         const keepsUserMaterial = keepsEveryUserStatedIdentity(size, retrySize);
         if (
           (needsSizeRetry ? retrySize.nodes <= size.nodes && retrySize.edges <= size.edges : retrySize.within || retrySize.user_material_exceeds_limit) &&
-          keepsUserMaterial && retryPreparation.mechanism_issues.length === 0 &&
+          keepsUserMaterial && keepsEveryUserNumber(candidate, retryCandidate) && retryPreparation.mechanism_issues.length === 0 &&
           // ⛔ Coverage is repaired where a level is defensible, so a retry may leave a
           // gap — but it must never cover LESS, and when coverage is the only reason
           // for the retry it must cover strictly MORE (c22).
