@@ -363,6 +363,10 @@ describe('a single option share row', () => {
     const text = 'Win share in the modelled runs:\n- Raise to £59: 71%.\n\nThe churn limit was not scored.';
     expect(dropRankingSentences(text, labels).text).toBe('The churn limit was not scored.');
   });
+  it('RED: a PARAPHRASED row under a ranking heading goes too (only the heading can tell what it means)', () => {
+    const text = 'Win share in the modelled runs:\n- The release-timed rise: 71%.\n\nThe churn limit was not scored.';
+    expect(dropRankingSentences(text, labels).text).toBe('The churn limit was not scored.');
+  });
   it('RED: a lone "<option>: N%" row is dropped even without a heading', () => {
     const text = 'Here is where things stand.\n\n- Raise to £59: 71%.\n\nThe churn limit was not scored.';
     expect(dropRankingSentences(text, labels).text).toBe('Here is where things stand.\n\nThe churn limit was not scored.');
