@@ -426,6 +426,12 @@ const REPLAY_CHANGE_NOT_IN_MODEL_TEXT =
 /** A replay whose reread failed: whether the change is in the model is unknown. */
 const REPLAY_CHANGE_UNCHECKABLE_TEXT =
   "Nothing new was written just now, and I couldn't read the model to check whether that change is in it.";
+/**
+ * A replay whose requested change IS in the reread snapshot, with no receipt
+ * naming THIS turn as its author: true whoever made the change.
+ */
+const REPLAY_CHANGE_IN_MODEL_UNATTRIBUTED_TEXT =
+  'Nothing new was written just now, and the model already reflects that change.';
 
 /**
  * ⛔ F4 (Codex, #63 5821693599) — THE REPLY FOR A GRAPH WRITER WHOSE COMMIT
@@ -464,13 +470,22 @@ const REPLAY_CHANGE_UNCHECKABLE_TEXT =
  * `no_persisted_graph`), which wrote no graph. Retried under that turn id once
  * state has changed, the identical request reaches the append, the store says
  * "replay", and commit.ts's "had already been recorded" would describe a change
- * that never happened. So on a replay (anything commit.ts did not answer as a
- * conflict) the caller's `requestedChangeVisibleIn` decides: the change visible
- * in the reread snapshot keeps commit.ts's prose and the original receipt;
- * otherwise the prose is replaced with a sentence true either way and the
- * receipt is withheld, because it cannot be evidence for a change the model does
- * not hold. With no snapshot the change cannot be checked, and the prose says
- * exactly that. Conflicts keep commit.ts's refusal — already true, receipt-free.
+ * that never happened.
+ *
+ * ⛔ VISIBLE IS NOT "MINE" (independent pre-review 5831122178 on #1906). The
+ * change being in today's reread says nothing about WHO made it: after that
+ * refusal, a foreign writer can make exactly the requested change between the
+ * retry's base read and its append, and the store still says "replay". The only
+ * durable evidence that THIS turn wrote earlier is the original receipt, which
+ * the RPC hands back on a genuine replay and which names its `source_turn_id`.
+ * So on a replay (anything commit.ts did not answer as a conflict) commit.ts's
+ * prose and the original receipt are kept ONLY when that receipt names this
+ * turn AND the caller's `requestedChangeVisibleIn` finds the change in the
+ * reread snapshot. Otherwise the receipt is withheld and the prose is replaced
+ * with a sentence true whoever wrote: the change is in the model, or it is not,
+ * or (no snapshot) it cannot be checked. A guest's genuine replay has no receipt
+ * and so reads "already reflects that change" — never a claim the reply cannot
+ * prove. Conflicts keep commit.ts's refusal — already true, receipt-free.
  */
 function replyForAttemptThatWroteNothing(args: {
   readonly writer: string;
@@ -514,7 +529,10 @@ function replyForAttemptThatWroteNothing(args: {
     committedResponse.assistant_text.startsWith(COMMIT_CONFLICT_REFUSAL_PREFIX);
   const requestedChangeVisible =
     snapshot !== null && args.requestedChangeVisibleIn(snapshot.graph);
-  const withholdReplayClaim = !answeredAsConflict && !requestedChangeVisible;
+  const earlierWriteByThisTurnProven =
+    committedResponse.model_version_receipt?.source_turn_id === payload.turn_id;
+  const withholdReplayClaim =
+    !answeredAsConflict && !(requestedChangeVisible && earlierWriteByThisTurnProven);
   const claimSafeResponse: OlumiResponse = withholdReplayClaim
     ? (() => {
         const withoutReceipt = { ...(committedResponse as Record<string, unknown>) };
@@ -522,7 +540,11 @@ function replyForAttemptThatWroteNothing(args: {
         return {
           ...withoutReceipt,
           assistant_text:
-            snapshot !== null ? REPLAY_CHANGE_NOT_IN_MODEL_TEXT : REPLAY_CHANGE_UNCHECKABLE_TEXT,
+            snapshot === null
+              ? REPLAY_CHANGE_UNCHECKABLE_TEXT
+              : requestedChangeVisible
+                ? REPLAY_CHANGE_IN_MODEL_UNATTRIBUTED_TEXT
+                : REPLAY_CHANGE_NOT_IN_MODEL_TEXT,
         } as OlumiResponse;
       })()
     : committedResponse;
@@ -544,6 +566,7 @@ function replyForAttemptThatWroteNothing(args: {
       stored_snapshot_presented: snapshot !== null,
       answered_as_conflict: answeredAsConflict,
       requested_change_visible_in_snapshot: snapshot === null ? null : requestedChangeVisible,
+      earlier_write_by_this_turn_proven: earlierWriteByThisTurnProven,
       replay_claim_withheld: withholdReplayClaim,
     },
     `V5 ${writer} — this attempt wrote nothing (a replay or a reused-id conflict); ` +
