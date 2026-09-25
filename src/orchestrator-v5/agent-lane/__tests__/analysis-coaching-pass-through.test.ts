@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
 import { currentAnalysisCoaching, runTurnCoaching, type CapturedAnalysis, type RunTurnCoachingFinal } from '../analysis-coaching-pass-through.js';
+import { RUN_TURN_COACHING_REASONS } from '../../coaching/fragile-link-challenge.js';
+import { runTurnCase } from '../../coaching/__tests__/fragile-link-challenge-fixtures.js';
 const hash = '0123456789abcdef';
 const time = '2026-09-24T10:00:00.000Z';
 const state = {run_state: {kind: 'complete_current', computed_at: time}, leader_claim: {permitted: false, withheld_reason: 'constraint_verdict_withheld'}};
@@ -33,7 +35,8 @@ test('no analysis result or approval action forwarded',()=>assert.deepEqual(curr
 test('strengthen upstream card is not forwarded',()=>assert.deepEqual(currentAnalysisCoaching({...capture,blocks:[result,{...card,coaching_kind:'strengthen'}]},final),[]));
 test('strengthen dropped, non-strengthen sibling kept',()=>{const other={...card,block_id:'00000000-0000-4000-8000-000000000002',coaching_kind:'strengthen'};assert.deepEqual(currentAnalysisCoaching({...capture,blocks:[result,other,card]},final),[card])});
 test('runTurnCoaching without a trigger forwards upstream coaching and makes no card',()=>assert.deepEqual(runTurnCoaching(capture,final),{blocks:[card],eligibility:{eligible:false,reason:'no_run_this_turn'}}));
-test('runTurnCoaching with a trigger but no fragile edges keeps upstream and says why',()=>assert.deepEqual(runTurnCoaching({...capture,trigger:'explicit_run'},final),{blocks:[card],eligibility:{eligible:false,reason:'no_groundable_fragile_edge'}}));
+// No robustness at all: neither run-turn card, and the reason is that the per-link test is not evidenced.
+test('runTurnCoaching with a trigger but no robustness keeps upstream and says why',()=>assert.deepEqual(runTurnCoaching({...capture,trigger:'explicit_run'},final),{blocks:[card],eligibility:{eligible:false,reason:'edge_sensitivity_not_evidenced'}}));
 test('runTurnCoaching on a foreign graph forwards nothing and says identity_mismatch',()=>assert.deepEqual(runTurnCoaching({...capture,trigger:'explicit_run'},{...final,graphHash:'fedcba9876543210'}),{blocks:[],eligibility:{eligible:false,reason:'identity_mismatch'}}));
 test('currentAnalysisCoaching is runTurnCoaching(...).blocks',()=>{for(const c of [capture,{...capture,trigger:'auto_first_pass' as const}]) assert.deepEqual(currentAnalysisCoaching(c,final),runTurnCoaching(c,final).blocks)});
 test('the fragile-link card and an upstream copy of it are emitted once',()=>{
@@ -46,4 +49,20 @@ test('the fragile-link card and an upstream copy of it are emitted once',()=>{
 test('a readback result computed against another graph forwards nothing, even a card stamped with the final hash',()=>{
  const other='fedcba9876543210';
  assert.deepEqual(runTurnCoaching({...capture,blocks:[result,{...card,graph_hash_at_generation:other}],trigger:'explicit_run'},{...final,graphHash:other}),{blocks:[],eligibility:{eligible:false,reason:'identity_mismatch'}});
+});
+
+// ── the no-flagged-link card (coaching/no-flagged-link-card.ts) — the second run-turn card ──
+test('RUN_TURN_COACHING_REASONS is the six-reason gate order',()=>assert.deepEqual([...RUN_TURN_COACHING_REASONS],['no_run_this_turn','identity_mismatch','no_groundable_fragile_edge','edge_sensitivity_not_evidenced','claim_not_usable','copy_gate']));
+test('a served run with no fragile link (c10) adds exactly one no-flagged-link card after the forwarded upstream card',()=>{
+ const c=runTurnCase('c10','t5','explicit_run');
+ const upstream={...card,block_id:'00000000-0000-4000-8000-0000000000c1',graph_hash_at_generation:c.turn.graph_hash,created_at:c.turn.analysis_state.run_state.computed_at};
+ const out=runTurnCoaching({...c.captured,blocks:[...c.captured.blocks!,upstream]},c.final);
+ assert.deepEqual(out.eligibility,{eligible:true});
+ assert.equal(out.blocks.length,2);
+ assert.strictEqual(out.blocks[0],upstream);
+ assert.ok(out.blocks[1]!.signal_id.startsWith('coach:no_flagged_link:'));
+ assert.deepEqual(out.blocks.filter(b=>b.signal_id.startsWith('coach:no_flagged_link:')||b.signal_id.startsWith('coach:fragile_link:')).length,1);
+ // Upstream forwarding is unchanged by the new card: without a trigger the same upstream card is forwarded alone.
+ const {trigger:_t,...untriggered}=c.captured;
+ assert.deepEqual(runTurnCoaching({...untriggered,blocks:[...c.captured.blocks!,upstream]},c.final),{blocks:[upstream],eligibility:{eligible:false,reason:'no_run_this_turn'}});
 });
