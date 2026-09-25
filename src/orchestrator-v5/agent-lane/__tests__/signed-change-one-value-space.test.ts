@@ -317,6 +317,13 @@ describe('B1 (review 5835754404): restated only when today is KNOWN to be zero',
     expect((await runAnalysis(graph)).refusal).toBeNull();
   });
 
+  it('RED row 2b: a baseline marked known but with NO value (known: true, null) is not restated — known-ness alone licenses nothing', async () => {
+    const { out, graph } = await build(candidate(...cutRaise('List price change'),
+      { baseline_known: true, baseline_value: null, provenance: 'explicit' }));
+    notRestated(out, graph, PRICE, 'List price change');
+    expect((await runAnalysis(graph)).refusal).toBeNull();
+  });
+
   it('RED row 3: a percent LEVEL with no known value (a margin at -5 vs 12) is never read as a change from today', async () => {
     const base = candidate(
       [iv('List price change', 5, '%'), iv('Gross margin', -5, '%', 'ai_proposed')],

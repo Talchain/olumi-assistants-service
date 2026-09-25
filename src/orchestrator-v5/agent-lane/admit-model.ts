@@ -596,8 +596,8 @@ export function findMechanismPath(
  * the real handler (`signed-change-one-value-space.test.ts`). The conventional drafter refuses
  * negatives for the same reason (`records/projector.ts`).
  *
- * A percentage CHANGE whose value today is KNOWN to be 0 is, by definition, the level of that
- * quantity relative to today, less 100. So it is restated as that level — today 100, "cut 15%"
+ * A percentage CHANGE whose value today is KNOWN to be 0 is the level of that quantity relative to
+ * today, less 100. So it is restated as that level — today 100, "cut 15%"
  * 85, "raise 10%" 110 — on a frame of 0..200 (wider only when a level needs it). Nothing is
  * invented: every level is the user's number plus 100, the sign survives as the side of today
  * each option sits on, the link's direction is unchanged (the level rises with the change), and
@@ -613,6 +613,14 @@ export function findMechanismPath(
  * or an unknown 0, is left alone and its negative levels are withheld and said, as for any other
  * level that cannot be restated. A known 0 the builder inferred keeps no `source`; a known 0 the
  * user stated ("no change today") keeps `brief_extraction`, which it is.
+ *
+ * ⚠ KNOWN LIMITATION (independent verification of B1): admission cannot tell a percentage CHANGE
+ * from a percent LEVEL that happens to be KNOWN as 0 today (a margin of 0 with options at -5 and
+ * 12). That level is restated too, and read as "95 / 112 % of today". The transform is affine
+ * (level = 100 + the stated figure), so order, sign and link direction survive and it is said;
+ * only the "% of today" reading is wrong for that shape. Telling the two apart needs a
+ * change-versus-level classification whose corpus must come from served captures, not from
+ * this file's author, so it is not guessed here.
  */
 const TODAY_LEVEL = 100;
 const TODAY_UNIT = '% of today';
