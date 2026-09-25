@@ -195,6 +195,56 @@ export interface GoalAttainmentContradiction {
   readonly better_probability_of_goal: number;
 }
 
+/**
+ * ⛔ THE GOAL FRAME THE HEADLINE WAS COMPOSED UNDER, decided ONCE, by the
+ * run_analysis headline builder (`describeGoalFrame` in
+ * `analysis-result-headline.ts`), and handed to this tail so the two halves of
+ * one summary cannot disagree about the goal.
+ *
+ *   goal_framed          PLoT sent neither GOAL_DIRECTION_UNATTESTED nor
+ *                        GOAL_THRESHOLD_NOT_CONVERTIBLE. Both arms say
+ *                        "scored highest against your goal most often".
+ *   direction_assumed    GOAL_DIRECTION_UNATTESTED alone, on a run that carried
+ *                        attainment data. The headline says the analysis assumed
+ *                        higher is better.
+ *   attainment_untested  GOAL_THRESHOLD_NOT_CONVERTIBLE without
+ *                        GOAL_DIRECTION_UNATTESTED. The headline says "The model
+ *                        could not test whether any option reaches your goal."
+ *   direction_assumed_and_attainment_untested
+ *                        GOAL_DIRECTION_UNATTESTED with THRESHOLD, or with no
+ *                        attainment data. The headline says both, in one
+ *                        sentence (R&C round 2, R3-1).
+ *
+ * THIS TAIL READS THE FRAME AS ONE BIT (R&C round 2, R3-2). Under
+ * `goal_framed` both arms ship as before. Under ANY other frame Arm A drops
+ * "against your goal" and Arm B is SILENT, both halves of it: its attainment
+ * claim ("more likely to reach your stated target") and its gloss ("Scoring
+ * highest counts how often an option scored highest on your goal…") both lean
+ * on a goal frame the headline has just said is unattested or untestable.
+ * Round 1 let Arm B ship unframed under `direction_assumed`; the round-2
+ * verifier ruled that out, so no unframed Arm B shape exists any more, in the
+ * builder or in the grammar.
+ *
+ * ⚠ THIS MODULE NEVER READS THE WARNING CHANNEL ITSELF. The codes ride a Tier-3
+ * deny field whose presence tests are cage-owned and pinned to one consumer
+ * (tests/contract/untestable-goal-disclosure-single-site.guard.test.ts, which
+ * also pins that this file names neither helper). It receives the verdict.
+ */
+export type GoalFrame =
+  | 'goal_framed'
+  | 'direction_assumed'
+  | 'attainment_untested'
+  | 'direction_assumed_and_attainment_untested';
+
+/**
+ * May Arm B (an attainment claim plus its gloss) ship under this frame? Only
+ * where the goal frame stands (R3-2). An allowlist of ONE, so any other value,
+ * including a frame added later, fails closed (silent).
+ */
+function attainmentArmMayShip(goalFrame: GoalFrame): boolean {
+  return goalFrame === 'goal_framed';
+}
+
 /** Arm A's verdict, including the containment subset. */
 export interface DirectionalContradiction {
   readonly kind: 'directional';
@@ -475,6 +525,42 @@ function finite(value: number | undefined): value is number {
  */
 function unitProbability(value: number | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+/**
+ * ⭐ "DID THIS RUN CARRY ATTAINMENT DATA?" — the ONE test, used by the headline
+ * builder to decide whether "…could not test whether any option reaches your
+ * goal" is true.
+ *
+ * True when ANY record carries, as a unit-interval number (0 counts: a measured
+ * zero is data), EITHER
+ *   - `probability_of_goal`: ISL Channel A, P(goal samples >= threshold) per
+ *     option, read through Arm B's own reader and {@link unitProbability}; OR
+ *   - `probability_of_joint_goal` (R&C round 2, R3-4): ISL Channel B's per-option
+ *     joint attainment (`constraint_analysis.joint_probability` via PLoT, #204).
+ *     It rides on the same `option_comparison[]` records
+ *     (`context/analysis-signals.ts` reads it there, and the code-derived PLoT
+ *     fixture `tests/fixtures/cross-service/plot-to-cee.doctrine-b.code-derived.json`
+ *     carries it per option, scored from the modelled distribution when the goal
+ *     node has no baseline). If Channel B scored the goal, "could not test" is
+ *     false, so it counts. Read from the RAW record: an identity-less record that
+ *     carries one is still evidence the goal was scored.
+ *
+ * Status is deliberately NOT filtered here, unlike Arm B's comparison: the
+ * question is whether attainment was computed at all, and a record carrying one
+ * is evidence that it was. The error is not symmetric ("could not test" is the
+ * sentence that can be false), so the test leans towards finding data.
+ */
+export function recordsCarryGoalAttainment(
+  records: ReadonlyArray<Record<string, unknown>>,
+): boolean {
+  return (
+    readObjectiveOptionViews(records).some((view) => unitProbability(view.probability_of_goal)) ||
+    records.some((record) => {
+      const joint = record.probability_of_joint_goal;
+      return typeof joint === 'number' && unitProbability(joint);
+    })
+  );
 }
 
 /**
@@ -774,6 +860,23 @@ const ATTAINMENT_TAIL_B =
   '). Scoring highest counts how often an option scored highest on your goal, not whether your target was met.';
 
 const DIRECTIONAL_MIDDLE = ' scored highest against your goal most often without moving ';
+
+/**
+ * ⛔ THE WITHDRAWN MIDDLE — Arm A's, used whenever the goal frame is not
+ * `goal_framed`.
+ *
+ * Only "against your goal" goes; the statistic ("scored highest most often"),
+ * the labels, the percentage and every other clause of the arm are kept. The
+ * run could not test the goal as stated, or assumed its direction (see
+ * {@link GoalFrame}), and the headline this rides on has just said so, so the
+ * tail must not re-assert it. "Scored highest" stays visible to the shared
+ * leader vocabulary (`scored_highest` in `compose/leading-option-egress-guard.ts`),
+ * so withheld-turn redaction still sees the leader.
+ *
+ * There is deliberately NO withdrawn middle for Arm B (R3-2): it does not ship
+ * under a withdrawn frame at all.
+ */
+const DIRECTIONAL_MIDDLE_UNFRAMED = ' scored highest most often without moving ';
 const DIRECTIONAL_TAIL_A = ' the way your goal asks. Among the options that do, ';
 /**
  * ⚠⚠ THIS CLAUSE MUST NOT END IN THE HEADLINE'S OWN LEAD CLAUSE, and the first
@@ -824,6 +927,7 @@ function pct(probability: number): number {
   return toPercent(probability);
 }
 
+/** Arm B has ONE shape: it ships only while the goal frame stands (R3-2). */
 function composeAttainment(
   leader: string,
   better: string,
@@ -841,16 +945,18 @@ function composeAttainment(
   );
 }
 
+/** `framed` = the goal frame stands (`goal_framed`); otherwise it is withdrawn. */
 function composeDirectional(
   leader: string,
   factor: string,
   pursuing: string,
   pursuingPct: number,
+  framed: boolean,
 ): string {
   return (
     ' ' +
     quote(leader) +
-    DIRECTIONAL_MIDDLE +
+    (framed ? DIRECTIONAL_MIDDLE : DIRECTIONAL_MIDDLE_UNFRAMED) +
     quote(factor) +
     DIRECTIONAL_TAIL_A +
     quote(pursuing) +
@@ -867,29 +973,64 @@ function escapeForRegex(source: string): string {
 
 const LABEL_SLOT = `“[^”\\n]{1,${OBJECTIVE_LABEL_MAX_CHARS}}”`;
 
+function attainmentReSrc(): string {
+  return (
+    escapeForRegex(ATTAINMENT_LEAD_IN) +
+    LABEL_SLOT +
+    escapeForRegex(ATTAINMENT_MIDDLE) +
+    LABEL_SLOT +
+    escapeForRegex(ATTAINMENT_TAIL_A) +
+    '\\d{1,3}% against \\d{1,3}%' +
+    escapeForRegex(ATTAINMENT_TAIL_B)
+  );
+}
+
+function directionalReSrc(middle: string): string {
+  return (
+    '\\u0020' +
+    LABEL_SLOT +
+    escapeForRegex(middle) +
+    LABEL_SLOT +
+    escapeForRegex(DIRECTIONAL_TAIL_A) +
+    LABEL_SLOT +
+    escapeForRegex(DIRECTIONAL_TAIL_B) +
+    '\\d{1,3}' +
+    escapeForRegex(DIRECTIONAL_TAIL_C)
+  );
+}
+
 /**
- * The grammar the egress allowlist compiles for this tail. Two alternatives,
- * one per arm. Percentages are `\d{1,3}` — integers only, matching {@link pct}.
+ * ⭐ EACH ARM SHAPE, SEPARATELY, so the headline grammar can BIND each one to
+ * the headline sentence it agrees with (`analysis-result-headline.ts`,
+ * `OBJECTIVE_CONTRADICTION_BOUND_RE_SRC`):
+ *   - the goal-framed shapes (both arms) only where no goal-frame sentence
+ *     precedes them;
+ *   - the unframed Arm A only where one of the goal-frame sentences does.
+ * There is no unframed Arm B shape (R3-2), so Arm B is admitted beside no
+ * goal-frame sentence at all. Derived from the copy constants, never
+ * hand-written. Deliberately not a `*_RE_SRC` export: these are parts of the
+ * one registered family below, not families of their own.
+ */
+export const OBJECTIVE_CONTRADICTION_ARM_GRAMMARS = Object.freeze({
+  attainmentFramed: attainmentReSrc(),
+  directionalFramed: directionalReSrc(DIRECTIONAL_MIDDLE),
+  directionalUnframed: directionalReSrc(DIRECTIONAL_MIDDLE_UNFRAMED),
+});
+
+/**
+ * The grammar for this tail as ONE family: every arm shape the builder can
+ * emit (framed Arm B, framed and unframed Arm A). Percentages are `\d{1,3}` —
+ * integers only, matching {@link pct}. This union is what the builder validates
+ * against and what the salvage specs read; the headline's TAIL_PATTERN uses the
+ * BOUND form of the same three parts.
  */
 export const OBJECTIVE_CONTRADICTION_RE_SRC =
   '(?:' +
-  escapeForRegex(ATTAINMENT_LEAD_IN) +
-  LABEL_SLOT +
-  escapeForRegex(ATTAINMENT_MIDDLE) +
-  LABEL_SLOT +
-  escapeForRegex(ATTAINMENT_TAIL_A) +
-  '\\d{1,3}% against \\d{1,3}%' +
-  escapeForRegex(ATTAINMENT_TAIL_B) +
+  OBJECTIVE_CONTRADICTION_ARM_GRAMMARS.attainmentFramed +
   '|' +
-  '\\u0020' +
-  LABEL_SLOT +
-  escapeForRegex(DIRECTIONAL_MIDDLE) +
-  LABEL_SLOT +
-  escapeForRegex(DIRECTIONAL_TAIL_A) +
-  LABEL_SLOT +
-  escapeForRegex(DIRECTIONAL_TAIL_B) +
-  '\\d{1,3}' +
-  escapeForRegex(DIRECTIONAL_TAIL_C) +
+  OBJECTIVE_CONTRADICTION_ARM_GRAMMARS.directionalFramed +
+  '|' +
+  OBJECTIVE_CONTRADICTION_ARM_GRAMMARS.directionalUnframed +
   ')';
 
 let exactRegex: RegExp | null = null;
@@ -921,12 +1062,15 @@ export const OBJECTIVE_CONTRADICTION_MAX_CHARS = Math.max(
     100,
     100,
   ).length,
-  composeDirectional(
-    'x'.repeat(OBJECTIVE_LABEL_MAX_CHARS),
-    'y'.repeat(OBJECTIVE_LABEL_MAX_CHARS),
-    'z'.repeat(OBJECTIVE_LABEL_MAX_CHARS),
-    100,
-  ).length,
+  ...[true, false].map((framed) =>
+    composeDirectional(
+      'x'.repeat(OBJECTIVE_LABEL_MAX_CHARS),
+      'y'.repeat(OBJECTIVE_LABEL_MAX_CHARS),
+      'z'.repeat(OBJECTIVE_LABEL_MAX_CHARS),
+      100,
+      framed,
+    ).length,
+  ),
 );
 
 /**
@@ -945,13 +1089,21 @@ export const OBJECTIVE_CONTRADICTION_MAX_CHARS = Math.max(
  * the cap or carries the quoting characters suppresses the WHOLE disclosure
  * rather than shipping a half-sentence — an honest silence, never a mangled
  * claim.
+ *
+ * ⛔ `goalFrame` IS THE HEADLINE BUILDER'S VERDICT (see {@link GoalFrame}), and
+ * REQUIRED, deliberately: a default would be "goal_framed", which is the claim
+ * this parameter exists to withdraw. Anything but `goal_framed` drops "against
+ * your goal" from Arm A and silences Arm B entirely (R3-2).
  */
 export function buildObjectiveContradictionDisclosure(
   contradiction: GoalAttainmentContradiction | DirectionalContradiction | null,
   leaderWasNamed: boolean,
+  goalFrame: GoalFrame,
 ): string {
   if (contradiction === null) return '';
   if (!leaderWasNamed) return '';
+  if (contradiction.kind === 'goal_attainment' && !attainmentArmMayShip(goalFrame)) return '';
+  const framed = goalFrame === 'goal_framed';
 
   const clean = (label: string): string | null => {
     const trimmed = typeof label === 'string' ? label.trim() : '';
@@ -981,6 +1133,7 @@ export function buildObjectiveContradictionDisclosure(
       factor,
       pursuing,
       pct(contradiction.pursuing_leader_win_probability),
+      framed,
     );
   }
 
@@ -1003,6 +1156,9 @@ export function buildObjectiveContradictionDisclosure(
  * and the same stated reason, as `intake-option-disclosure.ts`.
  */
 export const OBJECTIVE_DISCLOSURE_SURVIVES_ITS_OWN_GRAMMAR: true = (() => {
+  // Arm B has one shape; Arm A has both frames. The withdrawn shape is
+  // published copy too, and a copy edit to it must throw here rather than
+  // silently lose the tail at egress.
   const shapes: readonly string[] = [
     composeAttainment('Hold at £49 Per Seat (Status Quo)', 'Raise to £59 Per Seat', 48, 0),
     composeAttainment('A', 'B', 100, 0),
@@ -1012,19 +1168,23 @@ export const OBJECTIVE_DISCLOSURE_SURVIVES_ITS_OWN_GRAMMAR: true = (() => {
       100,
       100,
     ),
-    composeDirectional(
-      'Hold at £49 Per Seat (Status Quo)',
-      'Seat Price Level',
-      'Raise to £59 Per Seat',
-      28,
-    ),
-    composeDirectional('A', 'B', 'C', 0),
-    composeDirectional(
-      'x'.repeat(OBJECTIVE_LABEL_MAX_CHARS),
-      'y'.repeat(OBJECTIVE_LABEL_MAX_CHARS),
-      'z'.repeat(OBJECTIVE_LABEL_MAX_CHARS),
-      100,
-    ),
+    ...[true, false].flatMap((framed) => [
+      composeDirectional(
+        'Hold at £49 Per Seat (Status Quo)',
+        'Seat Price Level',
+        'Raise to £59 Per Seat',
+        28,
+        framed,
+      ),
+      composeDirectional('A', 'B', 'C', 0, framed),
+      composeDirectional(
+        'x'.repeat(OBJECTIVE_LABEL_MAX_CHARS),
+        'y'.repeat(OBJECTIVE_LABEL_MAX_CHARS),
+        'z'.repeat(OBJECTIVE_LABEL_MAX_CHARS),
+        100,
+        framed,
+      ),
+    ]),
   ];
   for (const shape of shapes) {
     if (!survivesEgress(shape)) {
@@ -1204,19 +1364,26 @@ export function readInterventionViews(rawGraph: unknown): InterventionView[] {
  *
  * `leaderWasNamed` is threaded straight through to the builder's hard
  * precondition — on a withheld turn this returns `''`.
+ *
+ * `goalFrame` is the headline builder's verdict for the SAME run
+ * (`describeGoalFrame(headlineInput)` in run-analysis.ts). Under any frame but
+ * `goal_framed`, Arm B is not considered at all (R3-2), so a directional
+ * contradiction on the same run still gets its (unframed) sentence instead of
+ * being pre-empted by an arm that may not ship.
  */
 export function composeObjectiveContradictionDisclosure(
   rawGraph: unknown,
   records: ReadonlyArray<Record<string, unknown>>,
   leaderWasNamed: boolean,
+  goalFrame: GoalFrame,
 ): string {
   if (!leaderWasNamed) return '';
   const options = readObjectiveOptionViews(records);
   if (options.length < 2) return '';
 
-  const attainment = detectGoalAttainmentContradiction(options);
+  const attainment = attainmentArmMayShip(goalFrame) ? detectGoalAttainmentContradiction(options) : null;
   if (attainment !== null) {
-    return buildObjectiveContradictionDisclosure(attainment, leaderWasNamed);
+    return buildObjectiveContradictionDisclosure(attainment, leaderWasNamed, goalFrame);
   }
 
   const directional = detectDirectionalContradiction(
@@ -1224,5 +1391,5 @@ export function composeObjectiveContradictionDisclosure(
     options,
     readInterventionViews(rawGraph),
   );
-  return buildObjectiveContradictionDisclosure(directional, leaderWasNamed);
+  return buildObjectiveContradictionDisclosure(directional, leaderWasNamed, goalFrame);
 }

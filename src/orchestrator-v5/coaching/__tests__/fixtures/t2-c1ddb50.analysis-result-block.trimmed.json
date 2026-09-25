@@ -1,0 +1,591 @@
+{
+  "_provenance": {
+    "source": "served CEE c1ddb50, programme-docs 17afe343 canonical-state-20260925/served-c1ddb50-0952/t2-run.json blocks[0]; AI Quality #69 5830649501",
+    "source_file": "olumi-programme-docs @ 17afe343: canonical-state-20260925/served-c1ddb50-0952/t2-run.json",
+    "source_sha256": "0735454987ebfc7d1cdb7f48137446111b7bc7f9cf640b662233d175165bfba8",
+    "served_build": "CEE c1ddb50 (staging), as recorded by the capture record named in `source`. The captured response itself carries no build SHA.",
+    "route": "agent lane served wire response (_diagnostic_trace.exit_path agent_lane_v1; tools get_canonical_state, run_analysis)",
+    "captured": "2026-09-25 (decision_brief.created_at 2026-09-25T09:53:42.611Z)",
+    "trimmed": true,
+    "trim_note": "Only blocks[0] (the single analysis_result block) is kept, whole: type, summary, leading_option_id, win_probabilities, enrichment (all 13 keys) and computed_against_hash. Dropped: every other top-level key of the response (assistant_text, suggested_actions, insights, stage_indicator, analysis_state, graph_hash, analysis_ready, draft_graph, _diagnostic_trace, _agent, _provider_calls). Values are the parsed source re-serialised with JSON.stringify, so every kept value is identical to the source when parsed. CAPTURE, not invented."
+  },
+  "blocks": [
+    {
+      "type": "analysis_result",
+      "summary": "Raise to £59 scored highest against your goal in 81% of runs of this model because Active paid seats is the strongest driver. 'Keep £49 price' was analysed as no change — the factors it compares against were held at the values your model records today.",
+      "leading_option_id": "raise_to_59",
+      "win_probabilities": {
+        "Raise to £54": 0.0200666666666668,
+        "Raise to £59": 0.8067666666666595,
+        "Keep £49 price": 0.17316666666666522
+      },
+      "enrichment": {
+        "option_comparison": [
+          {
+            "id": "keep_49_price",
+            "label": "Keep £49 price",
+            "status": "computed",
+            "outcome": {
+              "p10": -0.004690491912874015,
+              "p50": 0.09822643019123165,
+              "p90": 0.16431457169063635,
+              "std": 0.0673402040791753,
+              "mean": 0.08722047634095693,
+              "n_samples": 10000,
+              "validity_ratio": 1,
+              "n_valid_samples": 10000,
+              "percentiles_source": "samples"
+            },
+            "downside": {
+              "p05": -0.03157227687267657,
+              "cvar_10": -0.03960674113571075,
+              "expected_regret": 0.014850065585365176
+            },
+            "option_id": "keep_49_price",
+            "option_label": "Keep £49 price",
+            "win_probability": 0.17316666666666522
+          },
+          {
+            "id": "raise_to_59",
+            "label": "Raise to £59",
+            "status": "computed",
+            "outcome": {
+              "p10": -0.009688180829533013,
+              "p50": 0.115026860733951,
+              "p90": 0.1894874548047325,
+              "std": 0.078393584841471,
+              "mean": 0.10074493516789411,
+              "n_samples": 10000,
+              "validity_ratio": 1,
+              "n_valid_samples": 10000,
+              "percentiles_source": "samples"
+            },
+            "downside": {
+              "p05": -0.03966435786990418,
+              "cvar_10": -0.04819253640771543,
+              "expected_regret": 0.0013256067584279942
+            },
+            "option_id": "raise_to_59",
+            "option_label": "Raise to £59",
+            "win_probability": 0.8067666666666595
+          },
+          {
+            "id": "raise_to_54",
+            "label": "Raise to £54",
+            "status": "computed",
+            "outcome": {
+              "p10": -0.0073211495606562375,
+              "p50": 0.10658519534280803,
+              "p90": 0.1765476690588699,
+              "std": 0.07279673605714719,
+              "mean": 0.09398270575442551,
+              "n_samples": 10000,
+              "validity_ratio": 1,
+              "n_valid_samples": 10000,
+              "percentiles_source": "samples"
+            },
+            "downside": {
+              "p05": -0.035844779587664716,
+              "cvar_10": -0.043790169649659545,
+              "expected_regret": 0.008087836171896576
+            },
+            "option_id": "raise_to_54",
+            "option_label": "Raise to £54",
+            "win_probability": 0.0200666666666668
+          }
+        ],
+        "factor_sensitivity": [
+          {
+            "source": "graph",
+            "direction": "positive",
+            "factor_id": "active_paid_seats",
+            "confidence": 0.6000000000000001,
+            "elasticity": 1,
+            "evpi_method": "heuristic",
+            "driver_label": "biggest",
+            "factor_label": "Active paid seats",
+            "evidence_hint": false,
+            "influence_rank": 1,
+            "importance_rank": 1,
+            "influence_score": 1,
+            "importance_basis": "graph_structural",
+            "confidence_source": "plot_unified_from_graph",
+            "sensitivity_score": 0.5,
+            "flip_risk_category": "correlated",
+            "value_of_information": 0,
+            "confidence_components": {
+              "sampling_stability": null,
+              "structural_certainty": 0.8
+            },
+            "confidence_provenance": {
+              "input_quality": "standard",
+              "is_provisional": true,
+              "formula_version": "plot_unified_v2",
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "computation_source": "plot_unified_from_graph"
+            },
+            "evpi_percentage_points": 0,
+            "range_derivation_source": "default"
+          },
+          {
+            "source": "graph",
+            "direction": "negative",
+            "factor_id": "monthly_churn_rate",
+            "confidence": 0.5780500000000001,
+            "elasticity": 0.5,
+            "evpi_method": "heuristic",
+            "driver_label": "strong",
+            "factor_label": "Monthly churn rate",
+            "value_source": "brief_extraction",
+            "evidence_hint": false,
+            "influence_rank": 3,
+            "rank_flip_rate": 0,
+            "importance_rank": 2,
+            "influence_score": 0.5,
+            "importance_basis": "graph_structural",
+            "confidence_source": "plot_unified_from_isl_bootstrap",
+            "sensitivity_score": -0.25,
+            "flip_risk_category": "correlated",
+            "value_of_information": 0,
+            "attribution_stability": "low",
+            "confidence_components": {
+              "sampling_stability": 0.25,
+              "structural_certainty": 0.8
+            },
+            "confidence_provenance": {
+              "input_quality": "standard",
+              "is_provisional": true,
+              "formula_version": "plot_unified_v3",
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "computation_source": "plot_unified_from_isl_bootstrap"
+            },
+            "evpi_percentage_points": 0,
+            "range_derivation_source": "explicit_cap"
+          },
+          {
+            "source": "graph",
+            "direction": "positive",
+            "factor_id": "new_seats_per_month",
+            "confidence": 0.5827,
+            "elasticity": 0.5,
+            "evpi_method": "heuristic",
+            "driver_label": "strong",
+            "factor_label": "New seats per month",
+            "value_source": "brief_extraction",
+            "evidence_hint": false,
+            "influence_rank": 4,
+            "rank_flip_rate": 0.45,
+            "importance_rank": 3,
+            "influence_score": 0.5,
+            "importance_basis": "graph_structural",
+            "confidence_source": "plot_unified_from_isl_bootstrap",
+            "sensitivity_score": 0.25,
+            "flip_risk_category": "correlated",
+            "value_of_information": 0,
+            "attribution_stability": "low",
+            "confidence_components": {
+              "sampling_stability": 0.25,
+              "structural_certainty": 0.8
+            },
+            "confidence_provenance": {
+              "input_quality": "standard",
+              "is_provisional": true,
+              "formula_version": "plot_unified_v3",
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "computation_source": "plot_unified_from_isl_bootstrap"
+            },
+            "evpi_percentage_points": 0,
+            "range_derivation_source": "explicit_cap"
+          },
+          {
+            "source": "graph",
+            "direction": "positive",
+            "factor_id": "price_per_seat",
+            "confidence": 0.3,
+            "elasticity": 0,
+            "zero_reason": "intervention_override",
+            "driver_label": "strong",
+            "factor_label": "Price per seat",
+            "value_source": "brief_extraction",
+            "influence_rank": 2,
+            "rank_flip_rate": 0.4,
+            "importance_rank": 4,
+            "influence_score": 0.5,
+            "importance_basis": "graph_structural",
+            "confidence_source": "plot_unified_from_isl_bootstrap",
+            "sensitivity_score": 0,
+            "flip_risk_category": "isolated",
+            "value_of_information": 0,
+            "attribution_stability": "negligible",
+            "confidence_components": {
+              "sampling_stability": 0,
+              "structural_certainty": 0.5
+            },
+            "confidence_provenance": {
+              "input_quality": "standard",
+              "is_provisional": true,
+              "formula_version": "plot_unified_v3",
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "computation_source": "plot_unified_from_isl_bootstrap"
+            },
+            "range_derivation_source": "explicit_cap"
+          }
+        ],
+        "robustness": {
+          "level": "high",
+          "near_tie": {
+            "gap": 0.6335999999999943,
+            "is_tie": false,
+            "threshold": 0.1,
+            "top_option_id": "raise_to_59",
+            "tied_option_ids": [
+              "raise_to_59"
+            ],
+            "second_option_id": "keep_49_price"
+          },
+          "is_robust": true,
+          "confidence": 0.8067666666666595,
+          "robust_edges": [],
+          "fragile_edges": [
+            {
+              "to_id": "monthly_recurring_revenue",
+              "edge_id": "price_per_seat->monthly_recurring_revenue",
+              "from_id": "price_per_seat",
+              "visible": true,
+              "severity": "error",
+              "to_label": "Monthly recurring revenue",
+              "from_label": "Price per seat",
+              "switch_probability": 0.6672,
+              "alternative_winner_id": "keep_49_price",
+              "alternative_winner_label": "Keep £49 price",
+              "marginal_switch_probability": 0.2
+            },
+            {
+              "to_id": "active_paid_seats",
+              "edge_id": "monthly_churn_rate->active_paid_seats",
+              "from_id": "monthly_churn_rate",
+              "visible": true,
+              "severity": "warning",
+              "to_label": "Active paid seats",
+              "from_label": "Monthly churn rate",
+              "switch_probability": 0.1908,
+              "alternative_winner_id": "keep_49_price",
+              "alternative_winner_label": "Keep £49 price",
+              "marginal_switch_probability": 0
+            },
+            {
+              "to_id": "new_seats_per_month",
+              "edge_id": "price_per_seat->new_seats_per_month",
+              "from_id": "price_per_seat",
+              "visible": true,
+              "severity": "warning",
+              "to_label": "New seats per month",
+              "from_label": "Price per seat",
+              "switch_probability": 0.1856,
+              "alternative_winner_id": "keep_49_price",
+              "alternative_winner_label": "Keep £49 price",
+              "marginal_switch_probability": 0
+            },
+            {
+              "to_id": "active_paid_seats",
+              "edge_id": "new_seats_per_month->active_paid_seats",
+              "from_id": "new_seats_per_month",
+              "visible": false,
+              "severity": "warning",
+              "to_label": "Active paid seats",
+              "from_label": "New seats per month",
+              "switch_probability": 0.144,
+              "alternative_winner_id": "keep_49_price",
+              "alternative_winner_label": "Keep £49 price",
+              "marginal_switch_probability": 0
+            },
+            {
+              "to_id": "monthly_churn_rate",
+              "edge_id": "price_per_seat->monthly_churn_rate",
+              "from_id": "price_per_seat",
+              "visible": false,
+              "severity": "warning",
+              "to_label": "Monthly churn rate",
+              "from_label": "Price per seat",
+              "switch_probability": 0.1412,
+              "alternative_winner_id": "keep_49_price",
+              "alternative_winner_label": "Keep £49 price",
+              "marginal_switch_probability": 0
+            },
+            {
+              "to_id": "monthly_recurring_revenue",
+              "edge_id": "active_paid_seats->monthly_recurring_revenue",
+              "from_id": "active_paid_seats",
+              "visible": false,
+              "severity": "warning",
+              "to_label": "Monthly recurring revenue",
+              "from_label": "Active paid seats",
+              "switch_probability": 0.0888,
+              "alternative_winner_id": "keep_49_price",
+              "alternative_winner_label": "Keep £49 price",
+              "marginal_switch_probability": 0
+            }
+          ],
+          "display_verdict": "robust",
+          "confidence_basis": "recommendation_stability_uncalibrated",
+          "recommended_option_id": "raise_to_59",
+          "display_verdict_reason": "this run held up under the changes we tested",
+          "recommended_option_label": "Raise to £59",
+          "recommended_option_compliance": "not_applicable",
+          "recommended_option_compliance_reason": "no limits were set for this decision"
+        },
+        "option_comparison_status": "computed",
+        "edge_e_values": [
+          {
+            "to_id": "monthly_recurring_revenue",
+            "e_value": 1,
+            "edge_id": "price_per_seat::monthly_recurring_revenue",
+            "from_id": "price_per_seat",
+            "to_label": "Monthly recurring revenue",
+            "flip_mean": 0.159999,
+            "stability": {
+              "n_seeds": 10,
+              "band_max": 0.536392,
+              "band_min": -0.000001,
+              "band_width": 0.536393,
+              "band_median": 0.154923,
+              "n_seeds_flipped": 10,
+              "seed_flip_means": [
+                0.095511,
+                0.123843,
+                0.191553,
+                0.156524,
+                -0.000001,
+                0.289466,
+                0.114736,
+                0.211057,
+                0.536392,
+                0.153321
+              ]
+            },
+            "from_label": "Price per seat",
+            "current_mean": 0.5,
+            "flip_direction": "decrease"
+          }
+        ],
+        "inference_warnings": [
+          {
+            "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+            "message": "5 edge E-value entries were omitted from edge_e_values: 5 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+            "severity": "info"
+          },
+          {
+            "code": "GOAL_DIRECTION_UNATTESTED",
+            "field": "goal_direction",
+            "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+            "severity": "warning"
+          },
+          {
+            "code": "GOAL_THRESHOLD_NOT_CONVERTIBLE",
+            "field": "nodes[monthly_recurring_revenue].observed_state.baseline",
+            "message": "A 'level' frame requires goal node 'monthly_recurring_revenue' to carry observed_state.baseline to convert the level into the samples' frame, but it carries no observed_state at all.",
+            "severity": "warning"
+          }
+        ],
+        "confidence_tier": "fair",
+        "flip_thresholds": [
+          {
+            "unit": "GBP per seat per month",
+            "factor_id": "price_per_seat",
+            "flip_value": null,
+            "flip_reason": "structurally_invariant",
+            "probes_used": 0,
+            "value_scale": "display",
+            "factor_label": "Price per seat",
+            "current_value": 49,
+            "current_display": "49 GBP per seat per month",
+            "iterations_used": 0,
+            "no_flip_in_range": true,
+            "alternative_winner_id": null,
+            "alternative_winner_label": null
+          }
+        ],
+        "decision_brief": {
+          "options": [
+            {
+              "rank": 1,
+              "label": "Raise to £59",
+              "option_id": "raise_to_59",
+              "win_probability": 0.8067666666666595
+            },
+            {
+              "rank": 2,
+              "label": "Keep £49 price",
+              "option_id": "keep_49_price",
+              "win_probability": 0.17316666666666522
+            },
+            {
+              "rank": 3,
+              "label": "Raise to £54",
+              "option_id": "raise_to_54",
+              "win_probability": 0.0200666666666668
+            }
+          ],
+          "version": "1",
+          "brief_id": "e49f21b3-3b85-4210-becd-9761156b24cd",
+          "headline": "Raise to £59 currently leads, but the outcome is highly uncertain. However, the outcome is within model uncertainty, so the ranking could shift with new information. Define tie-breaker criteria or gather additional evidence.",
+          "warnings": [
+            {
+              "code": "DOMINANT_FACTOR",
+              "message": "One factor dominates. What would change if Active paid seats had less influence?",
+              "severity": "warning"
+            },
+            {
+              "code": "M2_UNAVAILABLE",
+              "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+              "severity": "warning"
+            }
+          ],
+          "created_at": "2026-09-25T09:53:42.611Z",
+          "robustness": "robust",
+          "top_drivers": [
+            {
+              "direction": "positive",
+              "sensitivity": 1,
+              "factor_label": "Active paid seats"
+            },
+            {
+              "direction": "negative",
+              "sensitivity": 0.5,
+              "factor_label": "Monthly churn rate"
+            },
+            {
+              "direction": "positive",
+              "sensitivity": 0.5,
+              "factor_label": "New seats per month"
+            }
+          ],
+          "warning_codes": [
+            "GOAL_DIRECTION_UNATTESTED",
+            "GOAL_THRESHOLD_NOT_CONVERTIBLE"
+          ],
+          "headline_banded": {
+            "band": "clearly_ahead",
+            "text": "Raise to £59 is clearly ahead.",
+            "doctrine": "provisional_doctrine_v0",
+            "leader_label": "Raise to £59",
+            "runner_up_label": "Keep £49 price",
+            "leader_option_id": "raise_to_59",
+            "robustness_gated": false,
+            "runner_up_option_id": "keep_49_price",
+            "win_probability_gap": 0.6335999999999943
+          },
+          "key_assumptions": [
+            "Active paid seats",
+            "Monthly churn rate",
+            "New seats per month"
+          ],
+          "analysis_summary": {
+            "leading_option": "Raise to £59",
+            "robustness_band": "robust",
+            "win_probability": 0.8067666666666595
+          },
+          "robustness_caveat": {
+            "text": "This run held up under the changes we tested. That is not a guarantee. Defaulted or uncertain inputs could still change it.",
+            "basis": "is_robust",
+            "doctrine": "provisional_doctrine_v0",
+            "flip_evidence": {
+              "text": "Varying any one of the factors we could test did not change which option is most likely to achieve your goal.",
+              "status": "all_no_effect"
+            }
+          },
+          "what_would_change": [
+            "Monthly churn rate → Active paid seats",
+            "New seats per month → Active paid seats",
+            "Active paid seats → Monthly recurring revenue"
+          ],
+          "defaulted_assumptions": []
+        },
+        "factor_evppi": [
+          {
+            "evppi": 0,
+            "units": "outcome",
+            "method": "regression_evppi_v1",
+            "status": "below_resolution",
+            "evppi_raw": 0,
+            "factor_id": "monthly_churn_rate",
+            "n_samples": 10000,
+            "clamped_low": false,
+            "noise_floor": 0,
+            "clamped_high": false,
+            "regression_degree": 4,
+            "correlation_active": false,
+            "baseline_max_expected_utility": 0.100745,
+            "conditional_max_expected_utility": 0.100745
+          },
+          {
+            "evppi": 0,
+            "units": "outcome",
+            "method": "regression_evppi_v1",
+            "status": "below_resolution",
+            "evppi_raw": 0,
+            "factor_id": "new_seats_per_month",
+            "n_samples": 10000,
+            "clamped_low": false,
+            "noise_floor": 0,
+            "clamped_high": false,
+            "regression_degree": 4,
+            "correlation_active": false,
+            "baseline_max_expected_utility": 0.100745,
+            "conditional_max_expected_utility": 0.100745
+          }
+        ],
+        "decision_evpi": 0.0013256067584279942,
+        "p_win_sensitivity": [
+          {
+            "method": "p_win_delta_at_mean_v1",
+            "status": "below_resolution",
+            "clamped": true,
+            "factor_id": "price_per_seat",
+            "n_samples": 2000,
+            "metric_type": "p_win_recommended",
+            "noise_floor": 0.03099,
+            "p_win_delta": 0,
+            "current_metric": 0.819333,
+            "perfect_metric": 0.793,
+            "labelling_doctrine": "provisional_doctrine_v0",
+            "noise_floor_method": "z95_worst_case_bernoulli_diff",
+            "p_win_delta_percentage_points": 0
+          },
+          {
+            "method": "p_win_delta_at_mean_v1",
+            "status": "below_resolution",
+            "clamped": true,
+            "factor_id": "monthly_churn_rate",
+            "n_samples": 2000,
+            "metric_type": "p_win_recommended",
+            "noise_floor": 0.03099,
+            "p_win_delta": 0,
+            "current_metric": 0.819333,
+            "perfect_metric": 0.8055,
+            "labelling_doctrine": "provisional_doctrine_v0",
+            "noise_floor_method": "z95_worst_case_bernoulli_diff",
+            "p_win_delta_percentage_points": 0
+          },
+          {
+            "method": "p_win_delta_at_mean_v1",
+            "status": "below_resolution",
+            "clamped": true,
+            "factor_id": "new_seats_per_month",
+            "n_samples": 2000,
+            "metric_type": "p_win_recommended",
+            "noise_floor": 0.03099,
+            "p_win_delta": 0,
+            "current_metric": 0.819333,
+            "perfect_metric": 0.797333,
+            "labelling_doctrine": "provisional_doctrine_v0",
+            "noise_floor_method": "z95_worst_case_bernoulli_diff",
+            "p_win_delta_percentage_points": 0
+          }
+        ],
+        "conditional_winners": []
+      },
+      "computed_against_hash": "ac6e217638485fc9"
+    }
+  ]
+}
