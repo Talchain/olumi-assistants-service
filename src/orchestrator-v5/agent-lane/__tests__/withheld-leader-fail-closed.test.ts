@@ -424,3 +424,21 @@ describe('review of #1871 at 9cc81d60 — the result forms stay ranking', () => 
     expect(dropRankingSentences(factors, labels).text).toBe(factors);
   });
 });
+
+/** Codex 5826046448: a win-share split in running prose, under a ranking heading. */
+describe('a share split in prose', () => {
+  const graph = { nodes: [{ id: 'raise', kind: 'option', label: 'Raise to £59' }, { id: 'keep', kind: 'option', label: 'Keep £49' }] };
+  const analysisReady = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } };
+  it('RED: through BOTH gates on a withheld turn, the 71/29 split never reaches the user', () => {
+    const out = enforceAgentLaneLeaderClaimsAtWire(
+      { assistant_text: 'Win shares in modelled runs:\nThe £59 path at 71% and holding at 29%.\nThe churn limit was not scored.', blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } } } as unknown as OlumiResponse,
+      { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'constraint_verdict_withheld', graph, analysisReady },
+    );
+    expect(out.response.assistant_text).not.toMatch(/71%|29%/);
+    expect(out.response.assistant_text).toContain('The churn limit was not scored.');
+  });
+  it('CONTROL: two percentages that are not a split stay (a factor against its limit)', () => {
+    expect(sentenceRanksOptions('Monthly churn is assumed at 3.5%, against your limit of 4%.')).toBe(false);
+    expect(sentenceRanksOptions('Conversion is 5% and churn is 3%.')).toBe(false);
+  });
+});

@@ -50,8 +50,9 @@
  *
  * ⚠ RESIDUAL — what a vocabulary classifier cannot see, stated so nobody quotes a stronger claim:
  * a designation that uses no ranking word at all ("directional support for £59", "go with the first
- * one", a bare "£59 comes first."), and win shares written as running prose with no ranking word
- * ("the £59 path at 71% and holding at 29%"). Those sentences are kept. Win shares ARE removed as
+ * one", a bare "£59 comes first."), and a PARTIAL win share in prose with no ranking word ("the £59
+ * path at 71%" alone). Those sentences are kept. A prose split whose percentages sum to ~100 is
+ * removed ("the £59 path at 71% and holding at 29%"). Win shares ARE also removed as
  * lists ("label: N%" / "label — N%", per contiguous list summing to ~100, under a ranking heading, or
  * on an option's own label) and as tables (a share header, an option row with a %, or a ranking row). Measured recall is corpus recall (AI
  * Quality v6: 43 real replies plus 6 authored controls), not a general guarantee.
@@ -306,9 +307,22 @@ function blankIdioms(text: string): string {
   return out;
 }
 
+/**
+ * ⭐ A SHARE SPLIT IN PROSE (Codex 5826046448: "The £59 path at 71% and holding at 29%."): two or more
+ * percentages in ONE sentence that sum to about 100 are a distribution over the options, whatever words
+ * surround them. A factor sentence ("3% a month, against your limit of 4%") never sums to 100.
+ */
+function isShareSplit(text: string): boolean {
+  const pcts = [...text.matchAll(new RegExp(PCT, 'g'))].map((m) => Number(m[0].replace(/[%\s]/g, '').replace(',', '.')));
+  if (pcts.length < 2) return false;
+  const total = pcts.reduce((a, b) => a + b, 0);
+  return total >= 97 && total <= 103;
+}
+
 /** Ranking codes present in text that has ALREADY been normalised and blanked. */
 function rankingCodesInBlanked(blanked: string): string[] {
   const codes = RANKING_PATTERNS.filter(({ re }) => re.test(blanked)).map(({ code }) => code);
+  if (isShareSplit(blanked)) codes.push('share_split');
   if (textNamesLeadingOption(blanked)) codes.push('shared_leader_vocabulary');
   return codes;
 }
