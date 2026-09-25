@@ -22,6 +22,8 @@
  *            no marker input, and `analysis_ready.freshness` from the
  *            post-handler derivation, which does not pass it — so a routed turn
  *            also reads complete_current / fresh;
+ *   RED      and the MODEL is told `coaching_context.freshness: "fresh"` on that
+ *            routed turn (the prompt, not only the wire);
  *   CONTROL  the reload itself (the authority both must agree with);
  *   CONTROL  marker OLDER than the run → every surface says complete_current
  *            (bound by time, not by the marker's presence);
@@ -206,6 +208,30 @@ const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route
 const { default: scenarioGraphRoute } = await import('../../../src/routes/assist.v1.scenario-graph.js');
 const { deriveDecisionContextGraphHash } = await import('../../../src/orchestrator-v5/build-turn-context.js');
 
+/**
+ * The `coaching_context` object the MODEL was handed on this turn, found by its
+ * key in the prompt text and parsed by brace matching — the whole object, not a
+ * substring another field could satisfy.
+ */
+function coachingContextSentToModel(): Record<string, unknown> {
+  const texts: string[] = [];
+  const walk = (v: unknown): void => {
+    if (typeof v === 'string') { if (v.includes('"coaching_context"')) texts.push(v); }
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v !== null && typeof v === 'object') Object.values(v).forEach(walk);
+  };
+  walk(coachCall.mock.calls[0]);
+  expect(texts, 'premise: the prompt carries exactly one coaching_context').toHaveLength(1);
+  const text = texts[0]!;
+  const open = text.indexOf('{', text.indexOf('"coaching_context"'));
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    if (text[i] === '{') depth += 1;
+    if (text[i] === '}') { depth -= 1; if (depth === 0) return JSON.parse(text.slice(open, i + 1)); }
+  }
+  throw new Error('coaching_context object is not closed in the prompt');
+}
+
 let seq = 0;
 function messageTurn() {
   seq += 1;
@@ -284,11 +310,18 @@ describe('turn path vs reload — a restored model (same hash, newer marker)', (
     expect(body.analysis_ready.freshness).toBe('stale');
   });
 
+  it('RED: the model is not told a restored model\'s analysis is fresh', async () => {
+    marker.value = AFTER_RUN;
+    await routedTurn();
+    expect(coachingContextSentToModel()).toMatchObject({ freshness: 'stale', rerun_required: true });
+  });
+
   it('CONTROL: marker OLDER than the run → complete_current on all three (time, not presence)', async () => {
     marker.value = BEFORE_RUN;
     expect((await clarifyExit()).analysis_state.run_state.kind).toBe('complete_current');
     expect((await reload()).analysis_state.run_state.kind).toBe('complete_current');
     expect((await routedTurn()).analysis_state.run_state.kind).toBe('complete_current');
+    expect(coachingContextSentToModel()).toMatchObject({ freshness: 'fresh' });
   });
 
   it('CONTROL: no marker → complete_current on all three', async () => {
