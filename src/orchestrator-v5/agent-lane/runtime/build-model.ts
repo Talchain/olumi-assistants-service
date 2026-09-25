@@ -525,6 +525,23 @@ function retainsRiskHypotheses(before: CandidateModel, after: CandidateModel): b
   return before.options.every((o) => after.options.some((kept) => kept.label === o.label));
 }
 
+/** "under 4%" held as "at most 4%": what the widening means at the boundary, in the user's own terms. */
+function sayWidenedBound(
+  loss: { field_path: string; before?: unknown; after?: unknown },
+  constraints: readonly { node_id: string; operator: string; value: number; label?: string; unit?: string; provenance?: string }[],
+): string | undefined {
+  const nodeId = /^goal_constraints\[(.+)\]\.operator$/.exec(loss.field_path)?.[1];
+  const strictOp = loss.before === '<' || loss.before === '>' ? loss.before : undefined;
+  const c = constraints.find((x) => x.node_id === nodeId && x.operator === loss.after && (x.label ?? '').includes(` ${String(strictOp)} `));
+  if (c === undefined || strictOp === undefined) return undefined;
+  const unit = c.unit ?? '';
+  const amount = /^[£$€]$/.test(unit) ? `${unit}${c.value}` : `${c.value}${unit}`;
+  const metric = (c.label ?? '').slice(0, (c.label ?? '').lastIndexOf(` ${strictOp} `));
+  const who = c.provenance === 'explicit' ? 'You said' : 'Olumi proposed';
+  return `${who} ${metric} ${strictOp === '<' ? 'under' : 'over'} ${amount}, but the model can only hold ` +
+    `"${strictOp === '<' ? 'at most' : 'at least'} ${amount}", so exactly ${amount} counts as meeting it.`;
+}
+
 export async function buildModelFromBrief(
   scenarioId: string,
   brief: string,
@@ -840,6 +857,14 @@ export async function buildModelFromBrief(
         // (`admit-model.ts`, `wireInertStatusQuo`), so it must be said and correctable.
         .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held)$/.test(l.field_path))
         .map((l) => l.reason),
+      // ⛔ A STRICT BOUND WIDENED TO "<=" / ">=" (served CEE 21e3b38: "under 4%" was
+      // stored as "at most 4%"). The canonical constraint vocabulary has no strict
+      // operator, so admission widens it and records the loss; until now that loss
+      // never reached the user. Said per constraint, as the user's only when they stated it.
+      ...admitted.loss
+        .filter((l) => /^goal_constraints\[.+\]\.operator$/.test(l.field_path))
+        .map((l) => sayWidenedBound(l, admitted.goal_constraints))
+        .filter((x): x is string => x !== undefined),
     ].filter((s): s is string => s !== undefined),
   };
 }
