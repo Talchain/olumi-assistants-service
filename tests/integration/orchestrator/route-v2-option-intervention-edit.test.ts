@@ -135,6 +135,7 @@ vi.mock('../../../src/adapters/llm/router.js', () => ({
 }));
 
 const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route-v2.js');
+const { runWithApprovedLevelAdoption } = await import('../../../src/orchestrator-v5/agent-lane/approved-adoption-context.js');
 
 const SCENARIO_ID = '55555555-5555-4555-8555-555555555555';
 let turnCounter = 0;
@@ -196,6 +197,26 @@ describe('POST /orchestrate/v2/turn — option_intervention_edit, at the wire', 
     // Derived against the COMMITTED hash, not the client's asserted base.
     expect(body.graph_hash).toBeDefined();
     expect(body.graph_hash).not.toBe(before);
+  });
+
+  /**
+   * ⭐ THE ADOPTION IDENTITY SURVIVES THE REAL ROUTE (review of #1902 at `8317a0d0`, residual 1). The
+   * Agent's approval dispatches in-process through `app.inject()`; AsyncLocalStorage must reach the
+   * writer through Fastify's handler, not only through a direct call. Cold read of the durable bytes.
+   */
+  it('ADOPTED — inside its adoption identity the cell lands cee_hypothesis at the wire; without it, user_specified', async () => {
+    const adopted = await runWithApprovedLevelAdoption(
+      { scenarioId: SCENARIO_ID, proposalId: 'prop_route', optionId: 'option', factorId: 'factor', modelValue: 0.3 },
+      () => post(app, { kind: 'option_intervention_edit', option_id: 'option', factor_id: 'factor', value: 0.3, base_graph_hash: currentHash() }),
+    );
+    expect(adopted.statusCode).toBe(200);
+    const cell = () => ((persisted as { nodes: Array<Record<string, unknown>> }).nodes
+      .find(n => n.id === 'option') as { interventions: Record<string, { value: number; source: string }> }).interventions.factor;
+    expect(cell()).toMatchObject({ value: 0.3, source: 'cee_hypothesis' });
+
+    const typed = await post(app, { kind: 'option_intervention_edit', option_id: 'option', factor_id: 'factor', value: 0.35, base_graph_hash: currentHash() });
+    expect(typed.statusCode).toBe(200);
+    expect(cell()).toMatchObject({ value: 0.35, source: 'user_specified' });
   });
 
   it('VERIFIED NO-OP — 200, not a retryable server failure', async () => {
