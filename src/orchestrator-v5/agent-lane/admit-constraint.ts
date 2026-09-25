@@ -177,5 +177,14 @@ export function admitCandidateConstraints(
     });
   }
 
-  return { constraints: constraints.filter((c) => !contradicted.has(c.node_id)), loss };
+  // ⛔ A RANGE ON ONE METRIC NEEDS TWO NAMES (review 5833797482). The label is the limit's NAME, so a floor and a cap on
+  // the same node would both read "Gross margin" in the "could not be checked" card. On that collision only, the lower
+  // bound is named "<metric> floor" and the upper "<metric> cap" (structural-reconciliation strips both suffixes).
+  const kept = constraints.filter((c) => !contradicted.has(c.node_id));
+  const directions = new Map<string, Set<CanonicalOperator>>();
+  for (const c of kept) directions.set(c.node_id, (directions.get(c.node_id) ?? new Set<CanonicalOperator>()).add(c.operator));
+  const named = kept.map((c) => ((directions.get(c.node_id)?.size ?? 0) > 1 && c.label !== undefined
+    ? { ...c, label: `${c.label} ${c.operator === '>=' ? 'floor' : 'cap'}` }
+    : c));
+  return { constraints: named, loss };
 }

@@ -15,6 +15,7 @@ import { buildConstraintDisclosureFromState } from '../../coaching/constraint-ga
 
 const ids: Record<string, string> = { 'Annual PA salary': 'annual_pa_salary', 'Gross margin': 'gross_margin' };
 const admit = (c: CandidateConstraint) => admitCandidateConstraints([c], (m) => ids[m]).constraints[0]!;
+const admitAll = (cs: CandidateConstraint[]) => admitCandidateConstraints(cs, (m) => ids[m]).constraints;
 
 describe('the admitted limit label is the limit\'s name', () => {
   it('D2: "Annual PA salary" < 40000 GBP/year → label "Annual PA salary"; the bound stays in operator/value/unit', () => {
@@ -39,5 +40,24 @@ describe('the admitted limit label is the limit\'s name', () => {
     expect(card, 'PRECONDITION: the unevaluated state discloses').toMatch(/could not be checked/);
     expect(card).toContain('“Annual PA salary”');
     expect(card).not.toMatch(/[<>]=?/);
+  });
+
+  it('A RANGE on one metric gets two names, "floor" and "cap" (review 5833797482), and the card tells them apart', () => {
+    const both = admitAll([
+      { metric: 'Gross margin', operator: '>=', value: 40, unit: '%', provenance: 'explicit' },
+      { metric: 'Gross margin', operator: '<=', value: 70, unit: '%', provenance: 'explicit' },
+    ]);
+    expect(both.map((c) => `${c.operator} ${c.label}`).sort()).toEqual(['<= Gross margin cap', '>= Gross margin floor']);
+    const card = buildConstraintDisclosureFromState('unevaluated', both.map((c) => ({ constraint_id: c.constraint_id, label: c.label ?? null })));
+    expect(card).toContain('“Gross margin floor”');
+    expect(card).toContain('“Gross margin cap”');
+  });
+
+  it('CONTROL: bounds on DIFFERENT metrics keep their plain names; a single bound is never suffixed', () => {
+    const two = admitAll([
+      { metric: 'Gross margin', operator: '>=', value: 40, unit: '%', provenance: 'explicit' },
+      { metric: 'Annual PA salary', operator: '<=', value: 40000, unit: 'GBP/year', provenance: 'explicit' },
+    ]);
+    expect(two.map((c) => c.label).sort()).toEqual(['Annual PA salary', 'Gross margin']);
   });
 });
