@@ -142,6 +142,24 @@ function valueWriteCommittedByThisRequest(
   });
 }
 
+/**
+ * The native figure THIS request's own committed write stored for `targetId` — from its own
+ * `graph_patch.after` (the handler fact of this request; another writer cannot produce it).
+ * `undefined` when the response carries no usable snapshot.
+ */
+function ownCommittedNative(res: { status: number; json: Record<string, unknown> }, targetId: string): number | undefined {
+  if (!valueWriteCommittedByThisRequest(res, targetId)) return undefined;
+  const blocks: unknown[] = Array.isArray(res.json.blocks) ? res.json.blocks : [];
+  const patch = blocks.find((b) => {
+    const p = (b ?? {}) as { type?: unknown; target_id?: unknown; status?: unknown };
+    return p.type === 'graph_patch' && p.target_id === targetId && p.status === 'applied';
+  }) as { after?: unknown } | undefined;
+  const a = (patch?.after ?? {}) as { value?: unknown; raw_value?: unknown; cap?: unknown };
+  if (typeof a.raw_value === 'number') return a.raw_value;
+  if (typeof a.value === 'number') return typeof a.cap === 'number' && a.cap > 0 ? a.value * a.cap : a.value;
+  return undefined;
+}
+
 /** Marks a compound starting point, so a newer one can replace it before approval. */
 const STARTING_POINT_BASIS = 'a starting point \u2014 values and what each option sets \u2014 for the user to adopt or correct in one approval';
 
@@ -2006,6 +2024,8 @@ export function createAgentCapabilities(
          * refusal into "Saved", and the old value read back became the "recorded" figure.
          */
         const ownWrite = new Map<string, boolean>();
+        /** What THIS approval's own committed write stored, per target — the historical fact. */
+        const ownNative = new Map<string, number>();
         /** The frame the factor already carries, read from the pre-write state. */
         const beforeById = new Map((before.nodes ?? []).map((n) => [n.id, n]));
         const capOf = (id: string): number | undefined => {
@@ -2063,6 +2083,8 @@ export function createAgentCapabilities(
           if (own && rc.summary !== null) receipts.push(rc.summary);
           if (rc.unreadable) failures.push({ factor: o.path, detail: 'a receipt arrived but could not be read' });
           ownWrite.set(o.path, own);
+          const mine = ownCommittedNative(r, o.path);
+          if (mine !== undefined) ownNative.set(o.path, mine);
         }
 
         // ⛔ CONFIRMED FROM STATE. The handler may rescale what it was sent
@@ -2071,6 +2093,7 @@ export function createAgentCapabilities(
         // that difference is exactly the thing a user must not discover later.
         const afterSet = await readGraph(ctx.scenario_id);
         const byId = new Map((afterSet?.nodes ?? []).map((n) => [n.id, n]));
+        const superseded: { id: string; factor: string; saved: number; now: number }[] = [];
         for (const o of ops) {
           const node = byId.get(o.path);
           const sos = (node?.observed_state ?? {}) as { value?: unknown; raw_value?: unknown; cap?: unknown };
@@ -2114,6 +2137,20 @@ export function createAgentCapabilities(
             // rather than the contract widened.
             recorded: ownWrite.get(o.path) === true && storedNative !== undefined ? storedNative : null,
           });
+          /**
+           * ⛔ SAVED BY US, THEN CHANGED BY SOMEONE ELSE (Codex pre-review of #1851, 5825735512).
+           * Our write committed, but the fresh read holds a different figure from the one OUR
+           * commit stored: another writer changed the same target in between. The row then keeps
+           * what THIS approval saved (the historical fact) — never the other writer's figure as a
+           * "rescale" — and the present state is reported separately. Nothing after this point
+           * frames, re-reads or describes that target as this approval's.
+           */
+          const mine = ownNative.get(o.path);
+          const last = applied[applied.length - 1]!;
+          if (ownWrite.get(o.path) === true && mine !== undefined && storedNative !== undefined && Math.abs(storedNative - mine) > 1e-9 * Math.max(1, Math.abs(mine))) {
+            last.recorded = mine;
+            superseded.push({ id: o.path, factor: last.factor, saved: mine, now: storedNative });
+          }
         }
         const landed = applied.filter((a) => a.recorded !== null);
         /**
@@ -2123,7 +2160,8 @@ export function createAgentCapabilities(
          * register the refused target — a write to a factor whose own write was just refused — and
          * the note said the refused value was "stored". Aligned with `applied` by index.
          */
-        const landedOps = ops.filter((_, i) => applied[i] !== undefined && applied[i]!.recorded !== null);
+        const supersededIds = new Set(superseded.map((x) => x.id));
+        const landedOps = ops.filter((o, i) => applied[i] !== undefined && applied[i]!.recorded !== null && !supersededIds.has(o.path));
         const notLandedLabels = ops
           .filter((_, i) => applied[i] === undefined || applied[i]!.recorded === null)
           .map((o) => beforeById.get(o.path)?.label ?? o.path);
@@ -2501,7 +2539,7 @@ export function createAgentCapabilities(
           if (finalRead === null) recordedUnread = true;
           for (let i = 0; i < ops.length; i += 1) {
             const row = applied[i];
-            if (row === undefined || row.recorded === null) continue;
+            if (row === undefined || row.recorded === null || supersededIds.has(ops[i].path)) continue;
             const node = finalById.get(ops[i].path);
             const finalValue = node?.observed_state?.value;
             if (typeof finalValue === 'number') {
@@ -2527,6 +2565,7 @@ export function createAgentCapabilities(
           revision_before: before.graph_hash,
           revision_after: afterSet?.graph_hash ?? before.graph_hash,
           ...(failures.length > 0 ? { failures } : {}),
+          ...(superseded.length > 0 ? { changed_since_by_another_writer: superseded.map(({ factor, saved, now }) => ({ factor, saved, now })) } : {}),
           ...(rescaled.length > 0
             ? { rescaled_by_the_model: rescaled, must_disclose_rescaling: true }
             : {}),
@@ -2565,6 +2604,10 @@ export function createAgentCapabilities(
             `${valueAuthorshipNote(landedOps, decision.proposal, (id) => beforeById.get(id)?.label ?? id)}` +
             (notLandedLabels.length > 0
               ? ` ${notLandedLabels.join(', ')} ${notLandedLabels.length === 1 ? 'was' : 'were'} NOT recorded by this approval.`
+              : '') +
+            (superseded.length > 0
+              ? ' ' + superseded.map((x) => `${x.factor} was saved by this approval as ${x.saved}, but someone else has since changed it to ${x.now}`).join('; ') +
+                ' — describe it from the model as it now stands, not as this approval\u2019s figure.'
               : '') +
             ' Say so when you describe what changed' +
             (rescaled.length > 0 ? ', and state every value the model stored differently from the one approved.' : '.') +

@@ -34,7 +34,7 @@ const EDGES = [
 ];
 
 /** The product double whose value writer IS the served writer. */
-function product(opts: { refuse?: string; extra?: Node[] } = {}) {
+function product(opts: { refuse?: string; extra?: Node[]; thenOtherWriter?: { target: string; raw: number } } = {}) {
   let nodes: Node[] = [...BASE, ...(opts.extra ?? [])].map((n) => ({ ...n, ...(n.observed_state ? { observed_state: { ...n.observed_state } } : {}) }));
   let rev = 0;
   let writes = 0;
@@ -58,8 +58,21 @@ function product(opts: { refuse?: string; extra?: Node[] } = {}) {
       writes += 1;
       nodes = ((res as unknown as { mutatedGraph: { nodes: Node[] } }).mutatedGraph.nodes);
       rev += 1;
-      // The served committed shape (`valueWriteCommittedByThisRequest`).
-      return { status: 200, json: { assistant_text: 'Saved.', graph_hash: `h${rev}`, blocks: [{ type: 'graph_patch', status: 'applied', operation: 'set_factor_value', target_id: String(ev.target_id) }] } };
+      // The served committed shape (`valueWriteCommittedByThisRequest`), with this write's OWN `after`
+      // from its handler fact, as `compose.ts` builds it.
+      const fact = (res as unknown as { handlerFacts: { fact_type: string; result: { after?: unknown } }[] }).handlerFacts.find((f) => f.fact_type === 'set_factor_value');
+      const committed = { status: 200, json: { assistant_text: 'Saved.', graph_hash: `h${rev}`, blocks: [{ type: 'graph_patch', status: 'applied', operation: 'set_factor_value', target_id: String(ev.target_id), after: fact?.result.after }] } };
+      // A collaborator writes the SAME target after our commit, before our read-back — through the real writer.
+      const other = opts.thenOtherWriter;
+      if (other !== undefined && other.target === ev.target_id) {
+        const oev = { kind: 'factor_value_edit', target_id: other.target, value: other.raw };
+        const ores = await applyFactorValueEdit({
+          payload: { kind: 'system_event', turn_id: '7e1d2c3b-4a5f-4e6d-8c7b-9a0f1e2d3c4b', scenario_id: SCENARIO, stage: 'frame', event: oev } as never,
+          event: oev as never, requestId: 'other-writer', persistedGraph: graph() as never, priorFacts: [],
+        });
+        if (ores.kind === 'mutated') { nodes = ((ores as unknown as { mutatedGraph: { nodes: Node[] } }).mutatedGraph.nodes); rev += 1; }
+      }
+      return committed;
     }
     if (path.endsWith('/graph/register')) registers.push(body);
     return { status: 200, json: { graph: graph(), graph_hash: `h${rev}` } };
@@ -174,6 +187,44 @@ describe('the user’s own figure stays theirs', () => {
  * Nothing after the writes may touch or describe the refused one as stored — not the range framing
  * (a second write), not the note the Agent repeats.
  */
+/**
+ * ⛔ SAVED BY THIS APPROVAL, THEN CHANGED BY SOMEONE ELSE (Codex pre-review of #1851, 5825735512): our
+ * write commits, a collaborator writes the SAME target before our read-back. Nothing after the write
+ * may frame the collaborator's figure, call it a rescale, or describe it as this approval's.
+ */
+describe('a collaborator changes the same target after our write', () => {
+  const BUDGET: Node = { id: 'monthly_budget', kind: 'factor', label: 'Monthly budget', category: 'controllable', observed_state: { value: 250, raw_value: 250, source: 'user_override' } };
+  it('RED: no range is derived from their figure; the result keeps ours and reports theirs separately', async () => {
+    const p = product({ extra: [BUDGET], thenOtherWriter: { target: 'monthly_budget', raw: 800 } });
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const proposed = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Monthly budget', value: 300, basis: 'the user said 300', revise: true }] } as never);
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    // PRECONDITIONS, proven: our write landed, and the collaborator's figure is what the model now holds.
+    expect(p.writes(), 'our one write').toBe(1);
+    expect(p.byId().monthly_budget.observed_state?.value).toBe(800);
+    expect(p.registers(), 'no range derived from the collaborator’s 800').toEqual([]);
+    expect(p.byId().monthly_budget.observed_state, 'their figure untouched').not.toHaveProperty('cap');
+    expect(applied.values).toEqual([expect.objectContaining({ factor: 'Monthly budget', requested: 300, recorded: 300 })]);
+    expect(applied, 'their change is not a model rescale').not.toHaveProperty('rescaled_by_the_model');
+    expect(applied.changed_since_by_another_writer).toEqual([{ factor: 'Monthly budget', saved: 300, now: 800 }]);
+    const said = String(applied.not_represented);
+    expect(said).toContain('Monthly budget was saved by this approval as 300, but someone else has since changed it to 800');
+    expect(said).not.toContain('Monthly budget is the user’s own figure');
+  });
+
+  it('CONTROL: with no other writer, the same approval is described as the user’s own and nothing is reported as changed since', async () => {
+    const p = product({ extra: [BUDGET] });
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const proposed = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Monthly budget', value: 300, basis: 'the user said 300', revise: true }] } as never);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+    expect(String(applied.not_represented)).toContain('Monthly budget is the user’s own figure, stored as theirs.');
+  });
+});
+
 describe('a partial approval: one value lands, one is refused', () => {
   const BUDGET: Node = { id: 'monthly_budget', kind: 'factor', label: 'Monthly budget', category: 'controllable', observed_state: { value: 250, raw_value: 250, source: 'user_override' } };
   async function approve(refuse: string, assumptions: unknown[]) {
