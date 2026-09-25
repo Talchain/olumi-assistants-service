@@ -72,6 +72,7 @@ import {
   type FirstAnalysisOutcome,
 } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
+import { deriveAnswerTextFromShape, synthesiseAnswerShapeFromText, warrantsProgressiveDisclosure } from '../orchestrator-v5/routing/answer-shape.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 /** The egress sanitiser resolves labels against a PARSED graph; an unparseable read gives it none. */
@@ -441,6 +442,46 @@ export function knownNotRunnable(analysisReady: unknown): boolean {
   if (analysisReady === null || typeof analysisReady !== 'object') return false;
   const ar = analysisReady as { may_run?: unknown; status?: unknown };
   return typeof ar.may_run === 'boolean' ? ar.may_run === false : typeof ar.status === 'string' && ar.status !== 'ready';
+}
+
+/**
+ * ⭐ AN ANALYSIS REPLY ARRIVES HEADLINE FIRST (UI contract UI-SEM-090; agreed design #69 5831886008).
+ * A Run reply on this route is a finding, a few bullets and often a closing line, and with no sidecar
+ * the UI renders it whole as free text. The product's own `_answer_shape` sidecar makes it headline + at
+ * most three bullets, with the rest behind "Show more" — the SAME synthesiser and derivation route-v2's
+ * egress uses (`routing/answer-shape.ts`), never a second one.
+ *
+ * ⛔ THE TIE HOLDS BY IDENTITY: `assistant_text` is SET to `deriveAnswerTextFromShape(shape)` in the same
+ * object that carries the shape, so the text and its sidecar cannot describe different answers.
+ *
+ * SCOPE: only a response that carries an `analysis_result` block — the explicit Run, the automatic first
+ * pass on a build turn, and any turn answered over a current result. A response with no result block
+ * (a blocked Run, a turn on a model with no current result) is returned by reference, byte-identical. So
+ * is one that already carries a shape, one the synthesiser declines (a single sentence, or nothing after
+ * the bullets to put behind the toggle), and one below the floor with no bullet.
+ *
+ * ⚠ A DELIBERATE DIFFERENCE FROM ROUTE-V2'S GATE. Route-v2 shapes only above the collapse floor
+ * (`warrantsProgressiveDisclosure`), because below it a shape could turn "the user reads all of it"
+ * into "the user reads one sentence". Here a reply below the floor is shaped too, but ONLY when the shape
+ * keeps at least one bullet on the face, so what shows is headline + bullets, never a lone sentence.
+ * Above the floor it is shaped exactly as route-v2 would shape it.
+ *
+ * ⛔ CALL IT ON THE FINAL PROSE — after the withheld-leader gate and every other rewrite of
+ * `assistant_text` on this route — so a headline or bullet can never carry a sentence a gate removed.
+ */
+export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; blocks?: unknown }>(body: T): T {
+  if ('_answer_shape' in body) return body;
+  const blocks = body.blocks;
+  const carriesResult = Array.isArray(blocks)
+    && blocks.some((b) => b !== null && typeof b === 'object' && (b as { type?: unknown }).type === 'analysis_result');
+  if (!carriesResult) return body;
+  const text = body.assistant_text;
+  if (typeof text !== 'string' || text.trim().length === 0) return body;
+  const shape = synthesiseAnswerShapeFromText(text);
+  if (shape === null) return body;
+  const derived = deriveAnswerTextFromShape(shape);
+  if (!warrantsProgressiveDisclosure(derived) && shape.bullets.length === 0) return body;
+  return { ...body, assistant_text: derived, _answer_shape: shape };
 }
 
 /**
@@ -1716,6 +1757,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         wireBody = (enforced.editedFields.includes('assistant_text') ? withoutShape : enforced.response) as OlumiResponse & Record<string, unknown>;
       }
     }
+    /**
+     * ⭐ HEADLINE FIRST ON AN ANALYSIS REPLY — see `withAnalysisAnswerShape`. HERE, and nowhere earlier:
+     * this is after the last rewrite of `assistant_text` on this route (write-claim removal, disclosures,
+     * proposal-id scrub, the leader gate above), so the shape is built from the prose the user receives,
+     * and before the answer row is written, so a replay returns the same words.
+     */
+    wireBody = withAnalysisAnswerShape(wireBody);
 
     /**
      * ⭐ PERSIST THE TURN BEFORE ANSWERING — the row a lost-response retry is

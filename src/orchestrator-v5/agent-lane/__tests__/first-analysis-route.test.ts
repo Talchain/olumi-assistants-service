@@ -388,6 +388,26 @@ describe('the Agent route runs the first analysis itself, once', () => {
     expect(b.assistant_text).toBe(prose);
   });
 
+  /**
+   * The automatic first pass is an analysis reply too (#69 5831886008): its narration arrives headline
+   * first. The prose is a SERVED Run reply's (AI Quality corpus W.V2.rep1, labelled clean), used for its
+   * shape — first sentence, three bullets, a closing line. See `agent-run-reply-answer-shape.test.ts`.
+   */
+  it('RED: a build turn whose first analysis ran → its bulleted narration carries `_answer_shape`, and the text is its derivation', async () => {
+    const { readFileSync } = await import('node:fs');
+    const corpus = JSON.parse(readFileSync(new URL('../../compose/__tests__/fixtures/leader-gate-real-replies.json', import.meta.url), 'utf8')) as { replies: { id: string; text: string }[] };
+    const prose = corpus.replies.find((r) => r.id === 'stack-1854-714677d5/pricing-run-complete.W.V2.rep1')!.text;
+    script = [callTool('build_model_from_brief', { brief: BRIEF }), say(prose)];
+    const b = await turn(app, { message: BRIEF }) as Body & { _answer_shape?: { headline: string; bullets: string[]; detail: string } };
+    expect(b._diagnostic_trace.first_analysis, 'the control: the first pass ran').toMatchObject({ ran: true });
+    expect((b.blocks ?? []).some((x) => x.type === 'analysis_result'), 'the control: an analysis-bearing turn').toBe(true);
+    expect(b._answer_shape).toBeDefined();
+    expect(b._answer_shape!.headline).toBe(prose.split('\n')[0]);
+    expect(b._answer_shape!.bullets).toHaveLength(3);
+    const { deriveAnswerTextFromShape } = await import('../../routing/answer-shape.js');
+    expect(deriveAnswerTextFromShape(b._answer_shape as never)).toBe(b.assistant_text);
+  });
+
   it('RED: the run’s coaching block is shown when bound to the readback revision and a current run (test 7)', async () => {
     const b = await buildTurn(app);
     expect((b.blocks ?? []).map((x) => x.type)).toEqual(['analysis_result', 'review_card']);
