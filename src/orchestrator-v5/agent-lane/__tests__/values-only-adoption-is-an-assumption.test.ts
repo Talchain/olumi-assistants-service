@@ -194,6 +194,20 @@ describe('the user’s own figure stays theirs', () => {
  */
 describe('a collaborator changes the same target after our write', () => {
   const BUDGET: Node = { id: 'monthly_budget', kind: 'factor', label: 'Monthly budget', category: 'controllable', observed_state: { value: 250, raw_value: 250, source: 'user_override' } };
+  /** ⛔ The same class on the value path (pre-review 5828080522): a relative 1e-9 band hid a £1 change on £1.2bn. */
+  it.each([
+    [1_234_564_999, 1_234_565_000],
+    [1_234_564_999_999, 1_234_565_000_000],
+  ])('RED: a collaborator moves our %s by £1 — reported exactly, never absorbed by a magnitude band', async (ours, theirs) => {
+    const p = product({ extra: [BUDGET], thenOtherWriter: { target: 'monthly_budget', raw: theirs } });
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const proposed = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Monthly budget', value: ours, basis: 'the user said it', revise: true }] } as never);
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    expect(p.byId().monthly_budget.observed_state?.value, 'PRECONDITION: theirs is what the model holds').toBe(theirs);
+    expect(applied.changed_since_by_another_writer).toEqual([{ factor: 'Monthly budget', saved: ours, now: theirs }]);
+  });
+
   it('RED: no range is derived from their figure; the result keeps ours and reports theirs separately', async () => {
     const p = product({ extra: [BUDGET], thenOtherWriter: { target: 'monthly_budget', raw: 800 } });
     const store = new ProposalStore();
