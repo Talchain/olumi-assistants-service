@@ -755,7 +755,6 @@ describe('review of #1871 at b2b3d3c2 — a bare pair after a listed phrase is d
     // Pre-review 5828932090: a bare pair naming no option still splits them — its legend may be another sentence.
     'Across both paths, 71% and 29%.',
     'On both options, 71% and 29% respectively.',
-    'It came out 71% to 29%.',
     // Review 5828992113 on ee11de4c: a content word before the pair, or a longer joiner between its figures.
     'For both Keep Pro at £49 and Raise Pro to £59 at release, the model shows 29% and 71% respectively.',
     'For both raising and holding, the model gives 71% and 29% respectively.',
@@ -772,6 +771,15 @@ describe('review of #1871 at b2b3d3c2 — a bare pair after a listed phrase is d
     'For both raising and holding, 71% and 29% are the win shares.',
     'For both raising and holding, 71% and 29% are the results.',
     'On both the £59 path and holding, 71% and 29% were the figures.',
+    // Self-review of c39c789d: the share is the clause's head noun, not its first word.
+    'For both raising and holding, 71% and 29% of model runs.',
+    'For both raising and holding, 71% and 29% of the simulated draws.',
+    // Pre-review 5829142299: the words BETWEEN the figures are an open class too — none gives a figure its own measure.
+    'For both raising and holding, 71% rather than 29%.',
+    'For both raising and holding, 71% & 29%.',
+    'For both raising and holding, 71% rather than a mere 29%.',
+    'For both raising and holding, 71% unlike 29%.',
+    'For both raising and holding, 71% versus merely 29%.',
   ])('RED: removed through BOTH gates: %s', (s) => { expect(wire(s)).not.toMatch(/71%|29%/); });
   it.each([
     'We compared raising and holding, in that order. Across both paths, 71% and 29% respectively.',
@@ -787,13 +795,9 @@ describe('review of #1871 at b2b3d3c2 — a bare pair after a listed phrase is d
   });
   it.each([
     'On both the £59 path and holding, 96% of customers stay and 4% churn.',
-    'On both the £59 path and holding, churn could fall 70% to 30%.',
-    'On both the £59 path and holding, retention ranges 30% to 70%.',
-    'For both raising and holding, retention is between 30% and 70%.',
     'Raising and holding alike keep 96% of customers and lose 4%.',
     'Retention could move from 70% to 30% under either option.',
     // Review 5828992113's KEEPs: each figure says what it measures, or the pair is shared over another list.
-    'For both raising and holding, 60% to 40% of revenue is from annual plans.',
     'For both raising and holding, 97% and 3% are the renewal and churn rates.',
     'For both raising and holding, 96% retention and 4% churn.',
     'For both raising and holding, retention is 96% and churn 4%.',
@@ -808,4 +812,73 @@ describe('review of #1871 at b2b3d3c2 — a bare pair after a listed phrase is d
     'Under either option, retention moves from 90% to 92%; holding keeps the price.',
     'On both options, churn falls 5% to 3%, whether we raise or hold.',
   ])('CONTROL: kept: %s', (s) => { expect(wire(s)).toContain(s); });
+});
+
+/**
+ * Review of #1871 at c39c789d (5829185444): the EXITS are the tested class. Figures sharing ~100 after a phrase that
+ * lists the options, or beside "respectively" / "in that order", are dropped whatever the joiner, verb or trailing
+ * noun — unless each figure has a measure word of its own, or another list names what they are shared over.
+ */
+describe('review of #1871 at c39c789d — the exits, not the leaks, are the class', () => {
+  const graph = { nodes: [{ id: 'keep', kind: 'option', label: 'Keep Pro at £49' }, { id: 'raise', kind: 'option', label: 'Raise Pro to £59 at release' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }] };
+  const analysisReady = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } };
+  const gate = (text: string) => enforceAgentLaneLeaderClaimsAtWire(
+    { assistant_text: text, blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } } } as unknown as OlumiResponse,
+    { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'constraint_verdict_withheld', graph, analysisReady },
+  ).response.assistant_text;
+  const wire = (sentence: string) => gate(`The churn limit was not scored. ${sentence} Churn is the input to check.`);
+  it.each([
+    // §1: a trailing measure noun no longer exempts a labelled split.
+    'For both Keep Pro at £49 and Raise Pro to £59 at release, 29% and 71% success rates respectively.',
+    'For both raising and holding, 71% and 29% success rates respectively.',
+    'For both raising and holding, 71% and 29% goal attainment respectively.',
+    'For both raising and holding, 71% and 29% of model runs.',
+    // §2: a change or range verb does not stop the pair mapping onto the options.
+    'For both raising and holding, the odds changed to 71% and 29% respectively.',
+    'For both Keep Pro at £49 and Raise Pro to £59 at release, the odds changed to 29% and 71% respectively.',
+    'For both raising and holding, the chances moved to 71% and 29% respectively.',
+    'Across both raising and holding, the runs divide between them 71% and 29%.',
+    // §3: joiners outside any list.
+    'For both raising and holding, 71% rather than 29%.',
+    'For both raising and holding, 71% & 29%.',
+    // §5: one word elsewhere no longer disables the test.
+    'For both raising and holding, 71% and 29% respectively, not anywhere near a tie.',
+    'Raising takes 71% and holding 29%, not anywhere near a tie.',
+  ])('RED: removed through BOTH gates: %s', (s) => { expect(wire(s)).not.toMatch(/71|29/); });
+  it.each([
+    'We compared raising and holding, in that order. Across both paths, 71 and 29 per cent respectively.',
+    'We compared raising and holding, in that order. Across both paths, 71/29 respectively.',
+    'We compared raising and holding, in that order. Across both paths, 71-29% respectively.',
+    'We compared holding and raising, in that order. Across both paths, 29% to 71% respectively.',
+    'We compared holding and raising, in that order. Across both paths, 29-71% respectively.',
+    'We compared Raise Pro to £59 at release and Keep Pro at £49, in that order. Across both paths, 71 and 29 per cent respectively.',
+    'We compared Raise Pro to £59 at release and Keep Pro at £49, in that order. With the new inputs, their chances rose to 71% and 29% respectively.',
+    'We compared raising and holding, in that order. With the new inputs, their chances rose to 71% and 29% respectively.',
+  ])('RED (§2, §4): the legend in the sentence before, every form: %s', (lead) => {
+    const out = gate(`${lead} Churn is the input to check.`);
+    expect(out).not.toMatch(/71|29/);
+    expect(out).toContain('Churn is the input to check.');
+  });
+  it.each([
+    // Over-drops at c39c789d, kept again: no option is named, and another list says what the figures are over.
+    'Annual and monthly plans are 70% and 30% respectively.',
+    'The survey came back 55% and 45%.',
+    // Still kept.
+    'Churn and retention sit at 4% and 96% today.',
+    'Annual and monthly plans are 70% and 30% of customers respectively.',
+    'Your current base renews at 96% and churns at 4%.',
+    'Last quarter, 60% and 40% of signups came from ads and referrals respectively.',
+    'For both raising and holding, 96% of customers stay and 4% churn.',
+    'Both options split 50/50 on the retention question.',
+  ])('CONTROL: kept: %s', (s) => { expect(wire(s)).toContain(s); });
+  it.each([
+    // RESIDUAL, named — over-drops in the fail-closed direction: a movement or span beside a list of both options.
+    'On both the £59 path and holding, churn could fall 70% to 30%.',
+    'On both the £59 path and holding, retention ranges 30% to 70%.',
+    'For both raising and holding, retention is between 30% and 70%.',
+  ])('RESIDUAL (fail closed, named): dropped: %s', (s) => { expect(wire(s)).not.toContain(s); });
+  it.each([
+    // RESIDUAL, named — kept: no option is named and nothing orders the figures.
+    'It came out 71% to 29%.',
+  ])('RESIDUAL (named): kept: %s', (s) => { expect(wire(s)).toContain(s); });
 });

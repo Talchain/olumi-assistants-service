@@ -336,7 +336,7 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
    * "between"/"from" forms need the NUMBER straight after the word, so "between options 1 and 2" is not a range.
    */
   const RANGE_NUM = '(?:about\\s+|around\\s+|roughly\\s+|some\\s+)?\\d+(?:[.,]\\d+)?\\s?(?:%|per\\s?cent)?';
-  if (new RegExp(`\\b(?:between\\s+${RANGE_NUM}\\s+and|from\\s+${RANGE_NUM}\\s+to)\\s+\\d|\\banywhere\\b`, 'i').test(text)) return false;
+  const rangeLike = new RegExp(`\\b(?:between\\s+${RANGE_NUM}\\s+and|from\\s+${RANGE_NUM}\\s+to)\\s+\\d|\\banywhere\\s+(?:between|from)\\b`, 'i').test(text);
   // A sentence that SAYS split or win share is never excused as a range; its cues decide ("the runs split 29% to 71% …").
   const saysSplit = /\b(?:split|win[-\s]shares?)\b/i.test(text);
   const optionKeys = (labels.optionLabels ?? []).map(labelKey);
@@ -368,6 +368,67 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
     }
     return refs;
   };
+  /** The words in `s` that could say what a figure measures: not function, share, figure, hedge or option words. */
+  const measureWords = (s: string): string[] => s.split(/\s+/)
+    .map((w) => w.replace(/^[^a-z]+|[^a-z]+$/gi, ''))
+    .filter((w) => w.length > 1 && /^[a-z][a-z'-]*$/i.test(w) && (!FUNCTION_OR_SHARE_WORD.test(w) || MEASURE_OR_OPINION.test(w)) && !SHARE_NOUN.test(w)
+      && !FIGURE_NOUN.test(w) && !MODIFIER_WORD.test(w) && optionRefs(w) === 0);
+  /** A list of other things the figures could be shared over: "ads and referrals", "annual and monthly (plans)". */
+  const otherList = (s: string): boolean => [...s.matchAll(/\b([a-z][a-z'-]+)\s+(?:and|or)\s+([a-z][a-z'-]+)\b/gi)]
+    .some((m) => measureWords(m[1]!).length > 0 && measureWords(m[2]!).length > 0);
+  /**
+   * ⛔ FIGURES SHARING ~100 OVER THE OPTIONS ARE A SPLIT, WHATEVER SURROUNDS THEM (review 5829185444). Four rounds each
+   * closed one list of surrounding words — joiners, the words before, trailing nouns, change verbs — and exposed the
+   * next. So the EXITS are the tested class, not the leaks. When figures summing to ~100 follow a phrase naming two or
+   * more options (or "both paths", "all options"), or sit beside two or more named options, or the sentence says
+   * "respectively" / "in that order", they are dropped. The only ways out: EACH figure has a measure word of its own,
+   * on its own side of the joiner ("96% of customers stay and 4% churn", "renews at 96% and churns at 4%"), or a list
+   * of other things names what they are shared over ("…came from ads and referrals respectively"). This runs before
+   * every other exit, the range reading included, and covers every form: "71% and 29%", "29% to 71%", "71-29%",
+   * "71/29", "71 and 29 per cent".
+   */
+  const ordered = /\b(?:respectively|in\s+that\s+order)\b/i.test(text);
+  const groups: [number, number][][] = [];
+  const pct = [...text.matchAll(new RegExp(PCT, 'gi'))];
+  const valueOf = (m: string): number => Number(m.replace(/[%\s]|per\s?cent/gi, '').replace(',', '.'));
+  const near100 = (t: number): boolean => t >= 97 && t <= 103;
+  if (pct.length >= 2 && near100(pct.reduce((a, m) => a + valueOf(m[0]), 0))) groups.push(pct.map((m) => [m.index!, m.index! + m[0].length]));
+  for (let i = 0; i + 1 < pct.length; i += 1) {
+    if (pct.length > 2 && near100(valueOf(pct[i]![0]) + valueOf(pct[i + 1]![0]))) groups.push([[pct[i]!.index!, pct[i]!.index! + pct[i]![0].length], [pct[i + 1]!.index!, pct[i + 1]!.index! + pct[i + 1]![0].length]]);
+  }
+  for (const m of text.matchAll(/(?<![\d.,£$€])(\d{1,3}(?:\.\d+)?)(\s*(?:%|per\s?cent)?\s*(?:\/|-|to|and)\s*)(\d{1,3}(?:\.\d+)?)(\s*(?:%|per\s?cent))?(?![\d.,])/gi)) {
+    if (!near100(Number(m[1]) + Number(m[3]))) continue;
+    const a = m.index!, b = a + m[1]!.length, c = b + m[2]!.length, d = a + m[0].length;
+    groups.push([[a, b], [c, d]]);
+  }
+  for (const figs of groups) {
+    const first = figs[0]!, last = figs[figs.length - 1]!;
+    const before = text.slice(0, first[0]);
+    const after = text.slice(last[1]).split(CLAUSE_BREAK)[0] ?? '';
+    const leads = optionRefs(before) >= 2 || QUANTIFIED_OPTIONS.test(before);
+    // Options named only AFTER the pair may be the frame of a change: "Retention could drop 70% to 30% on the £59 path
+    // compared with holding" (review 5827687841). A change verb exempts only there — never after a leading list or
+    // beside "respectively", where the pair still maps onto the options.
+    const trails = !leads && optionRefs(after) >= 2 && !CHANGE_VERB_BEFORE.test(text.slice(Math.max(0, first[0] - 40), first[0]));
+    if (!ordered && !leads && !trails) continue;
+    // An even split names no leader: "Both options split 50/50".
+    const values = figs.map(([x, y]) => Number(/\d+(?:\.\d+)?/.exec(text.slice(x, y))![0]));
+    if (values.every((v) => v === values[0])) continue;
+    const own: string[][] = figs.map(() => []);
+    own[0]!.push(...measureWords(before.split(CLAUSE_BREAK).pop() ?? ''));
+    for (let i = 1; i < figs.length; i += 1) {
+      const gap = text.slice(figs[i - 1]![1], figs[i]![0]);
+      const joiner = [...gap.matchAll(GAP_JOINER)].pop();
+      if (joiner === undefined) continue;
+      own[i - 1]!.push(...measureWords(gap.slice(0, joiner.index)));
+      own[i]!.push(...measureWords(gap.slice(joiner.index! + joiner[0].length)));
+    }
+    own[figs.length - 1]!.push(...measureWords(after));
+    if (own.every((ws) => ws.length > 0)) continue;
+    if (otherList(after) || (optionRefs(text) === 0 && otherList(text))) continue;
+    return true;
+  }
+  if (rangeLike) return false;
   /**
    * The figure applies to every OPTION only when the quantified clause is the one naming them ("On both the £59 path
    * and holding, …", "raising and holding alike", "on either path"). ⛔ Pre-review addendum 5828219261: "For both
@@ -431,16 +492,7 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
    * "Raising over holding, both paths alike: …". What the quantifier modifies is its phrase ("for both customer cohorts"
    * is not the options — 5828272340), and the phrase ends at its head noun, not at the punctuation.
    */
-  const appliesToAllOptions = (seg: string, distributed: boolean): boolean => {
-    /**
-     * ⛔ …AND A BARE PAIR IS DISTRIBUTED OVER THE LIST (review 5828786795). Figures with nothing but a joiner between
-     * them, governed by no change or range verb, are shared out over the options the phrase lists — "For both raising
-     * and holding, 71% and 29% respectively", "…, the figures are 71% and 29%", "Raising and holding alike: 29% to 71%" —
-     * whatever words sit before them. The words that make a split are an open class; the ones that make a span or a
-     * movement are not, so only those exempt. A figure with its own predicate ("96% of customers stay and 4% churn")
-     * is not a bare pair.
-     */
-    if (distributed) return false;
+  const appliesToAllOptions = (seg: string): boolean => {
     const key = labelKey(seg);
     const namedOutside = (before: string, after: string): boolean => optionRefs(before) > 0 || optionRefs(after) > 0;
     const scopes = [
@@ -459,15 +511,10 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
     }
     return false;
   };
-  const isLegend = (seg: string, need: number, distributed: boolean): boolean => !appliesToAllOptions(seg, distributed) && optionRefs(seg) >= need;
-  /** A change or range verb governs the figure at `at`: "churn could fall 70% to 30%", "retention ranges 30% to 70%". */
-  const governedAt = (at: number): boolean => {
-    const lead = text.slice(Math.max(0, at - 40), at);
-    return CHANGE_VERB_BEFORE.test(lead) || RANGE_VERB_BEFORE.test(lead);
-  };
+  const isLegend = (seg: string, need: number): boolean => !appliesToAllOptions(seg) && optionRefs(seg) >= need;
   for (const m of saysSplit ? [] : text.matchAll(/(?<![\d.,])(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent)?\s?(?:-|to)\s?(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent)/gi)) {
     // A pair right after a two-option legend is that legend's split, whichever order it is in ("Raising vs holding: 29-71%").
-    if (isLegend(text.slice(0, m.index), 2, !governedAt(m.index!))) continue;
+    if (isLegend(text.slice(0, m.index), 2)) continue;
     if (Number(m[1]!.replace(',', '.')) < Number(m[2]!.replace(',', '.'))) return false;
     // A CHANGE, not a split, when a change verb governs it: "Retention could drop 70% to 30% on the £59 path…" (review 5827687841).
     if (CHANGE_VERB_BEFORE.test(text.slice(Math.max(0, m.index! - 40), m.index))) return false;
@@ -482,7 +529,7 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
     // …and one % sign on the LAST number after a two-option legend: "Raising vs holding: 71-29%", "…: 71 and 29 per cent" (5827973102).
     const pairs = [...text.matchAll(/(?<![\d.,£$€])(\d{1,3}(?:\.\d+)?)\s*(?:%|per\s?cent)?\s*(?:\/|-|to|and)\s*(\d{1,3}(?:\.\d+)?)(?![\d.,])/gi)]
       .filter((m) => { const t = Number(m[1]) + Number(m[2]); return t >= 97 && t <= 103; });
-    return pairs.some((m) => (saysSplit && (RUN_SHARE_EXPLICIT.test(text) || optionRefs(text) >= 2)) || isLegend(text.slice(0, m.index), 2, !governedAt(m.index!)));
+    return pairs.some((m) => (saysSplit && (RUN_SHARE_EXPLICIT.test(text) || optionRefs(text) >= 2)) || isLegend(text.slice(0, m.index), 2));
   }
   const total = hits.map((m) => Number(m[0].replace(/[%\s]|per\s?cent/gi, '').replace(',', '.'))).reduce((a, b) => a + b, 0);
   if (total < 97 || total > 103) return false;
@@ -526,43 +573,13 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
    * option AFTER the last percentage, so only one percentage binds. A trailing segment naming at least as many
    * options as there are percentages is the split's own legend.
    */
-  /**
-   * A BARE pair: nothing but a joiner between the percentages ("71% and 29%", "71% vs 29%", "71%/29%"), the last one
-   * saying nothing of its own after it ("…29% respectively", "…29% of runs", "…29%." — never "…96% of customers stay"),
-   * and no verb governing them. Such figures are distributed over whatever list a reader maps them onto.
-   */
-  const lastStandsAlone = ((): boolean => {
-    const clause = /^[^,;:.!?()\u2013\u2014]*/.exec(segments[segments.length - 1]!)![0];
-    const words = clause.trim().split(/\s+/).filter((w) => w.length > 0);
-    if (words.length === 0) return true;
-    const plain = (w: string): boolean => FUNCTION_OR_SHARE_WORD.test(w) || FIGURE_NOUN.test(w) || optionRefs(w) > 0 || /^[£$€]?\d/.test(w);
-    // "…60% and 40% between annual and monthly plans": another list the figures are shared over.
-    const among = words.findIndex((w) => /^(?:between|among|amongst)$/i.test(w));
-    if (among >= 0 && optionRefs(words.slice(among + 1).join(' ')) === 0 && !words.slice(among + 1).every(plain)) return false;
-    let i = 0;
-    while (i < words.length - 1 && /^(?:of|the)$/i.test(words[i]!)) i += 1;
-    // "…96% of customers stay", "…40% of revenue": the figure's own measure.
-    if (!plain(words[i]!)) return false;
-    // "…50% is lost at trial", "…3% are the renewal and churn rates": the figure is the subject of its own predicate —
-    // unless that predicate is a share ("…29% are the win shares").
-    if (/^(?:is|are|was|were|be|been|being|has|have|had)$/i.test(words[i]!)) return words.slice(i + 1).every(plain);
-    return true;
-  })();
-  const distributed = segments.slice(1, -1).every(isBareJoiner) && lastStandsAlone && !governedAt(hits[0]!.index!);
-  if (isLegend(segments[segments.length - 1]!, hits.length, distributed)) return true;
+  if (isLegend(segments[segments.length - 1]!, hits.length)) return true;
   /**
    * ⛔ …AND THE MIRROR: A LEGEND BEFORE THE PERCENTAGES (review 5827687841): "The £59 path and holding came in at 71%
    * and 29%." Counted as COORDINATED PARTS that each carry a cue, never raw cue words, so one option named twice
    * ("For the Keep Pro at £49 option, 40% … 60% …": a label plus "option") stays one part and is kept.
    */
-  if (isLegend(segments[0]!, hits.length, distributed)) return true;
-  /**
-   * ⛔ A BARE PAIR SPLITS THE OPTIONS EVEN WHEN THIS SENTENCE NAMES NONE (pre-review 5828932090): "We compared raising
-   * and holding, in that order. Across both paths, 71% and 29% respectively." Its legend is in another sentence, and a
-   * reader maps the figures onto it. Percentages that sum to ~100 with nothing but a joiner between them and no change
-   * or range verb governing them are a distribution, whoever it is over — so it fails closed ("It came out 71% to 29%").
-   */
-  return distributed;
+  return isLegend(segments[0]!, hits.length);
 }
 
 /** What may follow a SHARE's percentage: English function words (a closed class) and the share/likelihood/ranking words. */
@@ -570,17 +587,20 @@ const FUNCTION_OR_SHARE_WORD = /^(?:and|or|nor|but|yet|so|to|for|of|in|on|at|by|
 
 /** A generic option noun: after another reference it names the same option ("the holding option"). */
 const GENERIC_OPTION_NOUN = /^(?:path|paths|option|options|choice|choices|route|routes|alternative|alternatives|scenario|scenarios)$/i;
-/**
- * What may sit between the figures of a bare pair: joiners, comparison words and hedges ("71% and 29%", "71% compared
- * with 29%", "71% as against 29%", "71% and just 29%", "71% and then about 29%"). A measure between them ("96% of
- * customers stay and 4%", "96% retention and 4%") makes them two figures, not a pair.
- */
-const BARE_JOINER_WORD = /^(?:and|or|but|to|then|vs\.?|versus|v|against|over|compared|with|as|opposed|while|whereas|just|only|about|around|roughly|nearly|almost|approximately|some|barely|merely|respectively)$/i;
+/** A noun that says the figures are SHARES of the runs: "…29% of model runs". */
+const SHARE_NOUN = /^(?:shares?|chances?|probabilit(?:y|ies)|likelihood|odds|wins?|runs?|draws?|simulations?|samples?|trials|votes?)$/i;
+/** Opinion words can also name what a figure measures ("60% is support" — a team): as a figure's own word they count. */
+const MEASURE_OR_OPINION = /^(?:support|backing|approval|favour|favor|favourability|favorability|confidence|certainty|preferences?)$/i;
 /** A noun that names the figures themselves, not what they measure: "…29% are the results". */
 const FIGURE_NOUN = /^(?:results?|outcomes?|figures?|numbers?|splits?|scores?|readings?|percentages?|totals?|picture)$/i;
-const isBareJoiner = (s: string): boolean => s.split(/[\s,;:/\u2013\u2014-]+/).filter((w) => w.length > 0).every((w) => BARE_JOINER_WORD.test(w));
-/** A span, not a split: "retention ranges 30% to 70%", "is between 30% and 70%". */
-const RANGE_VERB_BEFORE = /\b(?:ranges?|ranged|ranging|varies|varied|vary|varying|spans?|spanned|spanning|between|from)\s+(?:[a-z]+\s+){0,2}$/i;
+/** Where a gap between two figures divides: its last joiner or clause break. */
+const GAP_JOINER = /[,;:\u2013\u2014/&]|\b(?:and|or|but|nor|while|whereas|than|versus|vs|against|over|to|then|with)\b/gi;
+/** A clause break: a figure's own measure is not looked for across one. */
+const CLAUSE_BREAK = /[,;:.!?()\u2013\u2014]/;
+/** Hedges, degree words and quantifiers: they modify a figure; they never say what it measures. */
+const MODIFIER_WORD = /^(?:rather|mere|merely|just|only|even|still|almost|about|around|roughly|nearly|approximately|barely|some|fully|quite|very|much|far|instead|unlike|alike|both|either|neither|all|every|close|exactly|precisely|also|too|we|you|they|it|there)$/i;
+/** A quantifier over the options as a set: "both paths", "all options", "either option". */
+const QUANTIFIED_OPTIONS = /\b(?:both|either|each|all)\s+(?:the\s+|of\s+the\s+)?(?:paths?|options?|choices?|routes?|alternatives?|scenarios?)\b/i;
 /** A generic PLURAL option noun heads its own phrase: "both paths" ends there. */
 const GENERIC_PLURAL_OPTION_NOUN = /^(?:paths|options|choices|routes|alternatives|scenarios)$/i;
 /** Words a quantifier's noun phrase may open with before its head: determiners, "and"/"of", numbers and prices. */
