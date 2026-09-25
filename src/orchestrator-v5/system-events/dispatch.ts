@@ -2860,6 +2860,7 @@ async function dispatchStructuralRename(
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
   let graphPersisted = false;
+  let thisAttemptWrote: boolean | null = null;
   let committedResponse: OlumiResponse = result.response;
   try {
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
@@ -2895,6 +2896,7 @@ async function dispatchStructuralRename(
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
     graphPersisted = commitResult.graphPersisted;
+    thisAttemptWrote = commitResult.thisAttemptWrote;
     committedResponse = commitResult.response;
   } catch (err) {
     if (err instanceof GraphStaleWriteError) {
@@ -2945,6 +2947,37 @@ async function dispatchStructuralRename(
     return { response: result.response, commitPerformed: false, graph: null };
   }
 
+  // ── THIS ATTEMPT WROTE NOTHING: answer truthfully, attest nothing ────────
+  // ⛔ F4, extended to rename (Codex's consumer-boundary follow-up on #1856).
+  // On a replay or a reused-id conflict `graphPersisted` is still `true` and
+  // `persistedGraph` is a reread another writer (or this request's own earlier
+  // commit) may already have renamed exactly as asked, so the label check below
+  // would attest "new label verified in the persisted bytes" for a write that
+  // never happened, or answer a known no-write with a retryable 500. The fact
+  // history is read only on this branch: the rename's success path derives no
+  // freshness, so the common path pays nothing for it.
+  if (thisAttemptWrote === false) {
+    return replyForAttemptThatWroteNothing({
+      writer: 'structural_rename',
+      payload,
+      requestId,
+      committedResponse,
+      persistedGraphBytes,
+      persistedAnalysisGraphHash,
+      priorFactsRead: await loadPriorFactsWithReadState(payload.scenario_id, requestId),
+      // The rename is in the model iff the node carries the new label.
+      requestedChangeVisibleIn: (snapshot) =>
+        findStaleRenamedLabel(
+          snapshot as unknown as Record<string, unknown>,
+          result.renamedNodeId,
+          result.newLabel,
+        ) === null,
+      // NOT `renamed_node_id` (the "committed … verified" line's field): this
+      // attempt renamed nothing.
+      logFields: { requested_renamed_node_id: result.renamedNodeId },
+    });
+  }
+
   // ── the post-commit receipt check ────────────────────────────────────────
   // For a RENAME the claim to verify is PRESENCE: the named node carries the new
   // label in the bytes the commit produced, and the top-level `options[]` mirror
@@ -2966,6 +2999,7 @@ async function dispatchStructuralRename(
       result.newLabel,
     ) === null;
   if (
+    thisAttemptWrote !== true ||
     graphPersisted !== true ||
     persistedAnalysisGraphHash === null ||
     !committedParse.success ||
@@ -2976,6 +3010,7 @@ async function dispatchStructuralRename(
         request_id: requestId,
         event_kind: event.kind,
         scenario_id: payload.scenario_id,
+        this_attempt_wrote: thisAttemptWrote,
         graph_persisted: graphPersisted,
         has_analysis_hash: persistedAnalysisGraphHash !== null,
         graph_parse_ok: committedParse.success,
@@ -3541,6 +3576,7 @@ async function dispatchStructuralAddEdge(
   let persistedAnalysisGraphHash: string | null = null;
   let persistedGraphBytes: unknown = null;
   let graphPersisted = false;
+  let thisAttemptWrote: boolean | null = null;
   let committedResponse: OlumiResponse = result.response;
   try {
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
@@ -3568,6 +3604,7 @@ async function dispatchStructuralAddEdge(
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
     persistedGraphBytes = commitResult.persistedGraph;
     graphPersisted = commitResult.graphPersisted;
+    thisAttemptWrote = commitResult.thisAttemptWrote;
     committedResponse = commitResult.response;
   } catch (err) {
     if (err instanceof GraphStaleWriteError) {
@@ -3616,6 +3653,31 @@ async function dispatchStructuralAddEdge(
     return { response: result.response, commitPerformed: false, graph: null };
   }
 
+  // ── THIS ATTEMPT WROTE NOTHING: answer truthfully, attest nothing ────────
+  // ⛔ F4, extended to add_edge (Codex's consumer-boundary follow-up on #1856).
+  // On a replay or a reused-id conflict the reread may already hold exactly this
+  // connection (another writer's, or this request's own earlier commit), so the
+  // presence-and-sign check below would attest a write that never happened, or
+  // answer a known no-write with a retryable 500.
+  if (thisAttemptWrote === false) {
+    return replyForAttemptThatWroteNothing({
+      writer: 'structural_add_edge',
+      payload,
+      requestId,
+      committedResponse,
+      persistedGraphBytes,
+      persistedAnalysisGraphHash,
+      priorFactsRead,
+      // The connection is in the model iff an edge between the endpoints carries
+      // this request's signed strength — the receipt check's own terms.
+      requestedChangeVisibleIn: (snapshot) =>
+        snapshot.edges.some(
+          (e) => e.from === result.from && e.to === result.to && e.strength.mean === result.signedMean,
+        ),
+      logFields: { requested_edge_from: result.from, requested_edge_to: result.to },
+    });
+  }
+
   // ── the post-commit receipt check ────────────────────────────────────────
   // ⚠ SCOPE, at the honesty level the siblings state it:
   // `commitResult.persistedGraph` is this commit's own input after projection,
@@ -3630,6 +3692,7 @@ async function dispatchStructuralAddEdge(
   const addLanded =
     committedEdge !== undefined && committedEdge.strength.mean === result.signedMean;
   if (
+    thisAttemptWrote !== true ||
     graphPersisted !== true ||
     persistedAnalysisGraphHash === null ||
     !committedParse.success ||
@@ -3640,6 +3703,7 @@ async function dispatchStructuralAddEdge(
         request_id: requestId,
         event_kind: event.kind,
         scenario_id: payload.scenario_id,
+        this_attempt_wrote: thisAttemptWrote,
         graph_persisted: graphPersisted,
         has_analysis_hash: persistedAnalysisGraphHash !== null,
         graph_parse_ok: committedParse.success,
