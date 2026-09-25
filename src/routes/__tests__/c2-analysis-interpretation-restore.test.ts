@@ -5,8 +5,9 @@ import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 const readRecent = vi.fn();
 const readFactsFor = vi.fn();
 const readAnalysisInvalidatedAt = vi.fn();
+const durablePort: { readScenarioRunAnalysisFactsFor?: ReturnType<typeof vi.fn> } = vi.hoisted(() => ({}));
 vi.mock('../../orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({ readRecent, readFactsFor, readAnalysisInvalidatedAt }),
+  getSessionStore: () => ({ readRecent, readFactsFor, readAnalysisInvalidatedAt, ...durablePort }),
 }));
 // `emit` + `TelemetryEvents` too: the read leg now loads facts through the turn
 // path's own readers, which report a degraded read on those channels.
@@ -120,7 +121,14 @@ describe('C2 binding through the actual persisted scenario read', () => {
   it('keeps unreadable history distinct from a successful empty read', async () => {
     readFactsFor.mockRejectedValueOnce(new Error('fixture read failure'));
     expect((await read()).analysis_state?.run_state.kind).toBe('unknown_degraded');
+    // A successful empty read = a COMPLETE durable record with no run; an empty
+    // hot window alone cannot prove absence (#1860, Codex 5824695259).
     readFactsFor.mockResolvedValue([]);
-    expect((await read()).analysis_state?.run_state.kind).toBe('never_run');
+    durablePort.readScenarioRunAnalysisFactsFor = vi.fn().mockResolvedValue({ facts: [], total_count: 0 });
+    try {
+      expect((await read()).analysis_state?.run_state.kind).toBe('never_run');
+    } finally {
+      delete durablePort.readScenarioRunAnalysisFactsFor;
+    }
   });
 });
