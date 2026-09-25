@@ -328,6 +328,39 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     expect(node(graph, 'engineering_delivery_capacity').observed_state).toMatchObject({ raw_value: 40, source: 'brief_extraction' });
   });
 
+  /**
+   * Verdict 5829152814 B1 (regression): an explicit level on an UNKNOWN baseline is
+   * demoted to ai_proposed by preparation, so a guard on prepared candidates never
+   * saw it — and that shape always leaves a baseline gap, so the retry always fired.
+   */
+  const first60 = () => {
+    const first = c22();
+    first.options[0] = { ...first.options[0]!, changes: ['Hiring cost'], interventions: [{ factor_label: 'Engineering delivery capacity', value: 60, value_kind: 'absolute', unit: 'story points', provenance: 'explicit' }] };
+    return first;
+  };
+  const retryAt = (value: number, provenance: string) => {
+    const retry = covered();
+    retry.options[0] = { ...retry.options[0]!, interventions: [{ ...est('Engineering delivery capacity', value, 'story points'), provenance }, est('Hiring cost', 140000, 'GBP')] };
+    return retry;
+  };
+  const saidAsYours = (result: Record<string, unknown>) => ((result.not_represented ?? []) as string[]).filter((s) => s.includes('treated your'));
+
+  it.each([
+    ['52, ai_proposed', 52, 'ai_proposed'],
+    ['52, explicit', 52, 'explicit'],
+  ])('RED (verdict 5829152814 B1): a retry that rewrites the user\'s demoted 60 (%s) is not adopted — the 60 is registered and said', async (_c, value, provenance) => {
+    const { graph, result } = await construct(first60(), retryAt(value as number, provenance as string));
+    expect(node(graph, 'hire_two_developers').interventions?.engineering_delivery_capacity?.value).toBe(0.6);
+    expect(saidAsYours(result)).toEqual([expect.stringContaining('your 60')]);
+  });
+
+  it('CONTROL (B1): a retry that keeps the demoted 60 (as ai_proposed, the prepared echo) is adopted, and still says "your 60"', async () => {
+    const { graph, result } = await construct(first60(), retryAt(60, 'ai_proposed'));
+    expect(node(graph, 'hire_two_developers').interventions?.engineering_delivery_capacity?.value).toBe(0.6);
+    expect(Object.keys(node(graph, 'hire_both').interventions ?? {}).length).toBe(3);
+    expect(saidAsYours(result)).toEqual([expect.stringContaining('your 60')]);
+  });
+
   it('CONTROL: a retry keeping exactly the one explicit 52 and filling the other pairs is adopted', async () => {
     const { graph } = await construct(first52(), retry52([{ ...explicit52 }]));
     userLevelKept(graph);
