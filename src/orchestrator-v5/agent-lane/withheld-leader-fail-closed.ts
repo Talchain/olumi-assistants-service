@@ -431,16 +431,18 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
    * "Raising over holding, both paths alike: …". What the quantifier modifies is its phrase ("for both customer cohorts"
    * is not the options — 5828272340), and the phrase ends at its head noun, not at the punctuation.
    */
-  const appliesToAllOptions = (seg: string, bare: boolean): boolean => {
-    const key = labelKey(seg);
+  const appliesToAllOptions = (seg: string, distributed: boolean): boolean => {
     /**
-     * ⛔ …AND THE FIGURES MUST SAY WHAT THEY MEASURE. When the figures are a BARE pair (nothing but a joiner between
-     * them) and nothing but function or share words sits between the options and the first figure, the figures are
-     * DISTRIBUTED over the options the phrase lists — "For both raising and holding: 71% and 29%", "For each of raising
-     * and holding, 71% and 29% respectively", "Raising and holding alike: 29% to 71%" — not shared by them.
+     * ⛔ …AND A BARE PAIR IS DISTRIBUTED OVER THE LIST (review 5828786795). Figures with nothing but a joiner between
+     * them, governed by no change or range verb, are shared out over the options the phrase lists — "For both raising
+     * and holding, 71% and 29% respectively", "…, the figures are 71% and 29%", "Raising and holding alike: 29% to 71%" —
+     * whatever words sit before them. The words that make a split are an open class; the ones that make a span or a
+     * movement are not, so only those exempt. A figure with its own predicate ("96% of customers stay and 4% churn")
+     * is not a bare pair.
      */
-    const namedOutside = (before: string, after: string): boolean =>
-      optionRefs(before) > 0 || optionRefs(after) > 0 || (bare && onlyFunctionOrShareWords(after));
+    if (distributed) return false;
+    const key = labelKey(seg);
+    const namedOutside = (before: string, after: string): boolean => optionRefs(before) > 0 || optionRefs(after) > 0;
     const scopes = [
       ...key.matchAll(/\b(?:on|for|across|in|under|with|to)\s+(?:both|either|each|all)\b/g),
       ...key.matchAll(/\beither\b/g),
@@ -457,10 +459,15 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
     }
     return false;
   };
-  const isLegend = (seg: string, need: number, bare: boolean): boolean => !appliesToAllOptions(seg, bare) && optionRefs(seg) >= need;
+  const isLegend = (seg: string, need: number, distributed: boolean): boolean => !appliesToAllOptions(seg, distributed) && optionRefs(seg) >= need;
+  /** A change or range verb governs the figure at `at`: "churn could fall 70% to 30%", "retention ranges 30% to 70%". */
+  const governedAt = (at: number): boolean => {
+    const lead = text.slice(Math.max(0, at - 40), at);
+    return CHANGE_VERB_BEFORE.test(lead) || RANGE_VERB_BEFORE.test(lead);
+  };
   for (const m of saysSplit ? [] : text.matchAll(/(?<![\d.,])(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent)?\s?(?:-|to)\s?(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent)/gi)) {
     // A pair right after a two-option legend is that legend's split, whichever order it is in ("Raising vs holding: 29-71%").
-    if (isLegend(text.slice(0, m.index), 2, true)) continue;
+    if (isLegend(text.slice(0, m.index), 2, !governedAt(m.index!))) continue;
     if (Number(m[1]!.replace(',', '.')) < Number(m[2]!.replace(',', '.'))) return false;
     // A CHANGE, not a split, when a change verb governs it: "Retention could drop 70% to 30% on the £59 path…" (review 5827687841).
     if (CHANGE_VERB_BEFORE.test(text.slice(Math.max(0, m.index! - 40), m.index))) return false;
@@ -475,7 +482,7 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
     // …and one % sign on the LAST number after a two-option legend: "Raising vs holding: 71-29%", "…: 71 and 29 per cent" (5827973102).
     const pairs = [...text.matchAll(/(?<![\d.,£$€])(\d{1,3}(?:\.\d+)?)\s*(?:%|per\s?cent)?\s*(?:\/|-|to|and)\s*(\d{1,3}(?:\.\d+)?)(?![\d.,])/gi)]
       .filter((m) => { const t = Number(m[1]) + Number(m[2]); return t >= 97 && t <= 103; });
-    return pairs.some((m) => (saysSplit && (RUN_SHARE_EXPLICIT.test(text) || optionRefs(text) >= 2)) || isLegend(text.slice(0, m.index), 2, true));
+    return pairs.some((m) => (saysSplit && (RUN_SHARE_EXPLICIT.test(text) || optionRefs(text) >= 2)) || isLegend(text.slice(0, m.index), 2, !governedAt(m.index!)));
   }
   const total = hits.map((m) => Number(m[0].replace(/[%\s]|per\s?cent/gi, '').replace(',', '.'))).reduce((a, b) => a + b, 0);
   if (total < 97 || total > 103) return false;
@@ -519,15 +526,43 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
    * option AFTER the last percentage, so only one percentage binds. A trailing segment naming at least as many
    * options as there are percentages is the split's own legend.
    */
-  /** Nothing but a joiner between the percentages: a bare pair ("71% and 29%", "71% vs 29%", "71%/29%"). */
-  const bare = segments.slice(1, -1).every((s) => BARE_JOINER.test(s));
-  if (isLegend(segments[segments.length - 1]!, hits.length, bare)) return true;
+  /**
+   * A BARE pair: nothing but a joiner between the percentages ("71% and 29%", "71% vs 29%", "71%/29%"), the last one
+   * saying nothing of its own after it ("…29% respectively", "…29% of runs", "…29%." — never "…96% of customers stay"),
+   * and no verb governing them. Such figures are distributed over whatever list a reader maps them onto.
+   */
+  const lastStandsAlone = ((): boolean => {
+    const clause = /^[^,;:.!?()\u2013\u2014]*/.exec(segments[segments.length - 1]!)![0];
+    const words = clause.trim().split(/\s+/).filter((w) => w.length > 0);
+    if (words.length === 0) return true;
+    const plain = (w: string): boolean => FUNCTION_OR_SHARE_WORD.test(w) || FIGURE_NOUN.test(w) || optionRefs(w) > 0 || /^[£$€]?\d/.test(w);
+    // "…60% and 40% between annual and monthly plans": another list the figures are shared over.
+    const among = words.findIndex((w) => /^(?:between|among|amongst)$/i.test(w));
+    if (among >= 0 && optionRefs(words.slice(among + 1).join(' ')) === 0 && !words.slice(among + 1).every(plain)) return false;
+    let i = 0;
+    while (i < words.length - 1 && /^(?:of|the)$/i.test(words[i]!)) i += 1;
+    // "…96% of customers stay", "…40% of revenue": the figure's own measure.
+    if (!plain(words[i]!)) return false;
+    // "…50% is lost at trial", "…3% are the renewal and churn rates": the figure is the subject of its own predicate —
+    // unless that predicate is a share ("…29% are the win shares").
+    if (/^(?:is|are|was|were|be|been|being|has|have|had)$/i.test(words[i]!)) return words.slice(i + 1).every(plain);
+    return true;
+  })();
+  const distributed = segments.slice(1, -1).every(isBareJoiner) && lastStandsAlone && !governedAt(hits[0]!.index!);
+  if (isLegend(segments[segments.length - 1]!, hits.length, distributed)) return true;
   /**
    * ⛔ …AND THE MIRROR: A LEGEND BEFORE THE PERCENTAGES (review 5827687841): "The £59 path and holding came in at 71%
    * and 29%." Counted as COORDINATED PARTS that each carry a cue, never raw cue words, so one option named twice
    * ("For the Keep Pro at £49 option, 40% … 60% …": a label plus "option") stays one part and is kept.
    */
-  return isLegend(segments[0]!, hits.length, bare);
+  if (isLegend(segments[0]!, hits.length, distributed)) return true;
+  /**
+   * ⛔ A BARE PAIR SPLITS THE OPTIONS EVEN WHEN THIS SENTENCE NAMES NONE (pre-review 5828932090): "We compared raising
+   * and holding, in that order. Across both paths, 71% and 29% respectively." Its legend is in another sentence, and a
+   * reader maps the figures onto it. Percentages that sum to ~100 with nothing but a joiner between them and no change
+   * or range verb governing them are a distribution, whoever it is over — so it fails closed ("It came out 71% to 29%").
+   */
+  return distributed;
 }
 
 /** What may follow a SHARE's percentage: English function words (a closed class) and the share/likelihood/ranking words. */
@@ -535,11 +570,17 @@ const FUNCTION_OR_SHARE_WORD = /^(?:and|or|nor|but|yet|so|to|for|of|in|on|at|by|
 
 /** A generic option noun: after another reference it names the same option ("the holding option"). */
 const GENERIC_OPTION_NOUN = /^(?:path|paths|option|options|choice|choices|route|routes|alternative|alternatives|scenario|scenarios)$/i;
-/** What may sit between the two figures of a bare pair. */
-const BARE_JOINER = /^[\s,;:/\u2013\u2014-]*(?:(?:and|or|to|vs\.?|versus|against|over|then)[\s,;:/\u2013\u2014-]*)?$/i;
-/** True when every word is a function or share word — no predicate says what a figure measures. Empty counts. */
-const onlyFunctionOrShareWords = (s: string): boolean =>
-  s.split(/\s+/).map((w) => w.replace(/^[^a-z0-9£$€]+|[^a-z0-9%]+$/gi, '')).filter((w) => w.length > 0).every((w) => FUNCTION_OR_SHARE_WORD.test(w));
+/**
+ * What may sit between the figures of a bare pair: joiners, comparison words and hedges ("71% and 29%", "71% compared
+ * with 29%", "71% as against 29%", "71% and just 29%", "71% and then about 29%"). A measure between them ("96% of
+ * customers stay and 4%", "96% retention and 4%") makes them two figures, not a pair.
+ */
+const BARE_JOINER_WORD = /^(?:and|or|but|to|then|vs\.?|versus|v|against|over|compared|with|as|opposed|while|whereas|just|only|about|around|roughly|nearly|almost|approximately|some|barely|merely|respectively)$/i;
+/** A noun that names the figures themselves, not what they measure: "…29% are the results". */
+const FIGURE_NOUN = /^(?:results?|outcomes?|figures?|numbers?|splits?|scores?|readings?|percentages?|totals?|picture)$/i;
+const isBareJoiner = (s: string): boolean => s.split(/[\s,;:/\u2013\u2014-]+/).filter((w) => w.length > 0).every((w) => BARE_JOINER_WORD.test(w));
+/** A span, not a split: "retention ranges 30% to 70%", "is between 30% and 70%". */
+const RANGE_VERB_BEFORE = /\b(?:ranges?|ranged|ranging|varies|varied|vary|varying|spans?|spanned|spanning|between|from)\s+(?:[a-z]+\s+){0,2}$/i;
 /** A generic PLURAL option noun heads its own phrase: "both paths" ends there. */
 const GENERIC_PLURAL_OPTION_NOUN = /^(?:paths|options|choices|routes|alternatives|scenarios)$/i;
 /** Words a quantifier's noun phrase may open with before its head: determiners, "and"/"of", numbers and prices. */

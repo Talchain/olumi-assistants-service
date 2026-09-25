@@ -744,19 +744,68 @@ describe('review of #1871 at b2b3d3c2 — a bare pair after a listed phrase is d
     'Under either raising or holding, 71% vs 29%.',
     'For both raising and holding, the win share is 71% and 29%.',
     '71% and 29% across both the £59 path and holding.',
+    // Self-review of ee11de4c: the words before a bare pair are an open class — only a change or range verb exempts.
+    'For both raising and holding, it is 71% and 29%.',
+    'For both raising and holding, the figures are 71% and 29%.',
+    'For both raising and holding, the results come out at 71% and 29%.',
+    'For both raising and holding we see 71% and 29%.',
+    'On both the £59 path and holding, the outcome is 71% vs 29%.',
+    'Raising and holding alike: the numbers were 71% and 29% respectively.',
+    'On both the £59 path and holding, retention is 71% and 29%.',
+    // Pre-review 5828932090: a bare pair naming no option still splits them — its legend may be another sentence.
+    'Across both paths, 71% and 29%.',
+    'On both options, 71% and 29% respectively.',
+    'It came out 71% to 29%.',
+    // Review 5828992113 on ee11de4c: a content word before the pair, or a longer joiner between its figures.
+    'For both Keep Pro at £49 and Raise Pro to £59 at release, the model shows 29% and 71% respectively.',
+    'For both raising and holding, the model gives 71% and 29% respectively.',
+    'For both raising and holding, the model gives 71% and 29%.',
+    'For both raising and holding, the outcomes come to 71% and 29% respectively.',
+    'For both raising and holding, the runs came out 71% and 29% respectively.',
+    'On both the £59 path and holding, results were 71% and 29%.',
+    'Raising and holding alike scored 71% and 29% respectively.',
+    'Under either raising or holding the figures are 71% and 29%.',
+    'For both raising and holding, 71% compared with 29%.',
+    'For both raising and holding, 71% as against 29%.',
+    'For both raising and holding, 71% and just 29%.',
+    'For both raising and holding, 71% and then 29%.',
+    'For both raising and holding, 71% and 29% are the win shares.',
+    'For both raising and holding, 71% and 29% are the results.',
+    'On both the £59 path and holding, 71% and 29% were the figures.',
   ])('RED: removed through BOTH gates: %s', (s) => { expect(wire(s)).not.toMatch(/71%|29%/); });
+  it.each([
+    'We compared raising and holding, in that order. Across both paths, 71% and 29% respectively.',
+    'We compared Raise Pro to £59 at release and Keep Pro at £49, in that order. Across both paths, 71% and 29% respectively.',
+  ])('RED: the legend in the sentence before: %s', (lead) => {
+    const out = enforceAgentLaneLeaderClaimsAtWire(
+      { assistant_text: `${lead} Churn is the input to check.`, blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } } } as unknown as OlumiResponse,
+      { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'constraint_verdict_withheld', graph, analysisReady },
+    ).response.assistant_text;
+    expect(out).not.toMatch(/71%|29%/);
+    expect(out).toContain(lead.split('. ')[0]!);
+    expect(out).toContain('Churn is the input to check.');
+  });
   it.each([
     'On both the £59 path and holding, 96% of customers stay and 4% churn.',
     'On both the £59 path and holding, churn could fall 70% to 30%.',
     'On both the £59 path and holding, retention ranges 30% to 70%.',
+    'For both raising and holding, retention is between 30% and 70%.',
     'Raising and holding alike keep 96% of customers and lose 4%.',
+    'Retention could move from 70% to 30% under either option.',
+    // Review 5828992113's KEEPs: each figure says what it measures, or the pair is shared over another list.
+    'For both raising and holding, 60% to 40% of revenue is from annual plans.',
+    'For both raising and holding, 97% and 3% are the renewal and churn rates.',
+    'For both raising and holding, 96% retention and 4% churn.',
+    'For both raising and holding, retention is 96% and churn 4%.',
+    'For both raising and holding, conversion is 50% and 50% is lost at trial.',
+    'For both raising and holding, the split of revenue is 60% and 40% between annual and monthly plans.',
+    // Two measures, not a bare pair: the last figure says what it measures.
+    'For both raising and holding, the churn limit is 4%, and 96% of customers stay each month.',
     // The reviewer's KEEPs.
     'On both the £59 path and holding, 96% of customers stay and 4% churn, the same as today.',
     'For both raising and holding, 96% of customers stay and 4% churn.',
     'On both the £59 path and holding, 96% and 95% of customers stay respectively.',
     'Under either option, retention moves from 90% to 92%; holding keeps the price.',
     'On both options, churn falls 5% to 3%, whether we raise or hold.',
-    // No option is named, so there is no legend to distribute over (the named residual).
-    'Across both paths, 71% and 29%.',
   ])('CONTROL: kept: %s', (s) => { expect(wire(s)).toContain(s); });
 });
