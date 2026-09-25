@@ -1,0 +1,20 @@
+{
+ "state": "eng-hiring-4",
+ "arm": "C",
+ "rep": 1,
+ "http": 200,
+ "ms": 3382,
+ "usage": {
+  "input_tokens": 14032,
+  "input_tokens_details": {
+   "cache_write_tokens": 11011,
+   "cached_tokens": 3018
+  },
+  "output_tokens": 143,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 14175
+ },
+ "text": "No option can be put forward yet: the model could not test the **annual salary spend ≤ £400k/year** limit, so it was excluded from the comparison.\n\n- The comparison is also **very low robustness** and all options produced nearly identical outcomes. Its strongest driver is delivery capacity, but this is an Olumi estimate rather than user-supplied evidence.\n- The run assumed that a higher “new platform delivery by Q3” value is better; that objective direction was not explicitly stated.\n- The £400k cap needs to be attached to a comparable measured salary-spend quantity; as modelled, annual spend is calculated from other factors and cannot be checked against the limit."
+}

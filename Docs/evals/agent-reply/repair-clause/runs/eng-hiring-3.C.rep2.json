@@ -1,0 +1,20 @@
+{
+ "state": "eng-hiring-3",
+ "arm": "C",
+ "rep": 2,
+ "http": 200,
+ "ms": 5148,
+ "usage": {
+  "input_tokens": 13721,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 13718
+  },
+  "output_tokens": 159,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 13880
+ },
+ "text": "No hiring choice can be put forward yet, because the **£400k/year salary constraint was not checkable** in this run.\n\n- The comparison is **very low robustness** and rests on three Olumi-supplied values, not user evidence; delivery capacity, onboarding load, and annual salary spend are the key assumptions.\n- The analysis did compare all four scenarios, but it could not assess budget compliance: annual salary spend is modelled as a calculated change rather than a salary figure in **£/year**.\n- The goal direction was also assumed to mean “higher is better”, rather than stated.\n\nTo make the Q3-and-budget question decision-useful, the model needs annual fully loaded salary figures (and current salary spend) expressed in £/year."
+}

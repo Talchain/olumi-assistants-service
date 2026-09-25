@@ -1,0 +1,20 @@
+{
+ "state": "pricing-4",
+ "arm": "C",
+ "rep": 2,
+ "http": 200,
+ "ms": 5775,
+ "usage": {
+  "input_tokens": 10562,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 10559
+  },
+  "output_tokens": 244,
+  "output_tokens_details": {
+   "reasoning_tokens": 109
+  },
+  "total_tokens": 10806
+ },
+ "text": "No option can be put forward from this run because the **monthly churn rate <4% per month** condition could not be checked against the model’s churn output.\n\n- The price scenarios were compared, with moderate model robustness, but this is not a valid test of the full goal while churn compliance is unassessed.\n- Results also rest partly on Olumi-authored estimates; notably, **Non‑Pro MRR** had no supplied value and defaulted to £0, so MRR outcomes may be unreliable.\n- The £20k MRR threshold was not scored because its value frame and the model’s MRR baseline are unknown."
+}

@@ -1,0 +1,20 @@
+{
+ "state": "pricing-1",
+ "arm": "C",
+ "rep": 2,
+ "http": 200,
+ "ms": 4836,
+ "usage": {
+  "input_tokens": 10190,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 10187
+  },
+  "output_tokens": 169,
+  "output_tokens_details": {
+   "reasoning_tokens": 54
+  },
+  "total_tokens": 10359
+ },
+ "text": "No option can be put forward yet: the comparison did not assess whether monthly churn remains below **4%**.\n\n- The model’s comparison is robust under its tested changes, but its outcome is ranked as higher MRR—an assumption, not an explicitly recorded goal direction.\n- The churn limit could not be scored because monthly churn is modelled from other factors rather than measured on the constraint’s scale.\n- The result is particularly contingent on Olumi’s provisional estimates for active Pro subscribers, feature-release value, new Pro subscribers, and churn."
+}

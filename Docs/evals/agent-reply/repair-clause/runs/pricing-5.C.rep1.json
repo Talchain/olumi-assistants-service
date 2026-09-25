@@ -1,0 +1,20 @@
+{
+ "state": "pricing-5",
+ "arm": "C",
+ "rep": 1,
+ "http": 200,
+ "ms": 4733,
+ "usage": {
+  "input_tokens": 10019,
+  "input_tokens_details": {
+   "cache_write_tokens": 6998,
+   "cached_tokens": 3018
+  },
+  "output_tokens": 186,
+  "output_tokens_details": {
+   "reasoning_tokens": 48
+  },
+  "total_tokens": 10205
+ },
+ "text": "No option can be put forward yet, because the model could not test your requirement to keep monthly churn **under 4%**.\n\n- The price comparison itself held up under the changes tested, but that is not a check of the churn limit or of reaching £20k MRR within 12 months.\n- The model also assumed that higher MRR is the objective, rather than having that direction explicitly stated.\n- Its most influential inputs include Pro subscriber count, other-plan MRR, conversions and churn; the underlying values were supplied by Olumi, not measured user evidence.\n\nThe central reasoning gap is to connect the churn limit to a measurable model outcome."
+}

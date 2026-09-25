@@ -1,0 +1,20 @@
+{
+ "state": "eng-hiring-5",
+ "arm": "C",
+ "rep": 1,
+ "http": 200,
+ "ms": 6382,
+ "usage": {
+  "input_tokens": 13622,
+  "input_tokens_details": {
+   "cache_write_tokens": 10601,
+   "cached_tokens": 3018
+  },
+  "output_tokens": 259,
+  "output_tokens_details": {
+   "reasoning_tokens": 95
+  },
+  "total_tokens": 13881
+ },
+ "text": "No hiring option can be put forward from this run, because the £400k annual-salary constraint was not assessable in the model.\n\n- The comparison is **fragile**: small changes in assumptions can alter the ordering, and every material input is currently Olumi-authored rather than user-supplied.\n- The model is most sensitive to **platform delivery capacity**—an Olumi estimate—followed by annual salary spend. That identifies uncertainty, not a validated priority for investigation.\n- The salary cap was excluded: annual salary spend is modelled as a calculated change, with no compatible measured baseline or stated target frame. The model also lacks a stated goal direction for “shipped by Q3”.\n\nSo this is a provisional comparison to argue with, not a decision result."
+}

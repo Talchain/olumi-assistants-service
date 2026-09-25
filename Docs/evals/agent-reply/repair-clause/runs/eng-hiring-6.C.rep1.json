@@ -1,0 +1,20 @@
+{
+ "state": "eng-hiring-6",
+ "arm": "C",
+ "rep": 1,
+ "http": 200,
+ "ms": 5196,
+ "usage": {
+  "input_tokens": 15303,
+  "input_tokens_details": {
+   "cache_write_tokens": 12282,
+   "cached_tokens": 3018
+  },
+  "output_tokens": 220,
+  "output_tokens_details": {
+   "reasoning_tokens": 71
+  },
+  "total_tokens": 15523
+ },
+ "text": "This run cannot tell you which hiring plan meets the brief, because the £400k/year salary limit was not checkable.\n\n- All four options were analysed as leaving annual salary spend unchanged: no salary figures were stated for any option. The limit therefore did not form part of the comparison.\n- The comparison is fragile, and every estimate it rests on is machine-authored or unattributed rather than user-validated. No option can be put forward from this run.\n- The goal direction was also assumed to mean “more platform delivery is better”; that aim was not explicitly recorded.\n\nThe missing salary effects are the key model gap: annual salary spend for two seniors, four juniors, current staffing, and two juniors."
+}

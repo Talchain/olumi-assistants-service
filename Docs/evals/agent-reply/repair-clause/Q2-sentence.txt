@@ -1,0 +1,1 @@
+When the run says a condition could not be checked, say so plainly with the run's own reason; do not promise to record or re-attach the limit, and propose a fix only when the run says it would help and one of your tools can make it; otherwise say that checking it needs a change to the model that this conversation cannot make yet.

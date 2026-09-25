@@ -1,0 +1,20 @@
+{
+ "state": "pricing-4",
+ "arm": "C",
+ "rep": 1,
+ "http": 200,
+ "ms": 7105,
+ "usage": {
+  "input_tokens": 10562,
+  "input_tokens_details": {
+   "cache_write_tokens": 7541,
+   "cached_tokens": 3018
+  },
+  "output_tokens": 264,
+  "output_tokens_details": {
+   "reasoning_tokens": 125
+  },
+  "total_tokens": 10826
+ },
+ "text": "No option can be put forward yet, because the model could not check the requirement to keep monthly churn below 4%.\n\n- The price comparison itself held up moderately under the tested variations, but that does not establish compliance with the churn limit.\n- Churn is currently modelled as a calculated outcome, not a measured value on the same scale as the “<4% per month” constraint, so the limit was excluded from the comparison.\n- Results also rest partly on a default £0 starting value for Non‑Pro MRR, rather than a stated figure.\n\nThe key unresolved reasoning step is to define what measured churn figure the 4% limit should constrain."
+}

@@ -1,0 +1,20 @@
+{
+ "state": "pricing-1",
+ "arm": "C",
+ "rep": 1,
+ "http": 200,
+ "ms": 8348,
+ "usage": {
+  "input_tokens": 10190,
+  "input_tokens_details": {
+   "cache_write_tokens": 7169,
+   "cached_tokens": 3018
+  },
+  "output_tokens": 335,
+  "output_tokens_details": {
+   "reasoning_tokens": 183
+  },
+  "total_tokens": 10525
+ },
+ "text": "No option can be put forward yet because the under‑4% monthly churn condition was not checkable in this run.\n\n- The comparison across £49, £55 and £59/month was robust under the changes tested, but that is only an MRR-relative result—not evidence that any price meets both of your stated goals.\n- Monthly churn is modelled as a calculated outcome rather than a directly comparable reading, so the strict `<4% per month` limit was excluded. The £20k MRR target’s measurement frame and objective direction were also not fully specified.\n- The result remains provisional: four underlying inputs were supplied by Olumi rather than evidenced by you, including the drivers around subscribers, churn and feature-release value."
+}

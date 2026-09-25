@@ -1,0 +1,20 @@
+{
+ "state": "eng-hiring-5",
+ "arm": "C",
+ "rep": 2,
+ "http": 200,
+ "ms": 3642,
+ "usage": {
+  "input_tokens": 13622,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 13619
+  },
+  "output_tokens": 142,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 13764
+ },
+ "text": "No option can be put forward yet: the £400k annual-salary constraint was not assessable in this run.\n\n- The comparison is **very fragile** and rests entirely on Olumi-authored assumptions; small assumption changes can alter the ordering.\n- Platform delivery capacity is the most sensitive assumption, but that does not establish it as the priority for investigation.\n- The salary-cap limit is recorded but cannot be compared with the model’s calculated salary-spend measure; its frame is unspecified. The run also assumed a “higher is better” goal direction rather than one you stated.\n\nThe useful next reasoning step is to define how annual salary spend should be measured against the £400k cap."
+}
