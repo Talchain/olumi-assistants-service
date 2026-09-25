@@ -207,9 +207,10 @@ export function stillValidOffers(
   const runKind = (now.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
   const run = offered.some((a) => a.id === RUN_OFFER_CHIP.id)
     && admitsRunOffer(now.analysisReady) && runKind !== 'complete_current';
-  // The next step after a blocked Run stays offered while the model still cannot run (process-local,
-  // like the approve chip: after a restart the replay carries the words only).
-  const nextStep = offered.some((a) => a.id === NEXT_STEP_AFTER_BLOCKED_RUN_CHIP.id) && !admitsRunOffer(now.analysisReady);
+  // The next step after a blocked Run stays offered while the model is KNOWN not to run (process-local,
+  // like the approve chip: after a restart the replay carries the words only). A replay whose state read
+  // failed is unknown, and an unknown state is never re-advertised as a refusal (#1885 pre-review 5827131835).
+  const nextStep = offered.some((a) => a.id === NEXT_STEP_AFTER_BLOCKED_RUN_CHIP.id) && knownNotRunnable(now.analysisReady);
   // A rebuild stays offered only while there is still no model to build over.
   const rebuild = offered.some((a) => a.id === REBUILD_AFTER_TOO_LARGE_CHIP.id) && !now.modelExists;
   return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : [])];
