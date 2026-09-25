@@ -46,6 +46,23 @@ const NON_RANKING: readonly string[] = [
   'Tell me the lead time for the feature release and I will add it.',
 ];
 
+/**
+ * REAL non-ranking sentences the first cut would have dropped, verbatim from AI Quality's paired runs
+ * (branch aiq/agent-reply-paired-evidence @7b68d8bd, `paired/57f903c/runs/<case>/<arm>/rep-N.text.txt`).
+ * Found by running the classifier over all 43 replies there: 25 sentences flagged, 13 genuine
+ * rankings (pricing-run-complete), 12 of these. None was written by a test author.
+ */
+const REAL_NON_RANKING: readonly string[] = [
+  // hiring-run-blocked/M/rep-3
+  '- **Hire a Tech Lead** sets tech-lead capacity to **8 capacity points (0–10)**.',
+  // hiring-run-blocked/C1/rep-2
+  '- A reasonable assumption is that it leaves **Tech-lead capacity at 4 capacity points (0–10)** and **Developer capacity at 8 capacity points (0–20)**—the current starting levels.',
+  // hiring-construction/M/rep-2
+  'Whether a Tech Lead will mainly lead and unblock work, or also deliver significant hands-on output.',
+  // hiring-construction/M/rep-3
+  'The model also flags three questions most likely to determine the result: your current team size/productivity, how hands-on the Tech Lead would be, and onboarding/mentoring capacity.',
+];
+
 describe('the ranking-sentence classifier', () => {
   it.each(RANKING.map((s) => [s]))('RANKING, dropped: %s', (s) => {
     expect(sentenceRanksOptions(s)).toBe(true);
@@ -55,15 +72,20 @@ describe('the ranking-sentence classifier', () => {
     expect(sentenceRanksOptions(s)).toBe(false);
   });
 
+  it.each(REAL_NON_RANKING.map((s) => [s]))('REAL, NOT ranking, kept: %s', (s) => {
+    expect(sentenceRanksOptions(s)).toBe(false);
+  });
+
   it('a label that itself reads as ranking vocabulary is a NAME, not a claim — but its claim still is', () => {
-    const graph = { nodes: [{ id: 'o1', kind: 'option', label: 'Hire a Lead Engineer' }, { id: 'o2', kind: 'option', label: 'Keep the team as is' }] };
+    const graph = { nodes: [{ id: 'o1', kind: 'option', label: 'Become Market Leader' }, { id: 'o2', kind: 'option', label: 'Keep the team as is' }] };
     const labels = rankingLabelContext(graph, undefined);
-    expect(labels.rankingShapedLabels).toEqual(['Hire a Lead Engineer']);
-    expect(sentenceRanksOptions('Hire a Lead Engineer raises delivery capacity by 20%.', labels)).toBe(false);
-    expect(sentenceRanksOptions('The Lead Engineer hire adds one person to the team.', labels)).toBe(false);
-    expect(sentenceRanksOptions('Hire a Lead Engineer leads the comparison.', labels)).toBe(true);
+    expect(labels.rankingShapedLabels).toEqual(['Become Market Leader']);
+    expect(labels.rankingShapedLabelWords).toEqual(['Leader']);
+    expect(sentenceRanksOptions('Become Market Leader raises marketing spend by 20%.', labels)).toBe(false);
+    expect(sentenceRanksOptions('The Market Leader push adds two hires.', labels)).toBe(false);
+    expect(sentenceRanksOptions('Become Market Leader leads the comparison.', labels)).toBe(true);
     // CONTROL: without the label context the same name reads as ranking — the context is what spares it.
-    expect(sentenceRanksOptions('Hire a Lead Engineer raises delivery capacity by 20%.')).toBe(true);
+    expect(sentenceRanksOptions('Become Market Leader raises marketing spend by 20%.')).toBe(true);
   });
 });
 

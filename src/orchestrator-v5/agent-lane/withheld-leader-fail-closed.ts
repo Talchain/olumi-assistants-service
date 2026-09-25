@@ -85,6 +85,15 @@ const NON_RANKING_IDIOMS: readonly RegExp[] = [
   /\blead[\s-]+(?:times?|generation|magnets?|sources?|scoring|lists?|nurturing|conversion|volumes?|pipelines?)\b/gi,
   /\bleading\s+indicators?\b/gi,
   /\b(?:sales|qualified|inbound|outbound|warm|cold|new|marketing)\s+leads?\b/gi,
+  /**
+   * Job titles, HYPHENATED too. The shared carve-out spares "tech lead" but not "tech-lead capacity",
+   * which all 9 real run-blocked hiring replies use (10 of the 12 false positives in a 43-reply
+   * survey of AI Quality's paired runs, branch aiq/agent-reply-paired-evidence @7b68d8bd).
+   */
+  /\b(?:team|tech|technical|engineering|project|squad|product|design|dev|development|delivery)[\s-]+leads?\b/gi,
+  /** The managerial verb: "will mainly lead and unblock work", "leads the team". */
+  /\b(?:lead|leads|leading|led)\s+and\s+(?:unblock|mentor|manage|coordinate|support|coach|guide|deliver|review|grow|hire)\w*\b/gi,
+  /\b(?:lead|leads|leading|led)\s+(?:(?:the|a|an|this|that|their|your|our|its|new)\s+)*(?:teams?|squads?|projects?|work|rollout|migration|effort|initiative|delivery|engineers?|developers?|hires?|hiring|people|staff|onboarding|mentoring)\b/gi,
   /** Time, not rank: "go ahead", "ahead of the release", "the months ahead". */
   /\b(?:go|goes|going|went)\s+ahead\b(?!\s+of\b)/gi,
   /\bahead\s+of\s+(?:(?:the|any|a|its|your)\s+)?(?:schedule|time|plan|launch|release|rollout|deadline|renewal|decision|next\s+run)\b(?![\s-]+(?:timed|aligned|paths?|options?|routes?|scenarios?|increases?|rises?)\b)/gi,
@@ -107,6 +116,8 @@ const NON_RANKING_IDIOMS: readonly RegExp[] = [
   /\b(?:highest|strongest|biggest|largest)\s+(?:sensitivity|influence|drivers?|levers?|dependency|uncertainty|elasticity)\b/gi,
   /\bhighest\s+(?:plausible|possible|credible)\b/gi,
   /\bmost\s+likely\s+(?:values?|estimates?|figures?|ranges?|levels?)\b/gi,
+  /** Questions or assumptions "most likely to determine the result" — ranking what matters, not options. */
+  /\bmost\s+likely\s+to\s+(?:determine|affect|change|shift|move|matter|drive|influence|decide|flip|alter)\b/gi,
   /** "on top of that", "top-line", "top-down". */
   /\b(?<!\bout\s+)on\s+top\s+of\b/gi,
   /\btop[\s-]+(?:line|down)\b/gi,
