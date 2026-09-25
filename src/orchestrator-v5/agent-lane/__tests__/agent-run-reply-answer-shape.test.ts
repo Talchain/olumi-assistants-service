@@ -174,7 +174,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   it.each([
     ['in its first sentence', RANKS_FIRST, RANKS_FIRST_SENTENCE],
     ['in a bullet', RANKS_IN_BULLET, RANKS_IN_BULLET_SENTENCE],
-  ])('2. WITHHELD: a reply that ranks %s → shaped from the GATED prose; no dropped ranking on the face or behind it', async (_where, served, rankingSentence) => {
+  ])('2. WITHHELD: a reply that ranks %s → the gate rewrote it, so NOT shaped: the no-leader sentence stays on the face, no ranking anywhere', async (_where, served, rankingSentence) => {
     // The controls: the sentence is in the served reply, and shaping BEFORE the gate would have put it on the face.
     expect(served.text).toContain(rankingSentence);
     const early = synthesiseAnswerShapeFromText(served.text);
@@ -183,17 +183,14 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(unhyphen(faceOf(early!))).toContain(unhyphen(served.leak_phrases[0]!));
 
     readbackState = WITHHELD_STATE;
-    const { b } = await typedRun(served.text);
+    const { b, turnId } = await typedRun(served.text);
     expect(b._diagnostic_trace.leader_claim_enforced, 'the control: the gate edited this turn').toBe(true);
     expect(b.assistant_text, 'the control: the gate’s own sentence is in the reply').toContain(noLeaderSentence);
-    const shape = b._answer_shape;
-    expect(shape, '_answer_shape survives the gate, because it is built after it').toBeDefined();
-    expect(deriveAnswerTextFromShape(shape!)).toBe(b.assistant_text);
-    for (const field of [shape!.headline, ...shape!.bullets, shape!.detail]) {
-      expect(field).not.toContain(rankingSentence);
-      for (const leak of served.leak_phrases) expect(unhyphen(field)).not.toContain(unhyphen(leak));
-    }
-    expect(shape!.bullets.length, 'the face is headline + bullets').toBeGreaterThanOrEqual(1);
+    // Review 5832549611: a shape would put the gate's disclosure (and its next action) behind "Show more".
+    expect('_answer_shape' in b, 'a gate-rewritten reply ships whole: its disclosure is on the face').toBe(false);
+    expect(b.assistant_text).not.toContain(rankingSentence);
+    for (const leak of served.leak_phrases) expect(unhyphen(b.assistant_text)).not.toContain(unhyphen(leak));
+    expect(rows.get(turnId)?.assistant_message, 'the replayed row holds the same whole text').toBe(b.assistant_text);
   });
 
   it.each([

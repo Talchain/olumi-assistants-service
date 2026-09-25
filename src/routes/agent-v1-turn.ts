@@ -508,10 +508,14 @@ export function leavesProposalAwaitingApproval(
  */
 export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; blocks?: unknown; suggested_actions?: unknown }>(
   body: T,
-  turn: { proposalAwaitingApproval?: boolean } = {},
+  turn: { proposalAwaitingApproval?: boolean; leaderGateEditedText?: boolean } = {},
 ): T {
   if ('_answer_shape' in body) return body;
   if (turn.proposalAwaitingApproval === true || offersApproval(body)) return body;
+  // ⛔ The leader gate rewrote this text: its no-leader sentence and next action close the reply, and a
+  // shape would put them behind "Show more" (independent review of #1914, 5832549611). Ship it whole, as
+  // route-v2 does when its gate edits the text.
+  if (turn.leaderGateEditedText === true) return body;
   const blocks = body.blocks;
   const carriesResult = Array.isArray(blocks)
     && blocks.some((b) => b !== null && typeof b === 'object' && (b as { type?: unknown }).type === 'analysis_result');
@@ -1781,6 +1785,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       || fa !== undefined
       || result.tool_calls.some((c) => c.name === 'run_analysis');
     let leaderClaimEnforced = false;
+    let leaderGateEditedText = false;
     if (analysisBearing) {
       const claim = (analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
       const enforced = enforceAgentLaneLeaderClaimsAtWire(wireBody, {
@@ -1794,6 +1799,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       if (enforced.changed) {
         leaderClaimEnforced = true;
+        leaderGateEditedText = enforced.editedFields.includes('assistant_text');
         // A shape sidecar describes the text it was built from; it goes with an edit to that text.
         const { _answer_shape: _dropped, ...withoutShape } = enforced.response as OlumiResponse & { _answer_shape?: unknown };
         wireBody = (enforced.editedFields.includes('assistant_text') ? withoutShape : enforced.response) as OlumiResponse & Record<string, unknown>;
@@ -1804,10 +1810,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * this is after the last rewrite of `assistant_text` on this route (write-claim removal, disclosures,
      * proposal-id scrub, the leader gate above), so the shape is built from the prose the user receives,
      * and before the answer row is written, so a replay returns the same words. Never on a turn that asks
-     * for an approval: the route's own offer, or a proposal the chip rule left without a chip.
+     * for an approval: the route's own offer, or a proposal the chip rule left without a chip. Never on
+     * a turn whose text the leader gate rewrote: its disclosure stays on the face.
      */
     wireBody = withAnalysisAnswerShape(wireBody, {
       proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
+      leaderGateEditedText,
     });
 
     /**
