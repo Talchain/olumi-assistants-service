@@ -84,10 +84,13 @@ const FUTILE_REMEDY = 'Tell me the limit you meant in your own words and I will 
  * would name, and the re-run stayed unchecked in both standard journeys. So this arm must NOT say it.
  */
 const REPOINT_ASK = 'Tell me which part of your model it applies to and I will record it there';
-/** What a derived target actually lacks — a starting level, or the frame the limit is meant in. */
-const MISSING_INPUT = 'Checking it needs a starting level for that part, such as its value today, or a statement of whether the limit covers the whole amount or only what the options add';
+/**
+ * What can actually anchor a derived target (PLoT `resolveConstraintSampleFrameAnchor`): the delta frame,
+ * or a model change that measures it directly. NOT a starting level — PLoT never reads one here.
+ */
+const MISSING_INPUT = 'Checking it needs either a statement that the limit covers only what the options add, not the whole amount, or a change to the model so that this part is measured directly';
 /** And no answer is invited that this conversation cannot record (RC 5825523678). */
-const NOT_FROM_HERE = 'that cannot be added from this conversation yet';
+const NOT_FROM_HERE = 'neither can be added from this conversation yet';
 
 /** The limit, at the label and the brief span the session actually carried. */
 const CONSTRAINT_ID = 'constraint_goal_nrr_min';
@@ -310,6 +313,8 @@ describe('a limit on an UNANCHORABLE target is not told to restate itself', () =
     // What the target lacks, and plainly that it cannot be supplied from here yet.
     expect(v.summary).toContain(MISSING_INPUT);
     expect(v.summary).toContain(NOT_FROM_HERE);
+    // A starting level cannot anchor a derived target, so it is never offered as the fix.
+    expect(v.summary).not.toMatch(/starting level|value today/i);
     // The re-point ask is disproved on this arm (served probe), and re-running cannot help yet.
     expect(v.summary).not.toContain(REPOINT_ASK);
     expect(v.summary).not.toContain('Then run the analysis again');
