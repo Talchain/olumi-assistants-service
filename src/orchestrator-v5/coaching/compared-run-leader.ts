@@ -32,5 +32,24 @@ import { wasAnalysisRequestedByUser } from '../compose/unrequested-analysis-conf
 export function mayPresentComparedRunLeader(turnPermission: boolean, fact: HandlerFact): boolean {
   return turnPermission
     && readMayNameLeadingOptionVerdictForFact(fact).may_name_leading_option
-    && wasAnalysisRequestedByUser(fact);
+    && mayPresentComparedRunVerdicts(fact);
+}
+
+/**
+ * ⛔ MAY A COMPARED RUN'S *VERDICT-BEARING NUMBERS* BE PRESENTED — its per-option
+ * `win_probability`, its robustness band ("whether to trust it")?
+ *
+ * Only for a run the user ASKED FOR. Confinement withholds exactly these for an
+ * unrequested run (`compose/unrequested-analysis-confinement.ts`: "who wins, by how
+ * much, and whether to trust it"; `confineUnrequestedAnalysisBlock` drops
+ * `win_probabilities`). A comparison that re-ships them reveals the withheld leader
+ * by arithmetic — "Offshore: 62% → 45%" (review of #1857, B5). The sensitivity science
+ * (driver influence) is NOT in this class; confinement keeps it.
+ *
+ * Read by `buildRunDelta` (no `run_delta` at all for a pair with an unrequested run)
+ * and the "What changed?" gate (no band-movement sentence), and by
+ * {@link mayPresentComparedRunLeader} as its third conjunct.
+ */
+export function mayPresentComparedRunVerdicts(fact: HandlerFact): boolean {
+  return wasAnalysisRequestedByUser(fact);
 }

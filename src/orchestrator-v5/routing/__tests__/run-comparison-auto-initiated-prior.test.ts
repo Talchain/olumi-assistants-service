@@ -77,6 +77,14 @@ function ask(current: V2RunResponseEnvelope, priorProvenance: object | null) {
 }
 
 describe.each(Object.entries(PRIORS))('an AUTO-INITIATED (%s) prior run — its leader was never presented', (_kind, stamp) => {
+  it('RED (B5/N3): no band movement describes the automatic run — its trust verdict is confined', () => {
+    for (const current of [SAME_LEADER_CURRENT, FLIPPED_CURRENT]) {
+      const text = ask(current, stamp());
+      expect(text).not.toMatch(/where before it was/i);
+      expect(text).not.toMatch(/60%|62%|40%/);
+    }
+  });
+
   it('RED: same leader — no "still leads", no widened lead, no prior leader named', () => {
     const text = ask(SAME_LEADER_CURRENT, stamp());
     expect(text).not.toMatch(/\bstill leads\b/i);
@@ -95,8 +103,9 @@ describe.each(Object.entries(PRIORS))('an AUTO-INITIATED (%s) prior run — its 
 });
 
 describe('CONTRAST: the same pair with a USER-requested prior keeps its comparison', () => {
-  it('same leader → "still leads"', () => {
+  it('same leader → "still leads", and the band movement is described', () => {
     expect(ask(SAME_LEADER_CURRENT, null)).toMatch(/Offshore still leads/);
+    expect(ask(SAME_LEADER_CURRENT, null)).toMatch(/where before it was/);
   });
   it('flipped → the earlier leader is named', () => {
     expect(ask(FLIPPED_CURRENT, null)).toMatch(/Offshore/);
