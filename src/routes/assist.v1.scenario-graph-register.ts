@@ -637,7 +637,45 @@ export default async function route(app: FastifyInstance) {
          * is safe to discard and a caller asserting emptiness has not asked to.
          */
         const rawGraphPresent = baseGraphForInvariants !== null && baseGraphForInvariants !== undefined;
-        if (expectedGraphIdentityHash === null && rawGraphPresent) {
+        /**
+         * ⛔ AN ENTITY-LESS STORED GRAPH IS ABSENT FOR THIS ASSERTION (create-only construction,
+         * #69 5834761926 / 5834838346). `{nodes:[], edges:[]}` parses, has no identity, and is
+         * raw-present, so the guard below refused ordinary creation into an emptied scenario as
+         * "content that could not be read". There is nothing in it to protect. A present graph that
+         * does NOT parse as that still refuses: that is the case the guard exists for.
+         */
+        const rawGraphEntityLess = (() => {
+          if (baseGraphForInvariants === null || typeof baseGraphForInvariants !== "object") return false;
+          const { nodes, edges } = baseGraphForInvariants as { nodes?: unknown; edges?: unknown };
+          return Array.isArray(nodes) && nodes.length === 0 && Array.isArray(edges) && edges.length === 0;
+        })();
+        /**
+         * ⛔ AN IDENTICAL RETRY IS ITS OWN REPLAY, NOT A COMPETING WRITER. A construction whose
+         * response was lost is retried with the SAME operation and the SAME bytes; by then the graph
+         * it wrote is present, so the absence check below refused it before the replay arm inside
+         * the atomic writer could return the original receipt. Only a PROVEN identical commit — the
+         * derived turn id already holds this exact request hash — passes through; the writer then
+         * replays (SQL replay precedes CAS) and writes nothing. A different request under the same
+         * operation, no committed turn, or a read that fails all still refuse: none proves a replay.
+         */
+        const identicalCommittedReplay = async (): Promise<boolean> => {
+          if (operationId === undefined || typeof store.readCommittedTurn !== "function") return false;
+          try {
+            const committed = await store.readCommittedTurn(scenarioId, registrationTurnId(scenarioId, operationId));
+            if (committed === null) return false;
+            const bytes = projectGraphForPersistence(parsed.data, {
+              scenarioId,
+              turnClass: "direct_answer",
+              source: "graph_registration",
+            });
+            return committed.request_hash === registrationRequestHash(bytes, brief.value);
+          } catch {
+            return false;
+          }
+        };
+        const replayOfThisOperation =
+          rawGraphPresent && !rawGraphEntityLess ? await identicalCommittedReplay() : false;
+        if (expectedGraphIdentityHash === null && rawGraphPresent && !rawGraphEntityLess && !replayOfThisOperation) {
           log.warn(
             {
               event: "v5.scenario_graph_register.expected_absent_graph_unhashable",
@@ -667,7 +705,7 @@ export default async function route(app: FastifyInstance) {
               ),
             );
         }
-        if (expectedGraphIdentityHash !== null) {
+        if (expectedGraphIdentityHash !== null && !replayOfThisOperation) {
           log.warn(
             {
               event: "v5.scenario_graph_register.expected_absent_graph_present",

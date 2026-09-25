@@ -54,8 +54,9 @@ const loadGraph = vi.fn();
 const ensureScenarioExists = vi.fn();
 const getScenarioOwner = vi.fn();
 const scenarioExists = vi.fn();
+const readCommittedTurn = vi.fn();
 
-const store = { append, loadGraph, ensureScenarioExists, getScenarioOwner, scenarioExists };
+const store = { append, loadGraph, ensureScenarioExists, getScenarioOwner, scenarioExists, readCommittedTurn };
 vi.mock("../../orchestrator-v5/session/index.js", () => ({
   getSessionStore: () => store,
 }));
@@ -87,7 +88,7 @@ import { resolveCeeRateLimit } from "../../cee/config/limits.js";
 import { RATE_BUCKET_REGISTRY } from "../../cee/config/limits.js";
 import { checkPersistedGraphInvariants } from "../../orchestrator-v5/persisted-graph-invariants.js";
 import { currentTurnFenceSlot, TurnFenceRejectedError } from "../../orchestrator-v5/session/turn-fence.js";
-import { registrationTurnId } from "../../orchestrator-v5/graph-registration/registration-identity.js";
+import { registrationRequestHash, registrationTurnId } from "../../orchestrator-v5/graph-registration/registration-identity.js";
 
 
 
@@ -158,6 +159,7 @@ beforeEach(() => {
   scenarioExists.mockResolvedValue(true);
   loadGraph.mockResolvedValue(SERVER_PRE_IMPORT);
   append.mockResolvedValue({ id: "turn-1" });
+  readCommittedTurn.mockResolvedValue(null);
 });
 
 describe("register — optional initial brief", () => {
@@ -1654,6 +1656,82 @@ describe("register — an absence assertion does not discard a graph that merely
     const app = await buildApp();
     const res = await post(app, SCENARIO, { graph: IMPORTED });
     expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+});
+
+/**
+ * ⛔ CREATE-ONLY CONSTRUCTION (#69 5834761926 item 1 / RC 5834805999). The Agent's build now asserts
+ * `expected_graph_identity_hash: null` so it can never replace somebody's newer model. Two things that
+ * assertion must NOT break, found at source before the change (5834838346):
+ *   (a) ordinary creation into a scenario that stores an EMPTY graph — it parses, has no identity, and
+ *       is raw-present, so the "unhashable" guard refused it as "content that could not be read";
+ *   (b) an IDENTICAL retry of a build whose response was lost — the absence check ran BEFORE the replay
+ *       arm, so the retry got a 409 instead of its original receipt.
+ */
+describe("register — create-only construction: `null` refuses a real model, not an empty one or its own replay", () => {
+  const OP = "4f3c2b1a-0d9e-4c8b-a7f6-e5d4c3b2a190";
+  const projected = () =>
+    projectGraphForPersistence(IMPORTED as never, { scenarioId: SCENARIO, turnClass: "direct_answer", source: "graph_registration" });
+
+  it("RED (a): `null` against a stored EMPTY graph writes — an entity-less model is not content to protect", async () => {
+    loadGraph.mockResolvedValue({ nodes: [], edges: [] });
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: null, operation_id: OP });
+    expect(res.statusCode, res.body.slice(0, 300)).toBe(200);
+    expect(append).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it("CONTRAST (a): `null` against a present graph that cannot be parsed is still refused", async () => {
+    loadGraph.mockResolvedValue({ nodes: "not a graph" });
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: null, operation_id: OP });
+    expect(res.statusCode).toBe(409);
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("RED (b): an IDENTICAL retry (same operation, same bytes, already committed) reaches the replay arm — its receipt, not a 409", async () => {
+    loadGraph.mockResolvedValue(projected());
+    readCommittedTurn.mockResolvedValue({ id: "row-1", request_hash: registrationRequestHash(projected(), undefined), assistant_message: null, user_message: null, llm_calls_used: 0 });
+    append.mockResolvedValue({ id: "turn-1", replayedPriorTurn: true });
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: null, operation_id: OP });
+    expect(res.statusCode, res.body.slice(0, 300)).toBe(200);
+    expect(res.json().replayed).toBe(true);
+    expect(readCommittedTurn).toHaveBeenCalledWith(SCENARIO, registrationTurnId(SCENARIO, OP));
+    expect(append).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it("CONTRAST (b): the same operation with DIFFERENT bytes over a present model is refused — never a replay", async () => {
+    loadGraph.mockResolvedValue(projected());
+    readCommittedTurn.mockResolvedValue({ id: "row-1", request_hash: "a-different-request", assistant_message: null, user_message: null, llm_calls_used: 0 });
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: null, operation_id: OP });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().details.failed_expectation).toBe("absence");
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("CONTRAST (b): somebody else's model and no committed turn for this operation → refused, nothing written", async () => {
+    loadGraph.mockResolvedValue(SERVER_PRE_IMPORT);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: null, operation_id: OP });
+    expect(res.statusCode).toBe(409);
+    expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("CONTRAST (b): a committed-turn read that FAILS proves nothing — the absence claim is false, so refuse", async () => {
+    loadGraph.mockResolvedValue(projected());
+    readCommittedTurn.mockRejectedValue(new Error("db blip"));
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: null, operation_id: OP });
+    expect(res.statusCode).toBe(409);
+    expect(append).not.toHaveBeenCalled();
     await app.close();
   });
 });
