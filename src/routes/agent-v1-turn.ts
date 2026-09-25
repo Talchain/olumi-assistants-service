@@ -55,6 +55,7 @@ import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orch
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { CarriedProposals, carrierForAnswerRow, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
 import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
@@ -108,6 +109,8 @@ export const AGENT_TURN_CLAIM_WAIT = {
 /** The conversation of record stays Olumi's; this is a per-process cache. */
 const histories = new HistoryStore();
 const proposals = new ProposalStore();
+/** The approval carrier each scenario and subject's latest answer row persisted — see `carrierForAnswerRow`. */
+const carriedProposals = new CarriedProposals();
 
 type OfferedAction = SuggestedAction;
 /**
@@ -256,7 +259,7 @@ const AGENT_INSTRUCTIONS = [
    * be applied from one "yes". The build turn now ends with ONE exact starting
    * point the user can adopt in a single approval.
    */
-  'In that same reply, if any factor has no value or any option sets nothing, call propose_starting_point ONCE with a reasoned starting value for each such factor and the level each option sets, in the user\u2019s own units. Show every figure and what it rests on, say they are your assumptions to adopt or correct, and ask for one approval.',
+  'In that same reply, if any factor has no value or any option sets nothing, call propose_starting_point ONCE with a reasoned starting value for each such factor and the level each option sets, in the user\u2019s own units. An option in `status_quo_held` does not count: it is held at its starting values and is never given levels. Show every figure and what it rests on, say they are your assumptions to adopt or correct, and ask for one approval.',
   'If propose_starting_point refuses with incomplete_starting_point, NOTHING is awaiting approval: call it again with a level for every pair in options_missing_levels before you reply. Never ask the user to approve an incomplete starting point.',
   'Discussion, ideation and research are not mutation requests.',
   /*
@@ -312,7 +315,7 @@ const AGENT_INSTRUCTIONS = [
    * of three carried `interventions: null`. An option that sets nothing cannot
    * be compared with one that does.
    */
-  'get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model \u2014 do not wait for the analysis to refuse \u2014 ask what that option would actually change, and record the answer with propose_option_interventions.',
+  'get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model \u2014 do not wait for the analysis to refuse \u2014 ask what that option would actually change, and record the answer with propose_option_interventions. An option in `status_quo_held` is not in that list and is never given levels: say, in one short clause, that carrying on as now holds today\u2019s values, and that the user can say what would change if that is wrong. If they do, record exactly what they said with propose_option_interventions and user_stated: true on that level.',
   /*
    * ⛔ ANALYSIS IS MODEL-RELATIVE, NEVER A RECOMMENDATION (Paul, 23 Sep: "Olumi is a
    * reasoning-enhancement system, not an answer or decision engine"). Measured on
@@ -1030,7 +1033,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // The durable carrier: this exact row's persisted Run offer, still within its lifetime.
       const durableRun = (prior.pending_actions ?? []).some((pa) =>
         pa.chip_id === RUN_OFFER_CHIP.id && pa.action.kind === 'run_analysis' && !isPendingActionExpired(pa, Date.now()));
-      const offered = durableRun && !remembered.some((a) => a.id === RUN_OFFER_CHIP.id) ? [...remembered, RUN_OFFER_CHIP] : remembered;
+      // ⛔ And this exact row's approve chip, from the carrier persisted WITH it (Codex #1823 5819308426: a
+      // lost proposing response retried on a restarted process replayed the proposal with no way to approve
+      // it). Only its words come from the row; `stillValidOffers` below decides whether it is still offered,
+      // against the store the rehydration above has already refilled from the latest answer row.
+      const durableApprove = remembered.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
+        ? undefined
+        : offeredApproveChipOnRow(prior.pending_actions, { scenario_id: scenarioId, user_id: userId });
+      const offered = [
+        ...(durableApprove !== undefined ? [durableApprove] : []),
+        ...remembered,
+        ...(durableRun && !remembered.some((a) => a.id === RUN_OFFER_CHIP.id) ? [RUN_OFFER_CHIP] : []),
+      ];
       const composedReplay = composeDirectAnswerResponse({
         assistant_text: prior.assistant_message ?? 'That request was already completed.',
         stage: 'frame',
@@ -1055,6 +1069,25 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
       };
     };
+    /**
+     * ⛔ A RESTART MUST NOT FORGET WHAT THE USER IS ABOUT TO APPROVE (#63 5811981438: three redeploys inside
+     * Paul's session, his "yes" met `unknown_proposal`). The latest answer row carries the proposal it
+     * offered; put it back when this process does not hold it. Read BEFORE this turn's own claim row is
+     * written, or the latest row would be that claim, which carries nothing. A failed read degrades to today's behaviour.
+     */
+    const approveKey = `${scenarioId}:${userId ?? ''}`;
+    if ((approvedProposal !== undefined && proposals.get(approvedProposal) === undefined)
+      || proposals.outstanding(scenarioId, userId).length === 0) {
+      if (typeof store.readMostRecentPendingActions === 'function') {
+        try {
+          // What is restored is also carried forward by this turn's own answer row (`carrierForAnswerRow`).
+          rehydrateProposals(await store.readMostRecentPendingActions(scenarioId), proposals, { scenario_id: scenarioId, user_id: userId },
+            Date.now(), (carrier) => carriedProposals.remember(approveKey, carrier));
+        } catch (err) {
+          log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: pending proposals could not be read back — continuing without them');
+        }
+      }
+    }
     // Set only when THIS request owns the turn — used to release it if nothing ran.
     let claimHash: string | undefined;
     if (turnId !== undefined && typeof store.readCommittedTurn === 'function') {
@@ -1434,12 +1467,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const offerRebuild = lastBuild?.refusal === 'model_too_large' && !result.mutated;
     // A Run changes no graph: the ONE proposal still awaiting a yes keeps its chip if the store would still
     // execute it on this revision (never on a guess — two outstanding, or a moved model, carry nothing).
-    const approveKey = `${scenarioId}:${userId ?? ''}`;
+    // ⛔ On a FRESH worker the process-local `lastApproveOffer` is empty (Codex #1823 5819308426: "if Run lands
+    // on a fresh worker, the process-local carry can be absent"), so the chip also comes from the carrier the
+    // rehydration above restored from the latest answer row — the exact words the offer used.
     const carriedApproval = ((): OfferedAction[] => {
       if (fastPath !== 'run') return [];
-      const chip = lastApproveOffer.get(approveKey);
       const id = executableWaitingProposal(scenarioId, userId, graphHash);
-      return chip !== undefined && id !== undefined && typedApprovalOf({ chip: { id: chip.id } }) === id ? [chip, AMEND_CHIP] : [];
+      if (id === undefined) return [];
+      const chip = [lastApproveOffer.get(approveKey), carriedProposals.get(approveKey)?.chip]
+        .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === id);
+      return chip !== undefined ? [chip, AMEND_CHIP] : [];
     })();
     const offeredNow: OfferedAction[] = [
       ...approvalChipsFor(result.tool_calls),
@@ -1450,6 +1487,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     ];
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
     rememberApprove(approveKey, offeredNow);
+    // What this answer row persists: the Run offer, and the exact proposal behind the approve chip it offers
+    // — or, on a turn that offers none, the one still outstanding (a question between the offer and the "yes"
+    // must not drop what a restart needs to find it).
+    const offeredApprove = offeredNow.find((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined);
+    const offeredProposal = offeredApprove !== undefined ? proposals.get(typedApprovalOf({ chip: { id: offeredApprove.id } }) as string) : undefined;
+    const emittedAtIso = new Date().toISOString();
+    const approvalCarrier = carrierForAnswerRow({
+      offered: offeredApprove !== undefined && offeredProposal !== undefined ? { proposal: offeredProposal, chip: offeredApprove } : undefined,
+      carried: carriedProposals.get(approveKey),
+      store: proposals,
+      subject: { scenario_id: scenarioId, user_id: userId },
+      currentGraphHash: graphHash,
+      emittedAtIso,
+    });
+    const durablePending = [
+      ...(offerRun ? derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: emittedAtIso, ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) : []),
+      ...(approvalCarrier !== undefined ? [approvalCarrier] : []),
+    ];
 
     // A Run writes nothing: its interpretation is never passed through the WRITE narrator, whose
     // completion-claim stripper would delete a sentence and append a false write-status line
@@ -1506,10 +1561,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           handler_facts: [],
           userMessage: message,
           assistantMessage: String((finalised as { assistant_text?: unknown }).assistant_text ?? text),
-          // The Run offer, durably, with THIS answer row — so a replay after a restart can re-offer it.
-          ...(offerRun
-            ? { pending_actions: derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: new Date().toISOString(), ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) }
-            : {}),
+          // The Run offer AND the offered approval, durably, with THIS answer row — so a replay, or an
+          // approval that reaches a restarted process, can still find them.
+          ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}),
           },
         });
         if (outcome.priorTurnConflict === true) {
@@ -1525,6 +1579,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           if (first !== null) return reply.code(200).send(await replayed(first));
         }
         durability = 'recorded';
+        // Only a row that was written moves the slot: the next answer row carries what THIS one did.
+        carriedProposals.persisted(approveKey, approvalCarrier);
       } catch (err) {
         // The answer is real and the writes already happened; hiding it would be
         // worse. It is returned, flagged as not durable, and logged loudly.
