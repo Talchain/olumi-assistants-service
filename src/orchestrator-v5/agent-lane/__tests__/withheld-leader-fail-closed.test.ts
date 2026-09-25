@@ -344,6 +344,11 @@ describe('served survey — real replies on withheld turns', () => {
     expect(dropRankingSentences(text).text).toBe('The other results:\n\nAssumed ownership levels:\n- £3m seed: 65%\n- Bootstrap: 80%\n- Phased seed: 72%');
   });
 
+  it('two lists separated only by a blank line are separate runs (the paragraph break closes a run)', () => {
+    const text = '- Raise now: 60%\n- Wait a year: 40%\n\n- Ownership now: 65%\n- Ownership later: 80%';
+    expect(dropRankingSentences(text).text).toBe('- Ownership now: 65%\n- Ownership later: 80%');
+  });
+
   it('an ordered-list item is dropped whole, never leaving its bare number behind', () => {
     const text = 'The ordering is most sensitive to:\n\n1. **The link between growth and ARR** — this can switch the leading path towards bootstrap.\n2. **Runway** — a slower burn buys time.';
     expect(dropRankingSentences(text).text).toBe('The ordering is most sensitive to:\n\n2. **Runway** — a slower burn buys time.');
