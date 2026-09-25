@@ -410,11 +410,29 @@ describe('a run nobody asked for makes no quantified leader or robustness claim'
         .display_verdict,
     ).toBe('fragile');
 
-    // The key is OMITTED entirely rather than emitted as `{}` — the shape a
-    // consumer already tolerates, and never a positive assertion of an empty
-    // analysis.
-    expect(block).not.toHaveProperty('enrichment');
+    // ⚠ UPDATED (schemas 0.57.0): `run_provenance` is now ON the transport
+    // keep-list, and every fact that reaches this confinement is stamped (that
+    // is what makes it unrequested). So through the real builder the marker is
+    // the ONE key that survives — and nothing from the unprojected original.
+    expect(block.enrichment).toEqual({
+      run_provenance: buildAutoRunProvenance('22222222-2222-4222-8222-222222222222'),
+    });
     expect(robustnessVerdictPaths(block.enrichment)).toEqual([]);
+
+    // …and the fall-through the destructure fixed is still pinned, at the
+    // confinement itself: a block whose enrichment projects to NOTHING ships no
+    // `enrichment` key at all — omitted rather than `{}`, the shape a consumer
+    // already tolerates, and never the unprojected original.
+    const confined = confineUnrequestedAnalysisBlock(
+      {
+        type: 'analysis_result',
+        summary: 'x',
+        leading_option_id: null,
+        enrichment: { robustness: { display_verdict: 'fragile', is_robust: false } },
+      },
+      bare,
+    );
+    expect(confined).not.toHaveProperty('enrichment');
   });
 
   it('drops decision_review, whose prose is authored on the premise of a leader', () => {

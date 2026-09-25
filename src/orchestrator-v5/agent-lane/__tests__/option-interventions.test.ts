@@ -76,7 +76,8 @@ function fakeProduct(opts: { failOn?: string[]; registerFails?: boolean } = {}) 
       nodes = nodes.map((n) => (n.id === ev.option_id
         ? { ...n, interventions: { ...(n.interventions ?? {}), [ev.factor_id]: { value: ev.value } } } : n));
       rev += 1;
-      return { status: 200, json: { assistant_text: 'Recorded.' } };
+      // The served committed response carries its own persisted revision.
+      return { status: 200, json: { assistant_text: 'Recorded.', graph_hash: `h${rev}` } };
     }
     return { status: 200, json: { graph: { nodes, edges: wired(nodes) }, graph_hash: `h${rev}` } };
   };
