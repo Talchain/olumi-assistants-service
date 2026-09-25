@@ -27,6 +27,7 @@ import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchai
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
+import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import {
@@ -583,10 +584,63 @@ export function findMechanismPath(
   return null;
 }
 
+/**
+ * ⛔ A SIGNED PERCENTAGE CHANGE IS STATED AS THE LEVEL IT PRODUCES.
+ *
+ * Served CEE 06325c6 (#69 5835137365): "respond to the competitor's price cut" built
+ * "Cut List Price 15%" as `list_price_change = -15` beside a sibling's `0.1` on the same
+ * 0..100 factor, and `run_analysis` refused the comparison (`mixed_scale_unresolved`).
+ * Normalising the cut does not help: the analysis seam is sign-symmetric — a wire value
+ * below 0 rescales the whole request exactly as one above 1 does — so `-0.15` is refused too,
+ * and an all-raw `-15`/`10` is refused beside any ordinary estimated sibling. Measured through
+ * the real handler (`signed-change-one-value-space.test.ts`). The conventional drafter refuses
+ * negatives for the same reason (`records/projector.ts`).
+ *
+ * A percentage CHANGE whose value today is 0 (or unstated) is, by definition, the level of that
+ * quantity relative to today, less 100. So it is restated as that level — today 100, "cut 15%"
+ * 85, "raise 10%" 110 — on a frame of 0..200 (wider only when a level needs it). Nothing is
+ * invented: every level is the user's number plus 100, the sign survives as the side of today
+ * each option sits on, the link's direction is unchanged (the level rises with the change), and
+ * the restatement is said. Only when EVERY level on the factor can be restated; otherwise the
+ * factor is left alone and admission withholds the negative levels (below).
+ */
+const TODAY_LEVEL = 100;
+const TODAY_UNIT = '% of today';
+function restateSignedPercentChanges(model: CandidateModel): {
+  model: CandidateModel;
+  restated: { label: string; frame: number }[];
+} {
+  const restated: { label: string; frame: number }[] = [];
+  const restatedLabels = new Set<string>();
+  const factors = model.factors.map((f) => {
+    if (!isPercentScaledUnit(f.unit ?? undefined)) return f;
+    if (model.factors.filter((x) => x.label === f.label).length !== 1) return f;
+    const today = f.baseline_value;
+    if (today !== null && today !== 0) return f;
+    const levels = model.options.flatMap((o) =>
+      (o.interventions ?? []).filter((i) => i.factor_label === f.label).map((i) => i.value));
+    if (!levels.some((v) => v < 0)) return f;
+    if (levels.some((v) => !Number.isFinite(v) || TODAY_LEVEL + v < 0)) return f;
+    const top = Math.max(TODAY_LEVEL, ...levels.map((v) => TODAY_LEVEL + v));
+    const frame = top <= 2 * TODAY_LEVEL ? 2 * TODAY_LEVEL : defaultFrameFor(top);
+    restated.push({ label: f.label, frame });
+    restatedLabels.add(f.label);
+    return { ...f, baseline_known: true, baseline_value: TODAY_LEVEL, unit: TODAY_UNIT, plausible_max: frame };
+  });
+  if (restated.length === 0) return { model, restated };
+  const options = model.options.map((o) => o.interventions === undefined ? o : {
+    ...o,
+    interventions: o.interventions.map((i) => !restatedLabels.has(i.factor_label) ? i
+      : { ...i, value: TODAY_LEVEL + i.value, unit: TODAY_UNIT }),
+  });
+  return { model: { ...model, factors, options }, restated };
+}
+
 export function admitCandidateModel(
-  model: CandidateModel,
+  candidateModel: CandidateModel,
   widened: WidenerAdditions = {},
 ): AdmittedModel {
+  const { model, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
 
   /**
    * The scale frame for each factor, keyed by LABEL because it must be known
@@ -615,6 +669,27 @@ export function admitCandidateModel(
   }
   for (const o of model.options) {
     for (const iv of o.interventions ?? []) noteMagnitude(iv.factor_label, iv.value, iv.provenance);
+  }
+  /**
+   * ⛔ A LEVEL ABOVE THE STATED RANGE WIDENS THE RANGE; IT IS NEVER KEPT RAW BESIDE NORMALISED
+   * SIBLINGS. It used to be written as stated (`150`) while every other level on the factor was
+   * divided by the range (`0.05`): two value spaces on one factor, which `run_analysis` refuses
+   * outright (`mixed_scale_unresolved`, the same refusal as #69 5835137365). The range is a unit
+   * of measurement, so it is widened to the smallest power of ten above the level — derived,
+   * as a defaulted frame is, and said.
+   */
+  const widenedFrames: { label: string; stated: number; frame: number; option: string; value: number }[] = [];
+  for (const o of model.options) {
+    for (const iv of o.interventions ?? []) {
+      const stated = capByLabel.get(iv.factor_label);
+      if (stated === undefined || !Number.isFinite(iv.value) || iv.value <= stated) continue;
+      const frame = defaultFrameFor(iv.value);
+      const prior = widenedFrames.find((w) => w.label === iv.factor_label);
+      if (prior !== undefined && prior.frame >= frame) continue;
+      if (prior !== undefined) widenedFrames.splice(widenedFrames.indexOf(prior), 1);
+      widenedFrames.push({ label: iv.factor_label, stated: prior?.stated ?? stated, frame, option: o.label, value: iv.value });
+      capByLabel.set(iv.factor_label, frame);
+    }
   }
   const defaultedFrames: { label: string; frame: number }[] = [];
   for (const [label, largest] of largestByLabel) {
@@ -898,6 +973,35 @@ export function admitCandidateModel(
     } as RepairEntry);
   }
 
+  for (const w of widenedFrames) {
+    loss.push({
+      field_path: `nodes[${ids.get(w.label) ?? w.label}].observed_state.frame_widened`,
+      before: w.stated,
+      after: w.frame,
+      reason:
+        `"${w.label}" was given a range of 0 to ${w.stated}, but "${w.option}" sets it to ${w.value}, so the range ` +
+        `is now 0 to ${w.frame} and every figure for it is read against that one range. A range is a unit of ` +
+        'measurement, not a forecast or a limit; no figure was changed.',
+      severity: 'warn',
+    } as RepairEntry);
+  }
+  for (const r of restatedChanges) {
+    const levels = candidateModel.options.flatMap((o) => (o.interventions ?? [])
+      .filter((i) => i.factor_label === r.label)
+      .map((i) => `"${o.label}" ${TODAY_LEVEL + i.value}`));
+    loss.push({
+      field_path: `nodes[${ids.get(r.label) ?? r.label}].observed_state.level_restated`,
+      before: 0,
+      after: TODAY_LEVEL,
+      reason:
+        `"${r.label}" is a change from today, and a change below zero cannot be analysed beside the others, so it ` +
+        `is measured as its level relative to today instead: today is ${TODAY_LEVEL}, and each option's change is ` +
+        `added to it (${levels.join(', ')}), on a range of 0 to ${r.frame}. The sign of every change is kept and ` +
+        'no figure you gave was altered.',
+      severity: 'warn',
+    } as RepairEntry);
+  }
+
   /** option id -> factor ids it acts on, with or without a stated level. */
   const actsOnByOption = new Map<string, Set<string>>();
   for (const o of model.options) {
@@ -935,28 +1039,32 @@ export function admitCandidateModel(
         });
         continue;
       }
-      const cap = capByFactorId.get(factorId);
-      // Only when the level genuinely sits inside the declared range. A level
-      // outside it is left exactly as stated and the mismatch is recorded —
-      // silently clamping a user's number would be the worse failure.
-      if (cap !== undefined && iv.value >= 0 && iv.value <= cap) {
-        bundle[factorId] = { value: iv.value / cap, source: levelSourceFor(iv.provenance) };
-      } else {
-        if (cap !== undefined) {
-          loss.push({
-            field_path: `nodes[${optionId}].interventions.${factorId}`,
-            before: iv.value,
-            after: iv.value,
-            reason:
-              `"${o.label}" sets "${iv.factor_label}" to ${iv.value}, which is outside the range ` +
-              `0 to ${cap} the model states for that factor. It has been kept exactly as stated ` +
-              'rather than squeezed into the range — say so, and correct either the level or the range.',
-            severity: 'warn',
-          } as RepairEntry);
-        }
-        bundle[factorId] = { value: iv.value, source: levelSourceFor(iv.provenance) };
-      }
       actsOn.add(factorId);
+      /**
+       * ⛔ ONE VALUE SPACE PER FACTOR (#69 5835137365). A level below zero that could not be
+       * restated as a level relative to today (`restateSignedPercentChanges`) has no place in
+       * the factor's frame, and writing it raw beside normalised siblings is what made the
+       * served comparison refuse. It is WITHHELD — never squeezed, never registered in a second
+       * space — the option keeps acting on the factor with no level of its own, and it is said.
+       * Every other level sits inside its frame by construction (a stated range below a level
+       * is widened above), so it is divided by the same range as the factor's baseline.
+       */
+      if (iv.value < 0) {
+        loss.push({
+          field_path: `nodes[${optionId}].interventions.${factorId}.signed_level_withheld`,
+          before: iv.value,
+          after: null,
+          reason:
+            `"${o.label}" puts "${iv.factor_label}" at ${iv.value}${iv.unit ? ` ${iv.unit}` : ''}, and a level ` +
+            `below zero cannot be analysed beside the others, so no level was set: the option is kept as changing ` +
+            `"${iv.factor_label}", with no level of its own. Say what "${iv.factor_label}" would be after ` +
+            `"${o.label}" and it becomes a level.`,
+          severity: 'warn',
+        } as RepairEntry);
+        continue;
+      }
+      const cap = capByFactorId.get(factorId);
+      bundle[factorId] = { value: cap !== undefined ? iv.value / cap : iv.value, source: levelSourceFor(iv.provenance) };
     }
     if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);
   }
