@@ -269,3 +269,88 @@ describe('a signed change keeps its sign, and one factor carries one value space
     expect((await runAnalysis(graph)).refusal).toBeNull();
   });
 });
+
+/**
+ * ⛔ B1 (review 5835754404): A SIGNED CHANGE IS RESTATED ONLY ON A *KNOWN* ZERO TODAY.
+ *
+ * The gate was `today !== null && today !== 0`, so an UNKNOWN baseline (`null`, or an unknown
+ * `0`) was restated too, and the restated factor came out `baseline_known: true, 100` under the
+ * factor's own provenance — for an `explicit` factor, `observed_state.source: 'brief_extraction'`:
+ * a baseline the user never gave, recorded as extracted from their brief. It also asserted the
+ * factor was a change-from-today when nothing said so (a percent LEVEL such as a margin at -5 vs
+ * 12). Only `baseline_known === true && baseline_value === 0` licenses the restatement; anything
+ * else falls through to the withhold-and-say path.
+ */
+describe('B1 (review 5835754404): restated only when today is KNOWN to be zero', () => {
+  /** Nothing restated on `factorId`: no minted "today", no restatement sentence, the negative withheld and said. */
+  const notRestated = (out: Record<string, unknown>, graph: Graph, factorId: string, factorLabel: string): void => {
+    const os = byId(graph, factorId).observed_state as Record<string, unknown> | undefined;
+    expect(os?.source, `${factorId}: no baseline minted as the user's`).not.toBe('brief_extraction');
+    expect(os?.raw_value, `${factorId}: no invented "today" of 100`).not.toBe(100);
+    expect(os?.unit, `${factorId}: not restated as a level relative to today`).not.toBe('% of today');
+    expect(said(out, /today is 100/), JSON.stringify(out.not_represented)).toHaveLength(0);
+    // The negative is WITHHELD at admission (the option still acts on the factor) and said.
+    expect(level(graph, CUT, factorId), 'the -5 is withheld, never registered').toBeUndefined();
+    expect(graph.edges.some((e) => e.from === CUT && e.to === factorId)).toBe(true);
+    const withheld = said(out, new RegExp(`"Cut List Price 15%" puts "${factorLabel}" at -5\\b`));
+    expect(withheld, JSON.stringify(out.not_represented)).toHaveLength(1);
+    expect(withheld[0]).toMatch(/no level was set/);
+    // The positive level stays on the factor's stated 0..100 frame: 12 / 100.
+    expect(level(graph, RAISE, factorId)).toBeCloseTo(0.12, 10);
+    oneSpace(graph, factorId);
+  };
+  const cutRaise = (label: string): [Iv[], Iv[]] =>
+    [[iv(label, -5, '%', 'ai_proposed')], [iv(label, 12, '%', 'ai_proposed')]];
+
+  it('RED row 1: an UNKNOWN baseline (null) on a factor the user named is not restated — no "today" is minted as brief_extraction', async () => {
+    const { out, graph } = await build(candidate(...cutRaise('List price change'),
+      { baseline_known: false, baseline_value: null, provenance: 'explicit' }));
+    notRestated(out, graph, PRICE, 'List price change');
+    // Handler level only (PLoT faked): the withheld level does not stop the comparison.
+    expect((await runAnalysis(graph)).refusal).toBeNull();
+  });
+
+  it('RED row 2: an UNKNOWN baseline of 0 (baseline_known: false) is not restated either', async () => {
+    const { out, graph } = await build(candidate(...cutRaise('List price change'),
+      { baseline_known: false, baseline_value: 0, provenance: 'explicit' }));
+    notRestated(out, graph, PRICE, 'List price change');
+    expect((await runAnalysis(graph)).refusal).toBeNull();
+  });
+
+  it('RED row 3: a percent LEVEL with no known value (a margin at -5 vs 12) is never read as a change from today', async () => {
+    const base = candidate(
+      [iv('List price change', 5, '%'), iv('Gross margin', -5, '%', 'ai_proposed')],
+      [iv('List price change', 10, '%'), iv('Gross margin', 12, '%', 'ai_proposed')],
+    );
+    const c = {
+      ...base,
+      factors: [...base.factors, { label: 'Gross margin', role: 'observable', baseline_known: false, baseline_value: null, unit: '%', provenance: 'inferred', plausible_max: 100 }],
+      links: [...base.links, { from: 'Gross margin', to: 'Market share', direction: 'positive', provenance: 'inferred' }],
+    } as unknown as CandidateModel;
+    const { out, graph } = await build(c);
+    notRestated(out, graph, 'gross_margin', 'Gross margin');
+    expect((await runAnalysis(graph)).refusal).not.toBe('mixed_scale_unresolved');
+  });
+
+  const restated = async (provenance: 'inferred' | 'explicit'): Promise<Record<string, unknown>> => {
+    const { out, graph } = await build(candidate([iv('List price change', -15, '%')], [iv('List price change', 10, '%')],
+      { baseline_known: true, baseline_value: 0, provenance }));
+    const os = byId(graph, PRICE).observed_state as Record<string, unknown>;
+    expect(os).toMatchObject({ value: 0.5, raw_value: 100, cap: 200, unit: '% of today' });
+    expect(level(graph, CUT, PRICE)).toBeCloseTo(0.425, 10);
+    expect(level(graph, RAISE, PRICE)).toBeCloseTo(0.55, 10);
+    expect(said(out, /today is 100/)).toHaveLength(1);
+    expect((await runAnalysis(graph)).refusal).toBeNull();
+    return os;
+  };
+
+  it('CONTROL row 4a: a KNOWN zero today the builder inferred IS restated, and carries no source', async () => {
+    const os = await restated('inferred');
+    expect(Object.prototype.hasOwnProperty.call(os, 'source'), JSON.stringify(os)).toBe(false);
+  });
+
+  it('CONTROL row 4b: a KNOWN zero today the user stated IS restated, and stays brief_extraction ("no change today")', async () => {
+    const os = await restated('explicit');
+    expect(os.source).toBe('brief_extraction');
+  });
+});

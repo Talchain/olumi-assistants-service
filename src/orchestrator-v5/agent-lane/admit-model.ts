@@ -596,13 +596,23 @@ export function findMechanismPath(
  * the real handler (`signed-change-one-value-space.test.ts`). The conventional drafter refuses
  * negatives for the same reason (`records/projector.ts`).
  *
- * A percentage CHANGE whose value today is 0 (or unstated) is, by definition, the level of that
+ * A percentage CHANGE whose value today is KNOWN to be 0 is, by definition, the level of that
  * quantity relative to today, less 100. So it is restated as that level — today 100, "cut 15%"
  * 85, "raise 10%" 110 — on a frame of 0..200 (wider only when a level needs it). Nothing is
  * invented: every level is the user's number plus 100, the sign survives as the side of today
  * each option sits on, the link's direction is unchanged (the level rises with the change), and
  * the restatement is said. Only when EVERY level on the factor can be restated; otherwise the
  * factor is left alone and admission withholds the negative levels (below).
+ *
+ * ⛔ ONLY `baseline_known === true && baseline_value === 0` LICENSES IT (review 5835754404, B1).
+ * The gate used to admit an UNKNOWN today (`null`) as well, and the restated factor came out
+ * `baseline_known: true, 100` under the factor's own provenance — so on an `explicit` factor
+ * `framedObservedState` stamped `source: 'brief_extraction'` on a baseline the user never gave.
+ * An unknown today also says nothing about whether the factor is a change at all: a percent
+ * LEVEL (a margin at -5 vs 12) would have been misread as "5% below today". An unknown baseline,
+ * or an unknown 0, is left alone and its negative levels are withheld and said, as for any other
+ * level that cannot be restated. A known 0 the builder inferred keeps no `source`; a known 0 the
+ * user stated ("no change today") keeps `brief_extraction`, which it is.
  */
 const TODAY_LEVEL = 100;
 const TODAY_UNIT = '% of today';
@@ -616,7 +626,8 @@ function restateSignedPercentChanges(model: CandidateModel): {
     if (!isPercentScaledUnit(f.unit ?? undefined)) return f;
     if (model.factors.filter((x) => x.label === f.label).length !== 1) return f;
     const today = f.baseline_value;
-    if (today !== null && today !== 0) return f;
+    // ⛔ ONLY A KNOWN ZERO TODAY (review 5835754404, B1). An unknown baseline is never restated.
+    if (f.baseline_known !== true || today !== 0) return f;
     const levels = model.options.flatMap((o) =>
       (o.interventions ?? []).filter((i) => i.factor_label === f.label).map((i) => i.value));
     if (!levels.some((v) => v < 0)) return f;
