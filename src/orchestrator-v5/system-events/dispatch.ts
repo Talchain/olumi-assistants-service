@@ -261,6 +261,53 @@ async function readClientRecoverableBaseHash(scenarioId: string): Promise<string
   }
 }
 
+/**
+ * ⭐ A TURN-FENCE REFUSAL IS A KNOWN REFUSAL — one mapping for every writer.
+ *
+ * A later turn claimed this scenario (`superseded`) or the user stopped this
+ * one (`stopped`): the fence refused the write inside the append transaction,
+ * so nothing of it landed. It is answered with the envelope the message path
+ * already uses for the same error (turn-executor.ts, V5 TURN FENCE —
+ * AMENDMENT A2): 409 GRAPH_DIVERGED, `turn_fence_<verdict>`, and the
+ * per-verdict remedy. Served `caf7d1a` answered it with the retryable 500
+ * (3 of 5 refused racers, request 5bb2257f), which invited a blind retry over
+ * the turn that superseded this one.
+ *
+ * Only the two CONFLICT verdicts, as the register route draws the line:
+ * `unclaimed` / `unavailable` are infrastructure refusals and keep the
+ * retryable 500 until their code is decided. `null` = not a fence conflict;
+ * the caller falls through to its own handling.
+ */
+async function turnFenceConflict(
+  err: unknown,
+  ctx: {
+    readonly requestId: string;
+    readonly eventKind: string;
+    readonly scenarioId: string;
+    readonly targetId?: string;
+  },
+): Promise<NonNullable<DispatchSystemEventResult['graphConflict']> | null> {
+  if (!(err instanceof TurnFenceRejectedError)) return null;
+  if (err.verdict !== 'superseded' && err.verdict !== 'stopped') return null;
+  log.warn(
+    {
+      request_id: ctx.requestId,
+      event_kind: ctx.eventKind,
+      scenario_id: ctx.scenarioId,
+      ...(ctx.targetId !== undefined ? { target_id: ctx.targetId } : {}),
+      fence_verdict: err.verdict,
+      generation: err.generation,
+      max_generation: err.maxGeneration,
+    },
+    `V5 ${ctx.eventKind} — turn fence refused the graph write; nothing written`,
+  );
+  return {
+    recovery_action: err.verdict === 'stopped' ? 'start_new_draft' : 'refresh_and_reconfirm',
+    conflict_category: `turn_fence_${err.verdict}`,
+    expected_base_graph_hash: await readClientRecoverableBaseHash(ctx.scenarioId),
+  };
+}
+
 export interface DispatchSystemEventParams {
   readonly payload: SystemEventTurnPayload;
   readonly requestId: string;
@@ -1134,6 +1181,16 @@ async function dispatchEdgeStrengthEdit(
         },
       };
     }
+    // A later turn claimed this scenario, or the user stopped this one: a
+    // KNOWN refusal, never the retryable 500 below. See turnFenceConflict.
+    const fenceConflict = await turnFenceConflict(err, {
+      requestId,
+      eventKind: event.kind,
+      scenarioId: payload.scenario_id,
+    });
+    if (fenceConflict !== null) {
+      return { response: result.response, commitPerformed: false, graph: null, graphConflict: fenceConflict };
+    }
     log.error(
       {
         request_id: requestId,
@@ -1553,6 +1610,16 @@ async function dispatchStructuralDelete(
         },
       };
     }
+    // A later turn claimed this scenario, or the user stopped this one: a
+    // KNOWN refusal, never the retryable 500 below. See turnFenceConflict.
+    const fenceConflict = await turnFenceConflict(err, {
+      requestId,
+      eventKind: event.kind,
+      scenarioId: payload.scenario_id,
+    });
+    if (fenceConflict !== null) {
+      return { response: result.response, commitPerformed: false, graph: null, graphConflict: fenceConflict };
+    }
     log.error(
       {
         request_id: requestId,
@@ -1893,41 +1960,19 @@ async function dispatchFactorValueEdit(
         },
       };
     }
-    // ⭐ A LATER TURN CLAIMED THIS SCENARIO, OR THE USER STOPPED THIS ONE. The
-    // turn fence refused the write inside the append transaction, so nothing of
-    // this edit landed — a KNOWN refusal, answered with the envelope the message
-    // path already uses for the same error (turn-executor.ts, V5 TURN FENCE —
-    // AMENDMENT A2): 409 GRAPH_DIVERGED, `turn_fence_<verdict>`, and the
-    // per-verdict remedy. Served `caf7d1a` answered it with the retryable 500
-    // below (3 of 5 refused racers, request 5bb2257f), which invited a blind
-    // retry over the turn that superseded this one.
-    //
-    // Only the two CONFLICT verdicts, as the register route draws the line:
-    // `unclaimed` / `unavailable` are infrastructure refusals and keep the
-    // retryable 500 until their code is decided (F5 fixture header).
-    if (err instanceof TurnFenceRejectedError && (err.verdict === 'superseded' || err.verdict === 'stopped')) {
-      log.warn(
-        {
-          request_id: requestId,
-          event_kind: event.kind,
-          scenario_id: payload.scenario_id,
-          target_id: event.target_id,
-          fence_verdict: err.verdict,
-          generation: err.generation,
-          max_generation: err.maxGeneration,
-        },
-        'V5 factor_value_edit — turn fence refused the graph write; nothing written',
-      );
-      return {
-        response: result.response,
-        commitPerformed: false,
-        graph: null,
-        graphConflict: {
-          recovery_action: err.verdict === 'stopped' ? 'start_new_draft' : 'refresh_and_reconfirm',
-          conflict_category: `turn_fence_${err.verdict}`,
-          expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
-        },
-      };
+    // ⭐ A LATER TURN CLAIMED THIS SCENARIO, OR THE USER STOPPED THIS ONE (F5).
+    // The turn fence refused the write inside the append transaction, so
+    // nothing of this edit landed — a KNOWN refusal, answered with the typed
+    // 409 the message path already returns, never the retryable 500 below.
+    // One mapping for every writer: see turnFenceConflict.
+    const fenceConflict = await turnFenceConflict(err, {
+      requestId,
+      eventKind: event.kind,
+      scenarioId: payload.scenario_id,
+      targetId: event.target_id,
+    });
+    if (fenceConflict !== null) {
+      return { response: result.response, commitPerformed: false, graph: null, graphConflict: fenceConflict };
     }
     log.error(
       {
@@ -2634,6 +2679,16 @@ async function dispatchStructuralRename(
         },
       };
     }
+    // A later turn claimed this scenario, or the user stopped this one: a
+    // KNOWN refusal, never the retryable 500 below. See turnFenceConflict.
+    const fenceConflict = await turnFenceConflict(err, {
+      requestId,
+      eventKind: event.kind,
+      scenarioId: payload.scenario_id,
+    });
+    if (fenceConflict !== null) {
+      return { response: result.response, commitPerformed: false, graph: null, graphConflict: fenceConflict };
+    }
     log.error(
       {
         request_id: requestId,
@@ -2930,6 +2985,16 @@ async function dispatchStructuralAdd(
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
         },
       };
+    }
+    // A later turn claimed this scenario, or the user stopped this one: a
+    // KNOWN refusal, never the retryable 500 below. See turnFenceConflict.
+    const fenceConflict = await turnFenceConflict(err, {
+      requestId,
+      eventKind: event.kind,
+      scenarioId: payload.scenario_id,
+    });
+    if (fenceConflict !== null) {
+      return { response: result.response, commitPerformed: false, graph: null, graphConflict: fenceConflict };
     }
     log.error(
       {
@@ -3249,6 +3314,16 @@ async function dispatchStructuralAddEdge(
           expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
         },
       };
+    }
+    // A later turn claimed this scenario, or the user stopped this one: a
+    // KNOWN refusal, never the retryable 500 below. See turnFenceConflict.
+    const fenceConflict = await turnFenceConflict(err, {
+      requestId,
+      eventKind: event.kind,
+      scenarioId: payload.scenario_id,
+    });
+    if (fenceConflict !== null) {
+      return { response: result.response, commitPerformed: false, graph: null, graphConflict: fenceConflict };
     }
     log.error(
       {
