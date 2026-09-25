@@ -320,9 +320,12 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // referent here: there is no turn, no frame and no context to thread from.
     // The seam is a pure composition over `loadScenarioAnalysisFactsForRead`
     // (the turn path's own hot-window + durable readers, reconciled) +
-    // `computeAnalysisAffectingGraphHash(the graph this response is returning)`
-    // — the SAME hash function the run path stamps as `graph_hash_at_run`, so
-    // `fresh` on this leg means bit-for-bit what it means on a turn. It is NOT
+    // `deriveDecisionContextGraphHash(the graph this response is returning)`
+    // — the CANONICAL projection (`canonicaliseForAnalysis` →
+    // `GraphStateIngressSchema` → `computeAnalysisAffectingGraphHash`) the run
+    // path stamps as `graph_hash_at_run` (CS-AN-2: this leg once hashed the RAW
+    // bytes, which differ on repaired-shape graphs), so `fresh` on this leg
+    // means bit-for-bit what it means on a turn. It is NOT
     // a second rule about freshness; it is the one function applied to a
     // non-turn caller, which is why the alternative (hand-building a verdict at
     // the route) would have been the mirror this guard exists to prevent.

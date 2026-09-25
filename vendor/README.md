@@ -7,7 +7,46 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.55.0.tgz` ← **THE CURRENT PIN**
+### `talchain-schemas-0.58.0.tgz` ← **THE CURRENT PIN**
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
+>
+> Downloaded from GitHub Packages at
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.58.0/fa6c4e554c0c3460f65f4ccec86e5476da3f1776`,
+> the tarball `npm publish` produced from `olumi-schemas` `main`
+> **`49bbd4bcfbd64f4306179c7f4ba30643483f6996`** (the #66 merge; the registry's
+> own `gitHead` binds that commit), publish run `36068946091`, 2026-09-24.
+>
+> **583,337 bytes.** Verified against the registry's published metadata:
+>
+> ```
+> npm shasum (sha1)  fa6c4e554c0c3460f65f4ccec86e5476da3f1776   ← matches
+> integrity (sha512) sha512-ehGCVv+mnKJ6qN+AiphR+3pZcMdUVYg5Yhh6qsoAM35Ro4KWVXLyFZDHh/dTXiQ45ikSQmkvvygCFk7vKXtstA==   ← matches
+> sha256             6e2128ad8302e9c0a2ea5284a28da52e3728fdbc0a9e136d970c01e155ef9f41
+> ```
+>
+> `pnpm install` wrote the same sha512 into `pnpm-lock.yaml` from the file on
+> disk — two independent paths to one digest.
+>
+> It REPLACES the local source-pack this PR first vendored (584,609 bytes,
+> sha256 `f2a811b3…`, from `feat/run-provenance-typed-keep` @`6e952fad`); as
+> predicted, CI's pack differs in bytes from a local one. Review of #1857 (B1):
+> a same-version mismatch between staging and the registry is the worst form of
+> schema skew, so only the published bytes may reach `staging`.
+>
+> ⚠ 0.57.0 is claimed by open `olumi-schemas` PRs #62 and #65 (and staging's
+> decision-record migration already cites #65's 0.57.0), so this release took
+> the next free version, 0.58.0 (RC, #63 5818628860).
+>
+> **What it adds over the previous pin (0.55.0):** everything in 0.56.0
+> (`analysis_participation_withheld`, `observed_state.raw_value` / `.cap` —
+> regenerated `contracts/orchestrator-turn-payload.schema.json` accordingly)
+> plus 0.58.0: `EnrichmentRunProvenanceSchema`,
+> `AnalysisEnrichmentSchema.run_provenance`, and `'run_provenance'` on
+> `CEE_UI_ENRICHMENT_KEEP_LIST`, paired with the same key on
+> `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` in this PR.
+
+### `talchain-schemas-0.55.0.tgz` (historical — no longer vendored as of 0.58.0)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
 >

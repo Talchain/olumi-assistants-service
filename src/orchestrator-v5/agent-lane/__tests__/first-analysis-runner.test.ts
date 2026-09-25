@@ -27,7 +27,7 @@ import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { constructionOperationId } from '../runtime/build-model.js';
 import { AGENT_RUN_ANALYSIS_CHIP_ID } from '../../handlers/agent-chip-ids.js';
-import { RUN_PROVENANCE_ENRICHMENT_KEY } from '../../context/run-initiator.js';
+import { RUN_PROVENANCE_ENRICHMENT_KEY, buildAutoRunProvenance, buildConstructionAutoRunProvenance } from '../../context/run-initiator.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../../../config/timeouts.js';
 import { READY_GRAPH, BLOCKED_GRAPH } from './fixtures/first-analysis-graphs.js';
 
@@ -130,7 +130,7 @@ describe('RED: defence in depth — the (construction turn K, revision H) prior 
       fact_type: 'run_analysis', fact_id: 'f1', fact_version: 1, noop: false,
       result: {
         scenario_id: SCENARIO, graph_hash_at_run: hash, summary: 'x',
-        enrichment: { [RUN_PROVENANCE_ENRICHMENT_KEY]: { initiated_by: 'auto_post_draft', provisional: true, draft_turn_id: trigger.draftTurnId } },
+        enrichment: { [RUN_PROVENANCE_ENRICHMENT_KEY]: ('constructionTurnId' in trigger ? buildConstructionAutoRunProvenance(trigger.constructionTurnId) : buildAutoRunProvenance(trigger.draftTurnId)) },
       },
     } as unknown as HandlerFact;
   };

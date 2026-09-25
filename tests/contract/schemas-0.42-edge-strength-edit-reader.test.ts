@@ -173,7 +173,21 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     //
     // So the strict member, the root superRefine and the intent/direction
     // vocabularies this suite exercises are unchanged across the bump.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.55.0');
+    //
+    // 0.55.0 → 0.58.0 (the run_provenance keep-list train; it also carries
+    // 0.56.0). Compared the same way, extracted 0.55.0 tarball (git HEAD
+    // before the bump) against the vendored 0.58.0:
+    //   turn-payload.js  1218 → 1218 lines, BYTE-IDENTICAL (cmp)
+    //   enums.js          297 →  297 lines, BYTE-IDENTICAL
+    //   enums.d.ts         25 →   25 lines, BYTE-IDENTICAL
+    //   turn-payload.d.ts 6798 → 7014: 216 ADDED lines, 0 removed, and every
+    //                     one is `raw_value: z.ZodOptional<z.ZodNumber>;` or
+    //                     `cap: z.ZodOptional<z.ZodNumber>;` (108 each, the
+    //                     0.56.0 observed_state frame); 0 mention edge_strength.
+    //   fixtures/index.js: 58 changed lines, 0 mention edge_strength.
+    // POSITIVE control: `package.json` DOES differ (the version line), so the
+    // comparator can see a difference and the identities above can fail.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.58.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {
