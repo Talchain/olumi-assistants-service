@@ -212,6 +212,8 @@ export function firstAnalysisSentence(outcome: FirstAnalysisOutcome): string | n
 /** The typed leader permission, as the Agent is given it. Absent is never permission. */
 export interface ClaimPermissions {
   readonly leader_may_be_named: boolean;
+  /** Present (true) only when the leader may be named as a PROVISIONAL finding (separable, quantified_provisional). */
+  readonly provisional?: true;
   readonly withheld_reason?: string;
   readonly permitted_analysis_mode: string | null;
 }
@@ -221,11 +223,23 @@ export interface ClaimPermissions {
  * conjunction the admission's own consumer note prescribes. Read, never re-derived: both halves come
  * from the canonical producers' published verdicts.
  */
-export function claimPermissionsFrom(analysisState: unknown, analysisReady: unknown): ClaimPermissions {
-  const claim = (analysisState as { leader_claim?: { permitted?: unknown; withheld_reason?: unknown } } | null | undefined)?.leader_claim;
+export function claimPermissionsFrom(
+  analysisState: unknown,
+  analysisReady: unknown,
+  run: { readonly requested?: boolean } = {},
+): ClaimPermissions {
+  const claim = (analysisState as { leader_claim?: { permitted?: unknown; withheld_reason?: unknown; separation?: unknown } } | null | undefined)?.leader_claim;
   const mode = permittedAnalysisModeFromAnalysisReady(analysisReady);
+  // Paul's ruling (programme-docs#38 5576895511): a SEPARABLE run whose only objection is that every estimate
+  // is machine-authored is "caveat, not withhold" — the wire gate's separable-provisional arm, mirrored here so
+  // the Agent and the wire agree. It is named as provisional; every other population is unchanged.
+  // ⛔ REQUESTED RUNS ONLY (RC #63 5826599698): Paul's 24 Sep "keep the unrequested-analysis claim policy"
+  // governs the AUTOMATIC first run, so `describeFirstAnalysisForAgent` passes nothing and keeps today's answer.
+  const separableProvisional = run.requested === true
+    && claim?.permitted === true && claim?.separation === 'separated' && mode === 'quantified_provisional';
   return {
-    leader_may_be_named: claim?.permitted === true && mode === 'comparative_leader',
+    leader_may_be_named: (claim?.permitted === true && mode === 'comparative_leader') || separableProvisional,
+    ...(separableProvisional ? { provisional: true } : {}),
     ...(typeof claim?.withheld_reason === 'string' && claim.withheld_reason !== '' ? { withheld_reason: claim.withheld_reason } : {}),
     permitted_analysis_mode: mode,
   };
