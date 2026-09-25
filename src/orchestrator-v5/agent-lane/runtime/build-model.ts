@@ -364,6 +364,41 @@ export interface AdditionWithoutTotal {
   readonly factor_unit?: string;
 }
 export interface DemotedProvenance { readonly option: string; readonly factor: string; readonly value: number }
+/**
+ * ⛔ A LIMIT THE USER STATED IS NEVER DROPPED UNSEEN.
+ *
+ * `admit-constraint.ts` withholds a limit whose metric names no node in the admitted model, rather
+ * than attach it to a guessed target — right — and records a warn-level loss. Until now only horizon,
+ * goal_operator, mechanism and status-quo losses reached `not_represented`, so a build that drafted
+ * "under 15% net margin" as a "Net-margin breach" RISK (no "Net margin" node; 1 of 15 live builds on
+ * served 9417228) registered a model with no limit and said nothing: `goal_constraints_carried: 0` is a
+ * count, not a sentence. Named here from the candidate's own words, so the Agent can tell the user
+ * exactly which limit the analysis will not check. No remedy is offered: the withheld limit is not kept.
+ */
+const OPERATOR_WORDS: Readonly<Record<string, string>> = { '>=': 'at least', '<=': 'at most', '>': 'more than', '<': 'less than' };
+function unattachedLimitLines(model: CandidateModel, loss: readonly { readonly field_path: string; readonly before?: unknown }[]): string[] {
+  // Admission withholds BY METRIC (`admit-constraint.ts` resolves `c.metric` to a node, or not), so every
+  // bound on an unattached metric shares that fate. Iterate the BOUNDS, not the loss entries: a loss entry
+  // carries only the metric, and mapping it back by first match repeats one bound and hides the rest, with
+  // the wrong author (pre-review 5828829492: ">= 15%" said twice, Olumi's "<= 30%" never said, and called the user's).
+  const unattached = new Set(loss.filter((l) => /^goal_constraints\[.*\]\.node_id$/.test(l.field_path)).map((l) => String(l.before ?? '')));
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const c of model.constraints ?? []) {
+    if (!unattached.has(c.metric)) continue;
+    // Words, never symbols: this sentence reaches the user (RC 5828938080 §3, Runtime's copy point).
+    const bound = OPERATOR_WORDS[c.operator] ?? c.operator;
+    const unit = c.unit === undefined || c.unit === '' ? '' : c.unit.startsWith('%') ? c.unit : ` ${c.unit}`;
+    const limit = `${c.metric} of ${bound} ${c.value}${unit}`;
+    // The same rule as `admit-constraint.ts` `isUserAuthored`: only a bound the user stated is called theirs.
+    const users = c.provenance === 'explicit';
+    const key = `${users ? 'user' : 'olumi'}\u0000${limit}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push(`${users ? `Your limit "${limit}"` : `The limit Olumi proposed ("${limit}")`} is not in the model: no part of the model is "${c.metric}", so the analysis cannot check it.`);
+  }
+  return lines;
+}
 /** The user-facing sentence for an addition kept with no total: what is missing, and how to supply it. */
 function sayAdditionWithoutTotal(a: AdditionWithoutTotal): string {
   const amount = `${a.value}${a.unit ? ` ${a.unit}` : ''}`;
@@ -823,6 +858,7 @@ export async function buildModelFromBrief(
     ...(preparation.additions_without_total.length > 0 ? { additions_without_total: preparation.additions_without_total } : {}),
     ...(preparation.provenance_demoted.length > 0 ? { provenance_demoted: preparation.provenance_demoted } : {}),
     not_represented: [
+      ...unattachedLimitLines(candidate, admitted.loss),
       ...preparation.additions_without_total.map(sayAdditionWithoutTotal),
       ...preparation.provenance_demoted.map((d) =>
         `I've treated your ${d.value} for "${d.factor}" in "${d.option}" as a working figure because the current ` +

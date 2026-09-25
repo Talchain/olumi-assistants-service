@@ -91,7 +91,7 @@ import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSumm
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { baselineLabelledOptionId, structuralFacts } from '../structural-facts.js';
-import { runWithApprovedAdoption } from '../approved-adoption-context.js';
+import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
@@ -219,6 +219,26 @@ function valueOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'mo
 }
 
 /**
+ * ⛔ WHO AUTHORED THIS ONE LEVEL (RC #69 5830255884) — the same rule as `valueOpAuthor`, for an
+ * option level. MEASURED on served `c1ddb50`: every level an approval wrote was stamped
+ * `user_specified`, so Olumi's proposed levels read "Set by you". A level is the user's only
+ * when the user gave it (`user_stated` on the proposal) or the whole proposal is theirs; an op
+ * without the field (a carrier stored before it existed) is Olumi's — the narrower claim.
+ */
+function levelOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'model_proposed' | 'user_stated' {
+  return valueOpAuthor(op, proposal);
+}
+
+/** One level write, inside its adoption identity when the level is Olumi's (`approved-adoption-context.ts`). */
+function writeLevelAs<T>(
+  author: 'model_proposed' | 'user_stated',
+  adoption: { scenarioId: string; proposalId: string; optionId: string; factorId: string; modelValue: number },
+  write: () => Promise<T>,
+): Promise<T> {
+  return author === 'model_proposed' ? runWithApprovedLevelAdoption(adoption, write) : write();
+}
+
+/**
  * ⛔ WHAT THE APPROVAL STORED, SAID PER VALUE (Codex pre-review of #1851, 5825446207): the explanation
  * the Agent repeats must match the stamps `valueOpAuthor` decided. A mixed approval stores the user's
  * revision as theirs and Olumi's figure as the user's assumption; one sentence calling every value
@@ -312,6 +332,17 @@ function heldStatusQuoPairs(g: Pick<GraphRead, 'nodes' | 'edges'>): ReadonlySet<
     (isRepairAuthoredOptionFactorEdge(e, kinds) ? repaired : ordinary).add(`${e.from}::${e.to}`);
   }
   return new Set([...repaired].filter((k) => !ordinary.has(k)));
+}
+
+/**
+ * A factor's starting value in the user's own units (Codex 5810763729 item 1): `raw_value`
+ * when the frame recorded one, else the model value multiplied back up by the cap, else the
+ * value itself (an unframed factor stores native already). `undefined` when it holds none.
+ */
+function nativeStartingValue(os: { value?: unknown; raw_value?: unknown; cap?: unknown } | undefined): number | undefined {
+  const model = typeof os?.value === 'number' ? os.value : undefined;
+  const cap = typeof os?.cap === 'number' && os.cap > 0 ? os.cap : undefined;
+  return typeof os?.raw_value === 'number' ? os.raw_value : model !== undefined && cap !== undefined ? model * cap : model;
 }
 
 /**
@@ -787,13 +818,17 @@ export function createAgentCapabilities(
       const [optionId, factorId] = o.path.split('::');
       const v = ((o.value ?? {}) as { normalised?: number }).normalised;
       if (typeof v !== 'number') { levelStop = `no level was stored on the proposal for ${o.path}`; break; }
-      const r = await dispatch('/orchestrate/v2/turn', {
-        kind: 'system_event',
-        turn_id: authorisationTurnId(`${parent.proposal_id}#level${i}`),
-        scenario_id: ctx.scenario_id,
-        stage: 'frame',
-        event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: carried },
-      });
+      const r = await writeLevelAs(
+        levelOpAuthor(o, parent),
+        { scenarioId: ctx.scenario_id, proposalId: parent.proposal_id, optionId, factorId, modelValue: v },
+        () => dispatch('/orchestrate/v2/turn', {
+          kind: 'system_event',
+          turn_id: authorisationTurnId(`${parent.proposal_id}#level${i}`),
+          scenario_id: ctx.scenario_id,
+          stage: 'frame',
+          event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: carried },
+        }),
+      );
       if (r.status !== 200) { levelStop = `the level for ${o.path} was refused (http ${r.status})`; break; }
       const rc = receiptSummaryOf(r.json);
       if (rc.summary !== null) receipts.push(rc.summary);
@@ -1055,15 +1090,7 @@ export function createAgentCapabilities(
          * when the frame recorded one, else the model value multiplied back up by the
          * cap, else the value itself (an unframed factor stores native already).
          */
-        const os = (node.observed_state ?? {}) as { value?: unknown; raw_value?: unknown; cap?: unknown };
-        const existingModel = typeof os.value === 'number' ? os.value : undefined;
-        const existingCap = typeof os.cap === 'number' && os.cap > 0 ? os.cap : undefined;
-        const existing =
-          typeof os.raw_value === 'number'
-            ? os.raw_value
-            : existingModel !== undefined && existingCap !== undefined
-              ? existingModel * existingCap
-              : existingModel;
+        const existing = nativeStartingValue(node.observed_state as never);
         /**
          * ⭐ THE ONE CASE THE BLANKET REFUSAL WAS NEVER MEANT TO CATCH.
          *
@@ -1222,7 +1249,15 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'empty_proposal', detail: 'Nothing was proposed.' };
       }
       const a = assumptions.length > 0 ? await caps.proposeAssumptions(ctx, { assumptions }) : null;
-      const b = levels.length > 0 ? await caps.proposeOptionInterventions(ctx, { interventions: levels }) : null;
+      // What THIS starting point would make each factor's starting value — read off the stored
+      // value half, never the Agent's arguments — so a held level that only restates it is caught.
+      const valueHalf = a !== null && a.ok === true && typeof a.proposal_id === 'string' ? proposals.get(a.proposal_id) : undefined;
+      const startingValues = new Map<string, number>();
+      for (const o of valueHalf?.operations ?? []) {
+        const v = (o.value ?? {}) as { value?: unknown };
+        if (o.op === 'set_factor_value' && typeof v.value === 'number') startingValues.set(o.path, v.value);
+      }
+      const b = levels.length > 0 ? await caps.proposeOptionInterventions(ctx, { interventions: levels }, { startingValues }) : null;
       const refused = {
         ...(a !== null && a.ok !== true ? { assumptions_refused: a } : {}),
         ...(b !== null && b.ok !== true ? { option_levels_refused: b } : {}),
@@ -1301,7 +1336,7 @@ export function createAgentCapabilities(
       };
     },
 
-    async proposeOptionInterventions(ctx, args): Promise<ToolResult> {
+    async proposeOptionInterventions(ctx, args, internal): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
@@ -1336,6 +1371,8 @@ export function createAgentCapabilities(
         option: { id: string; label: string }; factor: { id: string; label: string };
         raw: number; normalised: number; cap: number | null; unit: string; basis: string;
         derivedFrame: number | null;
+        /** The user GAVE this level (`user_stated`); otherwise it is Olumi's proposal. */
+        userStated: boolean;
       }[] = [];
 
       for (const i of input) {
@@ -1468,6 +1505,31 @@ export function createAgentCapabilities(
           continue;
         }
 
+        /**
+         * ⛔ A HELD STATUS QUO'S STARTING VALUE IS NOT A LEVEL ANYONE STATED (RC #69 5830102377,
+         * pre-review 5830132268). Only a `user_stated` level reaches here on a held pair, and that
+         * flag is the Agent's. MEASURED on served builds: one "Use as starting assumptions" wrote
+         * the held status quo's levels as COPIES of the starting values — hiring c27a `0303ef5`
+         * (0.1333 and 0, the values the same starting point proposed), pricing c26 `7f9a16d` (the
+         * brief's £49) — and the level writer stamped each `user_specified`: Olumi's figure, or
+         * the brief's, recorded as a level the user set. A copy changes nothing today and freezes
+         * the figure, so a later correction to the starting value would leave "carrying on as
+         * now" behind (`heldStatusQuoPairs`). A DIFFERENT figure is still the user's correction.
+         * The starting value is the one this starting point proposes, else the factor's own.
+         */
+        if (held.has(`${option.id}::${factor.id}`)) {
+          const proposed = internal?.startingValues?.get(factor.id);
+          const start = proposed ?? nativeStartingValue(os as never);
+          const modelStart = proposed === undefined && typeof (os as { value?: unknown }).value === 'number' ? (os as { value: number }).value : undefined;
+          if (start !== undefined && (raw === start || (modelStart !== undefined && normalised === modelStart))) {
+            notAccepted.push({
+              option: option.label, factor: factor.label, value: i?.value,
+              reason: `${option.label} already keeps ${factor.label} at its starting value, ${quotable(start)}. Recording that as a level changes nothing today, and would stop carrying on as now from following a later correction to the starting value, so none is recorded. Leave it out.`,
+            });
+            continue;
+          }
+        }
+
         const current = (option.interventions ?? {})[factor.id] as { value?: unknown } | number | undefined;
         const currentValue = typeof current === 'number' ? current : (current as { value?: unknown } | undefined)?.value;
         if (currentValue === normalised || currentValue === raw) {
@@ -1481,7 +1543,7 @@ export function createAgentCapabilities(
           option: { id: option.id, label: option.label },
           factor: { id: factor.id, label: factor.label },
           raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' ? os.unit : '',
-          basis: String(i?.basis ?? ''), derivedFrame,
+          basis: String(i?.basis ?? ''), derivedFrame, userStated: i?.user_stated === true,
         });
       }
 
@@ -1503,7 +1565,11 @@ export function createAgentCapabilities(
       const operations: ProposalOperation[] = ordered.map((i) => ({
         op: 'set_option_intervention',
         path: `${i.option.id}::${i.factor.id}`,
-        value: { normalised: i.normalised, raw: i.raw, cap: i.cap, basis: i.basis, derived_frame: i.derivedFrame },
+        value: {
+          normalised: i.normalised, raw: i.raw, cap: i.cap, basis: i.basis, derived_frame: i.derivedFrame,
+          // Per level, like `valueOpAuthor`: whose level this is travels to the writer (`levelOpAuthor`).
+          authored_by: i.userStated ? 'user_stated' : 'model_proposed',
+        },
       }));
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
@@ -1914,13 +1980,17 @@ export function createAgentCapabilities(
           const [optionId, factorId] = o.path.split('::');
           const v = ((o.value ?? {}) as { normalised?: number }).normalised;
           if (typeof v !== 'number') { failures.push({ path: o.path, detail: 'no value stored on the proposal' }); continue; }
-          const r = await dispatch('/orchestrate/v2/turn', {
-            kind: 'system_event',
-            turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#${i}`),
-            scenario_id: ctx.scenario_id,
-            stage: 'frame',
-            event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: baseHash },
-          });
+          const r = await writeLevelAs(
+            levelOpAuthor(o, decision.proposal),
+            { scenarioId: ctx.scenario_id, proposalId: decision.proposal.proposal_id, optionId, factorId, modelValue: v },
+            () => dispatch('/orchestrate/v2/turn', {
+              kind: 'system_event',
+              turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#${i}`),
+              scenario_id: ctx.scenario_id,
+              stage: 'frame',
+              event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: baseHash },
+            }),
+          );
           const rc = receiptSummaryOf(r.json);
           if (rc.unreadable) failures.push({ path: o.path, detail: 'a receipt arrived but could not be read' });
           if (r.status !== 200) {
@@ -3068,8 +3138,10 @@ export function createAgentCapabilities(
         options: ready.options ?? [],
         ...(result !== undefined ? { result } : {}),
         // The typed leader permission for THIS run, read from its own wire verdict — so the Agent names a
-        // leader only when `leader_may_be_named` (see the route's reporting instruction).
-        claim_permissions: claimPermissionsFrom(r.json.analysis_state, r.json.analysis_ready),
+        // leader only when `leader_may_be_named` (see the route's reporting instruction). `requested`: every
+        // run_analysis dispatch is one the user asked for (the Agent's own call, or the Run chip's fast path);
+        // the automatic first analysis reads its permission in `describeFirstAnalysisForAgent`, not here.
+        claim_permissions: claimPermissionsFrom(r.json.analysis_state, r.json.analysis_ready, { requested: true }),
       };
     },
   };

@@ -290,6 +290,11 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // rather than a hand-written literal, so its invariant 3 holds. Not a new
     // seam and no extra I/O: the second call runs only on that failed read, and
     // `stale`/`none` verdicts pass through untouched.
+    // 2026-09-25 F4 (Codex, #63 5821693599): +0 — the no-write reply
+    // (`replyForAttemptThatWroteNothing`, a replay or a reused-id conflict)
+    // derives its freshness against the reread SNAPSHOT's hash through the same
+    // helper, `deriveWriteReplyFreshness`, so it adds no reference. (Its banked
+    // form added a call over the 20-row window with no restore marker.)
     'src/orchestrator-v5/system-events/dispatch.ts': 5,
     // 2026-09-24 MG&Q: +1 (one call) — `dispatchFactorValueEdit` now derives the
     // wire freshness for a factor-value edit, exactly as the edge_strength_edit
