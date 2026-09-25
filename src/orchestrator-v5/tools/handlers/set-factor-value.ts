@@ -33,6 +33,7 @@ import type { SetFactorValueHandlerFact } from '@talchain/schemas/orchestrator';
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import { USER_EDIT_SOURCE } from '../../../orchestrator/canonicalise-value-ops.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
+import { approvedAdoptionSourceFor } from '../../agent-lane/approved-adoption-context.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { synthesiseDisplayValue } from '../../../cee/factor-extraction/display-value.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
@@ -549,6 +550,14 @@ export function createSetFactorValueHandler(): HandlerFn {
       inputHasUnit: parsed.inputHasUnit,
     });
 
+    // ⭐ AN APPROVED ADOPTION OF OLUMI'S FIGURE IS NOT THE USER'S OWN FIGURE (review of #1851, B2).
+    // Present only when the Agent lane applies a server-verified, Olumi-authored proposal and
+    // names exactly this scenario, target and value (`approved-adoption-context.ts`). A panel
+    // apply keeps its own verified provenance; every other write keeps today's stamp.
+    const adoptedSource = appliedProvenance === undefined
+      ? approvedAdoptionSourceFor(invocation.context.session_id, targetId, normalised.raw_value)
+      : undefined;
+
     const after: ObservedSnapshot = {
       value: normalised.value,
       raw_value: normalised.raw_value,
@@ -566,6 +575,8 @@ export function createSetFactorValueHandler(): HandlerFn {
             elicited_from: appliedProvenance.elicited_from,
           }
         : {}),
+      // The adoption stamp rides the wire patch too, so it and the persisted graph agree.
+      ...(adoptedSource !== undefined ? { source: adoptedSource } : {}),
       // ⭐ ON A FOLDED-KEY MATCH, THE FACTOR'S STORED SPELLING WINS — nothing was
       // redeclared, so a value edit must not silently re-case what the factor
       // DECLARES. This is not "fold the display path": a genuinely NEW unit (no
@@ -654,11 +665,43 @@ export function createSetFactorValueHandler(): HandlerFn {
        */
       const priorObserved = (node.observed_state ?? {}) as { declared_scale?: unknown; cap?: unknown };
       const capAfterWrite = after.cap !== undefined ? after.cap : priorObserved.cap;
+      /**
+       * ⛔⛔ AND A NEGATIVE VALUE FALSIFIES *EVERY* DECLARED SCALE, not just
+       * `unit_interval`. This is the half the first version missed.
+       *
+       * The contract's own vocabulary is a THREE-member enum, and every member's
+       * admissible domain starts at zero (`schemas/graph.ts`, quoted in
+       * `cee/factor-extraction/display-value.ts:321-331`):
+       *
+       *   unit_interval — "a proportion or a cap-normalised magnitude. Admissible [0, 1]"
+       *   ratio         — "can meaningfully exceed 100% (NRR, growth, ROI). Admissible [0, +inf)"
+       *   raw_count     — "a magnitude left un-normalised in `unit`. Admissible [0, +inf)"
+       *
+       * So `unit_interval` is the only member a LARGE value can falsify — which is why
+       * the magnitude arm below is still scoped to it — but a NEGATIVE value is
+       * inadmissible under all three.
+       *
+       * MEASURED on served `1e7e08a`, driving the real writer at each declaration with
+       * an edit to -5:
+       *     unit_interval → declaration cleared   (the first guard, working)
+       *     ratio         → declaration RETAINED  ⛔ falsified and left standing
+       *     raw_count     → declaration RETAINED  ⛔ falsified and left standing
+       *
+       * Same remedy as before, and the same reason: drop a claim the value contradicts
+       * rather than invent a scale. The analysis still refuses the pair, honestly.
+       */
+      const storedValue = normalised.value;
+      const priorDeclared = String(priorObserved.declared_scale ?? '');
+      const declaredIsKnown =
+        priorDeclared === 'unit_interval' || priorDeclared === 'ratio' || priorDeclared === 'raw_count';
+      const negativeFalsifiesAny =
+        declaredIsKnown && Number.isFinite(storedValue) && storedValue < 0;
       const declarationFalsified =
-        String(priorObserved.declared_scale ?? '') === 'unit_interval'
-        && typeof capAfterWrite !== 'number'
-        && Number.isFinite(normalised.value)
-        && Math.abs(normalised.value) > 1;
+        negativeFalsifiesAny
+        || (priorDeclared === 'unit_interval'
+          && typeof capAfterWrite !== 'number'
+          && Number.isFinite(storedValue)
+          && Math.abs(storedValue) > 1);
       const merged = {
         ...(node.observed_state ?? {}),
         value: normalised.value,
@@ -688,6 +731,9 @@ export function createSetFactorValueHandler(): HandlerFn {
         ...(appliedProvenance !== undefined
           ? { elicited_from: appliedProvenance.elicited_from }
           : {}),
+        // An approved adoption of Olumi's figure (defined only when there is no panel
+        // provenance — see `adoptedSource`) is stored as an assumption, not as typed.
+        ...(adoptedSource !== undefined ? { source: adoptedSource } : {}),
       };
 
       // ⭐⭐ AND THE ABSENT BRANCH MUST *CLEAR* IT, NOT MERELY DECLINE TO SET IT.

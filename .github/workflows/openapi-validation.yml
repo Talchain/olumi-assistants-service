@@ -3,10 +3,11 @@ name: OpenAPI Validation
 on:
   pull_request:
     # Always run on PRs (required check) - path filtering done in job
+  # No `feat/**` push trigger: a feature branch is validated by its PR above.
+  # The push copy ran a second time on the same SHA (see ci.yml `on:`).
   push:
     branches:
       - main
-      - feat/**
     paths:
       - 'openapi.yaml'
       - 'src/**/*.ts'
@@ -16,6 +17,16 @@ on:
 permissions:
   contents: read
   packages: read
+
+# A newer push to a PR supersedes that PR's older run. A run on main or staging
+# gets a group of its OWN (keyed on run_id), so it is never cancelled — neither
+# in progress nor while PENDING. `cancel-in-progress: false` alone does NOT give
+# that: GitHub still replaces a pending run when a newer one joins the same
+# group (measured: 50 of 119 staging CI runs, 48h to 24 Sep 2026, under
+# ci.yml's shared-group block).
+concurrency:
+  group: ${{ github.workflow }}-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/staging' && github.ref != 'refs/heads/main' }}
 
 jobs:
   validate:

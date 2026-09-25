@@ -510,7 +510,8 @@ describe("Core/Drafting release hold is bounded and restores without a push", ()
     expect(findVarGatedConditions(ci, "ci")).toEqual([`ci.jobs.live-tests.if = ${ci.jobs["live-tests"].if}`]);
     expect(ci.jobs["unit-tests"].if).toBeUndefined();
     expect(ci.jobs["unit-tests"].steps.some((step: any) => step.run === "pnpm test:required")).toBe(true);
-    expect(ci.on.push.branches).toEqual(["main", "staging", "feat/**"]);
+    // Feature branches get CI through their PR; a `feat/**` push trigger ran it twice per SHA.
+    expect(ci.on.push.branches).toEqual(["main", "staging"]);
     expect(ci.on.pull_request.branches).toEqual(["main", "staging"]);
   });
 

@@ -287,6 +287,22 @@ export interface FinaliserContext {
    */
   readonly mayNameLeadingOption?: boolean;
   /**
+   * The CALLER that decided `mayNameLeadingOption === false` states that its
+   * refusal was the unrequested-analysis confinement (a permitting verdict,
+   * withheld only because nobody asked for the run). Read only when the turn is
+   * not entitled; absent = the constraint token.
+   *
+   * ⚠ THE FINALISER MUST NOT DERIVE THIS ITSELF. It never learns which fact the
+   * refusal came from: the verdict can come from a partial fact the freshness
+   * selector skips, from this turn's own run while `priorFacts` is the
+   * PRE-handler window, or from the durable newest fact. Deriving it from a fact
+   * the finaliser picked named a user's own Run "unrequested" (#1876
+   * CHANGES_REQUIRED; `leader-claim-withheld-cause-binding.test.ts`). No turn
+   * exit sets it today: the turn verdict is constraint-only, and the Agent lane
+   * serves `leader_claim` from the reload read, which binds the cause to one fact.
+   */
+  readonly leaderWithheldBecauseUnrequested?: boolean;
+  /**
    * The turn context's PERSISTED-GRAPH freshness derivation, carried to every
    * non-execute exit by `claimSafety.forExit()` (see `TurnExitStamp`).
    *
@@ -597,6 +613,8 @@ function attachAnalysisState(
     freshness: ctx.analysisStateFreshness ?? ctx.freshness,
     readiness: ctx.analysisReady,
     mayNameLeadingOption: ctx.mayNameLeadingOption,
+    // Stated by the caller that refused, never derived here (see the ctx field).
+    withheldBecauseUnrequested: ctx.leaderWithheldBecauseUnrequested === true,
     // Read from the body as it will ship, not from the fact: when the
     // withheld-claim projection has redacted `near_tie`, the separation half
     // is genuinely unknown to the consumer and `leader_claim` must say so.
