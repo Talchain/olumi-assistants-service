@@ -39,6 +39,7 @@ import {
   loadMostRecentPendingActionsIntegrityStrict,
   loadPersistedGraphStrict,
   loadPriorFactsWithReadState,
+  loadScenarioAnalysisFactsForRead,
 } from '../build-turn-context.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getSessionStore } from '../session/index.js';
@@ -54,6 +55,7 @@ import {
   isSuccessfulRunAnalysisFact,
   type FreshnessDerivation,
 } from '../context/freshness.js';
+import { isScenarioAnalysisReasoningAuthority } from '../context/reconcile-scenario-analysis-facts.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import {
   buildAppliedGraphWireField,
@@ -1738,8 +1740,18 @@ async function dispatchFactorValueEdit(
    * `none` ("no run has happened") from a read that simply failed. That is the
    * estate's own named trap: an absence that was never observed reported as an
    * observed absence. The existing `priorFacts` consumer below is unchanged.
+   *
+   * ⭐ AND THE SCENARIO'S ANALYSIS RECORD, NOT ONLY THE LAST 20 ROWS. The window
+   * alone (`readRecent`, SESSION_READ_WINDOW_DEFAULT rows) loses the run once
+   * ~20 value ops / Agent turns have passed, and the reply then said `none`
+   * about an analysis this very edit had just made stale. The composer is the
+   * reload route's own (`routes/scenario-graph-analysis-read.ts`): the turn
+   * path's hot-window and durable readers, reconciled. `hotWindow` is exactly
+   * the window this function always read, so the handler's `priorFacts` input
+   * keeps its meaning; only the freshness below chooses the durable set.
    */
-  const priorFactsRead = await loadPriorFactsWithReadState(payload.scenario_id, requestId);
+  const { hotWindow: priorFactsRead, factSet: analysisFactSet } =
+    await loadScenarioAnalysisFactsForRead(payload.scenario_id, requestId);
   const priorFacts = priorFactsRead.facts;
 
   const result = await applyFactorValueEdit({
@@ -2002,18 +2014,34 @@ async function dispatchFactorValueEdit(
    * verdict, a degraded read yields `unknown` with `derivation_failed` rather than
    * fabricating `none`. Fact history is observational only and never authorises or
    * blocks the write, so a failed read cannot lose the user's edit.
+   *
+   * THE FACT-SOURCE RULE IS THE RELOAD ROUTE'S (`scenario-graph-analysis-read.ts`):
+   * the durable set when it is reasoning authority (`complete | capped`), else the
+   * hot window. Absence is authoritative only for the `complete` record — under
+   * `capped` unread history sits behind the wall, and in the window fallback the
+   * 20 rows can hide an older run, so an empty selection stays `unknown /
+   * derivation_failed` in both (the turn path's rule, `build-turn-context.ts`).
+   *
+   * ⚠ NOT YET THE ROUTE'S WHOLE DERIVATION: the reload route also passes the
+   *   restore marker (`analysisInvalidatedAt`) so a version restore reads
+   *   `stale / model_restored_after_analysis`; this writer never has (nor did the
+   *   code this replaced). An edit that lands back on an analysed hash after a
+   *   restore can therefore answer `fresh` here while reload says `stale`. Named
+   *   follow-up, not closed here.
    */
-  const freshness: FreshnessDerivation =
-    priorFactsRead.status === 'ok'
-      ? deriveAnalysisFreshness(priorFactsRead.facts, persistedAnalysisGraphHash)
-      : {
-          freshness: 'unknown',
-          reason: 'derivation_failed',
-          selected_fact_index: null,
-          graph_hash_at_run: null,
-          current_graph_hash: persistedAnalysisGraphHash,
-          computed_at: null,
-        };
+  // Absence is authoritative only in a COMPLETE durable record — never in the
+  // window fallback, whose 20 rows can hide an older run (Codex pre-review
+  // finding 5824695259). A success in the window is still positive evidence:
+  // `priorFactsReadOk` is consulted only when no fact is selected.
+  const durableAuthority = isScenarioAnalysisReasoningAuthority(analysisFactSet);
+  const freshnessFacts = durableAuthority ? analysisFactSet.facts : priorFactsRead.facts;
+  const freshnessFactsReadOk = analysisFactSet.status === 'complete';
+  const freshness: FreshnessDerivation = deriveAnalysisFreshness(
+    freshnessFacts,
+    persistedAnalysisGraphHash,
+    undefined,
+    { priorFactsReadOk: freshnessFactsReadOk },
+  );
   emitFreshnessTelemetry(
     freshness,
     {
