@@ -34,16 +34,19 @@ const EDGES = [
 ];
 
 /** The product double whose value writer IS the served writer. */
-function product() {
-  let nodes: Node[] = BASE.map((n) => ({ ...n, ...(n.observed_state ? { observed_state: { ...n.observed_state } } : {}) }));
+function product(opts: { refuse?: string; extra?: Node[] } = {}) {
+  let nodes: Node[] = [...BASE, ...(opts.extra ?? [])].map((n) => ({ ...n, ...(n.observed_state ? { observed_state: { ...n.observed_state } } : {}) }));
   let rev = 0;
   let writes = 0;
+  const registers: unknown[] = [];
   const graph = () => ({ nodes, edges: EDGES });
   const d: InternalDispatch = async (path, body) => {
     const b = (body ?? {}) as Record<string, unknown>;
     if (path === '/orchestrate/v2/turn' && b.kind === 'system_event') {
       const ev = b.event as Record<string, unknown>;
       if (ev.kind !== 'factor_value_edit') return { status: 400, json: {} };
+      // A refusal as served: HTTP 200, committed as a turn, no graph_patch (another writer won).
+      if (opts.refuse !== undefined && ev.target_id === opts.refuse) return { status: 200, json: { assistant_text: 'Not changed: the model changed after this was proposed.' } };
       const res = await applyFactorValueEdit({
         payload: { kind: 'system_event', turn_id: String(b.turn_id), scenario_id: SCENARIO, stage: 'frame', event: ev } as never,
         event: ev as never,
@@ -58,9 +61,10 @@ function product() {
       // The served committed shape (`valueWriteCommittedByThisRequest`).
       return { status: 200, json: { assistant_text: 'Saved.', graph_hash: `h${rev}`, blocks: [{ type: 'graph_patch', status: 'applied', operation: 'set_factor_value', target_id: String(ev.target_id) }] } };
     }
+    if (path.endsWith('/graph/register')) registers.push(body);
     return { status: 200, json: { graph: graph(), graph_hash: `h${rev}` } };
   };
-  return { d, byId: () => Object.fromEntries(nodes.map((n) => [n.id, n])), graph, writes: () => writes };
+  return { d, byId: () => Object.fromEntries(nodes.map((n) => [n.id, n])), graph, writes: () => writes, registers: () => registers };
 }
 
 const OLUMIS = [{ factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'a five-person team with one lead' }];
@@ -162,6 +166,53 @@ describe('the user’s own figure stays theirs', () => {
     expect(said).toContain('Team size is the user’s own figure, stored as theirs.');
     expect(said).not.toContain('adopted');
     expect(said).not.toContain('records no mark');
+  });
+});
+
+/**
+ * ⛔ A PARTIAL APPROVAL (Codex pre-review of #1851, 5825603926): one value lands, the other is refused.
+ * Nothing after the writes may touch or describe the refused one as stored — not the range framing
+ * (a second write), not the note the Agent repeats.
+ */
+describe('a partial approval: one value lands, one is refused', () => {
+  const BUDGET: Node = { id: 'monthly_budget', kind: 'factor', label: 'Monthly budget', category: 'controllable', observed_state: { value: 250, raw_value: 250, source: 'user_override' } };
+  async function approve(refuse: string, assumptions: unknown[]) {
+    const p = product({ refuse, extra: [BUDGET] });
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const proposed = await caps.proposeAssumptions(ctx, { assumptions } as never);
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    return { p, applied };
+  }
+
+  it('RED: the refused, unframed factor gets NO range written, and the note does not call it stored', async () => {
+    const { p, applied } = await approve('monthly_budget', [
+      { factor_label: 'Monthly budget', value: 300, basis: 'the user said 300', revise: true },
+      { factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
+    ]);
+    // PRECONDITIONS, proven: exactly one value landed, and the refused factor is the unframed >1 kind.
+    expect(p.writes(), 'only Coordination load landed').toBe(1);
+    expect(applied.adopted_count).toBe(1);
+    expect(p.byId().monthly_budget.observed_state, 'the refused factor is byte-identical').toEqual(BUDGET.observed_state);
+    expect(p.registers(), 'no range write at all: Coordination load already has a range, and Monthly budget was refused').toEqual([]);
+    const said = String(applied.not_represented);
+    expect(said).toContain('Coordination load is Olumi’s figure that the user adopted as an assumption');
+    expect(said).toContain('Monthly budget was NOT recorded by this approval.');
+    expect(said).not.toContain('Monthly budget is the user’s own figure');
+  });
+
+  it('RED: the reverse — the user’s revision lands, Olumi’s figure is refused — says each truthfully', async () => {
+    const { p, applied } = await approve('coordination_load', [
+      { factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true },
+      { factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
+    ]);
+    expect(p.writes()).toBe(1);
+    expect(p.byId().coordination_load.observed_state).toBeUndefined();
+    const said = String(applied.not_represented);
+    expect(said).toContain('Team size is the user’s own figure, stored as theirs.');
+    expect(said).toContain('Coordination load was NOT recorded by this approval.');
+    expect(said).not.toContain('Coordination load is Olumi’s figure');
   });
 });
 

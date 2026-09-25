@@ -2116,6 +2116,17 @@ export function createAgentCapabilities(
           });
         }
         const landed = applied.filter((a) => a.recorded !== null);
+        /**
+         * ⛔ EVERYTHING AFTER THE VALUE WRITES FOLLOWS WHAT THIS APPROVAL COMMITTED, NOT WHAT IT
+         * PROPOSED (Codex pre-review of #1851, 5825603926). With one value landed and another
+         * refused, the range framing below selected every PROPOSAL op, so it could rescale and
+         * register the refused target — a write to a factor whose own write was just refused — and
+         * the note said the refused value was "stored". Aligned with `applied` by index.
+         */
+        const landedOps = ops.filter((_, i) => applied[i] !== undefined && applied[i]!.recorded !== null);
+        const notLandedLabels = ops
+          .filter((_, i) => applied[i] === undefined || applied[i]!.recorded === null)
+          .map((o) => beforeById.get(o.path)?.label ?? o.path);
         if (landed.length === 0) {
           return {
             ok: false, mutated: false, applied: false, refusal: 'not_applied',
@@ -2153,7 +2164,7 @@ export function createAgentCapabilities(
          * that number untouched, and it is reported so the Agent says it.
          */
         const needsFrame = (afterSet?.nodes ?? []).filter((n) => {
-          if (!ops.some((o) => o.path === n.id)) return false;
+          if (!landedOps.some((o) => o.path === n.id)) return false;
           const os = (n.observed_state ?? {}) as { value?: unknown; cap?: unknown };
           // ⛔ A factor that already carries a stored range was written ON it
           // by the value handler. A level above 1 there is the honest truth
@@ -2551,7 +2562,11 @@ export function createAgentCapabilities(
           // Per value, whoever authored the proposal (Codex 5825564214: a user-only revision was still told
           // "adopted assumptions … no mark", though it is stored as the user's own figure).
           not_represented:
-            `${valueAuthorshipNote(ops, decision.proposal, (id) => beforeById.get(id)?.label ?? id)} Say so when you describe what changed` +
+            `${valueAuthorshipNote(landedOps, decision.proposal, (id) => beforeById.get(id)?.label ?? id)}` +
+            (notLandedLabels.length > 0
+              ? ` ${notLandedLabels.join(', ')} ${notLandedLabels.length === 1 ? 'was' : 'were'} NOT recorded by this approval.`
+              : '') +
+            ' Say so when you describe what changed' +
             (rescaled.length > 0 ? ', and state every value the model stored differently from the one approved.' : '.') +
             (rangesNotAttached.length > 0
               ? ' \u26a0 This turn could not attach a range to ' +
