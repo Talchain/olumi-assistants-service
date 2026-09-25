@@ -396,7 +396,7 @@ function framedObservedState(f: {
  * nothing for a provisional first analysis to start from.
  *
  * ⭐ THE SHAPE IS CAPLESS, AND THAT IS BINDING. `{ value: raw / c, raw_value,
- * unit?, source: 'cee_inference' }` beside the node's `scale_frame: c` — exactly
+ * unit?, source: 'cee_inference', extractionType: 'inferred' }` beside the node's `scale_frame: c` — exactly
  * what `set_factor_value` writes when a user adopts a value on a framed factor
  * (`construction-range-carrier.test.ts`). NO `observed_state.cap` and NO
  * `declared_scale`: a capped shape would let Olumi's own guessed range refuse the
@@ -416,7 +416,10 @@ function estimatedObservedState(
   const raw = f.baseline_value;
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
   if (typeof c !== 'number' || !Number.isFinite(c) || c <= 1 || raw < 0 || raw > c) return null;
-  return { value: raw / c, raw_value: raw, ...(f.unit ? { unit: f.unit } : {}), source: 'cee_inference' };
+  // `extractionType: 'inferred'` is the stamp the conventional builders write for a value the
+  // brief did not state; the canvas reads it to say "Olumi estimate" (served UI b017e3c2 showed
+  // "no source" without it). A value a person later sets withdraws it (`set-factor-value.ts`).
+  return { value: raw / c, raw_value: raw, ...(f.unit ? { unit: f.unit } : {}), source: 'cee_inference', extractionType: 'inferred' };
 }
 
 /**
