@@ -264,12 +264,14 @@ const UNEVALUATED_REPAIR_STEP =
  * ── WHY NO RESTATEMENT COULD HAVE WORKED ──────────────────────────────────
  * The limit's target was the GOAL node, with five incoming edges. PLoT's
  * `resolveConstraintSampleFrameAnchor` returns `null` for any node carrying a
- * directed incoming edge, BEFORE it ever reads `observed_state` — so the
- * target has no measured starting point and nothing said about the LIMIT can
- * give it one. `plot-lite-service` #364 shipped that service's half of this
- * sentence on 18 Sep (*"it is calculated from its inputs, so it has no
- * measured starting point of its own to anchor to"*); this is its CEE twin, so
- * the two services stop disagreeing about what the user should do.
+ * directed incoming edge, BEFORE it ever reads `observed_state` — so neither
+ * a value on the target nor anything said about the LIMIT can anchor it.
+ * `plot-lite-service` #364 shipped that service's half of this sentence on
+ * 18 Sep (*"it is calculated from its inputs, so it has no measured starting
+ * point of its own to anchor to"*); this is its CEE twin, so the two services
+ * stop disagreeing about what the user should do. (Since 25 Sep the CEE
+ * sentence drops "no measured starting point": it implies a level would help,
+ * and on a non-root it provably cannot.)
  *
  * ── WHY THE STEP ABOVE IS KEPT EVERYWHERE ELSE ────────────────────────────
  * ⚠ Suppressing it wholesale would be the failure mode, not the fix. Its own
@@ -284,57 +286,39 @@ const UNEVALUATED_REPAIR_STEP =
  *
  * ── WHAT IT SAYS, CLAUSE BY CLAUSE ────────────────────────────────────────
  *   - the CAUSE, in the product's register and as a claim about OUR model
- *     rather than about a third-party engine the user cannot reach;
- *   - that restating the limit cannot supply what is missing — the precise
- *     thing the session disproved, said before the user spends a turn on it;
- *   - the MISSING INPUT, {@link derivedTargetMissingInput}: the delta frame, or a model change
- *     that measures the part directly (the only two moves PLoT can anchor). (This arm first
- *     reused the sibling voice's "name the part of your model this applies to" ask; a served
- *     probe on 25 Sep showed that ask cannot land here, because the limit already sits on the
- *     derived target the user would name. #63 5825511095.)
- *   - and it still DISCLOSES THE RESIDUAL — "this one stays on the model" —
- *     because there is no conversational remove/replace (ROADMAP 2.659) and a
- *     repair that cannot touch the defective row must say the row remains.
+ *     rather than about a third-party engine the user cannot reach: the part is
+ *     worked out from other parts, and Olumi cannot yet test a limit on a
+ *     quantity like that;
+ *   - the VERDICT, plainly: it cannot be checked in this model yet;
+ *   - and it still DISCLOSES THE RESIDUAL — "stays on the model" — because
+ *     there is no conversational remove/replace (ROADMAP 2.659) and a repair
+ *     that cannot touch the defective row must say the row remains.
+ *
+ * ⛔ IT INVITES NO ANSWER (RC ruling #63 5825683899, 25 Sep 02:31Z: "honest copy ONLY … no 'which
+ * part', no 'its value today', no 'run again'"). Each of those was measured or proved a dead end here:
+ *   - "which part of your model it applies to": served `e39f6e0`, the limit was already bound to the
+ *     derived target the user named, and the re-run stayed unchecked (2/2; #63 5825511095).
+ *   - "a starting level / its value today": PLoT (`plot-lite-service` `src/lib/constraint-reliability.ts`
+ *     `resolveConstraintSampleFrameAnchor`, staging `6d143fb`) returns null for any node with a directed
+ *     incoming edge BEFORE it reads `observed_state`; served `e39f6e0`, the user's level WAS saved on
+ *     the target (Monthly churn 3% → 2.4%, `user_override`, `authorise_change` mutated) and the re-run
+ *     still could not check the limit. Independent review 5825666624 reproduced it with the production
+ *     predicate.
+ *   - "run the analysis again": nothing a re-run can change.
+ * What WOULD anchor it — the limit recorded as a change the options make (`goal_threshold_frame:
+ * 'delta'`) — cannot be recorded today (`CEE_GOAL_THRESHOLD_FRAME` is the constant `'level'`, and PLoT
+ * strips the field at ingress). RC rules that cross-repo capability post-PoC, so the copy does not name
+ * it: a remedy in copy must be a control the lane can actually carry out. The sibling
+ * `unmeasured_target` voice keeps its ratified ask unchanged.
  *
  * ⚠ NO EM DASH, and no vocabulary the egress content defences ban; the
  * build-time survival probe in {@link buildVoice} turns a breach of either
  * into a loud failure rather than a silent revert to the locked template.
  */
 function unanchoredTargetRepairStep(total: number): string {
-  const cause =
-    total === 1
-      ? ' The part of your model it points at is worked out from other parts, so it has no measured starting point of its own, and restating the limit cannot give it one.'
-      : ' The parts of your model they point at are worked out from other parts, so they have no measured starting point of their own, and restating the limits cannot give them one.';
-  return `${cause}${derivedTargetMissingInput(total)}`;
-}
-
-/**
- * ⛔ THE ASK NAMES WHAT IS MISSING, NOT "WHICH PART" (RC #63 5825523678; served probe 5825511095).
- *
- * This arm is spoken only on PROOF that the limit already sits on a derived target. So "tell me which
- * part of your model it applies to" cannot land here: on served `e39f6e0` the user answered it in both
- * standard journeys ("…applies to Monthly churn", "…applies to Annual salary spend"), the limit was
- * already bound to exactly that node, and the re-run stayed unchecked (2/2).
- *
- * ⚠ AND NOT "A STARTING LEVEL" EITHER. PLoT anchors a derived (non-root) target in exactly two ways
- * (`plot-lite-service` `src/lib/constraint-reliability.ts` `resolveConstraintSampleFrameAnchor`,
- * staging `6d143fb`): the limit's threshold frame is `delta` (it covers only what the options add), or
- * every option pins the node. Otherwise it returns null BEFORE reading any value, by design (a level
- * on a non-root node would double-count). Served `e39f6e0`, 25 Sep: the user's stated level WAS saved
- * on the target (Monthly churn 3% → 2.4%, `user_override`, `authorise_change` mutated) and the re-run
- * still could not check the limit. So the copy names only the two moves that can: the delta frame, or
- * a model change that measures the part directly.
- *
- * ⚠ AND IT INVITES NO ANSWER THE CONVERSATION CANNOT RECORD. The OpenAI Agent lane has no tool that
- * records a limit's frame or restructures the model this way (RC item 2), so the copy says so plainly
- * rather than asking a question whose answer would be dropped — a remedy in copy must be a reachable
- * control. It still DISCLOSES THE RESIDUAL ("stays on the model"). No re-run instruction: re-running
- * cannot help until one of the two moves exists. The sibling `unmeasured_target` voice keeps its ratified ask unchanged.
- */
-function derivedTargetMissingInput(total: number): string {
   return total === 1
-    ? ' Checking it needs either a statement that the limit covers only what the options add, not the whole amount, or a change to the model so that this part is measured directly; neither can be added from this conversation yet, so this one stays on the model unchecked.'
-    : ' Checking them needs either a statement that each limit covers only what the options add, not the whole amount, or a change to the model so that those parts are measured directly; neither can be added from this conversation yet, so these stay on the model unchecked.';
+    ? ' The part of your model it points at is worked out from other parts, and Olumi cannot yet test a limit on a quantity like that, so it cannot be checked in this model yet; this one stays on the model unchecked.'
+    : ' The parts of your model they point at are worked out from other parts, and Olumi cannot yet test a limit on quantities like those, so they cannot be checked in this model yet; these stay on the model unchecked.';
 }
 
 /**

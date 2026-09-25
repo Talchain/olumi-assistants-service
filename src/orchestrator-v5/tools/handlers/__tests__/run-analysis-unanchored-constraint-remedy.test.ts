@@ -85,12 +85,16 @@ const FUTILE_REMEDY = 'Tell me the limit you meant in your own words and I will 
  */
 const REPOINT_ASK = 'Tell me which part of your model it applies to and I will record it there';
 /**
- * What can actually anchor a derived target (PLoT `resolveConstraintSampleFrameAnchor`): the delta frame,
- * or a model change that measures it directly. NOT a starting level — PLoT never reads one here.
+ * The honest verdict (RC ruling #63 5825683899): this limit cannot be checked in this model yet, for a
+ * reason in the user's terms. Nothing the user can say from here changes that, so nothing is asked.
  */
-const MISSING_INPUT = 'Checking it needs either a statement that the limit covers only what the options add, not the whole amount, or a change to the model so that this part is measured directly';
-/** And no answer is invited that this conversation cannot record (RC 5825523678). */
-const NOT_FROM_HERE = 'neither can be added from this conversation yet';
+const CANNOT_CHECK = 'Olumi cannot yet test a limit on a quantity like that, so it cannot be checked in this model yet';
+/**
+ * Every invitation measured or proved a dead end on this arm: "which part" (served, 2/2), "a starting
+ * level / its value today" (PLoT never reads a level on a non-root; served, the saved level did not
+ * help), "run again", and the delta frame (cannot be recorded yet; RC: post-PoC).
+ */
+const INVITATION = /which part|starting level|value today|run the analysis again|tell me|what the options add/i;
 
 /** The limit, at the label and the brief span the session actually carried. */
 const CONSTRAINT_ID = 'constraint_goal_nrr_min';
@@ -305,19 +309,16 @@ describe('a limit on an UNANCHORABLE target is not told to restate itself', () =
     expect(v.summary).not.toContain(FUTILE_REMEDY);
   });
 
-  it('ARM A: it is told WHY, and what is actually missing — never the "which part" ask that cannot land', async () => {
+  it('ARM A: it is told WHY, and that it cannot be checked yet — and it is invited to do nothing that cannot land', async () => {
     const v = await runSummary(DERIVED_TARGET_GRAPH);
 
     // The cause, in the product's own register: the target is computed.
     expect(v.summary).toContain('worked out from other parts');
-    // What the target lacks, and plainly that it cannot be supplied from here yet.
-    expect(v.summary).toContain(MISSING_INPUT);
-    expect(v.summary).toContain(NOT_FROM_HERE);
-    // A starting level cannot anchor a derived target, so it is never offered as the fix.
-    expect(v.summary).not.toMatch(/starting level|value today/i);
-    // The re-point ask is disproved on this arm (served probe), and re-running cannot help yet.
+    // The verdict, plainly: it cannot be checked in this model yet.
+    expect(v.summary).toContain(CANNOT_CHECK);
+    // And it invites nothing: every ask here was measured or proved a dead end.
+    expect(v.summary).not.toMatch(INVITATION);
     expect(v.summary).not.toContain(REPOINT_ASK);
-    expect(v.summary).not.toContain('Then run the analysis again');
     // And the residual is still disclosed: the bad row is not silently removed.
     expect(v.summary).toContain('this one stays on the model');
   });

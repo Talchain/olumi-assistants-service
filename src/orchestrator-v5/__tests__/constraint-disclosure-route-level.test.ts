@@ -2096,14 +2096,15 @@ describe('2.349 R2 — gap 5 at the serialised HTTP boundary', () => {
     // disproved that ask: the limit already sits on the derived target the
     // user would name, and the re-run stayed unchecked (2/2); a saved starting
     // level on that target did not help either (PLoT anchors a derived target
-    // only by a delta frame or every-option pins). The arm now names what is
-    // missing, says plainly that it cannot be added from this conversation,
-    // and keeps the residual — so this binds to that, and to the ask's absence.
+    // only by a delta frame or every-option pins). Per RC's ruling (#63
+    // 5825683899) the arm now says plainly that the limit cannot be checked in
+    // this model yet, invites nothing, and keeps the residual — so this binds
+    // to that, and to the ask's absence.
     expect(turn.assistantText).toContain(
       'We could not line it up with anything this analysis measures',
     );
-    expect(turn.assistantText).toContain('neither can be added from this conversation yet');
-    expect(turn.assistantText).toContain('stays on the model unchecked');
+    expect(turn.assistantText).toContain('cannot be checked in this model yet');
+    expect(turn.assistantText).toContain('this one stays on the model unchecked');
     expect(turn.assistantText).not.toContain('and I will record it');
   });
 

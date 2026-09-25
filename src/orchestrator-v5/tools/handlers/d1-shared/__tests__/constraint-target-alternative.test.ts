@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  collectUnanchoredConstraintTargetIds,
   findConstraintTargetAlternative,
   formatConstraintTargetAlternative,
   type TargetAlternativeNode,
@@ -255,5 +256,44 @@ describe('the candidate must be SCORABLE, not merely measured', () => {
       edges: [{ from: 'f-other', to: '7809def4', edge_type: 'directed' }],
       options: [],
     })).toBeNull();
+  });
+});
+
+/**
+ * ⛔ A LEVEL ON A DERIVED TARGET NEVER ANCHORS IT — the copy and the predicate must not drift apart
+ * (independent review #1875 5825666624). The unanchored repair arm is spoken for exactly the ids this
+ * collects, and its copy says the limit "cannot be checked in this model yet". PLoT
+ * (`constraint-reliability.ts` `resolveConstraintSampleFrameAnchor`, staging `6d143fb`) refuses a node
+ * with a directed incoming edge BEFORE it reads `observed_state`; served `e39f6e0` saved a user level on
+ * such a target (Monthly churn 3% → 2.4%) and the re-run still could not check the limit. If this mirror
+ * ever started reading the level, the arm would go quiet exactly where PLoT still refuses.
+ */
+describe('collectUnanchoredConstraintTargetIds — a level on a derived target does not anchor it', () => {
+  const churnLimit = [{ constraint_id: 'c_churn', node_id: 'monthly_churn' }];
+  const graph = (churn: Record<string, unknown>) => ({
+    nodes: [
+      { id: 'price', kind: 'factor', label: 'Price', observed_state: { value: 0.49, raw_value: 49, cap: 100, unit: '£' } },
+      { id: 'monthly_churn', kind: 'factor', label: 'Monthly churn', ...churn },
+    ],
+    edges: [{ from: 'price', to: 'monthly_churn' }],
+    options: [{ id: 'opt_a', interventions: { price: 0.59 } }, { id: 'opt_b', interventions: { price: 0.49 } }],
+  });
+
+  it('a derived target with no level is collected', () => {
+    expect([...collectUnanchoredConstraintTargetIds(churnLimit, graph({ observed_state: null }))]).toEqual(['c_churn']);
+  });
+
+  it('⛔ the SAME target carrying a level is STILL collected — the level is never read here', () => {
+    const withLevel = graph({ observed_state: { value: 0.024, raw_value: 2.4, unit: '%', source: 'user_override' } });
+    expect([...collectUnanchoredConstraintTargetIds(churnLimit, withLevel)]).toEqual(['c_churn']);
+  });
+
+  it('CONTRAST: a delta-framed limit on that target is anchored, so the predicate can say no', () => {
+    expect([...collectUnanchoredConstraintTargetIds(churnLimit, graph({ observed_state: null, goal_threshold_frame: 'delta' }))]).toEqual([]);
+  });
+
+  it('CONTRAST: a ROOT carrying a level is anchored, so it is the edge, not the level, that decides', () => {
+    const root = { ...graph({ observed_state: { value: 0.03, raw_value: 3, unit: '%' } }), edges: [] };
+    expect([...collectUnanchoredConstraintTargetIds(churnLimit, root)]).toEqual([]);
   });
 });
