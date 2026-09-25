@@ -175,6 +175,16 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     expect(b.suggested_actions.some((c) => c.action_type === 'run_analysis')).toBe(false);
   });
 
+  it('REPLAY: a remembered next-step chip is re-offered only on a KNOWN refusal, never on an unknown re-read (pre-review 5827131835)', async () => {
+    const { stillValidOffers, NEXT_STEP_AFTER_BLOCKED_RUN_CHIP } = await import('../../../routes/agent-v1-turn.js');
+    const now = (analysisReady: unknown) => ({ outstandingProposalIds: new Set<string>(), analysisReady, analysisState: {}, modelExists: true });
+    const ids = (analysisReady: unknown) => stillValidOffers([NEXT_STEP_AFTER_BLOCKED_RUN_CHIP], now(analysisReady)).map((a) => a.id);
+    expect(ids(undefined), 'the replay read failed: unknown').toEqual([]);
+    expect(ids({}), 'an empty readiness is not a refusal').toEqual([]);
+    expect(ids({ status: 'blocked', may_run: false, blockers: null }), 'still known blocked').toEqual(['agent-suggest-what-it-needs']);
+    expect(ids({ status: 'ready', may_run: true }), 'a collaborator made it runnable').toEqual([]);
+  });
+
   it('knownNotRunnable, exactly: only a READ refusal counts; unknown or empty is never a refusal', async () => {
     const { knownNotRunnable } = await import('../../../routes/agent-v1-turn.js');
     expect(knownNotRunnable(undefined)).toBe(false);
