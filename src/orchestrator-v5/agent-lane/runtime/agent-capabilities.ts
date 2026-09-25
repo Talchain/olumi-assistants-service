@@ -161,11 +161,6 @@ function ownCommittedNative(res: { status: number; json: Record<string, unknown>
 }
 
 /**
- * The level THIS request's own committed `option_intervention_edit` stored for (option, factor), from
- * the committed post-state its OWN response carries (`draft_graph`; `system-events/dispatch.ts`), or
- * `undefined` when the response carries none.
- */
-/**
  * ⛔ "THE SAME FIGURE" IS DECIDED EXACTLY WHEREVER NO ARITHMETIC SEPARATES THE TWO (pre-reviews of #1881, 5828080522 and
  * 5828293137). Any tolerance proportional to magnitude has a £1 boundary somewhere: 1e-6 hid £1,001 on £1.2bn, 1e-9 hid
  * £1 there, and 1e-12 hides £1 on £1.2tn. So two STORED figures — our committed level and the level read back in the
@@ -181,6 +176,11 @@ function quotable(x: number): number {
   return Number(x.toPrecision(15));
 }
 
+/**
+ * The level THIS request's own committed `option_intervention_edit` stored for (option, factor), from
+ * the committed post-state its OWN response carries (`draft_graph`; `system-events/dispatch.ts`), or
+ * `undefined` when the response carries none.
+ */
 function committedLevelOf(json: Record<string, unknown>, optionId: string, factorId: string): number | undefined {
   const nodes = ((json.draft_graph ?? {}) as { nodes?: unknown }).nodes;
   if (!Array.isArray(nodes)) return undefined;
