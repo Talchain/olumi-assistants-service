@@ -987,3 +987,25 @@ describe('self-review of #1871 at ae56cf4b — interleaved figures, and a split 
     expect(out).toContain('Churn is the input to check.');
   });
 });
+
+/** Pre-review 5829596023 on ae56cf4b: a list in a clause that only accompanies the figures is not what they are shared over. */
+describe('pre-review of #1871 at ae56cf4b — an accompanying list is not the receiving list', () => {
+  const graph = { nodes: [{ id: 'keep', kind: 'option', label: 'Keep Pro at £49' }, { id: 'raise', kind: 'option', label: 'Raise Pro to £59 at release' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }] };
+  const analysisReady = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } };
+  const wire = (sentence: string) => enforceAgentLaneLeaderClaimsAtWire(
+    { assistant_text: `The churn limit was not scored. ${sentence} Churn is the input to check.`, blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } } } as unknown as OlumiResponse,
+    { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'constraint_verdict_withheld', graph, analysisReady },
+  ).response.assistant_text;
+  it.each([
+    'For both raising and holding, the results were 71% and 29% respectively, with speed and cost concerns still open.',
+    'For both raising and holding, the results were 71% and 29% respectively with speed and cost concerns still open.',
+    'For both raising and holding, 71% and 29% respectively while price and churn stay uncertain.',
+    'For both raising and holding, 71% and 29% though price and churn are unscored.',
+    'For both raising and holding, 71% and 29% because price and churn dominate.',
+  ])('RED: removed through BOTH gates: %s', (s) => { expect(wire(s)).not.toMatch(/71%|29%/); });
+  it.each([
+    'Last quarter, 60% and 40% of signups came from ads and referrals respectively.',
+    'For both raising and holding, the split of revenue is 60% and 40% between annual and monthly plans.',
+    'For both raising and holding, 97% and 3% are the renewal and churn rates.',
+  ])('CONTROL: the receiving list still lets the figures through: %s', (s) => { expect(wire(s)).toContain(s); });
+});

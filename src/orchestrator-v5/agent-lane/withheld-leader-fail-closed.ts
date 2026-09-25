@@ -462,7 +462,10 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS, pri
     const stem = (w: string): string => w.slice(0, 4);
     const distinct = own.map((ws, i) => [...ws].filter((w) => !own.some((other, j) => j !== i && [...other].some((o) => stem(o) === stem(w)))));
     if (!ordered && distinct.every((ws) => ws.length > 0)) continue;
-    if (otherList(after) || (optionRefs(text) === 0 && otherList(text))) continue;
+    // The list the figures are shared over comes before any clause that merely accompanies them: "…71% and 29%
+    // respectively with speed and cost concerns still open" shares nothing over speed and cost (pre-review 5829596023).
+    const receiving = after.split(ACCOMPANYING_CLAUSE)[0] ?? '';
+    if (otherList(receiving) || (optionRefs(text) === 0 && otherList(text))) continue;
     return true;
   }
   if (rangeLike) return false;
@@ -632,6 +635,8 @@ const MEASURE_OR_OPINION = /^(?:support|backing|approval|favour|favor|favourabil
 const FIGURE_NOUN = /^(?:results?|outcomes?|figures?|numbers?|splits?|scores?|readings?|percentages?|totals?|picture)$/i;
 /** What links a measure to the figure after it: "retention IS 96%", "renews AT 96%", "churn OF 4%". */
 const FIGURE_LINK = /^(?:is|are|was|were|be|been|being|at|of|by|to|around|about|roughly|nearly|approximately|just|only|some)$/i;
+/** Where a clause that only accompanies the figures begins: what follows it is not what they are shared over. */
+const ACCOMPANYING_CLAUSE = /\b(?:with|while|whilst|though|although|but|because|since|as|whereas|so|yet|unless|until|if|when)\b/i;
 /** Where a gap between two figures divides: its last joiner or clause break. */
 const GAP_JOINER = /[,;:\u2013\u2014/&]|[.!?](?=\s)|\b(?:and|or|but|nor|while|whereas|than|versus|vs|against|over|to|then|with)\b/gi;
 /** A clause break: a figure's own measure is not looked for across one. */
