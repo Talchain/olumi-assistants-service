@@ -178,6 +178,17 @@ describe('the constructor declares the status quo, and admission holds it whatev
     expect(everyOption.slice(0, everyOption.indexOf('this is not optional bookkeeping'))).toContain('except the one marked is_status_quo');
   });
 
+  it('B2 RED (pre-review 5825700357): the "inert / unanswerable" warning is scoped to acting options, never the declared status quo', () => {
+    // The declared status quo has no interventions and no changes BY INSTRUCTION;
+    // a sentence calling every such option inert would tell the drafter to fill it.
+    const sentences = BUILD_INSTRUCTIONS.split(/(?<=[.:])\s+/).filter((s) => /\binert\b|unanswerable/.test(s));
+    expect(sentences.length).toBeGreaterThan(0);
+    for (const s of sentences.filter((x) => /no `interventions` AND no `changes`/.test(x))) {
+      expect(s, s).toMatch(/is_status_quo/);
+    }
+    expect(BUILD_INSTRUCTIONS).not.toContain('An option with no `interventions` AND no `changes` is inert');
+  });
+
   it('B2 control (recorded): a flagged option that still names changes is treated as acting — not held, not stamped — so nothing is invented for it', async () => {
     const { graph } = await build(hiring({ label: 'Continue Current Staffing', changes: ['Developers hired', 'Tech leads hired'] }));
     expect(heldEdges(graph, 'continue_current_staffing')).toEqual([]);
