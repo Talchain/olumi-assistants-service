@@ -771,6 +771,19 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "`value`, and `value` has its own field-scoped `value_frame`. Nothing " +
       "here is ambiguous once both are read together.",
   },
+  // ── SCOPE-AMBIGUOUS: the UI-stated goal target (declared 25 Sep 2026) ────────
+  {
+    id: "scope-ambiguous:cee.NodeV3::success_threshold",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — its warrant is `threshold_source`, by the writer's own contract. " +
+      "The UI writes the pair together on the goal node and reads `success_threshold` " +
+      "as the user's stated target ONLY under `threshold_source === 'user'` (UI " +
+      "store.ts ~:2407), so the level-scoped stamp does name this value. CEE only " +
+      "PRESERVES both through a re-parse (declared so an unrelated edit stops " +
+      "erasing them; goal-target-stamp-survives-mutation.test.ts) and neither reads " +
+      "nor writes them; CEE's own target stays `goal_threshold_raw` with its unit.",
+  },
 ];
 
 // ============================================================================
