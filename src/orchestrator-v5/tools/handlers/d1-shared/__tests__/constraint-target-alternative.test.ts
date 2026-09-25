@@ -292,6 +292,16 @@ describe('collectUnanchoredConstraintTargetIds — a level on a derived target d
     expect([...collectUnanchoredConstraintTargetIds(churnLimit, graph({ observed_state: null, goal_threshold_frame: 'delta' }))]).toEqual([]);
   });
 
+  it('⛔ pinned by SOME options only, it is still collected', () => {
+    const some = { ...graph({ observed_state: null }), options: [{ id: 'opt_a', interventions: { price: 0.59, monthly_churn: 0.02 } }, { id: 'opt_b', interventions: { price: 0.49 } }] };
+    expect([...collectUnanchoredConstraintTargetIds(churnLimit, some)]).toEqual(['c_churn']);
+  });
+
+  it('CONTROL: pinned by EVERY option it is anchored, so the "cannot be checked" arm is never spoken where the check can run (RC 5825841734)', () => {
+    const every = { ...graph({ observed_state: null }), options: [{ id: 'opt_a', interventions: { price: 0.59, monthly_churn: 0.02 } }, { id: 'opt_b', interventions: { price: 0.49, monthly_churn: 0.03 } }] };
+    expect([...collectUnanchoredConstraintTargetIds(churnLimit, every)]).toEqual([]);
+  });
+
   it('CONTRAST: a ROOT carrying a level is anchored, so it is the edge, not the level, that decides', () => {
     const root = { ...graph({ observed_state: { value: 0.03, raw_value: 3, unit: '%' } }), edges: [] };
     expect([...collectUnanchoredConstraintTargetIds(churnLimit, root)]).toEqual([]);

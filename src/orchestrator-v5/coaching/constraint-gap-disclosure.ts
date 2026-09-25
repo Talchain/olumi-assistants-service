@@ -305,11 +305,19 @@ const UNEVALUATED_REPAIR_STEP =
  *     still could not check the limit. Independent review 5825666624 reproduced it with the production
  *     predicate.
  *   - "run the analysis again": nothing a re-run can change.
- * What WOULD anchor it — the limit recorded as a change the options make (`goal_threshold_frame:
- * 'delta'`) — cannot be recorded today (`CEE_GOAL_THRESHOLD_FRAME` is the constant `'level'`, and PLoT
- * strips the field at ingress). RC rules that cross-repo capability post-PoC, so the copy does not name
- * it: a remedy in copy must be a control the lane can actually carry out. The sibling
- * `unmeasured_target` voice keeps its ratified ask unchanged.
+ * ⛔ AND IT NAMES NO LIST OF WHAT WOULD BE NEEDED (RC #63 5825841734, 02:49Z; review 5825823914).
+ * PLoT anchors a derived target two ways, and neither is offered:
+ *   - the limit recorded as a change the options make (`goal_threshold_frame: 'delta'`): cannot be
+ *     recorded today (`CEE_GOAL_THRESHOLD_FRAME` is the constant `'level'`, and PLoT strips the field
+ *     at ingress). RC: cross-repo, post-PoC.
+ *   - EVERY option pinning the target: RULED OUT as a remedy. Each option would then set churn (or
+ *     salary spend) directly, overriding the model's own derivation of it, and the check would only
+ *     test the user's stated figures against the user's own limit — circular, and not reasoning Olumi
+ *     should invite. (Where every option already pins it, the predicate reads it anchored and this arm
+ *     is never spoken; `constraint-target-alternative.test.ts` pins that control.)
+ * A list that left one out would read as "nothing you can do here" (review 5825823914), so the copy
+ * states only the verdict and its cause. A remedy in copy must be a control the lane can actually
+ * carry out. The sibling `unmeasured_target` voice keeps its ratified ask unchanged.
  *
  * ⚠ NO EM DASH, and no vocabulary the egress content defences ban; the
  * build-time survival probe in {@link buildVoice} turns a breach of either
