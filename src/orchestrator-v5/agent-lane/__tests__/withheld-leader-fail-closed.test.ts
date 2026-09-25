@@ -466,9 +466,16 @@ describe('review of #1871 at c0da634c', () => {
     '40% of responses supported the plan and 60% raised concerns.',
     'The highest-priority correction is to measure churn against its baseline.',
     'There is no leading option yet.',
+    // Codex 5826253038: a composition INSIDE one option is not a split over the options.
+    'For the Keep Pro at £49 option, 40% of capacity is engineering and 60% is support.',
+    'In the £59 path, 40% of customers are in Europe and 60% are in the US.',
+    '40% of the £59 path’s customers are in Europe and 60% in the US.',
   ];
   it.each(DROP.map((s) => [s] as const))('dropped: %s', (s) => { expect(sentenceRanksOptions(s, labels)).toBe(true); });
   it.each(KEEP.map((s) => [s] as const))('kept: %s', (s) => { expect(sentenceRanksOptions(s, labels)).toBe(false); });
+  it('the percentages may precede their options: "71% for the £59 path and 29% for holding" goes', () => {
+    expect(sentenceRanksOptions('The runs gave 71% for the £59 path and 29% for holding.', labels)).toBe(true);
+  });
   it('an option label is the cue: a label-named 100% split goes even with no option noun', () => {
     expect(sentenceRanksOptions('Keep Pro at £49 came to 29% and Raise Pro to £59 at release to 71%.', labels)).toBe(true);
   });

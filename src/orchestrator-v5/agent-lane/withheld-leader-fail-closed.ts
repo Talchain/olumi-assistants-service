@@ -322,16 +322,34 @@ function blankIdioms(text: string): string {
 function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): boolean {
   // A RANGE is uncertainty, not a split: "between 45% and 55%", "from 30% to 70%", "40-60%" (review 5826189511).
   if (/\bbetween\s+[^.;]{0,20}\d[^.;]{0,20}\s+and\s+\d|\bfrom\s+[^.;]{0,20}\d[^.;]{0,20}\s+to\s+\d|\d\s?%?\s?(?:-|to)\s?\d+(?:[.,]\d+)?\s?%|\banywhere\b/i.test(text)) return false;
-  const pcts = [...text.matchAll(new RegExp(PCT, 'gi'))].map((m) => Number(m[0].replace(/[%\s]|per\s?cent/gi, '').replace(',', '.')));
-  if (pcts.length < 2) return false;
-  const total = pcts.reduce((a, b) => a + b, 0);
+  const hits = [...text.matchAll(new RegExp(PCT, 'gi'))];
+  if (hits.length < 2) return false;
+  const total = hits.map((m) => Number(m[0].replace(/[%\s]|per\s?cent/gi, '').replace(',', '.'))).reduce((a, b) => a + b, 0);
   if (total < 97 || total > 103) return false;
-  // Only a split over the OPTIONS: an option's own label, or an option-shaped noun or gerund. "40% of capacity
-  // is engineering and 60% is support" and "40% of responses … 60% raised concerns" are not (Codex 5826167622).
-  const lower = labelKey(text);
-  if ((labels.optionLabels ?? []).some((l) => lower.includes(labelKey(l)))) return true;
-  return /\b(?:path|paths|option|options|choice|choices|route|routes|alternative|alternatives|scenario|scenarios|raising|keeping|holding|hiring|launching|building|buying|phasing|staying|expanding|bootstrapping|deferring|piloting)\b/i.test(text);
+  /**
+   * ⛔ EACH PERCENTAGE MUST BELONG TO ITS OWN OPTION (Codex 5826253038). An option named ANYWHERE was taken as
+   * the cue, so "For the Hire Two Developers option, 40% of capacity is engineering and 60% is support" — a
+   * composition inside ONE option — was dropped. The sentence is cut at its percentages; each percentage may
+   * claim an option cue from the segment just before it or just after it, and each segment's cue can be
+   * claimed ONCE. A split over the options needs two or more percentages bound to separate cues.
+   */
+  const segments: string[] = [];
+  let from = 0;
+  for (const m of hits) { segments.push(text.slice(from, m.index)); from = m.index! + m[0].length; }
+  segments.push(text.slice(from));
+  const optionKeys = (labels.optionLabels ?? []).map(labelKey);
+  const cue = (seg: string): boolean => optionKeys.some((k) => labelKey(seg).includes(k)) || OPTION_CUE.test(seg);
+  const used = new Set<number>();
+  let bound = 0;
+  for (let i = 0; i < hits.length; i += 1) {
+    if (!used.has(i) && cue(segments[i]!)) { used.add(i); bound += 1; continue; }
+    if (!used.has(i + 1) && cue(segments[i + 1]!)) { used.add(i + 1); bound += 1; }
+  }
+  return bound >= 2;
 }
+
+/** An option-shaped noun or gerund (a split's per-percentage cue). */
+const OPTION_CUE = /\b(?:path|paths|option|options|choice|choices|route|routes|alternative|alternatives|scenario|scenarios|raising|keeping|holding|hiring|launching|building|buying|phasing|staying|expanding|bootstrapping|deferring|piloting)\b/i;
 
 /** Ranking codes present in text that has ALREADY been normalised and blanked. */
 function rankingCodesInBlanked(blanked: string): string[] {
