@@ -118,6 +118,7 @@ import {
   type SessionTurnWrite,
 } from '../../../src/orchestrator-v5/session/store.js';
 import { log } from '../../../src/utils/telemetry.js';
+import { RunAnalysisHandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 
 // ── the persisted model ────────────────────────────────────────────────────
 // `structural-add.test.ts`'s fixture: a real, analysable-shaped model.
@@ -177,6 +178,27 @@ interface FakeRow {
   readonly receipt?: AtomicCommittedModelVersionReceipt;
 }
 
+const RUN_AT = '2026-09-24T09:00:00.000Z';
+const BEFORE_RUN = '2026-09-24T08:00:00.000Z';
+const AFTER_RUN = '2026-09-24T09:30:00.000Z';
+
+/** One successful run, stamped with the hash of the graph it analysed. */
+function runFact(graphHashAtRun: string): HandlerFact {
+  return RunAnalysisHandlerFactSchema.parse({
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: '55555555-5555-4555-8555-555555555555',
+      computed_at: RUN_AT,
+      graph_hash_at_run: graphHashAtRun,
+      leading_option_id: null,
+      summary: 'A prior run of exactly the stored model.',
+      enrichment: { analysis_status: 'completed' },
+    },
+  }) as HandlerFact;
+}
+
 const VERSION_IDS = [
   'c0000000-0000-4000-8000-0000000000b1',
   'c0000000-0000-4000-8000-0000000000b2',
@@ -198,6 +220,14 @@ const fake = {
    * at the time, so the premise is asserted, not inferred.
    */
   failFirstReadAfterAppends: undefined as number | undefined,
+  /**
+   * The scenario's DURABLE analysis record (`readScenarioRunAnalysisFactsFor`) —
+   * scenario-scoped, not window-bounded — and its restore marker. The window
+   * (`readRecent`) stays empty, so only a reader of the durable record sees a run.
+   */
+  runFacts: [] as HandlerFact[],
+  marker: null as string | null,
+  markerFails: false,
   readFailuresAtAppendCount: [] as number[],
   /** The fake's own verdicts, per turn_id — asserted as preconditions. */
   landed: [] as string[],
@@ -214,6 +244,9 @@ function resetFake() {
   fake.afterNextRead = undefined;
   fake.failFirstReadAfterAppends = undefined;
   fake.readFailuresAtAppendCount = [];
+  fake.runFacts = [];
+  fake.marker = null;
+  fake.markerFails = false;
   fake.landed = [];
   fake.replayed = [];
   fake.conflicted = [];
@@ -321,6 +354,18 @@ const fakeStore = {
   readRecent: async () => [],
   readFactsFor: async () => [],
   readMostRecentPendingActions: async () => [],
+  // The durable record and the restore marker, as #1892's writers read them
+  // (`loadWriteReplyAnalysisInputs`). Empty and readable by default, so the
+  // healthy-empty expectations elsewhere in this file keep their meaning.
+  readFactsWithTurnFor: async () => [],
+  readScenarioRunAnalysisFactsFor: async (_scenarioId: string, limit: number) => ({
+    facts: fake.runFacts.slice(0, limit).map((fact, i) => ({ fact, fact_row_id: `durable-run-${i}`, fact_created_at: RUN_AT })),
+    total_count: fake.runFacts.length,
+  }),
+  readAnalysisInvalidatedAt: async () => {
+    if (fake.markerFails) throw new Error('analysis_invalidated_at read unavailable (test)');
+    return fake.marker;
+  },
   loadGraph: async (_scenarioId: string) => {
     const appendsSoFar = appendMock.mock.calls.length;
     if (fake.failFirstReadAfterAppends !== undefined && appendsSoFar > fake.failFirstReadAfterAppends) {
@@ -1435,5 +1480,75 @@ describe('POST /orchestrate/v2/turn — structural_add under a REUSED turn id an
       `EDGE REPLAY: dispatcher attested a connection THIS append did not write (${observed})`,
     ).toBe(0);
     expectNoProviderReached();
+  });
+});
+
+// ── THE NO-WRITE REPLY READS WHAT #1892'S WRITERS READ ──────────────────────
+// F4 was built before #1892 and derived the no-write reply's freshness from the
+// 20-row WINDOW alone, with no restore marker. On the #1892 base every other
+// writer reply reads the scenario's durable analysis record and the marker
+// (`deriveWriteReplyFreshness`). One store fake, one variable per case; the run
+// is stamped with EXACTLY the stored snapshot's hash, so only the record and the
+// marker can decide the verdict.
+describe('the no-write reply (a reused-id CONFLICT) derives freshness like every other writer reply', () => {
+  beforeAll(async () => {
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      throw new Error('fetch attempted in a no-provider test');
+    });
+    logInfoSpy = vi.spyOn(log, 'info');
+    app = Fastify();
+    await ceeOrchestratorRouteV2(app);
+    await app.ready();
+  });
+  afterAll(async () => {
+    await app.close();
+    fetchSpy.mockRestore();
+    logInfoSpy.mockRestore();
+  });
+  beforeEach(() => {
+    appendMock.mockClear();
+    fetchSpy.mockClear();
+    logInfoSpy.mockClear();
+    loadGraphSnapshots.length = 0;
+    resetFake();
+  });
+
+  /** R1 adds X; R2 reuses its turn id for Y → priorTurnConflict → the no-write branch. */
+  async function conflictReplyWithStoredRun(setup: (storedHash: string) => void) {
+    await commitR1();
+    const storedAfterR1 = jsonCopy(fake.graph);
+    const storedHash = analysisHash(storedAfterR1);
+    setup(storedHash);
+    const r2 = await send(addEvent(Y, storedAfterR1), MINE);
+    const mineIdx = appendIndicesFor(MINE);
+    expect(mineIdx, 'premise: R1 and R2 both reached the append').toHaveLength(2);
+    expect((await outcomeAt(mineIdx[1]!)).priorTurnConflict, 'premise: the no-write branch').toBe(true);
+    expect(r2.status).toBe(200);
+    expect(r2.body.graph_hash, 'premise: the reply presents the stored snapshot').toBe(storedHash);
+    expectNoProviderReached();
+    return { ar: r2.body.analysis_ready as Record<string, unknown> | undefined, storedHash };
+  }
+
+  it('RED: a run held only in the durable record (not the window) is seen — `fresh` against the snapshot, never `none`', async () => {
+    const { ar, storedHash } = await conflictReplyWithStoredRun((h) => { fake.runFacts = [runFact(h)]; });
+    expect(ar?.freshness).toBe('fresh');
+    expect(ar?.graph_hash_at_run).toBe(storedHash);
+  });
+
+  it('RED: the restore marker NEWER than that run → `stale / model_restored_after_analysis`, as the reload says', async () => {
+    const { ar } = await conflictReplyWithStoredRun((h) => { fake.runFacts = [runFact(h)]; fake.marker = AFTER_RUN; });
+    expect(ar?.freshness).toBe('stale');
+    expect(ar?.freshness_reason).toBe('model_restored_after_analysis');
+  });
+
+  it('CONTROL: the marker OLDER than the run → `fresh` (bound by time, not presence)', async () => {
+    const { ar } = await conflictReplyWithStoredRun((h) => { fake.runFacts = [runFact(h)]; fake.marker = BEFORE_RUN; });
+    expect(ar?.freshness).toBe('fresh');
+  });
+
+  it('RED: the marker read FAILS → `unknown / derivation_failed`, never a positive `fresh`', async () => {
+    const { ar } = await conflictReplyWithStoredRun((h) => { fake.runFacts = [runFact(h)]; fake.markerFails = true; });
+    expect(ar?.freshness).toBe('unknown');
+    expect(ar?.freshness_reason).toBe('derivation_failed');
   });
 });
