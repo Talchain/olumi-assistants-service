@@ -1,0 +1,162 @@
+{
+ "R01": {
+  "relays_named_repair": true,
+  "proposes_different_fix": false,
+  "span": "The key repair is to define which model component the \u00a3400k/year limit applies to in a directly comparable level frame."
+ },
+ "R02": {
+  "relays_named_repair": false,
+  "proposes_different_fix": true,
+  "span": "A current analysis needs salary spend represented in a comparable annual \u00a3 figure before the constraint can be tested."
+ },
+ "R03": {
+  "relays_named_repair": false,
+  "proposes_different_fix": true,
+  "span": "A current analysis needs the salary measure anchored to an annual \u00a3 baseline and the constraint\u2019s value frame specified before it can test the budget."
+ },
+ "R04": {
+  "relays_named_repair": false,
+  "proposes_different_fix": false,
+  "span": ""
+ },
+ "R05": {
+  "relays_named_repair": false,
+  "proposes_different_fix": false,
+  "span": ""
+ },
+ "R06": {
+  "relays_named_repair": false,
+  "proposes_different_fix": true,
+  "span": "The next reasoning step is to state annual salary spend for each staffing option, including current staffing, in \u00a3/year."
+ },
+ "R07": {
+  "relays_named_repair": false,
+  "proposes_different_fix": false,
+  "span": ""
+ },
+ "R08": {
+  "relays_named_repair": true,
+  "proposes_different_fix": false,
+  "span": "The unscored churn constraint needs to be attached to the specific modelled measure it is intended to limit; simply restating the 4% threshold would not make it testable."
+ },
+ "R09": {
+  "relays_named_repair": true,
+  "proposes_different_fix": false,
+  "span": "The modelled churn constraint needs to be attached to the part of the model it governs before it can be checked; simply restating \u201cunder 4%\u201d will not resolve that."
+ },
+ "R10": {
+  "relays_named_repair": false,
+  "proposes_different_fix": true,
+  "span": "The key reasoning step is to define how the 4% churn limit should be measured in the model."
+ },
+ "R11": {
+  "relays_named_repair": true,
+  "proposes_different_fix": false,
+  "span": "The next reasoning step is to define what measurable churn quantity the under\u20114% limit applies to, so it can be evaluated rather than merely retained as an unscored constraint."
+ },
+ "R12": {
+  "relays_named_repair": false,
+  "proposes_different_fix": false,
+  "span": ""
+ },
+ "R13": {
+  "relays_named_repair": true,
+  "proposes_different_fix": false,
+  "span": "The next reasoning step is to specify which modelled salary measure the \u00a3400k/year cap applies to, and whether the limit is a level or a change from today."
+ },
+ "R14": {
+  "relays_named_repair": false,
+  "proposes_different_fix": true,
+  "span": "The key missing reasoning is the annual salary spend for each staffing scenario."
+ },
+ "R15": {
+  "relays_named_repair": true,
+  "proposes_different_fix": false,
+  "span": "The unresolved reasoning step is to specify which measured churn quantity the 4% limit should constrain."
+ },
+ "R16": {
+  "relays_named_repair": false,
+  "proposes_different_fix": false,
+  "span": ""
+ },
+ "R17": {
+  "relays_named_repair": false,
+  "proposes_different_fix": false,
+  "span": ""
+ },
+ "R18": {
+  "relays_named_repair": true,
+  "proposes_different_fix": false,
+  "span": "The key unresolved reasoning step is to define which measured churn rate the 4% limit applies to."
+ },
+ "R19": {
+  "relays_named_repair": false,
+  "proposes_different_fix": false,
+  "span": ""
+ },
+ "R20": {
+  "relays_named_repair": false,
+  "proposes_different_fix": false,
+  "span": ""
+ },
+ "R21": {
+  "relays_named_repair": true,
+  "proposes_different_fix": true,
+  "span": "To make the budget test meaningful, specify what measurable part of the model the \u00a3400k/year limit applies to and state each option\u2019s annual salary spend."
+ },
+ "R22": {
+  "relays_named_repair": true,
+  "proposes_different_fix": false,
+  "span": "The needed repair is to specify which measurable cost quantity the \u00a3400k/year limit applies to, so it can be aligned with the model rather than its calculated salary-change factor."
+ },
+ "R23": {
+  "relays_named_repair": true,
+  "proposes_different_fix": false,
+  "span": "The salary limit remains recorded, but needs attaching to the specific model component it constrains before compliance can be tested."
+ },
+ "R24": {
+  "relays_named_repair": false,
+  "proposes_different_fix": false,
+  "span": ""
+ },
+ "R25": {
+  "relays_named_repair": true,
+  "proposes_different_fix": false,
+  "span": "The key unresolved reasoning step is to specify which measured churn metric the 4% limit applies to, so it can be assessed in a future run."
+ },
+ "R26": {
+  "relays_named_repair": true,
+  "proposes_different_fix": false,
+  "span": "To make the churn condition testable, specify which measured model component the **<4% monthly** limit applies to."
+ },
+ "R27": {
+  "relays_named_repair": false,
+  "proposes_different_fix": false,
+  "span": ""
+ },
+ "R28": {
+  "relays_named_repair": true,
+  "proposes_different_fix": false,
+  "span": "The key next reasoning step is to attach the churn limit to a directly measured part of the model."
+ },
+ "R29": {
+  "relays_named_repair": true,
+  "proposes_different_fix": true,
+  "span": "To test the constraint, the model needs stated annual salary spend for each staffing option, and the \u00a3400k limit needs anchoring to the relevant salary measure."
+ },
+ "R30": {
+  "relays_named_repair": true,
+  "proposes_different_fix": false,
+  "span": "A current analysis needs the salary limit attached to a measurable part of the model before this constraint can be tested."
+ },
+ "R31": {
+  "relays_named_repair": true,
+  "proposes_different_fix": false,
+  "span": "To make the constraint testable, the model needs the part of the model to which the 4% churn limit applies specified; merely restating the limit will not resolve it."
+ },
+ "R32": {
+  "relays_named_repair": true,
+  "proposes_different_fix": false,
+  "span": "The key reasoning step is to define the churn measure the 4% cap applies to, so it can be evaluated in a current analysis."
+ }
+}
