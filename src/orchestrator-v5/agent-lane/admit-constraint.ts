@@ -41,6 +41,8 @@ export interface CandidateConstraint {
   readonly value: number;
   readonly unit?: string;
   readonly provenance: string;
+  /** The drafter's reading of the user's words: the limit is on the value itself, or on a change from today. */
+  readonly frame?: 'level' | 'delta';
 }
 
 export interface AdmittedConstraint {
@@ -50,6 +52,8 @@ export interface AdmittedConstraint {
   value: number;
   label?: string;
   unit?: string;
+  /** `GoalConstraintSchema.value_frame`. ISL refuses a limit without it (`frame_not_stamped`); never guessed here. */
+  value_frame?: 'level' | 'delta';
   /**
    * Canonical authorship marker — `GoalConstraintSchema.provenance`
    * (`src/schemas/assist.ts:418`), values `explicit | inferred | proxy`.
@@ -269,6 +273,7 @@ export function admitCandidateConstraints(
       ...(unit !== undefined ? { unit } : {}),
       provenance: canonicalProvenance(c.provenance),
       ...unitProvenance,
+      ...(c.frame === 'level' || c.frame === 'delta' ? { value_frame: c.frame } : {}),
     };
 
     if (isStrictnessLost(c.operator)) {
