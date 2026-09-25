@@ -479,7 +479,14 @@ function replyForAttemptThatWroteNothing(args: {
   readonly committedResponse: OlumiResponse;
   readonly persistedGraphBytes: unknown;
   readonly persistedAnalysisGraphHash: string | null;
-  readonly priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>;
+  /**
+   * The writer's own analysis read — the durable record, the hot window and the
+   * restore marker (`loadWriteReplyAnalysisInputs`) — so this reply derives its
+   * freshness exactly as every other writer reply does. It once took the window
+   * alone, which answered `none` for a run older than 20 rows and `fresh` for a
+   * restored model.
+   */
+  readonly analysisInputs: WriteReplyAnalysisInputs;
   /**
    * Whether the change THIS request asked for is present in the reread snapshot,
    * expressed by the writer in the terms of its own receipt check. Consulted
@@ -495,7 +502,7 @@ function replyForAttemptThatWroteNothing(args: {
     committedResponse,
     persistedGraphBytes,
     persistedAnalysisGraphHash,
-    priorFactsRead,
+    analysisInputs,
   } = args;
   const snapshotParse = GraphV3.safeParse(persistedGraphBytes);
   const snapshot =
@@ -545,17 +552,9 @@ function replyForAttemptThatWroteNothing(args: {
   if (snapshot === null) {
     return { response, commitPerformed: true, graph: null };
   }
-  const freshness: FreshnessDerivation =
-    priorFactsRead.status === 'ok'
-      ? deriveAnalysisFreshness(priorFactsRead.facts, snapshot.hash)
-      : {
-          freshness: 'unknown',
-          reason: 'derivation_failed',
-          selected_fact_index: null,
-          graph_hash_at_run: null,
-          current_graph_hash: snapshot.hash,
-          computed_at: null,
-        };
+  // The shared rule, against the SNAPSHOT's hash: the durable record when it is
+  // authority, the restore marker, and `unknown` when the marker is unread.
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(analysisInputs, snapshot.hash);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -564,8 +563,9 @@ function replyForAttemptThatWroteNothing(args: {
       dispatch_path: `system_event.${writer}`,
     },
     {
-      prior_fact_count: priorFactsRead.facts.length,
-      prior_fact_read_status: priorFactsRead.status,
+      prior_fact_count: analysisInputs.hotWindow.facts.length,
+      prior_fact_read_status: analysisInputs.hotWindow.status,
+      scenario_fact_set_status: analysisInputs.factSet.status,
       this_attempt_wrote: false,
     },
   );
@@ -1490,7 +1490,7 @@ async function dispatchEdgeStrengthEdit(
       committedResponse,
       persistedGraphBytes,
       persistedAnalysisGraphHash,
-      priorFactsRead: factsRead.hotWindow,
+      analysisInputs: factsRead,
       // The edit is in the model iff the unique (from, to) edge carries what the
       // adapter projected for it: the signed mean, the direction, and the
       // user-set provenance stamp — the stamp is the whole of a `confirm_current`
@@ -1948,7 +1948,7 @@ async function dispatchStructuralDelete(
       committedResponse,
       persistedGraphBytes,
       persistedAnalysisGraphHash,
-      priorFactsRead: factsRead.hotWindow,
+      analysisInputs: factsRead,
       // The removal is in the model iff every removed id and edge pair is ABSENT
       // — the same keys (`from::to`) the receipt check below compares.
       requestedChangeVisibleIn: (snapshot) => {
@@ -3046,7 +3046,7 @@ async function dispatchStructuralRename(
       committedResponse,
       persistedGraphBytes,
       persistedAnalysisGraphHash,
-      priorFactsRead: factsRead.hotWindow,
+      analysisInputs: factsRead,
       // The rename is in the model iff the node carries the new label.
       requestedChangeVisibleIn: (snapshot) =>
         findStaleRenamedLabel(
@@ -3409,7 +3409,7 @@ async function dispatchStructuralAdd(
       committedResponse,
       persistedGraphBytes,
       persistedAnalysisGraphHash,
-      priorFactsRead: factsRead.hotWindow,
+      analysisInputs: factsRead,
       // The add is in the model iff the requested node id is.
       requestedChangeVisibleIn: (snapshot) =>
         snapshot.nodes.some((n) => n.id === result.addedNodeId),
@@ -3760,7 +3760,7 @@ async function dispatchStructuralAddEdge(
       committedResponse,
       persistedGraphBytes,
       persistedAnalysisGraphHash,
-      priorFactsRead: factsRead.hotWindow,
+      analysisInputs: factsRead,
       // The connection is in the model iff an edge between the endpoints carries
       // this request's signed strength — the receipt check's own terms.
       requestedChangeVisibleIn: (snapshot) =>
