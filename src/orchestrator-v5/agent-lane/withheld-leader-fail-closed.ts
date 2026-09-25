@@ -423,6 +423,9 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS, pri
     // beside "respectively", where the pair still maps onto the options.
     const trails = !leads && optionRefs(after) >= 2 && !CHANGE_VERB_BEFORE.test(text.slice(Math.max(0, first[0] - 40), first[0]));
     if (!ordered && !leads && !trails && !priorNames) continue;
+    // Options named only in an EARLIER sentence claim a pair here only when its figures share one clause: "coordination
+    // 75%; onboarding workload 25%" are two levels, not a split.
+    if (!ordered && !leads && !trails && figs.slice(1).some((f, i) => CLAUSE_BREAK.test(text.slice(figs[i]![1], f[0])))) continue;
     // An even split names no leader: "Both options split 50/50".
     const values = figs.map(([x, y]) => Number(/\d+(?:\.\d+)?/.exec(text.slice(x, y))![0]));
     if (values.every((v) => v === values[0])) continue;
@@ -447,10 +450,11 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS, pri
         const joiner = [...gap.matchAll(GAP_JOINER)].pop();
         return joiner === undefined ? '' : gap.slice(0, joiner.index);
       })();
-      const back = lead.trim().split(/\s+/).filter((w) => w.length > 0).reverse();
+      const back = lead.replace(/[*_`]/g, '').trim().split(/\s+/).filter((w) => w.length > 0).reverse();
       let k = 0;
       while (k < back.length && FIGURE_LINK.test(back[k]!)) k += 1;
-      const linked = k > 0 || i > 0;
+      // "Development capacity: 60%" — a label's colon links it to its figure as "is" does.
+      const linked = k > 0 || i > 0 || /:$/.test(back[0] ?? '');
       const beforeWord = measureWords(back[k] ?? '')[0];
       if (linked && beforeWord !== undefined) own[i]!.add(beforeWord.toLowerCase());
       const fwd = trail.trim().split(/\s+/).filter((w) => w.length > 0);
@@ -465,7 +469,10 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS, pri
     // The list the figures are shared over comes before any clause that merely accompanies them: "…71% and 29%
     // respectively with speed and cost concerns still open" shares nothing over speed and cost (pre-review 5829596023).
     const receiving = after.split(ACCOMPANYING_CLAUSE)[0] ?? '';
-    if (otherList(receiving) || (optionRefs(text) === 0 && otherList(text))) continue;
+    // …and only a list in the figures' OWN clause: "Taking price and churn into account, the runs came out 71% and
+    // 29%" shares nothing over price and churn (review 5829704165 A).
+    const ownClause = (before.split(CLAUSE_BREAK).pop() ?? '') + text.slice(first[0], last[1]) + receiving;
+    if (otherList(receiving) || (optionRefs(text) === 0 && otherList(ownClause))) continue;
     return true;
   }
   if (rangeLike) return false;
@@ -687,6 +694,8 @@ export interface RankingLabelContext {
   readonly rankingShapedLabelWords: readonly string[];
   /** The OPTIONS' own labels — a lone "<option>: 71%" row is that option's share (Codex 5825866849). */
   readonly optionLabels?: readonly string[];
+  /** Every OTHER node's label (factors, outcomes, goals, risks): "- Development capacity: 60%" is that factor's level. */
+  readonly nonOptionLabels?: readonly string[];
 }
 
 const NO_LABELS: RankingLabelContext = { rankingShapedLabels: [], rankingShapedLabelWords: [] };
@@ -724,11 +733,14 @@ export function rankingLabelContext(graph: unknown, analysisReady: unknown): Ran
     }
   }
   const options = new Set<string>();
+  const others = new Set<string>();
   const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   if (Array.isArray(nodes)) {
     for (const n of nodes) {
       const o = n as { kind?: unknown; label?: unknown } | null;
-      if (o?.kind === 'option' && typeof o.label === 'string' && o.label.trim().length >= MIN_LABEL_LENGTH) options.add(o.label.trim());
+      if (typeof o?.label !== 'string' || o.label.trim().length < MIN_LABEL_LENGTH) continue;
+      if (o.kind === 'option') options.add(o.label.trim());
+      else others.add(o.label.trim());
     }
   }
   const readyOptions = (analysisReady as { options?: unknown } | null | undefined)?.options;
@@ -738,7 +750,7 @@ export function rankingLabelContext(graph: unknown, analysisReady: unknown): Ran
       if (typeof label === 'string' && label.trim().length >= MIN_LABEL_LENGTH) options.add(label.trim());
     }
   }
-  return { rankingShapedLabels: labels, rankingShapedLabelWords: [...words], optionLabels: [...options] };
+  return { rankingShapedLabels: labels, rankingShapedLabelWords: [...words], optionLabels: [...options], nonOptionLabels: [...others] };
 }
 
 function escapeRegExp(s: string): string {
@@ -767,6 +779,48 @@ function blankScopedMetricComparison(text: string): string {
   return METRIC_SCOPE_OPENING.test(text) ? text.replace(SCOPED_STAT_COMPARISON, BLANK) : text;
 }
 
+/**
+ * A ranked list's item: it gives an option — named, or written as the item's head ("**Keep £49:**", "Raise to £59:") —
+ * a bare share, a percentage with nothing after it saying what it measures. "- It assumes churn stays at 3%, which was
+ * not measured." has no such head and names no option; "- Pro retention: **97% retained/month**" says what it measures.
+ */
+function isRankedListItem(unit: string, startsLine: boolean, labels: RankingLabelContext): boolean {
+  const copy = classificationCopy(unit);
+  const plain = copy.replace(/[*_`]/g, '');
+  const pcts = [...plain.matchAll(new RegExp(PCT, 'gi'))];
+  // A ranked list's row gives ONE figure. Several figures are a sentence of levels, judged as a sentence.
+  if (pcts.length !== 1) return false;
+  const m = pcts[0]!;
+  const rest = plain.slice(m.index! + m[0].length);
+  const after = /^[\s)\]]*((?:(?:of|the|a|an)\s+)*)([a-z][a-z'-]*)?/i.exec(rest)!;
+  const next = after[2];
+  // "20% of team capacity", "4% per month": the figure names what it measures.
+  if (next !== undefined && (next.toLowerCase() === 'per' || !FUNCTION_OR_SHARE_WORD.test(next) || (after[1]!.length > 0 && !SHARE_NOUN.test(next)))) return false;
+  // "raise process maturity to 70%": a measure linked straight before it.
+  const back = plain.slice(0, m.index).trim().split(/\s+/).reverse();
+  let k = 0;
+  while (k < back.length && FIGURE_LINK.test(back[k]!)) k += 1;
+  const before = back[k] ?? '';
+  if (k > 0 && /^[a-z][a-z'-]*$/i.test(before) && !FUNCTION_OR_SHARE_WORD.test(before) && !OPTION_CUE.test(before)) return false;
+  const key = labelKey(copy);
+  // A specific option — a label, or an option-shaped word that is not the generic noun ("no option can be put forward").
+  const namesOption = (labels.optionLabels ?? []).some((l) => { const lk = labelKey(l); return lk.length > 0 && key.includes(lk); })
+    || [...copy.matchAll(new RegExp(OPTION_CUE.source, 'gi'))].some((c) => !GENERIC_OPTION_NOUN.test(c[0]));
+  if (namesOption) return true;
+  const head = startsLine ? /^\s*(?:[-+•]|\*(?=\s)|\d+[.)])\s+(?:\*\*([^*]+)\*\*|([^:.]{1,60}):)/.exec(copy) : null;
+  if (head === null) return false;
+  // A head that is one of the model's OTHER nodes ("Development capacity") gives its level, not an option's share.
+  const h = labelKey((head[1] ?? head[2] ?? '').replace(/[:\s]+$/, ''));
+  return h.length > 0 && !(labels.nonOptionLabels ?? []).some((l) => { const lk = labelKey(l); return lk.length > 0 && (lk.includes(h) || h.includes(lk)); });
+}
+
+/**
+ * ⛔ A PLACE IN AN ORDER IS A RANKING (served captures, RC 5829662359 (b)/(c)): "**Hire a Tech Lead** trails in this
+ * model (**10.6%**)", "**Pilot £59 at Release:** follows at **41%**". Naming an option's PLACE — trailing, following at a
+ * share, coming second or last — says the others lead. With an option and a percentage in the sentence, it ranks.
+ */
+const POSITION_WORD = /\b(?:trails?|trailing|trailed|lags?|lagging|lagged|follows?\s+(?:at|on|with)|runner[-\s]up|(?:comes?|came|finish(?:es|ed)?|sits?|ranks?|ranked|is|was)\s+(?:in\s+)?(?:second|third|fourth|last)(?:\s+place)?|in\s+(?:second|third|fourth|last)\s+place|at\s+the\s+bottom)\b/i;
+
 /** Which ranking patterns a sentence trips, after idioms and ranking-shaped labels are blanked. */
 export function rankingCodesIn(sentence: string, labels: RankingLabelContext = NO_LABELS, prior = ''): string[] {
   if (typeof sentence !== 'string' || sentence.trim() === '') return [];
@@ -778,6 +832,10 @@ export function rankingCodesIn(sentence: string, labels: RankingLabelContext = N
   }
   const codes = rankingCodesInBlanked(blankIdioms(blankScopedMetricComparison(text)));
   if (isShareSplit(classificationCopy(sentence), labels, classificationCopy(prior))) codes.push('share_split');
+  const copy = classificationCopy(sentence);
+  const key = labelKey(copy);
+  const namesOption = (labels.optionLabels ?? []).some((l) => { const k = labelKey(l); return k.length > 0 && key.includes(k); }) || OPTION_CUE.test(copy);
+  if (namesOption && POSITION_WORD.test(copy) && new RegExp(PCT, 'i').test(copy)) codes.push('position_share');
   return codes;
 }
 
@@ -1033,20 +1091,50 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
       if ('sep' in seg) { before += seg.sep; return; }
       seg.units.forEach((u, j) => {
         const key = `${r}:${j}`;
-        const one = /\S/.test(u) && !PROTECTED_SENTENCES.has(u.trim()) && ONE_PCT.test(u);
-        if (one && prev !== null && sentenceRanksOptions(`${prev.text.trim()} ${u.trim()}`, labels, prev.prior)) { pairDrop.add(prev.key); pairDrop.add(key); }
+        // List items are judged as a list (below), never paired line by line: "- Capacity: 40%" / "- Development: 60%".
+        const one = /\S/.test(u) && !PROTECTED_SENTENCES.has(u.trim()) && ONE_PCT.test(u) && !(j === 0 && LIST_MARKER.test(u));
+        // Only a SPLIT the two figures make together: a neighbour that ranks on its own goes alone, never taking this one.
+        if (one && prev !== null && rankingCodesIn(`${prev.text.trim()} ${u.trim()}`, labels, prev.prior).includes('share_split')) { pairDrop.add(prev.key); pairDrop.add(key); }
         prev = one ? { key, text: u, prior: before } : (/\S/.test(u) ? null : prev);
         before += u;
       });
     });
   }
-  const lines: Array<Seg | null> = segs.map((seg, r) => {
-    if ('sep' in seg) { prior += seg.sep; return seg; }
-    const drop = seg.units.map((u, j) => {
+  const drops: boolean[][] = segs.map((seg, r) => {
+    if ('sep' in seg) { prior += seg.sep; return []; }
+    return seg.units.map((u, j) => {
       const ranks = forced.has(`${r}:${j}`) || pairDrop.has(`${r}:${j}`) || (/\S/.test(u) && !PROTECTED_SENTENCES.has(u.trim()) && sentenceRanksOptions(u, labels, prior));
       prior += u;
       return ranks;
     });
+  });
+  /**
+   * ⛔ A RANKED LIST GOES AS A LIST (served captures, #1871 against RC 5829662359 (b)/(c)): a withheld reply listed
+   * "- **Raise Price at Release (£59):** leads … **55%**", "- **Pilot £59 at Release:** follows at **41%**", "- **Keep
+   * £49:** is at **4%**". The leader's item went; its siblings still ranked the rest. In a list where any item was
+   * dropped as ranking, an item that states a bare share — a percentage saying nothing of what it measures — goes too.
+   * "- Pro retention: **97% retained/month**" says what it measures, and stays.
+   */
+  for (let r = 0; r < segs.length; r += 1) {
+    const list: number[] = [];
+    let k = r;
+    while (k < segs.length) {
+      const seg = segs[k]!;
+      if ('units' in seg && LIST_MARKER.test(seg.units[0] ?? '')) { list.push(k); k += 1; continue; }
+      if ('sep' in seg && seg.sep === '\n' && list.length > 0) { k += 1; continue; }
+      break;
+    }
+    if (list.length > 1 && list.some((i) => drops[i]!.some(Boolean))) {
+      for (const i of list) {
+        const seg = segs[i] as { units: string[] };
+        seg.units.forEach((u, j) => { if (!drops[i]![j] && isRankedListItem(u, j === 0, labels)) drops[i]![j] = true; });
+      }
+    }
+    if (list.length > 0) r = k - 1;
+  }
+  const lines: Array<Seg | null> = segs.map((seg, r) => {
+    if ('sep' in seg) return seg;
+    const drop = drops[r]!;
     const n = drop.filter(Boolean).length;
     if (n === 0) return seg;
     dropped += n;

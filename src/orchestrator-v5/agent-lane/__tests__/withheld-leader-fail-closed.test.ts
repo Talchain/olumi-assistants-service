@@ -1009,3 +1009,103 @@ describe('pre-review of #1871 at ae56cf4b — an accompanying list is not the re
     'For both raising and holding, 97% and 3% are the renewal and churn rates.',
   ])('CONTROL: the receiving list still lets the figures through: %s', (s) => { expect(wire(s)).toContain(s); });
 });
+
+/**
+ * RC 5829662359 (b)/(c): served replies from the overnight captures, run through the gate offline. A ranked LIST goes as
+ * a list — its siblings rank the rest once the leader's row is dropped — and an option's PLACE ("trails", "follows at")
+ * is a ranking. Levels lists, and sentences whose neighbour ranks on its own, stay.
+ */
+describe('served captures — a ranked list goes as a list', () => {
+  const gate = (text: string, nodes: Array<{ id: string; kind: string; label: string }>) => enforceAgentLaneLeaderClaimsAtWire(
+    { assistant_text: text, blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: false, withheld_reason: 'near_tie' } } } as unknown as OlumiResponse,
+    { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'near_tie', graph: { nodes }, analysisReady: { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } } },
+  ).response.assistant_text;
+  const pricing = [{ id: 'o1', kind: 'option', label: 'Raise Price at Release' }, { id: 'o2', kind: 'option', label: 'Keep Current Pro Price' }, { id: 'o3', kind: 'option', label: 'Pilot £59 at Release' }];
+  const hiring = [{ id: 'o1', kind: 'option', label: 'Hire a Tech Lead' }, { id: 'o2', kind: 'option', label: 'Hire Two Developers' }, { id: 'o3', kind: 'option', label: 'Improve Delivery System' }, { id: 'f1', kind: 'factor', label: 'Development capacity' }, { id: 'f2', kind: 'factor', label: 'Technical leadership capacity' }];
+  it('RED (captured c3b-467b591): every row of a ranked win-share list goes, the caveat stays', () => {
+    const out = gate([
+      '**What the current model implies**',
+      '- **Raise Price at Release (£59):** leads in the model, with a **55%** chance of producing the strongest MRR outcome across the simulated scenarios.',
+      '- **Pilot £59 at Release (20% rollout):** follows at **41%**.',
+      '- **Keep £49:** is at **4%**.',
+      '',
+      '**Important limitation:** the model could **not assess the “monthly churn under 4%” constraint**.',
+    ].join('\n'), pricing);
+    expect(out).not.toMatch(/55%|41%|\*\*4%\*\*/);
+    expect(out).toContain('**Important limitation:** the model could **not assess the “monthly churn under 4%” constraint**.');
+  });
+  it('RED (captured sprint-c4a6cce-A-hiring): "trails in this model (10.6%)" goes with its list', () => {
+    const out = gate([
+      '**What the current model implies**',
+      '',
+      '- Across all five options, **Improve Delivery System** is marginally most likely to raise velocity (**39.3%**), with **Hire Two Developers** very close (**36.7%**).',
+      '- **Hire a Tech Lead** trails in this model (**10.6%**).',
+      '- Restricting the question to your two hiring choices: **two developers leads the Tech Lead under these assumptions**.',
+      '',
+      'However, this is a **fragile near-tie**, not a firm conclusion.',
+    ].join('\n'), hiring);
+    expect(out).not.toMatch(/39\.3%|36\.7%|10\.6%|leads the Tech Lead/);
+    expect(out).toContain('However, this is a **fragile near-tie**, not a firm conclusion.');
+  });
+  it('RED: an option\'s place with a share ranks in prose too', () => {
+    expect(gate('The churn limit was not scored. Hire a Tech Lead trails in this model at 10.6%. Churn is the input to check.', hiring)).not.toContain('10.6%');
+    expect(gate('The churn limit was not scored. The Pilot £59 at Release option follows at 41%. Churn is the input to check.', pricing)).not.toContain('41%');
+  });
+  it('CONTROL (captured construction reply): a levels list stays whole, beside the option-settings list', () => {
+    const text = [
+      '**Current position**',
+      '- Technical leadership capacity: **40%** — partly covered, but potentially constrained.',
+      '- Development capacity: **60%**.',
+      '- Team coordination effectiveness: **60%**.',
+      '- Onboarding workload: **10%**.',
+      '',
+      '**What each option would set**',
+      '- **Hire a Tech Lead:** 1 Tech Lead; technical leadership capacity **70%**; coordination **75%**; onboarding workload **25%**.',
+      '- **Hire two developers:** 6 developers; development capacity **85%**; coordination **50%**; onboarding workload **35%**.',
+    ].join('\n');
+    expect(gate(`I've set up a comparison model with three options: maintain current staffing, hire a Tech Lead, or hire two developers.\n\n${text}`, hiring)).toContain(text);
+  });
+  it('CONTROL: in a ranked list, a factor\'s level row and a row with a measured figure stay', () => {
+    const out = gate([
+      '- **Hire Two Developers** leads with **39.3%**.',
+      '- Technical leadership capacity: **50%**',
+      '- Pilot scope: **10%**, with churn at **4% per month**.',
+    ].join('\n'), hiring);
+    expect(out).not.toContain('39.3%');
+    expect(out).toContain('- Technical leadership capacity: **50%**');
+    expect(out).toContain('- Pilot scope: **10%**, with churn at **4% per month**.');
+  });
+  it('CONTROL: list items are judged as a list, never paired line by line', () => {
+    const text = '- Coordination 40%\n- Onboarding 60%';
+    expect(gate(`We compared hiring a Tech Lead and hiring two developers.\n\n${text}`, hiring)).toContain(text);
+  });
+  it('CONTROL (captured): a sentence whose neighbour ranks on its own is not taken with it', () => {
+    const out = gate('4. **Pilot scope**\n   The pilot is set at **10%** as an assumption. The ordering is particularly sensitive to rollout scope: the model indicates that a pilot scope below roughly **15%** favours keeping £49 rather than the pilot, on these assumptions.', pricing);
+    expect(out).toContain('The pilot is set at **10%** as an assumption.');
+  });
+});
+
+/** Review of #1871 at ae56cf4b (5829704165) A: another list counts only in the figures' own clause. */
+describe('review of #1871 at ae56cf4b — a list in a leading clause is not what the figures are shared over', () => {
+  const graph = { nodes: [{ id: 'keep', kind: 'option', label: 'Keep Pro at £49' }, { id: 'raise', kind: 'option', label: 'Raise Pro to £59 at release' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }] };
+  const analysisReady = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } };
+  const gate = (text: string) => enforceAgentLaneLeaderClaimsAtWire(
+    { assistant_text: text, blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } } } as unknown as OlumiResponse,
+    { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'constraint_verdict_withheld', graph, analysisReady },
+  ).response.assistant_text;
+  it.each([
+    ['We compared raising and holding, in that order.', 'Taking price and churn into account, the runs came out 71% and 29%.'],
+    ['We compared Raise Pro to £59 at release and Keep Pro at £49, in that order.', 'Weighing price and churn together, the results were 71% and 29%.'],
+    ['We compared raising and holding, in that order.', 'With price and churn both modelled, the results were 71% and 29%.'],
+    ['We compared raising and holding.', 'After accounting for price and churn, the results were 71% and 29%.'],
+    ['Here are raising and holding, respectively.', 'Once revenue and churn are combined, the results were 71% and 29%.'],
+  ])('RED: %s → "%s" is removed', (lead, pair) => {
+    const out = gate(`${lead} ${pair} Churn is the input to check.`);
+    expect(out).not.toMatch(/71%|29%/);
+    expect(out).toContain('Churn is the input to check.');
+  });
+  it.each([
+    ['We compared raising and holding.', 'Annual and monthly plans are 70% and 30% respectively.'],
+    ['We compared raising and holding.', 'Ads and referrals brought in 60% and 40% of signups.'],
+  ])('CONTROL: %s → "%s" is kept (the list is the figures\' own subject)', (lead, pair) => { expect(gate(`${lead} ${pair}`)).toContain(pair); });
+});
