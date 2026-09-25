@@ -150,5 +150,32 @@ export function admitCandidateConstraints(
     constraints.push(admitted);
   }
 
-  return { constraints, loss };
+  // ⛔ A LIMIT READ BOTH WAYS IS NOT A LIMIT (review 5831251158, saved draw cap-attach/L/B2/draw-4): "Budget is
+  // £900k either way" was drafted as BOTH "at least 900000" and "at most 900000" on one node. Attached, the lower
+  // half turned the user's ceiling into a floor. When a node's lower bound meets or exceeds its upper bound, both
+  // are withheld together and the loss is said in words; neither side is guessed. A genuine range still attaches.
+  const contradicted = new Set<string>();
+  for (const lower of constraints) {
+    if (lower.operator !== '>=') continue;
+    const upper = constraints.find((u) => u.node_id === lower.node_id && u.operator === '<=' && lower.value >= u.value);
+    if (upper === undefined || contradicted.has(lower.node_id)) continue;
+    contradicted.add(lower.node_id);
+    const metric = candidates.find((c) => nodeIdFor(c.metric) === lower.node_id)?.metric ?? lower.node_id;
+    const authored = lower.provenance === 'explicit' || upper.provenance === 'explicit';
+    loss.push({
+      code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
+      layer: 'cee',
+      field_path: `goal_constraints[${lower.node_id}].bound_direction`,
+      before: `${metric}: at least ${lower.value}${lower.unit ?? ''} and at most ${upper.value}${upper.unit ?? ''}`,
+      after: null,
+      reason:
+        `${authored ? 'Your limit' : 'The limit Olumi proposed'} on "${metric}" was drafted both as at least ` +
+        `${lower.value}${lower.unit ?? ''} and as at most ${upper.value}${upper.unit ?? ''}, which would count every ` +
+        `option on one side of it as breaking it. Neither was attached, so the analysis will not check this limit ` +
+        `until you say which way it runs (a budget is usually at most).`,
+      severity: 'warn',
+    });
+  }
+
+  return { constraints: constraints.filter((c) => !contradicted.has(c.node_id)), loss };
 }

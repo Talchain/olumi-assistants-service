@@ -47,6 +47,17 @@
  * advice SURVIVES there, is GREEN at pristine, and must stay green. Arm C
  * asserts both in ONE run, which is the only form that proves the
  * discrimination is per-NODE rather than per-request.
+ *
+ * ⛔ SUPERSEDED IN ONE RESPECT, 25 Sep 2026 (independent review #69
+ * 5831708206, adopted by AI Quality 5831722994). Arm B's envelope reaches
+ * `unevaluated` by rule 3 with `codes: []`, and on that shape the inputs cannot
+ * tell a root target that restating would repair from one it would not (the
+ * agent-lane frame refusal arrives identically, #69 5831686178). The agreed rule
+ * fails closed: NO row gets the restate-and-rerun promise unless a producer
+ * proves it lands, accepting the lost advice. So Arm B no longer asserts the
+ * advice survives. What still discriminates per NODE, and is still asserted in
+ * Arms B–D, is the CAUSE: only a PROVED-derived target is told it is "worked
+ * out from other parts"; the root target gets the neutral unknown-cause arm.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -95,6 +106,15 @@ const CANNOT_CHECK = 'Olumi cannot yet test a limit on a quantity like that, so 
  * help), "run again", and the delta frame (cannot be recorded yet; RC: post-PoC).
  */
 const INVITATION = /which part|starting level|value today|run the analysis again|tell me|what the options add/i;
+/**
+ * 25 Sep 2026 — the UNKNOWN-CAUSE arm (independent review #69 5831708206):
+ * what an unproved `codes: []` row now gets, singular and plural. It asserts no
+ * cause and promises no repair.
+ */
+const UNKNOWN_CAUSE_ARM =
+  'This model could not check it yet, so it was not part of the comparison. It stays on the model.';
+const UNKNOWN_CAUSE_ARM_PLURAL =
+  'This model could not check them yet, so they were not part of the comparison. They stay on the model.';
 
 /** The limit, at the label and the brief span the session actually carried. */
 const CONSTRAINT_ID = 'constraint_goal_nrr_min';
@@ -332,13 +352,17 @@ describe('a limit on an UNANCHORABLE target is not told to restate itself', () =
     expect(v.summary).not.toContain('scored highest against your goal in');
   });
 
-  it('ARM B (OPPOSITE-DIRECTION TWIN): a ROOT target KEEPS the restate-the-limit remedy', async () => {
-    // GREEN at pristine and GREEN after. This is the guard against closing the
-    // gap by suppressing the advice everywhere.
+  it('ARM B (OPPOSITE-DIRECTION TWIN): a ROOT target is NOT given the derived-target cause', async () => {
+    // Was "KEEPS the restate-the-limit remedy" until 25 Sep 2026. The agreed
+    // fail-closed rule (#69 5831708206) drops that promise for every `codes: []`
+    // row, root target included, because nothing proves it lands here either.
+    // The twin still guards the per-NODE discrimination: the unanchored CAUSE
+    // is spoken only on proof, so a root target must not receive it.
     const v = await runSummary(ROOT_TARGET_GRAPH);
 
-    expect(v.summary).toContain(FUTILE_REMEDY);
     expect(v.summary).not.toContain('worked out from other parts');
+    expect(v.summary).toContain(UNKNOWN_CAUSE_ARM);
+    expect(v.summary).not.toContain(FUTILE_REMEDY);
     expect(v.may_name_leading_option).toBe(false);
   });
 
@@ -356,7 +380,10 @@ describe('a limit on an UNANCHORABLE target is not told to restate itself', () =
     expect(v.summary).toContain(SECOND_CONSTRAINT_LABEL);
     // ...and therefore the claim that no restatement can help must NOT be made.
     expect(v.summary).not.toContain('worked out from other parts');
-    expect(v.summary).toContain(FUTILE_REMEDY);
+    // 25 Sep 2026: the conservative sentence is the unknown-cause arm, which
+    // promises nothing (#69 5831708206).
+    expect(v.summary).toContain(UNKNOWN_CAUSE_ARM_PLURAL);
+    expect(v.summary).not.toContain(FUTILE_REMEDY);
   });
 
   it('ARM C: both arms in ONE run — the discrimination is per-NODE, not per-request', async () => {
@@ -364,7 +391,12 @@ describe('a limit on an UNANCHORABLE target is not told to restate itself', () =
     const root = await runSummary(ROOT_TARGET_GRAPH);
 
     expect(derived.summary).not.toContain(FUTILE_REMEDY);
-    expect(root.summary).toContain(FUTILE_REMEDY);
+    expect(root.summary).not.toContain(FUTILE_REMEDY);
+    // Per-NODE, bound to each arm's own sentence (25 Sep 2026).
+    expect(derived.summary).toContain(CANNOT_CHECK);
+    expect(derived.summary).not.toContain(UNKNOWN_CAUSE_ARM);
+    expect(root.summary).toContain(UNKNOWN_CAUSE_ARM);
+    expect(root.summary).not.toContain(CANNOT_CHECK);
     // The two summaries must genuinely differ; identical output for different
     // inputs is evidence about the harness, not the product (trap 20).
     expect(derived.summary).not.toBe(root.summary);
