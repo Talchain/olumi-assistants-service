@@ -22,6 +22,7 @@
 import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { committedValueWrite } from './fixtures/served-value-write.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440000';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r' };
@@ -187,8 +188,8 @@ function framedProduct(writes: 'receipt' | 'refused' | 'committed_no_receipt') {
       hash = 'h1';
       // The egress validator DELETES the receipt when it is the only field that fails
       // (validators/b1.ts:128) — the write is committed and the 200 carries no receipt.
-      if (writes === 'committed_no_receipt') return { status: 200, json: {} };
-      return { status: 200, json: { model_version_receipt: RECEIPT(String(b.turn_id)) } };
+      if (writes === 'committed_no_receipt') return { status: 200, json: committedValueWrite(String(e.target_id)) };
+      return { status: 200, json: committedValueWrite(String(e.target_id), { model_version_receipt: RECEIPT(String(b.turn_id)) }) };
     }
     return { status: 200, json: { graph: { nodes, edges: [] }, graph_hash: hash } };
   };
@@ -247,8 +248,8 @@ describe('a value the user revises is saved on its own frame, and only called sa
     // Keying `ownWrite` on the receipt ALONE would report "not saved" for a write that
     // landed, which is worse than the defect item 4 fixes. `model_version_receipt` is the
     // single DEGRADABLE_EGRESS_FIELD (validators/b1.ts:128): when it is the only field that
-    // fails egress validation it is deleted and the rest of the response passes. The second
-    // signal is the canonical hash moving across this op's own dispatch.
+    // fails egress validation it is deleted and the rest of the response passes. What still
+    // proves it is this op's own `graph_patch` (status 'applied') in the same response.
     const p = framedProduct('committed_no_receipt');
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const proposed = await caps.proposeAssumptions(ctx, {
