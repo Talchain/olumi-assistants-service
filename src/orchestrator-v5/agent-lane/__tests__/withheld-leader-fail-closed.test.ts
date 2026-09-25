@@ -626,6 +626,9 @@ describe('pre-review of #1871 at f36e7fea — a metric per option is not a share
   it.each([
     'On the supplied retention metric, the £59 path has 40% retention, while holding has 60% retention.',
     'The £59 path shows 40% uptake and holding 60% uptake.',
+    // The quantifier genuinely scopes the OPTIONS.
+    'On both the £59 and £49 paths, 96% of customers stay and 4% churn.',
+    'On both the £59 path and holding, 96% of customers stay and 4% churn.',
   ])('RED: kept through BOTH gates (C2, a scoped metric): %s', (s) => { expect(wire(s)).toContain(s); });
   it.each([
     'The £59 path has 71% and holding 29%.',
@@ -638,6 +641,11 @@ describe('pre-review of #1871 at f36e7fea — a metric per option is not a share
     // Pre-review addendum 5828219261: "both" scopes something other than the options — the split stands.
     'For both customer cohorts, the £59 path over holding: 71% to 29%.',
     'Across both regions, raising and holding came in at 71% and 29%.',
+    // Pre-review addendum 5828272340: the quantifier's scope is its FOLLOWING phrase, not the punctuation.
+    'For both customer cohorts \u2014 the £59 path over holding: 71% to 29%.',
+    'For both customer cohorts the £59 path over holding: 71% to 29%.',
+    'For both cohorts alike, the £59 path over holding: 71% to 29%.',
+    'Both the £59 path and holding came in at 71% and 29%.',
   ])('CONTROL: a share is still removed through BOTH gates: %s', (s) => { expect(wire(s)).not.toMatch(/71%|29%/); });
   it('PERMITTED CONTROL: the same "both cohorts" sentence passes unchanged when a leader may be named', () => {
     const text = 'The churn limit was scored. For both customer cohorts, the £59 path over holding: 71% to 29%.';

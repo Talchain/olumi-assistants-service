@@ -373,10 +373,34 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
    * and holding, …", "raising and holding alike", "on either path"). ⛔ Pre-review addendum 5828219261: "For both
    * customer cohorts, the £59 path over holding: 71% to 29%" — "both" scopes the cohorts, and the split stands.
    */
-  const appliesToAllOptions = (seg: string): boolean => seg.split(/[,;:]/).some((clause) => {
-    const m = APPLIES_TO_ALL.exec(clause);
-    return m !== null && (/\beither\s+(?:option|path|choice|route)\b/i.test(m[0]) || optionRefs(clause) >= 2);
-  });
+  /**
+   * ⛔ WHAT THE QUANTIFIER MODIFIES, NOT WHERE THE PUNCTUATION IS (pre-review addendum 5828272340): "For both customer
+   * cohorts — the £59 path over holding" and "…cohorts the £59 path…" defeated a comma-scoped test. "both / either /
+   * each / all" modifies the noun phrase that FOLLOWS it: skip determiners, numbers and prices ("the", "£59", "and"),
+   * and the first content word must begin an option ("On both the £59 and £49 paths", "on either path"). "alike"
+   * modifies the phrase just BEFORE it ("raising and holding alike"). "both customer cohorts" is not the options.
+   */
+  const startsWithOption = (rest: string): boolean => {
+    const words = rest.trim().split(/\s+/);
+    let i = 0;
+    while (i < words.length && QUANTIFIER_SKIP.test(words[i]!.replace(/[,;:.!?]+$/, ''))) i += 1;
+    const tail = words.slice(i).join(' ');
+    return new RegExp(`^${OPTION_CUE.source}`, 'i').test(tail) || optionKeys.some((k) => k.length > 0 && tail.startsWith(k));
+  };
+  const appliesToAllOptions = (seg: string): boolean => {
+    const key = labelKey(seg);
+    for (const m of key.matchAll(/\b(?:on|for|across|in|under|with|to)\s+(?:both|either|each|all)\b/g)) {
+      if (startsWithOption(key.slice(m.index! + m[0].length))) return true;
+    }
+    for (const m of key.matchAll(/\beither\b/g)) {
+      if (startsWithOption(key.slice(m.index! + m[0].length))) return true;
+    }
+    for (const m of key.matchAll(/\balike\b/g)) {
+      const before = key.slice(0, m.index).trim().split(/\s+/).pop() ?? '';
+      if (new RegExp(`${OPTION_CUE.source}$`, 'i').test(before) || optionKeys.some((k) => k.length > 0 && key.slice(0, m.index).trim().endsWith(k))) return true;
+    }
+    return false;
+  };
   /** A passage naming two or more options AS A LEGEND — not a figure that applies to all of them. */
   const isLegend = (seg: string, need: number): boolean => !appliesToAllOptions(seg) && optionRefs(seg) >= need;
   for (const m of saysSplit ? [] : text.matchAll(/(?<![\d.,])(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent)?\s?(?:-|to)\s?(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent)/gi)) {
@@ -454,8 +478,8 @@ const FUNCTION_OR_SHARE_WORD = /^(?:and|or|nor|but|yet|so|to|for|of|in|on|at|by|
 
 /** A generic option noun: after another reference it names the same option ("the holding option"). */
 const GENERIC_OPTION_NOUN = /^(?:path|paths|option|options|choice|choices|route|routes|alternative|alternatives|scenario|scenarios)$/i;
-/** The figure applies to every option named ("on both the £59 path and holding", "raising and holding alike"). */
-const APPLIES_TO_ALL = /\b(?:on|for|across|in|under|with|to)\s+(?:both|either|each|all)\b|\balike\b|\beither\s+(?:option|path|choice|route)\b/i;
+/** Words a quantifier's noun phrase may open with before its head: determiners, "and"/"of", numbers and prices. */
+const QUANTIFIER_SKIP = /^(?:the|of|and|or|these|those|two|three|four|its|their|our|[£$€]?\d[\d,.]*[kmb]?)$/i;
 
 /** A change verb just before a descending pair: the pair is a change ("could drop 70% to 30%"), not a split. */
 const CHANGE_VERB_BEFORE = /\b(?:drops?|dropped|falls?|fell|declines?|declined|decreases?|decreased|shrinks?|shrank|cuts?|reduces?|reduced|rises?|rose|increases?|increased|grows?|grew|climbs?|climbed|moves?|moved|goes\s+(?:up|down)|went\s+(?:up|down)|changes?|changed)\s+(?:[a-z]+\s+){0,2}$/i;
