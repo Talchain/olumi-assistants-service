@@ -586,13 +586,23 @@ function keepsEveryAction(before: CandidateModel, after: CandidateModel): boolea
  * made a total compares as that total on both sides.
  */
 function keepsEveryUserNumber(before: CandidateModel, after: CandidateModel): boolean {
+  // ⛔ EVERY carrier of the pair must match, not SOME (pre-review 5829120255):
+  // admission keeps the LAST entry for a factor, so one matching duplicate proves
+  // nothing, and the same number re-stamped `ai_proposed` is no longer the user's.
+  // `value_kind` needs no check: preparation has already made an addition a total.
   const baselinesKept = before.factors
     .filter((f) => f.baseline_known && f.provenance === 'explicit' && typeof f.baseline_value === 'number')
-    .every((f) => after.factors.some((g) => g.label === f.label && g.baseline_known && g.baseline_value === f.baseline_value));
+    .every((f) => {
+      const same = after.factors.filter((g) => g.label === f.label);
+      return same.length > 0 && same.every((g) => g.baseline_known && g.provenance === 'explicit' && g.baseline_value === f.baseline_value);
+    });
   const levelsKept = before.options.every((o) => (o.interventions ?? [])
     .filter((i) => i.provenance === 'explicit')
-    .every((i) => after.options.find((x) => x.label === o.label)?.interventions
-      ?.some((j) => j.factor_label === i.factor_label && j.value === i.value) === true));
+    .every((i) => {
+      const carriers = (after.options.find((x) => x.label === o.label)?.interventions ?? []).filter((j) => j.factor_label === i.factor_label);
+      return carriers.length > 0 && carriers.every((j) =>
+        j.value === i.value && j.provenance === 'explicit' && j.unit === i.unit);
+    }));
   return baselinesKept && levelsKept;
 }
 

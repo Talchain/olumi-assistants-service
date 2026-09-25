@@ -316,6 +316,18 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     userLevelKept(graph);
   });
 
+  it('RED (same class): the user\'s 52 re-read as an ADDITION (so a different total, 40 + 52) is not adopted', async () => {
+    const { graph } = await construct(first52(), retry52([{ ...explicit52, value_kind: 'additional' as never }]));
+    userLevelKept(graph);
+  });
+
+  it('RED (same class): a user-stated baseline kept at 40 but re-stamped as Olumi\'s is not adopted', async () => {
+    const retry = stated40(covered(), 40, true);
+    retry.factors[0] = { ...retry.factors[0]!, provenance: 'ai_proposed' };
+    const { graph } = await construct(stated40(c22(), 40, true), retry);
+    expect(node(graph, 'engineering_delivery_capacity').observed_state).toMatchObject({ raw_value: 40, source: 'brief_extraction' });
+  });
+
   it('CONTROL: a retry keeping exactly the one explicit 52 and filling the other pairs is adopted', async () => {
     const { graph } = await construct(first52(), retry52([{ ...explicit52 }]));
     userLevelKept(graph);
