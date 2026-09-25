@@ -113,9 +113,26 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
     }
   });
 
-  it('RED: a stated value that the model itself inferred is not the user’s either', () => {
-    const m = admitCandidateModel(pricing({ baseline_known: true, baseline_value: 16000, baseline_provenance: 'inferred' }));
-    expect(m.nodes.find((n) => n.id === GOAL)?.observed_state?.source).toBe('cee_inference');
+  /**
+   * ⛔ "KNOWN" IS NOT ENOUGH — ONLY THE USER'S OWN FIGURE REACHES GOAL FIT (verdict
+   * 5824647383). The strict schema cannot tie `baseline_known` to its provenance, so
+   * `baseline_known: true` with `baseline_provenance: 'ai_proposed' | 'inferred'` is
+   * valid model output (the negative control below proves it). Admission used to
+   * carry it into Goal fit as `cee_inference`: the model's own current level setting
+   * the chance of reaching the user's target. It is now withheld and said, exactly
+   * like an estimate.
+   */
+  it.each(['ai_proposed', 'inferred'])('RED: a "known" current level the model attributes to itself (%s) is withheld from Goal fit and said', async (prov) => {
+    const model = pricing({ baseline_known: true, baseline_value: 16000, baseline_provenance: prov });
+    // Negative control: the REAL strict schema accepts this shape, so only admission can stop it.
+    expect(strict({ ...model, unknowns: [] }), JSON.stringify(strict.errors)).toBe(true);
+    const { goal, graph, out } = await registeredGoal(model);
+    expect(goal).not.toHaveProperty('observed_state');
+    const analysed = (resolveRunAdmission(graph).canonicalGraph as { nodes: { id: string; observed_state?: unknown }[] }).nodes.find((n) => n.id === GOAL);
+    expect(analysed).not.toHaveProperty('observed_state');
+    const said = (out.not_represented as string[]).filter((x) => x.includes("Olumi's own estimate"));
+    expect(said, JSON.stringify(out.not_represented)).toHaveLength(1);
+    expect(said[0]).toContain('16000');
   });
 
   it('RED: zero is a baseline', () => {
