@@ -66,3 +66,60 @@ test('a served run with no fragile link (c10) adds exactly one no-flagged-link c
  const {trigger:_t,...untriggered}=c.captured;
  assert.deepEqual(runTurnCoaching({...untriggered,blocks:[...c.captured.blocks!,upstream]},c.final),{blocks:[upstream],eligibility:{eligible:false,reason:'no_run_this_turn'}});
 });
+
+// ── a WITHHELD claim: the run response is gated, the graph read is not (served 25 Sep, CEE 7f9a16d) ──
+// On an entitled near tie the v2 send-point gate nulls the run response's `leading_option_id`
+// (leading-option-wire-enforcement.ts:659-670), while the graph read keeps the fact's id
+// (compose.ts:1275,1348). ONE run then reads null vs "<id>", and the served hiring Run got no
+// run-turn card (`identity_mismatch`) although it is exactly the no-flagged-link card's case.
+const NEAR_TIE_CLAIM = {permitted:false, withheld_reason:'options_do_not_separate', separation:'near_tie'};
+const withClaim = (c: ReturnType<typeof runTurnCase>, claim: unknown, capturedLeader: unknown, readbackLeader: unknown) => {
+ const capturedResult = {...(c.captured.blocks![0] as Record<string, unknown>), leading_option_id: capturedLeader};
+ return {
+  captured: {...c.captured, analysis_state: {...(c.captured.analysis_state as object), leader_claim: claim}, blocks: [capturedResult]} as CapturedAnalysis,
+  final: {...c.final, analysisState: {...(c.final.analysisState as object), leader_claim: claim}, analysisResult: {...(c.final.analysisResult as object), leading_option_id: readbackLeader}} as RunTurnCoachingFinal,
+ };
+};
+test('NEAR-TIE: a gated capture (leader null) binds to the ungated readback of the SAME run → the no-flagged-link card ships',()=>{
+ const {captured,final}=withClaim(runTurnCase('c10','t5','explicit_run'),NEAR_TIE_CLAIM,null,'opt_leader');
+ const out=runTurnCoaching(captured,final);
+ assert.deepEqual(out.eligibility,{eligible:true});
+ assert.equal(out.blocks.filter(b=>b.signal_id.startsWith('coach:no_flagged_link:')).length,1);
+});
+test('NEAR-TIE: a near tie WITH a fragile link (c19-C) ships the fragile-link card, unbadged',()=>{
+ const {captured,final}=withClaim(runTurnCase('C','A2r','explicit_run'),NEAR_TIE_CLAIM,null,'opt_leader');
+ const out=runTurnCoaching(captured,final);
+ assert.deepEqual(out.eligibility,{eligible:true});
+ const cards=out.blocks.filter(b=>b.signal_id.startsWith('coach:fragile_link:'));
+ assert.equal(cards.length,1);
+ assert.equal(Object.hasOwn(cards[0]!,'dsk_claim_provenance'),false);
+});
+test('WITHHELD: the builders see the designation as the gate leaves it — a clear winner under a withheld claim ships WITHOUT the badge',()=>{
+ // c16 earns the DSK-P-003 badge when the leader is permitted (BADGE-2). Under a withheld claim the
+ // user is not shown a leader, so the badge (which asserts "a clear winner") must not ride on the
+ // ungated readback id. The near-tie reason is what licenses the bind; the badge must still read
+ // the designation as the gate leaves it (null), whatever the robustness block says.
+ const {captured,final}=withClaim(runTurnCase('c16','t5','explicit_run'),NEAR_TIE_CLAIM,null,'opt_leader');
+ const out=runTurnCoaching(captured,final);
+ assert.deepEqual(out.eligibility,{eligible:true});
+ const cards=out.blocks.filter(b=>b.signal_id.startsWith('coach:fragile_link:'));
+ assert.equal(cards.length,1);
+ assert.equal(Object.hasOwn(cards[0]!,'dsk_claim_provenance'),false);
+});
+test('CONTROL (present): the same c16 run with a permitted claim and equal designations keeps its badge',()=>{
+ const c=runTurnCase('c16','t5','explicit_run');
+ const out=runTurnCoaching(c.captured,c.final);
+ const cards=out.blocks.filter(b=>b.signal_id.startsWith('coach:fragile_link:'));
+ assert.equal(cards.length,1);
+ assert.equal(Object.hasOwn(cards[0]!,'dsk_claim_provenance'),true);
+});
+for (const [name, claim, capturedLeader, readbackLeader] of [
+ ['withheld claim, two different designations', NEAR_TIE_CLAIM, 'opt_a', 'opt_b'],
+ ['PERMITTED claim, capture null vs readback id (the gate does not null a permitted leader)', {permitted:true, separation:'separated'}, null, 'opt_a'],
+ ['withheld claim, capture names a leader the readback does not (not the gate\'s edit)', NEAR_TIE_CLAIM, 'opt_a', null],
+ ['separation NOT EVALUATED (separation_unavailable) — no verdict, so no relaxation', {permitted:false, withheld_reason:'separation_unavailable'}, null, 'opt_a'],
+ ['constraint-withheld — no entitlement, the graph read nulls too, so an id there is a conflict', {permitted:false, withheld_reason:'constraint_verdict_withheld'}, null, 'opt_a'],
+] as [string, unknown, unknown, unknown][]) test(`CONTROL still refuses: ${name}`,()=>{
+ const {captured,final}=withClaim(runTurnCase('c10','t5','explicit_run'),claim,capturedLeader,readbackLeader);
+ assert.deepEqual(runTurnCoaching(captured,final),{blocks:[],eligibility:{eligible:false,reason:'identity_mismatch'}});
+});
