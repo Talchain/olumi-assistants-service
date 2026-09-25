@@ -27,8 +27,8 @@ const widened = JSON.parse(readFileSync(new URL('widened.json', here), 'utf8')) 
 const withGoal = (goal: Partial<CandidateModel['goal']>): CandidateModel =>
   ({ ...captured, goal: { ...captured.goal, ...goal } }) as CandidateModel;
 
-const goalNodeOf = (m: { nodes: readonly Record<string, unknown>[] }) => {
-  const g = m.nodes.find((n) => n['kind'] === 'goal');
+const goalNodeOf = (m: { nodes: readonly object[] }) => {
+  const g = (m.nodes as readonly Record<string, unknown>[]).find((n) => n['kind'] === 'goal');
   expect(g, 'the captured candidate must yield a goal node').toBeDefined();
   return g as Record<string, unknown>;
 };
