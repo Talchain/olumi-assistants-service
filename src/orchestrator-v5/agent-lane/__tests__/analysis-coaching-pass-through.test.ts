@@ -37,14 +37,26 @@ test('strengthen upstream card is not forwarded',()=>assert.deepEqual(currentAna
 test('strengthen dropped, non-strengthen sibling kept',()=>{const other={...card,block_id:'00000000-0000-4000-8000-000000000002',coaching_kind:'strengthen'};assert.deepEqual(currentAnalysisCoaching({...capture,blocks:[result,other,card]},final),[card])});
 test('runTurnCoaching without a trigger forwards upstream coaching and makes no card',()=>assert.deepEqual(runTurnCoaching(capture,final),{blocks:[card],eligibility:{eligible:false,reason:'no_run_this_turn'}}));
 // No robustness at all: neither run-turn card, and the reason is that the per-link test is not evidenced.
-test('runTurnCoaching with a trigger but no robustness keeps upstream and says why',()=>assert.deepEqual(runTurnCoaching({...capture,trigger:'explicit_run'},final),{blocks:[card],eligibility:{eligible:false,reason:'edge_sensitivity_not_evidenced'}}));
+// The synthetic `state` above withholds the leader FOR A LIMIT (constraint_verdict_withheld). Tests about the LINK
+// cards use a near-tie claim, so the limit-first rule (#70) does not decide them.
+const nearTieState = {...state, leader_claim: {permitted:false, withheld_reason:'options_do_not_separate', separation:'near_tie'}};
+const nearTie = {capture:{...capture, analysis_state:nearTieState}, final:{...final, analysisState:nearTieState}};
+test('runTurnCoaching with a trigger but no robustness keeps upstream and says why (leader not withheld for a limit)',()=>assert.deepEqual(runTurnCoaching({...nearTie.capture,trigger:'explicit_run'},nearTie.final),{blocks:[card],eligibility:{eligible:false,reason:'edge_sensitivity_not_evidenced'}}));
+test('runTurnCoaching with a trigger and a leader withheld FOR A LIMIT keeps upstream and adds the one limit card, robustness or not',()=>{
+ const out=runTurnCoaching({...capture,trigger:'explicit_run'},final);
+ assert.deepEqual(out.eligibility,{eligible:true});
+ assert.equal(out.blocks.length,2);
+ assert.strictEqual(out.blocks[0],card);
+ assert.ok(out.blocks[1]!.signal_id.startsWith('coach:limit_unchecked:'));
+});
 test('runTurnCoaching on a foreign graph forwards nothing and says identity_mismatch',()=>assert.deepEqual(runTurnCoaching({...capture,trigger:'explicit_run'},{...final,graphHash:'fedcba9876543210'}),{blocks:[],eligibility:{eligible:false,reason:'identity_mismatch'}}));
 test('currentAnalysisCoaching is runTurnCoaching(...).blocks',()=>{for(const c of [capture,{...capture,trigger:'auto_first_pass' as const}]) assert.deepEqual(currentAnalysisCoaching(c,final),runTurnCoaching(c,final).blocks)});
 test('the fragile-link card and an upstream copy of it are emitted once',()=>{
  const fragile={...result,enrichment:{robustness:{fragile_edges:[{from_id:'price',to_id:'demand',from_label:'Price',to_label:'Demand',switch_probability:0.4}]}}};
- const first=runTurnCoaching({...capture,blocks:[fragile],trigger:'explicit_run'},{...final,analysisResult:fragile});
+ const first=runTurnCoaching({...nearTie.capture,blocks:[fragile],trigger:'explicit_run'},{...nearTie.final,analysisResult:fragile});
  assert.equal(first.blocks.length,1);
- const again=runTurnCoaching({...capture,blocks:[fragile,first.blocks[0]],trigger:'explicit_run'},{...final,analysisResult:fragile});
+ assert.ok(first.blocks[0]!.signal_id.startsWith('coach:fragile_link:'));
+ const again=runTurnCoaching({...nearTie.capture,blocks:[fragile,first.blocks[0]],trigger:'explicit_run'},{...nearTie.final,analysisResult:fragile});
  assert.deepEqual(again.blocks.map(b=>b.block_id),[first.blocks[0]!.block_id]);
 });
 test('a readback result computed against another graph forwards nothing, even a card stamped with the final hash',()=>{
@@ -158,7 +170,12 @@ test('ONE next action: a read-back fact persisted BEFORE #1912 (legacy restate p
  const out=runTurnCoaching(...Object.values(withSummary(c,'Ran analysis on your current scenario.'+legacy)) as [CapturedAnalysis,RunTurnCoachingFinal]);
  assert.deepEqual(out.eligibility,{eligible:false,reason:'limit_repair_pending'});
 });
-test('CONTROL (Paul\'s PA case, served 7b42d63+): an unchecked limit with NO repair step keeps the one card',()=>{
+// ⚠ CORRECTED (#70, R&C): this #1922 control splices a "could not be checked" disclosure onto a PERMITTED claim
+// (c16 t5). That pairing cannot occur on the wire — an unevaluated limit withholds the claim
+// (constraint-feasibility.ts MAY_NAME_LEADING_OPTION.unevaluated === false). It now pins the OTHER half of the
+// limit-first rule: prose alone never decides — only the typed claim routes to the limit card (the served pairing
+// is the LIMIT FIRST pricing test above).
+test('CONTROL (Paul\'s PA case, served 7b42d63+): limit PROSE on a permitted claim does not route to the limit card — the typed claim decides',()=>{
  const c=runTurnCase('c16','t5','explicit_run');
  const noStep=buildConstraintDisclosureFromState('unevaluated',[PA]);
  assert.match(noStep,/could not be checked/);
@@ -172,4 +189,83 @@ test('CONTROL: a summary with no limit sentence keeps the card (c10 no-flagged-l
  const out=runTurnCoaching(...Object.values(withSummary(c,'Ran analysis on your current scenario.')) as [CapturedAnalysis,RunTurnCoachingFinal]);
  assert.deepEqual(out.eligibility,{eligible:true});
  assert.equal(runCards(out.blocks).length,1);
+});
+
+// ── LIMIT FIRST (Paul's manual test 1a298d6d, #69 5837270934; #70 R&C lane) ──
+// A run whose leader is withheld for a LIMIT — the readback's typed `leader_claim.withheld_reason` is
+// `constraint_verdict_withheld`, i.e. at least one limit on the model was not checked or not met — offers ONE
+// next action: the limit card. No link card (fragile-link or no-flagged-link) competes with it. It is read from
+// the READBACK's typed claim, never from prose: the automatic first pass replaces the prose summary
+// (compose/unrequested-analysis-confinement.ts), so a prose gate is blind exactly where Paul met the card.
+// Every input below is a SERVED wire turn (coaching/__tests__/fixtures/*.run-turns.trimmed.json).
+const LIMIT_CARD = 'coach:limit_unchecked:';
+const runTurnCards = <T extends {signal_id: string}>(blocks: readonly T[]): T[] =>
+ blocks.filter((b) => /^coach:(fragile_link|no_flagged_link|limit_unchecked):/.test(b.signal_id));
+const statelessCapture = (c: CapturedAnalysis): CapturedAnalysis => { const {analysis_state: _s, ...rest} = c; return rest; };
+const claimOf = (f: RunTurnCoachingFinal) => (f.analysisState as {leader_claim?: {withheld_reason?: string}}).leader_claim;
+
+test('LIMIT FIRST — Paul 1a298d6d (served bdd43f4, automatic first pass): the served link card becomes ONE limit card',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ // Present controls from the SAME wire turn: the served build emitted a link card, and the claim is limit-withheld.
+ assert.ok(c.turn.served_run_turn_cards?.[0]?.startsWith('coach:fragile_link:pro_plan_price→mrr:449b882e043ae3e3:'));
+ assert.equal(claimOf(c.final)?.withheld_reason,'constraint_verdict_withheld');
+ // The automatic pass hands over a capture with NO analysis_state (the stateless bind); the stateful shape binds too.
+ for (const captured of [statelessCapture(c.captured), c.captured]) {
+  const out=runTurnCoaching(captured,c.final);
+  assert.deepEqual(out.eligibility,{eligible:true});
+  const cards=runTurnCards(out.blocks);
+  assert.equal(cards.length,1);
+  assert.equal(cards[0]!.signal_id,`${LIMIT_CARD}449b882e043ae3e3:2026-09-25T17:27:54.315Z:auto_first_pass`);
+ }
+});
+for (const [turn, trigger] of [['t1','auto_first_pass'],['t2','explicit_run']] as const) test(`LIMIT FIRST — pricing (served 06325c6), ${trigger}: ONE limit card, no link card`,()=>{
+ const c=runTurnCase('pricing',turn,trigger);
+ assert.ok(c.turn.served_run_turn_cards?.[0]?.startsWith('coach:fragile_link:'));
+ assert.equal(claimOf(c.final)?.withheld_reason,'constraint_verdict_withheld');
+ const out=runTurnCoaching(trigger==='auto_first_pass'?statelessCapture(c.captured):c.captured,c.final);
+ assert.deepEqual(out.eligibility,{eligible:true});
+ const cards=runTurnCards(out.blocks);
+ assert.equal(cards.length,1);
+ assert.ok(cards[0]!.signal_id.startsWith(`${LIMIT_CARD}c247337beab725ed:${c.turn.analysis_state.run_state.computed_at}:`));
+ assert.ok(cards[0]!.signal_id.endsWith(`:${trigger}`));
+});
+for (const [turn, trigger, why] of [['t1','auto_first_pass','withheld only because nobody asked'],['t2','explicit_run','a near tie']] as const) test(`CONTROL — hiring (served 4809203), ${why}: no limit problem, so its ONE link card stays`,()=>{
+ const c=runTurnCase('hiring',turn,trigger);
+ assert.notEqual(claimOf(c.final)?.withheld_reason,'constraint_verdict_withheld');
+ const out=runTurnCoaching(trigger==='auto_first_pass'?statelessCapture(c.captured):c.captured,c.final);
+ assert.deepEqual(out.eligibility,{eligible:true});
+ const cards=runTurnCards(out.blocks);
+ assert.equal(cards.length,1);
+ assert.ok(cards[0]!.signal_id.startsWith('coach:fragile_link:effective_delivery_capacity→development_velocity:d06fe842d1150682:'));
+});
+test('LIMIT FIRST — the limit card is a well-formed run-turn card: bound, leader-free, number-free, no badge, no write intent',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const card=runTurnCards(runTurnCoaching(statelessCapture(c.captured),c.final).blocks)[0]!;
+ assert.ok(card.signal_id.startsWith(LIMIT_CARD));
+ assert.equal(card.type,'coaching');
+ assert.equal(card.coaching_kind,'assumption_check');
+ assert.equal(card.source,'deterministic_signal');
+ assert.equal(card.source_handler,'run_analysis');
+ assert.equal(card.freshness,'fresh');
+ assert.equal(card.graph_hash_at_generation,'449b882e043ae3e3');
+ assert.equal(card.created_at,'2026-09-25T17:27:54.315Z');
+ assert.deepEqual(card.target_refs,[]);
+ assert.equal(Object.hasOwn(card,'dsk_claim_provenance'),false);
+ assert.equal(Object.hasOwn(card,'action_intent'),false);
+ for (const text of [card.title,card.body,card.action_label??'',card.action_prompt??'']) {
+  assert.doesNotMatch(text,/option in front|winner|recommend|best option|leading option/i);
+  assert.doesNotMatch(text,/\d/);
+ }
+ // It must not promise a write the Agent cannot make, nor ask for a number the engine may not be able to use.
+ assert.match(card.action_prompt??'',/Don't change the model or re-run anything/);
+ // Deterministic: the same run gives the same card, and an upstream copy of it is emitted once.
+ const again=runTurnCoaching({...c.captured,blocks:[...c.captured.blocks!,card]},c.final);
+ assert.deepEqual(runTurnCards(again.blocks).map(b=>b.block_id),[card.block_id]);
+});
+test('LIMIT FIRST — the prose repair step still wins: a summary asking the user to restate a limit gives limit_repair_pending and NO card',()=>{
+ const c=runTurnCase('pricing','t2','explicit_run');
+ const {captured,final}=withSummary(c,'Ran analysis on your current scenario.'+buildConstraintDisclosureFromState('identity_unresolved',[PA]));
+ const out=runTurnCoaching(captured,final);
+ assert.deepEqual(out.eligibility,{eligible:false,reason:'limit_repair_pending'});
+ assert.equal(runTurnCards(out.blocks).length,0);
 });
