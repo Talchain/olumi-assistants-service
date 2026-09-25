@@ -1563,11 +1563,21 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // proposed the missing values this turn, otherwise the next-step chip.
     const firstAnalysisBlocked = fa !== undefined && !fa.ran && (fa.reason === 'not_admissible' || fa.reason === 'refused')
       && approvals.length === 0;
+    /**
+     * ⛔ AN APPROVAL THAT LEAVES THE MODEL UN-RUNNABLE STILL OFFERS A NEXT STEP (P0, 25 Sep; RC #69 5826744045 §2).
+     * Served `21e3b38`, hiring: "Use as starting assumptions" applied (`authorise_change` mutated), the model
+     * stayed `blocked` with `blockers: null` and `may_run: false`, and the reply was "Saved." with NO chip: the
+     * user had nothing to press. The Run offer above correctly declines, so the next-step chip stands in. The
+     * Run turn that followed named the gap and offered this same chip. Not when another approval is waiting.
+     */
+    const approvalLeftBlocked = result.tool_calls.some((c) => c.name === 'authorise_change' && c.mutated === true)
+      && !admitsRunOffer(analysisReady)
+      && approvals.length === 0 && carriedApproval.length === 0;
     const offeredNow: OfferedAction[] = [
       ...approvals,
       ...carriedApproval,
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
-      ...(runBlocked || firstAnalysisBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
+      ...(runBlocked || firstAnalysisBlocked || approvalLeftBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
       ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
     ];
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);

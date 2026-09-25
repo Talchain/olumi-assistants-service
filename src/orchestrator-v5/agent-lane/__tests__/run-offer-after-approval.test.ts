@@ -132,6 +132,26 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     expect(b.suggested_actions.some((c) => c.action_type === 'run_analysis')).toBe(false);
   });
 
+  /**
+   * ⛔ P0, 25 Sep (RC #69 5826744045 §2): the served hiring dead end. The approval applied, the readiness is
+   * the served `21e3b38` shape (AI Quality fixture `p0-post-approval-dead-end/dead-end.eng-hiring-2.approve.json`:
+   * `status: blocked`, `may_run: false`, `blockers: null`), and the reply offered NOTHING.
+   */
+  it('RED: approval applied but the model is still blocked (served shape) → the next-step chip, and no Run', async () => {
+    readiness = { status: 'blocked', may_run: false, blockers: null };
+    const b = await proposeThenApprove();
+    expect(edges, 'the approval really applied').toHaveLength(1);
+    expect(b.suggested_actions.some((c) => c.action_type === 'run_analysis')).toBe(false);
+    expect(b.suggested_actions.map((c) => c.id), 'the user always has one reachable next action').toEqual(['agent-suggest-what-it-needs']);
+    expect(runs).toBe(0);
+  });
+
+  it('CONTROL: approval applied and a run is admitted → Run, and NOT the next-step chip', async () => {
+    readiness = { status: 'ready', may_run: true };
+    const b = await proposeThenApprove();
+    expect(b.suggested_actions.map((c) => c.id)).toEqual(['agent-run-analysis']);
+  });
+
   it('CONTRAST: a turn that changed nothing is not offered a Run, even when a run is admitted', async () => {
     readiness = { status: 'ready', may_run: true };
     proposeNext = false; // the Agent just answers
