@@ -49,7 +49,7 @@ vi.mock('../../commit.js', async (importOriginal) => ({
 }));
 
 import { dispatchSystemEvent } from '../dispatch.js';
-import { reconcileScenarioAnalysisFacts } from '../../context/reconcile-scenario-analysis-facts.js';
+import { reconcileScenarioAnalysisFacts, SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT } from '../../context/reconcile-scenario-analysis-facts.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -83,10 +83,29 @@ function payload(): SystemEventTurnPayload {
  */
 const durableDegraded = () =>
   reconcileScenarioAnalysisFacts({ scenarioId: SCENARIO_ID, hotWindowFacts: [] });
-/** A read that SUCCEEDED and carries no analysis — a real verdict, not an evasion. */
+/**
+ * A read that SUCCEEDED and carries no analysis — a real verdict, not an evasion.
+ * "Genuinely empty" is a COMPLETE durable record with no fact, built through the
+ * production reconciler. A healthy hot window alone can no longer say `none`: its
+ * 20 rows can hide an older run (Codex pre-review finding 5824695259), so with
+ * the durable set degraded an empty window reads `unknown` like any other
+ * non-authoritative absence.
+ */
+const durableCompleteEmpty = () =>
+  reconcileScenarioAnalysisFacts({
+    scenarioId: SCENARIO_ID,
+    hotWindowFacts: [],
+    durableRead: {
+      status: 'ok',
+      scenario_id: SCENARIO_ID,
+      query_limit: SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
+      total_count: 0,
+      facts: [],
+    },
+  });
 const healthyEmpty = () => ({
   hotWindow: { status: 'ok' as const, facts: [] as never[] },
-  factSet: durableDegraded(),
+  factSet: durableCompleteEmpty(),
 });
 const degradedWindow = () => ({
   hotWindow: { status: 'degraded' as const, facts: [] as never[] },

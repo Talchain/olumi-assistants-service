@@ -85,6 +85,9 @@ const store = {
   readFactsFor,
 };
 vi.mock("../../orchestrator-v5/session/index.js", () => ({ getSessionStore: () => store }));
+beforeEach(() => {
+  delete (store as Record<string, unknown>).readScenarioRunAnalysisFactsFor;
+});
 
 import scenarioGraphRoute from "../assist.v1.scenario-graph.js";
 import { computeAnalysisAffectingGraphHash } from "../../orchestrator-v5/context/graph-hash.js";
@@ -381,7 +384,13 @@ describe("2.1271 — an unreadable fact store never claims the scenario was neve
   });
 
   it("DISCRIMINATING TWIN — a genuinely empty scenario DOES say `never_run`", async () => {
+    // "Genuinely empty" = the durable scenario record is COMPLETE and holds no
+    // run (what the production port returns). An empty hot window alone cannot
+    // prove absence: its 20 rows can hide an older run (#1860, Codex 5824695259).
     readFactsFor.mockResolvedValue([]);
+    (store as Record<string, unknown>).readScenarioRunAnalysisFactsFor = vi
+      .fn()
+      .mockResolvedValue({ facts: [], total_count: 0 });
     const app = await buildApp();
     const body = (await read(app)).json() as Record<string, unknown>;
     expect((body.analysis_state as { run_state: unknown }).run_state).toEqual({

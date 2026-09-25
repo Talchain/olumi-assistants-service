@@ -1980,11 +1980,10 @@ async function dispatchFactorValueEdit(
    *
    * THE FACT-SOURCE RULE IS THE RELOAD ROUTE'S (`scenario-graph-analysis-read.ts`):
    * the durable set when it is reasoning authority (`complete | capped`), else the
-   * hot window; and the read status from WHICHEVER was chosen. Absence is
-   * authoritative only for the `complete` record — under `capped`, unread history
-   * sits behind the wall, so an empty selection stays `unknown`. A degraded chosen
-   * source yields `unknown / derivation_failed` inside `deriveAnalysisFreshness`,
-   * the same verdict the literal this replaced produced.
+   * hot window. Absence is authoritative only for the `complete` record — under
+   * `capped` unread history sits behind the wall, and in the window fallback the
+   * 20 rows can hide an older run, so an empty selection stays `unknown /
+   * derivation_failed` in both (the turn path's rule, `build-turn-context.ts`).
    *
    * ⚠ NOT YET THE ROUTE'S WHOLE DERIVATION: the reload route also passes the
    *   restore marker (`analysisInvalidatedAt`) so a version restore reads
@@ -1993,11 +1992,13 @@ async function dispatchFactorValueEdit(
    *   restore can therefore answer `fresh` here while reload says `stale`. Named
    *   follow-up, not closed here.
    */
+  // Absence is authoritative only in a COMPLETE durable record — never in the
+  // window fallback, whose 20 rows can hide an older run (Codex pre-review
+  // finding 5824695259). A success in the window is still positive evidence:
+  // `priorFactsReadOk` is consulted only when no fact is selected.
   const durableAuthority = isScenarioAnalysisReasoningAuthority(analysisFactSet);
   const freshnessFacts = durableAuthority ? analysisFactSet.facts : priorFactsRead.facts;
-  const freshnessFactsReadOk = durableAuthority
-    ? analysisFactSet.status === 'complete'
-    : priorFactsRead.status === 'ok';
+  const freshnessFactsReadOk = analysisFactSet.status === 'complete';
   const freshness: FreshnessDerivation = deriveAnalysisFreshness(
     freshnessFacts,
     persistedAnalysisGraphHash,
