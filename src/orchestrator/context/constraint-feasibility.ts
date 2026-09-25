@@ -540,7 +540,7 @@ export function readRatifiedConstraints(source: unknown): RatifiedConstraint[] {
  *
  * It is a strict SUPERSET of the `carriesValue` conjunction in
  * `cee/transforms/schema-v3.ts` (observed_state · prior · display_value ·
- * intercept · goal_threshold · goal_threshold_raw), plus the two scale carriers
+ * intercept · goal_threshold · goal_threshold_raw · success_threshold), plus the two scale carriers
  * that module has no reason to consult (`scale_frame`, `goal_threshold_cap`)
  * and the V1 `data` carrier. Superset, not mirror: were the two to disagree,
  * this one says "carries a value" wherever that one does, which is the safe
@@ -554,6 +554,7 @@ const NODE_QUANTITY_FIELDS: readonly string[] = [
   "intercept",
   "goal_threshold",
   "goal_threshold_raw",
+  "success_threshold",
   "goal_threshold_cap",
   "scale_frame",
   "data",
