@@ -613,3 +613,42 @@ describe('review of #1871 at 8f45ee2e — a legend is counted, not parsed', () =
     expect(out.response.assistant_text).toContain('Churn is the input to check.');
   });
 });
+
+/** Pre-review of #1871 at f36e7fea (5828141606): a metric per option is v6 class C2 — kept; a share is still dropped. */
+describe('pre-review of #1871 at f36e7fea — a metric per option is not a share', () => {
+  const graph = { nodes: [{ id: 'keep', kind: 'option', label: 'Keep Pro at £49' }, { id: 'raise', kind: 'option', label: 'Raise Pro to £59 at release' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }] };
+  const labels = rankingLabelContext(graph, undefined);
+  const analysisReady = { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } };
+  const wire = (sentence: string) => enforceAgentLaneLeaderClaimsAtWire(
+    { assistant_text: `The churn limit was not scored. ${sentence} Churn is the input to check.`, blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } } } as unknown as OlumiResponse,
+    { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'constraint_verdict_withheld', graph, analysisReady },
+  ).response.assistant_text;
+  it.each([
+    'On the supplied retention metric, the £59 path has 40% retention, while holding has 60% retention.',
+    'The £59 path shows 40% uptake and holding 60% uptake.',
+  ])('RED: kept through BOTH gates (C2, a scoped metric): %s', (s) => { expect(wire(s)).toContain(s); });
+  it.each([
+    'The £59 path has 71% and holding 29%.',
+    'The £59 path at 71% and holding at 29%.',
+    'The £59 path wins 71% of runs while holding wins 29%.',
+    // Says it is a win share, so a measure after each figure does not make it a metric reading.
+    'The runs split 71% uptake for the £59 path and 29% uptake for holding.',
+    // Only ONE percentage names a measure: not a metric reading — fail closed.
+    'The £59 path has 71% retention and holding 29%.',
+    // Pre-review addendum 5828219261: "both" scopes something other than the options — the split stands.
+    'For both customer cohorts, the £59 path over holding: 71% to 29%.',
+    'Across both regions, raising and holding came in at 71% and 29%.',
+  ])('CONTROL: a share is still removed through BOTH gates: %s', (s) => { expect(wire(s)).not.toMatch(/71%|29%/); });
+  it('PERMITTED CONTROL: the same "both cohorts" sentence passes unchanged when a leader may be named', () => {
+    const text = 'The churn limit was scored. For both customer cohorts, the £59 path over holding: 71% to 29%.';
+    const out = enforceAgentLaneLeaderClaimsAtWire(
+      { assistant_text: text, blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: true } } } as unknown as OlumiResponse,
+      { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: true, graph, analysisReady },
+    );
+    expect(out.response.assistant_text).toBe(text);
+  });
+  it('the classifier agrees', () => {
+    expect(sentenceRanksOptions('On the supplied retention metric, the £59 path has 40% retention, while holding has 60% retention.', labels)).toBe(false);
+    expect(sentenceRanksOptions('The £59 path has 71% and holding 29%.', labels)).toBe(true);
+  });
+});

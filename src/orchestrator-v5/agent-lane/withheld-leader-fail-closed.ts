@@ -368,8 +368,17 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
     }
     return refs;
   };
-  /** A passage naming two or more options AS A LEGEND — not a figure that applies to both ("on both…", "…alike"). */
-  const isLegend = (seg: string, need: number): boolean => !APPLIES_TO_ALL.test(seg) && optionRefs(seg) >= need;
+  /**
+   * The figure applies to every OPTION only when the quantified clause is the one naming them ("On both the £59 path
+   * and holding, …", "raising and holding alike", "on either path"). ⛔ Pre-review addendum 5828219261: "For both
+   * customer cohorts, the £59 path over holding: 71% to 29%" — "both" scopes the cohorts, and the split stands.
+   */
+  const appliesToAllOptions = (seg: string): boolean => seg.split(/[,;:]/).some((clause) => {
+    const m = APPLIES_TO_ALL.exec(clause);
+    return m !== null && (/\beither\s+(?:option|path|choice|route)\b/i.test(m[0]) || optionRefs(clause) >= 2);
+  });
+  /** A passage naming two or more options AS A LEGEND — not a figure that applies to all of them. */
+  const isLegend = (seg: string, need: number): boolean => !appliesToAllOptions(seg) && optionRefs(seg) >= need;
   for (const m of saysSplit ? [] : text.matchAll(/(?<![\d.,])(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent)?\s?(?:-|to)\s?(\d+(?:[.,]\d+)?)\s?(?:%|per\s?cent)/gi)) {
     // A pair right after a two-option legend is that legend's split, whichever order it is in ("Raising vs holding: 29-71%").
     if (isLegend(text.slice(0, m.index), 2)) continue;
@@ -391,6 +400,17 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
   }
   const total = hits.map((m) => Number(m[0].replace(/[%\s]|per\s?cent/gi, '').replace(',', '.'))).reduce((a, b) => a + b, 0);
   if (total < 97 || total > 103) return false;
+  /**
+   * ⛔ A METRIC PER OPTION IS NOT A SHARE (pre-review 5828141606; v6 class C2, "scoped metric kept"): "the £59 path has
+   * 40% retention, while holding has 60% retention" sums to 100 by coincidence. A share's percentage is followed by a
+   * FUNCTION or SHARE word ("71% and…", "71% of runs", "71% chance", "71%."); a metric's by the thing it measures
+   * ("40% retention"). Function words are a closed class, so this is a complete test, not a list of metrics. When
+   * EVERY percentage names what it measures, it is a metric reading — unless the sentence says it is a win share.
+   */
+  if (!RUN_SHARE_EXPLICIT.test(text) && hits.every((m) => {
+    const next = /^\s*([a-z][a-z'-]*)/i.exec(text.slice(m.index! + m[0].length))?.[1];
+    return next !== undefined && !FUNCTION_OR_SHARE_WORD.test(next);
+  })) return false;
   /**
    * A sentence that says it is about the RUNS' outcome is a win share whatever it calls the options ("Across the
    * runs, the release-timed rise took 71% and the current price 29%", review 5826509657 item 2) — unless it
@@ -428,6 +448,9 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
    */
   return isLegend(segments[0]!, hits.length);
 }
+
+/** What may follow a SHARE's percentage: English function words (a closed class) and the share/likelihood/ranking words. */
+const FUNCTION_OR_SHARE_WORD = /^(?:and|or|nor|but|yet|so|to|for|of|in|on|at|by|from|with|without|into|onto|over|under|against|between|among|across|per|than|then|while|whereas|when|if|as|vs|versus|compared|respectively|each|apiece|alone|overall|the|a|an|this|that|these|those|its|their|is|was|are|were|be|been|being|has|have|had|share|shares|chance|chances|probability|probabilities|likelihood|odds|likely|win|wins|won|winning|lead|leads|led|ahead|behind|more|less|higher|lower|better|worse|top|first|second)$/i;
 
 /** A generic option noun: after another reference it names the same option ("the holding option"). */
 const GENERIC_OPTION_NOUN = /^(?:path|paths|option|options|choice|choices|route|routes|alternative|alternatives|scenario|scenarios)$/i;
