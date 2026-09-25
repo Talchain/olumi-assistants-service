@@ -2299,6 +2299,11 @@ export async function runTurnExecutor(
               ...(context.prior_facts_read_ok === undefined
                 ? {}
                 : { priorFactsReadOk: context.prior_facts_read_ok }),
+              // The restore marker, from the SAME context read the routing and
+              // prompt derivations already thread (see `routingFreshness`).
+              ...(context.analysis_invalidated_at === undefined
+                ? {}
+                : { analysisInvalidatedAt: context.analysis_invalidated_at }),
             });
     }
     return nonExecuteCanonicalMemo ?? undefined;
@@ -2327,6 +2332,11 @@ export async function runTurnExecutor(
                 ? extractGraphOptionIds(canonicalReadinessGraphForRun)
                 : undefined,
               priorFactsReadOk: scenarioAnalysisFactsReadOk,
+              // Same marker as `promptAnalysisFreshness`: without it the model's
+              // `coaching_context` called a restored model's analysis fresh.
+              ...(context.analysis_invalidated_at === undefined
+                ? {}
+                : { analysisInvalidatedAt: context.analysis_invalidated_at }),
             });
     }
     return promptCanonicalMemo ?? undefined;
@@ -13092,9 +13102,18 @@ export async function runTurnExecutor(
         // here (this turn's own facts are first in the unified chain) — it
         // matters only when the handler produced no usable fact AND the prior
         // read degraded, where 'none' would again be an unsupported claim.
-        context.prior_facts_read_ok === undefined
-          ? undefined
-          : { priorFactsReadOk: context.prior_facts_read_ok },
+        // The restore marker is threaded for the same reason as on
+        // `routingFreshness`: this derivation is the wire's
+        // `analysis_ready.freshness`, and without it a restored model read
+        // `fresh` here while the reload said stale.
+        {
+          ...(context.prior_facts_read_ok === undefined
+            ? {}
+            : { priorFactsReadOk: context.prior_facts_read_ok }),
+          ...(context.analysis_invalidated_at === undefined
+            ? {}
+            : { analysisInvalidatedAt: context.analysis_invalidated_at }),
+        },
       );
       // T1 claim safety — REFINE the turn-entry read (ROADMAP 1.233, see the
       // declaration) over the SAME fact array and via the SAME canonical
@@ -13205,6 +13224,11 @@ export async function runTurnExecutor(
         ...(context.prior_facts_read_ok === undefined
           ? {}
           : { priorFactsReadOk: context.prior_facts_read_ok }),
+        // The restore marker, from the SAME context read the routing and prompt
+        // derivations already thread (see `routingFreshness`).
+        ...(context.analysis_invalidated_at === undefined
+          ? {}
+          : { analysisInvalidatedAt: context.analysis_invalidated_at }),
       });
       // V5 Task 2.1: deterministic chip suggestions for the execute branch.
       // V5 0.9.0: priorFacts threaded so the new facts_absent rule does not

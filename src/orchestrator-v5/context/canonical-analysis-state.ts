@@ -338,6 +338,15 @@ export interface SelectCanonicalAnalysisStateInput {
    * NEITHER source yielded a usable fact — which is exactly the ambiguous case.
    */
   readonly priorFactsReadOk?: boolean;
+  /**
+   * The scenario's restore marker (`analysis_invalidated_at`), as the turn
+   * context read it. It is the ONLY input that turns a hash MATCH into
+   * `stale` / `model_restored_after_analysis` (A → analyse → B → restore A).
+   * Without it this selector — the wire's `analysis_state` and the model's
+   * `coaching_context` — called a restored model's analysis current while the
+   * reload said stale. Omitted ⇒ byte-identical to the pre-fix derivation.
+   */
+  readonly analysisInvalidatedAt?: string | null;
 }
 
 /** Defensive read of a fact's run-time `computed_at`. */
@@ -374,10 +383,14 @@ export function selectCanonicalAnalysisState(
     input.currentGraphHash,
     input.currentGraphOptionIds,
     // Defect 4: distinguishes "the store says no analysis" from "the store
-    // could not be read". Absent => pre-fix behaviour, by construction.
-    input.priorFactsReadOk === undefined
-      ? undefined
-      : { priorFactsReadOk: input.priorFactsReadOk },
+    // could not be read". Absent => pre-fix behaviour, by construction. The
+    // restore marker rides the same options object, absent-means-absent too.
+    {
+      ...(input.priorFactsReadOk === undefined ? {} : { priorFactsReadOk: input.priorFactsReadOk }),
+      ...(input.analysisInvalidatedAt === undefined
+        ? {}
+        : { analysisInvalidatedAt: input.analysisInvalidatedAt }),
+    },
   );
   const selected = selectRunAnalysisFact(unifiedFacts);
   const degraded = selectDegradedRunAnalysisFact(unifiedFacts);
