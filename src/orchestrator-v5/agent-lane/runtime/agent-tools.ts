@@ -143,6 +143,23 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function',
+    name: 'propose_remove_risk_link',
+    description:
+      'Propose removing ONE direct link from an option to a RISK. The analysis cannot use such a link: an option '
+      + 'linked straight to a risk stays "needs a mapping" whatever values are given, and blocks the comparison. '
+      + 'Offer this when the readiness names an option that still needs a mapping to a risk, and say plainly '
+      + 'what is lost: the analysis will no longer show that option changing that risk. The risk itself, and its '
+      + 'own links, stay in the model. This does NOT change anything: it records an exact proposal and returns '
+      + 'its id, which you keep for authorise_change: show the user what it removes, never the id, before asking '
+      + 'them to approve. Use the labels exactly as get_canonical_state returned them.',
+    parameters: obj({
+      option_label: { type: 'string' },
+      risk_label: { type: 'string' },
+      rationale: { type: 'string', description: 'Why removing it helps, in the user\u2019s terms.' },
+    }, ['option_label', 'risk_label', 'rationale']),
+  },
+  {
+    type: 'function',
     name: 'propose_option_interventions',
     description:
       'Propose the level an option sets a factor to \u2014 what the option actually DOES. An option ' +
@@ -232,7 +249,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'authorise_change'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_remove_risk_link', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'authorise_change'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -272,6 +289,9 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   proposeNewOption(ctx: AgentToolContext, args: {
     label: string; acts_on: { factor_label: string; direction: 'positive' | 'negative' }[]; rationale: string;
+  }): Promise<ToolResult>;
+  proposeRemoveRiskLink(ctx: AgentToolContext, args: {
+    option_label: string; risk_label: string; rationale: string;
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
     interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
@@ -317,6 +337,8 @@ export async function dispatchTool(
       return caps.proposeAssumptions(ctx, args as never);
     case 'propose_new_option':
       return caps.proposeNewOption(ctx, args as never);
+    case 'propose_remove_risk_link':
+      return caps.proposeRemoveRiskLink(ctx, args as never);
     case 'propose_option_interventions':
       return caps.proposeOptionInterventions(ctx, args as never);
     case 'propose_starting_point':

@@ -1088,6 +1088,79 @@ export function createAgentCapabilities(
     },
 
     /**
+     * ⭐ REMOVING A DIRECT OPTION→RISK LINK — the only way out of a block the conversation could not clear.
+     *
+     * `buildAnalysisReadyPayload` holds every option with a direct, non-bidirected edge to a RISK at
+     * `needs_user_mapping` ("a causal coefficient is not an intervention level"). MEASURED on served
+     * `0415b19` (witness g10, scenario `058f1f3e`): the user answered the Agent's own question and
+     * `propose_model_change` could only say `already_present` — nothing approvable, the block permanent.
+     * 13/120 recent scenarios carry such links. Deliberately NARROW: only an existing option→risk edge,
+     * so this capability can never remove a causal link the analysis does use.
+     */
+    async proposeRemoveRiskLink(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      /**
+       * ⛔ THE ENDPOINTS ARE THE ONES THE USER NAMED (Codex #1816, CHANGES_REQUIRED at df304a57): a first
+       * label-OR-description match let an option DESCRIBED as the name beat the one LABELLED it. An exact
+       * visible label wins, a description is only a fallback, and a match must be UNIQUE for its kind —
+       * anything else refuses before a proposal exists, so an approval can only ever remove the named link.
+       */
+      const resolve = (l: string, kind: string): { node?: (typeof g.nodes)[number]; ambiguous?: string[] } => {
+        const ofKind = g.nodes.filter((n) => n.kind === kind);
+        const byExactLabel = ofKind.filter((n) => norm(n.label) === norm(l));
+        const pool = byExactLabel.length > 0 ? byExactLabel : ofKind.filter((n) => norm(n.description) === norm(l));
+        return pool.length > 1 ? { ambiguous: pool.map((n) => String(n.id)) } : { node: pool[0] };
+      };
+      const o = resolve(String(args?.option_label ?? ''), 'option');
+      const k = resolve(String(args?.risk_label ?? ''), 'risk');
+      const ambiguous = [...(o.ambiguous !== undefined ? [`${o.ambiguous.length} options match "${String(args?.option_label ?? '')}"`] : []),
+        ...(k.ambiguous !== undefined ? [`${k.ambiguous.length} risks match "${String(args?.risk_label ?? '')}"`] : [])];
+      if (ambiguous.length > 0) {
+        return {
+          ok: false, mutated: false, refusal: 'ambiguous_label',
+          detail: `Nothing is proposed: ${ambiguous.join('; ')}. Ask the user which one they mean, then use a label that names exactly one.`,
+        };
+      }
+      const option = o.node;
+      const risk = k.node;
+      if (option === undefined) {
+        return { ok: false, mutated: false, refusal: 'unresolved_entity', detail: `No option is labelled "${String(args?.option_label ?? '')}". Use a label exactly as get_canonical_state gives it.` };
+      }
+      if (risk === undefined) {
+        return {
+          ok: false, mutated: false, refusal: 'not_a_risk_link',
+          detail: `"${String(args?.risk_label ?? '')}" is not a risk in the model. Only a direct link from an option to a RISK can be removed this way.`,
+        };
+      }
+      const link = g.edges.find((e) => e.from === option.id && e.to === risk.id && (e as { edge_type?: unknown }).edge_type !== 'bidirected');
+      if (link === undefined) return { ok: false, mutated: false, refusal: 'not_present', detail: 'That option is not linked directly to that risk.' };
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash,
+        // The labels the user is shown ride in the (hashed) proposal, so approval can refuse a rename or swap
+        // the label-blind analysis hash cannot see (Codex #1816, CHANGES_REQUIRED at 1ab2194e).
+        operations: [{ op: 'remove_edge', path: `${option.id}::${risk.id}`, value: { option_label: option.label, risk_label: risk.label } }],
+        provenance: { authored_by: 'model_proposed', basis: String(args?.rationale ?? '') },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: `Remove the direct link from "${option.label}" to the risk "${risk.label}"`,
+      });
+      proposals.put(proposal);
+      return {
+        ok: true, mutated: false,
+        proposal_id: proposal.proposal_id,
+        public_label: proposal.public_label,
+        base_revision: g.graph_hash,
+        note:
+          'Nothing has changed. Tell the user what this removes and what is lost \u2014 the analysis will no longer show '
+          + 'this option changing this risk \u2014 and that the risk and its own links stay. Ask them to approve it before '
+          + 'calling authorise_change.',
+      };
+    },
+
+    /**
      * ⭐ ADOPTING ASSUMPTIONS IS A PROPOSAL, NOT A WRITE.
      *
      * The gap, measured on Paul's session of 22 Sep: 17 of 20 factors held no
@@ -1866,6 +1939,56 @@ export function createAgentCapabilities(
 
       // A starting point mixes kinds; each single-kind path below handles one.
       if (new Set(ops.map((o) => o.op)).size > 1) return applyCompound(ctx, decision.proposal, before);
+
+      if (ops.length > 0 && ops.every((o) => o.op === 'remove_edge')) {
+        /**
+         * One atomic `structural_delete` of exactly the proposal's edges, on the base the store just verified
+         * (`authorise` refused a moved model above). The writer loads the persisted graph itself, applies the
+         * removal through the canonical patch train and commits once, so a partial removal cannot land.
+         */
+        const removed = ops.map((o) => { const [from, to] = o.path.split('::'); return { from, to }; });
+        // ⛔ The ids must still bear the names the user approved: the analysis hash excludes labels, so a
+        // rename or a swap of two risks since the proposal would otherwise delete a link now shown under
+        // another name. Refuse with nothing written, and ask for a fresh look.
+        const labelOf = (id: string) => before.nodes.find((n) => n.id === id)?.label;
+        const renamed = ops.some((o) => {
+          const v = (o.value ?? {}) as { option_label?: unknown; risk_label?: unknown };
+          const [from, to] = o.path.split('::');
+          return labelOf(from) !== v.option_label || labelOf(to) !== v.risk_label;
+        });
+        if (renamed) {
+          return {
+            ok: false, mutated: false, applied: false, refusal: 'superseded',
+            detail: 'The option or risk in this change has been renamed since it was proposed, so nothing was removed. Look at the model again and propose it once more.',
+          };
+        }
+        const r = await dispatch('/orchestrate/v2/turn', {
+          kind: 'system_event',
+          turn_id: authorisationTurnId(decision.proposal.proposal_id),
+          scenario_id: ctx.scenario_id,
+          stage: 'frame',
+          event: { kind: 'structural_delete', removed_node_ids: [], removed_edges: removed, base_graph_hash: before.graph_hash },
+        });
+        const after = await readGraph(ctx.scenario_id);
+        const stillThere = removed.filter((x) => (after?.edges ?? before.edges).some((e) => e.from === x.from && e.to === x.to));
+        const rc = receiptSummaryOf(r.json);
+        if (r.status !== 200 || after === null || stillThere.length > 0) {
+          return {
+            ok: false, mutated: false, applied: false, refusal: 'not_applied',
+            detail: `The link was not removed (http ${r.status}). The model is unchanged.`,
+          };
+        }
+        const receipts = rc.summary !== null ? [rc.summary] : [];
+        proposals.markApplied(decision.proposal.proposal_id, receipts);
+        return {
+          ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id,
+          receipts,
+          removed_links: removed.map((x) => ({
+            option: before.nodes.find((n) => n.id === x.from)?.label ?? x.from,
+            risk: before.nodes.find((n) => n.id === x.to)?.label ?? x.to,
+          })),
+        };
+      }
 
       if (ops[0]?.op === 'set_option_intervention') {
         /**
