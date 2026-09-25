@@ -288,6 +288,40 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     expect(node(graph, 'hire_two_developers').interventions?.engineering_delivery_capacity).toMatchObject({ value: 0.52, source: 'brief_extraction' });
   });
 
+  /** Pre-review 5829120255: the stated 52 must survive as the REGISTERED level, and as the user's. */
+  const explicit52 = { factor_label: 'Engineering delivery capacity', value: 52, value_kind: 'absolute' as const, unit: 'story points', provenance: 'explicit' };
+  const first52 = () => {
+    const first = stated40(c22(), 40, true);
+    first.options[0] = { ...first.options[0]!, changes: ['Hiring cost'], interventions: [{ ...explicit52 }] };
+    return first;
+  };
+  const retry52 = (levels: Iv[]) => {
+    const retry = stated40(covered(), 40, true);
+    retry.options[0] = { ...retry.options[0]!, interventions: [...levels, est('Hiring cost', 140000, 'GBP')] };
+    return retry;
+  };
+  const userLevelKept = (graph: Graph) =>
+    expect(node(graph, 'hire_two_developers').interventions?.engineering_delivery_capacity).toStrictEqual({ value: 0.52, source: 'brief_extraction' });
+
+  it('RED (pre-review 5829120255 #1): the same number re-stamped ai_proposed is not adopted — authorship is part of the user\'s number', async () => {
+    const { graph } = await construct(first52(), retry52([{ ...explicit52, provenance: 'ai_proposed' }]));
+    userLevelKept(graph);
+  });
+
+  it.each([
+    ['user 52 first, estimate 60 last', [{ ...explicit52 }, est('Engineering delivery capacity', 60, 'story points')]],
+    ['estimate 60 first, user 52 last', [est('Engineering delivery capacity', 60, 'story points'), { ...explicit52 }]],
+  ])('RED (pre-review 5829120255 #2): a duplicate level for the user\'s pair is not adopted, in either order (%s)', async (_order, levels) => {
+    const { graph } = await construct(first52(), retry52(levels as Iv[]));
+    userLevelKept(graph);
+  });
+
+  it('CONTROL: a retry keeping exactly the one explicit 52 and filling the other pairs is adopted', async () => {
+    const { graph } = await construct(first52(), retry52([{ ...explicit52 }]));
+    userLevelKept(graph);
+    expect(missingValues(graph)).toEqual([]);
+  });
+
   it('CONTROL: a retry that keeps the user-stated 40 and adds the levels is adopted, with the 40 still the user\'s', async () => {
     const { graph } = await construct(stated40(c22(), 40, true), stated40(covered(), 40, true));
     expect(node(graph, 'engineering_delivery_capacity').observed_state).toMatchObject({ raw_value: 40, source: 'brief_extraction' });
