@@ -376,6 +376,14 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     expect(graph.nodes.filter((n) => n.id === 'hire_two_developers')).toHaveLength(1);
   });
 
+  it('RED (same class): a retry with a DUPLICATE factor object of the same label is not adopted', async () => {
+    const retry = covered();
+    retry.factors.push(factor('Hiring cost', 999, 500000, 'GBP'));
+    const { graph } = await construct(c22(), retry);
+    // The first draft is kept: no retry levels were adopted.
+    expect(node(graph, 'hire_both')).not.toHaveProperty('interventions');
+  });
+
   it('CONTROL: a retry keeping exactly the one explicit 52 and filling the other pairs is adopted', async () => {
     const { graph } = await construct(first52(), retry52([{ ...explicit52 }]));
     userLevelKept(graph);

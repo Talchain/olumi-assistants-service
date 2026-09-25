@@ -597,6 +597,12 @@ function keepsEveryAction(before: CandidateModel, after: CandidateModel): boolea
  * nothing, and the same number re-stamped `ai_proposed` is no longer the user's.
  */
 function keepsEveryUserNumber(firstRaw: CandidateModel, firstPrepared: CandidateModel, retryRaw: CandidateModel): boolean {
+  // ⛔ An ambiguous retry is never adopted (pre-review 5829692499): admission folds
+  // every option (or factor) object of one label into ONE node, applying each
+  // object's levels in turn, so a duplicate object can overwrite the user's level
+  // wherever this guard looks. Two objects sharing a label mean "which one?".
+  const unique = (labels: string[]) => new Set(labels).size === labels.length;
+  if (!unique(retryRaw.options.map((o) => o.label)) || !unique(retryRaw.factors.map((f) => f.label))) return false;
   type Iv = NonNullable<CandidateModel['options'][number]['interventions']>[number];
   const same = (a: Iv, b: Iv) => a.value === b.value && a.unit === b.unit && a.provenance === b.provenance
     && (a as Iv & { value_kind?: string }).value_kind === (b as Iv & { value_kind?: string }).value_kind;
