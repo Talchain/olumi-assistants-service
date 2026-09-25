@@ -75,22 +75,29 @@ describe('a stated limit that cannot be attached is said, naming the limit', () 
     const lines = said(r);
     expect(lines, 'exactly one sentence names the unattached limit').toHaveLength(1);
     expect(lines[0]).toContain('Your limit');
-    expect(lines[0]).toContain('Net margin >= 15%');
+    expect(lines[0]).toContain('Net margin of at least 15%');
+    expect(lines[0], 'words, never a symbol, in text the user reads').not.toMatch(/[<>]=?/);
     expect(lines[0]).toMatch(/cannot check it/);
   });
 
-  it('TWO bounds on one unattached metric: each is said once, with ITS OWN bound and ITS OWN author (pre-review 5828829492)', async () => {
-    const { r } = await run(candidate('risk', 'explicit', [
-      { metric: 'Net margin', operator: '>=', value: 15, unit: '%', provenance: 'explicit' },
-      { metric: 'Net margin', operator: '<=', value: 30, unit: '%', provenance: 'ai_proposed' },
-    ]));
+  // Both ORDERS, mixed provenance, and two user bounds (review 5828856904 / pre-review 5828829492): a first-match
+  // lookup repeats the first bound and hides the second, with the wrong author.
+  const lower = { metric: 'Net margin', operator: '>=', value: 15, unit: '%' };
+  const upper = { metric: 'Net margin', operator: '<=', value: 40, unit: '%' };
+  const margin = (r: Record<string, unknown>) => ((r.not_represented as string[]) ?? []).filter((s) => /Net margin/.test(s));
+  it.each([
+    ['user lower first, Olumi upper second', [{ ...lower, provenance: 'explicit' }, { ...upper, provenance: 'ai_proposed' }],
+      ['Your limit "Net margin of at least 15%"', 'The limit Olumi proposed ("Net margin of at most 40%")']],
+    ['Olumi lower first, user upper second', [{ ...lower, provenance: 'ai_proposed' }, { ...upper, provenance: 'explicit' }],
+      ['The limit Olumi proposed ("Net margin of at least 15%")', 'Your limit "Net margin of at most 40%"']],
+    ['two user bounds', [{ ...lower, provenance: 'explicit' }, { ...upper, provenance: 'explicit' }],
+      ['Your limit "Net margin of at least 15%"', 'Your limit "Net margin of at most 40%"']],
+  ])('TWO bounds on one unattached metric (%s): each said once, with its own bound and its own author', async (_name, bounds, want) => {
+    const { r } = await run(candidate('risk', 'explicit', bounds as Bound[]));
     expect(r.goal_constraints_carried, 'PRECONDITION: both withheld').toBe(0);
-    const lines = said(r).concat(((r.not_represented as string[]) ?? []).filter((s) => /Net margin <= 30%/.test(s)));
-    const uniq = [...new Set(lines)];
-    expect(uniq, 'one sentence per bound, no duplicate').toHaveLength(2);
-    expect(uniq.filter((s) => s.includes('Your limit "Net margin >= 15%"'))).toHaveLength(1);
-    expect(uniq.filter((s) => s.includes('The limit Olumi proposed ("Net margin <= 30%")'))).toHaveLength(1);
-    expect(((r.not_represented as string[]) ?? []).filter((s) => /Net margin/.test(s)), 'no repeated sentence').toHaveLength(2);
+    const lines = margin(r);
+    expect(lines, 'one sentence per bound, none repeated').toHaveLength(2);
+    for (const w of want) expect(lines.filter((s) => s.startsWith(w)), w).toHaveLength(1);
   });
 
   it('the SAME bound drafted twice is said once', async () => {

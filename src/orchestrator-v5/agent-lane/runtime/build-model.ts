@@ -375,6 +375,7 @@ export interface DemotedProvenance { readonly option: string; readonly factor: s
  * count, not a sentence. Named here from the candidate's own words, so the Agent can tell the user
  * exactly which limit the analysis will not check. No remedy is offered: the withheld limit is not kept.
  */
+const OPERATOR_WORDS: Readonly<Record<string, string>> = { '>=': 'at least', '<=': 'at most', '>': 'more than', '<': 'less than' };
 function unattachedLimitLines(model: CandidateModel, loss: readonly { readonly field_path: string; readonly before?: unknown }[]): string[] {
   // Admission withholds BY METRIC (`admit-constraint.ts` resolves `c.metric` to a node, or not), so every
   // bound on an unattached metric shares that fate. Iterate the BOUNDS, not the loss entries: a loss entry
@@ -385,7 +386,10 @@ function unattachedLimitLines(model: CandidateModel, loss: readonly { readonly f
   const lines: string[] = [];
   for (const c of model.constraints ?? []) {
     if (!unattached.has(c.metric)) continue;
-    const limit = `${c.metric} ${c.operator} ${c.value}${c.unit ?? ''}`;
+    // Words, never symbols: this sentence reaches the user (RC 5828938080 §3, Runtime's copy point).
+    const bound = OPERATOR_WORDS[c.operator] ?? c.operator;
+    const unit = c.unit === undefined || c.unit === '' ? '' : c.unit.startsWith('%') ? c.unit : ` ${c.unit}`;
+    const limit = `${c.metric} of ${bound} ${c.value}${unit}`;
     // The same rule as `admit-constraint.ts` `isUserAuthored`: only a bound the user stated is called theirs.
     const users = c.provenance === 'explicit';
     const key = `${users ? 'user' : 'olumi'}\u0000${limit}`;
