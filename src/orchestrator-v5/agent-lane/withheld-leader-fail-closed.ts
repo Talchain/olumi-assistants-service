@@ -63,8 +63,10 @@
  * after a two-option legend or in a sentence that says split or win share, and a count ("won 71 of 100 runs"); an
  * ascending range, a change ("could drop 70% to 30%"), a figure that applies to every option ("on both…", "…alike") or
  * a non-option composition is not. Win shares ARE also removed as
- * lists ("label: N%" / "label — N%", per contiguous list summing to ~100, under a ranking heading, or
- * on an option's own label) and as tables (a share header, an option row with a %, or a ranking row). Measured recall is corpus recall (AI
+ * lists ("label: N%" / "label — N%", per contiguous list — tight or loose — summing to ~100, under a ranking heading,
+ * on an option's own label, or beside a ranked sibling when the row's head names an option and nothing measures its
+ * figure) and as tables (a share header, a ranking header, or an option row with a %, take the table; a ranking body
+ * row goes alone, with the option rows that give a bare share). Measured recall is corpus recall (AI
  * Quality v6: 43 real replies plus 6 authored controls), not a general guarantee.
  */
 import type { OlumiResponse } from '@talchain/schemas/boundary';
@@ -802,16 +804,86 @@ function isRankedListItem(unit: string, startsLine: boolean, labels: RankingLabe
   while (k < back.length && FIGURE_LINK.test(back[k]!)) k += 1;
   const before = back[k] ?? '';
   if (k > 0 && /^[a-z][a-z'-]*$/i.test(before) && !FUNCTION_OR_SHARE_WORD.test(before) && !OPTION_CUE.test(before)) return false;
+  // "- **Keep Pro at £49:** Monthly churn: **4%**.": a measure named after the item's own head, straight before the figure.
+  const own = ITEM_HEAD.exec(copy);
+  const ownEnd = own === null ? 0 : own[0].replace(/[*_`]/g, '').length;
+  if (ownEnd <= m.index! && measureBeforeFigure(plain.slice(ownEnd, m.index), labels)) return false;
+  const h = own === null ? '' : labelKey((own[1] ?? own[2] ?? '').replace(/[:\s]+$/, ''));
+  // "- **Monthly churn** (Keep Pro at £49): 4%": a head that IS another node's label gives that node's level, whatever
+  // option the row also names (review 5830799585: the option test ran first and took it).
+  if (startsLine && h.length > 0 && headedByNodeLabel(h, labels)) return false;
   const key = labelKey(copy);
   // A specific option — a label, or an option-shaped word that is not the generic noun ("no option can be put forward").
   const namesOption = (labels.optionLabels ?? []).some((l) => { const lk = labelKey(l); return lk.length > 0 && key.includes(lk); })
     || [...copy.matchAll(new RegExp(OPTION_CUE.source, 'gi'))].some((c) => !GENERIC_OPTION_NOUN.test(c[0]));
   if (namesOption) return true;
-  const head = startsLine ? /^\s*(?:[-+•]|\*(?=\s)|\d+[.)])\s+(?:\*\*([^*]+)\*\*|([^:.]{1,60}):)/.exec(copy) : null;
-  if (head === null) return false;
-  // A head that is one of the model's OTHER nodes ("Development capacity") gives its level, not an option's share.
-  const h = labelKey((head[1] ?? head[2] ?? '').replace(/[:\s]+$/, ''));
-  return h.length > 0 && !(labels.nonOptionLabels ?? []).some((l) => { const lk = labelKey(l); return lk.length > 0 && (lk.includes(h) || h.includes(lk)); });
+  if (!startsLine || own === null) return false;
+  // A head that is one of the model's OTHER nodes ("Development capacity") gives its level, not an option's share —
+  // and so does a row that names no option, in its head or after it ("Onboarding workload:", "Churn assumption:";
+  // residual 5). "- **Current model:** **55%** for the £59-at-release path." names one after its figure.
+  return h.length > 0 && !(labels.nonOptionLabels ?? []).some((l) => { const lk = labelKey(l); return lk.length > 0 && (lk.includes(h) || h.includes(lk)); })
+    && (headNamesOption(h, labels) || headNamesOption(key.replace(QUANTIFIED_GENERIC, BLANK), labels));
+}
+
+/** A generic option noun under a quantifier or a negation names no one option: "no option", "both paths", "either route". */
+const QUANTIFIED_GENERIC = /\b(?:no|any|either|neither|each|every|both|all|which|whichever|one|single)\s+(?:(?:single|clear|overall|of\s+the)\s+)?(?:paths?|options?|choices?|routes?|alternatives?|scenarios?)\b/gi;
+
+/**
+ * A list item's own head: "**Keep £49:**", "Keep £49:", or "Keep £49 —" (residual 2: the dash is "-" in the
+ * classification copy). The list marker is optional, so a later sentence of an item has its own head too.
+ */
+const ITEM_HEAD = /^\s*(?:(?:[-+•]|\*(?=\s)|\d+[.)])\s+)?(?:\*\*([^*]+)\*\*:?|([^:.|]{1,60}?)(?::|\s-\s))/;
+
+/**
+ * ⛔ A HEAD MUST NAME AN OPTION (review 5830799585, residual 5): any bold or "Label:" head that was not another node's
+ * label read as an option, so "- Onboarding workload: **10%**" and "- Churn assumption: **4%**" went with a ranked
+ * sibling. A head names an option by its label; by an option-shaped word, the generic noun included, since a head is one
+ * option ("Raising:", "The £49 path:", "Option A:"); by words all drawn from ONE option's label ("Tech Lead + Developer"
+ * beside "Tech Lead Plus Developer", captured c10-d2afc2c); by a word from an option's label that no other node's label
+ * shares and not every option's does ("Two developers" beside "Hire Two Developers"; never "Pro" in both prices, or
+ * "Video" beside "Video follow-up share"); or by the word that opens an option's label and no other node's ("Hire
+ * more:"). A noun phrase that is none of these heads a level.
+ */
+function headNamesOption(head: string, labels: RankingLabelContext): boolean {
+  const optionKeys = (labels.optionLabels ?? []).map(labelKey).filter((k) => k.length > 0);
+  if (optionKeys.some((k) => head.includes(k)) || OPTION_CUE.test(head)) return true;
+  const wordsOf = (s: string): string[] => s.split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}£$€]+|[^\p{L}\p{N}]+$/gu, ''))
+    .filter((w) => w.length > 1 && !FUNCTION_OR_SHARE_WORD.test(w));
+  const optionWords = optionKeys.map(wordsOf);
+  const otherKeys = (labels.nonOptionLabels ?? []).map(labelKey);
+  const otherWords = new Set(otherKeys.flatMap(wordsOf));
+  const headWords = wordsOf(head);
+  if (headWords.length > 0 && optionWords.some((ws) => headWords.every((w) => ws.includes(w)))) return true;
+  if (headWords.some((w) => !otherWords.has(w) && optionWords.some((ws) => ws.includes(w)) && !optionWords.every((ws) => ws.includes(w)))) return true;
+  const opener = (s: string): string => s.split(/\s+/)[0] ?? '';
+  const first = opener(head);
+  if (first.length < MIN_LABEL_LENGTH || FUNCTION_OR_SHARE_WORD.test(first)) return false;
+  return optionKeys.some((k) => opener(k) === first) && !otherKeys.some((k) => opener(k) === first);
+}
+
+/** The head IS another node's label, or opens with it — and does not open with an option's label ("Price rise to £59"). */
+function headedByNodeLabel(head: string, labels: RankingLabelContext): boolean {
+  const opensWith = (k: string): boolean => k.length > 0 && (head === k || head.startsWith(`${k} `));
+  return (labels.nonOptionLabels ?? []).some((l) => opensWith(labelKey(l))) && !(labels.optionLabels ?? []).some((l) => opensWith(labelKey(l)));
+}
+
+/**
+ * ⛔ A MEASURE NAMED JUST BEFORE THE FIGURE MAKES IT A LEVEL (review 5830799585, residual 4): "- **Keep Pro at £49:**
+ * Monthly churn: **4%**." is churn under that option, not its share; only an "is/at/of" link was counted. `between` is
+ * what sits AFTER the item's own head — "Keep current price:" heads the item and is never a measure. It measures the
+ * figure when it ends in another node's label ("monthly churn **4%**"), or in a "phrase:" with a content word of its own,
+ * no share, ranking or figure word, and no option in it. "Win probability:", "Share of runs:", "Score:" and
+ * "Probability of higher MRR:" say the figure IS a share, so those rows still go.
+ */
+function measureBeforeFigure(between: string, labels: RankingLabelContext): boolean {
+  const tail = labelKey(between).replace(/[:\s]+$/, '');
+  if ((labels.nonOptionLabels ?? []).some((l) => { const lk = labelKey(l); return lk.length > 0 && (tail === lk || tail.endsWith(` ${lk}`)); })) return true;
+  const phrase = /([^:;,.()|]+):\s*$/.exec(between)?.[1];
+  if (phrase === undefined) return false;
+  const words = phrase.split(/\s+/).map((w) => w.replace(/^[^a-z]+|[^a-z]+$/gi, '')).filter((w) => w.length > 0);
+  const content = words.some((w) => /^[a-z][a-z'-]*$/i.test(w) && (!FUNCTION_OR_SHARE_WORD.test(w) || MEASURE_OR_OPINION.test(w)) && !MODIFIER_WORD.test(w));
+  const shareRankingOrFigure = words.some((w) => SHARE_NOUN.test(w) || FIGURE_NOUN.test(w)) || rankingCodesInBlanked(blankIdioms(phrase)).length > 0;
+  return content && !shareRankingOrFigure && !headNamesOption(labelKey(phrase), labels);
 }
 
 /**
@@ -948,6 +1020,38 @@ function finerSentences(unit: string): string[] {
 
 /** A table header that names a share of runs ("| Option | Share |"), with or without a ranking word. */
 const TABLE_SHARE_HEADER = /^\s*\|\s*(?:options?|paths?|choices?|alternatives?|plans?|scenarios?)\s*\|.*\b(?:share|chance|likelihood|probability|odds)\b/i;
+/** A markdown table's header separator: "|---|---:|". */
+const TABLE_SEPARATOR = /^\s*\|(?:\s*:?-+:?\s*\|)+\s*$/;
+
+/**
+ * ⛔ A LOOSE LIST IS STILL ONE LIST (review 5830799585, residual 1): Markdown separates a list's items by a newline
+ * (tight) or by one blank line (loose), and every list rule below stopped at the blank line, so "- **Keep £49:** **4%**."
+ * outlived its ranked sibling. The gap is the same all the way down a list, so a CHANGE of spacing — a tight list, a
+ * blank line, another tight list — still starts a new one ("- Raise now: 60%\n- Wait a year: 40%\n\n- Ownership now: 65%").
+ */
+const continuesList = (gap: string | undefined, sep: string): boolean => /^\n\n?$/.test(sep) && (gap === undefined || gap === sep);
+
+type Segment = { sep: string } | { units: string[] };
+
+/** The markdown tables in a reply: runs of "| … |" lines joined by single newlines, as segment indices. */
+function tableRuns(segs: ReadonlyArray<Segment>): number[][] {
+  const isRow = (k: number): boolean => { const g = segs[k]; return g !== undefined && 'units' in g && /^\s*\|/.test(g.units.join('')); };
+  const out: number[][] = [];
+  for (let i = 0; i < segs.length; ) {
+    if (!isRow(i)) { i += 1; continue; }
+    const rows: number[] = [];
+    let k = i;
+    while (k < segs.length) {
+      if (isRow(k)) { rows.push(k); k += 1; continue; }
+      const g = segs[k];
+      if (g !== undefined && 'sep' in g && g.sep === '\n' && isRow(k + 1)) { k += 1; continue; }
+      break;
+    }
+    out.push(rows);
+    i = k;
+  }
+  return out;
+}
 
 const optionKeysOf = (labels: RankingLabelContext): Set<string> => new Set((labels.optionLabels ?? []).map(labelKey));
 
@@ -961,38 +1065,34 @@ const SHARE_UNIT = /^[\s\-+•*\d.)]*[^:|\n]{2,80}?(?::|\s-)\s*(\d+(?:[.,]\d+)?)
 
 /**
  * Units that rank only AS A WHOLE, so no single sentence test sees them (review of #1871):
- *   - a markdown TABLE any row of which ranks ("| Win share |" as its header) is dropped whole — dropping
- *     only the header left "| Raise to £59 | 71% |" standing without its label;
+ *   - a markdown TABLE whose HEADER ranks or names a share ("| Win share |"), or with an option's own row and a %, is
+ *     dropped whole — dropping only the header left "| Raise to £59 | 71% |" standing without its label;
  *   - a win-share DISTRIBUTION — two or more "label: N%" units whose percentages sum to about 100 — is
  *     dropped whole. A factor's own percentage ("Monthly churn: 4%") never sums to 100 with another.
  * Returned as `${segIndex}:${unitIndex}` keys.
  */
-function unitsRankingAsAWhole(segs: ReadonlyArray<{ sep: string } | { units: string[] }>, labels: RankingLabelContext): Set<string> {
+function unitsRankingAsAWhole(segs: ReadonlyArray<Segment>, labels: RankingLabelContext): Set<string> {
   const forced = new Set<string>();
   const unitsOf = (k: number): string[] | undefined => {
     const g = segs[k];
     return g !== undefined && 'units' in g ? g.units : undefined;
   };
-  const isRow = (k: number): boolean => /^\s*\|/.test(unitsOf(k)?.join('') ?? '');
-  for (let i = 0; i < segs.length; ) {
-    if (!isRow(i)) { i += 1; continue; }
-    const rows: number[] = [];
-    let k = i;
-    while (k < segs.length) {
-      if (isRow(k)) { rows.push(k); k += 1; continue; }
-      const g = segs[k];
-      if (g !== undefined && 'sep' in g && g.sep === '\n' && isRow(k + 1)) { k += 1; continue; }
-      break;
-    }
+  for (const rows of tableRuns(segs)) {
     const header = unitsOf(rows[0]!)!.join('');
     const optionShareRow = rows.some((r) => {
       const cells = unitsOf(r)!.join('').split('|').map((c) => c.trim()).filter((c) => c !== '');
       return cells.length >= 2 && optionKeysOf(labels).has(labelKey(cells[0]!)) && cells.slice(1).some((c) => new RegExp(PCT).test(classificationCopy(c)));
     });
-    if (optionShareRow || TABLE_SHARE_HEADER.test(classificationCopy(header)) || rows.some((r) => unitsOf(r)!.some((u) => sentenceRanksOptions(u, labels)))) {
+    /**
+     * ⛔ A TABLE IS ONE UNIT PER ROW (review 5830799585, residual 6): a row has no sentence punctuation, so "any row ranks"
+     * took the whole of a real construction reply's assumptions table for one "strongest fit" in its last row. A ranking
+     * HEADER still takes the table — it says what every row means — but a ranking BODY row goes alone (with the option rows
+     * it ranks, below in `dropRankingSentences`).
+     */
+    const headerRanks = rows.length > 1 && TABLE_SEPARATOR.test(unitsOf(rows[1]!)!.join('')) && unitsOf(rows[0]!)!.some((u) => sentenceRanksOptions(u, labels));
+    if (optionShareRow || TABLE_SHARE_HEADER.test(classificationCopy(header)) || headerRanks) {
       for (const r of rows) unitsOf(r)!.forEach((_, j) => forced.add(`${r}:${j}`));
     }
-    i = k;
   }
   /**
    * ⛔ ROWS WHOSE MEANING IS THEIR HEADING (Codex 5825866849: "Win share in the modelled runs:" then
@@ -1006,11 +1106,12 @@ function unitsRankingAsAWhole(segs: ReadonlyArray<{ sep: string } | { units: str
     if (heading === undefined || !/:\s*$/.test(classificationCopy(heading).trim()) || !sentenceRanksOptions(heading, labels)) continue;
     let k = i + 1;
     if (segs[k] !== undefined && 'sep' in segs[k]!) k += 1;
+    let gap: string | undefined;
     while (k < segs.length) {
       const row = unitsOf(k);
       if (row === undefined) {
         const g = segs[k];
-        if (g !== undefined && 'sep' in g && g.sep === '\n') { k += 1; continue; }
+        if (g !== undefined && 'sep' in g && continuesList(gap, g.sep)) { gap = g.sep; k += 1; continue; }
         break;
       }
       if (!VALUE_ROW.test(classificationCopy(row.join('')).trim())) break;
@@ -1032,15 +1133,17 @@ function unitsRankingAsAWhole(segs: ReadonlyArray<{ sep: string } | { units: str
     });
   }
   // Grouped per CONTIGUOUS run (served: a win-share list and an ownership list in one reply summed to
-  // 317 together, so neither was recognised). A run ends at anything but a share unit or a single newline.
+  // 317 together, so neither was recognised). A run ends at anything but a share unit or its list's own gap.
   let run: Array<{ key: string; pct: number }> = [];
+  let gap: string | undefined;
   const close = (): void => {
     const total = run.reduce((a, b) => a + b.pct, 0);
     if (run.length >= 2 && total >= 97 && total <= 103) for (const x of run) forced.add(x.key);
     run = [];
+    gap = undefined;
   };
   segs.forEach((g, r) => {
-    if ('sep' in g) { if (g.sep !== '\n') close(); return; }
+    if ('sep' in g) { if (run.length > 0 && continuesList(gap, g.sep)) gap = g.sep; else close(); return; }
     g.units.forEach((u, j) => {
       if (!/\S/.test(u)) return;
       const m = SHARE_UNIT.exec(classificationCopy(u));
@@ -1065,7 +1168,7 @@ export interface FailClosedProseResult {
  */
 export function dropRankingSentences(text: string, labels: RankingLabelContext = NO_LABELS): FailClosedProseResult {
   if (typeof text !== 'string' || text.length === 0) return { text, droppedSentences: 0 };
-  type Seg = { sep: string } | { units: string[] };
+  type Seg = Segment;
   const segs: Seg[] = [];
   for (const unit of splitIntoRedactableUnits(text)) {
     if (/^\n+$/.test(unit)) { segs.push({ sep: unit }); continue; }
@@ -1081,21 +1184,34 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
    * ⛔ A SPLIT ACROSS TWO SENTENCES (self-review of ae56cf4b): "The £59 path gets 71%. Holding gets the other 29%." Each
    * sentence alone holds one figure and ranks nothing. So two ADJACENT sentences with one percentage each are read
    * as one passage too; if the passage splits the options, both go.
+   *
+   * ⛔ …OR THREE OR MORE (review 5830799585, residual 3): "Raising gets 55%. The pilot gets 41%. Keeping £49 gets 4%." No
+   * two of those make a split. So every run of adjacent one-figure sentences ending at this one is read as a passage.
+   * One of three or more is tried only when its figures sum to about 100 and neither end figure can be spared — the
+   * SMALLEST such run is the split, so "…Keeping £49 gets 4%. Churn is 3%." keeps the churn sentence.
    */
   const ONE_PCT = new RegExp(`^(?:(?!${PCT}).)*${PCT}(?:(?!${PCT}).)*$`, 'is');
   const pairDrop = new Set<string>();
   {
+    const near100 = (t: number): boolean => t >= 97 && t <= 103;
     let before = '';
-    let prev: { key: string; text: string; prior: string } | null = null;
+    let chain: Array<{ key: string; text: string; prior: string; pct: number }> = [];
     segs.forEach((seg, r) => {
       if ('sep' in seg) { before += seg.sep; return; }
       seg.units.forEach((u, j) => {
         const key = `${r}:${j}`;
         // List items are judged as a list (below), never paired line by line: "- Capacity: 40%" / "- Development: 60%".
         const one = /\S/.test(u) && !PROTECTED_SENTENCES.has(u.trim()) && ONE_PCT.test(u) && !(j === 0 && LIST_MARKER.test(u));
-        // Only a SPLIT the two figures make together: a neighbour that ranks on its own goes alone, never taking this one.
-        if (one && prev !== null && rankingCodesIn(`${prev.text.trim()} ${u.trim()}`, labels, prev.prior).includes('share_split')) { pairDrop.add(prev.key); pairDrop.add(key); }
-        prev = one ? { key, text: u, prior: before } : (/\S/.test(u) ? null : prev);
+        if (one) {
+          chain.push({ key, text: u, prior: before, pct: Number(/\d+(?:[.,]\d+)?/.exec(new RegExp(PCT, 'i').exec(u)![0])![0].replace(',', '.')) });
+          for (let n = 2; n <= chain.length; n += 1) {
+            const run = chain.slice(-n);
+            const total = run.reduce((a, x) => a + x.pct, 0);
+            if (n > 2 && (!near100(total) || near100(total - run[0]!.pct) || near100(total - run[n - 1]!.pct))) continue;
+            // Only a SPLIT the figures make together: a neighbour that ranks on its own goes alone, never taking this one.
+            if (rankingCodesIn(run.map((x) => x.text.trim()).join(' '), labels, run[0]!.prior).includes('share_split')) for (const x of run) pairDrop.add(x.key);
+          }
+        } else if (/\S/.test(u)) chain = [];
         before += u;
       });
     });
@@ -1118,10 +1234,11 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
   for (let r = 0; r < segs.length; r += 1) {
     const list: number[] = [];
     let k = r;
+    let gap: string | undefined;
     while (k < segs.length) {
       const seg = segs[k]!;
       if ('units' in seg && LIST_MARKER.test(seg.units[0] ?? '')) { list.push(k); k += 1; continue; }
-      if ('sep' in seg && seg.sep === '\n' && list.length > 0) { k += 1; continue; }
+      if ('sep' in seg && list.length > 0 && continuesList(gap, seg.sep)) { gap = seg.sep; k += 1; continue; }
       break;
     }
     if (list.length > 1 && list.some((i) => drops[i]!.some(Boolean))) {
@@ -1131,6 +1248,22 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
       }
     }
     if (list.length > 0) r = k - 1;
+  }
+  /**
+   * …AND A TABLE AS A TABLE (review 5830799585, residual 6): a row is one unit, so a row with a ranking cell goes whole;
+   * then a body row that gives an option a bare share goes with it ("| Holding | 30% |" under "| The £59 path | 48%, the
+   * strongest |"). Each figure cell is read as the list item "- <first cell>: <cell>", so the list's own test decides it,
+   * and a row of several ("| Two developers | 34.6% | 41.8% |") goes when any of them is a share.
+   */
+  for (const rows of tableRuns(segs)) {
+    const unitsAt = (i: number): string[] => (segs[i] as { units: string[] }).units;
+    for (const i of rows) if (drops[i]!.some(Boolean)) drops[i] = drops[i]!.map(() => true);
+    const body = rows.length > 1 && TABLE_SEPARATOR.test(unitsAt(rows[1]!).join('')) ? rows.slice(2) : rows;
+    if (!body.some((i) => drops[i]!.some(Boolean))) continue;
+    for (const i of body) {
+      const cells = unitsAt(i).join('').split('|').map((c) => c.trim()).filter((c) => c !== '');
+      if (cells.slice(1).some((c) => isRankedListItem(`- ${cells[0]!}: ${c}`, true, labels))) drops[i] = drops[i]!.map(() => true);
+    }
   }
   const lines: Array<Seg | null> = segs.map((seg, r) => {
     if ('sep' in seg) return seg;

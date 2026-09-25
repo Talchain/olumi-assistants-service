@@ -1109,3 +1109,236 @@ describe('review of #1871 at ae56cf4b — a list in a leading clause is not what
     ['We compared raising and holding.', 'Ads and referrals brought in 60% and 40% of signups.'],
   ])('CONTROL: %s → "%s" is kept (the list is the figures\' own subject)', (lead, pair) => { expect(gate(`${lead} ${pair}`)).toContain(pair); });
 });
+
+/**
+ * FOLLOW-UP OF #1871 — the residuals named in the independent APPROVE (5830799585), closed as one class: what makes a
+ * row part of a ranked list, and what makes its figure a share rather than a level. Every row goes through the
+ * production gate, and every assertion is bound to an exact line: kept byte-identical, or absent.
+ */
+const PRICING_NODES = [{ id: 'keep', kind: 'option', label: 'Keep Pro at £49' }, { id: 'raise', kind: 'option', label: 'Raise Pro to £59 at release' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }];
+const withheldGate = (text: string, nodes: ReadonlyArray<{ id: string; kind: string; label: string }> = PRICING_NODES) => enforceAgentLaneLeaderClaimsAtWire(
+  { assistant_text: text, blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } } } as unknown as OlumiResponse,
+  { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'constraint_verdict_withheld', graph: { nodes }, analysisReady: { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } } },
+).response.assistant_text;
+const linesOf = (s: string): string[] => s.split('\n');
+const RANKED_ROW = '- **Raise Pro to £59 at release:** leads at **55%**.';
+const CAVEAT = 'The churn limit was not scored.';
+
+describe('follow-up of #1871 — a loose list and an em-dash row are still one list (residuals 1 and 2)', () => {
+  it.each([
+    ['loose (the reviewer\'s rows)', `${RANKED_ROW}\n\n- **Keep £49:** **4%**.`, ['- **Keep £49:** **4%**.']],
+    ['em-dash rows, tight', '- Raise Pro to £59 at release — leads at 55%\n- Keep £49 — 4%', ['- Raise Pro to £59 at release — leads at 55%', '- Keep £49 — 4%']],
+    ['em-dash rows, loose', '- Raise Pro to £59 at release — leads at 55%\n\n- Keep £49 — 4%', ['- Raise Pro to £59 at release — leads at 55%', '- Keep £49 — 4%']],
+  ])('RED: %s — every ranked row goes, the caveat stays', (_name, list, gone) => {
+    const out = withheldGate(`Here is where the runs stand.\n\n${list}\n\n${CAVEAT}`);
+    for (const row of [RANKED_ROW, ...gone]) expect(out).not.toContain(row);
+    expect(out).not.toMatch(/55%|\b4%/);
+    expect(linesOf(out)).toContain('Here is where the runs stand.');
+    expect(linesOf(out)).toContain(CAVEAT);
+  });
+  // The same gap broke the other two list rules: a win-share distribution, and the value rows under a ranking heading.
+  it.each([
+    ['a loose win-share distribution', 'Here is the split.\n\n- The £59 path: 71%\n\n- Holding at £49: 29%', ['- The £59 path: 71%', '- Holding at £49: 29%'], 'Here is the split.'],
+    ['loose value rows under a ranking heading', 'Win share in the modelled runs:\n\n- The release-timed rise: 55%\n\n- The pilot: 41%', ['- The release-timed rise: 55%', '- The pilot: 41%'], null],
+  ])('RED: %s — every row goes, the caveat stays', (_name, text, gone, keptLead) => {
+    const out = withheldGate(`${text}\n\n${CAVEAT}`);
+    for (const row of gone) expect(out).not.toContain(row);
+    if (keptLead !== null) expect(linesOf(out)).toContain(keptLead);
+    expect(linesOf(out)).toContain(CAVEAT);
+  });
+  it('RED (captured c3b-467b591, with blank lines between the rows): "is at **4%**" goes with its list', () => {
+    const pricing = [{ id: 'o1', kind: 'option', label: 'Raise Price at Release' }, { id: 'o2', kind: 'option', label: 'Keep Current Pro Price' }, { id: 'o3', kind: 'option', label: 'Pilot £59 at Release' }];
+    const out = withheldGate([
+      '**What the current model implies**',
+      '',
+      '- **Raise Price at Release (£59):** leads in the model, with a **55%** chance of producing the strongest MRR outcome across the simulated scenarios.',
+      '',
+      '- **Pilot £59 at Release (20% rollout):** follows at **41%**.',
+      '',
+      '- **Keep £49:** is at **4%**.',
+      '',
+      '**Important limitation:** the model could **not assess the “monthly churn under 4%” constraint**.',
+    ].join('\n'), pricing);
+    expect(out).not.toMatch(/55%|41%|\*\*4%\*\*/);
+    expect(linesOf(out)).toContain('**Important limitation:** the model could **not assess the “monthly churn under 4%” constraint**.');
+  });
+  it.each([
+    // A factor's level in em-dash form, in a ranked em-dash list.
+    ['- Raise Pro to £59 at release — leads at 55%\n- Monthly churn — 4%', '- Monthly churn — 4%'],
+    // A tight ranked list, a blank line, then a tight levels list: a change of spacing starts a new list.
+    [`${RANKED_ROW}\n- **Keep £49:** **4%**.\n\n- Ownership now: 65%\n- Ownership later: 80%`, '- Ownership now: 65%\n- Ownership later: 80%'],
+    // A paragraph between two lists ends the first one.
+    [`${RANKED_ROW}\n\nThe levels we assumed:\n\n- Ownership now: 65%`, 'The levels we assumed:\n\n- Ownership now: 65%'],
+  ])('CONTROL: %s → the level rows are kept byte-identical', (text, kept) => {
+    const out = withheldGate(text);
+    expect(out).not.toContain(RANKED_ROW);
+    expect(out).toContain(kept);
+  });
+});
+
+describe('follow-up of #1871 — N adjacent one-figure sentences that split ~100 over the options (residual 3)', () => {
+  it.each([
+    'Raising gets 55%. The pilot gets 41%. Keeping £49 gets 4%.',
+    'Raising gets 50%. Phasing gets 30%. The pilot gets 15%. Keeping £49 gets 5%.',
+    'Raising has 55%. The pilot has 41%. Keeping £49 has the other 4%.',
+  ])('RED: every sentence of the split goes, and nothing else: %s', (split) => {
+    const out = withheldGate(`${CAVEAT} ${split} Churn is the input to check.`);
+    for (const s of split.split(/(?<=\.) /)) expect(out).not.toContain(s);
+    expect(out.startsWith(`${CAVEAT} Churn is the input to check.`)).toBe(true);
+  });
+  it('CONTROL: a factor sentence after the split is not taken with it (the smallest ~100 run is the split)', () => {
+    const out = withheldGate(`${CAVEAT} Raising gets 55%. The pilot gets 41%. Keeping £49 gets 4%. Churn is 3%. Churn is the input to check.`);
+    expect(out).not.toMatch(/55%|41%|\b4%/);
+    expect(out.startsWith(`${CAVEAT} Churn is 3%. Churn is the input to check.`)).toBe(true);
+  });
+  it('CONTROL: three levels that happen to sum to 100 and name no option stay', () => {
+    const text = `${CAVEAT} Churn is 3%. Conversion is 5%. Retention is 92%. Churn is the input to check.`;
+    expect(withheldGate(text)).toBe(text);
+  });
+});
+
+describe('follow-up of #1871 — a measure named before the figure makes it a level, not a share (residual 4)', () => {
+  it.each([
+    '- **Keep Pro at £49:** Monthly churn: **4%**.',
+    '- **Keep Pro at £49:** Monthly churn: 4%.',
+    '- **Keep Pro at £49:** churn rate: **4%**.',
+    '- **Keep Pro at £49:** monthly churn **4%**.',
+  ])('KEPT beside a ranked row: %s', (row) => {
+    const out = withheldGate(`${RANKED_ROW}\n${row}\n\n${CAVEAT}`);
+    expect(out).not.toContain(RANKED_ROW);
+    expect(linesOf(out)).toContain(row);
+  });
+  it.each([
+    '- **Keep Pro at £49:** **4%**.',
+    '- **Keep Pro at £49:** **45%**.',
+    '- **Keep Pro at £49:** Win probability: **41%**',
+    '- **Keep Pro at £49:** Share of runs: 41%',
+    '- **Keep Pro at £49:** Score: 45%',
+    // A measure word beside a share word is still a share.
+    '- **Keep Pro at £49:** Probability of higher MRR: **41%**',
+    // The option's own head is the item's head, never a measure.
+    '- Keep current price: 45%',
+    // …and a head that names no option is not a measure either: the option named after the figure makes it a share.
+    '- **Current model:** **55%** for the £59-at-release path.',
+  ])('CONTROL, dropped beside a ranked row: %s', (row) => {
+    const out = withheldGate(`${RANKED_ROW}\n${row}\n\n${CAVEAT}`);
+    expect(out).not.toContain(RANKED_ROW);
+    expect(out).not.toContain(row);
+    expect(linesOf(out)).toContain(CAVEAT);
+  });
+});
+
+describe('follow-up of #1871 — a row headed by something that is not an option gives a level (residual 5)', () => {
+  const HIRING_NODES = [{ id: 'o1', kind: 'option', label: 'Hire a Tech Lead' }, { id: 'o2', kind: 'option', label: 'Hire Two Developers' }, { id: 'f1', kind: 'factor', label: 'Development capacity' }];
+  const CLINIC_NODES = [{ id: 'o1', kind: 'option', label: 'Video by Default' }, { id: 'o2', kind: 'option', label: 'Keep Face to Face' }, { id: 'f1', kind: 'factor', label: 'Video follow-up share' }];
+  it.each([
+    ['pricing', `${RANKED_ROW}\n- Churn assumption: **4%**`, '- Churn assumption: **4%**', PRICING_NODES],
+    ['hiring', '- **Hire Two Developers** leads with **39.3%**.\n- Onboarding workload: **10%**', '- Onboarding workload: **10%**', HIRING_NODES],
+    // A generic option noun under a quantifier names no one option: the level applies to both.
+    ['hiring', '- **Hire Two Developers** leads with **39.3%**.\n- Onboarding workload: **10%** on both paths', '- Onboarding workload: **10%** on both paths', HIRING_NODES],
+    // A row headed by another node's label gives that node's level, whatever option it also names.
+    ['pricing', `${RANKED_ROW}\n- **Monthly churn** (Keep Pro at £49): **4%**`, '- **Monthly churn** (Keep Pro at £49): **4%**', PRICING_NODES],
+    // "Video" opens an option's label AND a factor's: it does not make "Video uptake" an option.
+    ['clinic', '- **Video by Default** leads with **57.5%**.\n- Video uptake: **20%**', '- Video uptake: **20%**', CLINIC_NODES],
+  ] as const)('KEPT (%s): %s', (_graph, text, row, nodes) => {
+    const out = withheldGate(`${text}\n\n${CAVEAT}`, nodes);
+    expect(out).not.toMatch(/55%|39\.3%|57\.5%/);
+    expect(linesOf(out)).toContain(row);
+  });
+  it.each([
+    ['- **Keep £49:** **4%**', PRICING_NODES],
+    ['- Keep £49: 4%', PRICING_NODES],
+    ['- Raising: **4%**', PRICING_NODES],
+    ['- **Hire two devs:** **36.7%**', HIRING_NODES],
+    // Paraphrased heads the stricter rule must still read as options: a generic option noun, a word from one label.
+    ['- **The £49 path:** **4%**', PRICING_NODES],
+    ['- **The status-quo path:** **4%**', PRICING_NODES],
+    ['- **Two developers:** **36.7%**', HIRING_NODES],
+  ] as const)('CONTROL, an option-shaped head with a bare share still goes: %s', (row, nodes) => {
+    const lead = nodes === HIRING_NODES ? '- **Hire a Tech Lead** leads with **39.3%**.' : RANKED_ROW;
+    const out = withheldGate(`${lead}\n${row}\n\n${CAVEAT}`, nodes);
+    expect(out).not.toContain(lead);
+    expect(out).not.toContain(row);
+    expect(linesOf(out)).toContain(CAVEAT);
+  });
+  it('CONTROL (captured c10-d2afc2c): a paraphrased option head whose every word is also in a factor label still goes', () => {
+    const nodes = [
+      { id: 'o1', kind: 'option', label: 'Hire a Tech Lead' }, { id: 'o2', kind: 'option', label: 'Hire Two Developers' },
+      { id: 'o3', kind: 'option', label: 'Continue Current Staffing' }, { id: 'o4', kind: 'option', label: 'Tech Lead Plus Developer' },
+      { id: 'f1', kind: 'factor', label: 'Tech lead hires' }, { id: 'f2', kind: 'factor', label: 'Developer hires' }, { id: 'f3', kind: 'factor', label: 'Onboarding load' },
+    ];
+    const out = withheldGate([
+      'Re-run complete. Nothing changed in the model since the prior run, so the result is unchanged.',
+      '',
+      '- **Hire a Tech Lead:** 37.0% likelihood of leading in this model  ',
+      '- **Continue current staffing:** 27.4%  ',
+      '- **Hire Two Developers:** 26.5%  ',
+      '- **Tech Lead + Developer:** 9.1%  ',
+      '',
+      'This remains a **fragile near tie**—the model cannot put a single option forward confidently.',
+    ].join('\n'), nodes);
+    expect(out).not.toMatch(/37\.0%|27\.4%|26\.5%|9\.1%/);
+    expect(linesOf(out)).toContain('This remains a **fragile near tie**—the model cannot put a single option forward confidently.');
+  });
+});
+
+describe('follow-up of #1871 — a markdown table is judged row by row (residual 6)', () => {
+  // Captured g11-0415b19 (construction reply), verbatim.
+  const CLINIC_NODES = [
+    { id: 'o1', kind: 'option', label: 'Video by Default' }, { id: 'o2', kind: 'option', label: 'Keep Face to Face' }, { id: 'o3', kind: 'option', label: 'Clinician Case Choice' },
+    { id: 'f1', kind: 'factor', label: 'Video follow-up share' }, { id: 'f2', kind: 'factor', label: 'Clinical suitability matching' }, { id: 'f3', kind: 'factor', label: 'Patient digital access' },
+    { id: 'f4', kind: 'factor', label: 'Patients over 75' }, { id: 'g', kind: 'goal', label: 'Waiting-list reduction' },
+  ];
+  const CLINIC_TABLE = [
+    '| Item | Proposed level | Basis |',
+    '|---|---:|---|',
+    '| Current video follow-up share | 20% | Assumes video is currently used for a minority of follow-ups. |',
+    '| Clinical suitability matching | 70% | Assumes current pathways can reliably route about seven in ten follow-ups to the appropriate mode. |',
+    '| Patient digital access | 70% | Assumes access/support is below universal, materially relevant with 30% over 75. |',
+    '| **Video by Default:** video follow-up share | 70% | Most suitable follow-ups move to video, with exceptions retained. |',
+    '| **Video by Default:** clinical suitability matching | 65% | Defaulting to video raises the risk of a poor mode match despite screening. |',
+    '| **Keep Face to Face:** video follow-up share | 5% | Video remains exceptional. |',
+    '| **Keep Face to Face:** clinical suitability matching | 85% | Face-to-face is suitable for most cases, although more intensive than necessary for some. |',
+    '| **Clinician Case Choice:** video follow-up share | 35% | Clinicians use video selectively rather than as the default. |',
+  ];
+  const RANKING_TABLE_ROW = '| **Clinician Case Choice:** clinical suitability matching | 90% | Case-by-case triage should give the strongest fit between patient need and consultation mode. |';
+  it('KEPT (captured g11-0415b19): only the ranking row goes; the header, separator and every other row stay', () => {
+    const out = withheldGate(`I propose the following as **assumptions to adopt or correct — not measurements**:\n\n${[...CLINIC_TABLE, RANKING_TABLE_ROW].join('\n')}\n\nThe key unknowns to test next are: the share genuinely suitable for video.`, CLINIC_NODES);
+    expect(out).not.toContain(RANKING_TABLE_ROW);
+    expect(out).toContain(`\n\n${CLINIC_TABLE.join('\n')}\n\nThe key unknowns to test next are: the share genuinely suitable for video.`);
+  });
+  it.each([
+    ['captured c4a-0a470d2', ['| Hire a Tech Lead | 50.3% chance of leading | 42.5% |', '| Hire Two Developers | 34.6% | 41.8% |']],
+    // The same rows paraphrased: no exact label, so only the row-by-row sweep can take the second one.
+    ['paraphrased', ['| Tech Lead | 50.3% chance of leading | 42.5% |', '| Two developers | 34.6% | 41.8% |']],
+  ])('CONTROL (%s): a table of option shares beside a ranked row still goes', (_name, rows) => {
+    const hiring = [{ id: 'o1', kind: 'option', label: 'Hire a Tech Lead' }, { id: 'o2', kind: 'option', label: 'Hire Two Developers' }, { id: 'o3', kind: 'option', label: 'Phase Developer Hiring' }, { id: 'o4', kind: 'option', label: 'Maintain Current Staffing' }];
+    const out = withheldGate([
+      'Your board edit changed the current Tech Lead baseline from **0 to 1 person**. It mattered substantially to the headline comparison:',
+      '',
+      '| Option | Before the edit | After the edit |',
+      '|---|---:|---:|',
+      ...rows,
+      '',
+      'There is an important modelling reason.',
+    ].join('\n'), hiring);
+    expect(out).not.toMatch(/50\.3%|42\.5%|34\.6%|41\.8%/);
+    expect(linesOf(out)).toContain('There is an important modelling reason.');
+  });
+  it('CONTROL: a ranking HEADER still takes its table (it says what every row means)', () => {
+    const out = withheldGate(`Runs:\n\n| Pricing move | Wins |\n|---|---|\n| The release-timed rise | 71% |\n| Holding at £49 | 29% |\n\n${CAVEAT}`);
+    expect(out).not.toMatch(/71%|29%|\| Wins \|/);
+    expect(linesOf(out)).toContain(CAVEAT);
+  });
+  it('CONTROL: a row whose cell holds a ranking sentence goes whole, never leaving half a row', () => {
+    const row = '| **Keep Face to Face:** clinical suitability matching | 85% | Suitable for most cases. It is the strongest fit here. |';
+    const out = withheldGate(`${CLINIC_TABLE.slice(0, 3).join('\n')}\n${row}\n\n${CAVEAT}`, CLINIC_NODES);
+    expect(out).not.toContain('| **Keep Face to Face:** clinical suitability matching | 85% |');
+    expect(out).toContain(`${CLINIC_TABLE.slice(0, 3).join('\n')}\n\n${CAVEAT}`);
+  });
+  it('CONTROL: an option row with a bare share goes with its ranking sibling row, as in a list', () => {
+    const out = withheldGate(`| Path | Result |\n|---|---|\n| The £59 path | 48%, the strongest |\n| Holding | 30% |\n\n${CAVEAT}`);
+    expect(out).not.toMatch(/48%|30%/);
+    expect(linesOf(out)).toContain(CAVEAT);
+  });
+});
