@@ -1609,9 +1609,18 @@ function rebuildPhase3BlocksFresh(
     }
     return [...built, ...lensCompanions];
   }
-  return built.filter(
-    (block) => !presumesLeadingOption(block) && !evidenceGapPresumesLeadingOption(block),
-  );
+  // Nit 2 on #1893 (5827874798): compose drops through the SAME exported definition the Agent lane reads, so the
+  // "one definition" is true by construction — a predicate added there reaches both routes.
+  return built.filter((block) => !blockPresumesLeadingOption(block));
+}
+
+/**
+ * The ONE definition of a block that presumes a leading option, for any route that must drop such blocks on a
+ * turn whose leader is withheld — the Agent lane's run blocks read it (`bindRunBlocksToReadback`), so the two
+ * routes cannot disagree about which cards say "the leading option is ahead".
+ */
+export function blockPresumesLeadingOption(block: OlumiResponse['blocks'][number]): boolean {
+  return presumesLeadingOption(block) || evidenceGapPresumesLeadingOption(block);
 }
 
 /**
@@ -1653,15 +1662,6 @@ function rebuildPhase3BlocksFresh(
  * Scanned with the SHARED vocabulary (`textNamesLeadingOption`), so this gate
  * and the alarm that measures the residue cannot drift apart.
  */
-/**
- * The ONE definition of a block that presumes a leading option, for any route that must drop such blocks on a
- * turn whose leader is withheld — the Agent lane's run blocks read it (`bindRunBlocksToReadback`), so the two
- * routes cannot disagree about which cards say "the leading option is ahead".
- */
-export function blockPresumesLeadingOption(block: OlumiResponse['blocks'][number]): boolean {
-  return presumesLeadingOption(block) || evidenceGapPresumesLeadingOption(block);
-}
-
 function evidenceGapPresumesLeadingOption(block: OlumiResponse['blocks'][number]): boolean {
   const candidate = block as { type?: unknown; evidence_gap?: unknown };
   return (
