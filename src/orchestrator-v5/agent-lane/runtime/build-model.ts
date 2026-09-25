@@ -106,7 +106,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
       label: { type: 'string', description: 'A NAME, not a sentence. Keep it under 33 characters where you can.' },
       provenance,
       changes: { type: 'array', description:
-        'Factor labels this option changes when it states no level \u2014 e.g. an option that phases, grandfathers or tests something. Use the factor labels exactly. An option that names nothing here and has no interventions is unreachable from the decision and cannot be analysed.',
+        'Factor labels this option changes when it states no level \u2014 e.g. an option that phases, grandfathers or tests something. Use the factor labels exactly. An option (other than the one marked is_status_quo, which stays empty) that names nothing here and has no interventions is unreachable from the decision and cannot be analysed.',
         items: { type: 'string' } },
       interventions: { type: 'array', description:
         'The factor level this option sets, or a signed addition to its baseline. Distinguish these meanings with value_kind. Preserve user numbers; an estimated level is ai_proposed, never explicit.',
@@ -148,7 +148,7 @@ export const BUILD_INSTRUCTIONS = [
   'Mark the option that keeps things as they are now with is_status_quo:true \u2014 at most one option, whatever it is called \u2014 and give it no levels; every other option has is_status_quo:null.',
   'Connect options to the controllable factors they change, then through supported causal mechanisms to risks and the goal. Never emit a direct option-to-risk link: it cannot be interpreted as an option setting a risk value. Retain each meaningful risk hypothesis, its sign and its downstream path; express its exposure through a causal factor or mediator, rather than deleting the risk or claiming equal exposure.',
   'EVERY OPTION MUST SAY WHAT IT DOES \u2014 except the one marked is_status_quo, which names no changes and no levels because it keeps things as they are. Any OTHER option (not marked is_status_quo) with no `interventions` AND no `changes` is inert: it can never be compared with another option, whatever values are supplied later, and the whole decision becomes unanswerable. The option marked is_status_quo is meant to be empty \u2014 it is compared by holding today\u2019s levels, so leave it empty. If the brief does not say what an option changes, still name the factors it ACTS ON in `changes` \u2014 that is a structural claim, not a numeric one. '
-  + 'EVERY option (except the one marked is_status_quo) must also list, in `changes`, the factors it acts on WITHOUT a stated level. An option that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping.',
+  + 'EVERY option (except the one marked is_status_quo) must also list, in `changes`, the factors it acts on WITHOUT a stated level. An option (other than the one marked is_status_quo) that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping.',
   // ⛔ THE EXPLOSION CLAUSE, REPLACED. This previously read: "Then widen: add the
   // options, factors, risks, outcomes and causal mechanisms that materially improve
   // strategic reasoning, including alternatives beyond the user's initial frame."
