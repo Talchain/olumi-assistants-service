@@ -693,7 +693,11 @@ export function admitCandidateModel(
          * estimate is withheld from Goal fit and said, with the one step that makes it
          * count. A target-only brief stays admissible: only the Goal-fit figure waits.
          */
-        const estimated = model.goal.baseline_known !== true;
+        // ⛔ "Known" alone is not enough (verdict 5824647383): the strict schema cannot tie
+        // `baseline_known` to its provenance, so a level the model marks known but
+        // attributes to itself (`ai_proposed`/`inferred`) is Olumi's, and is withheld too.
+        const estimated = !(model.goal.baseline_known === true
+          && (model.goal.baseline_provenance ?? model.goal.provenance) === 'explicit');
         if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && estimated) {
           withheld(
             `Olumi's own estimate of the current level of "${model.goal.metric}" (${baselineRaw}) was not used, ` +
@@ -719,13 +723,12 @@ export function admitCandidateModel(
               'else; no chance of meeting the goal will be shown.',
             );
           } else if (admission.admitted) {
-            const stated = model.goal.baseline_known === true
-              && (model.goal.baseline_provenance ?? model.goal.provenance) === 'explicit';
+            // Only the user's stated level reaches here (see `estimated` above).
             observed_state = {
               value: admission.normalised,
               baseline: admission.normalised,
               ...(model.goal.unit ? { unit: model.goal.unit } : {}),
-              source: stated ? 'brief_extraction' : 'cee_inference',
+              source: 'brief_extraction',
               raw_value: baselineRaw,
               cap: resolved.cap,
             };
