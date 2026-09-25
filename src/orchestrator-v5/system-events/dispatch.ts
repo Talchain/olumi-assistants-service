@@ -3050,7 +3050,7 @@ async function dispatchStructuralRename(
       // The rename is in the model iff the node carries the new label.
       requestedChangeVisibleIn: (snapshot) =>
         findStaleRenamedLabel(
-          snapshot as unknown as Record<string, unknown>,
+          snapshot,
           result.renamedNodeId,
           result.newLabel,
         ) === null,
