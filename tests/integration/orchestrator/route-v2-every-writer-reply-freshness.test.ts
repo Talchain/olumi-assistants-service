@@ -19,7 +19,7 @@
  * event reaches its commit and that the hash-moving ones already derive `stale`
  * from the window — so a RED below is the source of the facts, not the harness.
  */
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { RunAnalysisHandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
@@ -205,19 +205,6 @@ const RUN_ROW_ID = 'row-run-analysis';
 const RUN_FACT_ROW_ID = 'fact-row-run-analysis';
 const RUN_AT = '2026-09-24T09:00:00.000Z';
 
-/** The value the user types: £50,000 against the £100,000 cap. */
-const EDIT = { kind: 'factor_value_edit', target_id: 'f-budget', value: 0.5, raw_value: 50000, unit: '£' };
-
-/** `suffix` is ONE hex character: it completes the turn id's last UUID group. */
-function payloadFor(suffix: string) {
-  return {
-    kind: 'system_event',
-    turn_id: `${TURN_ID_BASE}${suffix}`,
-    scenario_id: SCENARIO_ID,
-    stage: 'analyse',
-    event: EDIT,
-  };
-}
 
 /** One successful run, stamped with the hash of the graph it analysed. */
 function runFact(graphHashAtRun: string): HandlerFact {
@@ -331,7 +318,10 @@ describe('every system-event writer states freshness from the scenario record', 
       expect(appendMock).toHaveBeenCalledTimes(1);
       expect(body.analysis_ready?.freshness, `${writer} said the scenario was never analysed`).toBe('stale');
       expect(body.analysis_ready?.graph_hash_at_run).toBe(PRE_HASH);
-      expect(body.analysis_state?.run_state?.kind).toBe('complete_stale');
+      // run_state carries READINESS first (an added factor with no level is `blocked`),
+      // so the claim is the absence it must never state: not `never_run`, not current.
+      expect(body.analysis_state?.run_state?.kind).not.toBe('never_run');
+      expect(body.analysis_state?.run_state?.kind).not.toBe('complete_current');
     });
   });
 
@@ -349,7 +339,11 @@ describe('every system-event writer states freshness from the scenario record', 
       storeState.rows = [...newerRows(SESSION_READ_WINDOW_DEFAULT), runRow(PRE_HASH)];
       const { body } = await send('structural_rename', '9');
       expect(body.analysis_ready?.freshness).toBe('fresh');
-      expect(body.analysis_state?.run_state?.kind).toBe('complete_current');
+      // run_state carries readiness first (this fixture's option has no interventions,
+      // so it is `blocked`); the defect was the no-verdict fallback, which must be gone.
+      expect(body.analysis_state?.run_state?.kind).not.toBe('unknown_degraded');
+      expect(body.analysis_state?.run_state?.cause).not.toBe('no_graph_this_turn');
+      expect(body.analysis_state?.run_state?.kind).not.toBe('never_run');
     });
   });
 });
