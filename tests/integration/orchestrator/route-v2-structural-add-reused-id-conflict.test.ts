@@ -452,7 +452,7 @@ function hasNode(graph: unknown, id: string): boolean {
  * in the persisted bytes …", with `added_node_id`.
  */
 function committedAttestationsFor(nodeId: string): number {
-  return logInfoSpy.mock.calls.filter((c) => {
+  return logInfoSpy.mock.calls.filter((c: unknown[]) => {
     const [obj, msg] = c as [Record<string, unknown> | undefined, unknown];
     return (
       typeof msg === 'string' &&
@@ -687,7 +687,7 @@ describe('POST /orchestrate/v2/turn — structural_add under a REUSED turn id an
     const candidateHash = analysisHash(r2Write.graph);
     // (c) present control: the dispatcher took the no-write branch.
     const noWriteLines = logInfoSpy.mock.calls.filter(
-      (c) => typeof c[1] === 'string' && (c[1] as string).startsWith('V5 structural_add — this attempt wrote nothing'),
+      (c: unknown[]) => typeof c[1] === 'string' && (c[1] as string).startsWith('V5 structural_add — this attempt wrote nothing'),
     );
     expect(noWriteLines).toHaveLength(1);
 
@@ -888,7 +888,7 @@ describe('POST /orchestrate/v2/turn — structural_add under a REUSED turn id an
     expect(hasNode(stored, X.id)).toBe(true);
     // Present control for the log probe: commit.ts's own replay line was seen.
     const commitReplayLogs = logInfoSpy.mock.calls.filter(
-      (c) => typeof c[1] === 'string' && (c[1] as string).startsWith('V5 commit — this turn REPLAYED'),
+      (c: unknown[]) => typeof c[1] === 'string' && (c[1] as string).startsWith('V5 commit — this turn REPLAYED'),
     ).length;
     expect(commitReplayLogs, 'the log probe must see the commit\'s replay line in this run').toBe(1);
 
@@ -974,7 +974,7 @@ describe('POST /orchestrate/v2/turn — structural_add under a REUSED turn id an
     expect(hasNode(stored, X.id)).toBe(false);
     // Present control for the log probe: commit.ts's own replay line was seen.
     const commitReplayLogs = logInfoSpy.mock.calls.filter(
-      (c) => typeof c[1] === 'string' && (c[1] as string).startsWith('V5 commit — this turn REPLAYED'),
+      (c: unknown[]) => typeof c[1] === 'string' && (c[1] as string).startsWith('V5 commit — this turn REPLAYED'),
     ).length;
     expect(commitReplayLogs, 'the log probe must see the commit\'s replay line in this run').toBe(1);
 
@@ -1149,7 +1149,7 @@ describe('POST /orchestrate/v2/turn — structural_add under a REUSED turn id an
 
   /** The dispatcher's own success attestation lines, by message prefix and one identifying field. */
   function attestations(prefix: string, field: string, value: unknown): number {
-    return logInfoSpy.mock.calls.filter((c) => {
+    return logInfoSpy.mock.calls.filter((c: unknown[]) => {
       const [obj, msg] = c as [Record<string, unknown> | undefined, unknown];
       return typeof msg === 'string' && msg.startsWith(prefix) && obj?.[field] === value;
     }).length;
