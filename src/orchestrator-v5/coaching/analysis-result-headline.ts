@@ -190,8 +190,8 @@ import { isFieldUnseparable } from './option-separability.js';
 // reduced-samples one: the codes ride PLoT's Tier-3 warning channel, and this
 // producer must never carry that key. It receives booleans and nothing else.
 import {
+  hasGoalDirectionUnattestedDisclosure,
   hasGoalThresholdNotConvertibleDisclosure,
-  hasUntestableGoalDisclosure,
 } from '../compose/claim-safety-cage.js';
 
 /**
@@ -259,11 +259,9 @@ export const MAX_HEADLINE_CHARS = 220 + LEAD_CLAUSE_COPY_DELTA_CHARS;
  * no target value, and the only place the goal is named is the Tier-3 warning
  * prose, which the cage allows us to presence-test by code and never to read.
  *
- * ⚠ WHICH SENTENCE SAYS WHY IS DECIDED BY THE RUN'S OWN DATA (R&C round 1, F3),
- * because only one of them is true on any given run. See {@link resolveGoalFrame}:
- *   GOAL_UNTESTED_DISCLOSURE           THRESHOLD present, or no record carries a
- *                                      unit-interval `probability_of_goal`:
- *                                      nothing was tested against the goal.
+ * ⚠ WHICH SENTENCE SAYS WHY IS DECIDED BY THE RUN'S OWN DATA (R&C round 1, F3;
+ * round 2, R3-1), because only one of them is true on any given run. See
+ * {@link resolveGoalFrame}:
  *   GOAL_DIRECTION_ASSUMED_DISCLOSURE  DIRECTION alone on a run that DID carry
  *                                      attainment data. Saying attainment could
  *                                      not be tested there would be false; what
@@ -278,16 +276,44 @@ export const MAX_HEADLINE_CHARS = 220 + LEAD_CLAUSE_COPY_DELTA_CHARS;
  *                                      not say the USER stated no direction
  *                                      (their goal label may well state one; CEE
  *                                      deliberately never forwards 'maximise').
+ *   GOAL_UNTESTED_DISCLOSURE           THRESHOLD present, or no attainment data,
+ *                                      WITHOUT DIRECTION: nothing was tested
+ *                                      against the goal, and no direction was
+ *                                      assumed.
+ *   GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE
+ *                                      DIRECTION present AND (THRESHOLD present,
+ *                                      or no attainment data): both are true, so
+ *                                      ONE sentence says both. ⛔ The direction
+ *                                      clause is NEVER dropped while DIRECTION is
+ *                                      present: round 2 picked "could not test"
+ *                                      here and the served rerun (UI a9968d8c,
+ *                                      CEE c74a432) would have lost it.
+ * The three are built from two shared clauses, so the combined sentence cannot
+ * drift from either half.
  */
 const UNTESTED_GOAL_LEAD_CLAUSE_OPENING = 'scored highest in';
-const GOAL_UNTESTED_DISCLOSURE =
-  ' The model could not test whether any option reaches your goal.';
-const GOAL_DIRECTION_ASSUMED_DISCLOSURE =
-  ' The analysis was not told which way your goal points, so it assumed a higher value is better.';
-/** The goal-frame sentence's budget: the LONGER of the two, since exactly one rides. */
+const GOAL_DIRECTION_ASSUMED_CLAUSE =
+  'The analysis was not told which way your goal points, so it assumed a higher value is better';
+const GOAL_UNTESTED_CLAUSE = 'could not test whether any option reaches your goal';
+const GOAL_UNTESTED_DISCLOSURE = ` The model ${GOAL_UNTESTED_CLAUSE}.`;
+const GOAL_DIRECTION_ASSUMED_DISCLOSURE = ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}.`;
+const GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE =
+  ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}, and it ${GOAL_UNTESTED_CLAUSE}.`;
+/**
+ * The sentence each goal frame carries. A total map over {@link GoalFrame}, so a
+ * new frame cannot compile without choosing its sentence.
+ */
+const GOAL_FRAME_SENTENCE: Readonly<Record<GoalFrame, string>> = Object.freeze({
+  goal_framed: '',
+  direction_assumed: GOAL_DIRECTION_ASSUMED_DISCLOSURE,
+  attainment_untested: GOAL_UNTESTED_DISCLOSURE,
+  direction_assumed_and_attainment_untested: GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE,
+});
+/** The goal-frame sentence's budget: the LONGEST of the three, since exactly one rides. */
 const GOAL_FRAME_DISCLOSURE_MAX_CHARS = Math.max(
   GOAL_UNTESTED_DISCLOSURE.length,
   GOAL_DIRECTION_ASSUMED_DISCLOSURE.length,
+  GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE.length,
 );
 /**
  * How much SHORTER the withdrawn opening is than the goal-framed one (18). The
@@ -441,8 +467,8 @@ export const MAX_ASSISTANT_TEXT_CHARS =
   ELIMINATED_SENTENCE_MAX_CHARS +
   REDUCED_SAMPLES_SUFFIX.length +
   // The goal-frame sentence rides FIRST of the tails and can co-occur with
-  // every other one. Exactly one of its two sentences rides, so the longer is
-  // budgeted, whole, like its siblings.
+  // every other one. Exactly one of its three sentences rides, so the longest
+  // is budgeted, whole, like its siblings.
   GOAL_FRAME_DISCLOSURE_MAX_CHARS +
   // D-ask-1 (2.11 P0-1): the scaffold disclosure suffix rides AFTER every
   // other tail. Budgeted from the builder's own worst case so an honest
@@ -876,26 +902,41 @@ export function describeGoalFrame(input: AnalysisResultHeadlineInput): GoalFrame
  *
  *   goal_framed          neither GOAL_DIRECTION_UNATTESTED nor
  *                        GOAL_THRESHOLD_NOT_CONVERTIBLE on the warning channel.
- *   attainment_untested  THRESHOLD present, OR no per-option record in any
- *                        result source carries a unit-interval
- *                        `probability_of_goal`. "The model could not test whether
- *                        any option reaches your goal." is then true.
  *   direction_assumed    DIRECTION alone, and attainment data IS present. Only
  *                        the direction was assumed.
+ *   attainment_untested  no DIRECTION, and THRESHOLD present. "The model could
+ *                        not test whether any option reaches your goal." is true
+ *                        and no direction was assumed.
+ *   direction_assumed_and_attainment_untested
+ *                        DIRECTION present, and THRESHOLD present or no
+ *                        attainment data: both sentences are true, and the
+ *                        direction clause must not be dropped (R3-1).
+ *
+ * "Attainment data" is {@link recordsCarryGoalAttainment}: a unit-interval
+ * `probability_of_goal` (ISL Channel A) or `probability_of_joint_goal` (ISL
+ * Channel B, R3-4) on any per-option record.
  *
  * ⚠ EVERY SOURCE IS SEARCHED FOR ATTAINMENT DATA, not only the one the winner is
  * read from, because the error each way is not symmetric: "could not test" is
  * the sentence that can be FALSE (if attainment was computed anywhere), while
  * the direction sentence is true whenever the DIRECTION code is present. So the
- * attainment test leans towards finding data. The tail cannot contradict either
+ * attainment test leans towards finding data. The tail cannot contradict any
  * choice: it keys on this verdict, not on its own reading of the records.
+ *
+ * ⚠ THRESHOLD IS NOT RE-CHECKED AGAINST THE DATA (unchanged from round 1): with
+ * GOAL_THRESHOLD_NOT_CONVERTIBLE present, the frame says attainment could not
+ * be tested whatever the records carry. Whether PLoT's Channel B joint value
+ * can still score the goal on such a run is an open question for the owner
+ * (see the commit body); it is deliberately not decided here.
  */
 function resolveGoalFrame(enrichment: Record<string, unknown>): GoalFrame {
-  if (!hasUntestableGoalDisclosure(enrichment)) return 'goal_framed';
-  if (hasGoalThresholdNotConvertibleDisclosure(enrichment)) return 'attainment_untested';
-  return readResultsArraySources(enrichment).some(recordsCarryGoalAttainment)
-    ? 'direction_assumed'
-    : 'attainment_untested';
+  const directionAssumed = hasGoalDirectionUnattestedDisclosure(enrichment);
+  const thresholdNotConvertible = hasGoalThresholdNotConvertibleDisclosure(enrichment);
+  if (!directionAssumed && !thresholdNotConvertible) return 'goal_framed';
+  if (!directionAssumed) return 'attainment_untested';
+  const attainmentTested =
+    !thresholdNotConvertible && readResultsArraySources(enrichment).some(recordsCarryGoalAttainment);
+  return attainmentTested ? 'direction_assumed' : 'direction_assumed_and_attainment_untested';
 }
 
 function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
@@ -1082,12 +1123,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // never decides a case: see `leadCap`.
   const goalFrame = resolveGoalFrame(enrichment);
   const goalUntestable = goalFrame !== 'goal_framed';
-  const goalUntestedSuffix =
-    goalFrame === 'direction_assumed'
-      ? GOAL_DIRECTION_ASSUMED_DISCLOSURE
-      : goalFrame === 'attainment_untested'
-        ? GOAL_UNTESTED_DISCLOSURE
-        : '';
+  const goalUntestedSuffix = GOAL_FRAME_SENTENCE[goalFrame];
   const suffix = `${goalUntestedSuffix}${narrationTail}${reducedSamplesSuffix}${statusSuffix(status_kind)}`;
   const lengthCap =
     MAX_HEADLINE_CHARS + goalUntestedSuffix.length + narrationTail.length + reducedSamplesSuffix.length;
@@ -2474,28 +2510,32 @@ const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // The goal-frame sentence rides FIRST of the tails, mirroring `suffix` in
 // computeHeadline. It is a headline PREFIX family (before the status suffix)
 // and rides only on a composed headline, never on the locked template, so it
-// is not exported and not registered on the template branch. ONE slot, two
-// alternatives: exactly one of the two sentences rides.
-const GOAL_UNTESTED_RE_SRC = escapeForRegex(GOAL_UNTESTED_DISCLOSURE);
-const GOAL_DIRECTION_ASSUMED_RE_SRC = escapeForRegex(GOAL_DIRECTION_ASSUMED_DISCLOSURE);
-const GOAL_FRAME_WITHDRAWN_RE_SRC = `(?:${GOAL_UNTESTED_RE_SRC}|${GOAL_DIRECTION_ASSUMED_RE_SRC})`;
+// is not exported and not registered on the template branch. ONE slot, three
+// alternatives: exactly one of the three sentences rides.
+const GOAL_FRAME_WITHDRAWN_RE_SRC = `(?:${[
+  GOAL_UNTESTED_DISCLOSURE,
+  GOAL_DIRECTION_ASSUMED_DISCLOSURE,
+  GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE,
+]
+  .map(escapeForRegex)
+  .join('|')})`;
 // ⛔ THE OBJECTIVE-CONTRADICTION SLOT, BOUND TO THE GOAL-FRAME SENTENCE (R&C
 // round 1, F1). The builder emits each arm shape under exactly one frame, so the
 // allowlist admits each shape only beside the headline sentence it agrees with
 // (the same construction as `LEAD_CLAUSE_RE_SRC`'s lookarounds below):
 //   - a goal-framed arm ("…against your goal most often…") only where NO
 //     goal-frame sentence precedes it: a summary that says the goal could not be
-//     tested and then scores against it contradicts itself;
-//   - the unframed Arm A only where one of the two sentences precedes it;
-//   - the unframed Arm B only where the DIRECTION sentence precedes it. Beside
-//     "The model could not test whether any option reaches your goal." it would
-//     assert the very attainment that sentence says was not tested.
+//     tested (or its direction was assumed) and then scores against it
+//     contradicts itself;
+//   - the unframed Arm A only where one of the three sentences precedes it.
+// Arm B has no unframed shape (R&C round 2, R3-2): its attainment claim and its
+// gloss do not ship while the goal frame is unattested or untestable, so it is
+// admitted beside no goal-frame sentence at all.
 // The failure mode of a wrong binding is silent (the summary collapses to the
 // locked template), so both directions are pinned in
 // `run-analysis-untestable-goal-composed-summary.test.ts`.
 const OBJECTIVE_CONTRADICTION_BOUND_RE_SRC =
   `(?:(?<!${GOAL_FRAME_WITHDRAWN_RE_SRC}.*)(?:${OBJECTIVE_CONTRADICTION_ARM_GRAMMARS.attainmentFramed}|${OBJECTIVE_CONTRADICTION_ARM_GRAMMARS.directionalFramed})` +
-  `|(?<=${GOAL_DIRECTION_ASSUMED_RE_SRC}.*)${OBJECTIVE_CONTRADICTION_ARM_GRAMMARS.attainmentUnframed}` +
   `|(?<=${GOAL_FRAME_WITHDRAWN_RE_SRC}.*)${OBJECTIVE_CONTRADICTION_ARM_GRAMMARS.directionalUnframed})`;
 // D-ask-1 (2.11 P0-1): the scaffold disclosure composes LAST — after every
 // narration tail and status suffix — mirroring the handler's
@@ -2772,8 +2812,8 @@ const CAUTION_REASON_PATTERN =
 // sentence it admits — the failure mode is silent (a rejected headline becomes
 // the locked template, with no error anywhere).
 //
-// ⛔ TWO ALTERNATIVES, EACH BOUND TO THE GOAL-FRAME SENTENCE (either of its
-// two forms). The goal-framed clause is admitted only when no such sentence is
+// ⛔ TWO ALTERNATIVES, EACH BOUND TO THE GOAL-FRAME SENTENCE (any of its
+// three forms). The goal-framed clause is admitted only when no such sentence is
 // present (a headline that claims the goal and then says the goal could not be
 // tested, or that its direction was assumed, contradicts itself), and the
 // withdrawn clause only when one IS present (the user is owed the reason the

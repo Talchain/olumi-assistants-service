@@ -19,13 +19,18 @@
  * THE FIX. The tail takes the headline builder's own goal-frame verdict
  * (`describeGoalFrame`, one derivation, the same enrichment):
  *   goal_framed          no code: both arms exactly as before.
- *   direction_assumed    DIRECTION alone on a run with attainment data: the
- *                        headline says the direction was assumed; both arms say
- *                        "scored highest most often"; Arm B may still fire.
- *   attainment_untested  THRESHOLD, or no attainment data: the headline says
- *                        attainment could not be tested; Arm A says "scored
- *                        highest most often"; Arm B is SILENT, because it asserts
- *                        attainment and would contradict that sentence.
+ *   any other frame      a code is present (direction_assumed,
+ *                        attainment_untested, or
+ *                        direction_assumed_and_attainment_untested): Arm A says
+ *                        "scored highest most often" (no goal frame), and Arm B
+ *                        is SILENT, attainment claim and "Scoring highest
+ *                        counts…" gloss both (R&C round 2, R3-2). Round 1 let
+ *                        Arm B ship unframed beside the direction sentence; the
+ *                        round-2 verifier ruled that an attainment claim and its
+ *                        gloss must not ship at all while the goal frame is
+ *                        unattested or untestable.
+ * The headline sentence is the one the run's own data makes true, and whenever
+ * DIRECTION is present it says the direction was assumed (R3-1).
  * The egress grammar binds each arm shape to its sentence, so the contradicting
  * pairs are REJECTED even if a builder regressed.
  *
@@ -35,7 +40,8 @@
  * objective-contradiction tail), from `buildAnalysisResultHeadline`,
  * `describeGoalFrame` and `composeObjectiveContradictionDisclosure` called as
  * run-analysis.ts calls them (the source pin at the bottom binds that). It does
- * NOT execute the handler, so it is TESTED, not a wire witness.
+ * NOT execute the handler; `run-analysis-untestable-goal-handler.test.ts` does
+ * (R3-3). Both are TESTED, not a wire witness.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -86,6 +92,11 @@ const SERVED_GOAL_WARNINGS = (((T2.blocks[0] as Json)['enrichment'] as Json)['in
 const COULD_NOT_TEST = ' The model could not test whether any option reaches your goal.';
 const DIRECTION_ASSUMED =
   ' The analysis was not told which way your goal points, so it assumed a higher value is better.';
+const COMBINED =
+  ' The analysis was not told which way your goal points, so it assumed a higher value is better,' +
+  ' and it could not test whether any option reaches your goal.';
+const DIRECTION_CLAUSE = 'The analysis was not told which way your goal points, so it assumed a higher value is better';
+const GLOSS = 'Scoring highest counts how often an option scored highest on your goal';
 
 const HOLD = 'Hold at £49 Per Seat (Status Quo)';
 const RAISE = 'Raise to £59 Per Seat';
@@ -109,6 +120,8 @@ const ATTAINMENT_CONTRADICTED = records({ hold: 0.0, raise: 0.48, tiers: 0.11 })
 const ATTAINMENT_AGREES = records({ hold: 0.5, raise: 0.2, tiers: 0.1 });
 /** No `probability_of_goal` anywhere: the common state. */
 const NO_ATTAINMENT = records(null);
+/** R3-4: ONLY ISL Channel B's per-option joint attainment (PLoT #204), no Channel A value. */
+const JOINT_ONLY: Json[] = records(null).map((r, i) => ({ ...r, probability_of_joint_goal: [0.1, 0.5, 0.2][i] }));
 
 function headlineInput(recs: Json[], codes: readonly string[]): AnalysisResultHeadlineInput {
   return {
@@ -162,11 +175,13 @@ const ARM_A_UNFRAMED =
   ` Among the options that do, “${RAISE}” scored highest in 28% of runs.`;
 
 /** The claims a composed summary must never make once a code is present. */
-function expectNoContradiction(summary: string): void {
+function expectNoContradiction(summary: string, codes: readonly string[]): void {
   expect(summary, 'the goal frame survived somewhere in the summary').not.toMatch(/against\s+your\s+goal/i);
-  const saysUntested = summary.includes(COULD_NOT_TEST.trim());
-  const assertsAttainment = /more likely to reach your stated target/.test(summary);
-  expect(saysUntested && assertsAttainment, 'says attainment could not be tested AND asserts attainment').toBe(false);
+  // R3-2: no attainment claim and no gloss under ANY code.
+  expect(summary, 'an attainment claim shipped under a goal code').not.toMatch(/more likely to reach your stated target/);
+  expect(summary, 'the attainment gloss shipped under a goal code').not.toContain(GLOSS);
+  // R3-1: the direction clause rides whenever DIRECTION is present, and only then.
+  expect(summary.includes(DIRECTION_CLAUSE)).toBe(codes.includes(DIRECTION));
   expect(isAllowedRunAnalysisAssistantText(summary), `egress rejected: ${summary}`).toBe(true);
 }
 
@@ -207,27 +222,27 @@ interface ComposedRow {
 }
 
 const ROWS: readonly ComposedRow[] = [
-  // ── both codes ────────────────────────────────────────────────────────────
+  // ── both codes: the combined sentence (R3-1) ──────────────────────────────
   {
     name: 'both codes · Arm B data, metric goal: Arm B SILENT (it would contradict the headline)',
     recs: ATTAINMENT_CONTRADICTED,
     codes: [DIRECTION, THRESHOLD],
     graph: PRICING_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${COULD_NOT_TEST}`,
+    expected: `${HOLD_WITHDRAWN}${COMBINED}`,
   },
   {
     name: 'both codes · Arm B data, lever aim: Arm B silent, Arm A unframed',
     recs: ATTAINMENT_CONTRADICTED,
     codes: [DIRECTION, THRESHOLD],
     graph: LEVER_AIM_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${COULD_NOT_TEST}${ARM_A_UNFRAMED}`,
+    expected: `${HOLD_WITHDRAWN}${COMBINED}${ARM_A_UNFRAMED}`,
   },
   {
     name: 'both codes · no attainment data, lever aim: Arm A unframed',
     recs: NO_ATTAINMENT,
     codes: [DIRECTION, THRESHOLD],
     graph: LEVER_AIM_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${COULD_NOT_TEST}${ARM_A_UNFRAMED}`,
+    expected: `${HOLD_WITHDRAWN}${COMBINED}${ARM_A_UNFRAMED}`,
   },
   // ── THRESHOLD alone ───────────────────────────────────────────────────────
   {
@@ -253,18 +268,32 @@ const ROWS: readonly ComposedRow[] = [
   },
   // ── DIRECTION alone ───────────────────────────────────────────────────────
   {
-    name: `⭐ ${DIRECTION} alone · Arm B data, metric goal: Arm B UNFRAMED beside the direction sentence`,
+    name: `⭐ R3-2 ${DIRECTION} alone · Arm B data, metric goal: Arm B SILENT beside the direction sentence (round 1 shipped it unframed)`,
     recs: ATTAINMENT_CONTRADICTED,
     codes: [DIRECTION],
     graph: PRICING_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}${ARM_B_UNFRAMED}`,
+    expected: `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}`,
   },
   {
-    name: `${DIRECTION} alone · Arm B data, lever aim: Arm B unframed wins`,
+    name: `⭐ R3-2 ${DIRECTION} alone · Arm B data, lever aim: Arm B silent, so Arm A (unframed) is the tail`,
     recs: ATTAINMENT_CONTRADICTED,
     codes: [DIRECTION],
     graph: LEVER_AIM_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}${ARM_B_UNFRAMED}`,
+    expected: `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}${ARM_A_UNFRAMED}`,
+  },
+  {
+    name: `⭐ R3-4 ${DIRECTION} alone · ONLY Channel B joint attainment, metric goal: the direction sentence, not "could not test"`,
+    recs: JOINT_ONLY,
+    codes: [DIRECTION],
+    graph: PRICING_GRAPH,
+    expected: `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}`,
+  },
+  {
+    name: `⭐ R3-1 ${DIRECTION} alone · no attainment data, metric goal: the combined sentence`,
+    recs: NO_ATTAINMENT,
+    codes: [DIRECTION],
+    graph: PRICING_GRAPH,
+    expected: `${HOLD_WITHDRAWN}${COMBINED}`,
   },
   {
     name: `${DIRECTION} alone · attainment data, leader already best, lever aim: Arm A unframed`,
@@ -274,11 +303,11 @@ const ROWS: readonly ComposedRow[] = [
     expected: `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}${ARM_A_UNFRAMED}`,
   },
   {
-    name: `⭐ ${DIRECTION} alone · no attainment data, lever aim: Arm A unframed (the verifier's composition)`,
+    name: `⭐ ${DIRECTION} alone · no attainment data, lever aim: Arm A unframed (the verifier's composition), combined sentence`,
     recs: NO_ATTAINMENT,
     codes: [DIRECTION],
     graph: LEVER_AIM_GRAPH,
-    expected: `${HOLD_WITHDRAWN}${COULD_NOT_TEST}${ARM_A_UNFRAMED}`,
+    expected: `${HOLD_WITHDRAWN}${COMBINED}${ARM_A_UNFRAMED}`,
   },
 ];
 
@@ -287,15 +316,19 @@ describe('⭐ every code variant × every arm: no "against your goal", no contra
     it(row.name, () => {
       const { summary } = composeAsHandler(row.recs, row.codes, row.graph);
       expect(summary).toBe(row.expected);
-      expectNoContradiction(summary);
+      expectNoContradiction(summary, row.codes);
     });
   }
 
-  it('the matrix reaches every arm shape it claims to (Arm A and Arm B unframed both appear)', () => {
+  it('the matrix reaches every shape it claims to: Arm A unframed, all three sentences, and NO Arm B', () => {
     const composed = ROWS.map((r) => composeAsHandler(r.recs, r.codes, r.graph).summary);
     expect(composed.some((s) => s.endsWith(ARM_A_UNFRAMED))).toBe(true);
-    expect(composed.some((s) => s.endsWith(ARM_B_UNFRAMED))).toBe(true);
     expect(composed.some((s) => s.endsWith(COULD_NOT_TEST))).toBe(true);
+    expect(composed.some((s) => s.endsWith(DIRECTION_ASSUMED))).toBe(true);
+    expect(composed.some((s) => s.endsWith(COMBINED))).toBe(true);
+    expect(composed.some((s) => s.includes(GLOSS))).toBe(false);
+    // …while the SAME Arm B data does fire the arm with no code (the silence is the fix, not the fixture).
+    expect(composeAsHandler(ATTAINMENT_CONTRADICTED, [], PRICING_GRAPH).tail).toBe(ARM_B_FRAMED);
   });
 });
 
@@ -311,7 +344,13 @@ describe('egress — each arm shape is admitted only beside the headline it agre
     // The new shapes are admitted beside their sentence.
     ['could-not-test headline + unframed Arm A', `${HOLD_WITHDRAWN}${COULD_NOT_TEST}${ARM_A_UNFRAMED}`, true],
     ['direction headline + unframed Arm A', `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}${ARM_A_UNFRAMED}`, true],
-    ['direction headline + unframed Arm B', `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}${ARM_B_UNFRAMED}`, true],
+    ['combined headline + unframed Arm A', `${HOLD_WITHDRAWN}${COMBINED}${ARM_A_UNFRAMED}`, true],
+    ['combined headline alone', `${HOLD_WITHDRAWN}${COMBINED}`, true],
+    // R3-2: Arm B (claim + gloss) is admitted beside NO withdrawn sentence, framed or not.
+    ['⭐ R3-2 direction headline + unframed Arm B', `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}${ARM_B_UNFRAMED}`, false],
+    ['⭐ R3-2 combined headline + unframed Arm B', `${HOLD_WITHDRAWN}${COMBINED}${ARM_B_UNFRAMED}`, false],
+    ['combined headline + FRAMED Arm B', `${HOLD_WITHDRAWN}${COMBINED}${ARM_B_FRAMED}`, false],
+    ['combined headline + FRAMED Arm A', `${HOLD_WITHDRAWN}${COMBINED}${ARM_A_FRAMED}`, false],
     // The verifier's three compositions, and every other contradicting pair.
     ['could-not-test headline + FRAMED Arm A', `${HOLD_WITHDRAWN}${COULD_NOT_TEST}${ARM_A_FRAMED}`, false],
     ['could-not-test headline + FRAMED Arm B', `${HOLD_WITHDRAWN}${COULD_NOT_TEST}${ARM_B_FRAMED}`, false],

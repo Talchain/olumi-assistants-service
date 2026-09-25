@@ -24,16 +24,26 @@
  * THE FIX. When either code is present, the lead clause drops the goal frame
  * ("scored highest in N% of runs of this model", the same statistic and the
  * same scope clause) and the headline adds ONE fixed sentence, chosen by what
- * the run's own data makes true (F3):
- *   - GOAL_THRESHOLD_NOT_CONVERTIBLE present, OR no per-option record carries a
- *     unit-interval `probability_of_goal`:
- *       "The model could not test whether any option reaches your goal."
- *   - otherwise (GOAL_DIRECTION_UNATTESTED alone, attainment data present):
+ * the run's own data makes true (F3, and R&C round 2, R3-1):
+ *   - GOAL_DIRECTION_UNATTESTED alone, attainment data present:
  *       "The analysis was not told which way your goal points, so it assumed a
  *        higher value is better."
  *     No attainment claim: PLoT's own warning says the run "ranked by largest
  *     goal value. That is an assumption", and goal-direction.ts records that
  *     ISL runs the maximiser whenever no direction is sent.
+ *   - GOAL_THRESHOLD_NOT_CONVERTIBLE present, or no attainment data, WITHOUT
+ *     GOAL_DIRECTION_UNATTESTED:
+ *       "The model could not test whether any option reaches your goal."
+ *   - ⛔ GOAL_DIRECTION_UNATTESTED present AND (THRESHOLD present or no
+ *     attainment data): ONE sentence that says both, so the direction clause
+ *     is NEVER dropped (R3-1; the served rerun on c74a432 carried DIRECTION with
+ *     no attainment data and round 2 said only "could not test"):
+ *       "The analysis was not told which way your goal points, so it assumed a
+ *        higher value is better, and it could not test whether any option
+ *        reaches your goal."
+ *   "Attainment data" is a unit-interval `probability_of_goal` (ISL Channel A)
+ *   OR `probability_of_joint_goal` (ISL Channel B, via PLoT) on any per-option
+ *   record (R3-4).
  *
  * WHAT THIS FILE PINS, EXACTLY (the headline builder only):
  *   T1–T3  the served t2 block (both codes, each code alone) withdraws the goal
@@ -142,6 +152,15 @@ const DISCLOSURE = ' The model could not test whether any option reaches your go
  */
 const DIRECTION_DISCLOSURE =
   ' The analysis was not told which way your goal points, so it assumed a higher value is better.';
+/**
+ * R3-1: GOAL_DIRECTION_UNATTESTED present AND (THRESHOLD present, or no
+ * attainment data). ONE sentence that states both. Bound by identity.
+ */
+const COMBINED_DISCLOSURE =
+  ' The analysis was not told which way your goal points, so it assumed a higher value is better,' +
+  ' and it could not test whether any option reaches your goal.';
+/** The clause that must ride WHENEVER the DIRECTION code is present (R3-1). */
+const DIRECTION_CLAUSE = 'The analysis was not told which way your goal points, so it assumed a higher value is better';
 
 /**
  * TODAY'S served headline, captured from the UNCHANGED source (c1ddb50) on this
@@ -151,8 +170,15 @@ const DIRECTION_DISCLOSURE =
 const TODAY =
   'Raise to £59 scored highest against your goal in 81% of runs of this model because Active paid seats is the strongest driver.';
 
-/** What the served block must produce once the goal claim is withdrawn. */
+/**
+ * What the served block must produce once the goal claim is withdrawn. It
+ * carries BOTH codes and no attainment data, so the combined sentence (R3-1).
+ */
 const UNTESTED =
+  'Raise to £59 scored highest in 81% of runs of this model because Active paid seats is the strongest driver.' +
+  COMBINED_DISCLOSURE;
+/** The same block with GOAL_THRESHOLD_NOT_CONVERTIBLE alone: no direction clause. */
+const UNTESTED_THRESHOLD_ONLY =
   'Raise to £59 scored highest in 81% of runs of this model because Active paid seats is the strongest driver.' +
   DISCLOSURE;
 
@@ -192,7 +218,13 @@ function served(enrichment: Json, extra: Partial<AnalysisResultHeadlineInput> = 
  * removed first and everything else must be free of the goal frame.
  */
 function expectNoGoalClaim(text: string): void {
-  const rest = text.split(DISCLOSURE).join('').split(DIRECTION_DISCLOSURE).join('');
+  const rest = text
+    .split(COMBINED_DISCLOSURE)
+    .join('')
+    .split(DISCLOSURE)
+    .join('')
+    .split(DIRECTION_DISCLOSURE)
+    .join('');
   expect(rest, 'the goal frame survived').not.toMatch(/against\s+your\s+goal/i);
   expect(rest, 'an attainment assertion survived').not.toMatch(
     /\b(?:reach(?:es|ed)?|meets?|met|achiev(?:es|ed)?)\s+your\s+(?:stated\s+)?(?:goal|target)\b/i,
@@ -257,16 +289,20 @@ describe('T1–T3 — an untestable goal is never claimed', () => {
     expect(composed.length).toBeLessThanOrEqual(MAX_ASSISTANT_TEXT_CHARS);
   });
 
-  it('T2: GOAL_THRESHOLD_NOT_CONVERTIBLE alone withdraws the goal claim', () => {
+  it('T2: GOAL_THRESHOLD_NOT_CONVERTIBLE alone withdraws the goal claim (no direction clause: the direction was not assumed)', () => {
     const text = buildAnalysisResultHeadline(served(withGoalCodes(SERVED_ENRICHMENT, [THRESHOLD])));
-    expect(text).toBe(UNTESTED);
+    expect(text).toBe(UNTESTED_THRESHOLD_ONLY);
+    expect(text).not.toContain(DIRECTION_CLAUSE);
     expectNoGoalClaim(text!);
+    expectPassesCopyGates(text!);
   });
 
-  it('T3: GOAL_DIRECTION_UNATTESTED alone withdraws the goal claim', () => {
+  it('⭐ T3 (R3-1): GOAL_DIRECTION_UNATTESTED alone, no attainment data: withdrawn, and the direction clause is NOT dropped', () => {
     const text = buildAnalysisResultHeadline(served(withGoalCodes(SERVED_ENRICHMENT, [DIRECTION])));
     expect(text).toBe(UNTESTED);
+    expect(text).toContain(DIRECTION_CLAUSE);
     expectNoGoalClaim(text!);
+    expectPassesCopyGates(text!);
   });
 
   it('BINDING: the warning CHANNEL alone is enough — the decision_brief projection is not what is read', () => {
@@ -276,7 +312,8 @@ describe('T1–T3 — an untestable goal is never claimed', () => {
   });
 
   it('the lead sentence without the disclosure stays inside the base headline cap', () => {
-    expect(UNTESTED.length - DISCLOSURE.length).toBeLessThanOrEqual(MAX_HEADLINE_CHARS);
+    expect(UNTESTED.length - COMBINED_DISCLOSURE.length).toBeLessThanOrEqual(MAX_HEADLINE_CHARS);
+    expect(UNTESTED_THRESHOLD_ONLY.length - DISCLOSURE.length).toBeLessThanOrEqual(MAX_HEADLINE_CHARS);
   });
 });
 
@@ -546,23 +583,42 @@ const LEAD_CAP_SITES: readonly LeadCapSiteRow[] = [
 interface CodeVariant {
   readonly name: string;
   readonly codes: readonly string[];
-  /** Whether the records carry a unit-interval `probability_of_goal`. */
-  readonly attainment: boolean;
+  /**
+   * The attainment data the records carry: none, a unit-interval
+   * `probability_of_goal` (ISL Channel A), or ONLY a unit-interval
+   * `probability_of_joint_goal` (ISL Channel B via PLoT, R3-4).
+   */
+  readonly attainment: 'none' | 'goal' | 'joint';
   /** The sentence this variant must carry. */
   readonly sentence: string;
 }
 
 const CODE_VARIANTS: readonly CodeVariant[] = [
-  { name: 'both codes', codes: [DIRECTION, THRESHOLD], attainment: true, sentence: DISCLOSURE },
-  { name: `${THRESHOLD} alone`, codes: [THRESHOLD], attainment: true, sentence: DISCLOSURE },
-  { name: `${DIRECTION} alone, no attainment data`, codes: [DIRECTION], attainment: false, sentence: DISCLOSURE },
+  { name: 'both codes, attainment data', codes: [DIRECTION, THRESHOLD], attainment: 'goal', sentence: COMBINED_DISCLOSURE },
+  { name: 'both codes, no attainment data', codes: [DIRECTION, THRESHOLD], attainment: 'none', sentence: COMBINED_DISCLOSURE },
+  { name: `${THRESHOLD} alone`, codes: [THRESHOLD], attainment: 'goal', sentence: DISCLOSURE },
+  { name: `${THRESHOLD} alone, no attainment data`, codes: [THRESHOLD], attainment: 'none', sentence: DISCLOSURE },
+  { name: `${DIRECTION} alone, no attainment data`, codes: [DIRECTION], attainment: 'none', sentence: COMBINED_DISCLOSURE },
   {
     name: `${DIRECTION} alone, attainment data present`,
     codes: [DIRECTION],
-    attainment: true,
+    attainment: 'goal',
+    sentence: DIRECTION_DISCLOSURE,
+  },
+  {
+    name: `${DIRECTION} alone, ONLY Channel B joint attainment present (R3-4)`,
+    codes: [DIRECTION],
+    attainment: 'joint',
     sentence: DIRECTION_DISCLOSURE,
   },
 ];
+
+/** Add the variant's attainment data to a set of records (leader first). */
+function withVariantAttainment(records: Json[], attainment: CodeVariant['attainment']): Json[] {
+  if (attainment === 'none') return records;
+  const key = attainment === 'goal' ? 'probability_of_goal' : 'probability_of_joint_goal';
+  return records.map((r, i) => ({ ...r, [key]: i === 0 ? 0.3 : 0.2 }));
+}
 
 /** A label that makes `row.candidate(label)` exactly `target` characters long. */
 function labelFor(row: LeadCapSiteRow, target: number): string {
@@ -577,9 +633,7 @@ function siteInputs(
   label: string,
   variant: CodeVariant,
 ): { clean: AnalysisResultHeadlineInput; warned: AnalysisResultHeadlineInput } {
-  const records = row.records(label).map((r, i) =>
-    variant.attainment ? { ...r, probability_of_goal: i === 0 ? 0.3 : 0.2 } : r,
-  );
+  const records = withVariantAttainment(row.records(label), variant.attainment);
   const enrichment: Json = { results: records, ...(row.extra ?? {}) };
   const warnings = SERVED_GOAL_WARNINGS.filter((w) => variant.codes.includes(w['code'] as string));
   expect(warnings.map((w) => w['code'])).toEqual(variant.codes.length === 2 ? [DIRECTION, THRESHOLD] : variant.codes);
@@ -806,10 +860,13 @@ describe('T6 — every goal-claim path withdraws the claim when a goal code is p
         expect(describeAnalysisHeadline(clean).case).toBe(row.expectedCase);
       });
 
-      for (const [variant, codes] of [
-        ['both codes', [DIRECTION, THRESHOLD]],
-        [`${THRESHOLD} alone`, [THRESHOLD]],
-        [`${DIRECTION} alone`, [DIRECTION]],
+      // `row.untested` is spelled with the could-not-test sentence; each variant
+      // swaps in the sentence it must carry (PATHS carry no attainment data, so
+      // DIRECTION here always takes the combined sentence, R3-1).
+      for (const [variant, codes, sentence] of [
+        ['both codes', [DIRECTION, THRESHOLD], COMBINED_DISCLOSURE],
+        [`${THRESHOLD} alone`, [THRESHOLD], DISCLOSURE],
+        [`${DIRECTION} alone`, [DIRECTION], COMBINED_DISCLOSURE],
       ] as const) {
         it(`${variant}: no goal claim, the disclosure, same case, passes every copy gate`, () => {
           const warned: AnalysisResultHeadlineInput = {
@@ -820,7 +877,8 @@ describe('T6 — every goal-claim path withdraws the claim when a goal code is p
             },
           };
           const text = buildAnalysisResultHeadline(warned);
-          expect(text).toBe(row.untested);
+          expect(row.untested.split(DISCLOSURE).length - 1).toBe(1);
+          expect(text).toBe(row.untested.replace(DISCLOSURE, sentence));
           expectNoGoalClaim(text!);
           expectPassesCopyGates(text!);
           expect(describeAnalysisHeadline(warned)).toEqual(describeAnalysisHeadline(clean));
@@ -878,7 +936,8 @@ describe('T6 — the shapes that never claimed the goal carry the disclosure and
       expect(buildAnalysisResultHeadline(clean)).toBe(today);
       expect(describeAnalysisHeadline(clean).case).toBe(expectedCase);
       const text = buildAnalysisResultHeadline(warned);
-      expect(text).toBe(`${today}${DISCLOSURE}`);
+      // Both served codes, no attainment data: the combined sentence (R3-1).
+      expect(text).toBe(`${today}${COMBINED_DISCLOSURE}`);
       expectNoGoalClaim(text!);
       expect(isAllowedRunAnalysisAssistantText(text)).toBe(true);
       expect(describeAnalysisHeadline(warned)).toEqual(describeAnalysisHeadline(clean));
@@ -897,7 +956,7 @@ describe('T6 — the shapes that never claimed the goal carry the disclosure and
     const text = buildAnalysisResultHeadline({ enrichment, leading_option_id: 'opt_a', status_kind: 'partial' });
     expect(text).toBe(
       'Option A scored highest in 62% of runs of this model.' +
-        DISCLOSURE +
+        COMBINED_DISCLOSURE +
         ' The result is not yet robust — small changes could flip it.' +
         ' The run was flagged as partial — treat as provisional.',
     );
@@ -924,32 +983,112 @@ function withAttainment(enrichment: Json, value: unknown = 0.4): Json {
   return copy;
 }
 
+/**
+ * R3-4: the served t2 records with ONLY ISL Channel B's per-option joint
+ * attainment (`probability_of_joint_goal`, PLoT #204) added, and no
+ * `probability_of_goal`. The PRESENT control for the Channel B half of the rule.
+ */
+function withJointAttainment(enrichment: Json, value: unknown = 0.4): Json {
+  const copy = structuredClone(enrichment);
+  copy['option_comparison'] = (copy['option_comparison'] as Json[]).map((r) => ({
+    ...r,
+    probability_of_joint_goal: r['option_id'] === SERVED_LEADING_OPTION_ID ? 0.1 : value,
+  }));
+  return copy;
+}
+
+/**
+ * R3-4 EVIDENCE THAT THE FIELD REACHES THIS INPUT. The headline's `enrichment`
+ * IS the PLoT response (run-analysis.ts `enrichment: response`), and PLoT puts
+ * Channel B's joint attainment on `option_comparison[].probability_of_joint_goal`.
+ * Code-derived by the cross-service lane from plot-lite-service 524c488
+ * `src/routes/v2/run.ts buildResponse` (NOT a wire capture: its own
+ * `_provenance` says so, and no served capture in this repo carries a
+ * constraint-bearing run). `context/analysis-signals.ts` reads the same field
+ * from the same enrichment.
+ */
+const PLOT_CODE_DERIVED = JSON.parse(
+  readFileSync(
+    new URL('../../../../tests/fixtures/cross-service/plot-to-cee.doctrine-b.code-derived.json', import.meta.url),
+    'utf8',
+  ),
+) as { _provenance: Json; enrichment: Json };
+
 const LEAD_SENTENCE = 'Raise to £59 scored highest in 81% of runs of this model because Active paid seats is the strongest driver.';
 
 describe('F3 — "could not test" only where it is true; otherwise a sentence with no attainment claim', () => {
-  it('PRECONDITION: the served records carry no probability_of_goal, and the variant does', () => {
-    for (const r of SERVED_ENRICHMENT['option_comparison'] as Json[]) expect(r['probability_of_goal']).toBeUndefined();
+  it('PRECONDITION: the served records carry neither attainment field, and each variant carries only its own', () => {
+    for (const r of SERVED_ENRICHMENT['option_comparison'] as Json[]) {
+      expect(r['probability_of_goal']).toBeUndefined();
+      expect(r['probability_of_joint_goal']).toBeUndefined();
+    }
     for (const r of withAttainment(SERVED_ENRICHMENT)['option_comparison'] as Json[]) {
       expect(typeof r['probability_of_goal']).toBe('number');
+      expect(r['probability_of_joint_goal']).toBeUndefined();
+    }
+    for (const r of withJointAttainment(SERVED_ENRICHMENT)['option_comparison'] as Json[]) {
+      expect(typeof r['probability_of_joint_goal']).toBe('number');
+      expect(r['probability_of_goal']).toBeUndefined();
     }
   });
 
+  it('⭐ R3-4 on PLoT\'s own (code-derived) Channel B shape: joint attainment present, so DIRECTION alone does not say "could not test"', () => {
+    const e = PLOT_CODE_DERIVED.enrichment;
+    // Positive controls: the shape carries the field, per option, unit-interval,
+    // and no Channel A value, so the verdict below rests on Channel B alone.
+    const records = e['option_comparison'] as Json[];
+    expect(records.map((r) => r['probability_of_joint_goal'])).toEqual([0.62, 0.41]);
+    for (const r of records) expect(r['probability_of_goal']).toBeUndefined();
+    const direction = SERVED_GOAL_WARNINGS.filter((w) => w['code'] === DIRECTION);
+    const input = (warnings: Json[]): AnalysisResultHeadlineInput => ({
+      enrichment: { ...e, inference_warnings: [...(e['inference_warnings'] as Json[]), ...warnings] },
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(describeGoalFrame(input([]))).toBe('goal_framed');
+    expect(describeGoalFrame(input(direction))).toBe('direction_assumed');
+    const text = buildAnalysisResultHeadline(input(direction));
+    expect(text).not.toBeNull();
+    expect(text!.endsWith(DIRECTION_DISCLOSURE) || text!.includes(`${DIRECTION_DISCLOSURE} `)).toBe(true);
+    expect(text).not.toContain('could not test');
+    // CONTRAST: the same shape with the joint field removed says it could not test.
+    const stripped = structuredClone(e);
+    for (const r of stripped['option_comparison'] as Json[]) delete r['probability_of_joint_goal'];
+    expect(
+      describeGoalFrame({ enrichment: { ...stripped, inference_warnings: direction }, leading_option_id: 'opt_a', status_kind: 'ok' }),
+    ).toBe('direction_assumed_and_attainment_untested');
+  });
+
+  const BOTH_UNTESTED = 'direction_assumed_and_attainment_untested';
   const BRANCHES: ReadonlyArray<[string, Json, string, string]> = [
-    ['both codes, attainment data present', withAttainment(SERVED_ENRICHMENT), DISCLOSURE, 'attainment_untested'],
-    ['both codes, no attainment data', SERVED_ENRICHMENT, DISCLOSURE, 'attainment_untested'],
+    ['⭐ both codes, attainment data present', withAttainment(SERVED_ENRICHMENT), COMBINED_DISCLOSURE, BOTH_UNTESTED],
+    ['⭐ both codes, no attainment data', SERVED_ENRICHMENT, COMBINED_DISCLOSURE, BOTH_UNTESTED],
     [`${THRESHOLD} alone, attainment data present`, withGoalCodes(withAttainment(SERVED_ENRICHMENT), [THRESHOLD]), DISCLOSURE, 'attainment_untested'],
     [`${THRESHOLD} alone, no attainment data`, withGoalCodes(SERVED_ENRICHMENT, [THRESHOLD]), DISCLOSURE, 'attainment_untested'],
-    [`${DIRECTION} alone, no attainment data`, withGoalCodes(SERVED_ENRICHMENT, [DIRECTION]), DISCLOSURE, 'attainment_untested'],
+    [`⭐ ${DIRECTION} alone, no attainment data`, withGoalCodes(SERVED_ENRICHMENT, [DIRECTION]), COMBINED_DISCLOSURE, BOTH_UNTESTED],
     [`⭐ ${DIRECTION} alone, attainment data present`, withGoalCodes(withAttainment(SERVED_ENRICHMENT), [DIRECTION]), DIRECTION_DISCLOSURE, 'direction_assumed'],
+    [
+      `⭐ ${DIRECTION} alone, ONLY Channel B joint attainment present (R3-4)`,
+      withGoalCodes(withJointAttainment(SERVED_ENRICHMENT), [DIRECTION]),
+      DIRECTION_DISCLOSURE,
+      'direction_assumed',
+    ],
+    [
+      `${THRESHOLD} alone, ONLY Channel B joint attainment present (the THRESHOLD rule is unchanged)`,
+      withGoalCodes(withJointAttainment(SERVED_ENRICHMENT), [THRESHOLD]),
+      DISCLOSURE,
+      'attainment_untested',
+    ],
   ];
 
   for (const [name, enrichment, sentence, frame] of BRANCHES) {
     it(`${name}: carries exactly its sentence, makes no goal claim, passes every copy gate`, () => {
       const text = buildAnalysisResultHeadline(served(enrichment));
       expect(text).toBe(`${LEAD_SENTENCE}${sentence}`);
-      // Exactly one of the two sentences, never both.
-      const other = sentence === DISCLOSURE ? DIRECTION_DISCLOSURE : DISCLOSURE;
-      expect(text).not.toContain(other.trim());
+      // Exactly one of the three sentences, never two.
+      for (const other of [DISCLOSURE, DIRECTION_DISCLOSURE, COMBINED_DISCLOSURE].filter((s) => s !== sentence)) {
+        expect(text).not.toContain(other.trim());
+      }
       expectNoGoalClaim(text!);
       expectPassesCopyGates(text!);
       expect(describeGoalFrame(served(enrichment))).toBe(frame);
@@ -974,8 +1113,17 @@ describe('F3 — "could not test" only where it is true; otherwise a sentence wi
       for (const r of e['option_comparison'] as Json[]) {
         if (r['option_id'] === SERVED_LEADING_OPTION_ID) r['probability_of_goal'] = junk;
       }
-      expect(buildAnalysisResultHeadline(served(e)), `junk ${String(junk)}`).toBe(`${LEAD_SENTENCE}${DISCLOSURE}`);
-      expect(describeGoalFrame(served(e))).toBe('attainment_untested');
+      expect(buildAnalysisResultHeadline(served(e)), `junk ${String(junk)}`).toBe(`${LEAD_SENTENCE}${COMBINED_DISCLOSURE}`);
+      expect(describeGoalFrame(served(e))).toBe('direction_assumed_and_attainment_untested');
+    }
+  });
+
+  it('R3-4: the joint field obeys the same UNIT-INTERVAL rule: junk joint values are not attainment data', () => {
+    for (const junk of [1.5, -0.1, Number.NaN, '0.4', null]) {
+      const e = withGoalCodes(withJointAttainment(SERVED_ENRICHMENT, junk), [DIRECTION]);
+      for (const r of e['option_comparison'] as Json[]) r['probability_of_joint_goal'] = junk;
+      expect(buildAnalysisResultHeadline(served(e)), `junk ${String(junk)}`).toBe(`${LEAD_SENTENCE}${COMBINED_DISCLOSURE}`);
+      expect(describeGoalFrame(served(e))).toBe('direction_assumed_and_attainment_untested');
     }
   });
 
@@ -983,6 +1131,9 @@ describe('F3 — "could not test" only where it is true; otherwise a sentence wi
     const e = withGoalCodes(SERVED_ENRICHMENT, [DIRECTION]);
     (e['option_comparison'] as Json[])[2]!['probability_of_goal'] = 0;
     expect(buildAnalysisResultHeadline(served(e))).toBe(`${LEAD_SENTENCE}${DIRECTION_DISCLOSURE}`);
+    const j = withGoalCodes(SERVED_ENRICHMENT, [DIRECTION]);
+    (j['option_comparison'] as Json[])[2]!['probability_of_joint_goal'] = 0;
+    expect(buildAnalysisResultHeadline(served(j))).toBe(`${LEAD_SENTENCE}${DIRECTION_DISCLOSURE}`);
   });
 
   it('the direction sentence rides every emitted case too (Case E floor, with the not-robust tail after it)', () => {
@@ -1001,6 +1152,73 @@ describe('F3 — "could not test" only where it is true; otherwise a sentence wi
     );
     expect(isAllowedRunAnalysisAssistantText(text)).toBe(true);
   });
+});
+
+// ============================================================================
+// R3-1: the direction clause is NEVER dropped while DIRECTION is present
+// ============================================================================
+
+/**
+ * ⛔ WHENEVER GOAL_DIRECTION_UNATTESTED IS ON THE CHANNEL, THE SUMMARY SAYS THE
+ * DIRECTION WAS ASSUMED (R&C round 2, R3-1). Round 2 chose ONE of two sentences
+ * and, where attainment could not be tested, dropped the direction clause: the
+ * served rerun (UI a9968d8c, CEE c74a432) carried DIRECTION and no attainment
+ * data, and the fix would have said only "could not test".
+ *
+ * Swept over every goal-claim path (T6), every non-claiming shape, and every
+ * attainment state, for each code set. The converse is pinned too: without the
+ * DIRECTION code the clause never appears (THRESHOLD alone did not assume a
+ * direction).
+ */
+describe('⭐ R3-1 — the direction clause rides on EVERY emitted headline while DIRECTION is present, and only then', () => {
+  const SHAPES: ReadonlyArray<[string, Json]> = [
+    ...PATHS.map((row): [string, Json] => [row.path, row.enrichment]),
+    [
+      'Case E floor',
+      {
+        results: [
+          { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.29 },
+          { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.1 },
+          { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.1 },
+        ],
+      },
+    ],
+    [
+      'NT margin (effectively tied)',
+      {
+        results: [
+          { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.41 },
+          { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.4 },
+        ],
+      },
+    ],
+  ];
+  const CODE_SETS: ReadonlyArray<readonly string[]> = [[DIRECTION], [DIRECTION, THRESHOLD], [THRESHOLD]];
+  const ATTAINMENT: ReadonlyArray<CodeVariant['attainment']> = ['none', 'goal', 'joint'];
+
+  for (const [name, enrichment] of SHAPES) {
+    for (const codes of CODE_SETS) {
+      for (const attainment of ATTAINMENT) {
+        it(`${name} · ${codes.join('+')} · attainment ${attainment}`, () => {
+          const e: Json = {
+            ...enrichment,
+            results: withVariantAttainment(enrichment['results'] as Json[], attainment),
+            inference_warnings: SERVED_GOAL_WARNINGS.filter((w) => codes.includes(w['code'] as string)),
+          };
+          const text = buildAnalysisResultHeadline({ enrichment: e, leading_option_id: 'opt_a', status_kind: 'ok' });
+          // Positive control: every shape here emits a headline.
+          expect(text).not.toBeNull();
+          if (codes.includes(DIRECTION)) {
+            expect(text, 'the direction clause was dropped').toContain(DIRECTION_CLAUSE);
+          } else {
+            expect(text).not.toContain(DIRECTION_CLAUSE);
+          }
+          expectNoGoalClaim(text!);
+          expect(isAllowedRunAnalysisAssistantText(text)).toBe(true);
+        });
+      }
+    }
+  }
 });
 
 // ============================================================================
@@ -1053,7 +1271,8 @@ describe('F4 — NON-MEMBER CONTROL: GOAL_ANCESTOR_DATA_GAP does not withdraw th
     expect(kept).toMatch(/^Improve Engineering System scored highest against your goal in 66% of runs of this model/);
     const withdrawn = buildAnalysisResultHeadline(input(CAPTURE_5039CCA_ENRICHMENT));
     expect(withdrawn).toMatch(/^Improve Engineering System scored highest in 66% of runs of this model/);
-    expect(withdrawn).toContain(DISCLOSURE.trim());
+    // It carries the served DIRECTION code, so the direction clause rides (R3-1).
+    expect(withdrawn).toContain(DIRECTION_CLAUSE);
   });
 });
 
@@ -1064,10 +1283,33 @@ describe('F4 — NON-MEMBER CONTROL: GOAL_ANCESTOR_DATA_GAP does not withdraw th
 describe('egress grammar — the withdrawn clause and the disclosure travel together', () => {
   it('REJECTS the goal claim WITH the disclosure (a sentence that contradicts itself)', () => {
     expect(isAllowedRunAnalysisAssistantText(`${TODAY}${DISCLOSURE}`)).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText(`${TODAY}${COMBINED_DISCLOSURE}`)).toBe(false);
   });
 
   it('REJECTS the withdrawn clause WITHOUT the disclosure (the user is not told why the goal is gone)', () => {
-    expect(isAllowedRunAnalysisAssistantText(UNTESTED.slice(0, -DISCLOSURE.length))).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText(UNTESTED.slice(0, -COMBINED_DISCLOSURE.length))).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText(LEAD_SENTENCE)).toBe(false);
+  });
+
+  it('⭐ R3-1: the COMBINED sentence is admitted with the withdrawn clause, alone in its slot', () => {
+    expect(isAllowedRunAnalysisAssistantText(`${LEAD_SENTENCE}${COMBINED_DISCLOSURE}`)).toBe(true);
+    expect(isAllowedRunAnalysisAssistantText(UNTESTED)).toBe(true);
+    // Never beside another goal-frame sentence.
+    for (const other of [DISCLOSURE, DIRECTION_DISCLOSURE]) {
+      expect(isAllowedRunAnalysisAssistantText(`${LEAD_SENTENCE}${COMBINED_DISCLOSURE}${other}`)).toBe(false);
+      expect(isAllowedRunAnalysisAssistantText(`${LEAD_SENTENCE}${other}${COMBINED_DISCLOSURE}`)).toBe(false);
+    }
+  });
+
+  it('REJECTS the combined sentence with its direction clause cut or reworded (the slot is exact)', () => {
+    expect(
+      isAllowedRunAnalysisAssistantText(`${LEAD_SENTENCE} The analysis could not test whether any option reaches your goal.`),
+    ).toBe(false);
+    expect(
+      isAllowedRunAnalysisAssistantText(
+        `${LEAD_SENTENCE} The analysis assumed a higher value is better, and it could not test whether any option reaches your goal.`,
+      ),
+    ).toBe(false);
   });
 
   it('still ADMITS today\'s goal-framed headline with no disclosure', () => {
@@ -1117,7 +1359,7 @@ describe('the disclosure is budgeted in MAX_ASSISTANT_TEXT_CHARS', () => {
     expect(SUM_EXPR).not.toContain('DEFINITELY_NOT_A_BUDGET_MAX_CHARS');
   });
 
-  it('⭐ the goal-frame sentence is a term of the sum, budgeted at the LONGER of its two sentences', () => {
+  it('⭐ the goal-frame sentence is a term of the sum, budgeted at the LONGEST of its three sentences', () => {
     expect(SUM_EXPR).toContain('GOAL_FRAME_DISCLOSURE_MAX_CHARS');
     const start = HEADLINE_SRC.indexOf('const GOAL_FRAME_DISCLOSURE_MAX_CHARS');
     expect(start).toBeGreaterThan(0);
@@ -1125,5 +1367,11 @@ describe('the disclosure is budgeted in MAX_ASSISTANT_TEXT_CHARS', () => {
     expect(definition).toContain('Math.max(');
     expect(definition).toContain('GOAL_UNTESTED_DISCLOSURE.length');
     expect(definition).toContain('GOAL_DIRECTION_ASSUMED_DISCLOSURE.length');
+    expect(definition).toContain('GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE.length');
+  });
+
+  it('the combined sentence is the longest of the three, so it is the one the budget must cover', () => {
+    expect(COMBINED_DISCLOSURE.length).toBeGreaterThan(DIRECTION_DISCLOSURE.length);
+    expect(COMBINED_DISCLOSURE.length).toBeGreaterThan(DISCLOSURE.length);
   });
 });

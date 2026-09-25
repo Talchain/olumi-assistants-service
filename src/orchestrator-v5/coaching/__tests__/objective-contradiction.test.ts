@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   buildObjectiveContradictionDisclosure,
+  composeObjectiveContradictionDisclosure,
   detectDirectionalContradiction,
   detectGoalAttainmentContradiction,
   OBJECTIVE_CONTRADICTION_MAX_CHARS,
@@ -452,9 +453,10 @@ describe('the disclosure ships nothing it cannot stand behind', () => {
 });
 
 // ============================================================================
-// The goal frame (R&C review round 1, F1): when the run could not test the
-// goal, neither arm says "against your goal", and Arm B never asserts the
-// attainment the headline has just said could not be tested.
+// The goal frame (R&C review round 1, F1; round 2, R3-2): when the run could
+// not test the goal, or assumed its direction, neither arm says "against your
+// goal", and Arm B (an attainment claim plus the "Scoring highest counts…"
+// gloss) does not ship AT ALL under any of the three withdrawn frames.
 // ============================================================================
 
 describe('the goal frame the headline builder decided', () => {
@@ -477,20 +479,30 @@ describe('the goal frame the headline builder decided', () => {
     );
   });
 
-  it('⭐ direction_assumed: Arm B ships, unframed, with the rest of its content intact', () => {
-    expect(buildObjectiveContradictionDisclosure(ATTAINMENT(), true, 'direction_assumed')).toBe(
-      ' Two different questions have two different answers here: “Hold at £49 Per Seat (Status Quo)”' +
-        ' scored highest most often, but “Raise to £59 Per Seat” is more likely to reach your stated' +
-        ' target (48% against 0%). Scoring highest counts how often an option scored highest on' +
-        ' your goal, not whether your target was met.',
-    );
-  });
+  const WITHDRAWN_FRAMES = [
+    'direction_assumed',
+    'attainment_untested',
+    'direction_assumed_and_attainment_untested',
+  ] as const;
 
-  it('⭐ attainment_untested: Arm B is SILENT (it would assert the attainment the headline says was untested)', () => {
-    expect(buildObjectiveContradictionDisclosure(ATTAINMENT(), true, 'attainment_untested')).toBe('');
-  });
+  for (const frame of WITHDRAWN_FRAMES) {
+    it(`⭐ R3-2 ${frame}: Arm B is SILENT, attainment claim and gloss both (the goal frame is unattested or untestable)`, () => {
+      expect(buildObjectiveContradictionDisclosure(ATTAINMENT(), true, frame)).toBe('');
+    });
 
-  for (const frame of ['direction_assumed', 'attainment_untested'] as const) {
+    it(`⭐ R3-2 ${frame}: the composer never falls back to Arm B, and with no directional aim it ships nothing`, () => {
+      // Arm B's data is present (the positive control above), the goal states no
+      // direction over a lever, so the only arm that could fire is Arm B.
+      expect(
+        composeObjectiveContradictionDisclosure(PRICING_GRAPH, PRICING_OPTIONS_WITH_GOAL_PROBABILITY as unknown as Array<Record<string, unknown>>, true, 'goal_framed'),
+      ).toContain('is more likely to reach your stated target');
+      expect(
+        composeObjectiveContradictionDisclosure(PRICING_GRAPH, PRICING_OPTIONS_WITH_GOAL_PROBABILITY as unknown as Array<Record<string, unknown>>, true, frame),
+      ).toBe('');
+    });
+  }
+
+  for (const frame of WITHDRAWN_FRAMES) {
     it(`⭐ ${frame}: Arm A ships, unframed, with the rest of its content intact`, () => {
       expect(buildObjectiveContradictionDisclosure(DIRECTIONAL(), true, frame)).toBe(
         ' “Hold at £49 Per Seat (Status Quo)” scored highest most often without moving' +
@@ -507,11 +519,7 @@ describe('the goal frame the headline builder decided', () => {
 
   it('every unframed shape survives the published grammar, fits the budget and still reads as a leader claim', () => {
     const exact = new RegExp(`^(?:${OBJECTIVE_CONTRADICTION_RE_SRC})$`);
-    const shapes = [
-      buildObjectiveContradictionDisclosure(ATTAINMENT(), true, 'direction_assumed'),
-      buildObjectiveContradictionDisclosure(DIRECTIONAL(), true, 'direction_assumed'),
-      buildObjectiveContradictionDisclosure(DIRECTIONAL(), true, 'attainment_untested'),
-    ];
+    const shapes = WITHDRAWN_FRAMES.map((frame) => buildObjectiveContradictionDisclosure(DIRECTIONAL(), true, frame));
     for (const shape of shapes) {
       expect(shape).not.toBe('');
       expect(shape).not.toMatch(/against your goal/);
@@ -521,9 +529,29 @@ describe('the goal frame the headline builder decided', () => {
       expect(textNamesLeadingOption(shape)).toBe(true);
     }
   });
+
+  it('⭐ R3-2: the published grammar has NO unframed Arm B shape (the builder can never emit one)', () => {
+    const exact = new RegExp(`^(?:${OBJECTIVE_CONTRADICTION_RE_SRC})$`);
+    const framed = buildObjectiveContradictionDisclosure(ATTAINMENT(), true, 'goal_framed');
+    // Positive control: the framed Arm B is admitted.
+    expect(exact.test(framed)).toBe(true);
+    const unframed = framed.replace(' scored highest against your goal most often, but ', ' scored highest most often, but ');
+    expect(unframed).not.toBe(framed);
+    expect(exact.test(unframed)).toBe(false);
+  });
 });
 
-describe('recordsCarryGoalAttainment — the ONE test of "attainment data present", Arm B\'s own unit rule', () => {
+describe('recordsCarryGoalAttainment — the ONE test of "attainment data present" (Channel A or Channel B), unit-interval only', () => {
+  it('⭐ R3-4: true when any record carries a unit-interval probability_of_joint_goal (ISL Channel B via PLoT), 0 included', () => {
+    expect(recordsCarryGoalAttainment([{ option_id: 'a', probability_of_joint_goal: 0 }])).toBe(true);
+    expect(
+      recordsCarryGoalAttainment([{ option_id: 'a' }, { option_id: 'b', probability_of_joint_goal: 0.62 }]),
+    ).toBe(true);
+    for (const junk of [1.5, -0.1, Number.NaN, Number.POSITIVE_INFINITY, '0.4', null]) {
+      expect(recordsCarryGoalAttainment([{ option_id: 'a', probability_of_joint_goal: junk }]), String(junk)).toBe(false);
+    }
+  });
+
   it('true when any record carries a unit-interval probability_of_goal, 0 included', () => {
     expect(recordsCarryGoalAttainment([{ option_id: 'a', probability_of_goal: 0 }])).toBe(true);
     expect(

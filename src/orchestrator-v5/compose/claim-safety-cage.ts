@@ -350,9 +350,8 @@ export function hasReducedSamplesDisclosure(
 const PLOT_GOAL_DIRECTION_UNATTESTED = 'GOAL_DIRECTION_UNATTESTED';
 const PLOT_GOAL_THRESHOLD_NOT_CONVERTIBLE = 'GOAL_THRESHOLD_NOT_CONVERTIBLE';
 
-const UNTESTABLE_GOAL_WARNING_CODES: ReadonlySet<string> = new Set([
+const DIRECTION_UNATTESTED_WARNING_CODES: ReadonlySet<string> = new Set([
   PLOT_GOAL_DIRECTION_UNATTESTED,
-  PLOT_GOAL_THRESHOLD_NOT_CONVERTIBLE,
 ]);
 
 const THRESHOLD_NOT_CONVERTIBLE_WARNING_CODES: ReadonlySet<string> = new Set([
@@ -384,8 +383,14 @@ function warningChannelCarriesAny(
 }
 
 /**
- * Untestable-goal presence check: did PLoT say this run could not test the
- * user's goal as stated?
+ * Did PLoT say it was not told which way the goal points
+ * (GOAL_DIRECTION_UNATTESTED), so it ranked by the largest goal value, an
+ * assumption rather than the team's stated aim?
+ *
+ * ONE CODE, deliberately (R&C round 2, R3-1). Round 1 exported an either-code
+ * helper; the headline could not then tell "direction assumed" apart once
+ * GOAL_THRESHOLD_NOT_CONVERTIBLE was also present, and dropped the direction
+ * clause. Whenever this is true the headline says the direction was assumed.
  *
  * Same construction and same claim-safety class as
  * {@link hasReducedSamplesDisclosure}: a presence-only membership test on the
@@ -409,10 +414,10 @@ function warningChannelCarriesAny(
  * (tests/contract/untestable-goal-disclosure-single-site.guard.test.ts). A
  * second consumer needs a fresh claim-safety review, not a new import.
  */
-export function hasUntestableGoalDisclosure(
+export function hasGoalDirectionUnattestedDisclosure(
   response: Record<string, unknown>,
 ): boolean {
-  return warningChannelCarriesAny(response, UNTESTABLE_GOAL_WARNING_CODES);
+  return warningChannelCarriesAny(response, DIRECTION_UNATTESTED_WARNING_CODES);
 }
 
 /**
@@ -422,14 +427,15 @@ export function hasUntestableGoalDisclosure(
  * whatever else the envelope carries.
  *
  * It exists because the two codes license DIFFERENT sentences. With
- * GOAL_DIRECTION_UNATTESTED alone, on a run that did carry a
- * `probability_of_goal`, attainment WAS computed; what was assumed is the
- * direction ("options were ranked by largest goal value. That is an
- * assumption", PLoT's own warning text on served c1ddb50 and 5039cca). Saying
- * attainment could not be tested there would be false.
+ * GOAL_DIRECTION_UNATTESTED alone, on a run that did carry attainment data,
+ * attainment WAS computed; what was assumed is the direction ("options were
+ * ranked by largest goal value. That is an assumption", PLoT's own warning text
+ * on served c1ddb50 and 5039cca). Saying attainment could not be tested there
+ * would be false.
  *
- * The same presence-only membership test as {@link hasUntestableGoalDisclosure},
- * on one of its two codes, pinned to the same single consumer by the same guard.
+ * The same presence-only membership test as
+ * {@link hasGoalDirectionUnattestedDisclosure}, on the other code, pinned to the
+ * same single consumer by the same guard.
  */
 export function hasGoalThresholdNotConvertibleDisclosure(
   response: Record<string, unknown>,

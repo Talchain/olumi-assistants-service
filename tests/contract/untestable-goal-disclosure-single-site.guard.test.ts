@@ -1,9 +1,12 @@
 /**
  * Single-consumption-site pin for the cage-owned untestable-goal presence checks.
  *
- * `hasUntestableGoalDisclosure` and `hasGoalThresholdNotConvertibleDisclosure`
- * (compose/claim-safety-cage.ts) presence-test PLoT's Tier-3 warning channel for
- * GOAL_DIRECTION_UNATTESTED / GOAL_THRESHOLD_NOT_CONVERTIBLE. Same claim-safety
+ * `hasGoalDirectionUnattestedDisclosure` and
+ * `hasGoalThresholdNotConvertibleDisclosure` (compose/claim-safety-cage.ts)
+ * presence-test PLoT's Tier-3 warning channel for GOAL_DIRECTION_UNATTESTED and
+ * GOAL_THRESHOLD_NOT_CONVERTIBLE respectively, one code each (R&C round 2: the
+ * headline needs to know about DIRECTION on its own, so the either-code helper
+ * was replaced by the per-code one). Same claim-safety
  * class as the reduced-samples check (presence of the CODE only, nothing read
  * from the entries), and pinned the same way
  * (reduced-samples-disclosure-single-site.guard.test.ts): each is approved for
@@ -15,7 +18,7 @@
  *
  * ⚠ THE OBJECTIVE-CONTRADICTION TAIL IS NOT A SECOND CONSUMER, AND THIS IS HOW
  * THAT STAYS TRUE. It receives the headline builder's derived verdict
- * (`describeGoalFrame`, a three-valued frame), never the helpers and never the
+ * (`describeGoalFrame`, a four-valued frame), never the helpers and never the
  * channel. The last block pins that its module names neither.
  *
  * Auto-enrols in the required CI gate by living under tests/contract/.
@@ -27,7 +30,9 @@ import { join, relative } from 'node:path';
 
 import { stripCommentsFile } from '../../scripts/ci/strip-source-comments.mjs';
 
-const HELPER_NAMES = ['hasUntestableGoalDisclosure', 'hasGoalThresholdNotConvertibleDisclosure'] as const;
+const HELPER_NAMES = ['hasGoalDirectionUnattestedDisclosure', 'hasGoalThresholdNotConvertibleDisclosure'] as const;
+/** The round-1 either-code helper, replaced in round 2. It must not come back as a second path. */
+const RETIRED_HELPER_NAME = 'hasUntestableGoalDisclosure';
 
 const SRC_ROOT = fileURLToPath(new URL('../../src', import.meta.url));
 
@@ -91,6 +96,12 @@ for (const HELPER_NAME of HELPER_NAMES) {
     });
   });
 }
+
+describe('the retired either-code helper is gone everywhere', () => {
+  it(`no source file references ${RETIRED_HELPER_NAME}`, () => {
+    expect(ALL_FILES.filter(({ source }) => source.includes(RETIRED_HELPER_NAME)).map((f) => f.rel)).toEqual([]);
+  });
+});
 
 describe('the objective-contradiction tail takes the verdict, not the channel', () => {
   const tail = ALL_FILES.find((f) => f.rel === TAIL_FILE);
