@@ -21,6 +21,7 @@ import {
   CEE_GOAL_THRESHOLD_FRAME,
   resolveGoalThresholdCapWithProvenance,
 } from '../../utils/goal-threshold-cap.js';
+import { admitGoalBaseline } from '../../cee/factor-extraction/goal-baseline-admissibility.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import type { InterventionV3T } from '../../schemas/cee-v3.js';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
@@ -85,6 +86,16 @@ export interface CandidateModel {
      */
     target_stated?: boolean;
     value: number | null;
+    /**
+     * The goal metric's CURRENT level, when there is one. Optional because the
+     * banked contract has no such field: absent means no current level, which is
+     * exactly what an older candidate meant. `baseline_known: true` is a figure
+     * the brief gave; `false` with a finite value is Olumi's estimate.
+     * `baseline_provenance` defaults to the goal's own `provenance`.
+     */
+    baseline_known?: boolean;
+    baseline_value?: number | null;
+    baseline_provenance?: string;
   };
   readonly constraints: readonly CandidateConstraint[];
   readonly options: readonly {
@@ -184,7 +195,7 @@ export interface AdmittedNode {
    * type was the reason three test files failed the typecheck ratchet while
    * `tsconfig.build.json` — which excludes tests — reported clean.
    */
-  observed_state?: { value: number; unit?: string; source?: string; raw_value?: number; cap?: number; declared_scale?: string };
+  observed_state?: { value: number; unit?: string; source?: string; raw_value?: number; cap?: number; declared_scale?: string; baseline?: number };
   /**
    * `cee-v3.ts` `scale_frame`: the divisor this factor's levels are stated
    * on, for a factor with no baseline. The declared carrier; see the write site.
@@ -666,6 +677,110 @@ export function admitCandidateModel(
         const resolved = resolveGoalThresholdCapWithProvenance(
           undefined, raw, model.goal.unit, undefined,
         );
+        /**
+         * ⛔ A LEVEL FRAME WITH NO BASELINE HAS NO GOAL FIT. ISL reads the level
+         * frame against `observed_state.baseline` and refuses without it
+         * (`missing_goal_baseline`, `GOAL_THRESHOLD_NOT_CONVERTIBLE`), so PLoT has
+         * no `probability_of_goal` to copy. The draft path carries a stated current
+         * level (`enricher.ts` `goal_baseline`); this writes the SAME shape its
+         * projection sends (`transforms/schema-v3.ts`, the goal limb):
+         * `{ value: B, baseline: B, unit?, source, raw_value, cap }`, B on the
+         * threshold's OWN cap. `value` repeats `baseline` because ISL requires it
+         * (see that limb). Admission is the shared rule (`admitGoalBaseline`),
+         * never restated: a level above the target is a decrease the `>=` frame
+         * would invert, and is withheld and said, not written.
+         *
+         * Stated in the brief → `brief_extraction`; anything else → Olumi's
+         * (`cee_inference`). No current level → nothing, and nothing is derived
+         * from the target.
+         */
+        const baselineRaw = model.goal.baseline_value;
+        let observed_state: AdmittedNode['observed_state'];
+        const withheld = (reason: string): void => {
+          loss.push({
+            field_path: `nodes[${slugId(model.goal.metric)}].observed_state.baseline`,
+            before: baselineRaw ?? null,
+            after: null,
+            reason,
+            severity: 'warn',
+          } as RepairEntry);
+        };
+        /**
+         * ⛔ ONLY "AT LEAST" IS SCORED CORRECTLY TODAY. The operator has no GraphV3
+         * carrier (see the `goal_operator` loss below), and the level consumer scores
+         * P(level >= threshold) whatever the brief said (ISL
+         * `robustness_analyzer_v2.py`, `compared >= threshold`). So a baseline is
+         * written ONLY for `>=`:
+         *  · `<=` / `<` ("keep churn at or below 5%; 4% now") would be scored on the
+         *    WRONG tail;
+         *  · `>` ("grow MRR above £20k; £20k now") would count equality as met — a
+         *    held status quo would score 100% on a goal it has not reached.
+         * Withheld, and said with the shortest truthful repair, until the comparator
+         * is carried and honoured end to end. The target itself is kept as before.
+         */
+        const scoresTheRightTail = model.goal.operator === '>=';
+        /**
+         * ⛔ AND ONLY A LEVEL THE BRIEF STATES (review 5824085993; RC ruling 5824518762,
+         * fix (a)). An estimate of the goal's current level would set the chance of
+         * reaching the user's target on Olumi's own guess, and nothing downstream says
+         * so for a goal (the inferred-value disclosure covers factors only). So an
+         * estimate is withheld from Goal fit and said, with the one step that makes it
+         * count. A target-only brief stays admissible: only the Goal-fit figure waits.
+         */
+        // ⛔ "Known" alone is not enough (verdict 5824647383): the strict schema cannot tie
+        // `baseline_known` to its provenance, so a level the model marks known but
+        // attributes to itself (`ai_proposed`/`inferred`) is Olumi's, and is withheld too.
+        const estimated = !(model.goal.baseline_known === true
+          && (model.goal.baseline_provenance ?? model.goal.provenance) === 'explicit');
+        if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && estimated) {
+          withheld(
+            `Olumi's own estimate of the current level of "${model.goal.metric}" (${baselineRaw}) was not used, ` +
+            `so no chance of reaching ${raw} is shown: that figure would rest on a guess, not on anything you ` +
+            `said. Tell me the current level of "${model.goal.metric}" and the chance of reaching it can be shown.`,
+          );
+        } else if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)) {
+          const admission = scoresTheRightTail
+            ? admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap })
+            : null;
+          if (admission === null && model.goal.operator === '>') {
+            withheld(
+              `"${model.goal.metric}" is a goal to get strictly above ${raw}, and the chance of meeting it ` +
+              `cannot be calculated exactly yet: reaching ${raw} itself would be counted as success. So its ` +
+              `current level (${baselineRaw}) was not used for that, and no chance of meeting the goal will be ` +
+              `shown. If reaching ${raw} is enough, say the goal is "at least ${raw}" and it can be shown.`,
+            );
+          } else if (admission === null) {
+            withheld(
+              `"${model.goal.metric}" is a goal to stay ${model.goal.operator === '<' ? 'below' : 'at or below'} ${raw}, and the chance of meeting a ` +
+              'goal of that kind cannot be calculated correctly yet, so its current level ' +
+              `(${baselineRaw}) was not used for that. The options can still be compared on everything ` +
+              'else; no chance of meeting the goal will be shown.',
+            );
+          } else if (admission.admitted) {
+            // Only the user's stated level reaches here (see `estimated` above).
+            observed_state = {
+              value: admission.normalised,
+              baseline: admission.normalised,
+              ...(model.goal.unit ? { unit: model.goal.unit } : {}),
+              source: 'brief_extraction',
+              raw_value: baselineRaw,
+              cap: resolved.cap,
+            };
+          } else if (admission.reason === 'baseline_off_cap_scale') {
+            withheld(
+              `The current level of "${model.goal.metric}" (${baselineRaw}) is outside the range the target of ${raw} ` +
+              `is measured on (0 to ${resolved.cap}), so the chance of reaching the target cannot be shown. The target ` +
+              'is kept. If either figure is wrong, say which and it can be corrected.',
+            );
+          } else {
+            withheld(
+              `The current level of "${model.goal.metric}" (${baselineRaw}) is already above the target ` +
+              `of ${raw}, so the chance of reaching the target cannot be shown: read that way the question ` +
+              'would be upside down. The target is kept. If the goal is to get back below a level, or if ' +
+              'either figure is wrong, say which and it can be corrected.',
+            );
+          }
+        }
         return {
           ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
           goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
@@ -677,6 +792,7 @@ export function admitCandidateModel(
                 goal_threshold: raw / resolved.cap,
               }
             : {}),
+          ...(observed_state !== undefined ? { observed_state } : {}),
         };
       })(),
     },
