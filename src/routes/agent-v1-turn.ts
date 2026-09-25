@@ -54,7 +54,7 @@ import { narrateWriteOutcome, notAdoptedLine, withWriteOutcome } from '../orches
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
-import { AMEND_CHIP, approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
 import { CarriedProposals, carrierForAnswerRow, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
@@ -72,6 +72,7 @@ import {
   type FirstAnalysisOutcome,
 } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
+import { deriveAnswerTextFromShape, synthesiseAnswerShapeFromText, warrantsProgressiveDisclosure } from '../orchestrator-v5/routing/answer-shape.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 /** The egress sanitiser resolves labels against a PARSED graph; an unparseable read gives it none. */
@@ -448,6 +449,91 @@ export function knownNotRunnable(analysisReady: unknown): boolean {
   if (analysisReady === null || typeof analysisReady !== 'object') return false;
   const ar = analysisReady as { may_run?: unknown; status?: unknown };
   return typeof ar.may_run === 'boolean' ? ar.may_run === false : typeof ar.status === 'string' && ar.status !== 'ready';
+}
+
+/** The approve chip's id prefix, taken from the chip's own producer — never a copy of its string. */
+const APPROVE_CHIP_ID_PREFIX = approvalChipIdFor('');
+
+/** Does this response offer an approval: is the approve chip among its `suggested_actions`? */
+export function offersApproval(body: { suggested_actions?: unknown }): boolean {
+  const actions = body.suggested_actions;
+  return Array.isArray(actions) && actions.some((a) => {
+    const id = a !== null && typeof a === 'object' ? (a as { id?: unknown }).id : undefined;
+    return typeof id === 'string' && id.startsWith(APPROVE_CHIP_ID_PREFIX);
+  });
+}
+
+/**
+ * Did this turn's calls leave a proposal awaiting the user's yes, WHETHER OR NOT a chip names it?
+ * `approvalChipsFor` is the rule (a proposing tool that succeeded, after the turn's last model change, not
+ * consumed by an authorisation), but it offers a chip only when exactly ONE proposal qualifies: with two
+ * pending it offers none and the Agent asks in words. So it is asked about each proposal ALONE — every other
+ * proposal's id hidden, every call kept in place so order and mutation still count — and never re-derived.
+ */
+export function leavesProposalAwaitingApproval(
+  calls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[],
+): boolean {
+  return calls.some((c, j) => c.name !== 'authorise_change' && typeof c.proposal_id === 'string'
+    && approvalChipsFor(calls.map((d, i) => {
+      if (i === j || d.name === 'authorise_change') return d;
+      const { proposal_id: _hidden, ...rest } = d;
+      return rest;
+    })).length > 0);
+}
+
+/**
+ * ⭐ AN ANALYSIS REPLY ARRIVES HEADLINE FIRST (UI contract UI-SEM-090; agreed design #69 5831886008).
+ * A Run reply on this route is a finding, a few bullets and often a closing line, and with no sidecar
+ * the UI renders it whole as free text. The product's own `_answer_shape` sidecar makes it headline + at
+ * most three bullets, with the rest behind "Show more" — the SAME synthesiser and derivation route-v2's
+ * egress uses (`routing/answer-shape.ts`), never a second one.
+ *
+ * ⛔ THE TIE HOLDS BY IDENTITY: `assistant_text` is SET to `deriveAnswerTextFromShape(shape)` in the same
+ * object that carries the shape, so the text and its sidecar cannot describe different answers.
+ *
+ * SCOPE: only a response that carries an `analysis_result` block — the explicit Run, the automatic first
+ * pass on a build turn, and any turn answered over a current result. A response with no result block
+ * (a blocked Run, a turn on a model with no current result) is returned by reference, byte-identical. So
+ * is one that already carries a shape, one the synthesiser declines (a single sentence, or nothing after
+ * the bullets to put behind the toggle), and one below the floor with no bullet.
+ *
+ * ⚠ A DELIBERATE DIFFERENCE FROM ROUTE-V2'S GATE. Route-v2 shapes only above the collapse floor
+ * (`warrantsProgressiveDisclosure`), because below it a shape could turn "the user reads all of it"
+ * into "the user reads one sentence". Here a reply below the floor is shaped too, but ONLY when the shape
+ * keeps at least one bullet on the face, so what shows is headline + bullets, never a lone sentence.
+ * Above the floor it is shaped exactly as route-v2 would shape it.
+ *
+ * ⛔ CALL IT ON THE FINAL PROSE — after the withheld-leader gate and every other rewrite of
+ * `assistant_text` on this route — so a headline or bullet can never carry a sentence a gate removed.
+ *
+ * ⛔ CONSENT BEFORE BREVITY: A TURN THAT ASKS FOR AN APPROVAL IS NEVER SHAPED. The build turn's first pass
+ * with a four-figure starting point, or a proposal made over a current result, would put figure four behind
+ * "Show more" beside the chip that approves all four. So a response whose `suggested_actions` carry the
+ * approve chip (`offersApproval`), or a turn the route says left a proposal awaiting a yes whether or not a
+ * chip names it (`turn.proposalAwaitingApproval`, from `approvalChipsFor`'s own rule), is returned by
+ * reference, byte-identical.
+ */
+export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; blocks?: unknown; suggested_actions?: unknown }>(
+  body: T,
+  turn: { proposalAwaitingApproval?: boolean; leaderGateEditedText?: boolean } = {},
+): T {
+  if ('_answer_shape' in body) return body;
+  if (turn.proposalAwaitingApproval === true || offersApproval(body)) return body;
+  // ⛔ The leader gate rewrote this text: its no-leader sentence and next action close the reply, and a
+  // shape would put them behind "Show more" (independent review of #1914, 5832549611). Ship it whole, as
+  // route-v2 does when its gate edits the text.
+  if (turn.leaderGateEditedText === true) return body;
+  const blocks = body.blocks;
+  const carriesResult = Array.isArray(blocks)
+    && blocks.some((b) => b !== null && typeof b === 'object' && (b as { type?: unknown }).type === 'analysis_result');
+  if (!carriesResult) return body;
+  const text = body.assistant_text;
+  if (typeof text !== 'string' || text.trim().length === 0) return body;
+  const shape = synthesiseAnswerShapeFromText(text);
+  if (shape === null) return body;
+  const derived = deriveAnswerTextFromShape(shape);
+  if (!warrantsProgressiveDisclosure(derived) && shape.bullets.length === 0) return body;
+  return { ...body, assistant_text: derived, _answer_shape: shape };
 }
 
 /**
@@ -1576,9 +1662,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     })();
     // A withheld call consumed no proposal and moved nothing: it is not an authorisation, and
     // counting one (it has no proposal id) would strand the proposal it named without its chip.
+    const approvalCalls = result.tool_calls.filter((c) => c.refusal !== WITHHELD_ON_CHIP_TURN);
     // The chip's words come from the STORED proposal it approves and its proposer's own result, never the Agent's prose.
     const approvals = approvalChipsFor(
-      result.tool_calls.filter((c) => c.refusal !== WITHHELD_ON_CHIP_TURN),
+      approvalCalls,
       (id) => ({ proposal: proposals.get(id), result: result.tool_results.find((r) => r.proposal_id === id) }),
     );
     // A first analysis the model could not run offers its repair: the approve chip when the Agent
@@ -1709,6 +1796,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       || fa !== undefined
       || result.tool_calls.some((c) => c.name === 'run_analysis');
     let leaderClaimEnforced = false;
+    let leaderGateEditedText = false;
     if (analysisBearing) {
       const claim = (analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
       const enforced = enforceAgentLaneLeaderClaimsAtWire(wireBody, {
@@ -1722,11 +1810,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       if (enforced.changed) {
         leaderClaimEnforced = true;
+        leaderGateEditedText = enforced.editedFields.includes('assistant_text');
         // A shape sidecar describes the text it was built from; it goes with an edit to that text.
         const { _answer_shape: _dropped, ...withoutShape } = enforced.response as OlumiResponse & { _answer_shape?: unknown };
         wireBody = (enforced.editedFields.includes('assistant_text') ? withoutShape : enforced.response) as OlumiResponse & Record<string, unknown>;
       }
     }
+    /**
+     * ⭐ HEADLINE FIRST ON AN ANALYSIS REPLY — see `withAnalysisAnswerShape`. HERE, and nowhere earlier:
+     * this is after the last rewrite of `assistant_text` on this route (write-claim removal, disclosures,
+     * proposal-id scrub, the leader gate above), so the shape is built from the prose the user receives,
+     * and before the answer row is written, so a replay returns the same words. Never on a turn that asks
+     * for an approval: the route's own offer, or a proposal the chip rule left without a chip. Never on
+     * a turn whose text the leader gate rewrote: its disclosure stays on the face.
+     */
+    wireBody = withAnalysisAnswerShape(wireBody, {
+      proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
+      leaderGateEditedText,
+    });
 
     /**
      * ⭐ PERSIST THE TURN BEFORE ANSWERING — the row a lost-response retry is
