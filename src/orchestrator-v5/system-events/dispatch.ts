@@ -432,6 +432,22 @@ const REPLAY_CHANGE_UNCHECKABLE_TEXT =
  */
 const REPLAY_CHANGE_IN_MODEL_UNATTRIBUTED_TEXT =
   'Nothing new was written just now, and the model already reflects that change.';
+/**
+ * The two arms that keep commit.ts's claim, restated WITHOUT its value tail.
+ * commit.ts ends both with "<label> is currently <value>." or, when it has no
+ * value target, "I couldn't read the current value just now — open the model
+ * to check it." A structural write never has a value target, so that tail was
+ * always the second one: false beside the snapshot this reply presents
+ * (#1906 review 5831160000). The reply's `draft_graph` is the current state.
+ */
+const REPLAY_ALREADY_RECORDED_TEXT =
+  'That change had already been recorded, so nothing new was written just now.';
+const CONFLICT_REFUSAL_TEXT =
+  'I did not make that change. This request arrived under an identifier that had already been ' +
+  'used for a different instruction, so I stopped rather than risk applying the wrong edit. ' +
+  'Nothing was written.';
+/** Appended to either kept arm only when the reread failed, so no snapshot is shown. */
+const NO_SNAPSHOT_TAIL = " I couldn't read the model just now to show what it currently holds.";
 
 /**
  * ⛔ F4 (Codex, #63 5821693599) — THE REPLY FOR A GRAPH WRITER WHOSE COMMIT
@@ -547,7 +563,12 @@ function replyForAttemptThatWroteNothing(args: {
                 : REPLAY_CHANGE_NOT_IN_MODEL_TEXT,
         } as OlumiResponse;
       })()
-    : committedResponse;
+    : {
+        ...committedResponse,
+        assistant_text:
+          (answeredAsConflict ? CONFLICT_REFUSAL_TEXT : REPLAY_ALREADY_RECORDED_TEXT) +
+          (snapshot === null ? NO_SNAPSHOT_TAIL : ''),
+      };
   const response: OlumiResponse =
     snapshot !== null
       ? {
@@ -3058,9 +3079,9 @@ async function dispatchStructuralRename(
   // `persistedGraph` is a reread another writer (or this request's own earlier
   // commit) may already have renamed exactly as asked, so the label check below
   // would attest "new label verified in the persisted bytes" for a write that
-  // never happened, or answer a known no-write with a retryable 500. The fact
-  // history is read only on this branch: the rename's success path derives no
-  // freshness, so the common path pays nothing for it.
+  // never happened, or answer a known no-write with a retryable 500. It reuses
+  // the writer's own analysis read (`factsRead`), the same one its success path
+  // derives freshness from.
   if (thisAttemptWrote === false) {
     return replyForAttemptThatWroteNothing({
       writer: 'structural_rename',
