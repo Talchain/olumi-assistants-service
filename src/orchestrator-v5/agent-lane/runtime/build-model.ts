@@ -106,7 +106,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
       label: { type: 'string', description: 'A NAME, not a sentence. Keep it under 33 characters where you can.' },
       provenance,
       changes: { type: 'array', description:
-        'Factor labels this option changes when it states no level \u2014 e.g. an option that phases, grandfathers or tests something. Use the factor labels exactly. An option (other than the one marked is_status_quo, which stays empty) that names nothing here and has no interventions is unreachable from the decision and cannot be analysed.',
+        'Factor labels this option acts on for which no defensible level exists \u2014 each one leaves the user a value question before anything can be calculated, so prefer a level in `interventions` (your ai_proposed estimate when the brief states none). Use the factor labels exactly. The option marked is_status_quo leaves this empty. An option (other than the one marked is_status_quo) that names nothing here and has no interventions is unreachable from the decision and cannot be analysed.',
         items: { type: 'string' } },
       interventions: { type: 'array', description:
         'The factor level this option sets, or a signed addition to its baseline. Distinguish these meanings with value_kind. Preserve user numbers; an estimated level is ai_proposed, never explicit.',
@@ -147,8 +147,8 @@ export const BUILD_INSTRUCTIONS = [
   'For each option fill `interventions` with its factor settings. value_kind:"absolute" means the resulting total or level; value_kind:"additional" means a signed change from the same factor baseline. For hiring, adding two to a proposed baseline of five means total seven, never total two. Record the user-stated addition as explicit but keep an estimated resulting level ai_proposed. Keep one unit and plausible_max frame per factor across all baselines and options.',
   'Mark the option that keeps things as they are now with is_status_quo:true \u2014 at most one option, whatever it is called \u2014 and give it no levels; every other option has is_status_quo:null.',
   'Connect options to the controllable factors they change, then through supported causal mechanisms to risks and the goal. Never emit a direct option-to-risk link: it cannot be interpreted as an option setting a risk value. Retain each meaningful risk hypothesis, its sign and its downstream path; express its exposure through a causal factor or mediator, rather than deleting the risk or claiming equal exposure.',
-  'EVERY OPTION MUST SAY WHAT IT DOES \u2014 except the one marked is_status_quo, which names no changes and no levels because it keeps things as they are. Any OTHER option (not marked is_status_quo) with no `interventions` AND no `changes` is inert: it can never be compared with another option, whatever values are supplied later, and the whole decision becomes unanswerable. The option marked is_status_quo is meant to be empty \u2014 it is compared by holding today\u2019s levels, so leave it empty. If the brief does not say what an option changes, still name the factors it ACTS ON in `changes` \u2014 that is a structural claim, not a numeric one. '
-  + 'EVERY option (except the one marked is_status_quo) must also list, in `changes`, the factors it acts on WITHOUT a stated level. An option (other than the one marked is_status_quo) that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping.',
+  'EVERY OPTION MUST SAY WHAT IT DOES \u2014 except the one marked is_status_quo, which names no changes and no levels because it keeps things as they are. Any OTHER option (not marked is_status_quo) with no `interventions` AND no `changes` is inert: it can never be compared with another option, whatever values are supplied later, and the whole decision becomes unanswerable. The option marked is_status_quo is meant to be empty \u2014 it is compared by holding today\u2019s levels, so leave it empty. If the brief does not say what an option changes, still decide which factors it ACTS ON \u2014 that is a structural claim \u2014 and then give each one a level. '
+  + 'EVERY FACTOR IT ACTS ON NEEDS A LEVEL: for every option except the one marked is_status_quo, put one `interventions` entry for EACH factor it acts on \u2014 the user\u2019s own number where the brief states one, otherwise your estimated resulting level (value_kind:"absolute", provenance ai_proposed) in that factor\u2019s own unit and plausible_max frame. A factor an option acts on with no level leaves the user a value question before anything can be calculated. Use `changes` ONLY for a factor where no defensible level exists, and name that missing level in `unknowns`. Every factor an option acts on also needs a baseline_value (a provisional estimate with baseline_known:false when the brief gives none). An option (other than the one marked is_status_quo) that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping.',
   // ⛔ THE EXPLOSION CLAUSE, REPLACED. This previously read: "Then widen: add the
   // options, factors, risks, outcomes and causal mechanisms that materially improve
   // strategic reasoning, including alternatives beyond the user's initial frame."
@@ -418,6 +418,8 @@ export function prepareProvisionalCandidate(model: CandidateModel): {
   mechanism_issues: string[];
   additions_without_total: AdditionWithoutTotal[];
   provenance_demoted: DemotedProvenance[];
+  level_gaps: LevelGap[];
+  baseline_gaps: BaselineGap[];
 } {
   const mechanism_issues: string[] = [];
   const additions_without_total: AdditionWithoutTotal[] = [];
@@ -491,7 +493,56 @@ export function prepareProvisionalCandidate(model: CandidateModel): {
     if (findMechanismPath(mechanismGraph, link.from, link.to) !== null) continue;
     mechanism_issues.push(`${link.from} -> ${link.to}: retain this risk hypothesis through a causal factor or mediator, not a direct option-risk setting`);
   }
-  return { candidate: { ...model, options }, mechanism_issues, additions_without_total, provenance_demoted };
+  const { level_gaps, baseline_gaps } = findCoverageGaps(model, additions_without_total);
+  return { candidate: { ...model, options }, mechanism_issues, additions_without_total, provenance_demoted, level_gaps, baseline_gaps };
+}
+
+/**
+ * ⛔ EVERY OPTION × FACTOR IT ACTS ON NEEDS A LEVEL (served CEE e39f6e0, witness
+ * c22): every lever named its factors only in `changes` and two acted-on baselines
+ * were null, so readiness asked a value question for every pair and no first
+ * analysis ran. These gaps go to the ONE repair retry; nothing here invents a level.
+ *  · A `changes` entry with no level on that factor is a level gap — never on the
+ *    option marked is_status_quo, which is held, not set (#1873 B2).
+ *  · An acted-on factor with no finite baseline is a baseline gap — EXCEPT one a
+ *    user's addition could not become a total on (#1841 B1): that figure is the
+ *    user's to give, and no retry is spent on it.
+ * Read off the drafter's own candidate, so a degraded addition (moved into
+ * `changes` by preparation) is never mistaken for a missing level.
+ */
+export interface LevelGap { readonly option: string; readonly factor: string }
+export interface BaselineGap { readonly factor: string }
+export function findCoverageGaps(
+  model: CandidateModel,
+  additionsWithoutTotal: readonly AdditionWithoutTotal[],
+): { level_gaps: LevelGap[]; baseline_gaps: BaselineGap[] } {
+  const factorLabels = new Set(model.factors.map((f) => f.label));
+  const userOwnedBaseline = new Set(additionsWithoutTotal.filter((a) => a.reason === 'baseline_unknown').map((a) => a.factor));
+  const level_gaps: LevelGap[] = [];
+  const actedOn = new Set<string>();
+  for (const option of model.options) {
+    if (option.is_status_quo === true) continue;
+    const levelled = new Set((option.interventions ?? []).map((i) => i.factor_label));
+    for (const f of levelled) if (factorLabels.has(f)) actedOn.add(f);
+    for (const f of option.changes ?? []) {
+      if (!factorLabels.has(f)) continue;
+      actedOn.add(f);
+      if (!levelled.has(f) && !level_gaps.some((g) => g.option === option.label && g.factor === f)) level_gaps.push({ option: option.label, factor: f });
+    }
+  }
+  const baseline_gaps = model.factors
+    .filter((f) => actedOn.has(f.label) && !userOwnedBaseline.has(f.label))
+    .filter((f) => typeof f.baseline_value !== 'number' || !Number.isFinite(f.baseline_value))
+    .map((f) => ({ factor: f.label }));
+  return { level_gaps, baseline_gaps };
+}
+
+/** The retry's wording for each gap, naming the option and factor exactly. */
+function sayCoverageGaps(p: { level_gaps: readonly LevelGap[]; baseline_gaps: readonly BaselineGap[] }): string[] {
+  return [
+    ...p.level_gaps.map((g) => `${g.option} -> ${g.factor}: give the level this option sets in interventions (the user's number if stated, otherwise an ai_proposed estimate in the factor's unit and plausible_max frame); keep it only in changes if no defensible level exists`),
+    ...p.baseline_gaps.map((g) => `${g.factor}: give a baseline_value (a provisional estimate with baseline_known:false) \u2014 an option acts on it`),
+  ];
 }
 
 /** A repair may replace an invalid direct edge, but must preserve its signed path. */
@@ -586,9 +637,18 @@ export async function buildModelFromBrief(
   // them — otherwise an option the model mislabelled as its own vanishes unseen.
   let leftOut: { kind: string; label: string }[] = [];
   const needsSizeRetry = !size.within && !size.user_material_exceeds_limit;
-  // Only a missing risk mechanism asks the retry to repair. An addition with no total
+  // A missing risk mechanism, and an option × factor (or acted-on baseline) with no
+  // level (c22, `findCoverageGaps`), ask the retry to repair. An addition with no total
   // DEGRADES instead (see `prepareProvisionalCandidate`): the figure is the user's to give.
-  const repairIssues = (p: typeof preparation): string[] => p.mechanism_issues;
+  const repairIssues = (p: typeof preparation): string[] => [...p.mechanism_issues, ...sayCoverageGaps(p)];
+  // ⚠ Counted WITHOUT the first pass's own degraded additions (#1841 B1): a retry that
+  // echoes the prepared candidate carries each such pair in `changes`, and that figure
+  // is the user's to give — it is never a new gap, so it can never refuse the retry.
+  const gapCount = (p: typeof preparation): number => {
+    const userOwned = preparation.additions_without_total;
+    return p.level_gaps.filter((g) => !userOwned.some((a) => a.option === g.option && a.factor === g.factor)).length
+      + p.baseline_gaps.filter((g) => !userOwned.some((a) => a.reason === 'baseline_unknown' && a.factor === g.factor)).length;
+  };
   if (needsSizeRetry || repairIssues(preparation).length > 0) {
     sizeRetried = needsSizeRetry;
     constructionRetried = true;
@@ -624,7 +684,12 @@ export async function buildModelFromBrief(
         const keepsUserMaterial = keepsEveryUserStatedIdentity(size, retrySize);
         if (
           (needsSizeRetry ? retrySize.nodes <= size.nodes && retrySize.edges <= size.edges : retrySize.within || retrySize.user_material_exceeds_limit) &&
-          keepsUserMaterial && repairIssues(retryPreparation).length === 0 &&
+          keepsUserMaterial && retryPreparation.mechanism_issues.length === 0 &&
+          // ⛔ Coverage is repaired where a level is defensible, so a retry may leave a
+          // gap — but it must never cover LESS, and when coverage is the only reason
+          // for the retry it must cover strictly MORE (c22).
+          gapCount(retryPreparation) <= gapCount(preparation) &&
+          (needsSizeRetry || preparation.mechanism_issues.length > 0 || gapCount(retryPreparation) < gapCount(preparation)) &&
           (repairIssues(preparation).length === 0 || retainsRiskHypotheses(candidate, retryCandidate))
         ) {
           const kept = new Set(retryAdmitted.nodes.map(nodeIdentity));

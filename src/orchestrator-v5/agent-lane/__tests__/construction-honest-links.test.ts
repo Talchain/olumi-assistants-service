@@ -28,6 +28,7 @@ import {
   BUILD_INSTRUCTIONS,
   buildCandidateSchema,
   buildModelFromBrief,
+  prepareProvisionalCandidate,
   type CallStructuredModel,
 } from '../runtime/build-model.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
@@ -156,7 +157,7 @@ describe('the banked live candidate is admitted whole and analysable in structur
     expect(v.by_kind['factor']).toBeGreaterThanOrEqual(4);
   });
 
-  it('builds through buildModelFromBrief in ONE call and registers once', async () => {
+  it('builds through buildModelFromBrief with no size retry, spending only the coverage retry, and registers once', async () => {
     const calls: string[] = [];
     const fn = vi.fn(async (req: { instructions: string }) => {
       calls.push(req.instructions);
@@ -170,7 +171,11 @@ describe('the banked live candidate is admitted whole and analysable in structur
     const out = await buildModelFromBrief(SCENARIO, BRIEF, d, fn);
     expect(out.ok, JSON.stringify(out).slice(0, 300)).toBe(true);
     expect(out['size_retried']).toBe(false);
-    expect(calls).toHaveLength(1);
+    // The banked capture names most levers' factors with no level (the c22 class), so
+    // the ONE retry spent is the coverage repair; it has no mechanism issue to repair.
+    expect(prepareProvisionalCandidate(BANKED).mechanism_issues).toEqual([]);
+    expect(prepareProvisionalCandidate(BANKED).level_gaps.length).toBeGreaterThan(0);
+    expect(calls).toHaveLength(2);
     expect(paths.filter((p) => p.endsWith('/graph/register'))).toHaveLength(1);
   });
 });

@@ -173,6 +173,15 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     expect(node(graph, 'continue_current_staffing').is_baseline).toBe(true);
   });
 
+  it('CONTROL (#1873 B2): even a flagged status quo that lists changes is never asked for a level', async () => {
+    const c = c22();
+    c.options[3] = { ...c.options[3]!, changes: ['Team morale'] };
+    const p = prepareProvisionalCandidate(c as unknown as CandidateModel);
+    expect(p.level_gaps.filter((g) => g.option === 'Continue Current Staffing')).toEqual([]);
+    const { inputs } = await construct(c, covered());
+    expect(inputs[1]).not.toContain('Continue Current Staffing ->');
+  });
+
   it('CONTROL (#1841 B1): a user addition on an unknown baseline still degrades — no retry, no invented total, no baseline asked for', async () => {
     const c = c22();
     c.factors = [factor('Developers', null, 50, 'people'), factor('Hiring cost', 0, 500000, 'GBP')];
@@ -202,6 +211,16 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     expect(inputs).toHaveLength(2);
     // The first draft is kept: "Hire Both" does not act on Onboarding load.
     expect(graph.edges.some((e) => e.from === 'hire_both' && e.to === 'onboarding_load')).toBe(false);
+  });
+
+  it('CONTROL: a coverage-only retry that covers no more is not adopted, even when it rewrites something else', async () => {
+    const same = c22();
+    same.factors[3] = factor('Team spirit', 6, 10, 'score');
+    same.links[2] = { from: 'Team spirit', to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed' };
+    const { graph, inputs } = await construct(c22(), same);
+    expect(inputs).toHaveLength(2);
+    expect(graph.nodes.some((n) => n.id === 'team_morale')).toBe(true);
+    expect(graph.nodes.some((n) => n.id === 'team_spirit')).toBe(false);
   });
 
   it('CONTROL: a retry that covers every pair by dropping an option is not adopted', async () => {

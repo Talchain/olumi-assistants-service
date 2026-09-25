@@ -26,14 +26,16 @@ const link = (from: string, to: string) => ({ from, to, direction: 'positive', p
 /** A candidate whose ADMITTED size is driven by `extraFactors`. */
 function candidate(extraFactors: number) {
   const names = Array.from({ length: extraFactors }, (_, i) => `Secondary factor ${i}`);
+  // Each option carries an estimated level and the factor an estimated baseline, as the constructor
+  // now asks (c22): a level-free draft spends the coverage retry, which these size tests do not measure.
   return {
     goal: { metric: 'Velocity', operator: '>=', value: 20, unit: 'points', horizon_months: 6, provenance: 'explicit' },
     constraints: [],
     options: [
-      { label: 'Hire a tech lead', provenance: 'explicit', changes: ['Delivery capacity'], interventions: [] },
-      { label: 'Hire two developers', provenance: 'explicit', changes: ['Delivery capacity'], interventions: [] },
+      { label: 'Hire a tech lead', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Delivery capacity', value: 60, value_kind: 'absolute', unit: 'points', provenance: 'ai_proposed' }] },
+      { label: 'Hire two developers', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Delivery capacity', value: 60, value_kind: 'absolute', unit: 'points', provenance: 'ai_proposed' }] },
     ],
-    factors: [factor('Delivery capacity', 'inferred'), ...names.map((n) => factor(n))],
+    factors: [{ ...factor('Delivery capacity', 'inferred'), baseline_value: 50 }, ...names.map((n) => factor(n))],
     risks: [],
     outcomes: [{ label: 'Velocity', provenance: 'inferred' }],
     links: [link('Delivery capacity', 'Velocity'), ...names.map((n) => link(n, 'Velocity'))],
@@ -166,7 +168,7 @@ describe('⭐ the cap never overrides the user', () => {
       ...candidate(0),
       options: Array.from({ length: COMPACT_LIMITS.maxNodes + 2 }, (_, i) => ({
         label: `User option ${i}`, provenance: 'explicit',
-        changes: ['Delivery capacity'], interventions: [],
+        changes: [], interventions: [{ factor_label: 'Delivery capacity', value: 60, value_kind: 'absolute', unit: 'points', provenance: 'ai_proposed' }],
       })),
     };
     const s = structuredSequence(userHeavy);
