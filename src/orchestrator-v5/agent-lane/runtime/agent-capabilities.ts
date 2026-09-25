@@ -166,19 +166,19 @@ function ownCommittedNative(res: { status: number; json: Record<string, unknown>
  * `undefined` when the response carries none.
  */
 /**
- * ⛔ TWO STORED FIGURES ARE THE SAME FIGURE ONLY UP TO DOUBLE-PRECISION NOISE — never a magnitude-based band (pre-review of
- * #1881 at 16a2f19e, 5828080522). A relative 1e-6 hid a collaborator's £1,001 change on £1,234,564,999; the value path's
- * 1e-9 hid £1 on the same figure. The only arithmetic between two stored figures here is a few scale steps (÷range,
- * ×range, a range change's ×old÷new), whose error is ~1e-15 relative, so 1e-12 tolerates exactly that and nothing a
- * person could type.
+ * ⛔ "THE SAME FIGURE" IS DECIDED EXACTLY WHEREVER NO ARITHMETIC SEPARATES THE TWO (pre-reviews of #1881, 5828080522 and
+ * 5828293137). Any tolerance proportional to magnitude has a £1 boundary somewhere: 1e-6 hid £1,001 on £1.2bn, 1e-9 hid
+ * £1 there, and 1e-12 hides £1 on £1.2tn. So two STORED figures — our committed level and the level read back in the
+ * same range, or two native values — are compared with `===`. Only across a range change, where the product itself
+ * multiplied and divided, is float noise allowed, and then only a few units in the last place of the larger figure
+ * (~£0.002 at £1.2tn): the real rounding of those few steps, never a band a person's entry could fall inside.
  */
-const SAME_FIGURE_NOISE = 1e-12;
-function sameFigure(a: number, b: number): boolean {
-  return Math.abs(a - b) <= SAME_FIGURE_NOISE * Math.max(1, Math.abs(a), Math.abs(b));
+function sameAfterScaling(a: number, b: number): boolean {
+  return a === b || Math.abs(a - b) <= 8 * Number.EPSILON * Math.max(Math.abs(a), Math.abs(b));
 }
-/** A figure for the Agent to quote: float noise removed (54.00000000000001 → 54), every digit a person gave kept. */
+/** A figure for the Agent to quote: float noise removed (54.00000000000001 → 54); 15 significant digits is every digit a double carries. */
 function quotable(x: number): number {
-  return Number(x.toPrecision(12));
+  return Number(x.toPrecision(15));
 }
 
 function committedLevelOf(json: Record<string, unknown>, optionId: string, factorId: string): number | undefined {
@@ -1907,6 +1907,8 @@ export function createAgentCapabilities(
         const ownLevelWrite = new Set<string>();
         /** The level each own write committed: from its OWN response's committed post-state when present, else what it sent. */
         const ownLevel = new Map<string, number>();
+        /** Levels whose COMMITTED value is known exactly (the write's own `draft_graph`), not just the value sent. */
+        const ownLevelExact = new Set<string>();
         for (let i = 0; i < ops.length; i += 1) {
           const o = ops[i];
           const [optionId, factorId] = o.path.split('::');
@@ -1954,7 +1956,9 @@ export function createAgentCapabilities(
           }
           baseHash = committedHash;
           ownLevelWrite.add(o.path);
-          ownLevel.set(o.path, committedLevelOf(r.json, optionId!, factorId!) ?? v);
+          const committedLevel = committedLevelOf(r.json, optionId!, factorId!);
+          ownLevel.set(o.path, committedLevel ?? v);
+          if (committedLevel !== undefined) ownLevelExact.add(o.path);
           // A receipt is reported only beside its own committed write.
           if (rc.summary !== null) receipts.push(rc.summary);
         }
@@ -2011,7 +2015,7 @@ export function createAgentCapabilities(
              */
             const toAbs = (x: number): number => (cap !== undefined ? x * cap : x);
             // What we saved, as the user said it: their own figure when the write committed exactly what was sent.
-            const savedAsSent = typeof opv.normalised === 'number' && sameFigure(mine, opv.normalised) && Number.isFinite(row.requested);
+            const savedAsSent = typeof opv.normalised === 'number' && mine === opv.normalised && Number.isFinite(row.requested);
             // Compared against the EXACT committed level in its range, so the only difference left is scale-step noise.
             const savedAbs = toAbs(mine);
             const savedUser = savedAsSent ? row.requested : quotable(savedAbs);
@@ -2036,7 +2040,7 @@ export function createAgentCapabilities(
               if (current === null) return undefined;
               if (freshCap !== undefined) {
                 const fromFrame = current * freshCap;
-                return stampedAbs === undefined || sameFigure(stampedAbs, fromFrame) ? fromFrame : undefined;
+                return stampedAbs === undefined || sameAfterScaling(stampedAbs, fromFrame) ? fromFrame : undefined;
               }
               if (stampedAbs !== undefined) return stampedAbs;
               // A level on a factor that had no range then and has none now is already on the user's 0–1 scale.
@@ -2053,11 +2057,15 @@ export function createAgentCapabilities(
               if (movedPastUs) changed(null);
               else unknown();
             } else if (!hashKnown) {
-              if (!sameFigure(current, mine)) unknown();
+              if (current !== mine) unknown();
             } else if (movedPastUs) {
               row.recorded = mine;
-              if (currentAbs === undefined) unknown();
-              else if (!sameFigure(currentAbs, savedAbs)) changed(quotable(currentAbs));
+              // Same range: the stored level either IS ours or is not — no arithmetic, no tolerance.
+              const sameRange = freshCap === cap;
+              // Known only as SENT (no committed post-state): a mismatch may be the product's own normalisation — unknown, never another writer.
+              if (sameRange) { if (current !== mine) { if (ownLevelExact.has(o.path)) changed(quotable(toAbs(current))); else unknown(); } }
+              else if (currentAbs === undefined) unknown();
+              else if (!sameAfterScaling(currentAbs, savedAbs)) changed(quotable(currentAbs));
             }
           }
         }
@@ -2277,7 +2285,7 @@ export function createAgentCapabilities(
            */
           const mine = ownNative.get(o.path);
           const last = applied[applied.length - 1]!;
-          if (ownWrite.get(o.path) === true && mine !== undefined && storedNative !== undefined && !sameFigure(storedNative, mine)) {
+          if (ownWrite.get(o.path) === true && mine !== undefined && storedNative !== undefined && storedNative !== mine) {
             last.recorded = mine;
             superseded.push({ id: o.path, factor: last.factor, saved: mine, now: storedNative });
           }
