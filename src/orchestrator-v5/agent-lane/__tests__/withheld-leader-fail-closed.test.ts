@@ -447,3 +447,29 @@ describe('a share split in prose', () => {
     expect(sentenceRanksOptions('Conversion is 5% and churn is 3%.')).toBe(false);
   });
 });
+
+/** Review of #1871 at c0da634c (5825189511 / 5826189511) and Codex 5826167622. */
+describe('review of #1871 at c0da634c', () => {
+  const graph = { nodes: [{ id: 'keep', kind: 'option', label: 'Keep Pro at £49' }, { id: 'raise', kind: 'option', label: 'Raise Pro to £59 at release' }, { id: 'churn', kind: 'factor', label: 'Monthly churn' }] };
+  const labels = rankingLabelContext(graph, undefined);
+  const DROP: readonly string[] = [
+    'There is no best option other than the £59 path.',
+    'There is no clear winner except raising to £59.',
+    'The highest-priority fix is to raise Pro to £59 at release.',
+    'The £59 path at 71 per cent and holding at 29 per cent.',
+    'The current lead is effective.',
+  ];
+  const KEEP: readonly string[] = [
+    'Monthly churn could plausibly sit anywhere between 45% and 55%.',
+    'Conversion is uncertain: somewhere from 30% to 70%.',
+    'In the current model, 40% of capacity is engineering and 60% is support.',
+    '40% of responses supported the plan and 60% raised concerns.',
+    'The highest-priority correction is to measure churn against its baseline.',
+    'There is no leading option yet.',
+  ];
+  it.each(DROP.map((s) => [s] as const))('dropped: %s', (s) => { expect(sentenceRanksOptions(s, labels)).toBe(true); });
+  it.each(KEEP.map((s) => [s] as const))('kept: %s', (s) => { expect(sentenceRanksOptions(s, labels)).toBe(false); });
+  it('an option label is the cue: a label-named 100% split goes even with no option noun', () => {
+    expect(sentenceRanksOptions('Keep Pro at £49 came to 29% and Raise Pro to £59 at release to 71%.', labels)).toBe(true);
+  });
+});

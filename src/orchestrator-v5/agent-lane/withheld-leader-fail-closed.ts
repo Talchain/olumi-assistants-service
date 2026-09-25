@@ -51,8 +51,11 @@
  * ⚠ RESIDUAL — what a vocabulary classifier cannot see, stated so nobody quotes a stronger claim:
  * a designation that uses no ranking word at all ("directional support for £59", "go with the first
  * one", a bare "£59 comes first."), and a PARTIAL win share in prose with no ranking word ("the £59
- * path at 71%" alone). Those sentences are kept. A prose split whose percentages sum to ~100 is
- * removed ("the £59 path at 71% and holding at 29%"). Win shares ARE also removed as
+ * path at 71%" alone), a split written as decimals ("at 0.71 and … 0.29"), a partial multi-option
+ * split that does not sum to ~100 ("£59 at 60%, £49 at 30%"), and an inline heading margin ("Price-rise
+ * lead: about four points" — lexically the served role heading "Slow-ramping lead: …"). Those are kept.
+ * A prose split over the OPTIONS whose percentages ("%" or "per cent") sum to ~100 is removed ("the £59
+ * path at 71% and holding at 29%"); a range or a non-option composition is not. Win shares ARE also removed as
  * lists ("label: N%" / "label — N%", per contiguous list summing to ~100, under a ranking heading, or
  * on an option's own label) and as tables (a share header, an option row with a %, or a ranking row). Measured recall is corpus recall (AI
  * Quality v6: 43 real replies plus 6 authored controls), not a general guarantee.
@@ -112,7 +115,7 @@ const NON_RANKING_IDIOMS: readonly RegExp[] = [
   // ⚠ NOT "the lead is …" in general — "the current lead is the £59 path" is a MARGIN (review of #1871,
   // 5825898337). "is/was" count as the role only with a role predicate.
   /\b(?:the|a|an|another|new|current|dedicated|senior|second|one|that|this)\s+lead\s+(?:would|could|will|might|may|provides?|removes?|creates?|adds?|reduces?|improves?|brings?|consumes?|arrives?|joins?|spends?|needs?)\b/gi,
-  /\b(?:the|a|an|another|new|current|dedicated|senior|second|one|that|this)\s+lead\s+(?:is|was)\s+(?:not\s+)?(?:unavailable|available|stretched|overloaded|busy|empowered|hired|absent|part[\s-]time|full[\s-]time|effective|ineffective|a\s+(?:person|hire|role|senior|junior|manager))\b/gi,
+  /\b(?:the|a|an|another|new|current|dedicated|senior|second|one|that|this)\s+lead\s+(?:is|was)\s+(?:not\s+)?(?:unavailable|available|stretched|overloaded|busy|empowered|hired|absent|part[\s-]time|full[\s-]time|a\s+(?:person|hire|role|senior|junior|manager))\b/gi,
   // A hyphenated-adjective role only as a HEADING ("Slow-ramping lead:"); "the price-rise lead is …" is a margin.
   /\b[a-z]+-[a-z]+\s+lead(?=\s*:)/gi,
   /^[\s\-+•*\d.)#]*lead\s+as\b/gi,
@@ -141,7 +144,7 @@ const NON_RANKING_IDIOMS: readonly RegExp[] = [
   /\b(?:not|no|never|rather\s+than)\s+(?:yet\s+|really\s+|intended\s+as\s+|meant\s+as\s+)?(?:a\s+|any\s+)?(?:final\s+|firm\s+|formal\s+|definitive\s+)?recommendations?\b/gi,
   /** The product WITHHOLDING a leader is the reason there is none ("so the model withholds an overall leader"). */
   /\bwithh(?:olds?|eld|olding)\s+(?:an?\s+|the\s+|any\s+)?(?:overall\s+|full\s+|final\s+)?leader(?:\s+verdict)?\b/gi,
-  /\bno\s+(?:overall\s+|single\s+|clear\s+)?leader\b/gi,
+  /\bno\s+(?:overall\s+|single\s+|clear\s+)?leader\b(?!\s+(?:other\s+than|except|besides|apart\s+from|but)\b)/gi,
   /** Method, not result: "the engine has not been told to rank …", "it ranks relative MRR instead". */
   // Only when someone TOLD it how to rank; "appears to rank first" is a result (review of #1871).
   /\b(?:told|asked|set|configured|instructed|meant|supposed)\s+to\s+rank\b/gi,
@@ -154,10 +157,11 @@ const NON_RANKING_IDIOMS: readonly RegExp[] = [
   /\b(?:change|changes|changing|alter|alters|altering|affect|affects|determine|determines|decide|decides|flip|flips|switch|switches)\s+which\s+(?:option|path|plan|choice|alternative)s?\s+(?:leads?|comes?\s+out\s+ahead|wins?|is\s+(?:ahead|best))\b/gi,
   /** A NEGATED choice: "the model cannot distinguish a clear choice between …", "no clear winner". */
   /\b(?:cannot|can't|could\s+not|does\s+not|did\s+not|do\s+not)\s+(?:yet\s+)?(?:distinguish|identify|establish|name|pick|make|offer|give)\s+(?:a\s+|any\s+|the\s+)?clear\s+(?:choice|pick|winner|leader|option)\b/gi,
-  /\bno\s+clear\s+(?:choice|pick|winner|leader|option)\b/gi,
+  /\bno\s+clear\s+(?:choice|pick|winner|leader|option)\b(?!\s+(?:other\s+than|except|besides|apart\s+from|but)\b)/gi,
   /** Served 21e3b38 first pass: "…is not validated and does not name a leading option." The negation is in the pattern. */
-  /\b(?:(?:does|do|did|can|could|will|would)\s*(?:not|n't)|cannot|never)\s+(?:yet\s+)?(?:name|identify|pick|show|put\s+forward|declare|call|single\s+out|choose)\s+(?:a|any|the|one|an)\s+(?:single\s+|overall\s+)?(?:leading|winning|best|preferred|recommended|strongest|top)\s+(?:option|choice|path|plan|alternative)\b/gi,
-  /\bno\s+(?:single\s+|overall\s+|clear\s+)?(?:leading|winning|best|preferred)\s+(?:option|choice|path|plan)\b/gi,
+  // ⚠ Never with an exception that names the winner: "no best option other than the £59 path" (review 5826189511).
+  /\b(?:(?:does|do|did|can|could|will|would)\s*(?:not|n't)|cannot|never)\s+(?:yet\s+)?(?:name|identify|pick|show|put\s+forward|declare|call|single\s+out|choose)\s+(?:a|any|the|one|an)\s+(?:single\s+|overall\s+)?(?:leading|winning|best|preferred|recommended|strongest|top)\s+(?:option|choice|path|plan|alternative)\b(?!\s+(?:other\s+than|except|besides|apart\s+from|but)\b)/gi,
+  /\bno\s+(?:single\s+|overall\s+|clear\s+)?(?:leading|winning|best|preferred)\s+(?:option|choice|path|plan)\b(?!\s+(?:other\s+than|except|besides|apart\s+from|but)\b)/gi,
   /** Sales vocabulary, not a result: "win/loss data". */
   /\bwin\s*[/-]\s*loss\b/gi,
   /** Method: "the goal should be ranked as more reduction is better" — never "should be ranked first". */
@@ -167,7 +171,7 @@ const NON_RANKING_IDIOMS: readonly RegExp[] = [
   /** Ranking ASSUMPTIONS by sensitivity is sanctioned content; the route's instruction asks for it. */
   /\b(?:highest|strongest|biggest|largest|greatest)\s+(?:(?:modelled|model|mrr|arr|revenue|simulated|key|main|single|cost|price)\s+){0,2}(?:sensitivity|influence|drivers?|levers?|dependency|uncertainty|elasticity|risks?)\b/gi,
   // Only a piece of EVIDENCE to get ("the highest-priority correction"); "the highest-priority move" recommends.
-  /\b(?:highest|top)[\s-]+priority\s+(?:corrections?|questions?|checks?|inputs?|gaps?|unknowns?|assumptions?|measurements?|evidence|tests?|data|fix(?:es)?)\b/gi,
+  /\b(?:highest|top)[\s-]+priority\s+(?:corrections?|questions?|checks?|inputs?|gaps?|unknowns?|assumptions?|measurements?|evidence|tests?|data|fix(?:es)?)\b(?!\s+(?:is|was|would\s+be|will\s+be)\s+(?:to\s+)?(?:raise|raising|keep|keeping|hold|holding|hire|hiring|launch|build|buy|expand|stay|move|switch|phase|delay|go\s+with|pick|choose|adopt|pursue|the)\b)/gi,
   /**
    * Only a VALUE's plausible top, never an option's (Codex challenge on #1871: "The highest plausible MRR belongs
    * to the £59-at-release path" names the strongest option by paraphrase, so the noun must be a value word).
@@ -194,7 +198,7 @@ const NON_RANKING_IDIOMS: readonly RegExp[] = [
 ];
 
 /** A probability-like percentage: "83.28%", "15 %". */
-const PCT = String.raw`(?<![\w.])\d+(?:[.,]\d+)?\s?%`;
+const PCT = String.raw`(?<![\w.])\d+(?:[.,]\d+)?\s?(?:%|per\s?cent\b)`;
 
 /** A factor's own likelihood VALUE, not a win share: "the current 30% product-market-fit likelihood assumption" (served survey). */
 const LIKELIHOOD_INPUT = new RegExp(String.raw`${PCT}\s+(?:[\w'-]+\s+){0,3}?likel(?:y|ihood)\s+(?:assumption|estimate|input|parameter|value|figure)s?\b`, 'gi');
@@ -315,17 +319,24 @@ function blankIdioms(text: string): string {
  * percentages in ONE sentence that sum to about 100 are a distribution over the options, whatever words
  * surround them. A factor sentence ("3% a month, against your limit of 4%") never sums to 100.
  */
-function isShareSplit(text: string): boolean {
-  const pcts = [...text.matchAll(new RegExp(PCT, 'g'))].map((m) => Number(m[0].replace(/[%\s]/g, '').replace(',', '.')));
+function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): boolean {
+  // A RANGE is uncertainty, not a split: "between 45% and 55%", "from 30% to 70%", "40-60%" (review 5826189511).
+  if (/\bbetween\s+[^.;]{0,20}\d[^.;]{0,20}\s+and\s+\d|\bfrom\s+[^.;]{0,20}\d[^.;]{0,20}\s+to\s+\d|\d\s?%?\s?(?:-|to)\s?\d+(?:[.,]\d+)?\s?%|\banywhere\b/i.test(text)) return false;
+  const pcts = [...text.matchAll(new RegExp(PCT, 'gi'))].map((m) => Number(m[0].replace(/[%\s]|per\s?cent/gi, '').replace(',', '.')));
   if (pcts.length < 2) return false;
   const total = pcts.reduce((a, b) => a + b, 0);
-  return total >= 97 && total <= 103;
+  if (total < 97 || total > 103) return false;
+  // Only a split over the OPTIONS: an option's own label, or an option-shaped noun or gerund. "40% of capacity
+  // is engineering and 60% is support" and "40% of responses … 60% raised concerns" are not (Codex 5826167622).
+  const lower = labelKey(text);
+  if ((labels.optionLabels ?? []).some((l) => lower.includes(labelKey(l)))) return true;
+  return /\b(?:path|paths|option|options|choice|choices|route|routes|alternative|alternatives|scenario|scenarios|raising|keeping|holding|hiring|launching|building|buying|phasing|staying|expanding|bootstrapping|deferring|piloting)\b/i.test(text);
 }
 
 /** Ranking codes present in text that has ALREADY been normalised and blanked. */
 function rankingCodesInBlanked(blanked: string): string[] {
   const codes = RANKING_PATTERNS.filter(({ re }) => re.test(blanked)).map(({ code }) => code);
-  if (isShareSplit(blanked)) codes.push('share_split');
+
   if (textNamesLeadingOption(blanked)) codes.push('shared_leader_vocabulary');
   return codes;
 }
@@ -429,7 +440,9 @@ export function rankingCodesIn(sentence: string, labels: RankingLabelContext = N
     // Case-SENSITIVE: the capitalised name, never the lower-case verb ("leads the comparison").
     text = text.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegExp(word)}(?![\\p{L}\\p{N}_])`, 'gu'), BLANK);
   }
-  return rankingCodesInBlanked(blankIdioms(blankScopedMetricComparison(text)));
+  const codes = rankingCodesInBlanked(blankIdioms(blankScopedMetricComparison(text)));
+  if (isShareSplit(classificationCopy(sentence), labels)) codes.push('share_split');
+  return codes;
 }
 
 /** Does this sentence rank options or assert a leader? */
