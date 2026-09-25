@@ -1021,7 +1021,10 @@ export async function buildTurnContext(
     // have it replayed indefinitely — long after the store recovered.
     // Threading the read state makes the degraded case `'unknown' /
     // derivation_failed`, which maps to an `unavailable` signal instead.
-    { priorFactsReadOk: scenarioAnalysisFactsReadOk },
+    // …and the restore marker this function has already read (the reload's and the
+    // routed derivations' input): a hash MATCH after a later restore is `stale`,
+    // never `fresh` (independent pre-review 5828601536).
+    { priorFactsReadOk: scenarioAnalysisFactsReadOk, analysisInvalidatedAt: analysisInvalidatedAtRead },
   );
   // AUTHORITATIVE STAGE — CEE decides the reasoning stage from the model it
   // holds, rather than echoing the client's guess back at it. See
