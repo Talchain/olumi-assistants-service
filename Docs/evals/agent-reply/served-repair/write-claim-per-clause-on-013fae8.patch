@@ -1,0 +1,80 @@
+From 71560091e8bd8cd9394aea9f878a5fd4d9e30963 Mon Sep 17 00:00:00 2001
+From: Paul <paulsleepm@gmail.com>
+Date: Fri, 25 Sep 2026 04:40:29 +0100
+Subject: [PATCH] fix(agent-lane): a first-person save claim is judged per
+ clause, so a later 'cannot' does not excuse it
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Served e39f6e0: 'I've recorded your clarification as evidence, but cannot store £310,000 on …' on a turn
+whose only tool was get_canonical_state; the sentence-wide NEGATION ('cannot') excused the claim and the
+false save reached the user. Per-clause judgement, scoped to I_DID: across 5,155 served sentences it
+newly flags exactly that one and unflags none. Contrasts: the server's 'Not saved: none of it was
+applied.' and a served provenance sentence ('… were adopted assumptions, while …') — both RED if the
+split is widened to NOW_EFFECT.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+---
+ .../agent-lane/__tests__/write-outcome.test.ts       |  7 +++++++
+ src/orchestrator-v5/agent-lane/write-outcome.ts      | 12 +++++++++++-
+ 2 files changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/src/orchestrator-v5/agent-lane/__tests__/write-outcome.test.ts b/src/orchestrator-v5/agent-lane/__tests__/write-outcome.test.ts
+index 1c70a3c11..d365a4a01 100644
+--- a/src/orchestrator-v5/agent-lane/__tests__/write-outcome.test.ts
++++ b/src/orchestrator-v5/agent-lane/__tests__/write-outcome.test.ts
+@@ -22,6 +22,8 @@ const CLAIMS = [
+   'Recorded assumptions:',
+   'The direction is now recorded: a discount campaign is expected to increase churn.',
+   'All others were recorded as approved:',
++  // Served e39f6e0 (hiring, answer turn; only tool: get_canonical_state). The negation is in the SECOND clause.
++  'I’ve recorded your clarification as evidence, but cannot store £310,000 on **Annual salary spend**: it is a calculated outcome, not a factor that can hold a starting value.',
+ ];
+ // Served sentences that are NOT write claims (each must survive).
+ const NOT_CLAIMS = [
+@@ -35,6 +37,11 @@ const NOT_CLAIMS = [
+   '- Recorded by the model: **£59/month**',
+   'The practical question is whether the extra **£10 per Pro customer per month** offsets any reduction in new demand and any added churn, while staying below the 4% cap.',
+   'This is not yet represented in the decision model: it currently has price, churn and price-sensitivity factors, but no recorded prior-rise amount, date, or measured subscriber-loss outcome.',
++  // Guards against widening the per-clause split beyond first-person claims: split at the colon or at
++  // ", while", each of these has a clause that reads as a write ("none of it was applied", "were adopted").
++  // Served c7a-778f1fd (the server's own refusal line), and a served Run reply (provenance, not a write).
++  'Not saved: none of it was applied.',
++  'It rests partly on provisional inputs: Pro subscribers (**250**), conversion (**5%**), and churn (**3.5%**) were adopted assumptions, while **price sensitivity** and **feature-value shortfall** had no values and defaulted to zero.',
+ ];
+ 
+ describe('which served sentences assert a completed write', () => {
+diff --git a/src/orchestrator-v5/agent-lane/write-outcome.ts b/src/orchestrator-v5/agent-lane/write-outcome.ts
+index 750234e8a..7ab7d78d8 100644
+--- a/src/orchestrator-v5/agent-lane/write-outcome.ts
++++ b/src/orchestrator-v5/agent-lane/write-outcome.ts
+@@ -35,14 +35,24 @@ const CLAIM_OPENER =
+ const NOW_EFFECT = /\b(?:is|are)\s+now\s+(?:recorded|represented|saved|applied|in the model)\b|\b(?:was|were)\s+(?:recorded|applied|saved|added|adopted)\b/i;
+ const I_DID = /\bI(?:'|’)?(?:ve| have)\s+(?:applied|added|saved|recorded|updated|linked|adopted)\b/i;
+ const NEGATION = /\b(?:not|no|nothing|never|yet|haven(?:'|’)t|hasn(?:'|’)t|didn(?:'|’)t|won(?:'|’)t|cannot|can(?:'|’)t|once|if|until|when)\b|n(?:'|’)t\b/i;
++/**
++ * ⛔ A FIRST-PERSON CLAIM IS JUDGED PER CLAUSE. A served reply said "I’ve recorded your clarification as
++ * evidence, but cannot store £310,000 on …" on a turn whose only tool was `get_canonical_state`: the
++ * "cannot" in the SECOND clause excused the claim in the FIRST, and the false save reached the user
++ * (AI Quality `served-repair/WRITE-CLAIM-COMPOUND-ESCAPE.md`, 1 of 317 served turn texts). Scoped to
++ * {@link I_DID} on purpose: splitting {@link NOW_EFFECT} too newly flagged a true provenance sentence
++ * ("… were adopted assumptions, while …") across 5,155 served sentences.
++ */
++const CLAUSE_BREAK = /,\s*(?:but|though|although|yet|while)\b|;\s*|:\s+|\s[—–]\s/;
+ 
+ /** Does this sentence ASSERT that a write happened? Exported for its own tests. */
+ export function assertsCompletedWrite(sentence: string): boolean {
+   const s = sentence.trim();
+   if (s.length === 0) return false;
+   if (CLAIM_OPENER.test(s)) return true;
++  if (s.split(CLAUSE_BREAK).some((clause) => I_DID.test(clause) && !NEGATION.test(clause))) return true;
+   if (NEGATION.test(s)) return false;
+-  return NOW_EFFECT.test(s) || I_DID.test(s);
++  return NOW_EFFECT.test(s);
+ }
+ 
+ const versionsOf = (r: ToolResult): number[] => {
+-- 
+2.51.0
+
