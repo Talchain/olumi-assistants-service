@@ -104,7 +104,7 @@ import type { StructuralEditOp } from '../tools/propose-structural-edit.js';
  * the reply. Named follow-up with its own RED case.
  */
 function deriveWriteReplyFreshness(
-  read: Awaited<ReturnType<typeof loadScenarioAnalysisFactsForRead>>,
+  read: WriteReplyAnalysisInputs,
   persistedAnalysisGraphHash: string | null,
 ): FreshnessDerivation {
   const durableAuthority = isScenarioAnalysisReasoningAuthority(read.factSet);
@@ -112,8 +112,55 @@ function deriveWriteReplyFreshness(
     durableAuthority ? read.factSet.facts : read.hotWindow.facts,
     persistedAnalysisGraphHash,
     undefined,
-    { priorFactsReadOk: read.factSet.status === 'complete' },
+    { priorFactsReadOk: read.factSet.status === 'complete', analysisInvalidatedAt: read.analysisInvalidatedAt },
   );
+}
+
+type WriteReplyAnalysisInputs = Awaited<ReturnType<typeof loadScenarioAnalysisFactsForRead>> & {
+  readonly analysisInvalidatedAt: string | null;
+};
+
+/**
+ * EVERY WRITER'S ANALYSIS INPUTS: the facts AND the restore marker, read side by
+ * side exactly as the reload reads them (`scenario-graph-analysis-read.ts`).
+ *
+ * The marker (`scenarios.analysis_invalidated_at`) is the ONLY input that can
+ * make a hash MATCH read `stale`: restore the analysed version after a run
+ * (A → analyse → B → restore A) and the bytes equal A again while the analysis
+ * is no longer about the model the user is looking at. Without it, a write that
+ * lands on the analysed hash — a rename never moves it — replied `fresh` while
+ * the reload said `stale` (Independent Review 5827685385 on #1892).
+ *
+ * ⚠ FAILS OPEN, the turn path's rule (`build-turn-context.ts`): `null` means
+ * "no restore invalidation", byte-identical to every writer's behaviour before
+ * this read, so a failed read degrades to exactly that — never to a false
+ * `stale`, the worse direction. The `.catch` is load-bearing: the real store
+ * THROWS on a database error or a malformed timestamp, and `??` cannot catch a
+ * rejection. Fact history and the marker are observational only; neither ever
+ * authorises or blocks the write.
+ */
+async function loadWriteReplyAnalysisInputs(
+  scenarioId: string,
+  requestId: string,
+): Promise<WriteReplyAnalysisInputs> {
+  const store = getSessionStore();
+  const [read, analysisInvalidatedAt] = await Promise.all([
+    loadScenarioAnalysisFactsForRead(scenarioId, requestId),
+    (store?.readAnalysisInvalidatedAt?.(scenarioId) ?? Promise.resolve(null)).catch((error: unknown) => {
+      log.warn(
+        {
+          event: 'session.read_degraded',
+          read: 'analysis_invalidated_at',
+          request_id: requestId,
+          scenario_id: scenarioId,
+          error_name: error instanceof Error ? error.name : typeof error,
+        },
+        'Restore-invalidation read degraded on a write reply — treated as no invalidation',
+      );
+      return null;
+    }),
+  ]);
+  return { ...read, analysisInvalidatedAt };
 }
 
 /**
@@ -943,7 +990,7 @@ async function dispatchEdgeStrengthEdit(
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
-  let factsRead: Awaited<ReturnType<typeof loadScenarioAnalysisFactsForRead>>;
+  let factsRead: WriteReplyAnalysisInputs;
   try {
     // Both reads are authoritative and required before ANY newest-turn append.
     // The integrity-strict pending read rejects a non-array, any invalid entry,
@@ -955,7 +1002,7 @@ async function dispatchEdgeStrengthEdit(
         payload.scenario_id,
         requestId,
       ),
-      loadScenarioAnalysisFactsForRead(payload.scenario_id, requestId),
+      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
     ]);
   } catch (err) {
     log.error(
@@ -1341,7 +1388,7 @@ async function dispatchStructuralDelete(
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
-  let factsRead: Awaited<ReturnType<typeof loadScenarioAnalysisFactsForRead>>;
+  let factsRead: WriteReplyAnalysisInputs;
   try {
     // All three reads are authoritative and required before ANY newest-turn
     // append. On failure the prior row stays newest and authoritative: no
@@ -1350,7 +1397,7 @@ async function dispatchStructuralDelete(
     [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
       loadPersistedGraphStrict(payload.scenario_id),
       loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadScenarioAnalysisFactsForRead(payload.scenario_id, requestId),
+      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
     ]);
   } catch (err) {
     log.error(
@@ -1766,8 +1813,8 @@ async function dispatchFactorValueEdit(
    * the window this function always read, so the handler's `priorFacts` input
    * keeps its meaning; only the freshness below chooses the durable set.
    */
-  const { hotWindow: priorFactsRead, factSet: analysisFactSet } =
-    await loadScenarioAnalysisFactsForRead(payload.scenario_id, requestId);
+  const { hotWindow: priorFactsRead, factSet: analysisFactSet, analysisInvalidatedAt } =
+    await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId);
   const priorFacts = priorFactsRead.facts;
 
   const result = await applyFactorValueEdit({
@@ -2038,16 +2085,14 @@ async function dispatchFactorValueEdit(
    * 20 rows can hide an older run, so an empty selection stays `unknown /
    * derivation_failed` in both (the turn path's rule, `build-turn-context.ts`).
    *
-   * ⚠ NOT YET THE ROUTE'S WHOLE DERIVATION: the reload route also passes the
-   *   restore marker (`analysisInvalidatedAt`) so a version restore reads
-   *   `stale / model_restored_after_analysis`; this writer never has (nor did the
-   *   code this replaced). An edit that lands back on an analysed hash after a
-   *   restore can therefore answer `fresh` here while reload says `stale`. Named
-   *   follow-up, not closed here.
+   * AND THE RESTORE MARKER, as the reload reads it (`loadWriteReplyAnalysisInputs`):
+   *   an edit that lands back on an analysed hash after a version restore reads
+   *   `stale / model_restored_after_analysis` here too, never `fresh` while the
+   *   reload says `stale` (#1892, Independent Review 5827685385).
    */
   // The shared rule (`deriveWriteReplyFreshness`): absence only in a COMPLETE record.
   const freshness: FreshnessDerivation = deriveWriteReplyFreshness(
-    { hotWindow: priorFactsRead, factSet: analysisFactSet },
+    { hotWindow: priorFactsRead, factSet: analysisFactSet, analysisInvalidatedAt },
     persistedAnalysisGraphHash,
   );
   emitFreshnessTelemetry(
@@ -2446,7 +2491,7 @@ async function dispatchStructuralRename(
   // A rename cannot move the analysis hash, but its reply must still STATE the
   // verdict: without one the finaliser answered `unknown_degraded /
   // no_graph_this_turn` beside the graph it had just written.
-  let factsRead: Awaited<ReturnType<typeof loadScenarioAnalysisFactsForRead>>;
+  let factsRead: WriteReplyAnalysisInputs;
   try {
     // Both reads are authoritative and required before ANY newest-turn append.
     // On failure the prior row stays newest and authoritative: no transcript is
@@ -2460,7 +2505,7 @@ async function dispatchStructuralRename(
     [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
       loadPersistedGraphStrict(payload.scenario_id),
       loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadScenarioAnalysisFactsForRead(payload.scenario_id, requestId),
+      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
     ]);
   } catch (err) {
     log.error(
@@ -2786,12 +2831,12 @@ async function dispatchStructuralAdd(
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
-  let factsRead: Awaited<ReturnType<typeof loadScenarioAnalysisFactsForRead>>;
+  let factsRead: WriteReplyAnalysisInputs;
   try {
     [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
       loadPersistedGraphStrict(payload.scenario_id),
       loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadScenarioAnalysisFactsForRead(payload.scenario_id, requestId),
+      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
     ]);
   } catch (err) {
     log.error(
@@ -3097,12 +3142,12 @@ async function dispatchStructuralAddEdge(
   let priorPendingActions: Awaited<
     ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
   >;
-  let factsRead: Awaited<ReturnType<typeof loadScenarioAnalysisFactsForRead>>;
+  let factsRead: WriteReplyAnalysisInputs;
   try {
     [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
       loadPersistedGraphStrict(payload.scenario_id),
       loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
-      loadScenarioAnalysisFactsForRead(payload.scenario_id, requestId),
+      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
     ]);
   } catch (err) {
     log.error(
