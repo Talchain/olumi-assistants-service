@@ -301,8 +301,8 @@ const UNEVALUATED_REPAIR_STEP =
  *   - "a starting level / its value today": PLoT (`plot-lite-service` `src/lib/constraint-reliability.ts`
  *     `resolveConstraintSampleFrameAnchor`, staging `6d143fb`) returns null for any node with a directed
  *     incoming edge BEFORE it reads `observed_state`; served `e39f6e0`, the user's level WAS saved on
- *     the target (Monthly churn 3% → 2.4%, `user_override`, `authorise_change` mutated) and the re-run
- *     still could not check the limit. Independent review 5825666624 reproduced it with the production
+ *     the target (Monthly churn 3% → 2.4%, recorded as a user-set value, `authorise_change` mutated)
+ *     and the re-run still could not check the limit. Independent review 5825666624 reproduced it with the production
  *     predicate.
  *   - "run the analysis again": nothing a re-run can change.
  * ⛔ AND IT NAMES NO LIST OF WHAT WOULD BE NEEDED (RC #63 5825841734, 02:49Z; review 5825823914).
