@@ -52,11 +52,18 @@ import { passesGroundedProseGates, selectGroundedCounterCase } from './grounded-
 export const RUN_TURN_TRIGGERS = ['explicit_run', 'auto_first_pass'] as const;
 export type RunTurnTrigger = (typeof RUN_TURN_TRIGGERS)[number];
 
-/** Why no fragile-link card was produced. Closed; the order is the gate order. */
+/**
+ * Why no run-turn card was produced. Closed; the order is the gate order.
+ * `edge_sensitivity_not_evidenced` belongs to the no-flagged-link card
+ * (`no-flagged-link-card.ts`), which runs only after this module's
+ * `no_groundable_fragile_edge`: the run has no fragile row AND the readback does
+ * not show that the per-link test ran (and could be checked).
+ */
 export const RUN_TURN_COACHING_REASONS = [
   'no_run_this_turn',
   'identity_mismatch',
   'no_groundable_fragile_edge',
+  'edge_sensitivity_not_evidenced',
   'claim_not_usable',
   'copy_gate',
 ] as const;
@@ -105,10 +112,10 @@ export const RUN_TURN_COACHING_CONTRACT = Object.freeze({
   limits: Object.freeze({ title_max: 80, body_max: 300, action_label_max: 40, action_prompt_max: 300 }),
 });
 
-/** Leader language this card must never carry, whatever a label contains. */
-const LEADER_LANGUAGE_RE = /option in front|winner|recommend|best option|leading option/i;
+/** Leader language a run-turn card must never carry, whatever a label contains. */
+export const LEADER_LANGUAGE_RE = /option in front|winner|recommend|best option|leading option/i;
 
-const FIRST_PASS_PREFIX = 'Before relying on this first pass on Olumi\'s estimates, note that ';
+export const FIRST_PASS_PREFIX = 'Before relying on this first pass on Olumi\'s estimates, note that ';
 
 export interface FragileLinkChallengeCopy {
   readonly title: string;
@@ -172,7 +179,7 @@ export function composeFragileLinkChallenge(
   };
 }
 
-function readRecord(value: unknown): Record<string, unknown> | null {
+export function readRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
@@ -200,12 +207,13 @@ function namesAnOption(label: string, optionLabels: readonly string[]): boolean 
   );
 }
 
-function isAutomaticRun(enrichment: Record<string, unknown> | null): boolean {
+export function isAutomaticRun(enrichment: Record<string, unknown> | null): boolean {
   const provenance = readRecord(enrichment?.[RUN_PROVENANCE_ENRICHMENT_KEY]);
   return provenance?.initiated_by === AUTO_RUN_POST_DRAFT_INITIATOR;
 }
 
-function copyPasses(copy: FragileLinkChallengeCopy): boolean {
+/** The run-turn copy gate: the contract's bounds, the grounded prose gates, no leader language. */
+export function copyPasses(copy: FragileLinkChallengeCopy): boolean {
   const { limits } = RUN_TURN_COACHING_CONTRACT;
   if (copy.title.length > limits.title_max || copy.body.length > limits.body_max) return false;
   if (copy.action_label.length > limits.action_label_max || copy.action_prompt.length > limits.action_prompt_max) return false;

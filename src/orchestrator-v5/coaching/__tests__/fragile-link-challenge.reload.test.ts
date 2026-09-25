@@ -80,3 +80,58 @@ test('(viii) reload: readScenarioAnalysis returns no coaching block, and a reloa
   expect(withRun.blocks).toHaveLength(1);
   expect(withRun.blocks[0]!.signal_id.startsWith('coach:fragile_link:')).toBe(true);
 });
+
+test('(viii-b) the no-flagged-link card: a reload carries none, and one built from the RELOADED readback is byte-identical to one built from the served readback', async () => {
+  const fixture = loadRunTurnFixture('c10');
+  const turn = fixture.turns.t5!;
+  const scenarioId = fixture.scenario_id;
+  const graph = { nodes: [{ id: 'goal', kind: 'goal', label: 'Goal', goal_threshold: 0.7 }], edges: [] };
+  const hash = computeAnalysisAffectingGraphHash(graph as never)!;
+  const computedAt = turn.analysis_state.run_state.computed_at;
+  const served = turn.analysis_result as Record<string, any>;
+  const fact = RunAnalysisHandlerFactSchema.parse({
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: scenarioId,
+      computed_at: computedAt,
+      graph_hash_at_run: hash,
+      leading_option_id: served.leading_option_id,
+      summary: served.summary,
+      win_probabilities: served.win_probabilities,
+      constraint_verdict: { may_name_leading_option: true, constraint_verdict_state: 'evaluated_feasible' },
+      // The served run's own robustness — no fragile link, robust links present.
+      enrichment: { analysis_status: 'completed', robustness: served.enrichment.robustness },
+    },
+  });
+  readFactsFor.mockResolvedValue([fact]);
+
+  const read = await readScenarioAnalysis({ scenarioId, graph, requestId: 'no-flagged-link-reload' });
+  // Controls: the read carries the evidence and the guards the card reads.
+  const readRobustness = (read.analysis_result as unknown as { enrichment: { robustness: Record<string, any> } }).enrichment.robustness;
+  expect(readRobustness.fragile_edges).toEqual([]);
+  expect(readRobustness.robust_edges).toEqual(served.enrichment.robustness.robust_edges);
+  expect(readRobustness.display_verdict).toBe(served.enrichment.robustness.display_verdict);
+  expect(blockTypesIn(read)).not.toContain('coaching');
+
+  const final = { scenarioId, graphHash: hash, analysisState: read.analysis_state, analysisResult: read.analysis_result };
+  expect(runTurnCoaching(undefined, final)).toEqual({ blocks: [], eligibility: { eligible: false, reason: 'no_run_this_turn' } });
+
+  const reloaded = runTurnCoaching(
+    { scenario_id: scenarioId, status: 200, analysis_state: read.analysis_state, blocks: [read.analysis_result], trigger: 'explicit_run' },
+    final,
+  );
+  expect(reloaded.eligibility).toEqual({ eligible: true });
+  expect(reloaded.blocks).toHaveLength(1);
+  expect(reloaded.blocks[0]!.signal_id).toBe(`coach:no_flagged_link:${hash}:${computedAt}:explicit_run`);
+
+  // The served readback, bound to the same graph: the same card, byte for byte.
+  const direct = structuredClone(served);
+  direct.computed_against_hash = hash;
+  const fromServed = runTurnCoaching(
+    { scenario_id: scenarioId, status: 200, analysis_state: read.analysis_state, blocks: [direct], trigger: 'explicit_run' },
+    { scenarioId, graphHash: hash, analysisState: read.analysis_state, analysisResult: structuredClone(direct) },
+  );
+  expect(JSON.stringify(reloaded.blocks)).toBe(JSON.stringify(fromServed.blocks));
+});
