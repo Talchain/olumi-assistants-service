@@ -18,6 +18,7 @@ import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phra
 import { buildAutoRunProvenance } from '../../context/run-initiator.js';
 import { RUN_OFFER_CHIP, typedRunOf } from '../../../routes/agent-v1-turn.js';
 import { passesGroundedProseGates } from '../grounded-counter-case.js';
+import { composeNoFlaggedLinkCard } from '../no-flagged-link-card.js';
 import {
   firstPassCase,
   runTurnCase,
@@ -27,12 +28,23 @@ import {
 
 const TITLE = 'What the robustness check can\'t show';
 const BODY_EXPLICIT =
-  'The robustness check didn\'t mark any single link in the model as fragile. That doesn\'t show the estimates are right, '
-  + 'and the check only looks at links already in the model, not at what the model leaves out. Both are worth a look.';
+  'The robustness check didn\'t single out any one link in the model. That doesn\'t show the estimates are right, '
+  + 'and the check can only test what is already in the model, not what the model leaves out. Both are worth a look.';
 const BODY_FIRST_PASS =
-  'Before relying on this first pass on Olumi\'s estimates, note that the robustness check only looks at links already '
-  + 'in the model, not at what the model leaves out. It didn\'t mark any single link as fragile, but that doesn\'t show '
+  'Before relying on this first pass on Olumi\'s estimates, note that the robustness check can only test what is '
+  + 'already in the model, not what the model leaves out. It didn\'t single out any one link, but that doesn\'t show '
   + 'the estimates are right. Both are worth a look.';
+
+/**
+ * ⛔ WHAT THE BODY MAY NOT SAY (review of 1619d73, claims lens):
+ *   · that the check "only looks at links" — ISL also samples FACTOR values
+ *     (FactorSampler / _compute_factor_sensitivity), and the same run's footer
+ *     can read "varying any one of the factors we could test…";
+ *   · the verdict's own word "fragile" — on every served run that gets this card
+ *     the overall display_verdict IS "fragile", so "no link was fragile" beside
+ *     it reads as a contradiction, or as reassurance.
+ */
+const BODY_FORBIDDEN = /only looks at links|fragile/i;
 const ACTION_LABEL = 'Look for weak spots and gaps';
 const ACTION_PROMPT =
   'Ask me questions to help me spot which estimates in the model I\'m least sure of, and what matters to this decision '
@@ -249,6 +261,15 @@ describe('run-turn no-flagged-link card', () => {
     expect(noFlagSeen).toBeGreaterThan(0);
   });
 
+  it('CARD-6a the body says the check can only test what is in the model — never that it "only looks at links", and never the verdict\'s word "fragile"', () => {
+    for (const firstPass of [false, true]) {
+      const { body } = composeNoFlaggedLinkCard(firstPass);
+      expect(body, `firstPass=${firstPass}`).not.toMatch(BODY_FORBIDDEN);
+      expect(body, `firstPass=${firstPass}`).toMatch(/can only test what is already in the model, not what the model leaves out/);
+      expect(body, `firstPass=${firstPass}`).toMatch(/single out any one link/);
+    }
+  });
+
   it('CARD-6 claim scope: bounded, gated, leader-free, number-free; the body names the flag and the check\'s limits, never a verdict', () => {
     const cards = [
       soleNoFlagCard(runTurnCase('c10', 't5', 'explicit_run')),
@@ -265,8 +286,9 @@ describe('run-turn no-flagged-link card', () => {
         expect(text, field).not.toMatch(/\d/);
       }
       expect(card.body).not.toMatch(/\b(robust|stable|settled|held up|decides|assumption|factor)\b/i);
-      // It names the flag the run carries, not a sensitivity finding it does not have.
-      expect(card.body).toMatch(/didn't mark any single link .*as fragile/);
+      // It says what the run shows about single links — none singled out — not a
+      // sensitivity finding it does not have, and not in the verdict's word (CARD-6a).
+      expect(card.body).toMatch(/didn't single out any one link/);
       expect(card.body).not.toMatch(/sensitive|insensitive/i);
       // Both directions stay open: what is in the model, and what it leaves out.
       expect(card.body).toMatch(/estimates are right/);

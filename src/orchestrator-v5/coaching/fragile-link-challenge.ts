@@ -1,8 +1,12 @@
 /**
  * THE RUN-TURN FRAGILE-LINK CHALLENGE — contract `run-turn-coaching/v1`.
  *
- * DSK-P-003 (the disconfirmation / consider-the-opposite exercise) re-expressed
- * as ONE `type:'coaching'` block with ONE action, produced from the hash-bound
+ * A link check — "pressure-test a sensitive link" — as ONE `type:'coaching'`
+ * block with ONE action. It cites DSK-P-003 (the consider-the-opposite
+ * exercise) ONLY where the run positively shows that protocol's required input,
+ * a clear winner (`runShowsClearWinnerForP003`); everywhere else, including
+ * close calls where P-003 and T-003 both say not to run, it ships unbadged.
+ * Produced from the hash-bound
  * READBACK `analysis_result` of a run that completed in THIS turn — on the
  * automatic first pass and on explicit Runs alike, with or without a permitted
  * leader.

@@ -93,11 +93,13 @@ export const NO_FLAGGED_LINK_CARD_CONTRACT = Object.freeze({
  * no-flag finding never reads as a reason to rely on the first pass.
  */
 export function composeNoFlaggedLinkCard(firstPass: boolean): FragileLinkChallengeCopy {
+  // ⛔ Never "only looks at links" (ISL also samples factor values), and never the
+  // verdict's word "fragile" (the same run's overall verdict usually IS fragile).
   const body = firstPass
-    ? `${FIRST_PASS_PREFIX}the robustness check only looks at links already in the model, not at what the model leaves out. `
-      + 'It didn\'t mark any single link as fragile, but that doesn\'t show the estimates are right. Both are worth a look.'
-    : 'The robustness check didn\'t mark any single link in the model as fragile. That doesn\'t show the estimates are right, '
-      + 'and the check only looks at links already in the model, not at what the model leaves out. Both are worth a look.';
+    ? `${FIRST_PASS_PREFIX}the robustness check can only test what is already in the model, not what the model leaves out. `
+      + 'It didn\'t single out any one link, but that doesn\'t show the estimates are right. Both are worth a look.'
+    : 'The robustness check didn\'t single out any one link in the model. That doesn\'t show the estimates are right, '
+      + 'and the check can only test what is already in the model, not what the model leaves out. Both are worth a look.';
   return {
     title: 'What the robustness check can\'t show',
     body,
