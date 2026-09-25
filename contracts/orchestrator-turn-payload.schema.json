@@ -1055,6 +1055,52 @@
                     "statement"
                   ],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "goal_target_edit"
+                    },
+                    "goal_node_id": {
+                      "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/1/properties/event/anyOf/11/properties/from",
+                      "description": "Exact canonical id of the GOAL node whose success target is being set. ID-ADDRESSED — never a label. The server resolves it in its own persisted graph and MUST refuse, with no write, an id that names no node or names a node whose kind is not `goal`."
+                    },
+                    "constraint_type": {
+                      "type": "string",
+                      "enum": [
+                        "at_least",
+                        "at_most"
+                      ],
+                      "description": "The direction of the target. REQUIRED, no default. `at_least` sets the goal's success target (a `>=` constraint row plus the node's goal_threshold, goal_threshold_raw, goal_threshold_cap and goal_threshold_frame). `at_most` writes ONLY the `<=` goal_constraints row and leaves the goal's threshold untouched — the existing add_constraint semantics, carried rather than redefined. Not `goal_direction` (maximise/minimise), which is the objective's sense and a different concept."
+                    },
+                    "raw_value": {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "The target as an ABSOLUTE LEVEL on the metric's own scale, in the USER'S units, as typed (e.g. 400000 for £400,000; 5 for 5%). Never a change from the current level and never the model scale: this declaration is what licenses the server to stamp the frame `level`. Finite and NON-NEGATIVE: zero is a meaningful `at_most` level (\"at most 0 defects\"), so the contract admits it (Codex, #63 5821693599). Negative levels are refused. The SERVER still refuses `at_least` 0 (a success target of \"at least nothing\" is not a target), with an honest no-write refusal, exactly as the add_constraint success-target guard does today. The server derives the cap, its provenance and the model-scale goal_threshold (raw_value / cap) from this value; the client sends none of them."
+                    },
+                    "unit": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "description": "Unit symbol for `raw_value` (e.g. \"£\", \"%\", \"customers\"). REQUIRED and non-blank (a whitespace-only unit is refused): a unitless level is ambiguous against a capped goal. The server reconciles it against the goal's existing unit and may refuse an incompatible one."
+                    },
+                    "base_graph_hash": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "The canonical analysis-affecting graph hash the client last read. The stale gate: every analysis-affecting value this edit writes (goal_threshold, goal_threshold_raw, goal_threshold_cap, goal_constraints) is inside that projection, so a concurrent change to the target moves the hash and the server MUST refuse rather than clobber it. Absent, null and empty are all forbidden."
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "goal_node_id",
+                    "constraint_type",
+                    "raw_value",
+                    "unit",
+                    "base_graph_hash"
+                  ],
+                  "additionalProperties": false
                 }
               ]
             }

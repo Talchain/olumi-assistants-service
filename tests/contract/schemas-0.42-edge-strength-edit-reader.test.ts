@@ -174,20 +174,35 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // So the strict member, the root superRefine and the intent/direction
     // vocabularies this suite exercises are unchanged across the bump.
     //
-    // 0.55.0 → 0.58.0 (the run_provenance keep-list train; it also carries
-    // 0.56.0). Compared the same way, extracted 0.55.0 tarball (git HEAD
-    // before the bump) against the vendored 0.58.0:
-    //   turn-payload.js  1218 → 1218 lines, BYTE-IDENTICAL (cmp)
-    //   enums.js          297 →  297 lines, BYTE-IDENTICAL
-    //   enums.d.ts         25 →   25 lines, BYTE-IDENTICAL
-    //   turn-payload.d.ts 6798 → 7014: 216 ADDED lines, 0 removed, and every
-    //                     one is `raw_value: z.ZodOptional<z.ZodNumber>;` or
-    //                     `cap: z.ZodOptional<z.ZodNumber>;` (108 each, the
-    //                     0.56.0 observed_state frame); 0 mention edge_strength.
-    //   fixtures/index.js: 58 changed lines, 0 mention edge_strength.
-    // POSITIVE control: `package.json` DOES differ (the version line), so the
-    // comparator can see a difference and the identities above can fail.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.58.0');
+    // 0.55.0 → 0.59.0 (`goal_target_edit`, the structured success-target edit;
+    // the jump carries the released 0.56.0 and 0.58.0 and skips 0.57.0, which
+    // is claimed by open schemas PRs and unreleased). ⚠ THE 0.59.0 BYTES ARE A
+    // LOCAL PRE-PUBLISH PACK (see vendor/README.md), so this entry must be
+    // RE-DERIVED against the published tarball when it is swapped in. RE-DERIVED
+    // THE SAME WAY rather than inherited: the 0.55.0 tarball (sha256 `ea61d924…`,
+    // from `git show origin/staging:vendor/…`) and the 0.59.0 tarball (sha256
+    // `fcc40d5c…`) were unpacked and every `dist` file mentioning
+    // `edge_strength_edit` was compared. Log:
+    // reader-diff-059/cee-schemas-055-059-reader-diff.log.
+    //
+    // The FILE SET is identical (the same five files). Measured symmetrically,
+    // line numbers stripped from BOTH sides, LOST and NEW in the same run:
+    //   turn-payload.d.ts  19 → 19 lines, ZERO lost, ZERO new
+    //   turn-payload.js    11 → 11 lines, ZERO lost, ZERO new
+    //   enums.js            3 →  3 lines, ZERO lost, ZERO new
+    //   fixtures/index.js   3 →  3 lines, ZERO lost, ZERO new
+    //   enums.d.ts          1 →  1, and the one line DIFFERS — the
+    //                      `SystemEventKind` literal. Proven APPEND-ONLY by
+    //                      STRING EQUALITY: 0.55's literal with
+    //                      `, "goal_target_edit"` inserted after
+    //                      `"finding_dissent"` is EQUAL to 0.59's.
+    // Controls, same shape as the 0.55.0 entry:
+    //   POSITIVE — `package.json` DOES differ between the two tarballs.
+    //   NEGATIVE — the same construction inserting `goal_target_edit` after
+    //     `"feedback"` does NOT equal 0.59's literal.
+    // The `HandlerFact` `fact_type` literal set is 14 → 14, none added, none
+    // removed: the new member reuses the existing `add_constraint` fact.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.59.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {
@@ -358,6 +373,9 @@ describe('schema 0.42 — pre-0.42 system-event corpus is byte-compatible', () =
       'structural_rename',
       'option_intervention_edit',
       'finding_dissent',
+      // 0.59.0 appends `goal_target_edit` the same way — proven append-only
+      // by string equality at the vendored bytes (see the version pin above).
+      'goal_target_edit',
     ]);
   });
 
