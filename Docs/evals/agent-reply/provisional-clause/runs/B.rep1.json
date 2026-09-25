@@ -1,0 +1,20 @@
+{
+ "arm": "B",
+ "rep": 1,
+ "http": 200,
+ "ms": 7246,
+ "usage": {
+  "input_tokens": 10533,
+  "input_tokens_details": {
+   "cache_write_tokens": 10530,
+   "cached_tokens": 0
+  },
+  "output_tokens": 343,
+  "output_tokens_details": {
+   "reasoning_tokens": 201
+  },
+  "total_tokens": 10876
+ },
+ "instructions_sha": "ecea44ab3888cc8df6617cfe4a994f479441ec590e13796743accf09a7795359",
+ "text": "On this provisional model, **keeping the current search allocation separates from the two LinkedIn reallocations**—but this is not a decision recommendation.\n\n- The result is driven chiefly by **blended cost per lead**; all material inputs are Olumi’s estimates rather than your evidence.\n- It does **not establish** that any option achieves the **25% qualified-lead-growth target**: the model lacks the baseline needed to assess that threshold.\n- Nor does it test the **£80 CPL ceiling** as a constraint; the run reports no limit was set.\n\nThe key uncertainty is the assumed blended CPL; replacing it with your channel data could change what the model implies."
+}

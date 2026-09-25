@@ -1,0 +1,20 @@
+{
+ "arm": "A",
+ "rep": 1,
+ "http": 200,
+ "ms": 5793,
+ "usage": {
+  "input_tokens": 10471,
+  "input_tokens_details": {
+   "cache_write_tokens": 7522,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 268,
+  "output_tokens_details": {
+   "reasoning_tokens": 115
+  },
+  "total_tokens": 10739
+ },
+ "instructions_sha": "06a876d3d4fa74cd37c7e75f1ec62952f4a8a01d892badb23538ea1526fba8af",
+ "text": "On this provisional model, **keeping the current search allocation leads the comparison**; shifting 30% to LinkedIn does not currently support the stated case.\n\n- The result is driven chiefly by **blended cost per lead**, with LinkedIn qualified-lead volume and retained search leads also material. All underlying estimates are Olumi-authored, not your data.\n- It does **not establish** that any route achieves 25% qualified-lead growth or stays below **£80 per lead**: the goal direction is unstated and the model could not convert the 25% threshold into the analysis frame.\n- The apparent separation held under tested changes, but cannot be treated as robust validation while every material input remains machine-authored."
+}

@@ -1,0 +1,20 @@
+{
+ "arm": "B",
+ "rep": 3,
+ "http": 200,
+ "ms": 7853,
+ "usage": {
+  "input_tokens": 10533,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 10530
+  },
+  "output_tokens": 380,
+  "output_tokens_details": {
+   "reasoning_tokens": 234
+  },
+  "total_tokens": 10913
+ },
+ "instructions_sha": "ecea44ab3888cc8df6617cfe4a994f479441ec590e13796743accf09a7795359",
+ "text": "**This provisional model comparison separates “Keep Search Allocation” from the two LinkedIn reallocations, but it does not establish that any option achieves 25% qualified-lead growth while staying below £80 per lead.**\n\n- The separation is driven chiefly by **Blended Cost per Lead**, followed by assumed Search and LinkedIn qualified-lead volumes. Every material estimate is machine-authored, not supplied by you.\n- The £80 limit was not evaluated as a binding constraint, and the model could not convert the 25% target into the analysis frame because no observed growth baseline is recorded.\n- The result is therefore a first-pass scenario finding, not validation of the proposed 30% move."
+}

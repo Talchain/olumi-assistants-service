@@ -1,0 +1,20 @@
+{
+ "arm": "B",
+ "rep": 2,
+ "http": 200,
+ "ms": 7095,
+ "usage": {
+  "input_tokens": 10533,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 10530
+  },
+  "output_tokens": 332,
+  "output_tokens_details": {
+   "reasoning_tokens": 199
+  },
+  "total_tokens": 10865
+ },
+ "instructions_sha": "ecea44ab3888cc8df6617cfe4a994f479441ec590e13796743accf09a7795359",
+ "text": "Provisionally, **keeping paid-search allocation** is the model’s leading option, but this does **not** establish that it achieves 25% qualified-lead growth or keeps CPL below £80.\n\n- The separation is driven chiefly by **Blended Cost per Lead**; all material inputs are Olumi-authored estimates, not figures you supplied.\n- The £80 constraint was not converted into the analysis frame, and the goal direction was assumed rather than stated. So the target and cost ceiling have not been tested as hard pass/fail conditions.\n- The result is therefore a first-pass comparison to challenge, not a decision answer."
+}

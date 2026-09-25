@@ -1,0 +1,1 @@
+If it also carries `provisional: true`, that separation rests on Olumi's own starting estimates: you may say which option the comparison separates only as a provisional finding on those estimates, in the same sentence, never as a recommendation or the best choice, and keep any condition the run could not check.

@@ -1,0 +1,20 @@
+{
+ "arm": "B",
+ "rep": 4,
+ "http": 200,
+ "ms": 5948,
+ "usage": {
+  "input_tokens": 10533,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 10530
+  },
+  "output_tokens": 242,
+  "output_tokens_details": {
+   "reasoning_tokens": 107
+  },
+  "total_tokens": 10775
+ },
+ "instructions_sha": "ecea44ab3888cc8df6617cfe4a994f479441ec590e13796743accf09a7795359",
+ "text": "On Olumi’s unvalidated assumptions, **Keep Search Allocation** is provisionally separated from the two LinkedIn reallocations; this is not a recommendation.\n\n- The comparison is driven chiefly by blended cost per lead, with LinkedIn qualified leads and retained search leads also material. All underlying estimates are machine-authored, not supplied evidence.\n- The analysis cannot establish whether any option achieves **25% qualified-lead growth** or keeps CPL below **£80**: the goal direction was not stated and the growth baseline needed to test the threshold is absent.\n- The result held under the tested model variations, but that does not validate its assumptions."
+}
