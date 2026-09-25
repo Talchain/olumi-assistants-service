@@ -63,11 +63,12 @@ describe('every limit the drafter writes carries the frame the user stated', () 
     expect(items.required).toContain('frame');
   });
 
-  it('the drafter is told how to read the frame, and to give a limited factor its current level', async () => {
+  it('the drafter is told how to read the frame, and to give a limited cost its current spend (not an invented level)', async () => {
     const { reqs } = await run(candidate('level'));
     expect(reqs[0]!.instructions).toMatch(/State the `frame` of each limit: "level" when the user limits the value itself/);
     expect(reqs[0]!.instructions).toMatch(/"delta" only when they limit a CHANGE from today/);
-    expect(reqs[0]!.instructions).toMatch(/Give a limited factor a `baseline_value` at its CURRENT level/);
+    expect(reqs[0]!.instructions).toMatch(/When the limit is on a cost, budget or spend, give that factor a `baseline_value` at what is spent on it today/);
+    expect(reqs[0]!.instructions).toMatch(/Never set a current level that the brief does not support just because the user named a limit on it/);
   });
 
   it.each(['level', 'delta'] as const)('WIRE: a limit framed "%s" reaches /graph/register with that value_frame', async (frame) => {
