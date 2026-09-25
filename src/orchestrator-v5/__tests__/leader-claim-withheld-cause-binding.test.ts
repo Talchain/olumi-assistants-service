@@ -133,13 +133,33 @@ describe('the finaliser binds a withheld leader\'s cause to the refusal, never t
   });
 
   it('CONTROL E — an entitled turn never names an entitlement cause, whatever the caller states', () => {
-    // This minimal body carries no robustness, so an ENTITLED turn is still
-    // withheld — on the separation half. The property pinned is that the
-    // caller's statement cannot put an ENTITLEMENT cause on an entitled turn.
+    // A is unrequested, so `buildAnalysisResultBlock` confines its block
+    // (`confineUnrequestedAnalysisBlock`), and that projection REMOVES
+    // `robustness.level`, although the fact carries 'strong'. The finaliser reads
+    // separation from the projected BODY, so separation is unestablished and even
+    // an ENTITLED turn is withheld on the separation half. That is the second gate
+    // on the Conventional path (Independent Review 5826207230). The property pinned:
+    // the caller's statement cannot put an ENTITLEMENT cause on an entitled turn.
     const out = finalise([A], true, { leaderWithheldBecauseUnrequested: true });
+    expect(out.analysis_state?.leader_claim.permitted, 'the confined body cannot license a leader').toBe(false);
     const reason = out.analysis_state?.leader_claim.withheld_reason;
     expect(reason, 'premise: the separation half names its own cause').toBeDefined();
     expect(reason).not.toBe('unrequested_analysis_withheld');
     expect(reason).not.toBe('constraint_verdict_withheld');
+  });
+
+  it('CONTROL E′ — contrast for E: a REQUESTED fact\'s block is not confined, keeps its level, and an entitled turn is permitted', () => {
+    const R = runFact({ at: '2026-09-25T01:00:00.000Z', mayName: true, auto: false, status: 'completed' });
+    const freshness = deriveAnalysisFreshness([R], HASH, undefined, { priorFactsReadOk: true });
+    const analysisReady = { status: 'ready' as const, goal_node_id: 'goal', options: [], analysis_admission: { permitted_analysis_mode: 'comparative_leader' } };
+    const out = finaliseV5Response(composeDirectAnswerResponse({
+      assistant_text: 'Here is where the analysis stands.', stage: 'analyse', answerKind: 'substantive',
+      blocks: [buildAnalysisResultBlock(R, analysisReady as never)],
+    }), {
+      scenarioId: SCENARIO, analysisReady: analysisReady as never, freshness,
+      canonicalState: canonicalStateFromFreshness(freshness, {}), priorFacts: [R], mayNameLeadingOption: true,
+    } as never);
+    expect(out.analysis_state?.leader_claim.permitted).toBe(true);
+    expect(out.analysis_state?.leader_claim.withheld_reason).toBeUndefined();
   });
 });
