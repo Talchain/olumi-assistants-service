@@ -1,0 +1,236 @@
+{
+ "assistant_text": "Saved. No version number was recorded for it.",
+ "suggested_actions": [],
+ "analysis_ready": {
+  "options": [
+   {
+    "option_id": "hire_two_senior_engineers",
+    "label": "Hire two senior engineers",
+    "status": "ready",
+    "interventions": {
+     "senior_engineer_headcount": 0.1
+    },
+    "is_baseline": false,
+    "intervention_details": {
+     "senior_engineer_headcount": {
+      "display_value": "2 engineers",
+      "normalised_value": 0.1,
+      "raw_value": 2,
+      "unit": "engineers"
+     }
+    },
+    "status_reason": "1 intervention(s) ready for analysis"
+   },
+   {
+    "option_id": "hire_four_junior_engineers",
+    "label": "Hire four junior engineers",
+    "status": "ready",
+    "interventions": {
+     "junior_engineer_headcount": 0.13333333333333333
+    },
+    "is_baseline": false,
+    "intervention_details": {
+     "junior_engineer_headcount": {
+      "display_value": "4 engineers",
+      "normalised_value": 0.13333333333333333,
+      "raw_value": 4,
+      "unit": "engineers"
+     }
+    },
+    "status_reason": "1 intervention(s) ready for analysis"
+   },
+   {
+    "option_id": "continue_current_staffing",
+    "label": "Continue current staffing",
+    "status": "needs_user_mapping",
+    "interventions": {},
+    "is_baseline": false,
+    "status_reason": "No interventions extracted",
+    "user_questions": [
+     "Which factor(s) does \"Continue current staffing\" change, and what value should each be set to?"
+    ]
+   },
+   {
+    "option_id": "hire_one_senior_two_juniors",
+    "label": "Hire one senior, two juniors",
+    "status": "ready",
+    "interventions": {
+     "junior_engineer_headcount": 0.06666666666666667,
+     "senior_engineer_headcount": 0.05
+    },
+    "is_baseline": false,
+    "intervention_details": {
+     "junior_engineer_headcount": {
+      "display_value": "2 engineers",
+      "normalised_value": 0.06666666666666667,
+      "raw_value": 2,
+      "unit": "engineers"
+     },
+     "senior_engineer_headcount": {
+      "display_value": "1 engineers",
+      "normalised_value": 0.05,
+      "raw_value": 1,
+      "unit": "engineers"
+     }
+    },
+    "status_reason": "2 intervention(s) ready for analysis"
+   }
+  ],
+  "goal_node_id": "new_platform_shipped_by_q3",
+  "status": "blocked",
+  "goal_threshold": 0.8,
+  "goal_threshold_raw": 1,
+  "goal_threshold_unit": "platform shipped (binary)",
+  "goal_threshold_cap": 1.25,
+  "goal_threshold_cap_provenance": "target_derived_headroom",
+  "bias_findings": [],
+  "blocked_reason": "OPTION_NO_FACTOR_EDGES",
+  "readiness_issues": [
+   {
+    "issue_id": "structural_1",
+    "code": "OPTION_NO_FACTOR_EDGES",
+    "category": "graph_structure",
+    "message": "An option has no factor connections and cannot be analysed. Add at least one factor edge.",
+    "repairability": "human_input_required",
+    "provenance": "unattributed",
+    "obligation": "required"
+   },
+   {
+    "issue_id": "semantic_2",
+    "code": "OPTION_NEEDS_MAPPING",
+    "category": "option_mapping",
+    "message": "Choose which factor \"Continue current staffing\" changes and by how much.",
+    "repairability": "human_input_required",
+    "option_id": "continue_current_staffing",
+    "option_label": "Continue current staffing",
+    "provenance": "unattributed",
+    "obligation": "offered"
+   }
+  ],
+  "repair_proposal": {
+   "proposal_version": "readiness_repair_v1",
+   "complete": true,
+   "issue_ids": [
+    "structural_1",
+    "semantic_2"
+   ],
+   "changes": [],
+   "unresolved_inputs": [
+    {
+     "issue_id": "structural_1",
+     "kind": "model_structure",
+     "prompt": "An option has no factor connections and cannot be analysed. Add at least one factor edge.",
+     "obligation": "required",
+     "provenance": "unattributed"
+    },
+    {
+     "issue_id": "semantic_2",
+     "kind": "option_mapping",
+     "prompt": "Choose which factor \"Continue current staffing\" changes and by how much.",
+     "option_id": "continue_current_staffing",
+     "obligation": "offered",
+     "provenance": "unattributed"
+    }
+   ]
+  },
+  "may_run": false,
+  "analysis_admission": {
+   "structurally_analysable": false,
+   "missing_important_inputs": [
+    {
+     "issue_id": "structural_1",
+     "code": "OPTION_NO_FACTOR_EDGES",
+     "why_it_matters": "An option has no factor connections and cannot be analysed. Add at least one factor edge.",
+     "obligation": "required",
+     "waived_by_exclusion": false
+    },
+    {
+     "issue_id": "semantic_2",
+     "code": "OPTION_NEEDS_MAPPING",
+     "option_id": "continue_current_staffing",
+     "option_label": "Continue current staffing",
+     "why_it_matters": "Choose which factor \"Continue current staffing\" changes and by how much.",
+     "obligation": "offered",
+     "waived_by_exclusion": false
+    }
+   ],
+   "semantic_quality_sufficient": true,
+   "permitted_analysis_mode": "none",
+   "reasons": [
+    {
+     "field": "structurally_analysable",
+     "code": "MODEL_HAS_BLOCKERS",
+     "message": "Review all 2 readiness issues together before analysis."
+    },
+    {
+     "field": "missing_important_inputs",
+     "code": "MODEL_HAS_BLOCKERS",
+     "message": "One input is still needed from you."
+    },
+    {
+     "field": "semantic_quality_sufficient",
+     "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+     "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+    },
+    {
+     "field": "permitted_analysis_mode",
+     "code": "MODEL_HAS_BLOCKERS",
+     "message": "This model cannot be analysed yet."
+    }
+   ],
+   "graph_hash": "752b3262e51b788b054d36d4c1b47a3c4619535821cf83b26b80070176aab218",
+   "semantic_signals": {
+    "confidence_parameters_total": 22,
+    "confidence_parameters_user_stated": 2,
+    "confidence_parameters_machine_authored": 17,
+    "confidence_parameters_unattributed": 3,
+    "material_parameters_total": 22,
+    "material_parameters_user_stated": 2,
+    "intervened_factor_baselines_total": 2,
+    "intervened_factor_baselines_user_stated": 0,
+    "material_parameters_awaiting_user_node_ids": [
+     "new_platform_shipped_by_q3",
+     "senior_engineer_headcount",
+     "junior_engineer_headcount",
+     "platform_scope_completed",
+     "onboarding_load",
+     "onboarding_drag",
+     "senior_design_bottleneck"
+    ],
+    "goal_target_stated": true
+   }
+  },
+  "current_graph_hash": "752b3262e51b788b"
+ },
+ "analysis_state": {
+  "run_state": {
+   "kind": "never_run"
+  },
+  "readiness": {
+   "status": "unknown",
+   "blockers": []
+  },
+  "leader_claim": {
+   "permitted": false,
+   "withheld_reason": "constraint_verdict_withheld"
+  },
+  "robustness": {},
+  "usable_for_prose": false,
+  "usable_for_chips": false,
+  "usable_for_followup": false,
+  "requires_rerun": false,
+  "blocked_unusable": false,
+  "contradictions": []
+ },
+ "graph_hash": "752b3262e51b788b",
+ "_agent": {
+  "tool_calls": [
+   {
+    "name": "authorise_change",
+    "ok": true,
+    "mutated": true
+   }
+  ],
+  "receipts": []
+ }
+}

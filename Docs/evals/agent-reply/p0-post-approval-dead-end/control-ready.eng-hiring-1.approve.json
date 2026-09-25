@@ -1,0 +1,203 @@
+{
+ "assistant_text": "Saved. No version number was recorded for it.",
+ "suggested_actions": [
+  {
+   "id": "agent-run-analysis",
+   "label": "Run analysis",
+   "message": "Run analysis.",
+   "action_type": "run_analysis"
+  }
+ ],
+ "analysis_ready": {
+  "options": [
+   {
+    "option_id": "hire_two_senior_engineers",
+    "label": "Hire Two Senior Engineers",
+    "status": "ready",
+    "interventions": {
+     "junior_engineers_hired": 0,
+     "senior_engineers_hired": 0.2
+    },
+    "is_baseline": false,
+    "intervention_details": {
+     "junior_engineers_hired": {
+      "display_value": "0 engineers",
+      "normalised_value": 0,
+      "raw_value": 0,
+      "unit": "engineers"
+     },
+     "senior_engineers_hired": {
+      "display_value": "2 engineers",
+      "normalised_value": 0.2,
+      "raw_value": 2,
+      "unit": "engineers"
+     }
+    },
+    "status_reason": "2 intervention(s) ready for analysis"
+   },
+   {
+    "option_id": "hire_four_junior_engineers",
+    "label": "Hire Four Junior Engineers",
+    "status": "ready",
+    "interventions": {
+     "junior_engineers_hired": 0.26666666666666666,
+     "senior_engineers_hired": 0
+    },
+    "is_baseline": false,
+    "intervention_details": {
+     "junior_engineers_hired": {
+      "display_value": "4 engineers",
+      "normalised_value": 0.26666666666666666,
+      "raw_value": 4,
+      "unit": "engineers"
+     },
+     "senior_engineers_hired": {
+      "display_value": "0 engineers",
+      "normalised_value": 0,
+      "raw_value": 0,
+      "unit": "engineers"
+     }
+    },
+    "status_reason": "2 intervention(s) ready for analysis"
+   },
+   {
+    "option_id": "continue_current_staffing",
+    "label": "Continue Current Staffing",
+    "status": "ready",
+    "interventions": {
+     "junior_engineers_hired": 0,
+     "senior_engineers_hired": 0
+    },
+    "is_baseline": false,
+    "intervention_details": {
+     "junior_engineers_hired": {
+      "display_value": "0 engineers",
+      "normalised_value": 0,
+      "raw_value": 0,
+      "unit": "engineers"
+     },
+     "senior_engineers_hired": {
+      "display_value": "0 engineers",
+      "normalised_value": 0,
+      "raw_value": 0,
+      "unit": "engineers"
+     }
+    },
+    "status_reason": "2 intervention(s) ready for analysis"
+   },
+   {
+    "option_id": "hire_one_senior_two_junior",
+    "label": "Hire One Senior, Two Junior",
+    "status": "ready",
+    "interventions": {
+     "junior_engineers_hired": 0.13333333333333333,
+     "senior_engineers_hired": 0.1
+    },
+    "is_baseline": false,
+    "intervention_details": {
+     "junior_engineers_hired": {
+      "display_value": "2 engineers",
+      "normalised_value": 0.13333333333333333,
+      "raw_value": 2,
+      "unit": "engineers"
+     },
+     "senior_engineers_hired": {
+      "display_value": "1 engineers",
+      "normalised_value": 0.1,
+      "raw_value": 1,
+      "unit": "engineers"
+     }
+    },
+    "status_reason": "2 intervention(s) ready for analysis"
+   }
+  ],
+  "goal_node_id": "platform_shipped_by_q3",
+  "status": "ready",
+  "goal_threshold": 0.8,
+  "goal_threshold_raw": 1,
+  "goal_threshold_unit": "binary shipment",
+  "goal_threshold_cap": 1.25,
+  "goal_threshold_cap_provenance": "target_derived_headroom",
+  "bias_findings": [],
+  "may_run": true,
+  "analysis_admission": {
+   "structurally_analysable": true,
+   "missing_important_inputs": [],
+   "semantic_quality_sufficient": true,
+   "permitted_analysis_mode": "comparative_leader",
+   "reasons": [
+    {
+     "field": "structurally_analysable",
+     "code": "READY_TO_COMPARE",
+     "message": "Analysis can run on this model as it stands."
+    },
+    {
+     "field": "semantic_quality_sufficient",
+     "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+     "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+    },
+    {
+     "field": "permitted_analysis_mode",
+     "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+     "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+    }
+   ],
+   "graph_hash": "6f91ab6a16eb99768f9742be63d2e85d7a489dcb562d697b98e0d72d3ed8d362",
+   "semantic_signals": {
+    "confidence_parameters_total": 24,
+    "confidence_parameters_user_stated": 2,
+    "confidence_parameters_machine_authored": 19,
+    "confidence_parameters_unattributed": 3,
+    "material_parameters_total": 20,
+    "material_parameters_user_stated": 2,
+    "intervened_factor_baselines_total": 2,
+    "intervened_factor_baselines_user_stated": 0,
+    "material_parameters_awaiting_user_node_ids": [
+     "platform_shipped_by_q3",
+     "senior_engineers_hired",
+     "junior_engineers_hired",
+     "team_coordination_load",
+     "hiring_delay_risk",
+     "budget_breach_risk"
+    ],
+    "goal_target_stated": true
+   }
+  },
+  "freshness": "stale",
+  "freshness_reason": "agent_readback_run_state_stale",
+  "current_graph_hash": "6f91ab6a16eb9976"
+ },
+ "analysis_state": {
+  "run_state": {
+   "kind": "complete_stale",
+   "computed_at": "2026-09-25T03:00:43.393Z",
+   "cause": "graph_changed"
+  },
+  "readiness": {
+   "status": "unknown",
+   "blockers": []
+  },
+  "leader_claim": {
+   "permitted": false,
+   "withheld_reason": "constraint_verdict_withheld"
+  },
+  "robustness": {},
+  "usable_for_prose": true,
+  "usable_for_chips": false,
+  "usable_for_followup": true,
+  "requires_rerun": true,
+  "blocked_unusable": false,
+  "contradictions": []
+ },
+ "graph_hash": "6f91ab6a16eb9976",
+ "_agent": {
+  "tool_calls": [
+   {
+    "name": "authorise_change",
+    "ok": true,
+    "mutated": true
+   }
+  ],
+  "receipts": []
+ }
+}
