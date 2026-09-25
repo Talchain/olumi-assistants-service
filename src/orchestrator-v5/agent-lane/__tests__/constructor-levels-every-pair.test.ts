@@ -368,6 +368,14 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     userLevelKept(graph);
   });
 
+  it('RED (pre-review 5829692499): a retry with a DUPLICATE option object of the same label is not adopted', async () => {
+    const retry = retry52([{ ...explicit52 }]);
+    retry.options.push({ ...retry.options[0]!, interventions: [est('Engineering delivery capacity', 60, 'story points')] });
+    const { graph } = await construct(first52(), retry);
+    userLevelKept(graph);
+    expect(graph.nodes.filter((n) => n.id === 'hire_two_developers')).toHaveLength(1);
+  });
+
   it('CONTROL: a retry keeping exactly the one explicit 52 and filling the other pairs is adopted', async () => {
     const { graph } = await construct(first52(), retry52([{ ...explicit52 }]));
     userLevelKept(graph);
