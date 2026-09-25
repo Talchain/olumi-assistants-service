@@ -526,9 +526,11 @@ describe('(d) the Agent is told a held status quo is never given levels — in t
  * alone. The conventional `fixStatusQuoConnectivity` stamps that origin on EVERY
  * disconnected option, so a real alternative ("Use contractors") was called a
  * status quo holding today's values and its levels were refused. Held now needs
- * the same test #1838 mints under: exactly one baseline label, all-repair edges.
+ * the same test #1838 mints under: the one DECLARED option, else exactly one baseline
+ * label, and all-repair edges (the declared path: `declared-status-quo-is-held-by-the-reader.test.ts`).
+ * These fixtures declare nothing, so here the label is what discriminates.
  */
-describe('a repair-wired option is held ONLY when its label reads as carrying on as now', () => {
+describe('a repair-wired, UNDECLARED option is held ONLY when its label reads as carrying on as now', () => {
   function contractors() {
     const { nodes, edges } = hiring('Maintain current staffing');
     // Replace the status quo with a real alternative the repair wired the same way.
