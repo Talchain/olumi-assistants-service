@@ -281,7 +281,16 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // references: the import, the helper's single call, and
     // option_intervention_edit's two (pre-write referee input + post-commit;
     // its own follow-up). Nothing re-derives the frame's own value.
-    'src/orchestrator-v5/system-events/dispatch.ts': 4,
+    // 2026-09-25 Canonical State: 4 → 5 (+1, inside the SAME helper) — when the
+    // restore marker (`analysis_invalidated_at`) could not be read, a `fresh`
+    // verdict is unsupported (the marker is the only input that turns a hash
+    // match stale), so `deriveWriteReplyFreshness` replaces it with the
+    // freshness module's own degraded form, `unknown` / `derivation_failed`,
+    // built by `deriveAnalysisFreshness([], …, { priorFactsReadOk: false })`
+    // rather than a hand-written literal, so its invariant 3 holds. Not a new
+    // seam and no extra I/O: the second call runs only on that failed read, and
+    // `stale`/`none` verdicts pass through untouched.
+    'src/orchestrator-v5/system-events/dispatch.ts': 5,
     // 2026-09-24 MG&Q: +1 (one call) — `dispatchFactorValueEdit` now derives the
     // wire freshness for a factor-value edit, exactly as the edge_strength_edit
     // writer in this same file already does. Programme #63 item 15: the value
