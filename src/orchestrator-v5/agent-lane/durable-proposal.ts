@@ -40,6 +40,7 @@ import {
   PENDING_ACTION_ASK_WALL_TTL_MS,
   type PendingAction,
 } from '../session/pending-action.js';
+import { log } from '../../utils/telemetry.js';
 import { approvalChipIdFor } from './approval-chips.js';
 import { computeProposalId, type ProposalStore, type StructuredProposal } from './proposal.js';
 
@@ -152,7 +153,11 @@ export function rehydrateProposals(
     if (p === undefined || p === null || typeof p !== 'object' || typeof p.proposal_id !== 'string') continue;
     if (p.scenario_id !== subject.scenario_id || p.user_id !== subject.user_id) continue;
     const { proposal_id: _id, ...content } = p;
-    if (computeProposalId(content) !== p.proposal_id) continue;
+    if (computeProposalId(content) !== p.proposal_id) {
+      // Never silent again: a silent skip here is what hid the JSONB key-order loss (#69 5833864687).
+      log.warn({ proposal_id: p.proposal_id, scenario_id: subject.scenario_id }, 'agent-lane: a persisted proposal does not match its content — not restored');
+      continue;
+    }
     if (store.get(p.proposal_id) !== undefined) continue;
     store.put(p);
     restored += 1;
