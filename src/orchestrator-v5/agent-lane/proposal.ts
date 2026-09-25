@@ -97,12 +97,31 @@ export interface StructuredProposal {
 export type ProposalContent = Omit<StructuredProposal, 'proposal_id'>;
 
 /**
+ * Every object's keys sorted, at every depth; arrays keep their order (it is meaningful). `undefined`
+ * members are dropped, exactly as `JSON.stringify` drops them.
+ */
+function sortedKeysDeep(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(sortedKeysDeep);
+  if (v === null || typeof v !== 'object') return v;
+  const o = v as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(o).sort()) if (o[k] !== undefined) out[k] = sortedKeysDeep(o[k]);
+  return out;
+}
+
+/**
  * A stable id over the CONTENT. Key order is fixed explicitly rather than left
  * to `JSON.stringify` of an object literal, so a re-ordered but identical
  * proposal hashes the same and a changed one cannot collide.
+ *
+ * ⛔ AT EVERY DEPTH, NOT ONLY THE TOP (#69 5833864687). An operation's `value` is an object
+ * (`{value, unit, basis, authored_by}`, `{normalised, raw, cap, …}`), and the durable carrier
+ * stores the proposal in a JSONB column, which hands object keys back shorter-first. Hashed in
+ * insertion order, a proposal read back after a deploy no longer matched its own id, so the
+ * restarted process skipped it and the user's approval met `unknown_proposal`.
  */
 export function computeProposalId(c: ProposalContent): string {
-  const canonical = JSON.stringify([
+  const canonical = JSON.stringify(sortedKeysDeep([
     c.scenario_id,
     c.user_id,
     c.base_graph_identity_hash,
@@ -110,7 +129,7 @@ export function computeProposalId(c: ProposalContent): string {
     [c.provenance.authored_by, c.provenance.basis ?? null],
     [c.validation.admitted, c.validation.loss_count, [...c.validation.refusals].sort()],
     c.public_label,
-  ]);
+  ]));
   return 'prop_' + createHash('sha256').update(canonical).digest('hex').slice(0, 32);
 }
 

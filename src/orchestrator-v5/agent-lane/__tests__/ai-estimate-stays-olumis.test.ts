@@ -82,7 +82,7 @@ describe('an AI estimate is kept as Olumi’s figure (T1-T5)', () => {
   it('T1 RED: a finite estimate survives, framed on the node’s scale_frame and stamped cee_inference — capless', () => {
     const m = admitCandidateModel(candidate());
     const n = byId(m, 'estimated_headcount');
-    expect(n.observed_state).toStrictEqual({ value: 10 / 100, raw_value: 10, unit: 'FTE', source: 'cee_inference' });
+    expect(n.observed_state).toStrictEqual({ value: 10 / 100, raw_value: 10, unit: 'FTE', source: 'cee_inference', extractionType: 'inferred' });
     expect(n.scale_frame).toBe(100);
     expect(n.observed_state).not.toHaveProperty('cap');
     expect(n.observed_state).not.toHaveProperty('declared_scale');
@@ -99,7 +99,7 @@ describe('an AI estimate is kept as Olumi’s figure (T1-T5)', () => {
 
   it('T2 RED: an estimate of ZERO survives — no truthiness guard', () => {
     const n = byId(admitCandidateModel(candidate()), 'zero_tech_leads');
-    expect(n.observed_state).toStrictEqual({ value: 0, raw_value: 0, unit: 'FTE', source: 'cee_inference' });
+    expect(n.observed_state).toStrictEqual({ value: 0, raw_value: 0, unit: 'FTE', source: 'cee_inference', extractionType: 'inferred' });
     expect(n.scale_frame).toBe(10);
   });
 
@@ -165,6 +165,6 @@ describe('an AI estimate is kept as Olumi’s figure (T1-T5)', () => {
     expect(entry?.reason).not.toContain('your own figures');
     expect(entry?.reason).toContain('Olumi');
     // …and with the frame now defined, the estimate is carried on it, as Olumi's.
-    expect(byId(m, 'unframeable_backlog').observed_state).toStrictEqual({ value: 0.25, raw_value: 250, unit: 'tickets', source: 'cee_inference' });
+    expect(byId(m, 'unframeable_backlog').observed_state).toStrictEqual({ value: 0.25, raw_value: 250, unit: 'tickets', source: 'cee_inference', extractionType: 'inferred' });
   });
 });

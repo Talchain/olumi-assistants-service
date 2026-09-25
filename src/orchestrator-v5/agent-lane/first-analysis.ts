@@ -35,6 +35,7 @@ import { dispatchChipClickRunAnalysis, type ChipClickAutoRunTrigger } from '../h
 import { AGENT_RUN_ANALYSIS_CHIP_ID } from '../handlers/agent-chip-ids.js';
 import { RUN_PROVENANCE_ENRICHMENT_KEY } from '../context/run-initiator.js';
 import { permittedAnalysisModeFromAnalysisReady } from '../admission/analysis-admission.js';
+import { blockPresumesLeadingOption } from '../compose.js';
 
 /**
  * What must remain of the turn budget for a first analysis to START: a worst-case run (~20 s: PLoT
@@ -212,6 +213,8 @@ export function firstAnalysisSentence(outcome: FirstAnalysisOutcome): string | n
 /** The typed leader permission, as the Agent is given it. Absent is never permission. */
 export interface ClaimPermissions {
   readonly leader_may_be_named: boolean;
+  /** Present (true) only when the leader may be named as a PROVISIONAL finding (separable, quantified_provisional). */
+  readonly provisional?: true;
   readonly withheld_reason?: string;
   readonly permitted_analysis_mode: string | null;
 }
@@ -221,11 +224,23 @@ export interface ClaimPermissions {
  * conjunction the admission's own consumer note prescribes. Read, never re-derived: both halves come
  * from the canonical producers' published verdicts.
  */
-export function claimPermissionsFrom(analysisState: unknown, analysisReady: unknown): ClaimPermissions {
-  const claim = (analysisState as { leader_claim?: { permitted?: unknown; withheld_reason?: unknown } } | null | undefined)?.leader_claim;
+export function claimPermissionsFrom(
+  analysisState: unknown,
+  analysisReady: unknown,
+  run: { readonly requested?: boolean } = {},
+): ClaimPermissions {
+  const claim = (analysisState as { leader_claim?: { permitted?: unknown; withheld_reason?: unknown; separation?: unknown } } | null | undefined)?.leader_claim;
   const mode = permittedAnalysisModeFromAnalysisReady(analysisReady);
+  // Paul's ruling (programme-docs#38 5576895511): a SEPARABLE run whose only objection is that every estimate
+  // is machine-authored is "caveat, not withhold" — the wire gate's separable-provisional arm, mirrored here so
+  // the Agent and the wire agree. It is named as provisional; every other population is unchanged.
+  // ⛔ REQUESTED RUNS ONLY (RC #63 5826599698): Paul's 24 Sep "keep the unrequested-analysis claim policy"
+  // governs the AUTOMATIC first run, so `describeFirstAnalysisForAgent` passes nothing and keeps today's answer.
+  const separableProvisional = run.requested === true
+    && claim?.permitted === true && claim?.separation === 'separated' && mode === 'quantified_provisional';
   return {
-    leader_may_be_named: claim?.permitted === true && mode === 'comparative_leader',
+    leader_may_be_named: (claim?.permitted === true && mode === 'comparative_leader') || separableProvisional,
+    ...(separableProvisional ? { provisional: true } : {}),
     ...(typeof claim?.withheld_reason === 'string' && claim.withheld_reason !== '' ? { withheld_reason: claim.withheld_reason } : {}),
     permitted_analysis_mode: mode,
   };
@@ -248,14 +263,23 @@ export function bindRunBlocksToReadback(
   readback: { readonly graphHash: string | undefined; readonly analysisState: unknown; readonly analysisResult: unknown },
 ): unknown[] {
   if (readback.graphHash === undefined || readback.analysisResult === undefined) return [];
-  const state = readback.analysisState as { run_state?: { kind?: unknown }; usable_for_chips?: unknown } | undefined;
+  const state = readback.analysisState as { run_state?: { kind?: unknown }; usable_for_chips?: unknown; leader_claim?: { permitted?: unknown } } | undefined;
   if (state?.run_state?.kind !== 'complete_current') return [];
   const chipsUsable = state.usable_for_chips === true;
+  /**
+   * ⛔ A CARD THAT PRESUMES A LEADER IS SHOWN ONLY WHEN A LEADER MAY BE NAMED (R&C served witness
+   * `bw-580d135b-7f9a16d-noflag3`, #69 5827198323): on a near-tie Run (`leader_claim.permitted:false`,
+   * `options_do_not_separate`) a `strengthen` card — "The leading option is ahead, but not by a wide margin…" —
+   * reached the user beside a reply saying the options are effectively tied. The Conventional route drops these
+   * whole on a withheld turn (compose's filter); this reads the SAME definition, so the routes cannot disagree.
+   */
+  const leaderMayBeNamed = state.leader_claim?.permitted === true;
   return runBlocks.filter((b) => {
     const block = b as { type?: unknown; graph_hash_at_generation?: unknown; action_intent?: unknown; action_label?: unknown; action_prompt?: unknown } | null;
     if (block === null || typeof block !== 'object' || typeof block.type !== 'string') return false;
     if (!COACHING_BLOCK_TYPES.has(block.type)) return false;
     if (block.graph_hash_at_generation !== readback.graphHash) return false;
+    if (!leaderMayBeNamed && blockPresumesLeadingOption(block as never)) return false;
     const actionBearing = block.action_intent !== undefined || block.action_label !== undefined || block.action_prompt !== undefined;
     return !actionBearing || chipsUsable;
   });

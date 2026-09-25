@@ -25,10 +25,25 @@ const order: string[] = [];
 /** The latest ANSWER row for a scenario — claim rows excluded, exactly as the production read excludes them. */
 const latestRow = (sid: string = SCENARIO): Row | undefined =>
   [...order].reverse().map((k) => rows.get(k)!).find((r) => r.scenario_id === sid && !r.turn_id.endsWith(':claim'));
+/**
+ * ⛔ WHAT A JSONB COLUMN GIVES BACK. Postgres `jsonb` does not keep object key order: it returns every
+ * object's keys shorter first, then bytewise, at every depth. A plain `JSON.parse(JSON.stringify())`
+ * round trip keeps insertion order, and that is how the served deploy-survival witness FAILED while this
+ * suite was green (#69 5833816430 / 5833864687: an assumption proposal's id no longer matched its
+ * content, so a restarted process skipped it and the approval met `unknown_proposal`).
+ */
+const jsonbOrder = (v: unknown): unknown =>
+  Array.isArray(v) ? v.map(jsonbOrder)
+    : v !== null && typeof v === 'object'
+      ? Object.fromEntries(Object.keys(v as Record<string, unknown>)
+        .filter((k) => (v as Record<string, unknown>)[k] !== undefined)
+        .sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0))
+        .map((k) => [k, jsonbOrder((v as Record<string, unknown>)[k])]))
+      : v;
 /** A row's pending actions as the production reads return them: JSONB round-trip, the REAL parser, this scenario only. */
 const parsedPending = async (row: Row | undefined, sid: string): Promise<unknown[]> => {
   const { parsePendingAction } = await import('../../session/pending-action.js');
-  const raw = row ? (JSON.parse(JSON.stringify(row.pending_actions)) as unknown[]) : [];
+  const raw = row ? (jsonbOrder(JSON.parse(JSON.stringify(row.pending_actions))) as unknown[]) : [];
   return raw.map((x) => parsePendingAction(x)).filter((x) => x !== null && x.scenario_id === sid);
 };
 const store = {
@@ -47,7 +62,7 @@ const store = {
   append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; pending_actions?: unknown[] }) => {
     const k = `${w.scenario_id}:${w.turn_id}`;
     if (!rows.has(k)) {
-      rows.set(k, { id: `row-${rows.size + 1}`, scenario_id: w.scenario_id, turn_id: w.turn_id, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0, pending_actions: JSON.parse(JSON.stringify(w.pending_actions ?? [])) });
+      rows.set(k, { id: `row-${rows.size + 1}`, scenario_id: w.scenario_id, turn_id: w.turn_id, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0, pending_actions: jsonbOrder(JSON.parse(JSON.stringify(w.pending_actions ?? []))) as unknown[] });
       order.push(k);
     }
     return { id: rows.get(k)!.id };
@@ -62,7 +77,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 });
 
 type Chip = { id: string; label: string; message: string };
-type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string }; _agent: { tool_calls: { name: string; ok: boolean; refusal?: string }[]; replayed?: boolean } };
+type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string }; _agent: { tool_calls: { name: string; ok: boolean; refusal?: string }[]; replayed?: boolean; durability?: string; turn_id?: string } };
 type Carrier = { chip_id: string; emitted_at_iso: string; expires_at_iso: string; expires_at_turn_count: number; preconditions: { graph_hash?: string };
   action: { kind: string; proposal_ref: string; inline_patch: { agent_proposal: { proposal_id: string; user_id: string | null; public_label: string } } } };
 /** The approval carrier a row persisted, if any. */
@@ -164,6 +179,26 @@ describe('a pending approval survives a restart', () => {
     expect(persisted?.action.kind).toBe('apply_proposed_change');
     expect(persisted?.action.proposal_ref).toBe(approve.id);
     expect(persisted?.action.inline_patch).not.toHaveProperty('handler_id');
+  }, 60_000);
+
+  // Canonical State's deploy-survival witness (#69 5833516415): its turns carried NO turn_id, so the offer's
+  // answer row was never written and a real CEE deploy lost the approval (`unknown_proposal`).
+  it('(g) RED: NO client turn_id — propose, the process restarts, approve → SAVED; the offer turn was durable', async () => {
+    const t1 = await inProcess((a) => turn(a, { message: 'Should team size drive velocity?', turn_id: undefined }));
+    const approve = t1.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
+    expect(approve, 'the control: a real proposal was offered').toBeDefined();
+    expect(t1._agent.durability, 'the offer turn is recorded even with no client id').toBe('recorded');
+    expect(carrierIn(latestRow())?.chip_id, 'the offer is persisted with its answer row').toBe(approve!.id);
+    const t2 = await inProcess((b) => turn(b, { message: approve!.message, source: 'chip', chip: { id: approve!.id }, turn_id: undefined }));
+    expectSaved(t2);
+  }, 60_000);
+
+  it('(g) CONTRAST: a client turn_id is used exactly as given (echoed, and the row is keyed by it)', async () => {
+    const turnId = randomUUID();
+    const t1 = await inProcess((a) => turn(a, { message: 'Should team size drive velocity?', turn_id: turnId }));
+    expect(t1._agent.turn_id).toBe(turnId);
+    expect(t1._agent.durability).toBe('recorded');
+    expect(latestRow()?.turn_id).toBe(turnId);
   }, 60_000);
 
   it('CONTRAST: a stored proposal altered after it was offered is never rehydrated — nothing is written', async () => {
@@ -468,5 +503,81 @@ describe('rehydrateProposals restores only this subject\'s own, unexpired, unalt
   it('an expired carrier is never restored', async () => {
     const { pa } = await build({ expiresInMs: -1 });
     expect((await restore([pa])).n).toBe(0);
+  });
+});
+
+/**
+ * ⛔ THE PROPOSALS USERS ACTUALLY APPROVE CARRY OBJECT VALUES — and those must survive the JSONB column.
+ *
+ * Served (#69 5833816430, CEE `8a2f291` → `cee4772`): `propose_assumptions` offered a proposal, the proposing
+ * row was durable, CEE redeployed, the approval met `unknown_proposal`. `set_factor_value` values are
+ * `{value, unit, basis, authored_by}` and `set_option_intervention` values are `{normalised, raw, cap, basis,
+ * derived_frame, authored_by}` (`agent-capabilities.ts`); JSONB hands both back re-keyed, and an id hashed over
+ * insertion order no longer matched. The route tests above propose one `add_edge` whose value has ONE key, so
+ * they could never see it.
+ */
+describe('a proposal with object operation values survives the JSONB round trip', () => {
+  const assumptions = async (over: { value?: number } = {}) => {
+    const { proposalPendingAction } = await import('../durable-proposal.js');
+    const { createProposal } = await import('../proposal.js');
+    const p = createProposal({ scenario_id: 'scn', user_id: null, base_graph_identity_hash: 'hash-base',
+      operations: [
+        { op: 'set_factor_value', path: 'fac_admin', value: { value: 15, unit: 'hours', basis: 'the director said about 15', authored_by: 'user_stated' } },
+        { op: 'set_option_intervention', path: 'opt_pa::fac_admin', value: { normalised: 0.5, raw: 20, cap: 40, basis: 'a PA takes half', derived_frame: { lo: 0, hi: 40 }, authored_by: 'model_proposed' } },
+      ],
+      provenance: { authored_by: 'model_proposed', basis: 'starting assumptions' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Use as starting assumptions' });
+    const pa = proposalPendingAction(p, { id: `agent-approve-proposal:${p.proposal_id}`, label: 'Use as starting assumptions', message: 'Yes, use those.' }, { scenario_id: 'scn', emitted_at_iso: new Date().toISOString() });
+    const stored = jsonbOrder(JSON.parse(JSON.stringify(pa))) as { action: { inline_patch: { agent_proposal: { operations: { value: { value?: number } }[] } } } };
+    if (over.value !== undefined) stored.action.inline_patch.agent_proposal.operations[0]!.value.value = over.value;
+    const { parsePendingAction } = await import('../../session/pending-action.js');
+    return { p, read: parsePendingAction(stored) };
+  };
+  const restore = async (pending: unknown[]) => {
+    const { rehydrateProposals } = await import('../durable-proposal.js');
+    const { ProposalStore } = await import('../proposal.js');
+    const store = new ProposalStore();
+    return { n: rehydrateProposals(pending, store, { scenario_id: 'scn', user_id: null }), store };
+  };
+
+  it('the precondition: JSONB really re-keys these values (else this test proves nothing)', async () => {
+    const { read } = await assumptions();
+    const ops = (read as unknown as { action: { inline_patch: { agent_proposal: { operations: { value: Record<string, unknown> }[] } } } }).action.inline_patch.agent_proposal.operations;
+    expect(Object.keys(ops[0]!.value)).toEqual(['unit', 'basis', 'value', 'authored_by']);
+    expect(Object.keys(ops[1]!.value)).toEqual(['cap', 'raw', 'basis', 'normalised', 'authored_by', 'derived_frame']);
+  });
+
+  it('RED: an assumption + option-level proposal read back from JSONB is restored, and the store would execute it on its base', async () => {
+    const { p, read } = await assumptions();
+    expect(read, 'the control: the real parser keeps the carrier').not.toBeNull();
+    const { n, store } = await restore([read]);
+    expect(n).toBe(1);
+    expect(store.get(p.proposal_id)?.proposal_id).toBe(p.proposal_id);
+    expect(store.authorise({ proposal_id: p.proposal_id, scenario_id: 'scn', authenticated_user_id: null, current_graph_identity_hash: 'hash-base' }).status).toBe('execute');
+  });
+
+  it('CONTRAST: the same proposal with a value altered after it was offered is still never restored', async () => {
+    const { read } = await assumptions({ value: 16 });
+    expect((await restore([read])).n).toBe(0);
+  });
+
+  it('the id does not depend on key order at any depth; it still changes when a value changes', async () => {
+    const { computeProposalId } = await import('../proposal.js');
+    const { p } = await assumptions();
+    const { proposal_id: _id, ...content } = p;
+    expect(computeProposalId(jsonbOrder(content) as typeof content)).toBe(p.proposal_id);
+    const changed = { ...content, operations: [{ ...content.operations[0]!, value: { value: 16, unit: 'hours', basis: 'the director said about 15', authored_by: 'user_stated' } }, content.operations[1]!] };
+    expect(computeProposalId(changed)).not.toBe(p.proposal_id);
+  });
+
+  it('a skipped carrier is logged with its id and scenario only, never its content', async () => {
+    const { log } = await import('../../../utils/telemetry.js');
+    const warn = vi.spyOn(log, 'warn');
+    try {
+      const { read } = await assumptions({ value: 16 });
+      await restore([read]);
+      const call = warn.mock.calls.find((c) => String(c[1] ?? '').includes('does not match its content'));
+      expect(call, 'the integrity skip is no longer silent').toBeDefined();
+      expect(Object.keys(call![0] as object).sort()).toEqual(['proposal_id', 'scenario_id']);
+    } finally { warn.mockRestore(); }
   });
 });

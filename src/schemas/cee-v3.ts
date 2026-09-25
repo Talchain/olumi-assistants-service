@@ -245,6 +245,19 @@ export const NodeV3 = z.object({
    */
   goal_threshold_frame: GoalThresholdFrame.optional(),
   /**
+   * ⛔ WHO STATED THE GOAL TARGET, AND THE TARGET THEY STATED (goal nodes; written by the UI's register).
+   *
+   * THIS DECLARATION IS LOAD-BEARING, the same warning `goal_threshold_frame` carries above. The UI keeps
+   * `threshold_source: 'user'` + `success_threshold` as its durable per-goal source of truth. Undeclared,
+   * both survived the register write (passthrough) and were then SILENTLY DELETED by the next unrelated
+   * turn-path write's re-parse; served on `bed9a0c`, the user's stated target then read back as not stated.
+   * `field-safety.ts` still denies every producer from SETTING `threshold_source` (ruling J2); this only
+   * keeps what was written. A malformed value is dropped exactly as before (`.catch`), never a new reason
+   * to refuse a stored graph.
+   */
+  threshold_source: z.string().max(64).optional().catch(undefined),
+  success_threshold: z.number().finite().nullable().optional().catch(undefined),
+  /**
    * ⭐⭐ THE PER-FACTOR SCALE FRAME (factor nodes only) — the divisor pass 3d
    * projected this factor's baseline and every option intervention magnitude
    * onto, so within-factor ratios are exact.

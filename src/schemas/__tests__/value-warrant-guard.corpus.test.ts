@@ -294,20 +294,23 @@ describe("the live value-bearing contract, adjudicated", () => {
     expect(report.stale.map((d) => d.id)).toEqual([]);
   });
 
-  it("the first cut is an ENUMERATION: 36 sites, 28 findings, 20 OPEN, 8 accepted", () => {
+  it("the first cut is an ENUMERATION: 37 sites, 29 findings, 20 OPEN, 9 accepted", () => {
     // Pinned so the shape of the first cut cannot move quietly. There is no date
     // trigger anywhere in this check — a CI job that turns red on a calendar is a
     // time bomb. What this gives instead is an OPEN count a human can watch.
     // +2 sites / +2 findings / +2 OPEN (was 34/26/18): schemas 0.56.0 (#60)
     // declares `observed_state.cap` and `.raw_value` on the contract's NodeV3,
     // reaching CEE with the 0.58.0 re-vendor. Recorded OPEN with their family.
-    expect(SITES.length).toBe(36);
-    expect(FINDINGS.length).toBe(28);
+    // +1 site / +1 finding / +1 ACCEPTED (25 Sep): CEE's NodeV3 declares the UI's
+    // goal `success_threshold` so a re-parse stops erasing it; its warrant is
+    // `threshold_source` by the writer's own contract (value-warrant-guard.ts).
+    expect(SITES.length).toBe(37);
+    expect(FINDINGS.length).toBe(29);
     expect(report.open.length).toBe(20);
-    expect(report.accepted.length).toBe(8);
+    expect(report.accepted.length).toBe(9);
     expect(SITES.filter((s) => s.verdict === "FIELD").length).toBe(4);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SOLE").length).toBe(4);
-    expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(13);
+    expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(14);
     expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(15);
   });
 

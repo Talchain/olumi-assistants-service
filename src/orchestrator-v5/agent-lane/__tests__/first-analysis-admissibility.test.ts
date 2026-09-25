@@ -148,7 +148,7 @@ describe('a freshly built model is admissible for a provisional first analysis (
       willProceed: true, mode: 'quantified_provisional', blockers: [],
       ceeInference: ['tech_leads', 'developers', 'coordination_overhead'],
     });
-    expect(graph.nodes.find((n) => n.id === 'developers')?.observed_state).toStrictEqual({ value: 6 / 50, raw_value: 6, unit: 'FTE', source: 'cee_inference' });
+    expect(graph.nodes.find((n) => n.id === 'developers')?.observed_state).toStrictEqual({ value: 6 / 50, raw_value: 6, unit: 'FTE', source: 'cee_inference', extractionType: 'inferred' });
   });
 
   it('PRICING ("Keep the current price"): refused, and says why — the label is not a status-quo idiom readiness recognises', async () => {
@@ -201,7 +201,7 @@ describe('a freshly built model is admissible for a provisional first analysis (
       willProceed: true, mode: 'quantified_provisional', blockers: [],
       ceeInference: ['depots', 'courier_partners'],
     });
-    expect(graph.nodes.find((n) => n.id === 'courier_partners')?.observed_state).toStrictEqual({ value: 0, raw_value: 0, unit: 'partners', source: 'cee_inference' });
+    expect(graph.nodes.find((n) => n.id === 'courier_partners')?.observed_state).toStrictEqual({ value: 0, raw_value: 0, unit: 'partners', source: 'cee_inference', extractionType: 'inferred' });
     expect(graph.nodes.find((n) => n.id === 'parcel_backlog')).not.toHaveProperty('observed_state');
   });
 

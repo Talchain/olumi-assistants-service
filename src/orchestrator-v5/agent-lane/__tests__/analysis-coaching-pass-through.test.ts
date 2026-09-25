@@ -3,6 +3,7 @@ import { test } from 'vitest';
 import { currentAnalysisCoaching, runTurnCoaching, type CapturedAnalysis, type RunTurnCoachingFinal } from '../analysis-coaching-pass-through.js';
 import { RUN_TURN_COACHING_REASONS } from '../../coaching/fragile-link-challenge.js';
 import { runTurnCase } from '../../coaching/__tests__/fragile-link-challenge-fixtures.js';
+import { buildConstraintDisclosureFromState } from '../../coaching/constraint-gap-disclosure.js';
 const hash = '0123456789abcdef';
 const time = '2026-09-24T10:00:00.000Z';
 const state = {run_state: {kind: 'complete_current', computed_at: time}, leader_claim: {permitted: false, withheld_reason: 'constraint_verdict_withheld'}};
@@ -52,7 +53,7 @@ test('a readback result computed against another graph forwards nothing, even a 
 });
 
 // ── the no-flagged-link card (coaching/no-flagged-link-card.ts) — the second run-turn card ──
-test('RUN_TURN_COACHING_REASONS is the six-reason gate order',()=>assert.deepEqual([...RUN_TURN_COACHING_REASONS],['no_run_this_turn','identity_mismatch','no_groundable_fragile_edge','edge_sensitivity_not_evidenced','claim_not_usable','copy_gate']));
+test('RUN_TURN_COACHING_REASONS is the seven-reason gate order',()=>assert.deepEqual([...RUN_TURN_COACHING_REASONS],['no_run_this_turn','identity_mismatch','limit_repair_pending','no_groundable_fragile_edge','edge_sensitivity_not_evidenced','claim_not_usable','copy_gate']));
 test('a served run with no fragile link (c10) adds exactly one no-flagged-link card after the forwarded upstream card',()=>{
  const c=runTurnCase('c10','t5','explicit_run');
  const upstream={...card,block_id:'00000000-0000-4000-8000-0000000000c1',graph_hash_at_generation:c.turn.graph_hash,created_at:c.turn.analysis_state.run_state.computed_at};
@@ -65,4 +66,110 @@ test('a served run with no fragile link (c10) adds exactly one no-flagged-link c
  // Upstream forwarding is unchanged by the new card: without a trigger the same upstream card is forwarded alone.
  const {trigger:_t,...untriggered}=c.captured;
  assert.deepEqual(runTurnCoaching({...untriggered,blocks:[...c.captured.blocks!,upstream]},c.final),{blocks:[upstream],eligibility:{eligible:false,reason:'no_run_this_turn'}});
+});
+
+// ── a WITHHELD claim: the run response is gated, the graph read is not (served 25 Sep, CEE 7f9a16d) ──
+// On an entitled near tie the v2 send-point gate nulls the run response's `leading_option_id`
+// (leading-option-wire-enforcement.ts:659-670), while the graph read keeps the fact's id
+// (compose.ts:1275,1348). ONE run then reads null vs "<id>", and the served hiring Run got no
+// run-turn card (`identity_mismatch`) although it is exactly the no-flagged-link card's case.
+const NEAR_TIE_CLAIM = {permitted:false, withheld_reason:'options_do_not_separate', separation:'near_tie'};
+const withClaim = (c: ReturnType<typeof runTurnCase>, claim: unknown, capturedLeader: unknown, readbackLeader: unknown) => {
+ const capturedResult = {...(c.captured.blocks![0] as Record<string, unknown>), leading_option_id: capturedLeader};
+ return {
+  captured: {...c.captured, analysis_state: {...(c.captured.analysis_state as object), leader_claim: claim}, blocks: [capturedResult]} as CapturedAnalysis,
+  final: {...c.final, analysisState: {...(c.final.analysisState as object), leader_claim: claim}, analysisResult: {...(c.final.analysisResult as object), leading_option_id: readbackLeader}} as RunTurnCoachingFinal,
+ };
+};
+test('NEAR-TIE: a gated capture (leader null) binds to the ungated readback of the SAME run → the no-flagged-link card ships',()=>{
+ const {captured,final}=withClaim(runTurnCase('c10','t5','explicit_run'),NEAR_TIE_CLAIM,null,'opt_leader');
+ const out=runTurnCoaching(captured,final);
+ assert.deepEqual(out.eligibility,{eligible:true});
+ assert.equal(out.blocks.filter(b=>b.signal_id.startsWith('coach:no_flagged_link:')).length,1);
+});
+test('NEAR-TIE: a near tie WITH a fragile link (c19-C) ships the fragile-link card, unbadged',()=>{
+ const {captured,final}=withClaim(runTurnCase('C','A2r','explicit_run'),NEAR_TIE_CLAIM,null,'opt_leader');
+ const out=runTurnCoaching(captured,final);
+ assert.deepEqual(out.eligibility,{eligible:true});
+ const cards=out.blocks.filter(b=>b.signal_id.startsWith('coach:fragile_link:'));
+ assert.equal(cards.length,1);
+ assert.equal(Object.hasOwn(cards[0]!,'dsk_claim_provenance'),false);
+});
+test('WITHHELD: the builders see the designation as the gate leaves it — a clear winner under a withheld claim ships WITHOUT the badge',()=>{
+ // c16 earns the DSK-P-003 badge when the leader is permitted (BADGE-2). Under a withheld claim the
+ // user is not shown a leader, so the badge (which asserts "a clear winner") must not ride on the
+ // ungated readback id. The near-tie reason is what licenses the bind; the badge must still read
+ // the designation as the gate leaves it (null), whatever the robustness block says.
+ const {captured,final}=withClaim(runTurnCase('c16','t5','explicit_run'),NEAR_TIE_CLAIM,null,'opt_leader');
+ const out=runTurnCoaching(captured,final);
+ assert.deepEqual(out.eligibility,{eligible:true});
+ const cards=out.blocks.filter(b=>b.signal_id.startsWith('coach:fragile_link:'));
+ assert.equal(cards.length,1);
+ assert.equal(Object.hasOwn(cards[0]!,'dsk_claim_provenance'),false);
+});
+test('CONTROL (present): the same c16 run with a permitted claim and equal designations keeps its badge',()=>{
+ const c=runTurnCase('c16','t5','explicit_run');
+ const out=runTurnCoaching(c.captured,c.final);
+ const cards=out.blocks.filter(b=>b.signal_id.startsWith('coach:fragile_link:'));
+ assert.equal(cards.length,1);
+ assert.equal(Object.hasOwn(cards[0]!,'dsk_claim_provenance'),true);
+});
+for (const [name, claim, capturedLeader, readbackLeader] of [
+ ['withheld claim, two different designations', NEAR_TIE_CLAIM, 'opt_a', 'opt_b'],
+ ['PERMITTED claim, capture null vs readback id (the gate does not null a permitted leader)', {permitted:true, separation:'separated'}, null, 'opt_a'],
+ ['withheld claim, capture names a leader the readback does not (not the gate\'s edit)', NEAR_TIE_CLAIM, 'opt_a', null],
+ ['separation NOT EVALUATED (separation_unavailable) — no verdict, so no relaxation', {permitted:false, withheld_reason:'separation_unavailable'}, null, 'opt_a'],
+ ['constraint-withheld — no entitlement, the graph read nulls too, so an id there is a conflict', {permitted:false, withheld_reason:'constraint_verdict_withheld'}, null, 'opt_a'],
+] as [string, unknown, unknown, unknown][]) test(`CONTROL still refuses: ${name}`,()=>{
+ const {captured,final}=withClaim(runTurnCase('c10','t5','explicit_run'),claim,capturedLeader,readbackLeader);
+ assert.deepEqual(runTurnCoaching(captured,final),{blocks:[],eligibility:{eligible:false,reason:'identity_mismatch'}});
+});
+
+// ── ONE next action (AI Conversation #69 5834275139, served OpenAI Run "C2 run" c673223) ──
+// When the run's OWN summary asks the user to repair a limit, that step IS the turn's next action:
+// no run-turn card (fragile-link or no-flagged-link) competes with it. Upstream forwarding is unchanged.
+// The summaries below are PRODUCER-GENERATED by coaching/constraint-gap-disclosure.ts, not typed here.
+const PA = {constraint_id:'agent-lane:annual_pa_salary:<=', label:'PA Salary < 40000£/year'};
+const DEADLINE_ROW = {constraint_id:'agent-lane:hire_by:<=', label:'Hire by March'};
+const withSummary = (c: ReturnType<typeof runTurnCase>, summary: string) => ({
+ captured: {...c.captured, blocks: c.captured.blocks!.map((b) => (b as {type?: string})?.type === 'analysis_result' ? {...(b as object), summary} : b)} as CapturedAnalysis,
+ final: {...c.final, analysisResult: {...(c.final.analysisResult as object), summary}} as RunTurnCoachingFinal,
+});
+const runCards = (blocks: readonly {signal_id: string}[]) => blocks.filter((b) => b.signal_id.startsWith('coach:fragile_link:') || b.signal_id.startsWith('coach:no_flagged_link:'));
+test('ONE next action: a summary asking the user to restate an unresolved limit (singular) withholds the fragile-link card (c16)',()=>{
+ const c=runTurnCase('c16','t5','explicit_run');
+ const step=buildConstraintDisclosureFromState('identity_unresolved',[PA]);
+ assert.match(step,/run the analysis again/);
+ const {captured,final}=withSummary(c,'Ran analysis on your current scenario.'+step);
+ const out=runTurnCoaching(captured,final);
+ assert.deepEqual(out.eligibility,{eligible:false,reason:'limit_repair_pending'});
+ assert.equal(runCards(out.blocks).length,0);
+});
+test('ONE next action: the plural restate step withholds the no-flagged-link card too (c10)',()=>{
+ const c=runTurnCase('c10','t5','explicit_run');
+ const {captured,final}=withSummary(c,'Ran analysis on your current scenario.'+buildConstraintDisclosureFromState('identity_unresolved',[PA,DEADLINE_ROW]));
+ const out=runTurnCoaching(captured,final);
+ assert.deepEqual(out.eligibility,{eligible:false,reason:'limit_repair_pending'});
+ assert.equal(runCards(out.blocks).length,0);
+});
+test('ONE next action: a read-back fact persisted BEFORE #1912 (legacy restate promise, base c74a4327 :303) also withholds the card',()=>{
+ const c=runTurnCase('c16','t5','explicit_run');
+ const legacy=' One limit on your model could not be checked: “PA Salary < 40000£/year”. We could not line it up with anything this analysis measures, so it was not part of the comparison. Tell me the limit you meant in your own words and I will record it; this one stays on the model. Then run the analysis again.';
+ const out=runTurnCoaching(...Object.values(withSummary(c,'Ran analysis on your current scenario.'+legacy)) as [CapturedAnalysis,RunTurnCoachingFinal]);
+ assert.deepEqual(out.eligibility,{eligible:false,reason:'limit_repair_pending'});
+});
+test('CONTROL (Paul\'s PA case, served 7b42d63+): an unchecked limit with NO repair step keeps the one card',()=>{
+ const c=runTurnCase('c16','t5','explicit_run');
+ const noStep=buildConstraintDisclosureFromState('unevaluated',[PA]);
+ assert.match(noStep,/could not be checked/);
+ assert.doesNotMatch(noStep,/run the analysis again/);
+ const out=runTurnCoaching(...Object.values(withSummary(c,'Ran analysis on your current scenario.'+noStep)) as [CapturedAnalysis,RunTurnCoachingFinal]);
+ assert.deepEqual(out.eligibility,{eligible:true});
+ assert.equal(runCards(out.blocks).length,1);
+});
+test('CONTROL: a summary with no limit sentence keeps the card (c10 no-flagged-link)',()=>{
+ const c=runTurnCase('c10','t5','explicit_run');
+ const out=runTurnCoaching(...Object.values(withSummary(c,'Ran analysis on your current scenario.')) as [CapturedAnalysis,RunTurnCoachingFinal]);
+ assert.deepEqual(out.eligibility,{eligible:true});
+ assert.equal(runCards(out.blocks).length,1);
 });

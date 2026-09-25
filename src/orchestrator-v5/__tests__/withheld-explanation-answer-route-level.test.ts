@@ -408,7 +408,7 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
       ).toEqual([]);
     });
 
-    it('(b)+(c) the DISCLOSURE is present — condition named AND repair step — the 3/4 drop', async () => {
+    it('(b)+(c) the DISCLOSURE is present — condition named, and no unproved repair — the 3/4 drop', async () => {
       const turn = await rerunTurn(app);
       // (b) which condition
       expect(turn.assistantText).toContain('Three-Year Total Cost of Ownership');
@@ -432,9 +432,12 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
         turn.assistantText,
         'the false blanket claim must not come back through any producer',
       ).not.toContain('no option can be put forward yet');
-      // (c) a repair step the user can act on
+      // (c) ⛔ 25 Sep 2026 (#69 5831708206 / 5831722994): NO restate-and-rerun
+      // promise. Nothing the disclosure is given proves a restatement changes
+      // the next Run, so it states the verdict and the residual only.
+      expect(turn.assistantText).not.toContain('Tell me the limit you meant');
       expect(turn.assistantText).toContain(
-        'Tell me the limit you meant in your own words and I will record it',
+        'This model could not check it yet, so it was not part of the comparison. It stays on the model.',
       );
     });
 
@@ -509,9 +512,9 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
         // …and the disclosure the live bodies dropped 3/4 of the time.
         expect(turn.assistantText).toContain('Three-Year Total Cost of Ownership');
         expect(turn.assistantText).toContain('could not be checked');
-        expect(turn.assistantText).toContain(
-          'Tell me the limit you meant in your own words and I will record it',
-        );
+        // 25 Sep 2026: the disclosure closes on the residual, promising nothing.
+        expect(turn.assistantText).toContain('It stays on the model.');
+        expect(turn.assistantText).not.toContain('Tell me the limit you meant');
       });
 
       it('is IDEMPOTENT — an answer already carrying the disclosure is not double-stamped', async () => {
