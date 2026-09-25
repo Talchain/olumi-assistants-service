@@ -321,6 +321,10 @@ const fakeStore = {
   readRecent: async () => [],
   readFactsFor: async () => [],
   readMostRecentPendingActions: async () => [],
+  // A COMPLETE, EMPTY durable analysis record: "never analysed" is only provable
+  // from the record, never from an empty 20-row window (dispatch.ts
+  // `deriveWriteReplyFreshness`).
+  readScenarioRunAnalysisFactsFor: async () => ({ facts: [], total_count: 0 }),
   loadGraph: async (_scenarioId: string) => {
     const appendsSoFar = appendMock.mock.calls.length;
     if (fake.failFirstReadAfterAppends !== undefined && appendsSoFar > fake.failFirstReadAfterAppends) {
