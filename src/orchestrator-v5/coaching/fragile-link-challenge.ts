@@ -20,7 +20,10 @@
  *   · the identity: `deterministicBlockId(signal_id)`.
  *   · the science badge: `resolveDskClaimProvenance` over DSK-P-003's OWN
  *     `linked_claim_id`, read from the verified bundle — no id typed here but
- *     the protocol's.
+ *     the protocol's. The badge is kept ONLY on an explicit Run whose readback
+ *     positively shows the protocol's required input, a clear winner — never on
+ *     a close call, which P-003 and T-003 both contraindicate
+ *     (`runShowsClearWinnerForP003`). The card itself never depends on it.
  *
  * ── LEADER-FREE BY CONSTRUCTION ────────────────────────────────────────────
  * The copy never names, ranks or implies a leading option, never reads
@@ -206,11 +209,72 @@ function copyPasses(copy: FragileLinkChallengeCopy): boolean {
 }
 
 /**
+ * PLoT's "clearly ahead" leader gap (`CLEARLY_AHEAD_GAP_THRESHOLD`,
+ * plot-lite-service src/assembly/decision-brief.ts @6d143fb1): the smallest
+ * top-two win-probability gap PLoT itself will call a clear lead.
+ */
+export const DSK_P003_MIN_LEADER_GAP = 0.25;
+/** TR-003's robustness clause: "robustness = 'robust' or 'moderate'" (data/dsk/v1.json). */
+const DSK_P003_ROBUSTNESS_VERDICTS: readonly string[] = Object.freeze(['robust', 'moderate']);
+
+/**
+ * Does THIS readback positively show what DSK-P-003 needs — "analysis results
+ * showing a clear winner with high win probability" (its required input), and
+ * not "a close call" (its first contraindication, and T-003's)? TR-003 is the
+ * bundle's observable form: "win probability >70% AND robustness = 'robust' or
+ * 'moderate'", never on "a close call (separation <10%)".
+ *
+ * Every conjunct must be SHOWN; an absent or malformed member fails it:
+ *   · an explicit Run — the first pass confines win probabilities, is_robust,
+ *     the verdict and the runner-up away, and always withholds the leader;
+ *   · `near_tie.is_tie === false` — PLoT's is_tie is top-two gap < 0.10
+ *     (`computeNearTie`, `NEAR_TIE_THRESHOLD`, src/trust/result-coherence.ts).
+ *     Reading it as TR-003's "separation <10%" is an INTERPRETATION: the bundle
+ *     never defines "separation";
+ *   · a real comparison — a named runner-up and a gap that is not PLoT's
+ *     single-option sentinel (`is_tie:false, gap:1.0`, "No comparison possible");
+ *   · `near_tie.gap >= DSK_P003_MIN_LEADER_GAP`;
+ *   · `is_robust === true` — ISL: recommendation_stability >= 0.7, the leader's
+ *     win share (TR-003 says ">70%"; the 0.7 boundary itself is included);
+ *   · `display_verdict` 'robust' or 'moderate' (TR-003's robustness clause);
+ *   · a named leader (`leading_option_id`).
+ * TR-003's other conditions (no pre-mortem or devil's advocate this stage;
+ * once per stage per decision) need conversation state this pure builder does
+ * not have, and are left to the science owner.
+ */
+function runShowsClearWinnerForP003(
+  result: Record<string, unknown>,
+  robustness: Record<string, unknown> | null,
+  trigger: RunTurnTrigger,
+): boolean {
+  if (trigger !== 'explicit_run') return false;
+  const nearTie = readRecord(robustness?.near_tie);
+  if (nearTie === null) return false;
+  if (nearTie.is_tie !== false) return false;
+  if (typeof nearTie.second_option_id !== 'string' || nearTie.second_option_id.length === 0) return false;
+  const gap = nearTie.gap;
+  if (typeof gap !== 'number' || !Number.isFinite(gap)) return false;
+  if (gap === 1) return false;
+  if (gap < DSK_P003_MIN_LEADER_GAP) return false;
+  if (robustness?.is_robust !== true) return false;
+  if (typeof robustness.display_verdict !== 'string' || !DSK_P003_ROBUSTNESS_VERDICTS.includes(robustness.display_verdict)) return false;
+  if (typeof result.leading_option_id !== 'string' || result.leading_option_id.length === 0) return false;
+  return true;
+}
+
+/**
  * DSK-P-003's claim badge: the protocol's OWN `linked_claim_id`, resolved from
  * the verified bundle, and kept only when the bundle links that claim back to
- * this protocol. Anything else withholds the badge, never the card.
+ * this protocol AND the run positively shows a clear winner
+ * ({@link runShowsClearWinnerForP003}). Anything else withholds the badge,
+ * never the card.
  */
-function resolveFragileLinkDskProvenance(): DskClaimProvenance | null {
+function resolveFragileLinkDskProvenance(
+  result: Record<string, unknown>,
+  robustness: Record<string, unknown> | null,
+  trigger: RunTurnTrigger,
+): DskClaimProvenance | null {
+  if (!runShowsClearWinnerForP003(result, robustness, trigger)) return null;
   const protocol = loadVerifiedDskBundle()?.objects.find(
     (o) => o.id === DSK_PROTOCOL_ID && o.type === 'protocol' && !o.deprecated,
   ) as DSKProtocol | undefined;
@@ -288,7 +352,10 @@ export function buildFragileLinkChallenge(input: FragileLinkChallengeInput): Fra
   if (!copyPasses(copy)) return { block: null, reason: 'copy_gate' };
 
   const signalId = `${SIGNAL_ID_PREFIX}${edgeIdentity}:${input.graphHash}:${input.computedAt}:${effectiveTrigger}`;
-  const dsk = resolveFragileLinkDskProvenance();
+  // The badge reads the run's own close-call and clear-winner facts. It never
+  // changes the identity: near_tie and the verdict are fixed for one
+  // (graph_hash, computed_at) run, so one block_id still names one card.
+  const dsk = resolveFragileLinkDskProvenance(result, readRecord(enrichment?.robustness), effectiveTrigger);
   const parsed = CoachingBlockSchema.safeParse({
     type: 'coaching',
     coaching_kind: RUN_TURN_COACHING_CONTRACT.block.coaching_kind,

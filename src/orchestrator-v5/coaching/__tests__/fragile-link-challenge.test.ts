@@ -27,6 +27,7 @@ import { selectGroundedCounterCase } from '../grounded-counter-case.js';
 import {
   PAYLOAD_FILE,
   buildFragileLinkChallengePayload,
+  firstPassCase,
   fixtureUrl,
   runTurnCase,
   type RunTurnCase,
@@ -118,7 +119,9 @@ describe('run-turn fragile-link challenge', () => {
       action_label: 'Pressure-test this link',
     });
     expect(card.coaching_kind).toBe('assumption_check');
-    expect(card.dsk_claim_provenance).toEqual(dskClaimFromBundle());
+    // A is "slightly ahead" (gap 0.32 but is_robust false, verdict 'fragile'): not the clear
+    // winner DSK-P-003 requires, so the badge is withheld (see the DSK-P-003 badge block below).
+    expect(Object.hasOwn(card, 'dsk_claim_provenance')).toBe(false);
     expect(card.body.length).toBeLessThanOrEqual(300);
     // A permitted leader does not license leader copy on this card.
     for (const field of USER_FACING) expect(String(card[field])).not.toMatch(LEADER_WORDS);
@@ -476,11 +479,15 @@ describe('run-turn fragile-link challenge', () => {
     const committed = JSON.parse(readFileSync(fixtureUrl(PAYLOAD_FILE), 'utf8')) as Record<string, any>;
     expect(committed).toEqual(fresh);
     expect(committed.contract_version).toBe('run-turn-coaching/v1');
-    for (const key of ['explicit_run', 'auto_first_pass', 'permitted_explicit_run']) {
+    for (const key of ['explicit_run', 'auto_first_pass', 'permitted_explicit_run', 'clear_winner_explicit_run']) {
       expect(committed[key].eligibility).toEqual({ eligible: true });
       expect(committed[key].blocks).toHaveLength(1);
       expect(CoachingBlockSchema.safeParse(committed[key].blocks[0]).success).toBe(true);
     }
+    // Exactly one badged card: the clear winner. The three c19 inputs show no clear winner.
+    const badged = Object.entries(committed).filter(([, v]) => (v as any)?.blocks?.[0]?.dsk_claim_provenance !== undefined).map(([k]) => k);
+    expect(badged).toEqual(['clear_winner_explicit_run']);
+    expect(committed.clear_winner_explicit_run.blocks[0].dsk_claim_provenance).toEqual(dskClaimFromBundle());
   });
 });
 
@@ -544,3 +551,95 @@ describe('run-turn coaching — identity carries the copy variant, captures with
   });
 });
 
+
+/**
+ * THE DSK-P-003 BADGE IS KEPT ONLY WHERE THE RUN POSITIVELY SHOWS A CLEAR WINNER.
+ *
+ * DSK-P-003's required input is "analysis results showing a clear winner with high win
+ * probability" and its first contraindication is "Do not run when the analysis shows a close
+ * call" (data/dsk/v1.json); TR-003 fires on "win probability >70% AND robustness = 'robust' or
+ * 'moderate'" and never on "a close call (separation <10%)". The card is a link check and ships
+ * either way; only the science badge depends on these conditions, and anything unshown withholds it.
+ */
+describe('DSK-P-003 badge — kept only where the run positively shows a clear winner', () => {
+  const soleCard = (c: RunTurnCase, name = ''): CoachingBlock => {
+    const out = runTurnCoaching(c.captured, c.final);
+    expect(out.eligibility, name).toEqual({ eligible: true });
+    const cards = fragileLinkCards(out.blocks);
+    expect(cards, name).toHaveLength(1);
+    expect(CoachingBlockSchema.safeParse(cards[0]).success, name).toBe(true);
+    return cards[0]!;
+  };
+  const expectedSignal = (c: RunTurnCase, trigger: 'explicit_run' | 'auto_first_pass'): string => {
+    const readback = c.final.analysisResult as { enrichment: unknown };
+    const grounded = selectGroundedCounterCase(readback.enrichment as never).grounded!;
+    return `coach:fragile_link:${grounded.edgeIdentity}:${c.turn.graph_hash}:${c.turn.analysis_state.run_state.computed_at}:${trigger}`;
+  };
+
+  it('BADGE-RED-1: a near tie (c19-C, is_tie true) → the card ships WITHOUT the badge, identity unchanged, on both triggers', () => {
+    const explicit = runTurnCase('C', 'A2r', 'explicit_run');
+    expect(explicit.turn.tools_called).toContain('run_analysis');
+    expect(explicit.turn.analysis_result.enrichment.robustness.near_tie).toMatchObject({ is_tie: true });
+    const firstPass = firstPassCase('C', 'A2r');
+    // Control: the first pass really is the confined shape.
+    const confined = (firstPass.final.analysisResult as { enrichment: { robustness: Record<string, unknown> } }).enrichment.robustness;
+    expect(Object.keys(confined).sort()).toEqual(['fragile_edges', 'near_tie', 'robust_edges']);
+    expect(confined.near_tie).toMatchObject({ is_tie: true });
+    for (const [trigger, c] of [['explicit_run', explicit], ['auto_first_pass', firstPass]] as const) {
+      const card = soleCard(c, trigger);
+      expect(Object.hasOwn(card, 'dsk_claim_provenance'), trigger).toBe(false);
+      expect(card.signal_id, trigger).toBe(expectedSignal(c, trigger));
+      expect(card.block_id, trigger).toBe(deterministicBlockId(expectedSignal(c, trigger)));
+      expect(card.title, trigger).toBe('Pressure-test a sensitive link');
+    }
+  });
+
+  it('BADGE-2 contrast: a clear winner (c16: not a tie, gap ≥ 0.25, is_robust, verdict moderate, leader named) keeps the badge on the explicit Run only', () => {
+    const c = runTurnCase('c16', 't5', 'explicit_run');
+    expect(c.turn.analysis_result.enrichment.robustness).toMatchObject({ is_robust: true, display_verdict: 'moderate', near_tie: { is_tie: false } });
+    const card = soleCard(c);
+    expect(card.dsk_claim_provenance).toEqual(dskClaimFromBundle());
+    expect(card.signal_id).toBe(expectedSignal(c, 'explicit_run'));
+    // The first pass of the SAME run cannot show a clear winner (verdict, is_robust, leader and
+    // runner-up are confined away), so it withholds the badge — never the card.
+    const firstPass = soleCard(firstPassCase('c16', 't5'), 'c16 first pass');
+    expect(Object.hasOwn(firstPass, 'dsk_claim_provenance')).toBe(false);
+  });
+
+  it('BADGE-2b: the shipped goldens do not show a clear winner → no badge (c19-A slightly ahead and not robust; c19-B leader withheld)', () => {
+    for (const [letter, turn, trigger] of [['A', 't5', 'explicit_run'], ['A', 't7', 'explicit_run'], ['B', 't2', 'explicit_run'], ['B', 't2', 'auto_first_pass']] as const) {
+      const card = soleCard(runTurnCase(letter, turn, trigger), `${letter}/${turn}/${trigger}`);
+      expect(Object.hasOwn(card, 'dsk_claim_provenance'), `${letter}/${turn}/${trigger}`).toBe(false);
+    }
+  });
+
+  it('BADGE-3 fail closed: each unshown or failing condition withholds the badge, never the card', () => {
+    const rob = (r: Record<string, any>) => r.enrichment.robustness as Record<string, any>;
+    const rows: [string, (r: Record<string, any>) => void, ('explicit_run' | 'auto_first_pass')?][] = [
+      ['near_tie absent', (r) => { delete rob(r).near_tie; }],
+      ['near_tie null', (r) => { rob(r).near_tie = null; }],
+      ['near_tie an array', (r) => { rob(r).near_tie = [rob(r).near_tie]; }],
+      ["is_tie the string 'false'", (r) => { rob(r).near_tie.is_tie = 'false'; }],
+      ['is_tie undefined', (r) => { delete rob(r).near_tie.is_tie; }],
+      ['is_tie true', (r) => { rob(r).near_tie.is_tie = true; }],
+      ['no runner-up (second_option_id absent)', (r) => { delete rob(r).near_tie.second_option_id; }],
+      ['runner-up null (single-option branch)', (r) => { rob(r).near_tie.second_option_id = null; }],
+      ['gap 1.0 (no comparison possible)', (r) => { rob(r).near_tie.gap = 1; }],
+      ['gap below the clear-winner band', (r) => { rob(r).near_tie.gap = 0.24; }],
+      ['gap not a number', (r) => { rob(r).near_tie.gap = '0.59'; }],
+      ['is_robust false', (r) => { rob(r).is_robust = false; }],
+      ['is_robust absent', (r) => { delete rob(r).is_robust; }],
+      ["display_verdict 'fragile'", (r) => { rob(r).display_verdict = 'fragile'; }],
+      ['display_verdict absent', (r) => { delete rob(r).display_verdict; }],
+      ['leader withheld (leading_option_id null)', (r) => { r.leading_option_id = null; }],
+      ['automatic first pass on the full explicit shape', () => {}, 'auto_first_pass'],
+    ];
+    // Contrast: the unmodified run keeps the badge.
+    expect(soleCard(runTurnCase('c16', 't5', 'explicit_run')).dsk_claim_provenance).toEqual(dskClaimFromBundle());
+    for (const [name, mutate, trigger = 'explicit_run'] of rows) {
+      const card = soleCard(withResult(runTurnCase('c16', 't5', trigger), mutate), name);
+      expect(Object.hasOwn(card, 'dsk_claim_provenance'), name).toBe(false);
+      expect(card.title, name).toBe('Pressure-test a sensitive link');
+    }
+  });
+});

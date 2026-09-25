@@ -25,6 +25,13 @@
         "trigger": "explicit_run",
         "source": "output/paul-test-20260923/construction-witness/raw/c19-8428207-A.json",
         "source_sha256": "faf531b7fd71985df6fcbeca3209a5292d82d16e13f7cadef30fd941276c8351"
+      },
+      "clear_winner_explicit_run": {
+        "fixture": "c16-fd312b5-A.run-turns.trimmed.json",
+        "turn": "t5",
+        "trigger": "explicit_run",
+        "source": "output/paul-test-20260923/construction-witness/raw/c16-fd312b5-A.json",
+        "source_sha256": "bf3b828001894c6daea6322b5f9ab2055a26916d78bf6ae06bd35209ea1876ab"
       }
     },
     "capture_note": "Each capture is reconstructed from the same served turn (see fragile-link-challenge-fixtures.ts)."
@@ -53,13 +60,7 @@
         ],
         "priority_rank": 15,
         "action_label": "Pressure-test this link",
-        "action_prompt": "Talk me through what would change if the link from Pro subscriber base to MRR were weaker or stronger. Don't change the model or re-run anything yet.",
-        "dsk_claim_provenance": {
-          "claim_id": "DSK-T-003",
-          "claim_title": "Consider-the-opposite as a debiasing strategy",
-          "evidence_strength": "medium",
-          "protocol_id": "DSK-P-003"
-        }
+        "action_prompt": "Talk me through what would change if the link from Pro subscriber base to MRR were weaker or stronger. Don't change the model or re-run anything yet."
       }
     ],
     "eligibility": {
@@ -89,13 +90,7 @@
         ],
         "priority_rank": 15,
         "action_label": "Pressure-test this link",
-        "action_prompt": "Talk me through what would change if the link from Pro subscriber base to MRR were weaker or stronger. Don't change the model or re-run anything yet.",
-        "dsk_claim_provenance": {
-          "claim_id": "DSK-T-003",
-          "claim_title": "Consider-the-opposite as a debiasing strategy",
-          "evidence_strength": "medium",
-          "protocol_id": "DSK-P-003"
-        }
+        "action_prompt": "Talk me through what would change if the link from Pro subscriber base to MRR were weaker or stronger. Don't change the model or re-run anything yet."
       }
     ],
     "eligibility": {
@@ -125,7 +120,37 @@
         ],
         "priority_rank": 15,
         "action_label": "Pressure-test this link",
-        "action_prompt": "Talk me through what would change if the link from Developer capacity to Velocity were weaker or stronger. Don't change the model or re-run anything yet.",
+        "action_prompt": "Talk me through what would change if the link from Developer capacity to Velocity were weaker or stronger. Don't change the model or re-run anything yet."
+      }
+    ],
+    "eligibility": {
+      "eligible": true
+    }
+  },
+  "clear_winner_explicit_run": {
+    "blocks": [
+      {
+        "block_id": "b7f1c1e0-9afb-5028-9612-c147ffc84c34",
+        "signal_id": "coach:fragile_link:technical_coordination→engineering_velocity:4b661d3c711585ee:2026-09-24T10:19:54.218Z:explicit_run",
+        "created_at": "2026-09-24T10:19:54.218Z",
+        "source_handler": "run_analysis",
+        "graph_hash_at_generation": "4b661d3c711585ee",
+        "freshness": "fresh",
+        "type": "coaching",
+        "coaching_kind": "assumption_check",
+        "title": "Pressure-test a sensitive link",
+        "body": "The robustness check found the result sensitive to the link from Technical coordination to Engineering velocity — worth checking what the estimate of how strongly Technical coordination drives Engineering velocity rests on.",
+        "source": "deterministic_signal",
+        "target_refs": [
+          {
+            "id": "technical_coordination→engineering_velocity",
+            "label": "Technical coordination → Engineering velocity",
+            "kind": "edge"
+          }
+        ],
+        "priority_rank": 15,
+        "action_label": "Pressure-test this link",
+        "action_prompt": "Talk me through what would change if the link from Technical coordination to Engineering velocity were weaker or stronger. Don't change the model or re-run anything yet.",
         "dsk_claim_provenance": {
           "claim_id": "DSK-T-003",
           "claim_title": "Consider-the-opposite as a debiasing strategy",
