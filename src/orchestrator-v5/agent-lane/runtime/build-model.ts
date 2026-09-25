@@ -552,6 +552,30 @@ function sayCoverageGaps(p: { level_gaps: readonly LevelGap[]; baseline_gaps: re
   ];
 }
 
+/**
+ * ⛔ A REPAIR MAY ADD WHAT AN OPTION DOES, NEVER TAKE IT AWAY (pre-review 5828705574).
+ * Coverage is counted in gaps, so a retry that deleted an option's `changes` would
+ * "close" them with no level at all and leave the option changing nothing. Every
+ * factor an option acted on in the first draft — through `changes`, a level, or a
+ * directed option→factor link — must still be acted on by that option in the retry.
+ */
+function keepsEveryAction(before: CandidateModel, after: CandidateModel): boolean {
+  const actions = (model: CandidateModel, option: CandidateModel['options'][number]): Set<string> => {
+    const factors = new Set(model.factors.map((f) => f.label));
+    return new Set([
+      ...(option.changes ?? []),
+      ...(option.interventions ?? []).map((i) => i.factor_label),
+      ...model.links.filter((l) => l.from === option.label && l.direction !== 'unknown').map((l) => l.to),
+    ].filter((f) => factors.has(f)));
+  };
+  return before.options.every((o) => {
+    const kept = after.options.find((x) => x.label === o.label);
+    if (kept === undefined) return false;
+    const now = actions(after, kept);
+    return [...actions(before, o)].every((f) => now.has(f));
+  });
+}
+
 /** A repair may replace an invalid direct edge, but must preserve its signed path. */
 function retainsRiskHypotheses(before: CandidateModel, after: CandidateModel): boolean {
   const paths = (model: CandidateModel, from: string, to: string): Set<number> => {
@@ -697,7 +721,9 @@ export async function buildModelFromBrief(
           // for the retry it must cover strictly MORE (c22).
           gapCount(retryPreparation) <= gapCount(preparation) &&
           (needsSizeRetry || preparation.mechanism_issues.length > 0 || gapCount(retryPreparation) < gapCount(preparation)) &&
-          (repairIssues(preparation).length === 0 || retainsRiskHypotheses(candidate, retryCandidate))
+          (repairIssues(preparation).length === 0 || retainsRiskHypotheses(candidate, retryCandidate)) &&
+          // A compaction may shed what the model added; a repair may not shed an action.
+          (needsSizeRetry || keepsEveryAction(candidate, retryCandidate))
         ) {
           const kept = new Set(retryAdmitted.nodes.map(nodeIdentity));
           leftOut = admitted.nodes

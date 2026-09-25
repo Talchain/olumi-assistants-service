@@ -90,6 +90,16 @@ describe('an oversized first model gets exactly ONE bounded retry', () => {
     expect(registered(dp.paths)).toBe(1); // ONE graph write, not two
   });
 
+  it('a compaction may shed a model-added factor an option acted on — the repair-only "keep every action" guard does not apply to it', async () => {
+    const first = candidate(20);
+    first.options[0] = { ...first.options[0]!, changes: ['Secondary factor 10'] as never[] };
+    const s = structuredSequence(first, candidate(3));
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, dispatcher().d, s.fn);
+    expect(out['size_retried']).toBe(true);
+    expect(out['within_compact_limits']).toBe(true);
+    expect(s.calls).toHaveLength(2);
+  });
+
   it('passes the budget and the protect-the-brief rule in the retry instruction', async () => {
     const s = structuredSequence(candidate(20), candidate(3));
     await buildModelFromBrief(SCENARIO, BRIEF, dispatcher().d, s.fn);
