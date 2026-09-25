@@ -1,0 +1,74 @@
+diff --git a/src/orchestrator-v5/agent-lane/admit-model.ts b/src/orchestrator-v5/agent-lane/admit-model.ts
+index b383285..706ed90 100644
+--- a/src/orchestrator-v5/agent-lane/admit-model.ts
++++ b/src/orchestrator-v5/agent-lane/admit-model.ts
+@@ -1277,7 +1277,53 @@ export function admitCandidateModel(
+     } as RepairEntry);
+   }
+ 
+-  const allEdges = [...topologyEdges, ...heldStatusQuoEdges, ...mechanismEdges];
++  /**
++   * ⛔ AN OPTION OLUMI ADDED MUST NOT BLOCK THE USER'S RUN (served CEE 21e3b38,
++   * eng-hiring-2, AQ-FMC). The constructor added "Continue current staffing"; it was
++   * not flagged, not an idiom, so it stayed inert and readiness refused the first Run
++   * with `needs_user_mapping` for an option the user never gave. The declared-status-
++   * quo path (#1873) holds such an option when the drafter flags it; this is the
++   * backstop when it does not.
++   *
++   * Withheld ONLY when every one of these holds — anything else stays and is asked:
++   *  · Olumi added it (`provenance` is not `explicit`): a user's option is theirs, and
++   *    an inert one raises the honest mapping question;
++   *  · it has no outgoing edge at all after status-quo wiring (not held, acts on no
++   *    factor, carries no hypothesis);
++   *  · at least two options remain, so a comparison is still possible.
++   * It is named to the user, with how to bring it back — never a silent deletion.
++   * The estate's "keep and name unreachable nodes" rule (below) protects strategic
++   * content; an invented option that does nothing has none, and keeping it blocks
++   * the whole analysis.
++   */
++  const edgesBeforeWithholding = [...topologyEdges, ...heldStatusQuoEdges, ...mechanismEdges];
++  const optionIdsNow = nodes.filter((n) => n.kind === 'option').map((n) => n.id);
++  const inventedInert = model.options
++    .filter((o) => o.provenance !== 'explicit')
++    .map((o) => ids.get(o.label))
++    .filter((id): id is string => id !== undefined && optionIdsNow.includes(id))
++    .filter((id, i, all) => all.indexOf(id) === i)
++    .filter((id) => !edgesBeforeWithholding.some((e) => e.from === id));
++  const withheldOptionIds = new Set(optionIdsNow.length - inventedInert.length >= 2 ? inventedInert : []);
++  for (const id of withheldOptionIds) {
++    const label = labelById.get(id) ?? id;
++    nodes.splice(nodes.findIndex((n) => n.id === id), 1);
++    for (let i = unresolved.length - 1; i >= 0; i--) {
++      const w = unresolved[i]!;
++      if (w.reason === 'option_changes_nothing' && ids.get(w.from) === id) unresolved.splice(i, 1);
++    }
++    loss.push({
++      field_path: `nodes[${id}].invented_option_withheld`,
++      before: label,
++      after: null,
++      reason:
++        `I had added '${label}' myself, but it does not say what it would change, so I left it out ` +
++        'rather than have it stop the analysis. If you want it compared, say what it would change and I will add it back.',
++      severity: 'warn',
++    } as RepairEntry);
++  }
++
++  const allEdges = edgesBeforeWithholding.filter((e) => !withheldOptionIds.has(e.from) && !withheldOptionIds.has(e.to));
+ 
+   /**
+    * ⭐ A NODE THAT CANNOT REACH THE GOAL BLOCKS THE WHOLE ANALYSIS.
+diff --git a/src/orchestrator-v5/agent-lane/runtime/build-model.ts b/src/orchestrator-v5/agent-lane/runtime/build-model.ts
+index 73c1a30..ed58801 100644
+--- a/src/orchestrator-v5/agent-lane/runtime/build-model.ts
++++ b/src/orchestrator-v5/agent-lane/runtime/build-model.ts
+@@ -838,7 +838,9 @@ export async function buildModelFromBrief(
+       ...admitted.loss
+         // `status_quo_held`: the held status quo is a machine-inferred MEANING
+         // (`admit-model.ts`, `wireInertStatusQuo`), so it must be said and correctable.
+-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held)$/.test(l.field_path))
++        // `invented_option_withheld`: an option Olumi added that did nothing was left out
++        // rather than block the run, so the user is told and can bring it back.
++        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|invented_option_withheld)$/.test(l.field_path))
+         .map((l) => l.reason),
+     ].filter((s): s is string => s !== undefined),
+   };
