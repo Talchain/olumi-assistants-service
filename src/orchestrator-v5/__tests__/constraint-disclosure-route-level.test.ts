@@ -2088,12 +2088,23 @@ describe('2.349 R2 — gap 5 at the serialised HTTP boundary', () => {
     // can never change the outcome"* for the out-of-scope class.
     //
     // So it binds instead to the part that identifies the VOICE and cannot
-    // move with the arm — the consequence sentence — plus the invariant the
-    // test is actually about: a repair the user can act on is still offered.
+    // move with the arm — the consequence sentence — plus what the arm must
+    // still say.
+    //
+    // ⚠ REBOUND AGAIN (25 Sep). The arm used to offer "tell me which part of
+    // your model it applies to and I will record it". Served `e39f6e0`
+    // disproved that ask: the limit already sits on the derived target the
+    // user would name, and the re-run stayed unchecked (2/2); a saved starting
+    // level on that target did not help either (PLoT anchors a derived target
+    // only by a delta frame or every-option pins). The arm now names what is
+    // missing, says plainly that it cannot be added from this conversation,
+    // and keeps the residual — so this binds to that, and to the ask's absence.
     expect(turn.assistantText).toContain(
       'We could not line it up with anything this analysis measures',
     );
-    expect(turn.assistantText).toContain('and I will record it');
+    expect(turn.assistantText).toContain('neither can be added from this conversation yet');
+    expect(turn.assistantText).toContain('stays on the model unchecked');
+    expect(turn.assistantText).not.toContain('and I will record it');
   });
 
   it('MIXED: a second, genuinely unscored constraint still withholds AND both are disclosed', async () => {
