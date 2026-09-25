@@ -78,7 +78,15 @@ export function buildCandidateSchema(): Record<string, unknown> {
       target_stated: { type: 'boolean' },
       value: { anyOf: [{ type: 'number' }, { type: 'null' }] }, unit: { type: 'string' },
       horizon_months: { anyOf: [{ type: 'integer' }, { type: 'null' }] }, provenance,
-    }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance']),
+      // ⭐ THE GOAL'S CURRENT LEVEL, in the factor pattern (`baseline_known` beside a
+      // nullable value). Without it a level-framed goal has no baseline and ISL
+      // refuses Goal fit (`missing_goal_baseline`). REQUIRED so strict output must
+      // say "not given" (null) rather than omit it — an absent key is how silent
+      // defaults happen. `admit-model.ts` writes it; nothing is derived from the target.
+      baseline_known: { type: 'boolean', description: 'True only when the brief states the goal metric\u2019s CURRENT level.' },
+      baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }], description: 'The goal metric\u2019s current level in the goal unit, exactly as the brief states it; null when the brief does not. Never an estimate, never the target.' },
+      baseline_provenance: provenance,
+    }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance', 'baseline_known', 'baseline_value', 'baseline_provenance']),
     constraints: { type: 'array', items: obj({
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
       value: { type: 'number' }, unit: { type: 'string' }, provenance,
@@ -144,6 +152,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
 export const BUILD_INSTRUCTIONS = [
   'Produce a complete causal decision model from the brief in ONE pass.',
   'Preserve exact user facts, numbers, constraint semantics and time horizon. The first model must support a PROVISIONAL calculation before user adoption: provide defensible starting estimates where the brief gives no baseline, mark those factors ai_proposed with baseline_known:false, and explain the uncertainty in unknowns. These are modelling assumptions, never measurements or user-validated facts. If no defensible estimate is possible, leave it null and name the specific unresolved input.',
+  'Record the goal metric\u2019s CURRENT level in goal.baseline_value, in the goal unit. When the brief states it: baseline_known true, baseline_provenance "explicit". When it does not, leave baseline_value null with baseline_known false. Do not estimate it: a guessed current level would set the chance of reaching the target on a guess. It is where things stand today, never the target.',
   'For each option fill `interventions` with its factor settings. value_kind:"absolute" means the resulting total or level; value_kind:"additional" means a signed change from the same factor baseline. For hiring, adding two to a proposed baseline of five means total seven, never total two. Record the user-stated addition as explicit but keep an estimated resulting level ai_proposed. Keep one unit and plausible_max frame per factor across all baselines and options.',
   'Mark the option that keeps things as they are now with is_status_quo:true \u2014 at most one option, whatever it is called \u2014 and give it no levels; every other option has is_status_quo:null.',
   'Connect options to the controllable factors they change, then through supported causal mechanisms to risks and the goal. Never emit a direct option-to-risk link: it cannot be interpreted as an option setting a risk value. Retain each meaningful risk hypothesis, its sign and its downstream path; express its exposure through a causal factor or mediator, rather than deleting the risk or claiming equal exposure.',
@@ -317,6 +326,13 @@ export function retrySchemaPinningGoal(goal: CandidateModel['goal']): Record<str
     unit: { type: 'string', enum: [goal.unit] },
     horizon_months: goal.horizon_months === null ? { type: 'null' } : { type: 'integer', enum: [goal.horizon_months] },
     provenance: { type: 'string', enum: [goal.provenance] },
+    // The current level is part of the goal, so it is pinned too; an absent value
+    // (a candidate from before the field) pins to "not given".
+    baseline_known: { type: 'boolean', enum: [goal.baseline_known === true] },
+    baseline_value: typeof goal.baseline_value === 'number'
+      ? { type: 'number', enum: [goal.baseline_value] }
+      : { type: 'null' },
+    baseline_provenance: { type: 'string', enum: [goal.baseline_provenance ?? goal.provenance] },
   };
   return schema;
 }
@@ -906,7 +922,9 @@ export async function buildModelFromBrief(
       ...admitted.loss
         // `status_quo_held`: the held status quo is a machine-inferred MEANING
         // (`admit-model.ts`, `wireInertStatusQuo`), so it must be said and correctable.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction)$/.test(l.field_path))
+        // `observed_state.baseline`: a goal's current level that could not be carried
+        // (`admit-model.ts`) — the user is told why, and what would let it count.
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

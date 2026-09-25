@@ -36,7 +36,7 @@ function hiring(statusQuo: Partial<Opt> & { label: string }, extra: Opt[] = []):
     interventions: [{ factor_label: factor, value, value_kind: 'absolute', unit: 'hires', provenance: 'explicit' } as never],
   });
   return {
-    goal: { metric: 'Velocity', operator: '>=', target_stated: false, value: null, unit: 'points', horizon_months: null, provenance: 'explicit' },
+    goal: { metric: 'Velocity', operator: '>=', target_stated: false, value: null, unit: 'points', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit' },
     constraints: [],
     options: [
       lever('Hire a Tech Lead', 'Tech leads hired', 1),

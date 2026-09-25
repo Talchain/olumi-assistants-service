@@ -58,9 +58,10 @@ const GTM = (goal: Record<string, unknown>) => ({
 
 // `target_stated: true` — both briefs here DO name £3m, and the field is now required
 // by `buildCandidateSchema`. The live-schema guard below is what caught its absence,
-// which is the one part of that guard this change can vouch for.
-const WITH_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, value: 3000000, unit: 'GBP', horizon_months: 18, provenance: 'explicit' });
-const NO_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, value: 3000000, unit: 'GBP', horizon_months: null, provenance: 'explicit' });
+// which is the one part of that guard this change can vouch for. The goal's current
+// level (`baseline_*`, #1840) is required the same way; neither brief states one.
+const WITH_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, value: 3000000, unit: 'GBP', horizon_months: 18, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit' });
+const NO_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, value: 3000000, unit: 'GBP', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit' });
 
 /**
  * ⭐ THE FIXTURE MUST BE ONE THE REAL SCHEMA WOULD ACCEPT. A test in this area once
