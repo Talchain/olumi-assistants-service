@@ -34,7 +34,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { admitCandidateModel, findMechanismPath, type CandidateModel } from '../admit-model.js';
+import { admitCandidateModel, canonicalLabel, findMechanismPath, type CandidateModel } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -601,22 +601,26 @@ function keepsEveryUserNumber(firstRaw: CandidateModel, firstPrepared: Candidate
   // every option (or factor) object of one label into ONE node, applying each
   // object's levels in turn, so a duplicate object can overwrite the user's level
   // wherever this guard looks. Two objects sharing a label mean "which one?".
-  const unique = (labels: string[]) => new Set(labels).size === labels.length;
+  // ⛔ Sharing a label is judged by ADMISSION'S identity rule (`canonicalLabel`:
+  // case, trim, whitespace), never exact strings (pre-review 5829776660) — and the
+  // guard's own lookups below use the same rule.
+  const unique = (labels: string[]) => new Set(labels.map(canonicalLabel)).size === labels.length;
   if (!unique(retryRaw.options.map((o) => o.label)) || !unique(retryRaw.factors.map((f) => f.label))) return false;
+  const is = (a: string) => (b: string) => canonicalLabel(a) === canonicalLabel(b);
   type Iv = NonNullable<CandidateModel['options'][number]['interventions']>[number];
   const same = (a: Iv, b: Iv) => a.value === b.value && a.unit === b.unit && a.provenance === b.provenance
     && (a as Iv & { value_kind?: string }).value_kind === (b as Iv & { value_kind?: string }).value_kind;
   const baselinesKept = firstRaw.factors
     .filter((f) => f.baseline_known && f.provenance === 'explicit' && typeof f.baseline_value === 'number')
     .every((f) => {
-      const kept = retryRaw.factors.filter((g) => g.label === f.label);
+      const kept = retryRaw.factors.filter((g) => is(f.label)(g.label));
       return kept.length > 0 && kept.every((g) => g.baseline_known && g.provenance === 'explicit' && g.baseline_value === f.baseline_value);
     });
   const levelsKept = firstRaw.options.every((o) => (o.interventions ?? [])
     .filter((i) => i.provenance === 'explicit')
     .every((i) => {
-      const prepared = (firstPrepared.options.find((x) => x.label === o.label)?.interventions ?? []).filter((j) => j.factor_label === i.factor_label);
-      const carriers = (retryRaw.options.find((x) => x.label === o.label)?.interventions ?? []).filter((j) => j.factor_label === i.factor_label);
+      const prepared = (firstPrepared.options.find((x) => is(o.label)(x.label))?.interventions ?? []).filter((j) => is(i.factor_label)(j.factor_label));
+      const carriers = (retryRaw.options.find((x) => is(o.label)(x.label))?.interventions ?? []).filter((j) => is(i.factor_label)(j.factor_label));
       if (carriers.length === 0) return prepared.length === 0;
       return carriers.every((c) => same(c, i) || prepared.some((p) => same(c, p)));
     }));
