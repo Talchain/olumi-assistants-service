@@ -1,0 +1,21 @@
+{
+ "id": "D1.F.rep1",
+ "state": "D1",
+ "arm": "F",
+ "rep": 1,
+ "raw": "I can compare the two hiring routes, but the initial model build was refused: it produced 32 links, above the 30-link limit. No model was created.\n\nWould you like me to rebuild a deliberately lean version containing only the two options, the six‑month horizon, faster delivery, less rework, and the onboarding diversion risk? Any starting figures would remain clearly labelled as Olumi estimates.",
+ "visible": "I can compare the two hiring routes, but the initial model build was refused: it produced 32 links, above the 30-link limit. No model was created.\n\nWould you like me to rebuild a deliberately lean version containing only the two options, the six‑month horizon, faster delivery, less rework, and the onboarding diversion risk? Any starting figures would remain clearly labelled as Olumi estimates.\n\nThe model was not built: it came back larger than a first model can be, even after one attempt to make it more compact — ask me to build it again, or tell me which options and factors matter most.",
+ "gate_changed": false,
+ "stripped": [],
+ "owed": [],
+ "status": "The model was not built: it came back larger than a first model can be, even after one attempt to make it more compact — ask me to build it again, or tell me which options and factors matter most.",
+ "not_adopted": null,
+ "suggested_actions": [
+  {
+   "id": "agent-rebuild-model",
+   "label": "Build it again",
+   "message": "Build the model again from my brief."
+  }
+ ],
+ "blocks": []
+}

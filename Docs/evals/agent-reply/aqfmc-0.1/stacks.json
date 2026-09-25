@@ -1,0 +1,13 @@
+{
+ "V1": {
+  "fp3_sha256": "06a876d3d4fa74cd37c7e75f1ec62952f4a8a01d892badb23538ea1526fba8af",
+  "chars": 14123,
+  "v02_sha256": "3d979e8406693be42d3b340fd245d76a501c4b1c191d5ffaa1353f2f0380ba32"
+ },
+ "V2": {
+  "fp3_sha256": "7591895854143d30d87d3fe3ed03af6bf9d4e6a0e2b289f4b09a6c27cb89a516",
+  "chars": 15175,
+  "v02_sha256": "3d979e8406693be42d3b340fd245d76a501c4b1c191d5ffaa1353f2f0380ba32"
+ },
+ "agent_differs": true
+}

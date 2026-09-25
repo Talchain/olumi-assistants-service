@@ -1,0 +1,11 @@
+{
+ "phase": "D2",
+ "locked_at": "2026-09-25T01:06:38.337Z",
+ "key_file_sha256": "98660a0ac35e80cc19e06436f5ab3b3c72042b9972b180b4522b4daf3a1f03a6",
+ "prereg_sha256": "3e2ebf1cde2f8e9de6edc59c57e2aebb3b05a6ee78e512f87e7c42ea9c01aea9",
+ "files": {
+  "D2.rep1.scores.json": "20e83bd9cf6b4c1f35f42c7738618905e46b6974eb100b5b551c66ef2561697f",
+  "D2.rep2.scores.json": "5fa900223d0bd7a23b9f170a04dea2328f0ebb72977384ef980ee3a37fa500a5",
+  "D2.rep3.scores.json": "aa5099f3129ddcc6062bb306ab699159aa9d1cb5feb848e7d6965c864f95c755"
+ }
+}

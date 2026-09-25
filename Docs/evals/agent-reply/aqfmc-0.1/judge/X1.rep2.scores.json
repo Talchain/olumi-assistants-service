@@ -1,0 +1,254 @@
+{
+ "state": "X1",
+ "rep": 2,
+ "at": "2026-09-25T01:13:15.440Z",
+ "http": 200,
+ "error": null,
+ "tries": 1,
+ "latency_ms": 88524,
+ "request_sha256": "09925ed9c165afcb3bde6fec7ff84b8f1e3c89cdd07a1b7e8bfe1c2a4c8ea7f2",
+ "response_id": "resp_01f3c9d4e6e6612e006ab5ca53334487d2abc0f23f9d28ad60",
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 9775,
+  "input_tokens_details": {
+   "cache_write_tokens": 6792,
+   "cached_tokens": 2980
+  },
+  "output_tokens": 5565,
+  "output_tokens_details": {
+   "reasoning_tokens": 3106
+  },
+  "total_tokens": 15340
+ },
+ "status": "completed",
+ "scores": {
+  "A": {
+   "raw": {
+    "scores": {
+     "concise": 2,
+     "shape": 1,
+     "decisive_caveat": 1,
+     "next_move": 2,
+     "questions": 1,
+     "leader_honesty": 2,
+     "nothing_invented": 2,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 0,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "About 93 words; the extra detail is chiefly the proposed figures and caveats.",
+     "shape": "Clear opening and action, but it uses four bullets rather than at most three.",
+     "decisive_caveat": "It retains the on-time-dispatch outcome, pre-readiness output risk, and lack of analysis, but does not state the inclusive capital constraint.",
+     "next_move": "Approval or correction of the single proposed assumption set is supported by the offered proposal controls.",
+     "questions": "It asks for approval/correction rather than posing one explicit question.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "All proposal values and the two additional options are present in the supplied proposed starting point.",
+     "attribution": "The numerical values are explicitly identified as assumptions rather than measurements.",
+     "provisional_vs_validated": "It says that no analysis has run and does not treat the proposal as adopted.",
+     "fidelity": "It omits the stated operator “at most” for the £40,000 constraint and does not disclose the actual unlinked/excluded option-factor levels.",
+     "uncertainty": "It proportionately identifies the values as assumptions and says analysis has not run.",
+     "useful_next_step": "Adopting or correcting the assumptions is the useful prerequisite to analysis."
+    },
+    "gates": {
+     "truth_fidelity": "PASS",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 93,
+    "questions": 0,
+    "requests_for_information": [],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "fidelity",
+      "span": "“**Replace:** £40,000; 80 installation hours; 98% reliability; 6,500 orders/quarter.”",
+      "source": "/0/content/0/text: “Capital spend must be at most £40,000”; and /4/output/not_linked, which says Repair–Installation downtime, Repair–Packing-line capacity, and Continue current line–Installation downtime were left out."
+     }
+    ]
+   },
+   "full": {
+    "scores": {
+     "concise": 0,
+     "shape": 0,
+     "decisive_caveat": 1,
+     "next_move": 2,
+     "questions": 0,
+     "leader_honesty": 2,
+     "nothing_invented": 2,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 0,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "The visible response is about 174 words and includes a long four-question server disclosure after the model response.",
+     "shape": "Four bullets and the appended list of open questions violate the prescribed compact shape.",
+     "decisive_caveat": "It retains the on-time-dispatch outcome, pre-readiness output risk, and lack of analysis, but does not state the inclusive capital constraint.",
+     "next_move": "The visible controls support approval or amendment of the one proposal.",
+     "questions": "The server disclosure presents four open information questions, exceeding the default one-question limit.",
+     "leader_honesty": "No ranking or leader claim appears.",
+     "nothing_invented": "The visible values, options, exclusions context, and status are supported by the supplied state.",
+     "attribution": "Proposal figures are called assumptions; the visible status does not recast them as measurements.",
+     "provisional_vs_validated": "The response says analysis could not run and does not call the proposed figures validated.",
+     "fidelity": "The visible response still omits “at most” and the actual excluded/unlinked levels.",
+     "uncertainty": "It labels the figures as assumptions and visibly explains that analysis cannot run yet.",
+     "useful_next_step": "The approval/amendment path remains useful and is provided through the visible controls."
+    },
+    "gates": {
+     "truth_fidelity": "PASS",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 174,
+    "questions": 4,
+    "requests_for_information": [
+     "What are the expected capital costs of repair, full replacement, and a phased replacement?",
+     "How many installation-downtime hours would a full or phased replacement require before the replacement is ready?",
+     "What reliability and packing-capacity improvement is expected from repair versus replacement?",
+     "What is the current packing-line capacity and current number of orders dispatched on time per quarter?"
+    ],
+    "duplicate_statements": 1,
+    "evidence": [
+     {
+      "item": "concise",
+      "span": "“Questions this model does not answer yet: What are the expected capital costs of repair, full replacement, and a phased replacement? How many installation-downtime hours would a full or phased replacement require before the replacement is ready? What reliability and packing-capacity improvement is expected from repair versus replacement? What is the current packing-line capacity and current number of orders dispatched on time per quarter?”",
+      "source": "FULL server-owned disclosure / build_model_from_brief output / open_questions."
+     },
+     {
+      "item": "shape",
+      "span": "“These figures test whether replacement’s later capacity/reliability gain outweighs lost output before readiness. Approve these assumptions, or correct any figures. The first analysis could not run yet: Review all 4 readiness issues together before analysis. The model was saved. Questions this model does not answer yet: …”",
+      "source": "FULL visible response; server-owned disclosure / build_model_from_brief output / first_analysis and open_questions."
+     },
+     {
+      "item": "questions",
+      "span": "“What are the expected capital costs …? How many installation-downtime hours …? What reliability and packing-capacity improvement …? What is the current packing-line capacity …?”",
+      "source": "FULL server-owned disclosure / build_model_from_brief output / open_questions."
+     },
+     {
+      "item": "fidelity",
+      "span": "“**Replace:** £40,000; 80 installation hours; 98% reliability; 6,500 orders/quarter.”",
+      "source": "/0/content/0/text: “Capital spend must be at most £40,000”; and /4/output/not_linked, which lists the three left-out option-factor levels."
+     }
+    ]
+   }
+  },
+  "B": {
+   "raw": {
+    "scores": {
+     "concise": 1,
+     "shape": 1,
+     "decisive_caveat": 1,
+     "next_move": 2,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 2,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 1,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "About 106 words, slightly beyond the default; the added content is mostly material figures and one necessary exclusion.",
+     "shape": "Clear opening and action, but it has four bullets rather than at most three.",
+     "decisive_caveat": "It correctly retains the £40,000 ceiling and uncertainty, but does not explicitly connect the outcome to orders dispatched on time or state the pre-readiness output-risk consequence.",
+     "next_move": "It requests one supported action: approval of the single assumptions proposal, with correction as the alternative.",
+     "questions": "One concise approval question is used.",
+     "leader_honesty": "No option is called leading, best, or favoured.",
+     "nothing_invented": "Every listed value, option, and Repair exclusion is supported by the proposed-starting-point output.",
+     "attribution": "The operational figures are accurately identified as the assistant's illustrative assumptions, not measurements.",
+     "provisional_vs_validated": "It explicitly calls the comparison provisional and says analysis cannot run yet.",
+     "fidelity": "It states the £40,000 ceiling and one true Repair exclusion, but leaves out the additional actual exclusion for Continue current line’s installation downtime.",
+     "uncertainty": "It clearly distinguishes illustrative assumptions from missing measurements.",
+     "useful_next_step": "Approval or correction of this proposal is the state-supported prerequisite to analysis."
+    },
+    "gates": {
+     "truth_fidelity": "PASS",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 106,
+    "questions": 0,
+    "requests_for_information": [],
+    "duplicate_statements": 0,
+    "evidence": []
+   },
+   "full": {
+    "scores": {
+     "concise": 0,
+     "shape": 0,
+     "decisive_caveat": 1,
+     "next_move": 2,
+     "questions": 0,
+     "leader_honesty": 2,
+     "nothing_invented": 2,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 1,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "The full visible response is about 187 words and appends four detailed open questions.",
+     "shape": "The four bullets and appended open-question list do not meet the requested compact answer shape.",
+     "decisive_caveat": "It retains the £40,000 ceiling and uncertainty, but still does not explicitly state the on-time-dispatch outcome or pre-readiness output risk.",
+     "next_move": "The offered controls support the requested approval or amendment of the one proposal.",
+     "questions": "The appended disclosure contains four requests for information, rather than one by default.",
+     "leader_honesty": "No ranking or leader claim appears.",
+     "nothing_invented": "All visible values, status, and the stated Repair exclusion are grounded in the supplied state.",
+     "attribution": "The response keeps proposed operational figures distinct from measurements.",
+     "provisional_vs_validated": "It says no analysis can run and the disclosure confirms that the first analysis could not run.",
+     "fidelity": "The £40,000 ceiling and units are retained, but the visible answer still omits the Continue-current-line downtime exclusion.",
+     "uncertainty": "It visibly identifies absent measurements and a blocked first analysis.",
+     "useful_next_step": "Using or changing the proposal through the offered controls is useful for this model."
+    },
+    "gates": {
+     "truth_fidelity": "PASS",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 187,
+    "questions": 4,
+    "requests_for_information": [
+     "What are the expected capital costs of repair, full replacement, and a phased replacement?",
+     "How many installation-downtime hours would a full or phased replacement require before the replacement is ready?",
+     "What reliability and packing-capacity improvement is expected from repair versus replacement?",
+     "What is the current packing-line capacity and current number of orders dispatched on time per quarter?"
+    ],
+    "duplicate_statements": 1,
+    "evidence": [
+     {
+      "item": "concise",
+      "span": "“Questions this model does not answer yet: What are the expected capital costs of repair, full replacement, and a phased replacement? How many installation-downtime hours would a full or phased replacement require before the replacement is ready? What reliability and packing-capacity improvement is expected from repair versus replacement? What is the current packing-line capacity and current number of orders dispatched on time per quarter?”",
+      "source": "FULL server-owned disclosure / build_model_from_brief output / open_questions."
+     },
+     {
+      "item": "shape",
+      "span": "“Approve these assumptions? The first analysis could not run yet: Review all 4 readiness issues together before analysis. The model was saved. Questions this model does not answer yet: …”",
+      "source": "FULL visible response; server-owned disclosure / build_model_from_brief output / first_analysis and open_questions."
+     },
+     {
+      "item": "questions",
+      "span": "“What are the expected capital costs …? How many installation-downtime hours …? What reliability and packing-capacity improvement …? What is the current packing-line capacity …?”",
+      "source": "FULL server-owned disclosure / build_model_from_brief output / open_questions."
+     }
+    ]
+   }
+  },
+  "preference": "B",
+  "reason": "B is more faithful and decision-useful: it explicitly states that the £40,000 limit is a ceiling, labels operational inputs as illustrative assumptions, and discloses the Repair linkage exclusion. Both replies are weakened by four bullets, omission of some actual exclusions, and the lengthy server-owned open-question disclosure in the full view."
+ }
+}

@@ -1,0 +1,263 @@
+{
+ "state": "D2",
+ "rep": 3,
+ "at": "2026-09-25T01:06:38.113Z",
+ "http": 200,
+ "error": null,
+ "tries": 1,
+ "latency_ms": 80509,
+ "request_sha256": "6b05a0f73eea014749da021d77422d977feb89ce628c745c93e8e1e6c40c2a11",
+ "response_id": "resp_0fe3fe34baebba11006ab5c8cdddd887d2844c4e516b0a38fa",
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 8578,
+  "input_tokens_details": {
+   "cache_write_tokens": 5595,
+   "cached_tokens": 2980
+  },
+  "output_tokens": 4370,
+  "output_tokens_details": {
+   "reasoning_tokens": 2187
+  },
+  "total_tokens": 12948
+ },
+ "status": "completed",
+ "scores": {
+  "A": {
+   "raw": {
+    "scores": {
+     "concise": 2,
+     "shape": 2,
+     "decisive_caveat": 2,
+     "next_move": 1,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 0,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 2,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "68 words; concise for the requested coaching answer.",
+     "shape": "Direct recommendation followed by three short bullets.",
+     "decisive_caveat": "Retains the six-month horizon and onboarding-diversion caveat.",
+     "next_move": "The proposed challenge is model-specific and useful, but “first” asserts an unsupported investigation priority.",
+     "questions": "One request for information: the time-profile question.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "The reply invents both a priority and an unsupported 4–12-week investigation range.",
+     "attribution": "Correctly labels the 4 experienced developer-hours/week as an Olumi estimate rather than a supplied measurement.",
+     "provisional_vs_validated": "Does not present the estimate or model as validated.",
+     "fidelity": "The named assumption and its value/unit match canonical state.",
+     "uncertainty": "Acknowledges that the value is estimated and identifies the relevant temporal uncertainty.",
+     "useful_next_step": "Names the onboarding-load assumption, connects it to six-month delivery capacity, and asks for an observation that could challenge it."
+    },
+    "gates": {
+     "truth_fidelity": "FAIL",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 68,
+    "questions": 1,
+    "requests_for_information": [
+     "How many experienced-team hours are diverted in each of the first 4–12 weeks for each hire type?"
+    ],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "Unsupported priority and invented investigation timeframe",
+      "span": "“first” / “the first 4–12 weeks”",
+      "source": "/analysis/factor_sensitivity (onboarding_load has importance_rank 3, not a supplied first-priority designation); /entities and /existing_links contain no 4–12-week time profile"
+     },
+     {
+      "item": "Correct estimate attribution",
+      "span": "“It is an Olumi estimate, not a supplied measurement.”",
+      "source": "/entities/2-6 (onboarding_load raw_value 4, value_provenance.source cee_inference, provenance ai_inferred)"
+     }
+    ]
+   },
+   "full": {
+    "scores": {
+     "concise": 0,
+     "shape": 0,
+     "decisive_caveat": 2,
+     "next_move": 1,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 0,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 2,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "The visible analysis-result card adds a lengthy option-comparison, sensitivity, robustness, and E-value dump, far beyond a concise coaching answer.",
+     "shape": "The server card exposes extensive internal calculations after the concise model text.",
+     "decisive_caveat": "The model text retains the six-month onboarding caveat; the card also discloses that the first pass is unconfirmed.",
+     "next_move": "The proposed challenge is model-specific and useful, but “first” asserts an unsupported investigation priority.",
+     "questions": "One request for information appears in the model-authored text.",
+     "leader_honesty": "Neither the model text nor the server disclosure names a leading or favoured option; the card says no option is put forward.",
+     "nothing_invented": "The raw reply's unsupported priority and 4–12-week range remain visible and are not corrected by the card.",
+     "attribution": "The model correctly identifies the estimate, and the card identifies provisional/inferred sources.",
+     "provisional_vs_validated": "The card explicitly says nothing is confirmed and no result is reliable.",
+     "fidelity": "The model’s specific value/unit match canonical state; the card is supplied state output.",
+     "uncertainty": "Both the response and server disclosure appropriately flag provisional inputs/results.",
+     "useful_next_step": "The response supplies a model-specific assumption, causal rationale, and a potentially disconfirming observation."
+    },
+    "gates": {
+     "truth_fidelity": "FAIL",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 2300,
+    "questions": 1,
+    "requests_for_information": [
+     "How many experienced-team hours are diverted in each of the first 4–12 weeks for each hire type?"
+    ],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "Excessive visible detail",
+      "span": "“option_comparison”, “factor_sensitivity”, “edge_e_values”",
+      "source": "Cards (analysis_result)"
+     },
+     {
+      "item": "Unsupported priority and invented investigation timeframe",
+      "span": "“first” / “the first 4–12 weeks”",
+      "source": "/analysis/factor_sensitivity (onboarding_load importance_rank 3); /entities and /existing_links contain no 4–12-week time profile"
+     },
+     {
+      "item": "Server provisional disclosure",
+      "span": "“Nothing in it is confirmed yet, so no option is put forward and no result is called reliable.”",
+      "source": "Cards (analysis_result.summary)"
+     }
+    ]
+   }
+  },
+  "B": {
+   "raw": {
+    "scores": {
+     "concise": 2,
+     "shape": 2,
+     "decisive_caveat": 2,
+     "next_move": 2,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 1,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 1,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "77 words; concise for the requested coaching answer.",
+     "shape": "Answer first, followed by one compact explanatory paragraph and one question.",
+     "decisive_caveat": "Keeps both the onboarding diversion and six-month-horizon caveat.",
+     "next_move": "One grounded intervention: challenge the onboarding-load estimate.",
+     "questions": "One appropriate request for information, asking for both duration and weekly senior-team time for the same onboarding clarification.",
+     "leader_honesty": "No option is called leading, favoured, or best.",
+     "nothing_invented": "The core assumption and causal challenge are grounded, but the explicit timing claim that added capacity “arrives” later is not represented in the supplied model.",
+     "attribution": "Correctly calls the number an Olumi estimate rather than a measurement.",
+     "provisional_vs_validated": "Does not portray the automatic/provisional analysis as validated.",
+     "fidelity": "The estimate value/unit are exact, but the model has no represented arrival/ramp timing for added capacity.",
+     "uncertainty": "Appropriately frames the alternative as conditional on higher versus lower/shorter onboarding demand.",
+     "useful_next_step": "Identifies a supplied assumption, explains its effect on delivery capacity within six months, and requests a concrete comparable-hire observation."
+    },
+    "gates": {
+     "truth_fidelity": "FAIL",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 77,
+    "questions": 1,
+    "requests_for_information": [
+     "What did your last comparable hire actually take in senior-team time per week, and for how long?"
+    ],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "Unsupported dynamic timing assertion",
+      "span": "“before their added capacity arrives”",
+      "source": "/existing_links (Hire two developers -> Developer headcount -> Delivery capacity, but no ramp, arrival-time, or sequencing relationship is supplied)"
+     },
+     {
+      "item": "Correct estimate attribution",
+      "span": "“It is an Olumi estimate, not a measurement”",
+      "source": "/entities (onboarding_load raw_value 4, unit experienced developer-hours/week, value_provenance.source cee_inference)"
+     }
+    ]
+   },
+   "full": {
+    "scores": {
+     "concise": 0,
+     "shape": 0,
+     "decisive_caveat": 2,
+     "next_move": 2,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 1,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 1,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "The visible analysis-result card adds a long computational dump that is not needed for this one-assumption coaching response.",
+     "shape": "The server card exposes extensive calculations and lists after the otherwise well-shaped answer.",
+     "decisive_caveat": "The response preserves the six-month onboarding-capacity caveat, while the card reinforces that results are unconfirmed.",
+     "next_move": "One grounded intervention is clearly provided: challenge the onboarding-load estimate.",
+     "questions": "One request for information appears in the model-authored answer.",
+     "leader_honesty": "No visible text calls an option the leader or favourite; the card expressly says no option is put forward.",
+     "nothing_invented": "The core suggestion is grounded, but the raw reply's unsupported capacity-arrival timing remains visible.",
+     "attribution": "The reply and card keep inferred estimates distinct from measurements and provisional analysis.",
+     "provisional_vs_validated": "The server disclosure explicitly says the first pass is not confirmed or reliable.",
+     "fidelity": "The value/unit are correct, but the capacity-arrival timing is not represented in the supplied model.",
+     "uncertainty": "The response gives proportionate conditional uncertainty and the card discloses provisional analysis.",
+     "useful_next_step": "It remains a concrete, model-specific challenge with a causal reason and a potentially disconfirming observation."
+    },
+    "gates": {
+     "truth_fidelity": "FAIL",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 2309,
+    "questions": 1,
+    "requests_for_information": [
+     "What did your last comparable hire actually take in senior-team time per week, and for how long?"
+    ],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "Excessive visible detail",
+      "span": "“option_comparison”, “factor_sensitivity”, “edge_e_values”",
+      "source": "Cards (analysis_result)"
+     },
+     {
+      "item": "Unsupported dynamic timing assertion",
+      "span": "“before their added capacity arrives”",
+      "source": "/existing_links (no ramp, arrival-time, or sequencing relationship is supplied)"
+     },
+     {
+      "item": "Server provisional disclosure",
+      "span": "“Nothing in it is confirmed yet, so no option is put forward and no result is called reliable.”",
+      "source": "Cards (analysis_result.summary)"
+     }
+    ]
+   }
+  },
+  "preference": "B",
+  "reason": "B gives the requested single grounded assumption challenge without A’s unsupported “first” priority or invented 4–12-week range. Both replies preserve a minor unsupported timing assumption about when added developer capacity arrives, and both full responses are made unnecessarily long and poorly shaped by the identical server analysis card."
+ }
+}

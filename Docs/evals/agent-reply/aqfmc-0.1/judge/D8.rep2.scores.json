@@ -1,0 +1,251 @@
+{
+ "state": "D8",
+ "rep": 2,
+ "at": "2026-09-25T00:55:21.029Z",
+ "http": 200,
+ "error": null,
+ "tries": 1,
+ "latency_ms": 81049,
+ "request_sha256": "072d827947f92fef5bb9c659a2b82774c29f6c0ca546d2e321046a0d7fded1ed",
+ "response_id": "resp_0330e279f6e63a4f006ab5c628381c87d2b2914b97bb2309b7",
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 10241,
+  "input_tokens_details": {
+   "cache_write_tokens": 7258,
+   "cached_tokens": 2980
+  },
+  "output_tokens": 5509,
+  "output_tokens_details": {
+   "reasoning_tokens": 3106
+  },
+  "total_tokens": 15750
+ },
+ "status": "completed",
+ "scores": {
+  "A": {
+   "raw": {
+    "scores": {
+     "concise": 2,
+     "shape": 0,
+     "decisive_caveat": 1,
+     "next_move": 2,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 2,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 2,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "89 words; the figures and assumption qualification are material.",
+     "shape": "Answer-first, but it uses four bullets rather than at most three.",
+     "decisive_caveat": "It correctly says no analysis ran, but reduces the supplied reason to missing starting assumptions rather than the stated need to review all 12 readiness issues.",
+     "next_move": "One supported consent move: apply/adopt the single full starting-point proposal.",
+     "questions": "One consent question is asked.",
+     "leader_honesty": "No ranking or implied leader.",
+     "nothing_invented": "All figures, options, and stated exclusions are grounded in the brief or proposal.",
+     "attribution": "Correctly calls the values proposed assumptions rather than measurements.",
+     "provisional_vs_validated": "Explicitly distinguishes placeholders from measurements.",
+     "fidelity": "The goal, unknown retrieval time, option levels, and percentages match the supplied state.",
+     "uncertainty": "Unknown retrieval time and provisional assumptions are acknowledged.",
+     "useful_next_step": "Adopting or correcting the pending assumptions is the useful next step."
+    },
+    "gates": {
+     "truth_fidelity": "PASS",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 89,
+    "questions": 1,
+    "requests_for_information": [
+     "Shall I apply this full starting point?"
+    ],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "shape",
+      "span": "- Current state: index coverage **50%**, folder consistency **40%**, naming consistency **40%**, search effectiveness **50%**.\n- **Searchable index:** coverage **80%**; search effectiveness **75%**.\n- **Folder tidy-up:** folder consistency **80%**; naming consistency **70%**.\n- Also included for context: no-change baseline at current levels, and an **Index and folder pilot** at 55–60%.",
+      "source": "REPLY A — RAW model text; developer criterion 2 requires at most three short bullets."
+     }
+    ]
+   },
+   "full": {
+    "scores": {
+     "concise": 2,
+     "shape": 0,
+     "decisive_caveat": 2,
+     "next_move": 2,
+     "questions": 0,
+     "leader_honesty": 2,
+     "nothing_invented": 2,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 2,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "The complete visible response is longer, but the additional server disclosures, readiness caveat, and approval figures are material.",
+     "shape": "The model-authored portion has four bullets, exceeding the three-bullet limit.",
+     "decisive_caveat": "The server disclosure supplies the exact material caveat: analysis could not run and all 12 readiness issues need review.",
+     "next_move": "The response presents one pending proposal to use or amend.",
+     "questions": "The visible response contains the model's consent question plus three unresolved-information questions, exceeding the one-question default.",
+     "leader_honesty": "No ranking or implied leader.",
+     "nothing_invented": "The visible content stays within the supplied brief, proposal, and server status.",
+     "attribution": "Assumptions remain distinguished from measurements.",
+     "provisional_vs_validated": "No provisional values are represented as validated.",
+     "fidelity": "Figures and option descriptions match the proposal; the server status faithfully reports the no-run outcome.",
+     "uncertainty": "Unknown retrieval time, assumptions, and unresolved coverage/consistency/scope inputs are visible.",
+     "useful_next_step": "Using or changing the pending starting-assumptions proposal remains the appropriate next move."
+    },
+    "gates": {
+     "truth_fidelity": "PASS",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 154,
+    "questions": 4,
+    "requests_for_information": [
+     "Shall I apply this full starting point?",
+     "What proportion of archive documents could realistically be included in a searchable index?",
+     "How consistent are the current folder structure and document names?",
+     "Would the searchable index and folder tidy-up cover the full archive or only selected document types?"
+    ],
+    "duplicate_statements": 1,
+    "evidence": [
+     {
+      "item": "shape",
+      "span": "- Current state: index coverage **50%**, folder consistency **40%**, naming consistency **40%**, search effectiveness **50%**.\n- **Searchable index:** coverage **80%**; search effectiveness **75%**.\n- **Folder tidy-up:** folder consistency **80%**; naming consistency **70%**.\n- Also included for context: no-change baseline at current levels, and an **Index and folder pilot** at 55–60%.",
+      "source": "REPLY A — FULL visible text; developer criterion 2 requires at most three short bullets."
+     },
+     {
+      "item": "questions",
+      "span": "Shall I apply this full starting point? ... What proportion of archive documents could realistically be included in a searchable index? How consistent are the current folder structure and document names? Would the searchable index and folder tidy-up cover the full archive or only selected document types?",
+      "source": "REPLY A — FULL visible text; the latter three are supplied in function_call_output.open_questions."
+     }
+    ]
+   }
+  },
+  "B": {
+   "raw": {
+    "scores": {
+     "concise": 2,
+     "shape": 0,
+     "decisive_caveat": 0,
+     "next_move": 2,
+     "questions": 1,
+     "leader_honesty": 2,
+     "nothing_invented": 2,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 2,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "97 words, but the small excess is accounted for by necessary proposal figures and their assumption bases.",
+     "shape": "Answer-first, but it uses four bullets rather than at most three.",
+     "decisive_caveat": "It does not tell the user that the first analysis did not run, nor the supplied readiness reason.",
+     "next_move": "One supported move is offered: approve the pending assumptions proposal.",
+     "questions": "It requests approval but does not ask a direct question; this is weaker than the one-question default.",
+     "leader_honesty": "No ranking or implied leader.",
+     "nothing_invented": "The assumptions, option levels, baseline, and pilot all come from the pending proposal.",
+     "attribution": "It explicitly identifies the values as Olumi assumptions, not measurements.",
+     "provisional_vs_validated": "The assumptions are clearly framed as adoptable or correctable, not validated.",
+     "fidelity": "The values and their stated bases accurately reflect the proposal.",
+     "uncertainty": "It acknowledges the unknown retrieval time and the provisional status of all levels.",
+     "useful_next_step": "Approval or correction of the single pending proposal is the useful immediate action."
+    },
+    "gates": {
+     "truth_fidelity": "PASS",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 97,
+    "questions": 0,
+    "requests_for_information": [],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "shape",
+      "span": "- Current state: index coverage **50%**, folder consistency **40%**, naming consistency **40%**, search effectiveness **50%**—assuming a partly usable but inconsistent archive.\n- **Searchable index:** coverage **80%** and search effectiveness **75%**—assuming most documents can be indexed.\n- **Folder tidy-up:** folder consistency **80%** and naming consistency **70%**—assuming most folders and names can be standardised.\n- For comparison, “carry on as now” holds those starting levels; an index-and-folder pilot assumes **55–60%** across the affected areas.",
+      "source": "REPLY B — RAW model text; developer criterion 2 requires at most three short bullets."
+     },
+     {
+      "item": "decisive_caveat",
+      "span": "Approve these assumptions and levels to add them to the model.",
+      "source": "function_call_output.first_analysis: \"ran\":false and \"next_step\":\"Review all 12 readiness issues together before analysis.\" The raw reply lacks this actual first-analysis outcome."
+     }
+    ]
+   },
+   "full": {
+    "scores": {
+     "concise": 2,
+     "shape": 0,
+     "decisive_caveat": 2,
+     "next_move": 2,
+     "questions": 0,
+     "leader_honesty": 2,
+     "nothing_invented": 2,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 2,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "The full response is longer because it includes material server status and open questions alongside all approval figures.",
+     "shape": "The model-authored section uses four bullets, exceeding the three-bullet limit.",
+     "decisive_caveat": "The server-owned status accurately states that analysis could not run and gives the all-12-readiness-issues next step.",
+     "next_move": "One proposal is offered for approval or amendment.",
+     "questions": "Three visible unresolved-information questions exceed the one-question default.",
+     "leader_honesty": "No ranking or implied leader.",
+     "nothing_invented": "All displayed content is supported by the brief, proposal, or server state.",
+     "attribution": "Olumi estimates remain explicitly separate from measurements.",
+     "provisional_vs_validated": "Neither the assumptions nor the proposal are presented as validated.",
+     "fidelity": "The displayed levels, status, and open questions match the supplied state.",
+     "uncertainty": "The visible response covers unknown retrieval time and the key unmeasured scope/consistency inputs.",
+     "useful_next_step": "Using or changing the pending assumptions is appropriate before analysis."
+    },
+    "gates": {
+     "truth_fidelity": "PASS",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 162,
+    "questions": 3,
+    "requests_for_information": [
+     "What proportion of archive documents could realistically be included in a searchable index?",
+     "How consistent are the current folder structure and document names?",
+     "Would the searchable index and folder tidy-up cover the full archive or only selected document types?"
+    ],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "shape",
+      "span": "- Current state: index coverage **50%**, folder consistency **40%**, naming consistency **40%**, search effectiveness **50%**—assuming a partly usable but inconsistent archive.\n- **Searchable index:** coverage **80%** and search effectiveness **75%**—assuming most documents can be indexed.\n- **Folder tidy-up:** folder consistency **80%** and naming consistency **70%**—assuming most folders and names can be standardised.\n- For comparison, “carry on as now” holds those starting levels; an index-and-folder pilot assumes **55–60%** across the affected areas.",
+      "source": "REPLY B — FULL visible text; developer criterion 2 requires at most three short bullets."
+     },
+     {
+      "item": "questions",
+      "span": "What proportion of archive documents could realistically be included in a searchable index? How consistent are the current folder structure and document names? Would the searchable index and folder tidy-up cover the full archive or only selected document types?",
+      "source": "function_call_output.open_questions, displayed in REPLY B — FULL visible text."
+     }
+    ]
+   }
+  },
+  "preference": "A",
+  "reason": "A is preferable because its raw text tells the user that no analysis ran and explicitly preserves the requested exclusions. Both replies accurately present the same pending assumptions and have the same four-bullet shape issue, but B's raw reply omits the decisive no-analysis outcome that this negative-control case specifically requires."
+ }
+}

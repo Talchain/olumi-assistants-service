@@ -1,0 +1,793 @@
+{
+ "id": "D2.F.rep1",
+ "state": "D2",
+ "arm": "F",
+ "rep": 1,
+ "raw": "Challenge the **onboarding-load assumption** first: Olumi currently estimates **4 experienced developer-hours/week**. That may hide a crucial difference between onboarding two developers and onboarding a tech lead—and it directly reduces delivery capacity during a short six‑month window.\n\nIts decisive limitation: this is an Olumi estimate, not evidence from your team. It matters because extra hiring only improves delivery quickly if the team can absorb it.\n\nWhat would weaken that concern: evidence that onboarding is largely self-serve or can be handled without drawing key developers away from delivery.",
+ "visible": "Challenge the **onboarding-load assumption** first: Olumi currently estimates **4 experienced developer-hours/week**. That may hide a crucial difference between onboarding two developers and onboarding a tech lead—and it directly reduces delivery capacity during a short six‑month window.\n\nIts decisive limitation: this is an Olumi estimate, not evidence from your team. It matters because extra hiring only improves delivery quickly if the team can absorb it.\n\nWhat would weaken that concern: evidence that onboarding is largely self-serve or can be handled without drawing key developers away from delivery.",
+ "gate_changed": false,
+ "stripped": [],
+ "owed": [],
+ "status": null,
+ "not_adopted": null,
+ "suggested_actions": [],
+ "blocks": [
+  {
+   "type": "analysis_result",
+   "summary": "Olumi ran a first pass on the model it had just drafted. Nothing in it is confirmed yet, so no option is put forward and no result is called reliable. Use it to find what is wrong.",
+   "leading_option_id": null,
+   "computed_against_hash": "184da0182f85aec1",
+   "enrichment": {
+    "option_comparison": [
+     {
+      "id": "hire_a_tech_lead",
+      "label": "Hire a tech lead",
+      "status": "computed",
+      "outcome": {
+       "p10": 0,
+       "p50": 0.12453749416142199,
+       "p90": 0.24798131194869213,
+       "std": 0.09074170295301844,
+       "mean": 0.12796813770194748,
+       "n_samples": 10000,
+       "validity_ratio": 1,
+       "n_valid_samples": 10000,
+       "percentiles_source": "samples"
+      },
+      "downside": {
+       "p05": 0,
+       "cvar_10": -0.00037906795937430246,
+       "expected_regret": 0.021758978801380714
+      },
+      "option_id": "hire_a_tech_lead",
+      "option_label": "Hire a tech lead"
+     },
+     {
+      "id": "hire_two_developers",
+      "label": "Hire two developers",
+      "status": "computed",
+      "outcome": {
+       "p10": 0,
+       "p50": 0.10131818550845295,
+       "p90": 0.27303216743745373,
+       "std": 0.1174452961048075,
+       "mean": 0.11949407133819331,
+       "n_samples": 10000,
+       "validity_ratio": 1,
+       "n_valid_samples": 10000,
+       "percentiles_source": "samples"
+      },
+      "downside": {
+       "p05": -0.009482196856084237,
+       "cvar_10": -0.02872788622837991,
+       "expected_regret": 0.030233045165134895
+      },
+      "option_id": "hire_two_developers",
+      "option_label": "Hire two developers"
+     },
+     {
+      "id": "continue_current_staffing",
+      "label": "Continue current staffing",
+      "status": "computed",
+      "outcome": {
+       "p10": 0,
+       "p50": 0.11162410941473994,
+       "p90": 0.22563945976939198,
+       "std": 0.08326759426383895,
+       "mean": 0.11523308461466772,
+       "n_samples": 10000,
+       "validity_ratio": 1,
+       "n_valid_samples": 10000,
+       "percentiles_source": "samples"
+      },
+      "downside": {
+       "p05": 0,
+       "cvar_10": -0.0007405842883327774,
+       "expected_regret": 0.03449403188866047
+      },
+      "option_id": "continue_current_staffing",
+      "option_label": "Continue current staffing"
+     },
+     {
+      "id": "hire_one_developer",
+      "label": "Hire one developer",
+      "status": "computed",
+      "outcome": {
+       "p10": 0,
+       "p50": 0.09941804087456503,
+       "p90": 0.2704404872474702,
+       "std": 0.11679977493472277,
+       "mean": 0.11770219109362638,
+       "n_samples": 10000,
+       "validity_ratio": 1,
+       "n_valid_samples": 10000,
+       "percentiles_source": "samples"
+      },
+      "downside": {
+       "p05": -0.012294801451037571,
+       "cvar_10": -0.030007922237657858,
+       "expected_regret": 0.03202492540970184
+      },
+      "option_id": "hire_one_developer",
+      "option_label": "Hire one developer"
+     }
+    ],
+    "factor_sensitivity": [
+     {
+      "source": "graph",
+      "direction": "positive",
+      "factor_id": "delivery_capacity",
+      "confidence": 0.5876000000000001,
+      "elasticity": 1,
+      "evpi_method": "heuristic",
+      "driver_label": "biggest",
+      "factor_label": "Delivery capacity",
+      "value_source": "cee_inference",
+      "evidence_hint": false,
+      "influence_rank": 2,
+      "rank_flip_rate": 0.2,
+      "importance_rank": 1,
+      "influence_score": 1,
+      "importance_basis": "graph_structural",
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "sensitivity_score": 0.25,
+      "flip_risk_category": "correlated",
+      "value_of_information": 0,
+      "attribution_stability": "low",
+      "confidence_components": {
+       "sampling_stability": 0.25,
+       "structural_certainty": 0.8000000000000002
+      },
+      "confidence_provenance": {
+       "input_quality": "standard",
+       "is_provisional": true,
+       "formula_version": "plot_unified_v3",
+       "calibration_status": "provisional_pending_pilot_calibration",
+       "computation_source": "plot_unified_from_isl_bootstrap"
+      },
+      "evpi_percentage_points": 0
+     },
+     {
+      "source": "graph",
+      "direction": "positive",
+      "factor_id": "technical_guidance_quality",
+      "confidence": 0.59345,
+      "elasticity": 1,
+      "evpi_method": "heuristic",
+      "driver_label": "strong",
+      "factor_label": "Technical guidance quality",
+      "value_source": "cee_inference",
+      "evidence_hint": false,
+      "influence_rank": 3,
+      "rank_flip_rate": 0.2,
+      "importance_rank": 2,
+      "influence_score": 1,
+      "importance_basis": "graph_structural",
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "sensitivity_score": 0.25,
+      "flip_risk_category": "negligible",
+      "value_of_information": 0,
+      "attribution_stability": "low",
+      "confidence_components": {
+       "sampling_stability": 0.25,
+       "structural_certainty": 0.8
+      },
+      "confidence_provenance": {
+       "input_quality": "standard",
+       "is_provisional": true,
+       "formula_version": "plot_unified_v3",
+       "calibration_status": "provisional_pending_pilot_calibration",
+       "computation_source": "plot_unified_from_isl_bootstrap"
+      },
+      "evpi_percentage_points": 0
+     },
+     {
+      "source": "graph",
+      "direction": "negative",
+      "factor_id": "onboarding_load",
+      "confidence": 0.5675,
+      "elasticity": 0.25,
+      "evpi_method": "heuristic",
+      "driver_label": "moderate",
+      "factor_label": "Onboarding load",
+      "value_source": "cee_inference",
+      "evidence_hint": false,
+      "influence_rank": 5,
+      "rank_flip_rate": 0,
+      "importance_rank": 3,
+      "influence_score": 0.25,
+      "importance_basis": "graph_structural",
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "sensitivity_score": -0.0625,
+      "flip_risk_category": "negligible",
+      "value_of_information": 0,
+      "attribution_stability": "low",
+      "confidence_components": {
+       "sampling_stability": 0.25,
+       "structural_certainty": 0.8
+      },
+      "confidence_provenance": {
+       "input_quality": "standard",
+       "is_provisional": true,
+       "formula_version": "plot_unified_v3",
+       "calibration_status": "provisional_pending_pilot_calibration",
+       "computation_source": "plot_unified_from_isl_bootstrap"
+      },
+      "evpi_percentage_points": 0
+     },
+     {
+      "source": "graph",
+      "direction": "positive",
+      "factor_id": "tech_lead_headcount",
+      "confidence": 0.3,
+      "elasticity": 0,
+      "zero_reason": "intervention_override",
+      "driver_label": "strong",
+      "factor_label": "Tech lead headcount",
+      "value_source": "cee_inference",
+      "influence_rank": 1,
+      "rank_flip_rate": 0.25,
+      "importance_rank": 4,
+      "influence_score": 1,
+      "importance_basis": "graph_structural",
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "sensitivity_score": 0,
+      "flip_risk_category": "negligible",
+      "value_of_information": 0,
+      "attribution_stability": "negligible",
+      "confidence_components": {
+       "sampling_stability": 0,
+       "structural_certainty": 0.5
+      },
+      "confidence_provenance": {
+       "input_quality": "standard",
+       "is_provisional": true,
+       "formula_version": "plot_unified_v3",
+       "calibration_status": "provisional_pending_pilot_calibration",
+       "computation_source": "plot_unified_from_isl_bootstrap"
+      },
+      "range_derivation_source": "default"
+     },
+     {
+      "source": "graph",
+      "direction": "positive",
+      "factor_id": "developer_headcount",
+      "confidence": 0.4233,
+      "elasticity": 0,
+      "zero_reason": "intervention_override",
+      "driver_label": "moderate",
+      "factor_label": "Developer headcount",
+      "value_source": "cee_inference",
+      "influence_rank": 4,
+      "rank_flip_rate": 0.1,
+      "importance_rank": 5,
+      "influence_score": 0.375,
+      "importance_basis": "graph_structural",
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "sensitivity_score": 0,
+      "flip_risk_category": "negligible",
+      "value_of_information": 0,
+      "attribution_stability": "low",
+      "confidence_components": {
+       "sampling_stability": 0.25,
+       "structural_certainty": 0.5
+      },
+      "confidence_provenance": {
+       "input_quality": "standard",
+       "is_provisional": true,
+       "formula_version": "plot_unified_v3",
+       "calibration_status": "provisional_pending_pilot_calibration",
+       "computation_source": "plot_unified_from_isl_bootstrap"
+      },
+      "range_derivation_source": "default"
+     }
+    ],
+    "robustness": {
+     "near_tie": {
+      "gap": 0.12409999999999999,
+      "is_tie": false,
+      "threshold": 0.1
+     },
+     "robust_edges": [
+      {
+       "to_id": "onboarding_load",
+       "edge_id": "developer_headcount->onboarding_load",
+       "from_id": "developer_headcount",
+       "to_label": "Onboarding load",
+       "from_label": "Developer headcount",
+       "alternative_winner_id": null,
+       "alternative_winner_label": null
+      },
+      {
+       "to_id": "delivery_capacity",
+       "edge_id": "onboarding_diversion->delivery_capacity",
+       "from_id": "onboarding_diversion",
+       "to_label": "Delivery capacity",
+       "from_label": "Onboarding diversion",
+       "alternative_winner_id": null,
+       "alternative_winner_label": null
+      },
+      {
+       "to_id": "onboarding_diversion",
+       "edge_id": "onboarding_load->onboarding_diversion",
+       "from_id": "onboarding_load",
+       "to_label": "Onboarding diversion",
+       "from_label": "Onboarding load",
+       "alternative_winner_id": null,
+       "alternative_winner_label": null
+      }
+     ],
+     "fragile_edges": [
+      {
+       "to_id": "productivity",
+       "edge_id": "faster_delivery->productivity",
+       "from_id": "faster_delivery",
+       "visible": true,
+       "severity": "warning",
+       "to_label": "Productivity",
+       "from_label": "Faster delivery",
+       "switch_probability": 0.258,
+       "alternative_winner_id": "hire_two_developers",
+       "alternative_winner_label": "Hire two developers",
+       "marginal_switch_probability": 0
+      },
+      {
+       "to_id": "faster_delivery",
+       "edge_id": "delivery_capacity->faster_delivery",
+       "from_id": "delivery_capacity",
+       "visible": true,
+       "severity": "warning",
+       "to_label": "Faster delivery",
+       "from_label": "Delivery capacity",
+       "switch_probability": 0.2552,
+       "alternative_winner_id": "hire_two_developers",
+       "alternative_winner_label": "Hire two developers",
+       "marginal_switch_probability": 0
+      }
+     ]
+    },
+    "option_comparison_status": "computed",
+    "edge_e_values": [
+     {
+      "to_id": "delivery_capacity",
+      "e_value": 1,
+      "edge_id": "tech_lead_headcount::delivery_capacity",
+      "from_id": "tech_lead_headcount",
+      "to_label": "Delivery capacity",
+      "flip_mean": -0.220001,
+      "stability": {
+       "n_seeds": 10,
+       "band_max": 0.261395,
+       "band_min": -0.285515,
+       "band_width": 0.54691,
+       "band_median": 0.029444,
+       "n_seeds_flipped": 4,
+       "seed_flip_means": [
+        -0.184222,
+        null,
+        -0.285515,
+        null,
+        null,
+        0.24311,
+        null,
+        0.261395,
+        null,
+        null
+       ]
+      },
+      "from_label": "Tech lead headcount",
+      "current_mean": 0.5,
+      "flip_direction": "decrease"
+     },
+     {
+      "to_id": "technical_guidance_quality",
+      "e_value": 1,
+      "edge_id": "tech_lead_headcount::technical_guidance_quality",
+      "from_id": "tech_lead_headcount",
+      "to_label": "Technical guidance quality",
+      "flip_mean": -0.220001,
+      "stability": {
+       "n_seeds": 10,
+       "band_max": 0.053603,
+       "band_min": -0.448084,
+       "band_width": 0.501687,
+       "band_median": -0.000001,
+       "n_seeds_flipped": 5,
+       "seed_flip_means": [
+        -0.448084,
+        -0.000001,
+        0.053603,
+        -0.000001,
+        -0.000001,
+        null,
+        null,
+        null,
+        null,
+        null
+       ]
+      },
+      "from_label": "Tech lead headcount",
+      "current_mean": 0.5,
+      "flip_direction": "decrease"
+     },
+     {
+      "to_id": "faster_delivery",
+      "e_value": 1,
+      "edge_id": "delivery_capacity::faster_delivery",
+      "from_id": "delivery_capacity",
+      "to_label": "Faster delivery",
+      "flip_mean": -0.5,
+      "stability": {
+       "n_seeds": 10,
+       "band_max": -0.000001,
+       "band_min": -0.747236,
+       "band_width": 0.747235,
+       "band_median": -0.229229,
+       "n_seeds_flipped": 4,
+       "seed_flip_means": [
+        -0.458458,
+        -0.747236,
+        null,
+        null,
+        null,
+        -0.000001,
+        null,
+        -0.000001,
+        null,
+        null
+       ]
+      },
+      "from_label": "Delivery capacity",
+      "current_mean": 0.5,
+      "flip_direction": "decrease"
+     },
+     {
+      "to_id": "less_rework",
+      "e_value": 1,
+      "edge_id": "technical_guidance_quality::less_rework",
+      "from_id": "technical_guidance_quality",
+      "to_label": "Less rework",
+      "flip_mean": -0.220001,
+      "stability": {
+       "n_seeds": 10,
+       "band_max": 0.080555,
+       "band_min": -0.444853,
+       "band_width": 0.525408,
+       "band_median": -0.000001,
+       "n_seeds_flipped": 8,
+       "seed_flip_means": [
+        -0.444853,
+        -0.000001,
+        0.080555,
+        -0.000001,
+        -0.000001,
+        null,
+        -0.000001,
+        null,
+        -0.000001,
+        -0.000001
+       ]
+      },
+      "from_label": "Technical guidance quality",
+      "current_mean": 0.5,
+      "flip_direction": "decrease"
+     },
+     {
+      "to_id": "productivity",
+      "e_value": 1,
+      "edge_id": "faster_delivery::productivity",
+      "from_id": "faster_delivery",
+      "to_label": "Productivity",
+      "flip_mean": -0.5,
+      "stability": {
+       "n_seeds": 10,
+       "band_max": -0.000001,
+       "band_min": -0.573394,
+       "band_width": 0.573393,
+       "band_median": -0.000001,
+       "n_seeds_flipped": 8,
+       "seed_flip_means": [
+        -0.400302,
+        null,
+        null,
+        -0.573394,
+        -0.444066,
+        -0.000001,
+        -0.000001,
+        -0.000001,
+        -0.000001,
+        -0.000001
+       ]
+      },
+      "from_label": "Faster delivery",
+      "current_mean": 0.5,
+      "flip_direction": "decrease"
+     },
+     {
+      "to_id": "productivity",
+      "e_value": 1,
+      "edge_id": "less_rework::productivity",
+      "from_id": "less_rework",
+      "to_label": "Productivity",
+      "flip_mean": -0.220001,
+      "stability": {
+       "n_seeds": 10,
+       "band_max": 0.059847,
+       "band_min": -0.624575,
+       "band_width": 0.684422,
+       "band_median": -0.000001,
+       "n_seeds_flipped": 6,
+       "seed_flip_means": [
+        -0.453683,
+        -0.000001,
+        0.059847,
+        -0.000001,
+        -0.000001,
+        -0.624575,
+        null,
+        null,
+        null,
+        null
+       ]
+      },
+      "from_label": "Less rework",
+      "current_mean": 0.5,
+      "flip_direction": "decrease"
+     }
+    ],
+    "inference_warnings": [
+     {
+      "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+      "message": "4 edge E-value entries were omitted from edge_e_values: 4 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+      "severity": "info"
+     },
+     {
+      "code": "GOAL_DIRECTION_UNATTESTED",
+      "field": "goal_direction",
+      "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+      "severity": "warning"
+     }
+    ],
+    "confidence_tier": "needs_work",
+    "flip_thresholds": [
+     {
+      "unit": "headcount",
+      "factor_id": "developer_headcount",
+      "flip_value": null,
+      "flip_reason": "no_effect_within_bounds",
+      "probes_used": 0,
+      "value_scale": "normalised",
+      "factor_label": "Developer headcount",
+      "current_value": 0.16666666666666666,
+      "iterations_used": 0,
+      "no_flip_in_range": true,
+      "alternative_winner_id": null,
+      "alternative_winner_label": null
+     },
+     {
+      "unit": "headcount",
+      "direction": "increase",
+      "factor_id": "tech_lead_headcount",
+      "flip_value": 0.072,
+      "flip_reason": "found",
+      "probes_used": 0,
+      "value_scale": "normalised",
+      "factor_label": "Tech lead headcount",
+      "current_value": 0,
+      "iterations_used": 0,
+      "alternative_winner_id": "hire_two_developers",
+      "alternative_winner_label": "Hire two developers"
+     }
+    ],
+    "decision_brief": {
+     "options": [
+      {
+       "label": "Continue current staffing",
+       "option_id": "continue_current_staffing"
+      },
+      {
+       "label": "Hire a tech lead",
+       "option_id": "hire_a_tech_lead"
+      },
+      {
+       "label": "Hire one developer",
+       "option_id": "hire_one_developer"
+      },
+      {
+       "label": "Hire two developers",
+       "option_id": "hire_two_developers"
+      }
+     ],
+     "version": "1",
+     "brief_id": "00000000-0000-4000-8000-000000000000",
+     "warnings": [
+      {
+       "code": "ANCHORING_RISK",
+       "message": "High-influence factors have 0.5 baseline values — a common 'I don't know' default. Are these estimates or evidence?",
+       "severity": "warning"
+      },
+      {
+       "code": "M2_UNAVAILABLE",
+       "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+       "severity": "warning"
+      }
+     ],
+     "created_at": "2026-09-25T00:50:52.383Z",
+     "top_drivers": [
+      {
+       "direction": "positive",
+       "sensitivity": 1,
+       "factor_label": "Delivery capacity"
+      },
+      {
+       "direction": "positive",
+       "sensitivity": 1,
+       "factor_label": "Technical guidance quality"
+      },
+      {
+       "direction": "negative",
+       "sensitivity": 0.25,
+       "factor_label": "Onboarding load"
+      }
+     ],
+     "warning_codes": [
+      "GOAL_DIRECTION_UNATTESTED"
+     ],
+     "key_assumptions": [
+      "Delivery capacity",
+      "Technical guidance quality",
+      "Onboarding load"
+     ],
+     "what_would_change": [
+      "Faster delivery → Productivity",
+      "Delivery capacity → Faster delivery"
+     ],
+     "defaulted_assumptions": []
+    },
+    "factor_evppi": [
+     {
+      "evppi": 0.00002,
+      "units": "outcome",
+      "method": "regression_evppi_v1",
+      "status": "below_resolution",
+      "evppi_raw": 0.00002,
+      "factor_id": "onboarding_load",
+      "n_samples": 10000,
+      "clamped_low": false,
+      "noise_floor": 0.000038,
+      "clamped_high": false,
+      "regression_degree": 4,
+      "correlation_active": false,
+      "baseline_max_expected_utility": 0.127968,
+      "conditional_max_expected_utility": 0.127989
+     },
+     {
+      "evppi": 0.000009,
+      "units": "outcome",
+      "method": "regression_evppi_v1",
+      "status": "below_resolution",
+      "evppi_raw": 0.000009,
+      "factor_id": "technical_guidance_quality",
+      "n_samples": 10000,
+      "clamped_low": false,
+      "noise_floor": 0.000044,
+      "clamped_high": false,
+      "regression_degree": 4,
+      "correlation_active": false,
+      "baseline_max_expected_utility": 0.127968,
+      "conditional_max_expected_utility": 0.127978
+     },
+     {
+      "evppi": 0.000007,
+      "units": "outcome",
+      "method": "regression_evppi_v1",
+      "status": "below_resolution",
+      "evppi_raw": 0.000007,
+      "factor_id": "delivery_capacity",
+      "n_samples": 10000,
+      "clamped_low": false,
+      "noise_floor": 0.000043,
+      "clamped_high": false,
+      "regression_degree": 4,
+      "correlation_active": false,
+      "baseline_max_expected_utility": 0.127968,
+      "conditional_max_expected_utility": 0.127976
+     }
+    ],
+    "decision_evpi": 0.021758978801380714,
+    "p_win_sensitivity": [
+     {
+      "method": "p_win_delta_at_mean_v1",
+      "status": "resolved",
+      "clamped": false,
+      "factor_id": "tech_lead_headcount",
+      "n_samples": 2000,
+      "metric_type": "p_win_recommended",
+      "noise_floor": 0.03099,
+      "p_win_delta": 0.274625,
+      "current_metric": 0.465875,
+      "perfect_metric": 0.7405,
+      "labelling_doctrine": "provisional_doctrine_v0",
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "p_win_delta_percentage_points": 27.46
+     },
+     {
+      "method": "p_win_delta_at_mean_v1",
+      "status": "below_resolution",
+      "clamped": false,
+      "factor_id": "developer_headcount",
+      "n_samples": 2000,
+      "metric_type": "p_win_recommended",
+      "noise_floor": 0.03099,
+      "p_win_delta": 0.00425,
+      "current_metric": 0.465875,
+      "perfect_metric": 0.470125,
+      "labelling_doctrine": "provisional_doctrine_v0",
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "p_win_delta_percentage_points": 0.43
+     },
+     {
+      "method": "p_win_delta_at_mean_v1",
+      "status": "below_resolution",
+      "clamped": false,
+      "factor_id": "onboarding_load",
+      "n_samples": 2000,
+      "metric_type": "p_win_recommended",
+      "noise_floor": 0.03099,
+      "p_win_delta": 0.00425,
+      "current_metric": 0.465875,
+      "perfect_metric": 0.470125,
+      "labelling_doctrine": "provisional_doctrine_v0",
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "p_win_delta_percentage_points": 0.43
+     },
+     {
+      "method": "p_win_delta_at_mean_v1",
+      "status": "below_resolution",
+      "clamped": false,
+      "factor_id": "delivery_capacity",
+      "n_samples": 2000,
+      "metric_type": "p_win_recommended",
+      "noise_floor": 0.03099,
+      "p_win_delta": 0.004125,
+      "current_metric": 0.465875,
+      "perfect_metric": 0.47,
+      "labelling_doctrine": "provisional_doctrine_v0",
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "p_win_delta_percentage_points": 0.41
+     },
+     {
+      "method": "p_win_delta_at_mean_v1",
+      "status": "below_resolution",
+      "clamped": true,
+      "factor_id": "technical_guidance_quality",
+      "n_samples": 2000,
+      "metric_type": "p_win_recommended",
+      "noise_floor": 0.03099,
+      "p_win_delta": 0,
+      "current_metric": 0.465875,
+      "perfect_metric": 0.444625,
+      "labelling_doctrine": "provisional_doctrine_v0",
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "p_win_delta_percentage_points": 0
+     }
+    ],
+    "conditional_winners": [
+     {
+      "factor_id": "tech_lead_headcount",
+      "factor_label": "Tech lead headcount",
+      "split_value": -0.003321222959275008,
+      "split_unit": "headcount",
+      "low_bucket": {
+       "win_probability": 0.7758
+      },
+      "high_bucket": {
+       "win_probability": 0.5886
+      },
+      "winner_flips": true
+     }
+    ]
+   }
+  }
+ ]
+}

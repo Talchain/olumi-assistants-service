@@ -1,0 +1,28 @@
+{
+ "id": "X1.F.rep1",
+ "state": "X1",
+ "arm": "F",
+ "rep": 1,
+ "raw": "I’ve framed the comparison, but no analysis can run yet: all four options currently set no recorded levels. I also included **Continue current line** and **Phased replacement** as comparators; neither was stated by you.\n\nMy proposed starting assumptions — **not measurements** — are:\n\n- Baseline: capital spend **£0**, installation downtime **0 hours**, reliability **85%**, capacity **5,000 orders/quarter**.\n- Repair: **£10,000**, reliability **92%**; assumption: it restores reliability without adding capacity.  \n- Replace: **£40,000**, **80 hours** downtime, reliability **98%**, capacity **6,500 orders/quarter**.\n- Continue: **£0**, reliability **85%**, capacity **5,000 orders/quarter**.\n- Phased replacement: **£35,000**, **24 hours** downtime, reliability **96%**, capacity **6,000 orders/quarter**.\n\nThese figures test the trade-off you highlighted: replacement’s higher eventual throughput versus lost output before it is ready. Approve this one set, or correct any figure.",
+ "visible": "I’ve framed the comparison, but no analysis can run yet: all four options currently set no recorded levels. I also included **Continue current line** and **Phased replacement** as comparators; neither was stated by you.\n\nMy proposed starting assumptions — **not measurements** — are:\n\n- Baseline: capital spend **£0**, installation downtime **0 hours**, reliability **85%**, capacity **5,000 orders/quarter**.\n- Repair: **£10,000**, reliability **92%**; assumption: it restores reliability without adding capacity.  \n- Replace: **£40,000**, **80 hours** downtime, reliability **98%**, capacity **6,500 orders/quarter**.\n- Continue: **£0**, reliability **85%**, capacity **5,000 orders/quarter**.\n- Phased replacement: **£35,000**, **24 hours** downtime, reliability **96%**, capacity **6,000 orders/quarter**.\n\nThese figures test the trade-off you highlighted: replacement’s higher eventual throughput versus lost output before it is ready. Approve this one set, or correct any figure.\n\nThe first analysis could not run yet: Review all 4 readiness issues together before analysis.\n\nThe model was saved. Questions this model does not answer yet: What are the expected capital costs of repair, full replacement, and a phased replacement? How many installation-downtime hours would a full or phased replacement require before the replacement is ready? What reliability and packing-capacity improvement is expected from repair versus replacement? What is the current packing-line capacity and current number of orders dispatched on time per quarter?",
+ "gate_changed": false,
+ "stripped": [],
+ "owed": [
+  "The first analysis could not run yet: Review all 4 readiness issues together before analysis."
+ ],
+ "status": "The model was saved. Questions this model does not answer yet: What are the expected capital costs of repair, full replacement, and a phased replacement? How many installation-downtime hours would a full or phased replacement require before the replacement is ready? What reliability and packing-capacity improvement is expected from repair versus replacement? What is the current packing-line capacity and current number of orders dispatched on time per quarter?",
+ "not_adopted": null,
+ "suggested_actions": [
+  {
+   "id": "agent-approve-proposal:prop_3e4ce44cfe446260425547fa9353f4c3",
+   "label": "Use as starting assumptions",
+   "message": "Yes, use those."
+  },
+  {
+   "id": "agent-amend-proposal",
+   "label": "Change something first",
+   "message": "Before you apply it, I want to change some of it."
+  }
+ ],
+ "blocks": []
+}

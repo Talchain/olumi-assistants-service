@@ -1,0 +1,270 @@
+{
+ "state": "D1",
+ "rep": 3,
+ "at": "2026-09-25T00:56:39.842Z",
+ "http": 200,
+ "error": null,
+ "tries": 1,
+ "latency_ms": 78783,
+ "request_sha256": "b72de7cf2c14980e2984172a27af316a77349c769592b79b878b02875e07f8f2",
+ "response_id": "resp_0f33b201429995f6006ab5c679468c87d28015f2bf05e5c502",
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 5210,
+  "input_tokens_details": {
+   "cache_write_tokens": 2227,
+   "cached_tokens": 2980
+  },
+  "output_tokens": 5042,
+  "output_tokens_details": {
+   "reasoning_tokens": 2718
+  },
+  "total_tokens": 10252
+ },
+ "status": "completed",
+ "scores": {
+  "A": {
+   "raw": {
+    "scores": {
+     "concise": 2,
+     "shape": 2,
+     "decisive_caveat": 2,
+     "next_move": 2,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 2,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 2,
+     "uncertainty": 1,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "49 model-authored words; concise.",
+     "shape": "States the outcome first, then asks one focused question.",
+     "decisive_caveat": "Retains the binding 32-link versus 30-link limit.",
+     "next_move": "One supported move: narrow the requested model scope before rebuilding.",
+     "questions": "One scope-clarification request.",
+     "leader_honesty": "n/a: no option is ranked or implied to lead.",
+     "nothing_invented": "The proposed narrower scope uses only delivery speed, rework, and onboarding burden from the brief.",
+     "attribution": "n/a: it introduces no values or estimates needing attribution.",
+     "provisional_vs_validated": "n/a: no analysis result or estimate is presented.",
+     "fidelity": "Accurately reports that construction failed at 32 links against a 30-link limit and that nothing was recorded.",
+     "uncertainty": "It does not restate the missing team-size, productivity, and onboarding-capacity inputs, although these matter once a rebuilt model is analysed.",
+     "useful_next_step": "Narrowing scope is useful and directly addresses the construction-limit failure."
+    },
+    "gates": {
+     "truth_fidelity": "PASS",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 49,
+    "questions": 1,
+    "requests_for_information": [
+     "Should the model be narrowed to the six-month delivery trade-off only?"
+    ],
+    "duplicate_statements": 0,
+    "evidence": []
+   },
+   "full": {
+    "scores": {
+     "concise": 2,
+     "shape": 2,
+     "decisive_caveat": 2,
+     "next_move": 1,
+     "questions": 1,
+     "leader_honesty": 2,
+     "nothing_invented": 2,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 2,
+     "uncertainty": 1,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "87 visible words, including the required server disclosure; still within the default target.",
+     "shape": "The visible response remains answer-first with one focused model question; the server status line is short.",
+     "decisive_caveat": "Both the reply and server line retain the size-limit reason for failure.",
+     "next_move": "The model proposes narrowing, while the server also offers rebuilding or identifying priorities; the visible response has more than one route rather than one primary move.",
+     "questions": "There are two separate requests for information: the model's scope question and the server's request to identify important options/factors; they are not jointly required for the same clarification.",
+     "leader_honesty": "n/a: no option ranking or leading claim appears.",
+     "nothing_invented": "The added server disclosure is supported by the failed, retried construction result.",
+     "attribution": "n/a: no values or estimates are attributed.",
+     "provisional_vs_validated": "n/a: no result or estimate is presented as validated.",
+     "fidelity": "The server statement that the model was not built and had already undergone one compacting attempt matches the failed retried build.",
+     "uncertainty": "The missing operational inputs are still not surfaced in the visible response.",
+     "useful_next_step": "Both narrowing and rebuilding/prioritising factors are useful responses to the actual construction failure."
+    },
+    "gates": {
+     "truth_fidelity": "PASS",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 87,
+    "questions": 2,
+    "requests_for_information": [
+     "Should the model be narrowed to the six-month delivery trade-off only?",
+     "Tell me which options and factors matter most."
+    ],
+    "duplicate_statements": 1,
+    "evidence": []
+   }
+  },
+  "B": {
+   "raw": {
+    "scores": {
+     "concise": 2,
+     "shape": 2,
+     "decisive_caveat": 2,
+     "next_move": 0,
+     "questions": 0,
+     "leader_honesty": 2,
+     "nothing_invented": 0,
+     "attribution": 0,
+     "provisional_vs_validated": 2,
+     "fidelity": 0,
+     "uncertainty": 2,
+     "useful_next_step": 0
+    },
+    "notes": {
+     "concise": "72 model-authored words; concise.",
+     "shape": "Answer-first with three short bullets.",
+     "decisive_caveat": "Correctly preserves the 32-needed versus 30-allowed construction limit.",
+     "next_move": "It offers no action or scope clarification after reporting the failed build.",
+     "questions": "It requests no information, despite a scope/prioritisation clarification being needed to address the failure.",
+     "leader_honesty": "n/a: neither option is ranked or described as leading.",
+     "nothing_invented": "It invents option-specific causal effects that were not in the brief or the failed build output.",
+     "attribution": "The unsupported causal claims are not identified as Olumi estimates; 'likely' signals uncertainty but not provenance.",
+     "provisional_vs_validated": "No estimate or automatic analysis is presented as validated.",
+     "fidelity": "The option-specific effects go beyond the supplied facts; the model was not built, so no such model relationships were available.",
+     "uncertainty": "It appropriately identifies all three user-stated missing inputs.",
+     "useful_next_step": "Merely listing speculative differences does not help resolve the size-limit failure or advance construction."
+    },
+    "gates": {
+     "truth_fidelity": "FAIL",
+     "consent_action_truth": "PASS",
+     "provenance": "FAIL",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 72,
+    "questions": 0,
+    "requests_for_information": [],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "Invented tech-lead causal effect",
+      "span": "“Tech lead: likely targets less rework through technical direction”",
+      "source": "CASE D1 user brief: it names faster delivery and less rework as desired outcomes, but supplies no technical-direction effect for a tech lead."
+     },
+     {
+      "item": "Invented two-developer causal effects",
+      "span": "“Two developers: likely targets faster delivery once productive, but could impose more onboarding load and may not address rework directly.”",
+      "source": "CASE D1 user brief: it provides only a general onboarding concern, not these option-specific speed, load, or rework effects."
+     },
+     {
+      "item": "Missing provenance for unsupported estimates",
+      "span": "“likely targets less rework through technical direction” / “likely targets faster delivery once productive”",
+      "source": "CASE D1 user brief: “Keep any Olumi starting estimates clearly labelled as estimates.”"
+     },
+     {
+      "item": "No next move",
+      "span": "“Current team size, baseline productivity and onboarding capacity remain unknown; no Olumi estimates were created or saved.”",
+      "source": "build_model_from_brief output: construction failed with model_too_large; a useful response needed a supported rebuild/scope-prioritisation move."
+     },
+     {
+      "item": "No information request",
+      "span": "Entire RAW reply contains no request for information.",
+      "source": "build_model_from_brief output and server controls: construction failed; the offered control is “Build it again,” and a prioritisation/scope clarification would address the failure."
+     },
+     {
+      "item": "Truth-fidelity failure",
+      "span": "“Tech lead: likely targets less rework through technical direction” and “Two developers: likely targets faster delivery once productive”",
+      "source": "CASE D1 user brief and build_model_from_brief output: neither supplies these relationships, and the build did not produce a model."
+     },
+     {
+      "item": "Provenance failure",
+      "span": "“likely targets less rework through technical direction” / “likely targets faster delivery once productive”",
+      "source": "CASE D1 user brief requires Olumi starting estimates to be clearly labelled as estimates."
+     }
+    ]
+   },
+   "full": {
+    "scores": {
+     "concise": 1,
+     "shape": 2,
+     "decisive_caveat": 2,
+     "next_move": 1,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 0,
+     "attribution": 0,
+     "provisional_vs_validated": 2,
+     "fidelity": 0,
+     "uncertainty": 2,
+     "useful_next_step": 1
+    },
+    "notes": {
+     "concise": "110 visible words. The extra server disclosure is useful, but the total is above the default approximately 90-word target.",
+     "shape": "The response is answer-first and uses three short bullets; the final server disclosure is compact.",
+     "decisive_caveat": "The initial and server text accurately retain the model-size failure.",
+     "next_move": "The server offers rebuilding or specifying important factors, which is useful, but presents alternatives rather than one primary next move.",
+     "questions": "The server makes one request for information: which options and factors matter most.",
+     "leader_honesty": "n/a: no ranking claim appears.",
+     "nothing_invented": "The server disclosure does not remove the raw reply's unsupported option-specific causal assertions.",
+     "attribution": "The server disclosure does not label the unsupported causal claims as Olumi estimates.",
+     "provisional_vs_validated": "No result or estimate is claimed to be validated.",
+     "fidelity": "The raw unsupported option-specific assertions remain visible and conflict with the supplied state.",
+     "uncertainty": "The response acknowledges the three missing inputs and the server gives an appropriate way to supply prioritisation.",
+     "useful_next_step": "The server's rebuild/prioritisation instruction is useful, though it offers two routes rather than one primary move."
+    },
+    "gates": {
+     "truth_fidelity": "FAIL",
+     "consent_action_truth": "PASS",
+     "provenance": "FAIL",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 110,
+    "questions": 1,
+    "requests_for_information": [
+     "Tell me which options and factors matter most."
+    ],
+    "duplicate_statements": 1,
+    "evidence": [
+     {
+      "item": "Invented tech-lead causal effect remains visible",
+      "span": "“Tech lead: likely targets less rework through technical direction”",
+      "source": "CASE D1 user brief: no technical-direction or option-specific rework relationship was supplied."
+     },
+     {
+      "item": "Invented two-developer causal effects remain visible",
+      "span": "“Two developers: likely targets faster delivery once productive, but could impose more onboarding load and may not address rework directly.”",
+      "source": "CASE D1 user brief: no option-specific delivery, onboarding-load, or rework relationship was supplied."
+     },
+     {
+      "item": "Missing provenance remains visible",
+      "span": "“likely targets less rework through technical direction” / “likely targets faster delivery once productive”",
+      "source": "CASE D1 user brief: “Keep any Olumi starting estimates clearly labelled as estimates.”"
+     },
+     {
+      "item": "Truth-fidelity failure",
+      "span": "“Tech lead: likely targets less rework through technical direction” and “Two developers: likely targets faster delivery once productive”",
+      "source": "CASE D1 user brief and build_model_from_brief output: the model was not built and neither causal relationship is supplied."
+     },
+     {
+      "item": "Provenance failure",
+      "span": "“likely targets less rework through technical direction” / “likely targets faster delivery once productive”",
+      "source": "CASE D1 user brief requires any Olumi starting estimates to be clearly labelled as estimates."
+     }
+    ]
+   }
+  },
+  "preference": "A",
+  "reason": "A faithfully reports the actual failed construction, preserves the binding link-limit caveat, and asks one grounded scope question without inventing an analysis. B correctly reports the failure and missing inputs, but then adds unsupported option-specific causal claims without labelling them as Olumi estimates."
+ }
+}

@@ -1,0 +1,80 @@
+{
+ "head": "c933aabfaffb4cac5572b7962d9e3a3658996de0",
+ "validation": {
+  "D1": {
+   "byte_equal": true,
+   "sim_sha": "3026d3b2c920f94fd9598884a7e11600f01251f20b9d61917b44d4793269f16c",
+   "actual_sha": "3026d3b2c920f94fd9598884a7e11600f01251f20b9d61917b44d4793269f16c",
+   "server_copy_nonempty": true,
+   "owed": [],
+   "status": "The model was not built: it came back larger than a first model can be, even after one attempt to make it more compact — ask me to build it again, or tell me which options and factors matter most.",
+   "not_adopted": null,
+   "stripped": [
+    "It included 17 nodes and 32 links (the limit is 30); two nodes were added beyond your brief."
+   ],
+   "gate_changed": false,
+   "analysis_bearing": false,
+   "source": {
+    "final_hop_request": "~/olumi-ai-quality-20260924/aqfmc/captures/R/D1/llm-calls/05.request.json",
+    "final_hop_index": "05",
+    "first_analysis": null,
+    "tools_called": [
+     "get_canonical_state",
+     "build_model_from_brief"
+    ],
+    "fast_path": null
+   }
+  },
+  "D2": {
+   "byte_equal": true,
+   "sim_sha": "174f0a492c551e7bf8307041000937ebb4ec31da57abe0fe872cb3c033f6f12f",
+   "actual_sha": "174f0a492c551e7bf8307041000937ebb4ec31da57abe0fe872cb3c033f6f12f",
+   "server_copy_nonempty": false,
+   "owed": [],
+   "status": null,
+   "not_adopted": null,
+   "stripped": [],
+   "gate_changed": false,
+   "analysis_bearing": false,
+   "source": {
+    "final_hop_request": "~/olumi-ai-quality-20260924/aqfmc/captures/R/D2/llm-calls/01.request.json",
+    "final_hop_index": "01",
+    "first_analysis": null,
+    "tools_called": [],
+    "fast_path": null
+   }
+  },
+  "D8": {
+   "byte_equal": true,
+   "sim_sha": "90e545f6cdaa415e2dd90c1e9eae4d13d463b0a14389cdf80ba7f949af652a95",
+   "actual_sha": "90e545f6cdaa415e2dd90c1e9eae4d13d463b0a14389cdf80ba7f949af652a95",
+   "server_copy_nonempty": true,
+   "owed": [
+    "The first analysis could not run yet: Review all 12 readiness issues together before analysis."
+   ],
+   "status": "The model was saved. Questions this model does not answer yet: What proportion of archive documents could realistically be included in a searchable index? How consistent are the current folder structure and document names? Would the searchable index and folder tidy-up cover the full archive or only selected document types?",
+   "not_adopted": null,
+   "stripped": [],
+   "gate_changed": false,
+   "analysis_bearing": true,
+   "source": {
+    "final_hop_request": "~/olumi-ai-quality-20260924/aqfmc/captures/R/D8/llm-calls/04.request.json",
+    "final_hop_index": "04",
+    "first_analysis": {
+     "ran": false,
+     "reason": "not_admissible",
+     "construction_turn_id": "graph_registration:00000000-0000-4000-8000-000000000000",
+     "revision": "ecf062f67b375496",
+     "ms": 88,
+     "coaching_blocks": 0
+    },
+    "tools_called": [
+     "build_model_from_brief",
+     "propose_starting_point"
+    ],
+    "fast_path": null
+   }
+  }
+ },
+ "composed": []
+}

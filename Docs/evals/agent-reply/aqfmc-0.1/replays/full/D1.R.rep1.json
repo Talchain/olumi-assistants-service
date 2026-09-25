@@ -1,0 +1,21 @@
+{
+ "id": "D1.R.rep1",
+ "state": "D1",
+ "arm": "R",
+ "rep": 1,
+ "raw": "I couldn’t build the first model because its initial causal map exceeded the link limit.  \n\n- Your brief produced 17 nodes and 32 links; the limit is 30.  \n- The model builder added two concepts beyond your wording, which pushed it over.  \n- A tighter first pass can focus only on delivery speed, rework, onboarding drag, and the two hiring choices.  \n\nWould you like me to build that narrower comparison?",
+ "visible": "I couldn’t build the first model because its initial causal map exceeded the link limit.  \n\n- Your brief produced 17 nodes and 32 links; the limit is 30.  \n- The model builder added two concepts beyond your wording, which pushed it over.  \n- A tighter first pass can focus only on delivery speed, rework, onboarding drag, and the two hiring choices.  \n\nWould you like me to build that narrower comparison?\n\nThe model was not built: it came back larger than a first model can be, even after one attempt to make it more compact — ask me to build it again, or tell me which options and factors matter most.",
+ "gate_changed": false,
+ "stripped": [],
+ "owed": [],
+ "status": "The model was not built: it came back larger than a first model can be, even after one attempt to make it more compact — ask me to build it again, or tell me which options and factors matter most.",
+ "not_adopted": null,
+ "suggested_actions": [
+  {
+   "id": "agent-rebuild-model",
+   "label": "Build it again",
+   "message": "Build the model again from my brief."
+  }
+ ],
+ "blocks": []
+}

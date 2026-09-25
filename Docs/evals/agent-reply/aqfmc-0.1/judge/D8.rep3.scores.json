@@ -1,0 +1,271 @@
+{
+ "state": "D8",
+ "rep": 3,
+ "at": "2026-09-25T00:58:21.434Z",
+ "http": 200,
+ "error": null,
+ "tries": 1,
+ "latency_ms": 101508,
+ "request_sha256": "fb18a733c3f98fb2924334ce52c3a87f3cef46206ecb7862ef74e055f0dffbfa",
+ "response_id": "resp_0ac0cd28d894f9c3006ab5c6c847e487d2b3b2a33531b6521f",
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 10357,
+  "input_tokens_details": {
+   "cache_write_tokens": 7374,
+   "cached_tokens": 2980
+  },
+  "output_tokens": 6383,
+  "output_tokens_details": {
+   "reasoning_tokens": 3808
+  },
+  "total_tokens": 16740
+ },
+ "status": "completed",
+ "scores": {
+  "A": {
+   "raw": {
+    "scores": {
+     "concise": 2,
+     "shape": 0,
+     "decisive_caveat": 1,
+     "next_move": 2,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 2,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 2,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "121 words, but the extra length is substantially occupied by the proposal's required figures, option levels, and assumption caveat.",
+     "shape": "It has four bullets, exceeding the maximum of three.",
+     "decisive_caveat": "It clearly says the values are starting assumptions rather than measurements, but it does not itself retain the material fact that no analysis ran and that readiness review is required; that is supplied below it by the server.",
+     "next_move": "Approval or correction of the single proposed assumption package is a supported primary next move.",
+     "questions": "There is no request for additional information; the approval sentence is a consent request, not an information question.",
+     "leader_honesty": "No option is presented as leading, favoured, or otherwise ranked.",
+     "nothing_invented": "The values, options, and qualitative bases correspond to the proposed assumption package.",
+     "attribution": "The figures are correctly attributed as Olumi starting assumptions, not measurements or user-provided facts.",
+     "provisional_vs_validated": "It explicitly distinguishes the proposed assumptions from measurements and does not imply that an analysis validated them.",
+     "fidelity": "The goal, exclusions, factor values, option levels, and pilot values are faithful to the supplied proposal.",
+     "uncertainty": "The non-measurement/starting-assumption qualification is clear and proportionate.",
+     "useful_next_step": "Seeking one approval for the displayed package is the required proposal workflow."
+    },
+    "gates": {
+     "truth_fidelity": "PASS",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 121,
+    "questions": 0,
+    "requests_for_information": [],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "shape score 0",
+      "span": "- Current state: ...\n- Searchable index: ...\n- Folder tidy-up: ...\n- For context, it also includes ...",
+      "source": "criterion 2: at most three short bullets"
+     }
+    ]
+   },
+   "full": {
+    "scores": {
+     "concise": 2,
+     "shape": 0,
+     "decisive_caveat": 2,
+     "next_move": 2,
+     "questions": 1,
+     "leader_honesty": 2,
+     "nothing_invented": 2,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 2,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "185 visible words are justified chiefly by the required approval figures plus the server's necessary readiness and open-question disclosure.",
+     "shape": "The visible response retains the model's four-bullet structure, exceeding the maximum of three.",
+     "decisive_caveat": "The server disclosure correctly supplies the decisive caveat: the first analysis did not run and requires review of all 12 readiness issues.",
+     "next_move": "The visible controls support approving the assumption package or changing it first.",
+     "questions": "Three actual information requests appear in the server-owned open-questions disclosure; this exceeds the default one-question limit, although the model did not author them.",
+     "leader_honesty": "No ranking or leading-option claim appears.",
+     "nothing_invented": "The model text and server disclosures match the state: all figures are proposed assumptions, analysis did not run, and the listed open questions are supplied.",
+     "attribution": "The visible response keeps Olumi estimates separate from user facts and measurements.",
+     "provisional_vs_validated": "The response calls the numbers assumptions and accurately reports that no analysis ran.",
+     "fidelity": "The server's readiness statement, saved status, and open questions are supported by the supplied tool outputs; the model text is also faithful.",
+     "uncertainty": "The response identifies assumptions and includes the relevant unresolved inputs.",
+     "useful_next_step": "Using or changing the offered proposal is useful and directly supported by the listed controls."
+    },
+    "gates": {
+     "truth_fidelity": "PASS",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 185,
+    "questions": 3,
+    "requests_for_information": [
+     "What proportion of archive documents could realistically be included in a searchable index?",
+     "How consistent are the current folder structure and document names?",
+     "Would the searchable index and folder tidy-up cover the full archive or only selected document types?"
+    ],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "shape score 0",
+      "span": "- Current state: ...\n- Searchable index: ...\n- Folder tidy-up: ...\n- For context, it also includes ...",
+      "source": "criterion 2: at most three short bullets"
+     }
+    ]
+   }
+  },
+  "B": {
+   "raw": {
+    "scores": {
+     "concise": 1,
+     "shape": 0,
+     "decisive_caveat": 0,
+     "next_move": 2,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 0,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 1,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "At 130 words, it is longer than needed and includes an unsupported prioritisation and conditional advocacy beyond the necessary figures.",
+     "shape": "It uses four bullets, exceeding the maximum of three, followed by an additional explanatory paragraph.",
+     "decisive_caveat": "It gives an unsupported and incomplete explanation for why analysis did not run instead of retaining the actual readiness caveat.",
+     "next_move": "Approving or correcting the one offered assumption package is supported by the proposal and controls.",
+     "questions": "It asks one actual information question about index coverage.",
+     "leader_honesty": "It does not call either option leading or otherwise rank the alternatives.",
+     "nothing_invented": "It invents an investigation priority and an unvalidated implication for the index.",
+     "attribution": "The numerical values are correctly described as Olumi assumptions rather than measurements.",
+     "provisional_vs_validated": "It does not present the assumptions or an analysis as validated.",
+     "fidelity": "The fact that analysis did not run is correct, but its stated reason is not the supplied first-analysis reason and omits the required all-12-readiness-issues condition.",
+     "uncertainty": "It acknowledges the unknown current retrieval time and that the figures are assumptions.",
+     "useful_next_step": "Approval or correction is the useful supported disposition of this proposal."
+    },
+    "gates": {
+     "truth_fidelity": "FAIL",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 130,
+    "questions": 1,
+    "requests_for_information": [
+     "what proportion of the archive would the index actually include?"
+    ],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "shape score 0",
+      "span": "- Starting position: ...\n- Searchable index: ...\n- Folder tidy-up: ...\n- Also included for context: ...",
+      "source": "criterion 2: at most three short bullets"
+     },
+     {
+      "item": "decisive_caveat score 0",
+      "span": "\"No analysis ran: current retrieval time is unknown, and the model needs assumptions about how each approach changes discoverability.\"",
+      "source": "case truth /3/output/first_analysis: reason is \"not_admissible\" and next_step is \"Review all 12 readiness issues together before analysis.\""
+     },
+     {
+      "item": "nothing_invented score 0",
+      "span": "\"The key challenge is coverage\" and \"If it is much lower than 80%, that would weaken the case for it.\"",
+      "source": "case truth /6/output: proposal supplies an estimated coverage level and basis, but does not identify coverage as the key challenge or establish this conditional case-strength effect"
+     },
+     {
+      "item": "truth_fidelity gate FAIL",
+      "span": "\"No analysis ran: current retrieval time is unknown, and the model needs assumptions about how each approach changes discoverability.\"",
+      "source": "case truth /3/output/first_analysis: \"reason\":\"not_admissible\"; \"next_step\":\"Review all 12 readiness issues together before analysis.\""
+     }
+    ]
+   },
+   "full": {
+    "scores": {
+     "concise": 1,
+     "shape": 0,
+     "decisive_caveat": 0,
+     "next_move": 2,
+     "questions": 0,
+     "leader_honesty": 2,
+     "nothing_invented": 0,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 1,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "The visible response is 194 words. Required server disclosure accounts for some length, but the model's unsupported coverage-priority paragraph is avoidable.",
+     "shape": "The model's four bullets already breach the three-bullet maximum, and the response then adds a paragraph and server disclosures.",
+     "decisive_caveat": "Although the server correctly states the real readiness condition, the model-authored unsupported explanation remains visible and conflicts with the required faithful framing.",
+     "next_move": "The controls allow using the proposal or changing it first, matching the proposed next move.",
+     "questions": "The model asks one coverage question and the server adds three open information questions, for four actual information requests.",
+     "leader_honesty": "No option is called leader, best, ahead, or otherwise ranked.",
+     "nothing_invented": "The unsupported \"key challenge\" and conditional weakening claim remain present in the full response.",
+     "attribution": "Assumptions remain labelled as Olumi assumptions; the server does not blur provenance.",
+     "provisional_vs_validated": "The visible response does not represent assumptions as validated, and the server correctly says analysis could not run.",
+     "fidelity": "The server adds the correct non-run explanation, but it does not remove the model's unsupported/incomplete explanation, so the full response remains materially unfaithful on why analysis did not run.",
+     "uncertainty": "It identifies unknown retrieval time and labels figures as assumptions, while the server adds unresolved questions.",
+     "useful_next_step": "The visible controls support the offered approval-or-amend disposition."
+    },
+    "gates": {
+     "truth_fidelity": "FAIL",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 194,
+    "questions": 4,
+    "requests_for_information": [
+     "what proportion of the archive would the index actually include?",
+     "What proportion of archive documents could realistically be included in a searchable index?",
+     "How consistent are the current folder structure and document names?",
+     "Would the searchable index and folder tidy-up cover the full archive or only selected document types?"
+    ],
+    "duplicate_statements": 2,
+    "evidence": [
+     {
+      "item": "shape score 0",
+      "span": "- Starting position: ...\n- Searchable index: ...\n- Folder tidy-up: ...\n- Also included for context: ...",
+      "source": "criterion 2: at most three short bullets"
+     },
+     {
+      "item": "decisive_caveat score 0",
+      "span": "\"No analysis ran: current retrieval time is unknown, and the model needs assumptions about how each approach changes discoverability.\"",
+      "source": "case truth /3/output/first_analysis: reason is \"not_admissible\" and next_step is \"Review all 12 readiness issues together before analysis.\""
+     },
+     {
+      "item": "questions score 0",
+      "span": "\"what proportion of the archive would the index actually include?\" plus the three questions following \"Questions this model does not answer yet:\"",
+      "source": "case truth /3/output/open_questions lists the three server-disclosed questions; criterion 5 permits one question by default"
+     },
+     {
+      "item": "nothing_invented score 0",
+      "span": "\"The key challenge is coverage\" and \"If it is much lower than 80%, that would weaken the case for it.\"",
+      "source": "case truth /6/output: proposal supplies an estimated coverage level and basis, but does not identify coverage as the key challenge or establish this conditional case-strength effect"
+     },
+     {
+      "item": "truth_fidelity gate FAIL",
+      "span": "\"No analysis ran: current retrieval time is unknown, and the model needs assumptions about how each approach changes discoverability.\"",
+      "source": "case truth /3/output/first_analysis: \"reason\":\"not_admissible\"; \"next_step\":\"Review all 12 readiness issues together before analysis.\""
+     }
+    ]
+   }
+  },
+  "preference": "A",
+  "reason": "A faithfully presents the entire assumption package as unvalidated Olumi estimates and asks for the supported approval. B adds an unsupported claim that coverage is the key challenge and gives an incomplete, non-canonical reason for the non-run; the correct server disclosure does not erase that visible model error."
+ }
+}

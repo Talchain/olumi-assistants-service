@@ -1,0 +1,21 @@
+{
+ "id": "D1.F.rep3",
+ "state": "D1",
+ "arm": "F",
+ "rep": 3,
+ "raw": "I couldn’t create the first model: the brief expanded to 32 causal links, above the 30-link limit. Nothing has been recorded.\n\nTo keep it analysable, should I narrow the model to the six‑month delivery trade-off only—delivery speed, rework, and experienced-developer time spent onboarding—rather than modelling broader hiring effects?",
+ "visible": "I couldn’t create the first model: the brief expanded to 32 causal links, above the 30-link limit. Nothing has been recorded.\n\nTo keep it analysable, should I narrow the model to the six‑month delivery trade-off only—delivery speed, rework, and experienced-developer time spent onboarding—rather than modelling broader hiring effects?\n\nThe model was not built: it came back larger than a first model can be, even after one attempt to make it more compact — ask me to build it again, or tell me which options and factors matter most.",
+ "gate_changed": false,
+ "stripped": [],
+ "owed": [],
+ "status": "The model was not built: it came back larger than a first model can be, even after one attempt to make it more compact — ask me to build it again, or tell me which options and factors matter most.",
+ "not_adopted": null,
+ "suggested_actions": [
+  {
+   "id": "agent-rebuild-model",
+   "label": "Build it again",
+   "message": "Build the model again from my brief."
+  }
+ ],
+ "blocks": []
+}

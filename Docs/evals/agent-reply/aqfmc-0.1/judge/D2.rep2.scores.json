@@ -1,0 +1,295 @@
+{
+ "state": "D2",
+ "rep": 2,
+ "at": "2026-09-25T01:05:17.592Z",
+ "http": 200,
+ "error": null,
+ "tries": 1,
+ "latency_ms": 81733,
+ "request_sha256": "e5c4264f9ea8dd4c40ecb9b6d9b5799de12030d1ee126e3b6a9a40313ae95f63",
+ "response_id": "resp_085b01a5a757dbaf006ab5c87c2bf087d2b7e48f7b9cf2f945",
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 8592,
+  "input_tokens_details": {
+   "cache_write_tokens": 5609,
+   "cached_tokens": 2980
+  },
+  "output_tokens": 4908,
+  "output_tokens_details": {
+   "reasoning_tokens": 2521
+  },
+  "total_tokens": 13500
+ },
+ "status": "completed",
+ "scores": {
+  "A": {
+   "raw": {
+    "scores": {
+     "concise": 2,
+     "shape": 2,
+     "decisive_caveat": 2,
+     "next_move": 2,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 0,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 1,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "76 words; appropriately brief.",
+     "shape": "Direct answer followed by short explanatory paragraphs.",
+     "decisive_caveat": "Identifies the material structural limitation: one shared onboarding-load assumption for distinct hiring options.",
+     "next_move": "Gives one grounded coaching intervention: challenge the onboarding-load estimate.",
+     "questions": "n/a: the user asked for a completed coaching answer, and no clarification is required.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "It adds an unsupported claim that the difference is likely material.",
+     "attribution": "Correctly identifies 4 experienced developer-hours/week as an Olumi estimate rather than a supplied measurement.",
+     "provisional_vs_validated": "Does not portray the estimate or analysis as validated.",
+     "fidelity": "The value and unit are exact, but onboarding load affects delivery capacity through onboarding diversion rather than directly.",
+     "uncertainty": "Clearly labels the input as an estimate and identifies the option-specific uncertainty.",
+     "useful_next_step": "Names a supplied model assumption, explains its delivery-capacity relevance, and gives a concrete observation that could weaken it."
+    },
+    "gates": {
+     "truth_fidelity": "FAIL",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 76,
+    "questions": 0,
+    "requests_for_information": [],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "Invented material effect",
+      "span": "\"the penalty is likely materially different for a tech lead versus two developers\"",
+      "source": "Canonical state /existing_links: both options link to the single onboarding_load factor; no option-specific or material-size effect is supplied."
+     },
+     {
+      "item": "Indirect relationship stated as direct",
+      "span": "\"it directly reduces delivery capacity\"",
+      "source": "Canonical state /existing_links: onboarding_load -> onboarding_diversion -> delivery_capacity."
+     },
+     {
+      "item": "Truth-fidelity gate failure",
+      "span": "\"it directly reduces delivery capacity\"",
+      "source": "Canonical state /existing_links: the supplied causal path contains onboarding_diversion between onboarding_load and delivery_capacity."
+     }
+    ]
+   },
+   "full": {
+    "scores": {
+     "concise": 2,
+     "shape": 2,
+     "decisive_caveat": 2,
+     "next_move": 2,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 0,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 1,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "76 visible words; appropriately brief.",
+     "shape": "Direct answer followed by short explanatory paragraphs.",
+     "decisive_caveat": "Identifies the material structural limitation: one shared onboarding-load assumption for distinct hiring options.",
+     "next_move": "Gives one grounded coaching intervention: challenge the onboarding-load estimate.",
+     "questions": "n/a: the user asked for a completed coaching answer, and no clarification is required.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "It adds an unsupported claim that the difference is likely material.",
+     "attribution": "Correctly identifies 4 experienced developer-hours/week as an Olumi estimate rather than a supplied measurement.",
+     "provisional_vs_validated": "Does not portray the estimate or analysis as validated.",
+     "fidelity": "The value and unit are exact, but onboarding load affects delivery capacity through onboarding diversion rather than directly.",
+     "uncertainty": "Clearly labels the input as an estimate and identifies the option-specific uncertainty.",
+     "useful_next_step": "Names a supplied model assumption, explains its delivery-capacity relevance, and gives a concrete observation that could weaken it."
+    },
+    "gates": {
+     "truth_fidelity": "FAIL",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 76,
+    "questions": 0,
+    "requests_for_information": [],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "Invented material effect",
+      "span": "\"the penalty is likely materially different for a tech lead versus two developers\"",
+      "source": "Canonical state /existing_links: both options link to the single onboarding_load factor; no option-specific or material-size effect is supplied."
+     },
+     {
+      "item": "Indirect relationship stated as direct",
+      "span": "\"it directly reduces delivery capacity\"",
+      "source": "Canonical state /existing_links: onboarding_load -> onboarding_diversion -> delivery_capacity."
+     },
+     {
+      "item": "Truth-fidelity gate failure",
+      "span": "\"it directly reduces delivery capacity\"",
+      "source": "Canonical state /existing_links: the supplied causal path contains onboarding_diversion between onboarding_load and delivery_capacity."
+     }
+    ]
+   }
+  },
+  "B": {
+   "raw": {
+    "scores": {
+     "concise": 2,
+     "shape": 2,
+     "decisive_caveat": 1,
+     "next_move": 0,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 0,
+     "attribution": 1,
+     "provisional_vs_validated": 2,
+     "fidelity": 1,
+     "uncertainty": 2,
+     "useful_next_step": 0
+    },
+    "notes": {
+     "concise": "76 words; appropriately brief.",
+     "shape": "Answer first, then exactly three short bullets.",
+     "decisive_caveat": "Notes the six-month horizon and possible hire-type difference, but does not clearly state that the current model uses one shared onboarding-load value.",
+     "next_move": "It gives a second coaching action despite the requested single intervention.",
+     "questions": "n/a: the user asked for a completed coaching answer, and no clarification is required.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "It asserts unsupported effects and adds a second investigation.",
+     "attribution": "The first estimate is attributed to Olumi; the 50/100 technical-guidance estimate is called an estimate but its Olumi provenance is not made clear.",
+     "provisional_vs_validated": "Uses estimated/assumed language and does not claim validation.",
+     "fidelity": "The inputs match the supplied values, but the asserted magnitude and future onboarding effect are not supplied model findings.",
+     "uncertainty": "Uses conditional language and acknowledges the estimates.",
+     "useful_next_step": "Fails the state-specific rule: it supplies no observation that could weaken the chosen assumption, and it adds another exercise."
+    },
+    "gates": {
+     "truth_fidelity": "FAIL",
+     "consent_action_truth": "PASS",
+     "provenance": "FAIL",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 76,
+    "questions": 0,
+    "requests_for_information": [],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "Second unsupported action",
+      "span": "\"Next, challenge the technical guidance quality estimate of 50/100\"",
+      "source": "Case state test: \"Do not add another exercise alongside a current eligible coaching action.\""
+     },
+     {
+      "item": "Unsupported magnitude claim",
+      "span": "\"can erase much of two new developers’ delivery gain\"",
+      "source": "Canonical state and server analysis_result: no supplied result establishes that onboarding erases much of the delivery gain."
+     },
+     {
+      "item": "Unsupported future causal effect",
+      "span": "\"a tech lead could reduce future onboarding burden\"",
+      "source": "Canonical state /existing_links: no link from tech lead headcount or technical guidance quality to onboarding load or onboarding diversion."
+     },
+     {
+      "item": "Unclear provenance for second value",
+      "span": "\"technical guidance quality estimate of 50/100\"",
+      "source": "Canonical state /entities/10/value_provenance/source: \"cee_inference\"; the reply does not identify this as an Olumi estimate."
+     },
+     {
+      "item": "Truth-fidelity gate failure",
+      "span": "\"can erase much of two new developers’ delivery gain\"",
+      "source": "Canonical state and server analysis_result: no supplied magnitude or finding supports this claim."
+     },
+     {
+      "item": "Provenance gate failure",
+      "span": "\"technical guidance quality estimate of 50/100\"",
+      "source": "Canonical state /entities/10/value_provenance/source: \"cee_inference\"; the source is not distinguished for the user."
+     }
+    ]
+   },
+   "full": {
+    "scores": {
+     "concise": 2,
+     "shape": 2,
+     "decisive_caveat": 1,
+     "next_move": 0,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 0,
+     "attribution": 1,
+     "provisional_vs_validated": 2,
+     "fidelity": 1,
+     "uncertainty": 2,
+     "useful_next_step": 0
+    },
+    "notes": {
+     "concise": "76 visible words; appropriately brief.",
+     "shape": "Answer first, then exactly three short bullets.",
+     "decisive_caveat": "Notes the six-month horizon and possible hire-type difference, but does not clearly state that the current model uses one shared onboarding-load value.",
+     "next_move": "It gives a second coaching action despite the requested single intervention.",
+     "questions": "n/a: the user asked for a completed coaching answer, and no clarification is required.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "It asserts unsupported effects and adds a second investigation.",
+     "attribution": "The first estimate is attributed to Olumi; the 50/100 technical-guidance estimate is called an estimate but its Olumi provenance is not made clear.",
+     "provisional_vs_validated": "Uses estimated/assumed language and does not claim validation.",
+     "fidelity": "The inputs match the supplied values, but the asserted magnitude and future onboarding effect are not supplied model findings.",
+     "uncertainty": "Uses conditional language and acknowledges the estimates.",
+     "useful_next_step": "Fails the state-specific rule: it supplies no observation that could weaken the chosen assumption, and it adds another exercise."
+    },
+    "gates": {
+     "truth_fidelity": "FAIL",
+     "consent_action_truth": "PASS",
+     "provenance": "FAIL",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 76,
+    "questions": 0,
+    "requests_for_information": [],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "Second unsupported action",
+      "span": "\"Next, challenge the technical guidance quality estimate of 50/100\"",
+      "source": "Case state test: \"Do not add another exercise alongside a current eligible coaching action.\""
+     },
+     {
+      "item": "Unsupported magnitude claim",
+      "span": "\"can erase much of two new developers’ delivery gain\"",
+      "source": "Canonical state and server analysis_result: no supplied result establishes that onboarding erases much of the delivery gain."
+     },
+     {
+      "item": "Unsupported future causal effect",
+      "span": "\"a tech lead could reduce future onboarding burden\"",
+      "source": "Canonical state /existing_links: no link from tech lead headcount or technical guidance quality to onboarding load or onboarding diversion."
+     },
+     {
+      "item": "Unclear provenance for second value",
+      "span": "\"technical guidance quality estimate of 50/100\"",
+      "source": "Canonical state /entities/10/value_provenance/source: \"cee_inference\"; the reply does not identify this as an Olumi estimate."
+     },
+     {
+      "item": "Truth-fidelity gate failure",
+      "span": "\"can erase much of two new developers’ delivery gain\"",
+      "source": "Canonical state and server analysis_result: no supplied magnitude or finding supports this claim."
+     },
+     {
+      "item": "Provenance gate failure",
+      "span": "\"technical guidance quality estimate of 50/100\"",
+      "source": "Canonical state /entities/10/value_provenance/source: \"cee_inference\"; the source is not distinguished for the user."
+     }
+    ]
+   }
+  },
+  "preference": "A",
+  "reason": "A provides one model-specific, evidence-oriented coaching intervention with a concrete falsifying observation. Its unsupported materiality wording is a defect, but B adds a prohibited second exercise, makes stronger unsupported causal/magnitude claims, and omits the required weakening observation."
+ }
+}

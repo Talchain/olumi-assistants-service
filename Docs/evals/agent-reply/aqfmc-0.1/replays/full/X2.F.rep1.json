@@ -1,0 +1,15 @@
+{
+ "id": "X2.F.rep1",
+ "state": "X2",
+ "arm": "F",
+ "rep": 1,
+ "raw": "Challenge the **80-hour replacement installation downtime** first. It is an Olumi assumption, not measured evidence, and it directly offsets replacement’s assumed reliability and capacity gains during the next quarter—the period you care about.\n\nIts decisive limitation is asymmetry: the current proposal does **not** represent repair downtime, because repair is not linked to that factor. Confirm the replacement outage, including commissioning and any parallel-running period; what planned installation schedule would show that 80 hours is too high or too low?",
+ "visible": "Challenge the **80-hour replacement installation downtime** first. It is an Olumi assumption, not measured evidence, and it directly offsets replacement’s assumed reliability and capacity gains during the next quarter—the period you care about.\n\nIts decisive limitation is asymmetry: the current proposal does **not** represent repair downtime, because repair is not linked to that factor. Confirm the replacement outage, including commissioning and any parallel-running period; what planned installation schedule would show that 80 hours is too high or too low?",
+ "gate_changed": false,
+ "stripped": [],
+ "owed": [],
+ "status": null,
+ "not_adopted": null,
+ "suggested_actions": [],
+ "blocks": []
+}

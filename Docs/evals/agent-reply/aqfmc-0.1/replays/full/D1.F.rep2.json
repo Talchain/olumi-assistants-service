@@ -1,0 +1,21 @@
+{
+ "id": "D1.F.rep2",
+ "state": "D1",
+ "arm": "F",
+ "rep": 2,
+ "raw": "I can compare them, but Olumi could not create the first model: its initial interpretation had 32 links, above the 30-link limit. Nothing has been recorded.\n\nTo keep it analysable, shall I build a tighter six‑month model around **delivery speed**, **rework**, and **onboarding drag on experienced developers**, excluding current team size and baseline productivity until you choose estimates?",
+ "visible": "I can compare them, but Olumi could not create the first model: its initial interpretation had 32 links, above the 30-link limit. Nothing has been recorded.\n\nTo keep it analysable, shall I build a tighter six‑month model around **delivery speed**, **rework**, and **onboarding drag on experienced developers**, excluding current team size and baseline productivity until you choose estimates?\n\nThe model was not built: it came back larger than a first model can be, even after one attempt to make it more compact — ask me to build it again, or tell me which options and factors matter most.",
+ "gate_changed": false,
+ "stripped": [],
+ "owed": [],
+ "status": "The model was not built: it came back larger than a first model can be, even after one attempt to make it more compact — ask me to build it again, or tell me which options and factors matter most.",
+ "not_adopted": null,
+ "suggested_actions": [
+  {
+   "id": "agent-rebuild-model",
+   "label": "Build it again",
+   "message": "Build the model again from my brief."
+  }
+ ],
+ "blocks": []
+}

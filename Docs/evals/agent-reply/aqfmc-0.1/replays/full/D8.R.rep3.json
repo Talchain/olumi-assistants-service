@@ -1,0 +1,28 @@
+{
+ "id": "D8.R.rep3",
+ "state": "D8",
+ "arm": "R",
+ "rep": 3,
+ "raw": "I’ve framed the comparison around reducing document retrieval time; customer, revenue and staffing factors are excluded as you specified.\n\nThese are Olumi’s **starting assumptions, not measurements**, to adopt or correct in one go:\n\n- Current state: index coverage **50%**, folder consistency **40%**, naming consistency **40%**, search effectiveness **50%** — assumed partly workable but inconsistent.\n- **Searchable index:** coverage **80%**, search effectiveness **75%** — assumes most documents can be indexed and searches become substantially better.\n- **Folder tidy-up:** folder consistency **80%**, naming consistency **70%** — assumes a largely consistent structure with some legacy exceptions.\n- For context, it also includes **carry on as now** at current levels and an **index-and-folder pilot** at intermediate levels (coverage/folder consistency **60%**, naming/search effectiveness **55%/60%**).\n\nDo you approve these assumptions for the comparison?",
+ "visible": "I’ve framed the comparison around reducing document retrieval time; customer, revenue and staffing factors are excluded as you specified.\n\nThese are Olumi’s **starting assumptions, not measurements**, to adopt or correct in one go:\n\n- Current state: index coverage **50%**, folder consistency **40%**, naming consistency **40%**, search effectiveness **50%** — assumed partly workable but inconsistent.\n- **Searchable index:** coverage **80%**, search effectiveness **75%** — assumes most documents can be indexed and searches become substantially better.\n- **Folder tidy-up:** folder consistency **80%**, naming consistency **70%** — assumes a largely consistent structure with some legacy exceptions.\n- For context, it also includes **carry on as now** at current levels and an **index-and-folder pilot** at intermediate levels (coverage/folder consistency **60%**, naming/search effectiveness **55%/60%**).\n\nDo you approve these assumptions for the comparison?\n\nThe first analysis could not run yet: Review all 12 readiness issues together before analysis.\n\nThe model was saved. Questions this model does not answer yet: What proportion of archive documents could realistically be included in a searchable index? How consistent are the current folder structure and document names? Would the searchable index and folder tidy-up cover the full archive or only selected document types?",
+ "gate_changed": false,
+ "stripped": [],
+ "owed": [
+  "The first analysis could not run yet: Review all 12 readiness issues together before analysis."
+ ],
+ "status": "The model was saved. Questions this model does not answer yet: What proportion of archive documents could realistically be included in a searchable index? How consistent are the current folder structure and document names? Would the searchable index and folder tidy-up cover the full archive or only selected document types?",
+ "not_adopted": null,
+ "suggested_actions": [
+  {
+   "id": "agent-approve-proposal:prop_f929de45ade0323761c7ed45e7a0fe9a",
+   "label": "Use as starting assumptions",
+   "message": "Yes, use those."
+  },
+  {
+   "id": "agent-amend-proposal",
+   "label": "Change something first",
+   "message": "Before you apply it, I want to change some of it."
+  }
+ ],
+ "blocks": []
+}

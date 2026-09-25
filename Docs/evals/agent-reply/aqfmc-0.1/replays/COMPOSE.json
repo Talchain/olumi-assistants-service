@@ -1,0 +1,318 @@
+{
+ "head": "c933aabfaffb4cac5572b7962d9e3a3658996de0",
+ "validation": {
+  "D1": {
+   "byte_equal": true,
+   "sim_sha": "3026d3b2c920f94fd9598884a7e11600f01251f20b9d61917b44d4793269f16c",
+   "actual_sha": "3026d3b2c920f94fd9598884a7e11600f01251f20b9d61917b44d4793269f16c",
+   "server_copy_nonempty": true,
+   "owed": [],
+   "status": "The model was not built: it came back larger than a first model can be, even after one attempt to make it more compact — ask me to build it again, or tell me which options and factors matter most.",
+   "not_adopted": null,
+   "stripped": [
+    "It included 17 nodes and 32 links (the limit is 30); two nodes were added beyond your brief."
+   ],
+   "gate_changed": false,
+   "analysis_bearing": false,
+   "source": {
+    "final_hop_request": "~/olumi-ai-quality-20260924/aqfmc/captures/R/D1/llm-calls/05.request.json",
+    "final_hop_index": "05",
+    "first_analysis": null,
+    "tools_called": [
+     "get_canonical_state",
+     "build_model_from_brief"
+    ],
+    "fast_path": null
+   }
+  },
+  "D2": {
+   "byte_equal": true,
+   "sim_sha": "610fa4958d45fdb206419fdca3b9c65f1f69b368b490971bf9aae8d2766499de",
+   "actual_sha": "610fa4958d45fdb206419fdca3b9c65f1f69b368b490971bf9aae8d2766499de",
+   "server_copy_nonempty": false,
+   "owed": [],
+   "status": null,
+   "not_adopted": null,
+   "stripped": [],
+   "gate_changed": false,
+   "analysis_bearing": false,
+   "source": {
+    "final_hop_request": "~/olumi-ai-quality-20260924/aqfmc/captures/R/D2/llm-calls/02.request.json",
+    "final_hop_index": "02",
+    "first_analysis": null,
+    "tools_called": [
+     "get_canonical_state"
+    ],
+    "fast_path": null
+   }
+  },
+  "D2-nomodel": {
+   "error": "empty model text: the route substitutes its own fallback, not mirrored"
+  },
+  "D8": {
+   "byte_equal": true,
+   "sim_sha": "90e545f6cdaa415e2dd90c1e9eae4d13d463b0a14389cdf80ba7f949af652a95",
+   "actual_sha": "90e545f6cdaa415e2dd90c1e9eae4d13d463b0a14389cdf80ba7f949af652a95",
+   "server_copy_nonempty": true,
+   "owed": [
+    "The first analysis could not run yet: Review all 12 readiness issues together before analysis."
+   ],
+   "status": "The model was saved. Questions this model does not answer yet: What proportion of archive documents could realistically be included in a searchable index? How consistent are the current folder structure and document names? Would the searchable index and folder tidy-up cover the full archive or only selected document types?",
+   "not_adopted": null,
+   "stripped": [],
+   "gate_changed": false,
+   "analysis_bearing": true,
+   "source": {
+    "final_hop_request": "~/olumi-ai-quality-20260924/aqfmc/captures/R/D8/llm-calls/04.request.json",
+    "final_hop_index": "04",
+    "first_analysis": {
+     "ran": false,
+     "reason": "not_admissible",
+     "construction_turn_id": "graph_registration:00000000-0000-4000-8000-000000000000",
+     "revision": "ecf062f67b375496",
+     "ms": 88,
+     "coaching_blocks": 0
+    },
+    "tools_called": [
+     "build_model_from_brief",
+     "propose_starting_point"
+    ],
+    "fast_path": null
+   }
+  },
+  "X1": {
+   "byte_equal": true,
+   "sim_sha": "8765a6f334eb651d9185f34d6334c94fd264b66b6cc0fb3cf3b51798ead22d8d",
+   "actual_sha": "8765a6f334eb651d9185f34d6334c94fd264b66b6cc0fb3cf3b51798ead22d8d",
+   "server_copy_nonempty": true,
+   "owed": [
+    "The first analysis could not run yet: Review all 4 readiness issues together before analysis."
+   ],
+   "status": "The model was saved. Questions this model does not answer yet: What are the expected capital costs of repair, full replacement, and a phased replacement? How many installation-downtime hours would a full or phased replacement require before the replacement is ready? What reliability and packing-capacity improvement is expected from repair versus replacement? What is the current packing-line capacity and current number of orders dispatched on time per quarter?",
+   "not_adopted": null,
+   "stripped": [],
+   "gate_changed": false,
+   "analysis_bearing": true,
+   "source": {
+    "final_hop_request": "~/olumi-ai-quality-20260924/aqfmc/captures/R/X1/llm-calls/04.request.json",
+    "final_hop_index": "04",
+    "first_analysis": {
+     "ran": false,
+     "reason": "not_admissible",
+     "construction_turn_id": "graph_registration:00000000-0000-4000-8000-000000000000",
+     "revision": "4f4130149ffa2780",
+     "ms": 17,
+     "coaching_blocks": 0
+    },
+    "tools_called": [
+     "build_model_from_brief",
+     "propose_starting_point"
+    ],
+    "fast_path": null
+   }
+  },
+  "X2": {
+   "byte_equal": true,
+   "sim_sha": "bb777b63bfdba5917b6ba2543dcde28f57fb5d9bfb717cac3c109e4487206e26",
+   "actual_sha": "bb777b63bfdba5917b6ba2543dcde28f57fb5d9bfb717cac3c109e4487206e26",
+   "server_copy_nonempty": false,
+   "owed": [],
+   "status": null,
+   "not_adopted": null,
+   "stripped": [],
+   "gate_changed": false,
+   "analysis_bearing": false,
+   "source": {
+    "final_hop_request": "~/olumi-ai-quality-20260924/aqfmc/captures/R/X2/llm-calls/02.request.json",
+    "final_hop_index": "02",
+    "first_analysis": null,
+    "tools_called": [
+     "get_canonical_state"
+    ],
+    "fast_path": null
+   }
+  }
+ },
+ "composed": [
+  {
+   "id": "D1.F.rep1",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "D1.F.rep2",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "D1.F.rep3",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "D1.R.rep1",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "D1.R.rep2",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "D1.R.rep3",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "D2.F.rep1",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "D2.F.rep2",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "D2.F.rep3",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "D2.R.rep1",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "D2.R.rep2",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "D2.R.rep3",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "D8.F.rep1",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "D8.F.rep2",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "D8.F.rep3",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "D8.R.rep1",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "D8.R.rep2",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "D8.R.rep3",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "X1.F.rep1",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "X1.F.rep2",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "X1.F.rep3",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "X1.R.rep1",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "X1.R.rep2",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "X1.R.rep3",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "X2.F.rep1",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "X2.F.rep2",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "X2.F.rep3",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "X2.R.rep1",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "X2.R.rep2",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  },
+  {
+   "id": "X2.R.rep3",
+   "status": "COMPOSED",
+   "gate_changed": false,
+   "stripped": 0
+  }
+ ]
+}

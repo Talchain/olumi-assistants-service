@@ -1,0 +1,21 @@
+{
+ "id": "D1.R.rep3",
+ "state": "D1",
+ "arm": "R",
+ "rep": 3,
+ "raw": "I couldn’t create the decision model: the first draft exceeded its link limit (32 needed; 30 allowed).\n\n- **Tech lead:** likely targets less rework through technical direction, while onboarding may reduce experienced developers’ delivery capacity initially.\n- **Two developers:** likely targets faster delivery once productive, but could impose more onboarding load and may not address rework directly.\n- Current team size, baseline productivity and onboarding capacity remain unknown; no Olumi estimates were created or saved.",
+ "visible": "I couldn’t create the decision model: the first draft exceeded its link limit (32 needed; 30 allowed).\n\n- **Tech lead:** likely targets less rework through technical direction, while onboarding may reduce experienced developers’ delivery capacity initially.\n- **Two developers:** likely targets faster delivery once productive, but could impose more onboarding load and may not address rework directly.\n- Current team size, baseline productivity and onboarding capacity remain unknown; no Olumi estimates were created or saved.\n\nThe model was not built: it came back larger than a first model can be, even after one attempt to make it more compact — ask me to build it again, or tell me which options and factors matter most.",
+ "gate_changed": false,
+ "stripped": [],
+ "owed": [],
+ "status": "The model was not built: it came back larger than a first model can be, even after one attempt to make it more compact — ask me to build it again, or tell me which options and factors matter most.",
+ "not_adopted": null,
+ "suggested_actions": [
+  {
+   "id": "agent-rebuild-model",
+   "label": "Build it again",
+   "message": "Build the model again from my brief."
+  }
+ ],
+ "blocks": []
+}

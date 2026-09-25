@@ -1,0 +1,15 @@
+{
+ "id": "X2.F.rep2",
+ "state": "X2",
+ "arm": "F",
+ "rep": 2,
+ "raw": "Challenge the **replacement installation downtime of 80 hours** first. It is an Olumi assumption, not a measured figure, and it directly represents your stated risk: lost output before the replacement is ready. Within one quarter, a materially longer commissioning or cutover could offset much of the assumed capacity and reliability gain.\n\nAsk the supplier: **what is the credible end-to-end downtime, including commissioning, faults and contingency—not just installation?**\n\nNo model change or rerun has been made.",
+ "visible": "Challenge the **replacement installation downtime of 80 hours** first. It is an Olumi assumption, not a measured figure, and it directly represents your stated risk: lost output before the replacement is ready. Within one quarter, a materially longer commissioning or cutover could offset much of the assumed capacity and reliability gain.\n\nAsk the supplier: **what is the credible end-to-end downtime, including commissioning, faults and contingency—not just installation?**\n\nNo model change or rerun has been made.",
+ "gate_changed": false,
+ "stripped": [],
+ "owed": [],
+ "status": null,
+ "not_adopted": null,
+ "suggested_actions": [],
+ "blocks": []
+}

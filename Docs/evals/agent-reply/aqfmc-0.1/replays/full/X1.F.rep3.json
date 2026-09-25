@@ -1,0 +1,28 @@
+{
+ "id": "X1.F.rep3",
+ "state": "X1",
+ "arm": "F",
+ "rep": 3,
+ "raw": "I’ve set up the comparison. No analysis has run: all options currently set no factors, so no comparison is possible yet.\n\nMy proposed **assumptions—not measurements** are:\n\n- Starting point: capital spend **£0**; installation downtime **0 hours**; reliability **85%**; capacity **5,000 orders/quarter**.\n- Repair: **£10,000**, **92%** reliability; assumes it restores rather than expands capacity.\n- Replace: **£40,000**, **80 hours** downtime, **98%** reliability, **6,500 orders/quarter**.\n- Also included for challenge: phased replacement at **£35,000**, **24 hours**, **96%**, **6,000 orders/quarter**; and continue current line at the starting levels.\n\nThese are deliberately testable placeholders, based on your £40,000 ceiling and the stated downtime risk. A decisive uncertainty is replacement’s **80-hour installation downtime**: what evidence would show that is materially too high or low?\n\nApprove these assumptions to enter them into the model, or correct any figures first.",
+ "visible": "I’ve set up the comparison. No analysis has run: all options currently set no factors, so no comparison is possible yet.\n\nMy proposed **assumptions—not measurements** are:\n\n- Starting point: capital spend **£0**; installation downtime **0 hours**; reliability **85%**; capacity **5,000 orders/quarter**.\n- Repair: **£10,000**, **92%** reliability; assumes it restores rather than expands capacity.\n- Replace: **£40,000**, **80 hours** downtime, **98%** reliability, **6,500 orders/quarter**.\n- Also included for challenge: phased replacement at **£35,000**, **24 hours**, **96%**, **6,000 orders/quarter**; and continue current line at the starting levels.\n\nThese are deliberately testable placeholders, based on your £40,000 ceiling and the stated downtime risk. A decisive uncertainty is replacement’s **80-hour installation downtime**: what evidence would show that is materially too high or low?\n\nApprove these assumptions to enter them into the model, or correct any figures first.\n\nThe first analysis could not run yet: Review all 4 readiness issues together before analysis.\n\nThe model was saved. Questions this model does not answer yet: What are the expected capital costs of repair, full replacement, and a phased replacement? How many installation-downtime hours would a full or phased replacement require before the replacement is ready? What reliability and packing-capacity improvement is expected from repair versus replacement? What is the current packing-line capacity and current number of orders dispatched on time per quarter?",
+ "gate_changed": false,
+ "stripped": [],
+ "owed": [
+  "The first analysis could not run yet: Review all 4 readiness issues together before analysis."
+ ],
+ "status": "The model was saved. Questions this model does not answer yet: What are the expected capital costs of repair, full replacement, and a phased replacement? How many installation-downtime hours would a full or phased replacement require before the replacement is ready? What reliability and packing-capacity improvement is expected from repair versus replacement? What is the current packing-line capacity and current number of orders dispatched on time per quarter?",
+ "not_adopted": null,
+ "suggested_actions": [
+  {
+   "id": "agent-approve-proposal:prop_3e4ce44cfe446260425547fa9353f4c3",
+   "label": "Use as starting assumptions",
+   "message": "Yes, use those."
+  },
+  {
+   "id": "agent-amend-proposal",
+   "label": "Change something first",
+   "message": "Before you apply it, I want to change some of it."
+  }
+ ],
+ "blocks": []
+}

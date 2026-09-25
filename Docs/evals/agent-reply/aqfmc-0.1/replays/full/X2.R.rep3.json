@@ -1,0 +1,15 @@
+{
+ "id": "X2.R.rep3",
+ "state": "X2",
+ "arm": "R",
+ "rep": 3,
+ "raw": "Challenge the **80-hour replacement installation downtime** first.\n\nIt is the direct trade-off against your next-quarter aim: a replacement’s higher assumed reliability (**98%**) and capacity (**6,500 orders/quarter**) only help after it is ready. The 80-hour figure is an Olumi assumption, not evidence, and a commissioning overrun could materially change the case.\n\nAlso challenge the assumed **£40,000 replacement cost**: it exactly meets your cap, leaving no allowance for installation, contingency, or associated works.",
+ "visible": "Challenge the **80-hour replacement installation downtime** first.\n\nIt is the direct trade-off against your next-quarter aim: a replacement’s higher assumed reliability (**98%**) and capacity (**6,500 orders/quarter**) only help after it is ready. The 80-hour figure is an Olumi assumption, not evidence, and a commissioning overrun could materially change the case.\n\nAlso challenge the assumed **£40,000 replacement cost**: it exactly meets your cap, leaving no allowance for installation, contingency, or associated works.",
+ "gate_changed": false,
+ "stripped": [],
+ "owed": [],
+ "status": null,
+ "not_adopted": null,
+ "suggested_actions": [],
+ "blocks": []
+}

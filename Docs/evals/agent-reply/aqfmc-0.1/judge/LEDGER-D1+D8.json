@@ -1,0 +1,41 @@
+{
+ "attempts": 6,
+ "calls": 6,
+ "blocked": 0,
+ "hosts": [
+  "api.openai.com"
+ ],
+ "anthropic_env_absent_at_end": true,
+ "ledger": [
+  {
+   "at": "2026-09-25T00:50:25.674Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T00:51:36.459Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T00:52:42.439Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T00:53:59.979Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T00:55:21.035Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T00:56:39.925Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  }
+ ]
+}

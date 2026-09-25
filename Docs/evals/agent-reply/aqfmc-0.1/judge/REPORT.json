@@ -1,0 +1,4514 @@
+{
+ "verdict": "NO_ACCEPTABLE_WINNER (both fail a hard gate)",
+ "rules": {
+  "r1_F_all_gates_pass": false,
+  "r1_R_all_gates_pass": false,
+  "r2_D2_intervention_2_all": true,
+  "r3_mean_dev_gain_raw": 2.6666666666666665,
+  "r3_mean_dev_gain_full": 3.3333333333333335,
+  "r3_pass": true,
+  "r4_no_dev_regression": true,
+  "r5_held_no_regression": false,
+  "r5_X2_intervention_2_all": true,
+  "r6_same_call_pattern": true,
+  "r7_latency_ratio": 1.1378977820636451,
+  "r8_token_ratios": {
+   "uncached": 274.4888888888889,
+   "cached": 0.8966239988023056,
+   "output": 1.0751004016064256
+  },
+  "r8_median_per_reply_cost": "NOT_DECIDABLE (no timestamped gpt-5.6-terra price card in hand)",
+  "disclose_over_125": [
+   {
+    "state": "D1",
+    "latency": {
+     "R": 3833,
+     "F": 5111
+    },
+    "output_tokens": {
+     "R": 130,
+     "F": 203
+    }
+   }
+  ],
+  "r7_pass": false,
+  "r8_price_independent_pass": false
+ },
+ "table": [
+  {
+   "state": "D1",
+   "n": [
+    3,
+    3
+   ],
+   "raw": {
+    "R": 17,
+    "F": 23,
+    "R_range": [
+     12,
+     24
+    ],
+    "F_range": [
+     16,
+     24
+    ]
+   },
+   "full": {
+    "R": 15,
+    "F": 21,
+    "R_range": [
+     15,
+     21
+    ],
+    "F_range": [
+     13,
+     22
+    ]
+   },
+   "words": {
+    "raw": {
+     "R": 70,
+     "F": 58
+    },
+    "visible": {
+     "R": 110,
+     "F": 98
+    }
+   },
+   "latency": {
+    "R": 3833,
+    "F": 5111
+   },
+   "output_tokens": {
+    "R": 130,
+    "F": 203
+   },
+   "paired_diff_full": [
+    7,
+    -8,
+    6
+   ],
+   "paired_diff_raw": [
+    7,
+    -8,
+    11
+   ],
+   "gate_fails": {
+    "R": [
+     "raw:truth_fidelity@rep1",
+     "raw:provenance@rep1",
+     "full:truth_fidelity@rep1",
+     "full:provenance@rep1",
+     "raw:consent_action_truth@rep2",
+     "full:consent_action_truth@rep2",
+     "raw:truth_fidelity@rep3",
+     "raw:provenance@rep3",
+     "full:truth_fidelity@rep3",
+     "full:provenance@rep3"
+    ],
+    "F": [
+     "raw:truth_fidelity@rep2",
+     "raw:consent_action_truth@rep2",
+     "raw:provenance@rep2",
+     "full:truth_fidelity@rep2",
+     "full:consent_action_truth@rep2",
+     "full:provenance@rep2"
+    ]
+   },
+   "not_decidable": {
+    "R": 0,
+    "F": 0
+   },
+   "intervention": {
+    "R": [
+     [
+      2,
+      2
+     ],
+     [
+      2,
+      2
+     ],
+     [
+      0,
+      1
+     ]
+    ],
+    "F": [
+     [
+      2,
+      2
+     ],
+     [
+      1,
+      1
+     ],
+     [
+      2,
+      2
+     ]
+    ]
+   },
+   "outcomes": {
+    "R": [
+     "text",
+     "text",
+     "text"
+    ],
+    "F": [
+     "text",
+     "text",
+     "text"
+    ]
+   },
+   "gate_changed": {
+    "R": 0,
+    "F": 0
+   },
+   "judge_preferred": {
+    "R": 1,
+    "F": 2
+   }
+  },
+  {
+   "state": "D8",
+   "n": [
+    3,
+    3
+   ],
+   "raw": {
+    "R": 20,
+    "F": 21,
+    "R_range": [
+     19,
+     21
+    ],
+    "F_range": [
+     16,
+     24
+    ]
+   },
+   "full": {
+    "R": 20,
+    "F": 20,
+    "R_range": [
+     19,
+     21
+    ],
+    "F_range": [
+     14,
+     20
+    ]
+   },
+   "words": {
+    "raw": {
+     "R": 108,
+     "F": 111
+    },
+    "visible": {
+     "R": 173,
+     "F": 176
+    }
+   },
+   "latency": {
+    "R": 3768,
+    "F": 4495
+   },
+   "output_tokens": {
+    "R": 175,
+    "F": 191
+   },
+   "paired_diff_full": [
+    1,
+    0,
+    -7
+   ],
+   "paired_diff_raw": [
+    4,
+    2,
+    -5
+   ],
+   "gate_fails": {
+    "R": [],
+    "F": [
+     "raw:truth_fidelity@rep3",
+     "full:truth_fidelity@rep3"
+    ]
+   },
+   "not_decidable": {
+    "R": 0,
+    "F": 0
+   },
+   "intervention": {
+    "R": [
+     [
+      2,
+      2
+     ],
+     [
+      2,
+      2
+     ],
+     [
+      2,
+      2
+     ]
+    ],
+    "F": [
+     [
+      2,
+      2
+     ],
+     [
+      2,
+      2
+     ],
+     [
+      2,
+      2
+     ]
+    ]
+   },
+   "outcomes": {
+    "R": [
+     "text",
+     "text",
+     "text"
+    ],
+    "F": [
+     "text",
+     "text",
+     "text"
+    ]
+   },
+   "gate_changed": {
+    "R": 0,
+    "F": 0
+   },
+   "judge_preferred": {
+    "R": 1,
+    "F": 2
+   }
+  },
+  {
+   "state": "D2",
+   "n": [
+    3,
+    3
+   ],
+   "raw": {
+    "R": 21,
+    "F": 22,
+    "R_range": [
+     15,
+     22
+    ],
+    "F_range": [
+     21,
+     22
+    ]
+   },
+   "full": {
+    "R": 17,
+    "F": 21,
+    "R_range": [
+     15,
+     22
+    ],
+    "F_range": [
+     18,
+     22
+    ]
+   },
+   "words": {
+    "raw": {
+     "R": 71,
+     "F": 78
+    },
+    "visible": {
+     "R": 71,
+     "F": 78
+    }
+   },
+   "latency": {
+    "R": 6038,
+    "F": 4101
+   },
+   "output_tokens": {
+    "R": 174,
+    "F": 109
+   },
+   "paired_diff_full": [
+    0,
+    6,
+    1
+   ],
+   "paired_diff_raw": [
+    0,
+    6,
+    1
+   ],
+   "gate_fails": {
+    "R": [
+     "raw:truth_fidelity@rep2",
+     "raw:provenance@rep2",
+     "full:truth_fidelity@rep2",
+     "full:provenance@rep2",
+     "raw:truth_fidelity@rep3",
+     "full:truth_fidelity@rep3"
+    ],
+    "F": [
+     "raw:truth_fidelity@rep2",
+     "full:truth_fidelity@rep2",
+     "raw:truth_fidelity@rep3",
+     "full:truth_fidelity@rep3"
+    ]
+   },
+   "not_decidable": {
+    "R": 0,
+    "F": 0
+   },
+   "intervention": {
+    "R": [
+     [
+      1,
+      1
+     ],
+     [
+      0,
+      0
+     ],
+     [
+      2,
+      2
+     ]
+    ],
+    "F": [
+     [
+      2,
+      2
+     ],
+     [
+      2,
+      2
+     ],
+     [
+      2,
+      2
+     ]
+    ]
+   },
+   "outcomes": {
+    "R": [
+     "text",
+     "text",
+     "text"
+    ],
+    "F": [
+     "text",
+     "text",
+     "text"
+    ]
+   },
+   "gate_changed": {
+    "R": 0,
+    "F": 0
+   },
+   "judge_preferred": {
+    "R": 0,
+    "F": 3
+   }
+  },
+  {
+   "state": "X1",
+   "n": [
+    3,
+    3
+   ],
+   "raw": {
+    "R": 20,
+    "F": 18,
+    "R_range": [
+     19,
+     20
+    ],
+    "F_range": [
+     16,
+     19
+    ]
+   },
+   "full": {
+    "R": 15,
+    "F": 14,
+    "R_range": [
+     14,
+     16
+    ],
+    "F_range": [
+     11,
+     15
+    ]
+   },
+   "words": {
+    "raw": {
+     "R": 110,
+     "F": 126
+    },
+    "visible": {
+     "R": 193,
+     "F": 209
+    }
+   },
+   "latency": {
+    "R": 4871,
+    "F": 4940
+   },
+   "output_tokens": {
+    "R": 197,
+    "F": 231
+   },
+   "paired_diff_full": [
+    -4,
+    -1,
+    0
+   ],
+   "paired_diff_raw": [
+    -4,
+    -1,
+    -1
+   ],
+   "gate_fails": {
+    "R": [
+     "full:truth_fidelity@rep3",
+     "full:consent_action_truth@rep3"
+    ],
+    "F": [
+     "raw:truth_fidelity@rep1",
+     "full:truth_fidelity@rep1",
+     "raw:truth_fidelity@rep3",
+     "full:truth_fidelity@rep3",
+     "full:consent_action_truth@rep3"
+    ]
+   },
+   "not_decidable": {
+    "R": 0,
+    "F": 0
+   },
+   "intervention": {
+    "R": [
+     [
+      2,
+      2
+     ],
+     [
+      2,
+      2
+     ],
+     [
+      2,
+      2
+     ]
+    ],
+    "F": [
+     [
+      2,
+      2
+     ],
+     [
+      2,
+      2
+     ],
+     [
+      2,
+      2
+     ]
+    ]
+   },
+   "outcomes": {
+    "R": [
+     "text",
+     "text",
+     "text"
+    ],
+    "F": [
+     "text",
+     "text",
+     "text"
+    ]
+   },
+   "gate_changed": {
+    "R": 0,
+    "F": 0
+   },
+   "judge_preferred": {
+    "R": 3,
+    "F": 0
+   }
+  },
+  {
+   "state": "X2",
+   "n": [
+    3,
+    3
+   ],
+   "raw": {
+    "R": 18,
+    "F": 24,
+    "R_range": [
+     15,
+     20
+    ],
+    "F_range": [
+     23,
+     24
+    ]
+   },
+   "full": {
+    "R": 18,
+    "F": 24,
+    "R_range": [
+     15,
+     20
+    ],
+    "F_range": [
+     23,
+     24
+    ]
+   },
+   "words": {
+    "raw": {
+     "R": 71,
+     "F": 79
+    },
+    "visible": {
+     "R": 71,
+     "F": 79
+    }
+   },
+   "latency": {
+    "R": 3586,
+    "F": 4287
+   },
+   "output_tokens": {
+    "R": 107,
+    "F": 120
+   },
+   "paired_diff_full": [
+    6,
+    3,
+    9
+   ],
+   "paired_diff_raw": [
+    6,
+    3,
+    9
+   ],
+   "gate_fails": {
+    "R": [
+     "raw:provenance@rep2",
+     "full:provenance@rep2",
+     "raw:truth_fidelity@rep3",
+     "full:truth_fidelity@rep3"
+    ],
+    "F": []
+   },
+   "not_decidable": {
+    "R": 0,
+    "F": 0
+   },
+   "intervention": {
+    "R": [
+     [
+      0,
+      0
+     ],
+     [
+      2,
+      2
+     ],
+     [
+      1,
+      1
+     ]
+    ],
+    "F": [
+     [
+      2,
+      2
+     ],
+     [
+      2,
+      2
+     ],
+     [
+      2,
+      2
+     ]
+    ]
+   },
+   "outcomes": {
+    "R": [
+     "text",
+     "text",
+     "text"
+    ],
+    "F": [
+     "text",
+     "text",
+     "text"
+    ]
+   },
+   "gate_changed": {
+    "R": 0,
+    "F": 0
+   },
+   "judge_preferred": {
+    "R": 0,
+    "F": 3
+   }
+  }
+ ],
+ "rows": [
+  {
+   "state": "D1",
+   "rep": 1,
+   "arm": "R",
+   "letter": "A",
+   "raw": 17,
+   "full": 15,
+   "rawScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 0,
+    "provisional_vs_validated": 2,
+    "fidelity": 0,
+    "uncertainty": 1,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 1,
+    "shape": 1,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 0,
+    "provisional_vs_validated": 2,
+    "fidelity": 0,
+    "uncertainty": 1,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "FAIL",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "FAIL",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "Unsupported causal claim / invented effect",
+      "span": "\"which pushed it over\"",
+      "source": "case truth $[4].output.detail reports that 2 nodes were added beyond the brief, but does not say those additions caused the 32-link excess or how many links they contributed."
+     },
+     {
+      "item": "Incorrect attribution",
+      "span": "\"Your brief produced 17 nodes and 32 links\"",
+      "source": "case truth $[4].output.detail: \"2 of the 17 nodes were added beyond the brief, and 9 came from what you said.\""
+     },
+     {
+      "item": "Fidelity failure",
+      "span": "\"Your brief produced 17 nodes and 32 links\"",
+      "source": "case truth $[4].output.detail distinguishes the 17-node proposed model from the 9 nodes sourced from the user's brief and 2 added beyond it."
+     },
+     {
+      "item": "Truth-fidelity gate failure",
+      "span": "\"The model builder added two concepts beyond your wording, which pushed it over.\"",
+      "source": "case truth $[4].output.detail supports the count of two added nodes but not the claimed causal contribution to exceeding the link limit."
+     },
+     {
+      "item": "Provenance gate failure",
+      "span": "\"Your brief produced 17 nodes and 32 links\"",
+      "source": "case truth $[4].output.detail says only 9 nodes came from the brief; 2 were added beyond it."
+     }
+    ],
+    "full": [
+     {
+      "item": "Unsupported causal claim / invented effect retained in full response",
+      "span": "\"which pushed it over\"",
+      "source": "case truth $[4].output.detail does not establish that the two added nodes caused the 32-link excess."
+     },
+     {
+      "item": "Incorrect attribution retained in full response",
+      "span": "\"Your brief produced 17 nodes and 32 links\"",
+      "source": "case truth $[4].output.detail says 9 nodes came from the brief and 2 were added beyond it."
+     },
+     {
+      "item": "Fidelity failure retained in full response",
+      "span": "\"Your brief produced 17 nodes and 32 links\"",
+      "source": "case truth $[4].output.detail distinguishes model totals from their sources."
+     },
+     {
+      "item": "Truth-fidelity gate failure",
+      "span": "\"The model builder added two concepts beyond your wording, which pushed it over.\"",
+      "source": "case truth $[4].output.detail supports only the count of added nodes, not their asserted causal effect on the link excess."
+     },
+     {
+      "item": "Provenance gate failure",
+      "span": "\"Your brief produced 17 nodes and 32 links\"",
+      "source": "case truth $[4].output.detail: only 9 nodes came from the user's brief."
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "67 words; concise for a failed construction outcome.",
+     "shape": "Clear outcome first, followed by three short bullets and one question.",
+     "decisive_caveat": "States that the initial causal map exceeded the 30-link limit.",
+     "next_move": "Offers one useful next move: a narrower rebuild.",
+     "questions": "One direct request for information.",
+     "leader_honesty": "n/a: no option is ranked or implied to lead.",
+     "nothing_invented": "It asserts an unsupported causal explanation for why the limit was exceeded.",
+     "attribution": "It attributes all 17 nodes and 32 links to the user's brief, although the tool says only 9 came from the brief and 2 were added beyond it.",
+     "provisional_vs_validated": "n/a: no model, estimates, or analysis result is presented as validated.",
+     "fidelity": "The numerical totals are right, but the source and causal characterization of those totals are not faithful to the tool result.",
+     "uncertainty": "It does not acknowledge the specifically missing team size, productivity, and onboarding-capacity inputs, though the immediate build failure is correctly foregrounded.",
+     "useful_next_step": "A leaner reconstruction focused on the named outcomes and onboarding risk is useful for this brief."
+    },
+    "full": {
+     "concise": "107 visible words. The required server disclosure adds material length and repeats the failed-build point.",
+     "shape": "The raw answer is well shaped, but the visible server disclosure follows the question and duplicates the outcome.",
+     "decisive_caveat": "Both the response and server disclosure clearly retain the over-limit failure.",
+     "next_move": "The raw response offers one useful rebuild path; the server also exposes the supported rebuild control.",
+     "questions": "One actual request for information.",
+     "leader_honesty": "n/a: no option is ranked or implied to lead.",
+     "nothing_invented": "The server disclosure does not correct the raw unsupported causal claim.",
+     "attribution": "The server disclosure does not correct the raw misattribution of the whole proposed model to the brief.",
+     "provisional_vs_validated": "n/a: no model, estimates, or analysis result is presented as validated.",
+     "fidelity": "The full response retains the raw provenance/fidelity error.",
+     "uncertainty": "The missing operating inputs remain unacknowledged in the model-authored portion.",
+     "useful_next_step": "Rebuilding or narrowing the model is useful, and the visible control supports rebuilding."
+    }
+   },
+   "rawWords": 70,
+   "visibleWords": 110,
+   "questions": {
+    "raw": 1,
+    "full": 1
+   },
+   "duplicates": 1,
+   "requests": [
+    "Would you like me to build that narrower comparison?"
+   ],
+   "outcome": "text",
+   "latency": 3833,
+   "uncached": 3,
+   "cached": 4200,
+   "output": 120,
+   "reasoning": 25,
+   "response_id": "resp_055fac113b996b30006ab5c4df457887d29fe53ba0d5810598",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": false
+  },
+  {
+   "state": "D1",
+   "rep": 1,
+   "arm": "F",
+   "letter": "B",
+   "raw": 24,
+   "full": 22,
+   "rawScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 1,
+    "shape": 1,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [],
+    "full": []
+   },
+   "notes": {
+    "raw": {
+     "concise": "63 words; it gives the failed-build status, exact constraint, and next step without excess detail.",
+     "shape": "Answer first, then one focused question; no unnecessary lists or calculations.",
+     "decisive_caveat": "Accurately preserves that the build was refused because 32 links exceeded the 30-link limit.",
+     "next_move": "One primary next move: rebuild a lean model centered on the stated alternatives, horizon, outcomes, and risk.",
+     "questions": "One direct request for information.",
+     "leader_honesty": "n/a: no option is ranked or implied to lead.",
+     "nothing_invented": "The proposed lean scope uses only concepts supplied in the brief and introduces no figures, findings, or causal effects.",
+     "attribution": "It correctly frames any future starting figures as Olumi estimates, not measurements.",
+     "provisional_vs_validated": "n/a: it accurately says no model was created and does not represent a result as validated.",
+     "fidelity": "The 32-link result, 30-link limit, no-created-model status, six-month horizon, outcomes, and onboarding risk all match the supplied state.",
+     "uncertainty": "It avoids pretending that missing inputs are known and explicitly preserves estimated status for any future starting figures.",
+     "useful_next_step": "A deliberately lean rebuild is the directly useful response to the first build exceeding the size limit."
+    },
+    "full": {
+     "concise": "103 visible words. The server disclosure is useful but repeats the failed-build conclusion already stated in the raw response.",
+     "shape": "The raw answer is clean; the appended server disclosure follows the question and repeats the status.",
+     "decisive_caveat": "The visible response clearly says that no model was built because the proposed build exceeded the limit.",
+     "next_move": "The raw rebuild request and the visible \"Build it again\" control provide a supported next move.",
+     "questions": "One actual request for information.",
+     "leader_honesty": "n/a: no option is ranked or implied to lead.",
+     "nothing_invented": "No unsupported facts, effects, or findings are added by either the raw response or server disclosure.",
+     "attribution": "Future values are explicitly described as Olumi estimates; no measured or user-provided values are misrepresented.",
+     "provisional_vs_validated": "n/a: the visible response clearly says the model was not built and does not claim validation.",
+     "fidelity": "The full response faithfully states the build refusal and applicable link-limit facts.",
+     "uncertainty": "It proportionately labels any future starting figures as estimates while no model currently exists.",
+     "useful_next_step": "The visible rebuild control and the proposed lean scope are useful for resolving the size-limit failure."
+    }
+   },
+   "rawWords": 63,
+   "visibleWords": 103,
+   "questions": {
+    "raw": 1,
+    "full": 1
+   },
+   "duplicates": 1,
+   "requests": [
+    "Would you like me to rebuild a deliberately lean version containing only the two options, the six‑month horizon, faster delivery, less rework, and the onboarding diversion risk?"
+   ],
+   "outcome": "text",
+   "latency": 5276,
+   "uncached": 387,
+   "cached": 3992,
+   "output": 249,
+   "reasoning": 162,
+   "response_id": "resp_055fac113b996b30006ab5c4e32f9087d2b60e766d259d7be3",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": true
+  },
+  {
+   "state": "D1",
+   "rep": 2,
+   "arm": "R",
+   "letter": "A",
+   "raw": 24,
+   "full": 21,
+   "rawScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 2,
+    "shape": 1,
+    "decisive_caveat": 2,
+    "next_move": 1,
+    "questions": 1,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "FAIL",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "FAIL",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "Unsupported future tool-action commitment",
+      "span": "“I’ll then build that leaner model”",
+      "source": "build_model_from_brief output: {\"ok\":false,\"mutated\":false}; no later build action or completed proposal is supplied."
+     }
+    ],
+    "full": [
+     {
+      "item": "Repeated failure statement",
+      "span": "“The model was not built: it came back larger than a first model can be”",
+      "source": "Server-owned visible status; duplicates the raw statement “I couldn’t create the first model because the initial structure exceeded its link limit.”"
+     },
+     {
+      "item": "Unsupported future tool-action commitment",
+      "span": "“I’ll then build that leaner model”",
+      "source": "build_model_from_brief output: {\"ok\":false,\"mutated\":false}; no later build action or completed proposal is supplied."
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "47 model-authored words; concise.",
+     "shape": "States the outcome first, then makes one focused clarification request.",
+     "decisive_caveat": "Retains both the link-limit failure and the need to label missing figures as Olumi estimates.",
+     "next_move": "One supported move: confirm a narrower factor scope before another build attempt.",
+     "questions": "One focused clarification request.",
+     "leader_honesty": "No ranking or implied leader.",
+     "nothing_invented": "The proposed narrower factors faithfully restate delivery speed, rework, and onboarding drag from the brief.",
+     "attribution": "Missing figures are correctly described as Olumi estimates rather than measurements.",
+     "provisional_vs_validated": "Does not imply that a model or estimates were validated.",
+     "fidelity": "Correctly reports that the first model could not be created because it exceeded the link limit.",
+     "uncertainty": "Acknowledges that missing figures would be assumptions.",
+     "useful_next_step": "Narrowing the requested structure is useful after the size-limit failure."
+    },
+    "full": {
+     "concise": "86 visible words; still within the default target.",
+     "shape": "The server status repeats the already-stated model-build failure.",
+     "decisive_caveat": "The visible response preserves the size-limit and provisional-estimate caveats.",
+     "next_move": "The raw clarification and server's alternative of rebuilding or specifying factors leave more than one offered next move.",
+     "questions": "There are two information requests in the visible response; they concern related scoping but are not both required.",
+     "leader_honesty": "No ranking or implied leader.",
+     "nothing_invented": "The server disclosure adds only state-supported failure information.",
+     "attribution": "Olumi estimates remain clearly attributed in the model-authored text.",
+     "provisional_vs_validated": "No validation is claimed.",
+     "fidelity": "The server disclosure accurately adds that the failed construction had already retried compaction.",
+     "uncertainty": "The missing-figure caveat remains proportionate.",
+     "useful_next_step": "Both narrowing the model and specifying important factors are useful responses to the link limit."
+    }
+   },
+   "rawWords": 50,
+   "visibleWords": 90,
+   "questions": {
+    "raw": 1,
+    "full": 2
+   },
+   "duplicates": 1,
+   "requests": [
+    "Please confirm whether to keep the comparison narrowly to delivery speed, rework, and onboarding drag on experienced developers over six months."
+   ],
+   "outcome": "text",
+   "latency": 3673,
+   "uncached": 3,
+   "cached": 4200,
+   "output": 130,
+   "reasoning": 59,
+   "response_id": "resp_055fac113b996b30006ab5c4ed839887d2a24afbd8b8be06c4",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": true
+  },
+  {
+   "state": "D1",
+   "rep": 2,
+   "arm": "F",
+   "letter": "B",
+   "raw": 16,
+   "full": 13,
+   "rawScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 1,
+    "next_move": 1,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 1,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 1,
+    "useful_next_step": 1
+   },
+   "fullScores": {
+    "concise": 1,
+    "shape": 1,
+    "decisive_caveat": 1,
+    "next_move": 1,
+    "questions": 1,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 1,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 1,
+    "useful_next_step": 1
+   },
+   "rawGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "FAIL",
+    "provenance": "FAIL",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "FAIL",
+    "provenance": "FAIL",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "Invented model exclusion",
+      "span": "“excluding current team size and baseline productivity until you choose estimates”",
+      "source": "User brief: current team size and productivity were not supplied, and says “Keep any Olumi starting estimates clearly labelled as estimates”; it does not direct their exclusion or require user-chosen estimates."
+     },
+     {
+      "item": "Unsupported future tool-action proposal",
+      "span": "“shall I build a tighter six-month model”",
+      "source": "build_model_from_brief output: {\"ok\":false,\"mutated\":false}; no later build action or completed proposal is supplied."
+     },
+     {
+      "item": "Provenance conflation",
+      "span": "“until you choose estimates”",
+      "source": "User brief: “Keep any Olumi starting estimates clearly labelled as estimates.”"
+     }
+    ],
+    "full": [
+     {
+      "item": "Repeated failure statement",
+      "span": "“The model was not built: it came back larger than a first model can be”",
+      "source": "Server-owned visible status; duplicates “Olumi could not create the first model: its initial interpretation had 32 links, above the 30-link limit.”"
+     },
+     {
+      "item": "Invented model exclusion",
+      "span": "“excluding current team size and baseline productivity until you choose estimates”",
+      "source": "User brief: current team size and productivity were not supplied, and says “Keep any Olumi starting estimates clearly labelled as estimates”; it does not direct their exclusion or require user-chosen estimates."
+     },
+     {
+      "item": "Unsupported future tool-action proposal",
+      "span": "“shall I build a tighter six-month model”",
+      "source": "build_model_from_brief output: {\"ok\":false,\"mutated\":false}; no later build action or completed proposal is supplied."
+     },
+     {
+      "item": "Provenance conflation",
+      "span": "“until you choose estimates”",
+      "source": "User brief: “Keep any Olumi starting estimates clearly labelled as estimates.”"
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "58 model-authored words; concise.",
+     "shape": "Gives the failed outcome first and follows with one tightly framed question.",
+     "decisive_caveat": "It gives the actual 32/30 link-limit failure, but omits the brief's requirement that any Olumi starting estimates be clearly labelled and omits onboarding capacity as a missing input.",
+     "next_move": "A tighter model is reasonable, but the proposed exclusion of inputs and requirement that the user choose estimates are unsupported.",
+     "questions": "One question.",
+     "leader_honesty": "No ranking or implied leader.",
+     "nothing_invented": "It invents an exclusion of current team size and productivity and makes user selection of estimates a condition not stated in the brief.",
+     "attribution": "It does not misstate a numeric value, but “until you choose estimates” blurs the requested distinction that starting estimates would be Olumi estimates.",
+     "provisional_vs_validated": "No estimates or model are portrayed as validated.",
+     "fidelity": "The 32-link and 30-link figures are accurate, but the proposed exclusion of “baseline productivity” is not specified by the user or result.",
+     "uncertainty": "Notes two missing inputs, but not onboarding capacity or the required Olumi-estimate labelling.",
+     "useful_next_step": "Narrowing scope can help, but excluding unknown baseline inputs is not established as the appropriate model change."
+    },
+    "full": {
+     "concise": "97 visible words, slightly above the default 90-word target; the added server disclosure is material but repeats the failure.",
+     "shape": "The server-written status repeats the failure already stated in the raw response.",
+     "decisive_caveat": "The link-limit caveat is retained, but the response still does not make clear that any starting estimates would be Olumi assumptions or mention onboarding capacity.",
+     "next_move": "The visible response offers a tight-build proposal plus rebuild/factor-selection alternatives; the raw proposal also contains unsupported exclusions.",
+     "questions": "The visible response contains two requests, although both relate to resolving the oversized model.",
+     "leader_honesty": "No ranking or implied leader.",
+     "nothing_invented": "The raw invented exclusion remains visible; the server disclosure does not remove it.",
+     "attribution": "The raw phrasing still shifts Olumi estimates toward being user-chosen values.",
+     "provisional_vs_validated": "No model or assumption is presented as validated.",
+     "fidelity": "The server status correctly states the failed build and retry, but it does not correct the unsupported proposed exclusions.",
+     "uncertainty": "The response identifies some missing information but incompletely handles the specified uncertainty.",
+     "useful_next_step": "The server's factor-selection route is useful, but the primary raw proposal remains improperly constrained."
+    }
+   },
+   "rawWords": 58,
+   "visibleWords": 98,
+   "questions": {
+    "raw": 1,
+    "full": 2
+   },
+   "duplicates": 1,
+   "requests": [
+    "Shall I build a tighter six-month model around delivery speed, rework, and onboarding drag on experienced developers, excluding current team size and baseline productivity until you choose estimates?"
+   ],
+   "outcome": "text",
+   "latency": 5111,
+   "uncached": 3,
+   "cached": 4376,
+   "output": 203,
+   "reasoning": 117,
+   "response_id": "resp_055fac113b996b30006ab5c4e86e7887d2bdd28e163d4b01ad",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": false
+  },
+  {
+   "state": "D1",
+   "rep": 3,
+   "arm": "F",
+   "letter": "A",
+   "raw": 23,
+   "full": 21,
+   "rawScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 1,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 1,
+    "questions": 1,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 1,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [],
+    "full": []
+   },
+   "notes": {
+    "raw": {
+     "concise": "49 model-authored words; concise.",
+     "shape": "States the outcome first, then asks one focused question.",
+     "decisive_caveat": "Retains the binding 32-link versus 30-link limit.",
+     "next_move": "One supported move: narrow the requested model scope before rebuilding.",
+     "questions": "One scope-clarification request.",
+     "leader_honesty": "n/a: no option is ranked or implied to lead.",
+     "nothing_invented": "The proposed narrower scope uses only delivery speed, rework, and onboarding burden from the brief.",
+     "attribution": "n/a: it introduces no values or estimates needing attribution.",
+     "provisional_vs_validated": "n/a: no analysis result or estimate is presented.",
+     "fidelity": "Accurately reports that construction failed at 32 links against a 30-link limit and that nothing was recorded.",
+     "uncertainty": "It does not restate the missing team-size, productivity, and onboarding-capacity inputs, although these matter once a rebuilt model is analysed.",
+     "useful_next_step": "Narrowing scope is useful and directly addresses the construction-limit failure."
+    },
+    "full": {
+     "concise": "87 visible words, including the required server disclosure; still within the default target.",
+     "shape": "The visible response remains answer-first with one focused model question; the server status line is short.",
+     "decisive_caveat": "Both the reply and server line retain the size-limit reason for failure.",
+     "next_move": "The model proposes narrowing, while the server also offers rebuilding or identifying priorities; the visible response has more than one route rather than one primary move.",
+     "questions": "There are two separate requests for information: the model's scope question and the server's request to identify important options/factors; they are not jointly required for the same clarification.",
+     "leader_honesty": "n/a: no option ranking or leading claim appears.",
+     "nothing_invented": "The added server disclosure is supported by the failed, retried construction result.",
+     "attribution": "n/a: no values or estimates are attributed.",
+     "provisional_vs_validated": "n/a: no result or estimate is presented as validated.",
+     "fidelity": "The server statement that the model was not built and had already undergone one compacting attempt matches the failed retried build.",
+     "uncertainty": "The missing operational inputs are still not surfaced in the visible response.",
+     "useful_next_step": "Both narrowing and rebuilding/prioritising factors are useful responses to the actual construction failure."
+    }
+   },
+   "rawWords": 48,
+   "visibleWords": 88,
+   "questions": {
+    "raw": 1,
+    "full": 2
+   },
+   "duplicates": 1,
+   "requests": [
+    "Should the model be narrowed to the six-month delivery trade-off only?"
+   ],
+   "outcome": "text",
+   "latency": 3627,
+   "uncached": 3,
+   "cached": 4376,
+   "output": 144,
+   "reasoning": 67,
+   "response_id": "resp_055fac113b996b30006ab5c4f8bf2087d2a1bf8986ad34742b",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": true
+  },
+  {
+   "state": "D1",
+   "rep": 3,
+   "arm": "R",
+   "letter": "B",
+   "raw": 12,
+   "full": 15,
+   "rawScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 0,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 0,
+    "provisional_vs_validated": 2,
+    "fidelity": 0,
+    "uncertainty": 2,
+    "useful_next_step": 0
+   },
+   "fullScores": {
+    "concise": 1,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 1,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 0,
+    "provisional_vs_validated": 2,
+    "fidelity": 0,
+    "uncertainty": 2,
+    "useful_next_step": 1
+   },
+   "rawGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "FAIL",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "FAIL",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "Invented tech-lead causal effect",
+      "span": "“Tech lead: likely targets less rework through technical direction”",
+      "source": "CASE D1 user brief: it names faster delivery and less rework as desired outcomes, but supplies no technical-direction effect for a tech lead."
+     },
+     {
+      "item": "Invented two-developer causal effects",
+      "span": "“Two developers: likely targets faster delivery once productive, but could impose more onboarding load and may not address rework directly.”",
+      "source": "CASE D1 user brief: it provides only a general onboarding concern, not these option-specific speed, load, or rework effects."
+     },
+     {
+      "item": "Missing provenance for unsupported estimates",
+      "span": "“likely targets less rework through technical direction” / “likely targets faster delivery once productive”",
+      "source": "CASE D1 user brief: “Keep any Olumi starting estimates clearly labelled as estimates.”"
+     },
+     {
+      "item": "No next move",
+      "span": "“Current team size, baseline productivity and onboarding capacity remain unknown; no Olumi estimates were created or saved.”",
+      "source": "build_model_from_brief output: construction failed with model_too_large; a useful response needed a supported rebuild/scope-prioritisation move."
+     },
+     {
+      "item": "No information request",
+      "span": "Entire RAW reply contains no request for information.",
+      "source": "build_model_from_brief output and server controls: construction failed; the offered control is “Build it again,” and a prioritisation/scope clarification would address the failure."
+     },
+     {
+      "item": "Truth-fidelity failure",
+      "span": "“Tech lead: likely targets less rework through technical direction” and “Two developers: likely targets faster delivery once productive”",
+      "source": "CASE D1 user brief and build_model_from_brief output: neither supplies these relationships, and the build did not produce a model."
+     },
+     {
+      "item": "Provenance failure",
+      "span": "“likely targets less rework through technical direction” / “likely targets faster delivery once productive”",
+      "source": "CASE D1 user brief requires Olumi starting estimates to be clearly labelled as estimates."
+     }
+    ],
+    "full": [
+     {
+      "item": "Invented tech-lead causal effect remains visible",
+      "span": "“Tech lead: likely targets less rework through technical direction”",
+      "source": "CASE D1 user brief: no technical-direction or option-specific rework relationship was supplied."
+     },
+     {
+      "item": "Invented two-developer causal effects remain visible",
+      "span": "“Two developers: likely targets faster delivery once productive, but could impose more onboarding load and may not address rework directly.”",
+      "source": "CASE D1 user brief: no option-specific delivery, onboarding-load, or rework relationship was supplied."
+     },
+     {
+      "item": "Missing provenance remains visible",
+      "span": "“likely targets less rework through technical direction” / “likely targets faster delivery once productive”",
+      "source": "CASE D1 user brief: “Keep any Olumi starting estimates clearly labelled as estimates.”"
+     },
+     {
+      "item": "Truth-fidelity failure",
+      "span": "“Tech lead: likely targets less rework through technical direction” and “Two developers: likely targets faster delivery once productive”",
+      "source": "CASE D1 user brief and build_model_from_brief output: the model was not built and neither causal relationship is supplied."
+     },
+     {
+      "item": "Provenance failure",
+      "span": "“likely targets less rework through technical direction” / “likely targets faster delivery once productive”",
+      "source": "CASE D1 user brief requires any Olumi starting estimates to be clearly labelled as estimates."
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "72 model-authored words; concise.",
+     "shape": "Answer-first with three short bullets.",
+     "decisive_caveat": "Correctly preserves the 32-needed versus 30-allowed construction limit.",
+     "next_move": "It offers no action or scope clarification after reporting the failed build.",
+     "questions": "It requests no information, despite a scope/prioritisation clarification being needed to address the failure.",
+     "leader_honesty": "n/a: neither option is ranked or described as leading.",
+     "nothing_invented": "It invents option-specific causal effects that were not in the brief or the failed build output.",
+     "attribution": "The unsupported causal claims are not identified as Olumi estimates; 'likely' signals uncertainty but not provenance.",
+     "provisional_vs_validated": "No estimate or automatic analysis is presented as validated.",
+     "fidelity": "The option-specific effects go beyond the supplied facts; the model was not built, so no such model relationships were available.",
+     "uncertainty": "It appropriately identifies all three user-stated missing inputs.",
+     "useful_next_step": "Merely listing speculative differences does not help resolve the size-limit failure or advance construction."
+    },
+    "full": {
+     "concise": "110 visible words. The extra server disclosure is useful, but the total is above the default approximately 90-word target.",
+     "shape": "The response is answer-first and uses three short bullets; the final server disclosure is compact.",
+     "decisive_caveat": "The initial and server text accurately retain the model-size failure.",
+     "next_move": "The server offers rebuilding or specifying important factors, which is useful, but presents alternatives rather than one primary next move.",
+     "questions": "The server makes one request for information: which options and factors matter most.",
+     "leader_honesty": "n/a: no ranking claim appears.",
+     "nothing_invented": "The server disclosure does not remove the raw reply's unsupported option-specific causal assertions.",
+     "attribution": "The server disclosure does not label the unsupported causal claims as Olumi estimates.",
+     "provisional_vs_validated": "No result or estimate is claimed to be validated.",
+     "fidelity": "The raw unsupported option-specific assertions remain visible and conflict with the supplied state.",
+     "uncertainty": "The response acknowledges the three missing inputs and the server gives an appropriate way to supply prioritisation.",
+     "useful_next_step": "The server's rebuild/prioritisation instruction is useful, though it offers two routes rather than one primary move."
+    }
+   },
+   "rawWords": 75,
+   "visibleWords": 115,
+   "questions": {
+    "raw": 0,
+    "full": 1
+   },
+   "duplicates": 1,
+   "requests": [],
+   "outcome": "text",
+   "latency": 4912,
+   "uncached": 3,
+   "cached": 4200,
+   "output": 215,
+   "reasoning": 113,
+   "response_id": "resp_055fac113b996b30006ab5c4fc5bd887d29da46e8f6edfc89f",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": false
+  },
+  {
+   "state": "D8",
+   "rep": 1,
+   "arm": "F",
+   "letter": "A",
+   "raw": 24,
+   "full": 20,
+   "rawScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 1,
+    "shape": 1,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [],
+    "full": [
+     {
+      "item": "questions",
+      "span": "“Shall I apply this full starting point?” ... “What proportion of archive documents could realistically be included in a searchable index? How consistent are the current folder structure and document names? Would the searchable index and folder tidy-up cover the full archive or only selected document types?”",
+      "source": "REPLY A — FULL visible text"
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "107 words, with the detailed figures necessary to present the single approval proposal.",
+     "shape": "States the result first, then uses three compact bullets and one closing consent question.",
+     "decisive_caveat": "Clearly says that no analysis ran and retains the unknown retrieval-time caveat.",
+     "next_move": "One supported primary move: apply the displayed starting-point proposal.",
+     "questions": "One consent/clarification question.",
+     "leader_honesty": "No option is presented as leading or favoured; no analysis ranking is implied.",
+     "nothing_invented": "All four assumptions, option levels, carry-on, and pilot are present in the proposal output.",
+     "attribution": "Explicitly identifies values as Olumi assumptions rather than measurements.",
+     "provisional_vs_validated": "The assumptions are explicitly presented as adoption candidates, not validated findings.",
+     "fidelity": "Labels and figures match the proposed starting point, and the unknown current retrieval time is retained.",
+     "uncertainty": "Appropriately flags both unknown retrieval time and assumption status.",
+     "useful_next_step": "Approval or correction of the displayed proposal is the useful state-specific next step."
+    },
+    "full": {
+     "concise": "172 visible words. The proposal figures are material, but the added server status and three-question list make the total substantially exceed the default concise form.",
+     "shape": "The authored portion has a strong three-bullet shape, but the visible response additionally appends a status disclosure and a list of three open questions.",
+     "decisive_caveat": "The visible response explicitly and accurately says the first analysis could not run yet.",
+     "next_move": "The authored closing asks for the supported proposal approval; the offered approval/amend controls support it.",
+     "questions": "0: the visible response contains four requests for information: the authored approval question plus the three appended open questions.",
+     "leader_honesty": "No option is described as leading, preferred, or ranked.",
+     "nothing_invented": "The appended questions and readiness status are supplied by the server state; the authored figures match the proposal.",
+     "attribution": "Values remain identified as Olumi assumptions, not measurements.",
+     "provisional_vs_validated": "Neither the assumptions nor the absent analysis are presented as validated.",
+     "fidelity": "The server disclosure faithfully states that analysis could not run and gives the supplied readiness next step.",
+     "uncertainty": "Unknown retrieval time and the proposed/assumed nature of the inputs are clear.",
+     "useful_next_step": "Adopting or amending the proposal remains useful before analysis."
+    }
+   },
+   "rawWords": 111,
+   "visibleWords": 176,
+   "questions": {
+    "raw": 1,
+    "full": 4
+   },
+   "duplicates": 1,
+   "requests": [
+    "Shall I apply this full starting point?"
+   ],
+   "outcome": "text",
+   "latency": 5115,
+   "uncached": 2923,
+   "cached": 3920,
+   "output": 191,
+   "reasoning": 0,
+   "response_id": "resp_07eff1d81817580a006ab5c4d6839887d284d93c650cc244c9",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": true
+  },
+  {
+   "state": "D8",
+   "rep": 1,
+   "arm": "R",
+   "letter": "B",
+   "raw": 20,
+   "full": 19,
+   "rawScores": {
+    "concise": 2,
+    "shape": 1,
+    "decisive_caveat": 0,
+    "next_move": 1,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 1,
+    "shape": 1,
+    "decisive_caveat": 2,
+    "next_move": 1,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "decisive_caveat",
+      "span": "“I’ve framed the comparison around document retrieval time; current retrieval time remains unknown.”",
+      "source": "REPLY B — RAW model text; lacks the result-status disclosure required by function_call_output build_model_from_brief.first_analysis: “ran”: false, “reason”: “not_admissible”"
+     }
+    ],
+    "full": [
+     {
+      "item": "questions",
+      "span": "“tell me which figures to change” ... “What proportion of archive documents could realistically be included in a searchable index? How consistent are the current folder structure and document names? Would the searchable index and folder tidy-up cover the full archive or only selected document types?”",
+      "source": "REPLY B — FULL visible text"
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "102 words; the figures and their assumption caveats are material to the proposal.",
+     "shape": "The response uses four bullets, exceeding the specified maximum of three.",
+     "decisive_caveat": "0: it does not say that no first analysis ran or that it was not admissible; it only identifies the unknown current retrieval time.",
+     "next_move": "It presents approval and amendment as alternatives rather than one primary move, though both map to the supplied proposal workflow.",
+     "questions": "One request for information: asking which figures to change.",
+     "leader_honesty": "No analysis result or option ranking is claimed.",
+     "nothing_invented": "The figures, options, and stated partial-coverage/legacy-exception bases are supported by the proposal.",
+     "attribution": "The text correctly calls the values Olumi starting assumptions rather than measurements.",
+     "provisional_vs_validated": "The proposal is framed for adoption or correction, not as validated evidence.",
+     "fidelity": "The stated factors and numeric levels match the proposal; current retrieval time is correctly unknown.",
+     "uncertainty": "It identifies the unknown current retrieval time and repeatedly qualifies values as assumptions.",
+     "useful_next_step": "Approving or amending the proposal is useful before a first analysis."
+    },
+    "full": {
+     "concise": "167 visible words. The proposal figures are material, but the appended status and question list make this longer than the default concise response.",
+     "shape": "The authored response has four bullets rather than at most three, followed by additional server status and open-question material.",
+     "decisive_caveat": "The appended status correctly states that the first analysis could not run yet and gives the supplied readiness condition.",
+     "next_move": "The authored text offers approval or figure changes as alternatives rather than selecting one primary move; both are supported by the visible controls.",
+     "questions": "0: the request to identify figures to change plus the three appended open questions makes four requests for information.",
+     "leader_honesty": "No leading option, ranking, or win percentage is stated.",
+     "nothing_invented": "The figures and caveats are proposal-supported, and the server additions are all supplied state content.",
+     "attribution": "The figures remain clearly designated as Olumi assumptions rather than measurements.",
+     "provisional_vs_validated": "The response does not convert assumptions into validated facts, and the server says analysis did not run.",
+     "fidelity": "The appended first-analysis status and open questions agree with the supplied state.",
+     "uncertainty": "The response keeps both the unknown retrieval-time condition and the provisional nature of the figures visible.",
+     "useful_next_step": "Approval or amendment remains the useful next step for this proposed starting point."
+    }
+   },
+   "rawWords": 107,
+   "visibleWords": 172,
+   "questions": {
+    "raw": 1,
+    "full": 4
+   },
+   "duplicates": 0,
+   "requests": [
+    "tell me which figures to change"
+   ],
+   "outcome": "text",
+   "latency": 4063,
+   "uncached": 3,
+   "cached": 6664,
+   "output": 168,
+   "reasoning": 0,
+   "response_id": "resp_07eff1d81817580a006ab5c4db42b487d2ba60bacd65251aae",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": false
+  },
+  {
+   "state": "D8",
+   "rep": 2,
+   "arm": "F",
+   "letter": "A",
+   "raw": 21,
+   "full": 20,
+   "rawScores": {
+    "concise": 2,
+    "shape": 0,
+    "decisive_caveat": 1,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 2,
+    "shape": 0,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "shape",
+      "span": "- Current state: index coverage **50%**, folder consistency **40%**, naming consistency **40%**, search effectiveness **50%**.\n- **Searchable index:** coverage **80%**; search effectiveness **75%**.\n- **Folder tidy-up:** folder consistency **80%**; naming consistency **70%**.\n- Also included for context: no-change baseline at current levels, and an **Index and folder pilot** at 55–60%.",
+      "source": "REPLY A — RAW model text; developer criterion 2 requires at most three short bullets."
+     }
+    ],
+    "full": [
+     {
+      "item": "shape",
+      "span": "- Current state: index coverage **50%**, folder consistency **40%**, naming consistency **40%**, search effectiveness **50%**.\n- **Searchable index:** coverage **80%**; search effectiveness **75%**.\n- **Folder tidy-up:** folder consistency **80%**; naming consistency **70%**.\n- Also included for context: no-change baseline at current levels, and an **Index and folder pilot** at 55–60%.",
+      "source": "REPLY A — FULL visible text; developer criterion 2 requires at most three short bullets."
+     },
+     {
+      "item": "questions",
+      "span": "Shall I apply this full starting point? ... What proportion of archive documents could realistically be included in a searchable index? How consistent are the current folder structure and document names? Would the searchable index and folder tidy-up cover the full archive or only selected document types?",
+      "source": "REPLY A — FULL visible text; the latter three are supplied in function_call_output.open_questions."
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "89 words; the figures and assumption qualification are material.",
+     "shape": "Answer-first, but it uses four bullets rather than at most three.",
+     "decisive_caveat": "It correctly says no analysis ran, but reduces the supplied reason to missing starting assumptions rather than the stated need to review all 12 readiness issues.",
+     "next_move": "One supported consent move: apply/adopt the single full starting-point proposal.",
+     "questions": "One consent question is asked.",
+     "leader_honesty": "No ranking or implied leader.",
+     "nothing_invented": "All figures, options, and stated exclusions are grounded in the brief or proposal.",
+     "attribution": "Correctly calls the values proposed assumptions rather than measurements.",
+     "provisional_vs_validated": "Explicitly distinguishes placeholders from measurements.",
+     "fidelity": "The goal, unknown retrieval time, option levels, and percentages match the supplied state.",
+     "uncertainty": "Unknown retrieval time and provisional assumptions are acknowledged.",
+     "useful_next_step": "Adopting or correcting the pending assumptions is the useful next step."
+    },
+    "full": {
+     "concise": "The complete visible response is longer, but the additional server disclosures, readiness caveat, and approval figures are material.",
+     "shape": "The model-authored portion has four bullets, exceeding the three-bullet limit.",
+     "decisive_caveat": "The server disclosure supplies the exact material caveat: analysis could not run and all 12 readiness issues need review.",
+     "next_move": "The response presents one pending proposal to use or amend.",
+     "questions": "The visible response contains the model's consent question plus three unresolved-information questions, exceeding the one-question default.",
+     "leader_honesty": "No ranking or implied leader.",
+     "nothing_invented": "The visible content stays within the supplied brief, proposal, and server status.",
+     "attribution": "Assumptions remain distinguished from measurements.",
+     "provisional_vs_validated": "No provisional values are represented as validated.",
+     "fidelity": "Figures and option descriptions match the proposal; the server status faithfully reports the no-run outcome.",
+     "uncertainty": "Unknown retrieval time, assumptions, and unresolved coverage/consistency/scope inputs are visible.",
+     "useful_next_step": "Using or changing the pending starting-assumptions proposal remains the appropriate next move."
+    }
+   },
+   "rawWords": 102,
+   "visibleWords": 167,
+   "questions": {
+    "raw": 1,
+    "full": 4
+   },
+   "duplicates": 1,
+   "requests": [
+    "Shall I apply this full starting point?"
+   ],
+   "outcome": "text",
+   "latency": 3779,
+   "uncached": 3,
+   "cached": 6840,
+   "output": 166,
+   "reasoning": 0,
+   "response_id": "resp_07eff1d81817580a006ab5c4f4f63487d29fc90276b8c0b350",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": true
+  },
+  {
+   "state": "D8",
+   "rep": 2,
+   "arm": "R",
+   "letter": "B",
+   "raw": 19,
+   "full": 20,
+   "rawScores": {
+    "concise": 2,
+    "shape": 0,
+    "decisive_caveat": 0,
+    "next_move": 2,
+    "questions": 1,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 2,
+    "shape": 0,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "shape",
+      "span": "- Current state: index coverage **50%**, folder consistency **40%**, naming consistency **40%**, search effectiveness **50%**—assuming a partly usable but inconsistent archive.\n- **Searchable index:** coverage **80%** and search effectiveness **75%**—assuming most documents can be indexed.\n- **Folder tidy-up:** folder consistency **80%** and naming consistency **70%**—assuming most folders and names can be standardised.\n- For comparison, “carry on as now” holds those starting levels; an index-and-folder pilot assumes **55–60%** across the affected areas.",
+      "source": "REPLY B — RAW model text; developer criterion 2 requires at most three short bullets."
+     },
+     {
+      "item": "decisive_caveat",
+      "span": "Approve these assumptions and levels to add them to the model.",
+      "source": "function_call_output.first_analysis: \"ran\":false and \"next_step\":\"Review all 12 readiness issues together before analysis.\" The raw reply lacks this actual first-analysis outcome."
+     }
+    ],
+    "full": [
+     {
+      "item": "shape",
+      "span": "- Current state: index coverage **50%**, folder consistency **40%**, naming consistency **40%**, search effectiveness **50%**—assuming a partly usable but inconsistent archive.\n- **Searchable index:** coverage **80%** and search effectiveness **75%**—assuming most documents can be indexed.\n- **Folder tidy-up:** folder consistency **80%** and naming consistency **70%**—assuming most folders and names can be standardised.\n- For comparison, “carry on as now” holds those starting levels; an index-and-folder pilot assumes **55–60%** across the affected areas.",
+      "source": "REPLY B — FULL visible text; developer criterion 2 requires at most three short bullets."
+     },
+     {
+      "item": "questions",
+      "span": "What proportion of archive documents could realistically be included in a searchable index? How consistent are the current folder structure and document names? Would the searchable index and folder tidy-up cover the full archive or only selected document types?",
+      "source": "function_call_output.open_questions, displayed in REPLY B — FULL visible text."
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "97 words, but the small excess is accounted for by necessary proposal figures and their assumption bases.",
+     "shape": "Answer-first, but it uses four bullets rather than at most three.",
+     "decisive_caveat": "It does not tell the user that the first analysis did not run, nor the supplied readiness reason.",
+     "next_move": "One supported move is offered: approve the pending assumptions proposal.",
+     "questions": "It requests approval but does not ask a direct question; this is weaker than the one-question default.",
+     "leader_honesty": "No ranking or implied leader.",
+     "nothing_invented": "The assumptions, option levels, baseline, and pilot all come from the pending proposal.",
+     "attribution": "It explicitly identifies the values as Olumi assumptions, not measurements.",
+     "provisional_vs_validated": "The assumptions are clearly framed as adoptable or correctable, not validated.",
+     "fidelity": "The values and their stated bases accurately reflect the proposal.",
+     "uncertainty": "It acknowledges the unknown retrieval time and the provisional status of all levels.",
+     "useful_next_step": "Approval or correction of the single pending proposal is the useful immediate action."
+    },
+    "full": {
+     "concise": "The full response is longer because it includes material server status and open questions alongside all approval figures.",
+     "shape": "The model-authored section uses four bullets, exceeding the three-bullet limit.",
+     "decisive_caveat": "The server-owned status accurately states that analysis could not run and gives the all-12-readiness-issues next step.",
+     "next_move": "One proposal is offered for approval or amendment.",
+     "questions": "Three visible unresolved-information questions exceed the one-question default.",
+     "leader_honesty": "No ranking or implied leader.",
+     "nothing_invented": "All displayed content is supported by the brief, proposal, or server state.",
+     "attribution": "Olumi estimates remain explicitly separate from measurements.",
+     "provisional_vs_validated": "Neither the assumptions nor the proposal are presented as validated.",
+     "fidelity": "The displayed levels, status, and open questions match the supplied state.",
+     "uncertainty": "The visible response covers unknown retrieval time and the key unmeasured scope/consistency inputs.",
+     "useful_next_step": "Using or changing the pending assumptions is appropriate before analysis."
+    }
+   },
+   "rawWords": 108,
+   "visibleWords": 173,
+   "questions": {
+    "raw": 0,
+    "full": 3
+   },
+   "duplicates": 0,
+   "requests": [],
+   "outcome": "text",
+   "latency": 3768,
+   "uncached": 3,
+   "cached": 6664,
+   "output": 175,
+   "reasoning": 0,
+   "response_id": "resp_07eff1d81817580a006ab5c4f1385887d287f9b0eb7cee3547",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": false
+  },
+  {
+   "state": "D8",
+   "rep": 3,
+   "arm": "R",
+   "letter": "A",
+   "raw": 21,
+   "full": 21,
+   "rawScores": {
+    "concise": 2,
+    "shape": 0,
+    "decisive_caveat": 1,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 2,
+    "shape": 0,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 1,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "shape score 0",
+      "span": "- Current state: ...\n- Searchable index: ...\n- Folder tidy-up: ...\n- For context, it also includes ...",
+      "source": "criterion 2: at most three short bullets"
+     }
+    ],
+    "full": [
+     {
+      "item": "shape score 0",
+      "span": "- Current state: ...\n- Searchable index: ...\n- Folder tidy-up: ...\n- For context, it also includes ...",
+      "source": "criterion 2: at most three short bullets"
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "121 words, but the extra length is substantially occupied by the proposal's required figures, option levels, and assumption caveat.",
+     "shape": "It has four bullets, exceeding the maximum of three.",
+     "decisive_caveat": "It clearly says the values are starting assumptions rather than measurements, but it does not itself retain the material fact that no analysis ran and that readiness review is required; that is supplied below it by the server.",
+     "next_move": "Approval or correction of the single proposed assumption package is a supported primary next move.",
+     "questions": "There is no request for additional information; the approval sentence is a consent request, not an information question.",
+     "leader_honesty": "No option is presented as leading, favoured, or otherwise ranked.",
+     "nothing_invented": "The values, options, and qualitative bases correspond to the proposed assumption package.",
+     "attribution": "The figures are correctly attributed as Olumi starting assumptions, not measurements or user-provided facts.",
+     "provisional_vs_validated": "It explicitly distinguishes the proposed assumptions from measurements and does not imply that an analysis validated them.",
+     "fidelity": "The goal, exclusions, factor values, option levels, and pilot values are faithful to the supplied proposal.",
+     "uncertainty": "The non-measurement/starting-assumption qualification is clear and proportionate.",
+     "useful_next_step": "Seeking one approval for the displayed package is the required proposal workflow."
+    },
+    "full": {
+     "concise": "185 visible words are justified chiefly by the required approval figures plus the server's necessary readiness and open-question disclosure.",
+     "shape": "The visible response retains the model's four-bullet structure, exceeding the maximum of three.",
+     "decisive_caveat": "The server disclosure correctly supplies the decisive caveat: the first analysis did not run and requires review of all 12 readiness issues.",
+     "next_move": "The visible controls support approving the assumption package or changing it first.",
+     "questions": "Three actual information requests appear in the server-owned open-questions disclosure; this exceeds the default one-question limit, although the model did not author them.",
+     "leader_honesty": "No ranking or leading-option claim appears.",
+     "nothing_invented": "The model text and server disclosures match the state: all figures are proposed assumptions, analysis did not run, and the listed open questions are supplied.",
+     "attribution": "The visible response keeps Olumi estimates separate from user facts and measurements.",
+     "provisional_vs_validated": "The response calls the numbers assumptions and accurately reports that no analysis ran.",
+     "fidelity": "The server's readiness statement, saved status, and open questions are supported by the supplied tool outputs; the model text is also faithful.",
+     "uncertainty": "The response identifies assumptions and includes the relevant unresolved inputs.",
+     "useful_next_step": "Using or changing the offered proposal is useful and directly supported by the listed controls."
+    }
+   },
+   "rawWords": 127,
+   "visibleWords": 192,
+   "questions": {
+    "raw": 0,
+    "full": 3
+   },
+   "duplicates": 0,
+   "requests": [],
+   "outcome": "text",
+   "latency": 3137,
+   "uncached": 3,
+   "cached": 6664,
+   "output": 197,
+   "reasoning": 0,
+   "response_id": "resp_07eff1d81817580a006ab5c50149e087d2a548ad70425d3409",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": true
+  },
+  {
+   "state": "D8",
+   "rep": 3,
+   "arm": "F",
+   "letter": "B",
+   "raw": 16,
+   "full": 14,
+   "rawScores": {
+    "concise": 1,
+    "shape": 0,
+    "decisive_caveat": 0,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 1,
+    "shape": 0,
+    "decisive_caveat": 0,
+    "next_move": 2,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "shape score 0",
+      "span": "- Starting position: ...\n- Searchable index: ...\n- Folder tidy-up: ...\n- Also included for context: ...",
+      "source": "criterion 2: at most three short bullets"
+     },
+     {
+      "item": "decisive_caveat score 0",
+      "span": "\"No analysis ran: current retrieval time is unknown, and the model needs assumptions about how each approach changes discoverability.\"",
+      "source": "case truth /3/output/first_analysis: reason is \"not_admissible\" and next_step is \"Review all 12 readiness issues together before analysis.\""
+     },
+     {
+      "item": "nothing_invented score 0",
+      "span": "\"The key challenge is coverage\" and \"If it is much lower than 80%, that would weaken the case for it.\"",
+      "source": "case truth /6/output: proposal supplies an estimated coverage level and basis, but does not identify coverage as the key challenge or establish this conditional case-strength effect"
+     },
+     {
+      "item": "truth_fidelity gate FAIL",
+      "span": "\"No analysis ran: current retrieval time is unknown, and the model needs assumptions about how each approach changes discoverability.\"",
+      "source": "case truth /3/output/first_analysis: \"reason\":\"not_admissible\"; \"next_step\":\"Review all 12 readiness issues together before analysis.\""
+     }
+    ],
+    "full": [
+     {
+      "item": "shape score 0",
+      "span": "- Starting position: ...\n- Searchable index: ...\n- Folder tidy-up: ...\n- Also included for context: ...",
+      "source": "criterion 2: at most three short bullets"
+     },
+     {
+      "item": "decisive_caveat score 0",
+      "span": "\"No analysis ran: current retrieval time is unknown, and the model needs assumptions about how each approach changes discoverability.\"",
+      "source": "case truth /3/output/first_analysis: reason is \"not_admissible\" and next_step is \"Review all 12 readiness issues together before analysis.\""
+     },
+     {
+      "item": "questions score 0",
+      "span": "\"what proportion of the archive would the index actually include?\" plus the three questions following \"Questions this model does not answer yet:\"",
+      "source": "case truth /3/output/open_questions lists the three server-disclosed questions; criterion 5 permits one question by default"
+     },
+     {
+      "item": "nothing_invented score 0",
+      "span": "\"The key challenge is coverage\" and \"If it is much lower than 80%, that would weaken the case for it.\"",
+      "source": "case truth /6/output: proposal supplies an estimated coverage level and basis, but does not identify coverage as the key challenge or establish this conditional case-strength effect"
+     },
+     {
+      "item": "truth_fidelity gate FAIL",
+      "span": "\"No analysis ran: current retrieval time is unknown, and the model needs assumptions about how each approach changes discoverability.\"",
+      "source": "case truth /3/output/first_analysis: \"reason\":\"not_admissible\"; \"next_step\":\"Review all 12 readiness issues together before analysis.\""
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "At 130 words, it is longer than needed and includes an unsupported prioritisation and conditional advocacy beyond the necessary figures.",
+     "shape": "It uses four bullets, exceeding the maximum of three, followed by an additional explanatory paragraph.",
+     "decisive_caveat": "It gives an unsupported and incomplete explanation for why analysis did not run instead of retaining the actual readiness caveat.",
+     "next_move": "Approving or correcting the one offered assumption package is supported by the proposal and controls.",
+     "questions": "It asks one actual information question about index coverage.",
+     "leader_honesty": "It does not call either option leading or otherwise rank the alternatives.",
+     "nothing_invented": "It invents an investigation priority and an unvalidated implication for the index.",
+     "attribution": "The numerical values are correctly described as Olumi assumptions rather than measurements.",
+     "provisional_vs_validated": "It does not present the assumptions or an analysis as validated.",
+     "fidelity": "The fact that analysis did not run is correct, but its stated reason is not the supplied first-analysis reason and omits the required all-12-readiness-issues condition.",
+     "uncertainty": "It acknowledges the unknown current retrieval time and that the figures are assumptions.",
+     "useful_next_step": "Approval or correction is the useful supported disposition of this proposal."
+    },
+    "full": {
+     "concise": "The visible response is 194 words. Required server disclosure accounts for some length, but the model's unsupported coverage-priority paragraph is avoidable.",
+     "shape": "The model's four bullets already breach the three-bullet maximum, and the response then adds a paragraph and server disclosures.",
+     "decisive_caveat": "Although the server correctly states the real readiness condition, the model-authored unsupported explanation remains visible and conflicts with the required faithful framing.",
+     "next_move": "The controls allow using the proposal or changing it first, matching the proposed next move.",
+     "questions": "The model asks one coverage question and the server adds three open information questions, for four actual information requests.",
+     "leader_honesty": "No option is called leader, best, ahead, or otherwise ranked.",
+     "nothing_invented": "The unsupported \"key challenge\" and conditional weakening claim remain present in the full response.",
+     "attribution": "Assumptions remain labelled as Olumi assumptions; the server does not blur provenance.",
+     "provisional_vs_validated": "The visible response does not represent assumptions as validated, and the server correctly says analysis could not run.",
+     "fidelity": "The server adds the correct non-run explanation, but it does not remove the model's unsupported/incomplete explanation, so the full response remains materially unfaithful on why analysis did not run.",
+     "uncertainty": "It identifies unknown retrieval time and labels figures as assumptions, while the server adds unresolved questions.",
+     "useful_next_step": "The visible controls support the offered approval-or-amend disposition."
+    }
+   },
+   "rawWords": 134,
+   "visibleWords": 199,
+   "questions": {
+    "raw": 1,
+    "full": 4
+   },
+   "duplicates": 2,
+   "requests": [
+    "what proportion of the archive would the index actually include?"
+   ],
+   "outcome": "text",
+   "latency": 4495,
+   "uncached": 3,
+   "cached": 6840,
+   "output": 202,
+   "reasoning": 0,
+   "response_id": "resp_07eff1d81817580a006ab5c504734c87d2bbc34c5dfacc0fa2",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": false
+  },
+  {
+   "state": "D2",
+   "rep": 1,
+   "arm": "R",
+   "letter": "A",
+   "raw": 22,
+   "full": 22,
+   "rawScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 1,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 1
+   },
+   "fullScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 1,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 1
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [],
+    "full": []
+   },
+   "notes": {
+    "raw": {
+     "concise": "61 words; concise.",
+     "shape": "Direct answer followed by three short bullets.",
+     "decisive_caveat": "Clearly retains that the figure is an Olumi estimate rather than supplied evidence.",
+     "next_move": "Gives one grounded intervention: challenge/check the onboarding-load assumption.",
+     "questions": "No actual request for information is asked; the response remains a completed answer.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "The estimate, options, six-month horizon, and onboarding-to-delivery relationship are grounded in the supplied state.",
+     "attribution": "Correctly attributes the 4 experienced developer-hours/week value to Olumi.",
+     "provisional_vs_validated": "Does not imply that the estimate or model is validated.",
+     "fidelity": "Matches the onboarding-load value, unit, alternatives, and six-month timeframe.",
+     "uncertainty": "Appropriately flags unsupported input and differing onboarding duration/load by hire type.",
+     "useful_next_step": "Identifies a model-specific assumption and why it matters. The suggested check is specific, but does not explicitly state what observed result would weaken the concern."
+    },
+    "full": {
+     "concise": "61 visible words; concise.",
+     "shape": "Direct answer followed by three short bullets.",
+     "decisive_caveat": "Clearly retains that the figure is an Olumi estimate rather than supplied evidence.",
+     "next_move": "Gives one grounded intervention: challenge/check the onboarding-load assumption.",
+     "questions": "No actual request for information is asked; the response remains a completed answer.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "The estimate, options, six-month horizon, and onboarding-to-delivery relationship are grounded in the supplied state.",
+     "attribution": "Correctly attributes the 4 experienced developer-hours/week value to Olumi.",
+     "provisional_vs_validated": "Does not imply that the estimate or model is validated.",
+     "fidelity": "Matches the onboarding-load value, unit, alternatives, and six-month timeframe.",
+     "uncertainty": "Appropriately flags unsupported input and differing onboarding duration/load by hire type.",
+     "useful_next_step": "Identifies a model-specific assumption and why it matters. The suggested check is specific, but does not explicitly state what observed result would weaken the concern."
+    }
+   },
+   "rawWords": 64,
+   "visibleWords": 64,
+   "questions": {
+    "raw": 0,
+    "full": 0
+   },
+   "duplicates": 0,
+   "requests": [],
+   "outcome": "text",
+   "latency": 6038,
+   "uncached": 3,
+   "cached": 5201,
+   "output": 119,
+   "reasoning": 34,
+   "response_id": "resp_033c644be7edc764006ab5c7fc95d487d2aa85c4e80a5bf074",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": false
+  },
+  {
+   "state": "D2",
+   "rep": 1,
+   "arm": "F",
+   "letter": "B",
+   "raw": 22,
+   "full": 22,
+   "rawScores": {
+    "concise": 2,
+    "shape": 1,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 1,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 2,
+    "shape": 1,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 1,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [],
+    "full": []
+   },
+   "notes": {
+    "raw": {
+     "concise": "85 words; concise.",
+     "shape": "Clear answer-first structure, but uses three prose paragraphs rather than the requested answer followed by short bullets.",
+     "decisive_caveat": "Explicitly says the value is an Olumi estimate rather than team evidence.",
+     "next_move": "Gives one grounded intervention: challenge the onboarding-load assumption.",
+     "questions": "No actual request for information is asked; “What would weaken that concern” introduces the supplied weakening observation rather than asking the user.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "The estimate, alternatives, six-month horizon, and onboarding diversion relationship are supported by the brief and canonical model.",
+     "attribution": "Correctly identifies the 4 experienced developer-hours/week value as Olumi’s estimate.",
+     "provisional_vs_validated": "Does not present the estimate or resulting analysis as validated.",
+     "fidelity": "Matches the supplied onboarding estimate and its units, and accurately describes its delivery-capacity pathway.",
+     "uncertainty": "Proportionately identifies the lack of team evidence and a plausible condition that would reduce the concern.",
+     "useful_next_step": "Meets the state-specific requirement: a supplied model assumption, why it matters to delivery/productivity, and a concrete observation—self-serve onboarding without drawing delivery staff away—that would weaken the concern."
+    },
+    "full": {
+     "concise": "85 visible words; concise.",
+     "shape": "Clear answer-first structure, but uses three prose paragraphs rather than the requested answer followed by short bullets.",
+     "decisive_caveat": "Explicitly says the value is an Olumi estimate rather than team evidence.",
+     "next_move": "Gives one grounded intervention: challenge the onboarding-load assumption.",
+     "questions": "No actual request for information is asked; “What would weaken that concern” introduces the supplied weakening observation rather than asking the user.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "The estimate, alternatives, six-month horizon, and onboarding diversion relationship are supported by the brief and canonical model.",
+     "attribution": "Correctly identifies the 4 experienced developer-hours/week value as Olumi’s estimate.",
+     "provisional_vs_validated": "Does not present the estimate or resulting analysis as validated.",
+     "fidelity": "Matches the supplied onboarding estimate and its units, and accurately describes its delivery-capacity pathway.",
+     "uncertainty": "Proportionately identifies the lack of team evidence and a plausible condition that would reduce the concern.",
+     "useful_next_step": "Meets the state-specific requirement: a supplied model assumption, why it matters to delivery/productivity, and a concrete observation—self-serve onboarding without drawing delivery staff away—that would weaken the concern."
+    }
+   },
+   "rawWords": 86,
+   "visibleWords": 86,
+   "questions": {
+    "raw": 0,
+    "full": 0
+   },
+   "duplicates": 0,
+   "requests": [],
+   "outcome": "text",
+   "latency": 6668,
+   "uncached": 1388,
+   "cached": 3992,
+   "output": 200,
+   "reasoning": 84,
+   "response_id": "resp_033c644be7edc764006ab5c802274087d2ae1b279331189746",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": true
+  },
+  {
+   "state": "D2",
+   "rep": 2,
+   "arm": "F",
+   "letter": "A",
+   "raw": 21,
+   "full": 21,
+   "rawScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "Invented material effect",
+      "span": "\"the penalty is likely materially different for a tech lead versus two developers\"",
+      "source": "Canonical state /existing_links: both options link to the single onboarding_load factor; no option-specific or material-size effect is supplied."
+     },
+     {
+      "item": "Indirect relationship stated as direct",
+      "span": "\"it directly reduces delivery capacity\"",
+      "source": "Canonical state /existing_links: onboarding_load -> onboarding_diversion -> delivery_capacity."
+     },
+     {
+      "item": "Truth-fidelity gate failure",
+      "span": "\"it directly reduces delivery capacity\"",
+      "source": "Canonical state /existing_links: the supplied causal path contains onboarding_diversion between onboarding_load and delivery_capacity."
+     }
+    ],
+    "full": [
+     {
+      "item": "Invented material effect",
+      "span": "\"the penalty is likely materially different for a tech lead versus two developers\"",
+      "source": "Canonical state /existing_links: both options link to the single onboarding_load factor; no option-specific or material-size effect is supplied."
+     },
+     {
+      "item": "Indirect relationship stated as direct",
+      "span": "\"it directly reduces delivery capacity\"",
+      "source": "Canonical state /existing_links: onboarding_load -> onboarding_diversion -> delivery_capacity."
+     },
+     {
+      "item": "Truth-fidelity gate failure",
+      "span": "\"it directly reduces delivery capacity\"",
+      "source": "Canonical state /existing_links: the supplied causal path contains onboarding_diversion between onboarding_load and delivery_capacity."
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "76 words; appropriately brief.",
+     "shape": "Direct answer followed by short explanatory paragraphs.",
+     "decisive_caveat": "Identifies the material structural limitation: one shared onboarding-load assumption for distinct hiring options.",
+     "next_move": "Gives one grounded coaching intervention: challenge the onboarding-load estimate.",
+     "questions": "n/a: the user asked for a completed coaching answer, and no clarification is required.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "It adds an unsupported claim that the difference is likely material.",
+     "attribution": "Correctly identifies 4 experienced developer-hours/week as an Olumi estimate rather than a supplied measurement.",
+     "provisional_vs_validated": "Does not portray the estimate or analysis as validated.",
+     "fidelity": "The value and unit are exact, but onboarding load affects delivery capacity through onboarding diversion rather than directly.",
+     "uncertainty": "Clearly labels the input as an estimate and identifies the option-specific uncertainty.",
+     "useful_next_step": "Names a supplied model assumption, explains its delivery-capacity relevance, and gives a concrete observation that could weaken it."
+    },
+    "full": {
+     "concise": "76 visible words; appropriately brief.",
+     "shape": "Direct answer followed by short explanatory paragraphs.",
+     "decisive_caveat": "Identifies the material structural limitation: one shared onboarding-load assumption for distinct hiring options.",
+     "next_move": "Gives one grounded coaching intervention: challenge the onboarding-load estimate.",
+     "questions": "n/a: the user asked for a completed coaching answer, and no clarification is required.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "It adds an unsupported claim that the difference is likely material.",
+     "attribution": "Correctly identifies 4 experienced developer-hours/week as an Olumi estimate rather than a supplied measurement.",
+     "provisional_vs_validated": "Does not portray the estimate or analysis as validated.",
+     "fidelity": "The value and unit are exact, but onboarding load affects delivery capacity through onboarding diversion rather than directly.",
+     "uncertainty": "Clearly labels the input as an estimate and identifies the option-specific uncertainty.",
+     "useful_next_step": "Names a supplied model assumption, explains its delivery-capacity relevance, and gives a concrete observation that could weaken it."
+    }
+   },
+   "rawWords": 78,
+   "visibleWords": 78,
+   "questions": {
+    "raw": 0,
+    "full": 0
+   },
+   "duplicates": 0,
+   "requests": [],
+   "outcome": "text",
+   "latency": 3799,
+   "uncached": 3,
+   "cached": 5377,
+   "output": 101,
+   "reasoning": 0,
+   "response_id": "resp_033c644be7edc764006ab5c808d54487d293386c201edffb8a",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": true
+  },
+  {
+   "state": "D2",
+   "rep": 2,
+   "arm": "R",
+   "letter": "B",
+   "raw": 15,
+   "full": 15,
+   "rawScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 1,
+    "next_move": 0,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 1,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 2,
+    "useful_next_step": 0
+   },
+   "fullScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 1,
+    "next_move": 0,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 1,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 2,
+    "useful_next_step": 0
+   },
+   "rawGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "FAIL",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "FAIL",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "Second unsupported action",
+      "span": "\"Next, challenge the technical guidance quality estimate of 50/100\"",
+      "source": "Case state test: \"Do not add another exercise alongside a current eligible coaching action.\""
+     },
+     {
+      "item": "Unsupported magnitude claim",
+      "span": "\"can erase much of two new developers’ delivery gain\"",
+      "source": "Canonical state and server analysis_result: no supplied result establishes that onboarding erases much of the delivery gain."
+     },
+     {
+      "item": "Unsupported future causal effect",
+      "span": "\"a tech lead could reduce future onboarding burden\"",
+      "source": "Canonical state /existing_links: no link from tech lead headcount or technical guidance quality to onboarding load or onboarding diversion."
+     },
+     {
+      "item": "Unclear provenance for second value",
+      "span": "\"technical guidance quality estimate of 50/100\"",
+      "source": "Canonical state /entities/10/value_provenance/source: \"cee_inference\"; the reply does not identify this as an Olumi estimate."
+     },
+     {
+      "item": "Truth-fidelity gate failure",
+      "span": "\"can erase much of two new developers’ delivery gain\"",
+      "source": "Canonical state and server analysis_result: no supplied magnitude or finding supports this claim."
+     },
+     {
+      "item": "Provenance gate failure",
+      "span": "\"technical guidance quality estimate of 50/100\"",
+      "source": "Canonical state /entities/10/value_provenance/source: \"cee_inference\"; the source is not distinguished for the user."
+     }
+    ],
+    "full": [
+     {
+      "item": "Second unsupported action",
+      "span": "\"Next, challenge the technical guidance quality estimate of 50/100\"",
+      "source": "Case state test: \"Do not add another exercise alongside a current eligible coaching action.\""
+     },
+     {
+      "item": "Unsupported magnitude claim",
+      "span": "\"can erase much of two new developers’ delivery gain\"",
+      "source": "Canonical state and server analysis_result: no supplied result establishes that onboarding erases much of the delivery gain."
+     },
+     {
+      "item": "Unsupported future causal effect",
+      "span": "\"a tech lead could reduce future onboarding burden\"",
+      "source": "Canonical state /existing_links: no link from tech lead headcount or technical guidance quality to onboarding load or onboarding diversion."
+     },
+     {
+      "item": "Unclear provenance for second value",
+      "span": "\"technical guidance quality estimate of 50/100\"",
+      "source": "Canonical state /entities/10/value_provenance/source: \"cee_inference\"; the reply does not identify this as an Olumi estimate."
+     },
+     {
+      "item": "Truth-fidelity gate failure",
+      "span": "\"can erase much of two new developers’ delivery gain\"",
+      "source": "Canonical state and server analysis_result: no supplied magnitude or finding supports this claim."
+     },
+     {
+      "item": "Provenance gate failure",
+      "span": "\"technical guidance quality estimate of 50/100\"",
+      "source": "Canonical state /entities/10/value_provenance/source: \"cee_inference\"; the source is not distinguished for the user."
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "76 words; appropriately brief.",
+     "shape": "Answer first, then exactly three short bullets.",
+     "decisive_caveat": "Notes the six-month horizon and possible hire-type difference, but does not clearly state that the current model uses one shared onboarding-load value.",
+     "next_move": "It gives a second coaching action despite the requested single intervention.",
+     "questions": "n/a: the user asked for a completed coaching answer, and no clarification is required.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "It asserts unsupported effects and adds a second investigation.",
+     "attribution": "The first estimate is attributed to Olumi; the 50/100 technical-guidance estimate is called an estimate but its Olumi provenance is not made clear.",
+     "provisional_vs_validated": "Uses estimated/assumed language and does not claim validation.",
+     "fidelity": "The inputs match the supplied values, but the asserted magnitude and future onboarding effect are not supplied model findings.",
+     "uncertainty": "Uses conditional language and acknowledges the estimates.",
+     "useful_next_step": "Fails the state-specific rule: it supplies no observation that could weaken the chosen assumption, and it adds another exercise."
+    },
+    "full": {
+     "concise": "76 visible words; appropriately brief.",
+     "shape": "Answer first, then exactly three short bullets.",
+     "decisive_caveat": "Notes the six-month horizon and possible hire-type difference, but does not clearly state that the current model uses one shared onboarding-load value.",
+     "next_move": "It gives a second coaching action despite the requested single intervention.",
+     "questions": "n/a: the user asked for a completed coaching answer, and no clarification is required.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "It asserts unsupported effects and adds a second investigation.",
+     "attribution": "The first estimate is attributed to Olumi; the 50/100 technical-guidance estimate is called an estimate but its Olumi provenance is not made clear.",
+     "provisional_vs_validated": "Uses estimated/assumed language and does not claim validation.",
+     "fidelity": "The inputs match the supplied values, but the asserted magnitude and future onboarding effect are not supplied model findings.",
+     "uncertainty": "Uses conditional language and acknowledges the estimates.",
+     "useful_next_step": "Fails the state-specific rule: it supplies no observation that could weaken the chosen assumption, and it adds another exercise."
+    }
+   },
+   "rawWords": 80,
+   "visibleWords": 80,
+   "questions": {
+    "raw": 0,
+    "full": 0
+   },
+   "duplicates": 0,
+   "requests": [],
+   "outcome": "text",
+   "latency": 4792,
+   "uncached": 3,
+   "cached": 5201,
+   "output": 174,
+   "reasoning": 62,
+   "response_id": "resp_033c644be7edc764006ab5c80c9f3887d2829059d6d0d19767",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": false
+  },
+  {
+   "state": "D2",
+   "rep": 3,
+   "arm": "R",
+   "letter": "A",
+   "raw": 21,
+   "full": 17,
+   "rawScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 1,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 0,
+    "shape": 0,
+    "decisive_caveat": 2,
+    "next_move": 1,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "Unsupported priority and invented investigation timeframe",
+      "span": "“first” / “the first 4–12 weeks”",
+      "source": "/analysis/factor_sensitivity (onboarding_load has importance_rank 3, not a supplied first-priority designation); /entities and /existing_links contain no 4–12-week time profile"
+     },
+     {
+      "item": "Correct estimate attribution",
+      "span": "“It is an Olumi estimate, not a supplied measurement.”",
+      "source": "/entities/2-6 (onboarding_load raw_value 4, value_provenance.source cee_inference, provenance ai_inferred)"
+     }
+    ],
+    "full": [
+     {
+      "item": "Excessive visible detail",
+      "span": "“option_comparison”, “factor_sensitivity”, “edge_e_values”",
+      "source": "Cards (analysis_result)"
+     },
+     {
+      "item": "Unsupported priority and invented investigation timeframe",
+      "span": "“first” / “the first 4–12 weeks”",
+      "source": "/analysis/factor_sensitivity (onboarding_load importance_rank 3); /entities and /existing_links contain no 4–12-week time profile"
+     },
+     {
+      "item": "Server provisional disclosure",
+      "span": "“Nothing in it is confirmed yet, so no option is put forward and no result is called reliable.”",
+      "source": "Cards (analysis_result.summary)"
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "68 words; concise for the requested coaching answer.",
+     "shape": "Direct recommendation followed by three short bullets.",
+     "decisive_caveat": "Retains the six-month horizon and onboarding-diversion caveat.",
+     "next_move": "The proposed challenge is model-specific and useful, but “first” asserts an unsupported investigation priority.",
+     "questions": "One request for information: the time-profile question.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "The reply invents both a priority and an unsupported 4–12-week investigation range.",
+     "attribution": "Correctly labels the 4 experienced developer-hours/week as an Olumi estimate rather than a supplied measurement.",
+     "provisional_vs_validated": "Does not present the estimate or model as validated.",
+     "fidelity": "The named assumption and its value/unit match canonical state.",
+     "uncertainty": "Acknowledges that the value is estimated and identifies the relevant temporal uncertainty.",
+     "useful_next_step": "Names the onboarding-load assumption, connects it to six-month delivery capacity, and asks for an observation that could challenge it."
+    },
+    "full": {
+     "concise": "The visible analysis-result card adds a lengthy option-comparison, sensitivity, robustness, and E-value dump, far beyond a concise coaching answer.",
+     "shape": "The server card exposes extensive internal calculations after the concise model text.",
+     "decisive_caveat": "The model text retains the six-month onboarding caveat; the card also discloses that the first pass is unconfirmed.",
+     "next_move": "The proposed challenge is model-specific and useful, but “first” asserts an unsupported investigation priority.",
+     "questions": "One request for information appears in the model-authored text.",
+     "leader_honesty": "Neither the model text nor the server disclosure names a leading or favoured option; the card says no option is put forward.",
+     "nothing_invented": "The raw reply's unsupported priority and 4–12-week range remain visible and are not corrected by the card.",
+     "attribution": "The model correctly identifies the estimate, and the card identifies provisional/inferred sources.",
+     "provisional_vs_validated": "The card explicitly says nothing is confirmed and no result is reliable.",
+     "fidelity": "The model’s specific value/unit match canonical state; the card is supplied state output.",
+     "uncertainty": "Both the response and server disclosure appropriately flag provisional inputs/results.",
+     "useful_next_step": "The response supplies a model-specific assumption, causal rationale, and a potentially disconfirming observation."
+    }
+   },
+   "rawWords": 71,
+   "visibleWords": 71,
+   "questions": {
+    "raw": 1,
+    "full": 1
+   },
+   "duplicates": 0,
+   "requests": [
+    "How many experienced-team hours are diverted in each of the first 4–12 weeks for each hire type?"
+   ],
+   "outcome": "text",
+   "latency": 6613,
+   "uncached": 3,
+   "cached": 5201,
+   "output": 185,
+   "reasoning": 88,
+   "response_id": "resp_033c644be7edc764006ab5c8158cf487d285d087f73cf024b7",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": false
+  },
+  {
+   "state": "D2",
+   "rep": 3,
+   "arm": "F",
+   "letter": "B",
+   "raw": 22,
+   "full": 18,
+   "rawScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 1,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 0,
+    "shape": 0,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 1,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "Unsupported dynamic timing assertion",
+      "span": "“before their added capacity arrives”",
+      "source": "/existing_links (Hire two developers -> Developer headcount -> Delivery capacity, but no ramp, arrival-time, or sequencing relationship is supplied)"
+     },
+     {
+      "item": "Correct estimate attribution",
+      "span": "“It is an Olumi estimate, not a measurement”",
+      "source": "/entities (onboarding_load raw_value 4, unit experienced developer-hours/week, value_provenance.source cee_inference)"
+     }
+    ],
+    "full": [
+     {
+      "item": "Excessive visible detail",
+      "span": "“option_comparison”, “factor_sensitivity”, “edge_e_values”",
+      "source": "Cards (analysis_result)"
+     },
+     {
+      "item": "Unsupported dynamic timing assertion",
+      "span": "“before their added capacity arrives”",
+      "source": "/existing_links (no ramp, arrival-time, or sequencing relationship is supplied)"
+     },
+     {
+      "item": "Server provisional disclosure",
+      "span": "“Nothing in it is confirmed yet, so no option is put forward and no result is called reliable.”",
+      "source": "Cards (analysis_result.summary)"
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "77 words; concise for the requested coaching answer.",
+     "shape": "Answer first, followed by one compact explanatory paragraph and one question.",
+     "decisive_caveat": "Keeps both the onboarding diversion and six-month-horizon caveat.",
+     "next_move": "One grounded intervention: challenge the onboarding-load estimate.",
+     "questions": "One appropriate request for information, asking for both duration and weekly senior-team time for the same onboarding clarification.",
+     "leader_honesty": "No option is called leading, favoured, or best.",
+     "nothing_invented": "The core assumption and causal challenge are grounded, but the explicit timing claim that added capacity “arrives” later is not represented in the supplied model.",
+     "attribution": "Correctly calls the number an Olumi estimate rather than a measurement.",
+     "provisional_vs_validated": "Does not portray the automatic/provisional analysis as validated.",
+     "fidelity": "The estimate value/unit are exact, but the model has no represented arrival/ramp timing for added capacity.",
+     "uncertainty": "Appropriately frames the alternative as conditional on higher versus lower/shorter onboarding demand.",
+     "useful_next_step": "Identifies a supplied assumption, explains its effect on delivery capacity within six months, and requests a concrete comparable-hire observation."
+    },
+    "full": {
+     "concise": "The visible analysis-result card adds a long computational dump that is not needed for this one-assumption coaching response.",
+     "shape": "The server card exposes extensive calculations and lists after the otherwise well-shaped answer.",
+     "decisive_caveat": "The response preserves the six-month onboarding-capacity caveat, while the card reinforces that results are unconfirmed.",
+     "next_move": "One grounded intervention is clearly provided: challenge the onboarding-load estimate.",
+     "questions": "One request for information appears in the model-authored answer.",
+     "leader_honesty": "No visible text calls an option the leader or favourite; the card expressly says no option is put forward.",
+     "nothing_invented": "The core suggestion is grounded, but the raw reply's unsupported capacity-arrival timing remains visible.",
+     "attribution": "The reply and card keep inferred estimates distinct from measurements and provisional analysis.",
+     "provisional_vs_validated": "The server disclosure explicitly says the first pass is not confirmed or reliable.",
+     "fidelity": "The value/unit are correct, but the capacity-arrival timing is not represented in the supplied model.",
+     "uncertainty": "The response gives proportionate conditional uncertainty and the card discloses provisional analysis.",
+     "useful_next_step": "It remains a concrete, model-specific challenge with a causal reason and a potentially disconfirming observation."
+    }
+   },
+   "rawWords": 77,
+   "visibleWords": 77,
+   "questions": {
+    "raw": 1,
+    "full": 1
+   },
+   "duplicates": 0,
+   "requests": [
+    "What did your last comparable hire actually take in senior-team time per week, and for how long?"
+   ],
+   "outcome": "text",
+   "latency": 4101,
+   "uncached": 3,
+   "cached": 5377,
+   "output": 109,
+   "reasoning": 0,
+   "response_id": "resp_033c644be7edc764006ab5c8116dc487d2aae8980c9cf0adcf",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": true
+  },
+  {
+   "state": "X1",
+   "rep": 1,
+   "arm": "F",
+   "letter": "A",
+   "raw": 16,
+   "full": 11,
+   "rawScores": {
+    "concise": 2,
+    "shape": 0,
+    "decisive_caveat": 0,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 1,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 0,
+    "uncertainty": 1,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 0,
+    "shape": 0,
+    "decisive_caveat": 0,
+    "next_move": 1,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 1,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 0,
+    "uncertainty": 1,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "shape score 0",
+      "span": "“- Baseline: …” through “- Phased replacement: …”",
+      "source": "REPLY A — RAW model text"
+     },
+     {
+      "item": "decisive_caveat score 0",
+      "span": "The reply states “Replace: £40,000” but nowhere states that capital spend must be “at most £40,000.”",
+      "source": "CASE TRUTH / user brief"
+     },
+     {
+      "item": "fidelity score 0",
+      "span": "“assumption: it restores reliability without adding capacity.”",
+      "source": "function_call_output for propose_starting_point / not_linked: Repair packing line, Packing-line capacity; not_linked_note"
+     },
+     {
+      "item": "truth_fidelity FAIL",
+      "span": "“assumption: it restores reliability without adding capacity.”",
+      "source": "function_call_output for propose_starting_point / not_linked: Repair packing line, Packing-line capacity; not_linked_note"
+     }
+    ],
+    "full": [
+     {
+      "item": "concise score 0",
+      "span": "The full visible response, including “Questions this model does not answer yet:” and four questions",
+      "source": "REPLY A — FULL visible text; SERVER-OWNED controls"
+     },
+     {
+      "item": "shape score 0",
+      "span": "“- Baseline: …” through “- Phased replacement: …”; “Questions this model does not answer yet: What are …”",
+      "source": "REPLY A — FULL visible text"
+     },
+     {
+      "item": "decisive_caveat score 0",
+      "span": "The full response contains “£40,000” but does not state “at most £40,000.”",
+      "source": "CASE TRUTH / user brief"
+     },
+     {
+      "item": "questions score 0",
+      "span": "“Approve this one set, or correct any figure.” plus the four questions after “Questions this model does not answer yet:”",
+      "source": "REPLY A — FULL visible text"
+     },
+     {
+      "item": "fidelity score 0",
+      "span": "“assumption: it restores reliability without adding capacity.”",
+      "source": "function_call_output for propose_starting_point / not_linked: Repair packing line, Packing-line capacity; not_linked_note"
+     },
+     {
+      "item": "truth_fidelity FAIL",
+      "span": "“assumption: it restores reliability without adding capacity.”",
+      "source": "function_call_output for propose_starting_point / not_linked: Repair packing line, Packing-line capacity; not_linked_note"
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "The 120 words are largely necessary to enumerate the proposed approval figures.",
+     "shape": "It opens with the answer, but uses five substantive bullets rather than at most three.",
+     "decisive_caveat": "It never states the user’s inclusive capital constraint: capital spend must be at most £40,000.",
+     "next_move": "It offers one supported decision path: approve the single proposal or amend its figures.",
+     "questions": "One request for user input/decision is made: approve or correct the proposal.",
+     "leader_honesty": "n/a: no option is presented as leading or favoured.",
+     "nothing_invented": "The repair capacity implication was not recordable in the returned proposal; the text turns it into a stated repair assumption without disclosing that exclusion.",
+     "attribution": "The numerical inputs are clearly called proposed assumptions and “not measurements.”",
+     "provisional_vs_validated": "It does not portray the unadopted proposal as validated or adopted.",
+     "fidelity": "It implies that the model records repair as having no capacity addition, although repair capacity was explicitly left out because that link is not represented.",
+     "uncertainty": "It labels values as assumptions, but omits the material exclusion that repair downtime and capacity cannot be recorded.",
+     "useful_next_step": "Reviewing or amending the single assumption proposal is useful before an admissible analysis."
+    },
+    "full": {
+     "concise": "At roughly 210 visible words including controls, disclosures, and the four-question server dump, it is no longer concise.",
+     "shape": "The five raw bullets remain, and the visible server text adds a multi-question open-issues dump.",
+     "decisive_caveat": "Neither the model text nor server disclosure says the capital constraint is inclusive and at most £40,000.",
+     "next_move": "The model asks for proposal approval, while the disclosure separately directs review of four readiness issues and presents four data questions.",
+     "questions": "The visible response contains the approval/correction request plus four server-written requests for information.",
+     "leader_honesty": "n/a: no option is presented as leading or favoured.",
+     "nothing_invented": "The visible disclosure does not correct the unsupported repair-capacity implication.",
+     "attribution": "The raw proposal distinguishes assumptions from measurements; server questions do not alter that provenance.",
+     "provisional_vs_validated": "The disclosure correctly says analysis could not run, and the text does not claim validation.",
+     "fidelity": "The server disclosure does not cure the unsupported claim that repair has no capacity addition in the represented model.",
+     "uncertainty": "The answer acknowledges assumed figures but still omits the unavailable repair downtime/capacity representation.",
+     "useful_next_step": "The approval/amend controls and readiness questions are relevant to making this model analysable."
+    }
+   },
+   "rawWords": 126,
+   "visibleWords": 209,
+   "questions": {
+    "raw": 1,
+    "full": 5
+   },
+   "duplicates": 1,
+   "requests": [
+    "Approve this one set, or correct any figure."
+   ],
+   "outcome": "text",
+   "latency": 4720,
+   "uncached": 3161,
+   "cached": 3920,
+   "output": 235,
+   "reasoning": 0,
+   "response_id": "resp_04591add931061e0006ab5c940eb7087d2ae4a2543a292a1ad",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": false
+  },
+  {
+   "state": "X1",
+   "rep": 1,
+   "arm": "R",
+   "letter": "B",
+   "raw": 20,
+   "full": 15,
+   "rawScores": {
+    "concise": 2,
+    "shape": 0,
+    "decisive_caveat": 0,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 0,
+    "shape": 0,
+    "decisive_caveat": 0,
+    "next_move": 1,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "shape score 0",
+      "span": "“- **Current baseline:** …” through “- I also included **continue current line** and **phased replacement** …”",
+      "source": "REPLY B — RAW model text"
+     },
+     {
+      "item": "decisive_caveat score 0",
+      "span": "The reply lists “£40,000” but never says capital spend must be “at most £40,000.”",
+      "source": "CASE TRUTH / user brief"
+     }
+    ],
+    "full": [
+     {
+      "item": "concise score 0",
+      "span": "The full visible response, including “Questions this model does not answer yet:” and four subsequent questions",
+      "source": "REPLY B — FULL visible text; SERVER-OWNED controls"
+     },
+     {
+      "item": "shape score 0",
+      "span": "“- **Current baseline:** …” through the phased-replacement bullet; “Questions this model does not answer yet: What are …”",
+      "source": "REPLY B — FULL visible text"
+     },
+     {
+      "item": "decisive_caveat score 0",
+      "span": "The full response contains “£40,000” but nowhere says “at most £40,000.”",
+      "source": "CASE TRUTH / user brief"
+     },
+     {
+      "item": "questions score 0",
+      "span": "“Shall I adopt these assumptions?” plus the four questions after “Questions this model does not answer yet:”",
+      "source": "REPLY B — FULL visible text"
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "Its 103 words are slightly above the default, but the exact approval figures and exclusion caveat justify the length.",
+     "shape": "It starts directly, but has four substantive bullets rather than no more than three.",
+     "decisive_caveat": "It omits the explicit inclusive constraint that capital spend must be at most £40,000.",
+     "next_move": "It asks for one appropriate action: adopt or correct the one proposal.",
+     "questions": "It asks one direct user-decision question.",
+     "leader_honesty": "n/a: no ranking or favoured option is asserted.",
+     "nothing_invented": "All figures are stated as Olumi assumptions and match the proposal; the unavailable repair levels are expressly identified as unrecordable.",
+     "attribution": "“Olumi’s assumptions, not measurements” accurately identifies the source and status of the figures.",
+     "provisional_vs_validated": "The response says the inputs are to be adopted or corrected and does not claim an analysis result.",
+     "fidelity": "It accurately preserves the available proposed levels and expressly says repair downtime and repair capacity cannot be recorded because their links are absent.",
+     "uncertainty": "It proportionately identifies both the assumed status of values and the two missing representational links.",
+     "useful_next_step": "Adopting or correcting the assumptions is the useful prerequisite for analysis."
+    },
+    "full": {
+     "concise": "At roughly 193 visible words including controls and server disclosure, the complete response exceeds the normal concise form.",
+     "shape": "Four raw bullets remain, and the server disclosure appends four open questions.",
+     "decisive_caveat": "The visible response still does not say that £40,000 is an inclusive maximum.",
+     "next_move": "The raw approval request is useful, but the server’s separate readiness-review direction and four information requests create competing next steps.",
+     "questions": "The visible response includes the adoption question plus four server-written information requests.",
+     "leader_honesty": "n/a: no ranking or favoured option is asserted.",
+     "nothing_invented": "The text presents proposal-derived assumptions and explicitly limits what the model can record.",
+     "attribution": "The visible response consistently distinguishes Olumi assumptions from measurements.",
+     "provisional_vs_validated": "It correctly says the first analysis could not run; nothing presents the proposal as validated.",
+     "fidelity": "The repair-level exclusion is stated accurately, and all listed figures correspond to the proposed assumptions.",
+     "uncertainty": "The response clearly identifies both unmeasured assumptions and unrepresented repair links.",
+     "useful_next_step": "The approval/amend controls and the readiness questions are relevant to completing this decision model."
+    }
+   },
+   "rawWords": 107,
+   "visibleWords": 190,
+   "questions": {
+    "raw": 1,
+    "full": 5
+   },
+   "duplicates": 1,
+   "requests": [
+    "Shall I adopt these assumptions?"
+   ],
+   "outcome": "text",
+   "latency": 4267,
+   "uncached": 3,
+   "cached": 6902,
+   "output": 191,
+   "reasoning": 0,
+   "response_id": "resp_04591add931061e0006ab5c93cbf4087d2b929d2b8689f157f",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": true
+  },
+  {
+   "state": "X1",
+   "rep": 2,
+   "arm": "F",
+   "letter": "A",
+   "raw": 19,
+   "full": 15,
+   "rawScores": {
+    "concise": 2,
+    "shape": 1,
+    "decisive_caveat": 1,
+    "next_move": 2,
+    "questions": 1,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 0,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 0,
+    "shape": 0,
+    "decisive_caveat": 1,
+    "next_move": 2,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 0,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "fidelity",
+      "span": "“**Replace:** £40,000; 80 installation hours; 98% reliability; 6,500 orders/quarter.”",
+      "source": "/0/content/0/text: “Capital spend must be at most £40,000”; and /4/output/not_linked, which says Repair–Installation downtime, Repair–Packing-line capacity, and Continue current line–Installation downtime were left out."
+     }
+    ],
+    "full": [
+     {
+      "item": "concise",
+      "span": "“Questions this model does not answer yet: What are the expected capital costs of repair, full replacement, and a phased replacement? How many installation-downtime hours would a full or phased replacement require before the replacement is ready? What reliability and packing-capacity improvement is expected from repair versus replacement? What is the current packing-line capacity and current number of orders dispatched on time per quarter?”",
+      "source": "FULL server-owned disclosure / build_model_from_brief output / open_questions."
+     },
+     {
+      "item": "shape",
+      "span": "“These figures test whether replacement’s later capacity/reliability gain outweighs lost output before readiness. Approve these assumptions, or correct any figures. The first analysis could not run yet: Review all 4 readiness issues together before analysis. The model was saved. Questions this model does not answer yet: …”",
+      "source": "FULL visible response; server-owned disclosure / build_model_from_brief output / first_analysis and open_questions."
+     },
+     {
+      "item": "questions",
+      "span": "“What are the expected capital costs …? How many installation-downtime hours …? What reliability and packing-capacity improvement …? What is the current packing-line capacity …?”",
+      "source": "FULL server-owned disclosure / build_model_from_brief output / open_questions."
+     },
+     {
+      "item": "fidelity",
+      "span": "“**Replace:** £40,000; 80 installation hours; 98% reliability; 6,500 orders/quarter.”",
+      "source": "/0/content/0/text: “Capital spend must be at most £40,000”; and /4/output/not_linked, which lists the three left-out option-factor levels."
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "About 93 words; the extra detail is chiefly the proposed figures and caveats.",
+     "shape": "Clear opening and action, but it uses four bullets rather than at most three.",
+     "decisive_caveat": "It retains the on-time-dispatch outcome, pre-readiness output risk, and lack of analysis, but does not state the inclusive capital constraint.",
+     "next_move": "Approval or correction of the single proposed assumption set is supported by the offered proposal controls.",
+     "questions": "It asks for approval/correction rather than posing one explicit question.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "All proposal values and the two additional options are present in the supplied proposed starting point.",
+     "attribution": "The numerical values are explicitly identified as assumptions rather than measurements.",
+     "provisional_vs_validated": "It says that no analysis has run and does not treat the proposal as adopted.",
+     "fidelity": "It omits the stated operator “at most” for the £40,000 constraint and does not disclose the actual unlinked/excluded option-factor levels.",
+     "uncertainty": "It proportionately identifies the values as assumptions and says analysis has not run.",
+     "useful_next_step": "Adopting or correcting the assumptions is the useful prerequisite to analysis."
+    },
+    "full": {
+     "concise": "The visible response is about 174 words and includes a long four-question server disclosure after the model response.",
+     "shape": "Four bullets and the appended list of open questions violate the prescribed compact shape.",
+     "decisive_caveat": "It retains the on-time-dispatch outcome, pre-readiness output risk, and lack of analysis, but does not state the inclusive capital constraint.",
+     "next_move": "The visible controls support approval or amendment of the one proposal.",
+     "questions": "The server disclosure presents four open information questions, exceeding the default one-question limit.",
+     "leader_honesty": "No ranking or leader claim appears.",
+     "nothing_invented": "The visible values, options, exclusions context, and status are supported by the supplied state.",
+     "attribution": "Proposal figures are called assumptions; the visible status does not recast them as measurements.",
+     "provisional_vs_validated": "The response says analysis could not run and does not call the proposed figures validated.",
+     "fidelity": "The visible response still omits “at most” and the actual excluded/unlinked levels.",
+     "uncertainty": "It labels the figures as assumptions and visibly explains that analysis cannot run yet.",
+     "useful_next_step": "The approval/amendment path remains useful and is provided through the visible controls."
+    }
+   },
+   "rawWords": 96,
+   "visibleWords": 179,
+   "questions": {
+    "raw": 0,
+    "full": 4
+   },
+   "duplicates": 1,
+   "requests": [],
+   "outcome": "text",
+   "latency": 4940,
+   "uncached": 3,
+   "cached": 7078,
+   "output": 186,
+   "reasoning": 0,
+   "response_id": "resp_04591add931061e0006ab5c945a69887d28eaa5af1127c3fea",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": false
+  },
+  {
+   "state": "X1",
+   "rep": 2,
+   "arm": "R",
+   "letter": "B",
+   "raw": 20,
+   "full": 16,
+   "rawScores": {
+    "concise": 1,
+    "shape": 1,
+    "decisive_caveat": 1,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 0,
+    "shape": 0,
+    "decisive_caveat": 1,
+    "next_move": 2,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [],
+    "full": [
+     {
+      "item": "concise",
+      "span": "“Questions this model does not answer yet: What are the expected capital costs of repair, full replacement, and a phased replacement? How many installation-downtime hours would a full or phased replacement require before the replacement is ready? What reliability and packing-capacity improvement is expected from repair versus replacement? What is the current packing-line capacity and current number of orders dispatched on time per quarter?”",
+      "source": "FULL server-owned disclosure / build_model_from_brief output / open_questions."
+     },
+     {
+      "item": "shape",
+      "span": "“Approve these assumptions? The first analysis could not run yet: Review all 4 readiness issues together before analysis. The model was saved. Questions this model does not answer yet: …”",
+      "source": "FULL visible response; server-owned disclosure / build_model_from_brief output / first_analysis and open_questions."
+     },
+     {
+      "item": "questions",
+      "span": "“What are the expected capital costs …? How many installation-downtime hours …? What reliability and packing-capacity improvement …? What is the current packing-line capacity …?”",
+      "source": "FULL server-owned disclosure / build_model_from_brief output / open_questions."
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "About 106 words, slightly beyond the default; the added content is mostly material figures and one necessary exclusion.",
+     "shape": "Clear opening and action, but it has four bullets rather than at most three.",
+     "decisive_caveat": "It correctly retains the £40,000 ceiling and uncertainty, but does not explicitly connect the outcome to orders dispatched on time or state the pre-readiness output-risk consequence.",
+     "next_move": "It requests one supported action: approval of the single assumptions proposal, with correction as the alternative.",
+     "questions": "One concise approval question is used.",
+     "leader_honesty": "No option is called leading, best, or favoured.",
+     "nothing_invented": "Every listed value, option, and Repair exclusion is supported by the proposed-starting-point output.",
+     "attribution": "The operational figures are accurately identified as the assistant's illustrative assumptions, not measurements.",
+     "provisional_vs_validated": "It explicitly calls the comparison provisional and says analysis cannot run yet.",
+     "fidelity": "It states the £40,000 ceiling and one true Repair exclusion, but leaves out the additional actual exclusion for Continue current line’s installation downtime.",
+     "uncertainty": "It clearly distinguishes illustrative assumptions from missing measurements.",
+     "useful_next_step": "Approval or correction of this proposal is the state-supported prerequisite to analysis."
+    },
+    "full": {
+     "concise": "The full visible response is about 187 words and appends four detailed open questions.",
+     "shape": "The four bullets and appended open-question list do not meet the requested compact answer shape.",
+     "decisive_caveat": "It retains the £40,000 ceiling and uncertainty, but still does not explicitly state the on-time-dispatch outcome or pre-readiness output risk.",
+     "next_move": "The offered controls support the requested approval or amendment of the one proposal.",
+     "questions": "The appended disclosure contains four requests for information, rather than one by default.",
+     "leader_honesty": "No ranking or leader claim appears.",
+     "nothing_invented": "All visible values, status, and the stated Repair exclusion are grounded in the supplied state.",
+     "attribution": "The response keeps proposed operational figures distinct from measurements.",
+     "provisional_vs_validated": "It says no analysis can run and the disclosure confirms that the first analysis could not run.",
+     "fidelity": "The £40,000 ceiling and units are retained, but the visible answer still omits the Continue-current-line downtime exclusion.",
+     "uncertainty": "It visibly identifies absent measurements and a blocked first analysis.",
+     "useful_next_step": "Using or changing the proposal through the offered controls is useful for this model."
+    }
+   },
+   "rawWords": 114,
+   "visibleWords": 197,
+   "questions": {
+    "raw": 0,
+    "full": 4
+   },
+   "duplicates": 1,
+   "requests": [],
+   "outcome": "text",
+   "latency": 4871,
+   "uncached": 3,
+   "cached": 6902,
+   "output": 197,
+   "reasoning": 0,
+   "response_id": "resp_04591add931061e0006ab5c94aa0e487d2ab2f075fd6c16f02",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": true
+  },
+  {
+   "state": "X1",
+   "rep": 3,
+   "arm": "F",
+   "letter": "A",
+   "raw": 18,
+   "full": 14,
+   "rawScores": {
+    "concise": 1,
+    "shape": 0,
+    "decisive_caveat": 1,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 1,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 0,
+    "shape": 0,
+    "decisive_caveat": 1,
+    "next_move": 2,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "FAIL",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "shape score 0",
+      "span": "\"- Starting point...\" through \"- Also included for challenge...\"",
+      "source": "REPLY A — RAW model text; evaluator criterion 2 permits at most three short bullets."
+     },
+     {
+      "item": "truth_fidelity FAIL",
+      "span": "\"Repair: £10,000, 92% reliability; assumes it restores rather than expands capacity.\"",
+      "source": "/function_call_output call_UACF5o9iCr0MKfMJK9XXrLGF/output/not_linked/0: Repair packing line—Packing-line capacity was LEFT OUT because the option is not connected to that factor."
+     }
+    ],
+    "full": [
+     {
+      "item": "concise score 0",
+      "span": "The complete 212-word visible response, including \"Questions this model does not answer yet\" and four follow-up requests.",
+      "source": "REPLY A — FULL visible text; evaluator criterion 1."
+     },
+     {
+      "item": "shape score 0",
+      "span": "\"- Starting point...\" through \"- Also included for challenge...\"",
+      "source": "REPLY A — FULL visible text; evaluator criterion 2 permits at most three short bullets."
+     },
+     {
+      "item": "questions score 0",
+      "span": "\"what evidence would show...\" plus \"What are...\", \"How many...\", \"What reliability...\", and \"What is the current...\"",
+      "source": "REPLY A — FULL visible text; evaluator criterion 5 permits one question by default."
+     },
+     {
+      "item": "nothing_invented score 0",
+      "span": "\"The model was saved.\"",
+      "source": "/function_call_output call_UACF5o9iCr0MKfMJK9XXrLGF/output/note: \"Nothing has changed.\"; its mutated field is false."
+     },
+     {
+      "item": "truth_fidelity FAIL",
+      "span": "\"Repair: £10,000, 92% reliability; assumes it restores rather than expands capacity.\"",
+      "source": "/function_call_output call_UACF5o9iCr0MKfMJK9XXrLGF/output/not_linked/0: Repair packing line—Packing-line capacity was LEFT OUT."
+     },
+     {
+      "item": "consent_action_truth FAIL",
+      "span": "\"The model was saved.\"",
+      "source": "/function_call_output call_UACF5o9iCr0MKfMJK9XXrLGF/output: \"mutated\":false and note \"Nothing has changed.\""
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "129 words. The approval figures and caveats justify some length, but this is materially above the default and includes avoidable framing.",
+     "shape": "It gives four bullets, exceeding the maximum of three.",
+     "decisive_caveat": "It correctly says analysis did not run and flags downtime uncertainty, but does not explicitly retain the outcome of orders dispatched on time or the actual model exclusions.",
+     "next_move": "Approval or correction of the single offered starting-point proposal is supported by the available controls.",
+     "questions": "One focused evidence question is asked about the consequential downtime assumption.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "Most figures are the proposed assumptions, but the repair-capacity characterization is not an adopted/recorded level.",
+     "attribution": "The response clearly labels the figures as assumptions rather than measurements and does not attribute invented figures to the user.",
+     "provisional_vs_validated": "It explicitly calls the figures assumptions and states that no analysis ran.",
+     "fidelity": "The stated proposed values largely match, but it omits the explicit at-most/inclusive constraint, the goal outcome, and the recorded exclusions; moreover, repair capacity was left out rather than recorded.",
+     "uncertainty": "It proportionately acknowledges placeholders, absent analysis, and the key downtime uncertainty.",
+     "useful_next_step": "Approving or correcting the offered proposal is the useful available next step."
+    },
+    "full": {
+     "concise": "212 visible words is far beyond the default; the added disclosure contains four further unanswered-information requests.",
+     "shape": "The model text still has four bullets, beyond the maximum of three.",
+     "decisive_caveat": "The visible response faithfully says the first analysis could not run, but still does not explicitly state the goal outcome and pre-readiness-output risk together.",
+     "next_move": "The supported primary action remains approval or amendment of the offered proposal.",
+     "questions": "The visible disclosure adds four separate information requests to the model-authored evidence question.",
+     "leader_honesty": "No option is ranked or described as ahead.",
+     "nothing_invented": "The visible server line claims the model was saved, whereas the supplied proposal output says nothing changed.",
+     "attribution": "Assumptions remain distinguished from measurements; the server disclosure adds no provenance misattribution.",
+     "provisional_vs_validated": "Neither the assumptions nor any analysis result is portrayed as validated.",
+     "fidelity": "The raw repair-capacity assertion remains inconsistent with the recorded exclusion, and required explicit constraint/outcome framing is absent.",
+     "uncertainty": "The response identifies missing readiness inputs and the illustrative nature of the values.",
+     "useful_next_step": "Approval/amendment is still actionable through the listed controls."
+    }
+   },
+   "rawWords": 133,
+   "visibleWords": 216,
+   "questions": {
+    "raw": 1,
+    "full": 5
+   },
+   "duplicates": 1,
+   "requests": [
+    "what evidence would show that is materially too high or low?"
+   ],
+   "outcome": "text",
+   "latency": 5862,
+   "uncached": 3,
+   "cached": 7078,
+   "output": 231,
+   "reasoning": 0,
+   "response_id": "resp_04591add931061e0006ab5c95882b487d2bdae3b83aac4b7d4",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": false
+  },
+  {
+   "state": "X1",
+   "rep": 3,
+   "arm": "R",
+   "letter": "B",
+   "raw": 19,
+   "full": 14,
+   "rawScores": {
+    "concise": 2,
+    "shape": 0,
+    "decisive_caveat": 1,
+    "next_move": 2,
+    "questions": 1,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 0,
+    "shape": 0,
+    "decisive_caveat": 1,
+    "next_move": 2,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 1,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "FAIL",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "shape score 0",
+      "span": "\"- Starting assumptions...\", \"- Repair...\", \"- Replace...\", and \"- I also included comparison cases...\"",
+      "source": "REPLY B — RAW model text; evaluator criterion 2 permits at most three short bullets."
+     }
+    ],
+    "full": [
+     {
+      "item": "concise score 0",
+      "span": "The complete 189-word visible response, especially \"Questions this model does not answer yet\" followed by four requests.",
+      "source": "REPLY B — FULL visible text; evaluator criterion 1."
+     },
+     {
+      "item": "shape score 0",
+      "span": "\"- Starting assumptions...\", \"- Repair...\", \"- Replace...\", and \"- I also included comparison cases...\"",
+      "source": "REPLY B — FULL visible text; evaluator criterion 2 permits at most three short bullets."
+     },
+     {
+      "item": "questions score 0",
+      "span": "\"What are...\", \"How many...\", \"What reliability...\", and \"What is the current...\"",
+      "source": "REPLY B — FULL visible text; evaluator criterion 5 permits one question by default."
+     },
+     {
+      "item": "nothing_invented score 0",
+      "span": "\"The model was saved.\"",
+      "source": "/function_call_output call_UACF5o9iCr0MKfMJK9XXrLGF/output/note: \"Nothing has changed.\"; its mutated field is false."
+     },
+     {
+      "item": "truth_fidelity FAIL",
+      "span": "\"The model was saved.\"",
+      "source": "/function_call_output call_UACF5o9iCr0MKfMJK9XXrLGF/output: \"mutated\":false and note \"Nothing has changed.\""
+     },
+     {
+      "item": "consent_action_truth FAIL",
+      "span": "\"The model was saved.\"",
+      "source": "/function_call_output call_UACF5o9iCr0MKfMJK9XXrLGF/output: \"mutated\":false and note \"Nothing has changed.\""
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "106 words is slightly above the default, but the additional words are needed to show the complete proposal values and its material exclusions.",
+     "shape": "It uses four bullets, exceeding the maximum of three.",
+     "decisive_caveat": "It correctly retains the need for assumptions, the lack of analysis, and the actual repair exclusions, but it does not explicitly restate the on-time-dispatch outcome or the pre-readiness output-disruption risk.",
+     "next_move": "It asks for approval of the single complete proposed starting point, which is supported by the offered approval control.",
+     "questions": "The approval question is a consent prompt rather than a request for missing factual information; no unnecessary fact-finding questions are added.",
+     "leader_honesty": "No ranking or leading-option claim is made.",
+     "nothing_invented": "All stated figures are in the proposed starting point, and it accurately reports the two repair levels that were not recorded.",
+     "attribution": "It expressly identifies the figures as Olumi assumptions rather than measured facts.",
+     "provisional_vs_validated": "It says the assumptions need adoption or correction and that the comparison cannot yet be analysed.",
+     "fidelity": "The figures and exclusions are accurate, but the reply does not explicitly state that capital spend is at most £40,000 (inclusive), nor explicitly name the orders-dispatched-on-time outcome.",
+     "uncertainty": "The illustrative nature of the values and need for test assumptions are clear.",
+     "useful_next_step": "Approval or correction of the offered full starting point is useful and supported."
+    },
+    "full": {
+     "concise": "189 visible words, including four additional unanswered-information requests, is well beyond the default.",
+     "shape": "The four model-authored bullets remain beyond the maximum of three.",
+     "decisive_caveat": "The visible response correctly says analysis could not run and includes the repair exclusions, but does not explicitly retain the goal outcome and output-disruption risk.",
+     "next_move": "The approval/amendment action remains the supported next move.",
+     "questions": "The disclosure contributes four separate factual requests, rather than the default one focused question.",
+     "leader_honesty": "No option is ranked or implied to lead.",
+     "nothing_invented": "The visible response includes an unsupported claim that the model was saved.",
+     "attribution": "The assumptions are identified as Olumi assumptions, and no values are falsely described as measurements.",
+     "provisional_vs_validated": "The reply does not represent an analysis or assumptions as validated.",
+     "fidelity": "The raw figure/exclusion statements remain accurate, but it still omits an explicit inclusive capital constraint and explicit outcome framing.",
+     "uncertainty": "It clearly signals the need for assumptions and exposes the remaining readiness questions.",
+     "useful_next_step": "The available approval or amendment control is useful for this proposal."
+    }
+   },
+   "rawWords": 110,
+   "visibleWords": 193,
+   "questions": {
+    "raw": 0,
+    "full": 4
+   },
+   "duplicates": 1,
+   "requests": [],
+   "outcome": "text",
+   "latency": 7060,
+   "uncached": 3,
+   "cached": 6902,
+   "output": 315,
+   "reasoning": 105,
+   "response_id": "resp_04591add931061e0006ab5c95e455487d2821475361e6b82ea",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": true
+  },
+  {
+   "state": "X2",
+   "rep": 1,
+   "arm": "F",
+   "letter": "A",
+   "raw": 24,
+   "full": 24,
+   "rawScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "80-hour replacement installation downtime is an Olumi estimate",
+      "span": "“Challenge the 80-hour replacement installation downtime first. It is an Olumi assumption, not measured evidence”",
+      "source": "/function_call_output/call_UACF5o9iCr0MKfMJK9XXrLGF/option_levels[Replace packing line, Installation downtime]"
+     },
+     {
+      "item": "Repair downtime is omitted because repair is not linked to installation downtime",
+      "span": "“the current proposal does not represent repair downtime, because repair is not linked to that factor”",
+      "source": "/function_call_output/call_UACF5o9iCr0MKfMJK9XXrLGF/not_linked"
+     }
+    ],
+    "full": [
+     {
+      "item": "80-hour replacement installation downtime is an Olumi estimate",
+      "span": "“Challenge the 80-hour replacement installation downtime first. It is an Olumi assumption, not measured evidence”",
+      "source": "/function_call_output/call_UACF5o9iCr0MKfMJK9XXrLGF/option_levels[Replace packing line, Installation downtime]"
+     },
+     {
+      "item": "Repair downtime is omitted because repair is not linked to installation downtime",
+      "span": "“the current proposal does not represent repair downtime, because repair is not linked to that factor”",
+      "source": "/function_call_output/call_UACF5o9iCr0MKfMJK9XXrLGF/not_linked"
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "79 words; the detail is material to the requested assumption challenge.",
+     "shape": "Direct answer first, followed by one concise qualifying paragraph; no model dump.",
+     "decisive_caveat": "Preserves the consequential asymmetry that repair downtime is not represented.",
+     "next_move": "One supported move: challenge/confirm the 80-hour replacement-downtime assumption using the installation schedule.",
+     "questions": "Two closely related information requests concern the same clarification: the scope and plausibility of the 80-hour outage assumption.",
+     "leader_honesty": "n/a: no option is ranked, favoured, or described as leading.",
+     "nothing_invented": "The selected assumption, values, missing repair link, and relevant model relationships are all supplied.",
+     "attribution": "Correctly calls the 80 hours an Olumi assumption rather than measured evidence.",
+     "provisional_vs_validated": "Refers to the pending values as a proposal and assumption, not as validated results.",
+     "fidelity": "Matches the proposed 80-hour replacement downtime and the absence of a Repair packing line -> Installation downtime link.",
+     "uncertainty": "Acknowledges the lack of measurement and requests an operational observation that could revise the estimate.",
+     "useful_next_step": "Names a supplied assumption, explains its next-quarter dispatch consequence, and identifies a planned installation schedule as potentially disconfirming evidence."
+    },
+    "full": {
+     "concise": "79 visible words; no additional server text is present.",
+     "shape": "Direct answer first, followed by one concise qualifying paragraph; no model dump.",
+     "decisive_caveat": "Preserves the consequential asymmetry that repair downtime is not represented.",
+     "next_move": "One supported move: challenge/confirm the 80-hour replacement-downtime assumption using the installation schedule.",
+     "questions": "Two closely related information requests concern the same clarification: the scope and plausibility of the 80-hour outage assumption.",
+     "leader_honesty": "n/a: no option is ranked, favoured, or described as leading.",
+     "nothing_invented": "The selected assumption, values, missing repair link, and relevant model relationships are all supplied.",
+     "attribution": "Correctly calls the 80 hours an Olumi assumption rather than measured evidence.",
+     "provisional_vs_validated": "Refers to the pending values as a proposal and assumption, not as validated results.",
+     "fidelity": "Matches the proposed 80-hour replacement downtime and the absence of a Repair packing line -> Installation downtime link.",
+     "uncertainty": "Acknowledges the lack of measurement and requests an operational observation that could revise the estimate.",
+     "useful_next_step": "Names a supplied assumption, explains its next-quarter dispatch consequence, and identifies a planned installation schedule as potentially disconfirming evidence."
+    }
+   },
+   "rawWords": 79,
+   "visibleWords": 79,
+   "questions": {
+    "raw": 2,
+    "full": 2
+   },
+   "duplicates": 0,
+   "requests": [
+    "Confirm the replacement outage, including commissioning and any parallel-running period.",
+    "What planned installation schedule would show that 80 hours is too high or too low?"
+   ],
+   "outcome": "text",
+   "latency": 7365,
+   "uncached": 4463,
+   "cached": 3920,
+   "output": 238,
+   "reasoning": 132,
+   "response_id": "resp_04591add931061e0006ab5c932e46487d2b289013b8b5bcb47",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": true
+  },
+  {
+   "state": "X2",
+   "rep": 1,
+   "arm": "R",
+   "letter": "B",
+   "raw": 18,
+   "full": 18,
+   "rawScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 1,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 1,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 0
+   },
+   "fullScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 1,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 1,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 0
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "No question or requested observation is supplied",
+      "span": "“Challenge the replacement installation downtime first: the proposed 80 hours is an Olumi assumption, not your evidence, and it directly trades off against next-quarter dispatch performance before the new line is ready.\n\nAlso challenge the missing repair downtime: the current structure does not connect repair to installation downtime, so it implicitly fails to represent repair disruption at all. That could materially distort a repair-versus-replace comparison.”",
+      "source": "/REPLY_B/RAW; CASE X2 — WHAT THIS STATE TESTS"
+     },
+     {
+      "item": "Unsupported magnitude claim",
+      "span": "“That could materially distort a repair-versus-replace comparison.”",
+      "source": "/get_canonical_state/analysis (run_state.kind: never_run); /get_canonical_state/existing_links"
+     }
+    ],
+    "full": [
+     {
+      "item": "No question or requested observation is supplied",
+      "span": "“Challenge the replacement installation downtime first: the proposed 80 hours is an Olumi assumption, not your evidence, and it directly trades off against next-quarter dispatch performance before the new line is ready.\n\nAlso challenge the missing repair downtime: the current structure does not connect repair to installation downtime, so it implicitly fails to represent repair disruption at all. That could materially distort a repair-versus-replace comparison.”",
+      "source": "/REPLY_B/FULL; CASE X2 — WHAT THIS STATE TESTS"
+     },
+     {
+      "item": "Unsupported magnitude claim",
+      "span": "“That could materially distort a repair-versus-replace comparison.”",
+      "source": "/get_canonical_state/analysis (run_state.kind: never_run); /get_canonical_state/existing_links"
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "64 words.",
+     "shape": "Direct answer followed by one concise caveat; no model dump.",
+     "decisive_caveat": "Identifies the missing repair-downtime representation, which materially qualifies the comparison.",
+     "next_move": "It gives two challenge directions: replacement downtime and missing repair downtime, rather than one primary move.",
+     "questions": "No request for information is made; the default is one question.",
+     "leader_honesty": "n/a: no option is ranked, favoured, or described as leading.",
+     "nothing_invented": "The omission is grounded, but “could materially distort” adds an unsupported magnitude judgment without analysis.",
+     "attribution": "Correctly identifies the 80 hours as an Olumi assumption rather than user evidence.",
+     "provisional_vs_validated": "Calls the value proposed and assumed; it does not claim validation or a run.",
+     "fidelity": "Correctly states that replacement has 80 hours of installation downtime and repair is not connected to that factor.",
+     "uncertainty": "Properly signals that the downtime value is not user evidence and qualifies the possible consequence.",
+     "useful_next_step": "It supplies the assumption and why it matters, but no observation or source that could weaken the 80-hour estimate, as required for a model-specific next step."
+    },
+    "full": {
+     "concise": "64 visible words; no additional server text is present.",
+     "shape": "Direct answer followed by one concise caveat; no model dump.",
+     "decisive_caveat": "Identifies the missing repair-downtime representation, which materially qualifies the comparison.",
+     "next_move": "It gives two challenge directions: replacement downtime and missing repair downtime, rather than one primary move.",
+     "questions": "No request for information is made; the default is one question.",
+     "leader_honesty": "n/a: no option is ranked, favoured, or described as leading.",
+     "nothing_invented": "The omission is grounded, but “could materially distort” adds an unsupported magnitude judgment without analysis.",
+     "attribution": "Correctly identifies the 80 hours as an Olumi assumption rather than user evidence.",
+     "provisional_vs_validated": "Calls the value proposed and assumed; it does not claim validation or a run.",
+     "fidelity": "Correctly states that replacement has 80 hours of installation downtime and repair is not connected to that factor.",
+     "uncertainty": "Properly signals that the downtime value is not user evidence and qualifies the possible consequence.",
+     "useful_next_step": "It supplies the assumption and why it matters, but no observation or source that could weaken the 80-hour estimate, as required for a model-specific next step."
+    }
+   },
+   "rawWords": 65,
+   "visibleWords": 65,
+   "questions": {
+    "raw": 0,
+    "full": 0
+   },
+   "duplicates": 0,
+   "requests": [],
+   "outcome": "text",
+   "latency": 3303,
+   "uncached": 3,
+   "cached": 8204,
+   "output": 87,
+   "reasoning": 0,
+   "response_id": "resp_04591add931061e0006ab5c939613c87d2bbbcdc8ebb8082c6",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": false
+  },
+  {
+   "state": "X2",
+   "rep": 2,
+   "arm": "R",
+   "letter": "A",
+   "raw": 20,
+   "full": 20,
+   "rawScores": {
+    "concise": 2,
+    "shape": 1,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 1,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 2,
+    "shape": 1,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 1,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "FAIL",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "FAIL",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "questions score 0: the reply supplies an instruction rather than a request for information.",
+      "span": "“Test the full ‘out of service to stable output’ period”",
+      "source": "Developer criterion 5: one question by default."
+     },
+     {
+      "item": "provenance gate FAIL: the replacement’s £40,000 cost is presented without saying it is an Olumi estimate rather than user evidence.",
+      "span": "“The £40,000 replacement cost is also pivotal because it sits exactly on your stated cap”",
+      "source": "case truth: propose_starting_point output, option_levels entry for Replace packing line / Capital spend: value 40000, basis begins “Assumption: replacement uses the full stated capital-spend limit.” The user brief states only a £40,000 maximum."
+     }
+    ],
+    "full": [
+     {
+      "item": "questions score 0: the visible reply supplies an instruction rather than a request for information.",
+      "span": "“Test the full ‘out of service to stable output’ period”",
+      "source": "Developer criterion 5: one question by default."
+     },
+     {
+      "item": "provenance gate FAIL: the replacement’s £40,000 cost is presented without saying it is an Olumi estimate rather than user evidence.",
+      "span": "“The £40,000 replacement cost is also pivotal because it sits exactly on your stated cap”",
+      "source": "case truth: propose_starting_point output, option_levels entry for Replace packing line / Capital spend: value 40000, basis begins “Assumption: replacement uses the full stated capital-spend limit.” The user brief states only a £40,000 maximum."
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "73 words; concise for the requested challenge.",
+     "shape": "It gives a clear answer and three bullets, but then adds a separate £40,000 conclusion after the bullet structure.",
+     "decisive_caveat": "Keeps the material next-quarter caveat: downtime occurs before replacement benefits are available.",
+     "next_move": "One supported primary move: challenge and test the 80-hour end-to-end downtime assumption.",
+     "questions": "No request for information is asked, despite the default one-question criterion.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "The end-to-end downtime components are framed as items to test, not established model facts.",
+     "attribution": "The 80-hour figure is correctly identified as Olumi’s illustrative assumption, but the separate £40,000 replacement-cost claim is not identified as an Olumi estimate.",
+     "provisional_vs_validated": "Describes the 80-hour value as an illustrative assumption and does not imply validation or a run.",
+     "fidelity": "80 hours, the £40,000 cap, and the qualitative pre-readiness output concern align with the pending proposal and brief.",
+     "uncertainty": "Appropriately highlights the unmeasured downtime assumption and lack of contingency headroom under that estimate.",
+     "useful_next_step": "Names the model-specific 80-hour assumption, explains its relevance to next-quarter dispatches, and proposes observing the complete time out of service to stable output."
+    },
+    "full": {
+     "concise": "73 visible words; no server material adds length.",
+     "shape": "The visible response has the same post-bullet £40,000 conclusion.",
+     "decisive_caveat": "Keeps the material next-quarter caveat: downtime occurs before replacement benefits are available.",
+     "next_move": "One supported primary move: challenge and test the 80-hour end-to-end downtime assumption.",
+     "questions": "No request for information is asked, despite the default one-question criterion.",
+     "leader_honesty": "No option is presented as leading or favoured.",
+     "nothing_invented": "The end-to-end downtime components are framed as items to test, not established model facts.",
+     "attribution": "The 80-hour figure is correctly identified as Olumi’s illustrative assumption, but the separate £40,000 replacement-cost claim is not identified as an Olumi estimate.",
+     "provisional_vs_validated": "Describes the 80-hour value as an illustrative assumption and does not imply validation or a run.",
+     "fidelity": "80 hours, the £40,000 cap, and the qualitative pre-readiness output concern align with the pending proposal and brief.",
+     "uncertainty": "Appropriately highlights the unmeasured downtime assumption and lack of contingency headroom under that estimate.",
+     "useful_next_step": "Names the model-specific 80-hour assumption, explains its relevance to next-quarter dispatches, and proposes observing the complete time out of service to stable output."
+    }
+   },
+   "rawWords": 78,
+   "visibleWords": 78,
+   "questions": {
+    "raw": 0,
+    "full": 0
+   },
+   "duplicates": 0,
+   "requests": [],
+   "outcome": "text",
+   "latency": 4148,
+   "uncached": 3,
+   "cached": 8204,
+   "output": 107,
+   "reasoning": 0,
+   "response_id": "resp_04591add931061e0006ab5c94ff5c087d2b571dc3e0e2f4274",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": false
+  },
+  {
+   "state": "X2",
+   "rep": 2,
+   "arm": "F",
+   "letter": "B",
+   "raw": 23,
+   "full": 23,
+   "rawScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 1,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 1,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [],
+    "full": []
+   },
+   "notes": {
+    "raw": {
+     "concise": "75 words; concise and directly responsive.",
+     "shape": "Answer first, followed by a focused supplier question and an accurate no-action status.",
+     "decisive_caveat": "Preserves the decisive caveat that output is lost before the replacement is ready, within the next-quarter decision horizon.",
+     "next_move": "One practical, supported next move: obtain a credible supplier estimate of end-to-end downtime.",
+     "questions": "Exactly one useful request for information is asked.",
+     "leader_honesty": "No ranking, leader, win percentage, or implied preferred option.",
+     "nothing_invented": "The qualitative claim that longer downtime could offset “much” of the gain goes beyond the supplied non-quantified relationship, although it is clearly conditional and directionally grounded.",
+     "attribution": "Correctly distinguishes the 80-hour value as an Olumi assumption, not a measured figure.",
+     "provisional_vs_validated": "Does not treat any assumption as validated or claim an analysis was run.",
+     "fidelity": "The 80-hour replacement downtime, next-quarter framing, stated readiness risk, and no-change/no-rerun status match the supplied state.",
+     "uncertainty": "Clearly acknowledges the unmeasured downtime and uncertainty around commissioning/cutover duration.",
+     "useful_next_step": "It identifies the 80-hour replacement-downtime assumption, links it to orders dispatched on time, and specifies an observation that can challenge it: supplier evidence on credible end-to-end downtime."
+    },
+    "full": {
+     "concise": "75 visible words; no server material adds length.",
+     "shape": "Answer first, followed by a focused supplier question and an accurate no-action status.",
+     "decisive_caveat": "Preserves the decisive caveat that output is lost before the replacement is ready, within the next-quarter decision horizon.",
+     "next_move": "One practical, supported next move: obtain a credible supplier estimate of end-to-end downtime.",
+     "questions": "Exactly one useful request for information is asked.",
+     "leader_honesty": "No ranking, leader, win percentage, or implied preferred option.",
+     "nothing_invented": "The qualitative claim that longer downtime could offset “much” of the gain goes beyond the supplied non-quantified relationship, although it is clearly conditional and directionally grounded.",
+     "attribution": "Correctly distinguishes the 80-hour value as an Olumi assumption, not a measured figure.",
+     "provisional_vs_validated": "Does not treat any assumption as validated or claim an analysis was run.",
+     "fidelity": "The 80-hour replacement downtime, next-quarter framing, stated readiness risk, and no-change/no-rerun status match the supplied state.",
+     "uncertainty": "Clearly acknowledges the unmeasured downtime and uncertainty around commissioning/cutover duration.",
+     "useful_next_step": "It identifies the 80-hour replacement-downtime assumption, links it to orders dispatched on time, and specifies an observation that can challenge it: supplier evidence on credible end-to-end downtime."
+    }
+   },
+   "rawWords": 75,
+   "visibleWords": 75,
+   "questions": {
+    "raw": 1,
+    "full": 1
+   },
+   "duplicates": 0,
+   "requests": [
+    "what is the credible end-to-end downtime, including commissioning, faults and contingency—not just installation?"
+   ],
+   "outcome": "text",
+   "latency": 4287,
+   "uncached": 3,
+   "cached": 8380,
+   "output": 102,
+   "reasoning": 0,
+   "response_id": "resp_04591add931061e0006ab5c954198487d2aaf195fc70c6da3e",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": true
+  },
+  {
+   "state": "X2",
+   "rep": 3,
+   "arm": "F",
+   "letter": "A",
+   "raw": 24,
+   "full": 24,
+   "rawScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "fullScores": {
+    "concise": 2,
+    "shape": 2,
+    "decisive_caveat": 2,
+    "next_move": 2,
+    "questions": 2,
+    "leader_honesty": 2,
+    "nothing_invented": 2,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 2,
+    "uncertainty": 2,
+    "useful_next_step": 2
+   },
+   "rawGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "PASS",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [],
+    "full": []
+   },
+   "notes": {
+    "raw": {
+     "concise": "91 whitespace-separated words; the slight excess is justified by provenance, the model-link caveat, and the concrete observation to obtain.",
+     "shape": "Answers immediately, then gives two short supporting bullets without a model dump.",
+     "decisive_caveat": "Keeps the key next-quarter caveat: replacement downtime reduces output before the replacement is ready.",
+     "next_move": "One primary move is supported: obtain a supplier shutdown-and-commissioning plan.",
+     "questions": "One substantive clarification is posed: whether installation plus commissioning actually takes two working weeks.",
+     "leader_honesty": "No option is presented as leading or favoured; no analysis result is implied.",
+     "nothing_invented": "The downtime estimate, its estimate status, two-working-week basis, and omitted repair downtime link are all grounded in supplied proposal/state.",
+     "attribution": "Correctly identifies the 80-hour value as an Olumi estimate rather than measured evidence.",
+     "provisional_vs_validated": "Calls the figure a proposed estimate and refers to pending assumptions; it does not treat them as adopted or validated.",
+     "fidelity": "Matches the proposed replacement downtime of 80 hours and its stated two-working-week installation/commissioning basis. It accurately notes that repair has no installation-downtime link.",
+     "uncertainty": "Appropriately highlights unmeasured duration and commissioning uncertainty.",
+     "useful_next_step": "Identifies the supplied replacement-downtime assumption, explains its output/on-time-dispatch relevance, and names a supplier plan with recovery and contingency information that could revise it."
+    },
+    "full": {
+     "concise": "91 whitespace-separated words; no server material adds length.",
+     "shape": "Answers immediately, then gives two short supporting bullets without a model dump.",
+     "decisive_caveat": "Keeps the key next-quarter caveat: replacement downtime reduces output before the replacement is ready.",
+     "next_move": "One primary move is supported: obtain a supplier shutdown-and-commissioning plan.",
+     "questions": "One substantive clarification is posed: whether installation plus commissioning actually takes two working weeks.",
+     "leader_honesty": "No option is presented as leading or favoured; no analysis result is implied.",
+     "nothing_invented": "The downtime estimate, its estimate status, two-working-week basis, and omitted repair downtime link are all grounded in supplied proposal/state.",
+     "attribution": "Correctly identifies the 80-hour value as an Olumi estimate rather than measured evidence.",
+     "provisional_vs_validated": "Calls the figure a proposed estimate and refers to pending assumptions; it does not treat them as adopted or validated.",
+     "fidelity": "Matches the proposed replacement downtime of 80 hours and its stated two-working-week installation/commissioning basis. It accurately notes that repair has no installation-downtime link.",
+     "uncertainty": "Appropriately highlights unmeasured duration and commissioning uncertainty.",
+     "useful_next_step": "Identifies the supplied replacement-downtime assumption, explains its output/on-time-dispatch relevance, and names a supplier plan with recovery and contingency information that could revise it."
+    }
+   },
+   "rawWords": 92,
+   "visibleWords": 92,
+   "questions": {
+    "raw": 1,
+    "full": 1
+   },
+   "duplicates": 0,
+   "requests": [
+    "Whether installation plus commissioning truly takes two working weeks, as checked through a supplier shutdown-and-commissioning plan."
+   ],
+   "outcome": "text",
+   "latency": 3721,
+   "uncached": 3,
+   "cached": 8380,
+   "output": 120,
+   "reasoning": 0,
+   "response_id": "resp_04591add931061e0006ab5c96a0bf887d2a61562f3c892d29e",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": true
+  },
+  {
+   "state": "X2",
+   "rep": 3,
+   "arm": "R",
+   "letter": "B",
+   "raw": 15,
+   "full": 15,
+   "rawScores": {
+    "concise": 2,
+    "shape": 1,
+    "decisive_caveat": 2,
+    "next_move": 1,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 0,
+    "uncertainty": 2,
+    "useful_next_step": 1
+   },
+   "fullScores": {
+    "concise": 2,
+    "shape": 1,
+    "decisive_caveat": 2,
+    "next_move": 1,
+    "questions": 0,
+    "leader_honesty": 2,
+    "nothing_invented": 0,
+    "attribution": 2,
+    "provisional_vs_validated": 2,
+    "fidelity": 0,
+    "uncertainty": 2,
+    "useful_next_step": 1
+   },
+   "rawGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "fullGates": {
+    "truth_fidelity": "FAIL",
+    "consent_action_truth": "PASS",
+    "provenance": "PASS",
+    "claim_permission_currentness": "PASS",
+    "usability_controls": "PASS"
+   },
+   "evidence": {
+    "raw": [
+     {
+      "item": "questions score 0",
+      "span": "\"Challenge the **80-hour replacement installation downtime** first.\"",
+      "source": "CASE X2 held-out requirement: a grounded challenge; the reply contains no request for information to test the assumption."
+     },
+     {
+      "item": "nothing_invented score 0",
+      "span": "\"leaving no allowance for installation, contingency, or associated works\"",
+      "source": "CASE TRUTH: propose_starting_point output, Replace packing line—Capital spend basis: \"Assumption: replacement uses the full stated capital-spend limit.\" No inclusion/exclusion of installation, contingency, or associated works is supplied."
+     },
+     {
+      "item": "fidelity score 0",
+      "span": "\"leaving no allowance for installation, contingency, or associated works\"",
+      "source": "CASE TRUTH: proposal/public label and proposed Replace packing line capital spend = £40,000; no breakdown or allowance treatment is present."
+     },
+     {
+      "item": "truth_fidelity FAIL",
+      "span": "\"leaving no allowance for installation, contingency, or associated works\"",
+      "source": "CASE TRUTH: propose_starting_point output, Replace packing line—Capital spend basis only states that replacement uses the full £40,000 stated limit; it does not establish excluded costs or zero allowance."
+     }
+    ],
+    "full": [
+     {
+      "item": "questions score 0",
+      "span": "\"Challenge the **80-hour replacement installation downtime** first.\"",
+      "source": "CASE X2 held-out requirement: a grounded challenge; the reply contains no request for information to test the assumption."
+     },
+     {
+      "item": "nothing_invented score 0",
+      "span": "\"leaving no allowance for installation, contingency, or associated works\"",
+      "source": "CASE TRUTH: propose_starting_point output, Replace packing line—Capital spend basis: \"Assumption: replacement uses the full stated capital-spend limit.\" No inclusion/exclusion of installation, contingency, or associated works is supplied."
+     },
+     {
+      "item": "fidelity score 0",
+      "span": "\"leaving no allowance for installation, contingency, or associated works\"",
+      "source": "CASE TRUTH: proposal/public label and proposed Replace packing line capital spend = £40,000; no breakdown or allowance treatment is present."
+     },
+     {
+      "item": "truth_fidelity FAIL",
+      "span": "\"leaving no allowance for installation, contingency, or associated works\"",
+      "source": "CASE TRUTH: propose_starting_point output, Replace packing line—Capital spend basis only states that replacement uses the full £40,000 stated limit; it does not establish excluded costs or zero allowance."
+     }
+    ]
+   },
+   "notes": {
+    "raw": {
+     "concise": "69 whitespace-separated words.",
+     "shape": "It answers first and is readable, but uses consecutive prose paragraphs rather than the requested answer-plus-short-bullets form.",
+     "decisive_caveat": "Correctly preserves that replacement benefits begin only after readiness, so downtime matters to the next-quarter objective.",
+     "next_move": "It initially prioritises the downtime challenge, but adds a separate cost challenge rather than maintaining one primary next move.",
+     "questions": "No actual request for information or question is made.",
+     "leader_honesty": "No option is presented as leading, favoured, or best.",
+     "nothing_invented": "It invents an exclusion from the £40,000 cost assumption: the supplied state does not say whether installation, contingency, or associated works are included.",
+     "attribution": "Reliability, capacity, downtime, and cost are consistently framed as assumed/Olumi values, not measurements.",
+     "provisional_vs_validated": "The reply calls the inputs assumptions and does not claim adoption, validation, or a run.",
+     "fidelity": "Although £40,000 is the proposed replacement capital-spend value and equals the cap, the response adds an unsupported claim about absent allowance for other costs.",
+     "uncertainty": "It notes that the 80-hour input is not evidence and that commissioning duration could overrun.",
+     "useful_next_step": "It identifies a supplied model-specific downtime assumption and why it matters, but does not specify an observation or evidence source that could weaken or revise it."
+    },
+    "full": {
+     "concise": "69 whitespace-separated words; no server material adds length.",
+     "shape": "It answers first and is readable, but uses consecutive prose paragraphs rather than the requested answer-plus-short-bullets form.",
+     "decisive_caveat": "Correctly preserves that replacement benefits begin only after readiness, so downtime matters to the next-quarter objective.",
+     "next_move": "It initially prioritises the downtime challenge, but adds a separate cost challenge rather than maintaining one primary next move.",
+     "questions": "No actual request for information or question is made.",
+     "leader_honesty": "No option is presented as leading, favoured, or best.",
+     "nothing_invented": "It invents an exclusion from the £40,000 cost assumption: the supplied state does not say whether installation, contingency, or associated works are included.",
+     "attribution": "Reliability, capacity, downtime, and cost are consistently framed as assumed/Olumi values, not measurements.",
+     "provisional_vs_validated": "The reply calls the inputs assumptions and does not claim adoption, validation, or a run.",
+     "fidelity": "Although £40,000 is the proposed replacement capital-spend value and equals the cap, the response adds an unsupported claim about absent allowance for other costs.",
+     "uncertainty": "It notes that the 80-hour input is not evidence and that commissioning duration could overrun.",
+     "useful_next_step": "It identifies a supplied model-specific downtime assumption and why it matters, but does not specify an observation or evidence source that could weaken or revise it."
+    }
+   },
+   "rawWords": 71,
+   "visibleWords": 71,
+   "questions": {
+    "raw": 0,
+    "full": 0
+   },
+   "duplicates": 0,
+   "requests": [],
+   "outcome": "text",
+   "latency": 3586,
+   "uncached": 3,
+   "cached": 8204,
+   "output": 110,
+   "reasoning": 0,
+   "response_id": "resp_04591add931061e0006ab5c96556b487d28b8c9df6cc2e0290",
+   "gate_changed": false,
+   "stripped": 0,
+   "preference": false
+  }
+ ]
+}

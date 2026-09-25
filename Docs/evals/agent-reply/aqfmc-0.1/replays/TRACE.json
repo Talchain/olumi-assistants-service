@@ -1,0 +1,303 @@
+{
+ "H": {
+  "state": "D1",
+  "status": "TRACED",
+  "constructor_calls": [
+   "03:construction",
+   "04:construction_retry"
+  ],
+  "constructor_parsed": true,
+  "constructor_build": {
+   "name": "build_model_from_brief",
+   "ok": false,
+   "mutated": false,
+   "refusal": "model_too_large"
+  },
+  "node_count": {
+   "constructor_raw_entities": {
+    "goal": 1,
+    "options": 4,
+    "factors": 6,
+    "risks": 0,
+    "outcomes": 2,
+    "constraints": 0,
+    "unknowns": 3
+   },
+   "constructor_raw_links": 9,
+   "canonical_readback": null
+  },
+  "present_control_nodes": [],
+  "visible": "NOT_TESTED — no browser can launch from this runtime; debug JSON is not visibility",
+  "used_or_excluded": "NO_FIRST_ANALYSIS_ON_THIS_TURN",
+  "concepts": {
+   "faster delivery": {
+    "stages": {
+     "brief": true,
+     "constructor_raw": [
+      {
+       "ptr": "/factors/3",
+       "cat": "factors",
+       "id": null,
+       "label": "Delivery capacity",
+       "provenance": "inferred"
+      },
+      {
+       "ptr": "/outcomes/0",
+       "cat": "outcomes",
+       "id": null,
+       "label": "Faster delivery",
+       "provenance": "explicit"
+      }
+     ],
+     "agent_tool_result": [],
+     "canonical_readback": [],
+     "explained_in_raw_reply": true
+    },
+    "first_adjacent_mismatch": "constructor_raw → agent_tool_result"
+   },
+   "less rework": {
+    "stages": {
+     "brief": true,
+     "constructor_raw": [
+      {
+       "ptr": "/outcomes/1",
+       "cat": "outcomes",
+       "id": null,
+       "label": "Less rework",
+       "provenance": "explicit"
+      }
+     ],
+     "agent_tool_result": [],
+     "canonical_readback": [],
+     "explained_in_raw_reply": true
+    },
+    "first_adjacent_mismatch": "constructor_raw → agent_tool_result"
+   },
+   "onboarding / diverted capacity": {
+    "stages": {
+     "brief": true,
+     "constructor_raw": [
+      {
+       "ptr": "/factors/4",
+       "cat": "factors",
+       "id": null,
+       "label": "Onboarding workload",
+       "provenance": "inferred"
+      },
+      {
+       "ptr": "/factors/5",
+       "cat": "factors",
+       "id": null,
+       "label": "Onboarding capacity",
+       "provenance": "inferred"
+      }
+     ],
+     "agent_tool_result": [],
+     "canonical_readback": [],
+     "explained_in_raw_reply": false
+    },
+    "first_adjacent_mismatch": "constructor_raw → agent_tool_result"
+   }
+  }
+ },
+ "H_followup": {
+  "state": "D2",
+  "status": "TRACED",
+  "constructor_calls": [],
+  "constructor_parsed": false,
+  "constructor_build": null,
+  "node_count": {
+   "constructor_raw_entities": null,
+   "constructor_raw_links": null,
+   "canonical_readback": null
+  },
+  "present_control_nodes": [],
+  "visible": "NOT_TESTED — no browser can launch from this runtime; debug JSON is not visibility",
+  "used_or_excluded": "NO_FIRST_ANALYSIS_ON_THIS_TURN",
+  "concepts": {
+   "faster delivery": {
+    "stages": {
+     "brief": false,
+     "constructor_raw": [],
+     "agent_tool_result": [],
+     "canonical_readback": [],
+     "explained_in_raw_reply": true
+    },
+    "first_adjacent_mismatch": "NOT_ESTABLISHED"
+   },
+   "less rework": {
+    "stages": {
+     "brief": false,
+     "constructor_raw": [],
+     "agent_tool_result": [],
+     "canonical_readback": [],
+     "explained_in_raw_reply": true
+    },
+    "first_adjacent_mismatch": "NOT_ESTABLISHED"
+   },
+   "onboarding / diverted capacity": {
+    "stages": {
+     "brief": false,
+     "constructor_raw": [],
+     "agent_tool_result": [],
+     "canonical_readback": [],
+     "explained_in_raw_reply": true
+    },
+    "first_adjacent_mismatch": "NOT_ESTABLISHED"
+   }
+  }
+ },
+ "N": {
+  "state": "D8",
+  "status": "TRACED",
+  "constructor_calls": [
+   "02:construction"
+  ],
+  "constructor_parsed": true,
+  "constructor_build": {
+   "name": "build_model_from_brief",
+   "ok": true,
+   "mutated": true
+  },
+  "node_count": {
+   "constructor_raw_entities": {
+    "goal": 1,
+    "options": 4,
+    "factors": 4,
+    "risks": 0,
+    "outcomes": 1,
+    "constraints": 1,
+    "unknowns": 3
+   },
+   "constructor_raw_links": 5,
+   "canonical_readback": 11
+  },
+  "present_control_nodes": [
+   "decision:Decision: Document retrieval time",
+   "goal:Document retrieval time",
+   "option:Searchable index"
+  ],
+  "visible": "NOT_TESTED — no browser can launch from this runtime; debug JSON is not visibility",
+  "used_or_excluded": "NOT RUN: not_admissible",
+  "concepts": {
+   "less time finding documents (goal)": {
+    "stages": {
+     "brief": true,
+     "constructor_raw": [
+      {
+       "ptr": "/options/0",
+       "cat": "options",
+       "id": null,
+       "label": "Searchable index",
+       "provenance": "explicit"
+      },
+      {
+       "ptr": "/factors/0",
+       "cat": "factors",
+       "id": null,
+       "label": "Search index coverage",
+       "provenance": "inferred"
+      },
+      {
+       "ptr": "/factors/3",
+       "cat": "factors",
+       "id": null,
+       "label": "Search query effectiveness",
+       "provenance": "inferred"
+      }
+     ],
+     "agent_tool_result": [
+      {
+       "ptr": "/tool_outputs/0/open_questions/0",
+       "text": "What proportion of archive documents could realistically be included in a searchable index?"
+      },
+      {
+       "ptr": "/tool_outputs/0/open_questions/2",
+       "text": "Would the searchable index and folder tidy-up cover the full archive or only selected document types?"
+      },
+      {
+       "ptr": "/tool_outputs/0/entities/0/id",
+       "text": "decision_document_retrieval_time"
+      },
+      {
+       "ptr": "/tool_outputs/0/entities/0/label",
+       "text": "Decision: Document retrieval time"
+      },
+      {
+       "ptr": "/tool_outputs/0/entities/1/id",
+       "text": "document_retrieval_time"
+      },
+      {
+       "ptr": "/tool_outputs/0/entities/1/label",
+       "text": "Document retrieval time"
+      }
+     ],
+     "canonical_readback": [
+      {
+       "ptr": "/nodes/0",
+       "id": "decision_document_retrieval_time",
+       "kind": "decision",
+       "label": "Decision: Document retrieval time",
+       "provenance": "ai_inferred",
+       "value": null
+      },
+      {
+       "ptr": "/nodes/1",
+       "id": "document_retrieval_time",
+       "kind": "goal",
+       "label": "Document retrieval time",
+       "provenance": "from_brief",
+       "value": null
+      },
+      {
+       "ptr": "/nodes/2",
+       "id": "searchable_index",
+       "kind": "option",
+       "label": "Searchable index",
+       "provenance": "from_brief",
+       "value": null
+      },
+      {
+       "ptr": "/nodes/6",
+       "id": "search_index_coverage",
+       "kind": "factor",
+       "label": "Search index coverage",
+       "provenance": "ai_inferred",
+       "value": null
+      },
+      {
+       "ptr": "/nodes/9",
+       "id": "search_query_effectiveness",
+       "kind": "factor",
+       "label": "Search query effectiveness",
+       "provenance": "ai_inferred",
+       "value": null
+      }
+     ],
+     "explained_in_raw_reply": true
+    },
+    "first_adjacent_mismatch": "NOT_ESTABLISHED"
+   },
+   "customer churn (MUST BE ABSENT)": {
+    "stages": {
+     "brief": true,
+     "constructor_raw": [],
+     "agent_tool_result": [],
+     "canonical_readback": [],
+     "explained_in_raw_reply": false
+    },
+    "first_adjacent_mismatch": "brief → constructor_raw"
+   },
+   "new-hire onboarding (MUST BE ABSENT)": {
+    "stages": {
+     "brief": true,
+     "constructor_raw": [],
+     "agent_tool_result": [],
+     "canonical_readback": [],
+     "explained_in_raw_reply": false
+    },
+    "first_adjacent_mismatch": "brief → constructor_raw"
+   }
+  }
+ }
+}

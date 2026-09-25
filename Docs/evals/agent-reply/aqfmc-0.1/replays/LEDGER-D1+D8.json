@@ -1,0 +1,71 @@
+{
+ "attempts": 12,
+ "calls": 12,
+ "blocked": 0,
+ "hosts": [
+  "api.openai.com"
+ ],
+ "anthropic_env_absent_at_end": true,
+ "ledger": [
+  {
+   "at": "2026-09-25T00:48:21.915Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T00:48:27.041Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T00:48:31.108Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T00:48:34.948Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T00:48:40.227Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T00:48:45.340Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T00:48:49.015Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T00:48:52.788Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T00:48:56.570Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T00:49:00.206Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T00:49:05.123Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T00:49:08.263Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  }
+ ]
+}

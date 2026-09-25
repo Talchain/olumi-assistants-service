@@ -1,0 +1,15 @@
+{
+ "id": "X2.R.rep1",
+ "state": "X2",
+ "arm": "R",
+ "rep": 1,
+ "raw": "Challenge the **replacement installation downtime** first: the proposed **80 hours** is an Olumi assumption, not your evidence, and it directly trades off against next-quarter dispatch performance before the new line is ready.\n\nAlso challenge the missing repair downtime: the current structure does not connect repair to installation downtime, so it implicitly fails to represent repair disruption at all. That could materially distort a repair-versus-replace comparison.",
+ "visible": "Challenge the **replacement installation downtime** first: the proposed **80 hours** is an Olumi assumption, not your evidence, and it directly trades off against next-quarter dispatch performance before the new line is ready.\n\nAlso challenge the missing repair downtime: the current structure does not connect repair to installation downtime, so it implicitly fails to represent repair disruption at all. That could materially distort a repair-versus-replace comparison.",
+ "gate_changed": false,
+ "stripped": [],
+ "owed": [],
+ "status": null,
+ "not_adopted": null,
+ "suggested_actions": [],
+ "blocks": []
+}

@@ -1,0 +1,28 @@
+{
+ "id": "X1.R.rep2",
+ "state": "X1",
+ "arm": "R",
+ "rep": 2,
+ "raw": "I’ve set up a provisional comparison; no analysis can run yet because all four options currently set no recorded levels.\n\nThese are **my assumptions, not measurements**, to adopt or correct in one go:\n\n- **Starting point:** £0 capital spend; 0 installation hours; 85% reliability; 5,000 orders/quarter capacity.\n- **Repair:** £10,000; 92% reliability. (The model does not currently link repair to downtime or capacity.)\n- **Replace:** £40,000; 80 installation hours; 98% reliability; 6,500 orders/quarter capacity.\n- **Also included for comparison:** continue current line (£0, 85%, 5,000); phased replacement (£35,000, 24 hours, 96%, 6,000).\n\nThe cost figures respect your £40,000 ceiling; the operational figures are illustrative assumptions based on the absence of measurements. Approve these assumptions?",
+ "visible": "I’ve set up a provisional comparison; no analysis can run yet because all four options currently set no recorded levels.\n\nThese are **my assumptions, not measurements**, to adopt or correct in one go:\n\n- **Starting point:** £0 capital spend; 0 installation hours; 85% reliability; 5,000 orders/quarter capacity.\n- **Repair:** £10,000; 92% reliability. (The model does not currently link repair to downtime or capacity.)\n- **Replace:** £40,000; 80 installation hours; 98% reliability; 6,500 orders/quarter capacity.\n- **Also included for comparison:** continue current line (£0, 85%, 5,000); phased replacement (£35,000, 24 hours, 96%, 6,000).\n\nThe cost figures respect your £40,000 ceiling; the operational figures are illustrative assumptions based on the absence of measurements. Approve these assumptions?\n\nThe first analysis could not run yet: Review all 4 readiness issues together before analysis.\n\nThe model was saved. Questions this model does not answer yet: What are the expected capital costs of repair, full replacement, and a phased replacement? How many installation-downtime hours would a full or phased replacement require before the replacement is ready? What reliability and packing-capacity improvement is expected from repair versus replacement? What is the current packing-line capacity and current number of orders dispatched on time per quarter?",
+ "gate_changed": false,
+ "stripped": [],
+ "owed": [
+  "The first analysis could not run yet: Review all 4 readiness issues together before analysis."
+ ],
+ "status": "The model was saved. Questions this model does not answer yet: What are the expected capital costs of repair, full replacement, and a phased replacement? How many installation-downtime hours would a full or phased replacement require before the replacement is ready? What reliability and packing-capacity improvement is expected from repair versus replacement? What is the current packing-line capacity and current number of orders dispatched on time per quarter?",
+ "not_adopted": null,
+ "suggested_actions": [
+  {
+   "id": "agent-approve-proposal:prop_3e4ce44cfe446260425547fa9353f4c3",
+   "label": "Use as starting assumptions",
+   "message": "Yes, use those."
+  },
+  {
+   "id": "agent-amend-proposal",
+   "label": "Change something first",
+   "message": "Before you apply it, I want to change some of it."
+  }
+ ],
+ "blocks": []
+}

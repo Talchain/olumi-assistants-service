@@ -1,0 +1,28 @@
+{
+ "id": "D8.F.rep1",
+ "state": "D8",
+ "arm": "F",
+ "rep": 1,
+ "raw": "I’ve framed the comparison around reducing document retrieval time. No analysis ran: the model needs starting assumptions, and the current retrieval time remains unknown.\n\nThese are **Olumi assumptions, not measurements**—adopt or correct them:\n\n- Starting position: index coverage **50%**; folder structure consistency **40%**; naming consistency **40%**; search-query effectiveness **50%**.\n- **Searchable index:** coverage **80%**, query effectiveness **75%**. **Folder tidy-up:** folder consistency **80%**, naming consistency **70%**.\n- For comparison, carry-on remains at the starting levels; an **index-and-folder pilot** is included at limited levels (coverage **60%**, folders **60%**, naming **55%**, query effectiveness **60%**).\n\nThese assumptions rest on a partial, one-off improvement rather than complete archive transformation. Shall I apply this full starting point?",
+ "visible": "I’ve framed the comparison around reducing document retrieval time. No analysis ran: the model needs starting assumptions, and the current retrieval time remains unknown.\n\nThese are **Olumi assumptions, not measurements**—adopt or correct them:\n\n- Starting position: index coverage **50%**; folder structure consistency **40%**; naming consistency **40%**; search-query effectiveness **50%**.\n- **Searchable index:** coverage **80%**, query effectiveness **75%**. **Folder tidy-up:** folder consistency **80%**, naming consistency **70%**.\n- For comparison, carry-on remains at the starting levels; an **index-and-folder pilot** is included at limited levels (coverage **60%**, folders **60%**, naming **55%**, query effectiveness **60%**).\n\nThese assumptions rest on a partial, one-off improvement rather than complete archive transformation. Shall I apply this full starting point?\n\nThe first analysis could not run yet: Review all 12 readiness issues together before analysis.\n\nThe model was saved. Questions this model does not answer yet: What proportion of archive documents could realistically be included in a searchable index? How consistent are the current folder structure and document names? Would the searchable index and folder tidy-up cover the full archive or only selected document types?",
+ "gate_changed": false,
+ "stripped": [],
+ "owed": [
+  "The first analysis could not run yet: Review all 12 readiness issues together before analysis."
+ ],
+ "status": "The model was saved. Questions this model does not answer yet: What proportion of archive documents could realistically be included in a searchable index? How consistent are the current folder structure and document names? Would the searchable index and folder tidy-up cover the full archive or only selected document types?",
+ "not_adopted": null,
+ "suggested_actions": [
+  {
+   "id": "agent-approve-proposal:prop_f929de45ade0323761c7ed45e7a0fe9a",
+   "label": "Use as starting assumptions",
+   "message": "Yes, use those."
+  },
+  {
+   "id": "agent-amend-proposal",
+   "label": "Change something first",
+   "message": "Before you apply it, I want to change some of it."
+  }
+ ],
+ "blocks": []
+}

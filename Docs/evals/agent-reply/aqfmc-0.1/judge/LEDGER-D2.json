@@ -1,0 +1,26 @@
+{
+ "attempts": 3,
+ "calls": 3,
+ "blocked": 0,
+ "hosts": [
+  "api.openai.com"
+ ],
+ "anthropic_env_absent_at_end": true,
+ "ledger": [
+  {
+   "at": "2026-09-25T01:02:40.968Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T01:03:55.856Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  },
+  {
+   "at": "2026-09-25T01:05:17.604Z",
+   "url": "https://api.openai.com/v1/responses",
+   "allowed": true
+  }
+ ]
+}

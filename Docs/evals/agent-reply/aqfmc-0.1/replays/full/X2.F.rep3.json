@@ -1,0 +1,15 @@
+{
+ "id": "X2.F.rep3",
+ "state": "X2",
+ "arm": "F",
+ "rep": 3,
+ "raw": "Challenge the **replacement installation downtime** assumption first: the proposed **80 hours** is an Olumi estimate, not measured evidence, and it directly reduces output during the quarter when you need on-time dispatches.\n\nThe decisive question is whether installation plus commissioning truly takes two working weeks—or whether supplier planning, parallel preparation, or contingency makes it materially shorter or longer.\n\n- Ask the supplier for a shutdown-and-commissioning plan, including recovery time and failure contingency.\n- Also note: the pending assumptions omit repair downtime, because repair is not linked to installation downtime in the current model.",
+ "visible": "Challenge the **replacement installation downtime** assumption first: the proposed **80 hours** is an Olumi estimate, not measured evidence, and it directly reduces output during the quarter when you need on-time dispatches.\n\nThe decisive question is whether installation plus commissioning truly takes two working weeks—or whether supplier planning, parallel preparation, or contingency makes it materially shorter or longer.\n\n- Ask the supplier for a shutdown-and-commissioning plan, including recovery time and failure contingency.\n- Also note: the pending assumptions omit repair downtime, because repair is not linked to installation downtime in the current model.",
+ "gate_changed": false,
+ "stripped": [],
+ "owed": [],
+ "status": null,
+ "not_adopted": null,
+ "suggested_actions": [],
+ "blocks": []
+}

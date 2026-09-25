@@ -1,0 +1,261 @@
+{
+ "state": "D1",
+ "rep": 1,
+ "at": "2026-09-25T00:51:36.436Z",
+ "http": 200,
+ "error": null,
+ "tries": 1,
+ "latency_ms": 70762,
+ "request_sha256": "5225effd0699a82648cc0c5b0d32a492de2d9be9ed145b68f0d826e5a6b13fd3",
+ "response_id": "resp_0989687a0327c54e006ab5c552d6c087d28609213b9a70a467",
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 5216,
+  "input_tokens_details": {
+   "cache_write_tokens": 5213,
+   "cached_tokens": 0
+  },
+  "output_tokens": 4576,
+  "output_tokens_details": {
+   "reasoning_tokens": 2328
+  },
+  "total_tokens": 9792
+ },
+ "status": "completed",
+ "scores": {
+  "A": {
+   "raw": {
+    "scores": {
+     "concise": 2,
+     "shape": 2,
+     "decisive_caveat": 2,
+     "next_move": 2,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 0,
+     "attribution": 0,
+     "provisional_vs_validated": 2,
+     "fidelity": 0,
+     "uncertainty": 1,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "67 words; concise for a failed construction outcome.",
+     "shape": "Clear outcome first, followed by three short bullets and one question.",
+     "decisive_caveat": "States that the initial causal map exceeded the 30-link limit.",
+     "next_move": "Offers one useful next move: a narrower rebuild.",
+     "questions": "One direct request for information.",
+     "leader_honesty": "n/a: no option is ranked or implied to lead.",
+     "nothing_invented": "It asserts an unsupported causal explanation for why the limit was exceeded.",
+     "attribution": "It attributes all 17 nodes and 32 links to the user's brief, although the tool says only 9 came from the brief and 2 were added beyond it.",
+     "provisional_vs_validated": "n/a: no model, estimates, or analysis result is presented as validated.",
+     "fidelity": "The numerical totals are right, but the source and causal characterization of those totals are not faithful to the tool result.",
+     "uncertainty": "It does not acknowledge the specifically missing team size, productivity, and onboarding-capacity inputs, though the immediate build failure is correctly foregrounded.",
+     "useful_next_step": "A leaner reconstruction focused on the named outcomes and onboarding risk is useful for this brief."
+    },
+    "gates": {
+     "truth_fidelity": "FAIL",
+     "consent_action_truth": "PASS",
+     "provenance": "FAIL",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 67,
+    "questions": 1,
+    "requests_for_information": [
+     "Would you like me to build that narrower comparison?"
+    ],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "Unsupported causal claim / invented effect",
+      "span": "\"which pushed it over\"",
+      "source": "case truth $[4].output.detail reports that 2 nodes were added beyond the brief, but does not say those additions caused the 32-link excess or how many links they contributed."
+     },
+     {
+      "item": "Incorrect attribution",
+      "span": "\"Your brief produced 17 nodes and 32 links\"",
+      "source": "case truth $[4].output.detail: \"2 of the 17 nodes were added beyond the brief, and 9 came from what you said.\""
+     },
+     {
+      "item": "Fidelity failure",
+      "span": "\"Your brief produced 17 nodes and 32 links\"",
+      "source": "case truth $[4].output.detail distinguishes the 17-node proposed model from the 9 nodes sourced from the user's brief and 2 added beyond it."
+     },
+     {
+      "item": "Truth-fidelity gate failure",
+      "span": "\"The model builder added two concepts beyond your wording, which pushed it over.\"",
+      "source": "case truth $[4].output.detail supports the count of two added nodes but not the claimed causal contribution to exceeding the link limit."
+     },
+     {
+      "item": "Provenance gate failure",
+      "span": "\"Your brief produced 17 nodes and 32 links\"",
+      "source": "case truth $[4].output.detail says only 9 nodes came from the brief; 2 were added beyond it."
+     }
+    ]
+   },
+   "full": {
+    "scores": {
+     "concise": 1,
+     "shape": 1,
+     "decisive_caveat": 2,
+     "next_move": 2,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 0,
+     "attribution": 0,
+     "provisional_vs_validated": 2,
+     "fidelity": 0,
+     "uncertainty": 1,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "107 visible words. The required server disclosure adds material length and repeats the failed-build point.",
+     "shape": "The raw answer is well shaped, but the visible server disclosure follows the question and duplicates the outcome.",
+     "decisive_caveat": "Both the response and server disclosure clearly retain the over-limit failure.",
+     "next_move": "The raw response offers one useful rebuild path; the server also exposes the supported rebuild control.",
+     "questions": "One actual request for information.",
+     "leader_honesty": "n/a: no option is ranked or implied to lead.",
+     "nothing_invented": "The server disclosure does not correct the raw unsupported causal claim.",
+     "attribution": "The server disclosure does not correct the raw misattribution of the whole proposed model to the brief.",
+     "provisional_vs_validated": "n/a: no model, estimates, or analysis result is presented as validated.",
+     "fidelity": "The full response retains the raw provenance/fidelity error.",
+     "uncertainty": "The missing operating inputs remain unacknowledged in the model-authored portion.",
+     "useful_next_step": "Rebuilding or narrowing the model is useful, and the visible control supports rebuilding."
+    },
+    "gates": {
+     "truth_fidelity": "FAIL",
+     "consent_action_truth": "PASS",
+     "provenance": "FAIL",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 107,
+    "questions": 1,
+    "requests_for_information": [
+     "Would you like me to build that narrower comparison?"
+    ],
+    "duplicate_statements": 1,
+    "evidence": [
+     {
+      "item": "Unsupported causal claim / invented effect retained in full response",
+      "span": "\"which pushed it over\"",
+      "source": "case truth $[4].output.detail does not establish that the two added nodes caused the 32-link excess."
+     },
+     {
+      "item": "Incorrect attribution retained in full response",
+      "span": "\"Your brief produced 17 nodes and 32 links\"",
+      "source": "case truth $[4].output.detail says 9 nodes came from the brief and 2 were added beyond it."
+     },
+     {
+      "item": "Fidelity failure retained in full response",
+      "span": "\"Your brief produced 17 nodes and 32 links\"",
+      "source": "case truth $[4].output.detail distinguishes model totals from their sources."
+     },
+     {
+      "item": "Truth-fidelity gate failure",
+      "span": "\"The model builder added two concepts beyond your wording, which pushed it over.\"",
+      "source": "case truth $[4].output.detail supports only the count of added nodes, not their asserted causal effect on the link excess."
+     },
+     {
+      "item": "Provenance gate failure",
+      "span": "\"Your brief produced 17 nodes and 32 links\"",
+      "source": "case truth $[4].output.detail: only 9 nodes came from the user's brief."
+     }
+    ]
+   }
+  },
+  "B": {
+   "raw": {
+    "scores": {
+     "concise": 2,
+     "shape": 2,
+     "decisive_caveat": 2,
+     "next_move": 2,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 2,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 2,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "63 words; it gives the failed-build status, exact constraint, and next step without excess detail.",
+     "shape": "Answer first, then one focused question; no unnecessary lists or calculations.",
+     "decisive_caveat": "Accurately preserves that the build was refused because 32 links exceeded the 30-link limit.",
+     "next_move": "One primary next move: rebuild a lean model centered on the stated alternatives, horizon, outcomes, and risk.",
+     "questions": "One direct request for information.",
+     "leader_honesty": "n/a: no option is ranked or implied to lead.",
+     "nothing_invented": "The proposed lean scope uses only concepts supplied in the brief and introduces no figures, findings, or causal effects.",
+     "attribution": "It correctly frames any future starting figures as Olumi estimates, not measurements.",
+     "provisional_vs_validated": "n/a: it accurately says no model was created and does not represent a result as validated.",
+     "fidelity": "The 32-link result, 30-link limit, no-created-model status, six-month horizon, outcomes, and onboarding risk all match the supplied state.",
+     "uncertainty": "It avoids pretending that missing inputs are known and explicitly preserves estimated status for any future starting figures.",
+     "useful_next_step": "A deliberately lean rebuild is the directly useful response to the first build exceeding the size limit."
+    },
+    "gates": {
+     "truth_fidelity": "PASS",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 63,
+    "questions": 1,
+    "requests_for_information": [
+     "Would you like me to rebuild a deliberately lean version containing only the two options, the six‑month horizon, faster delivery, less rework, and the onboarding diversion risk?"
+    ],
+    "duplicate_statements": 0,
+    "evidence": []
+   },
+   "full": {
+    "scores": {
+     "concise": 1,
+     "shape": 1,
+     "decisive_caveat": 2,
+     "next_move": 2,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 2,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 2,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "103 visible words. The server disclosure is useful but repeats the failed-build conclusion already stated in the raw response.",
+     "shape": "The raw answer is clean; the appended server disclosure follows the question and repeats the status.",
+     "decisive_caveat": "The visible response clearly says that no model was built because the proposed build exceeded the limit.",
+     "next_move": "The raw rebuild request and the visible \"Build it again\" control provide a supported next move.",
+     "questions": "One actual request for information.",
+     "leader_honesty": "n/a: no option is ranked or implied to lead.",
+     "nothing_invented": "No unsupported facts, effects, or findings are added by either the raw response or server disclosure.",
+     "attribution": "Future values are explicitly described as Olumi estimates; no measured or user-provided values are misrepresented.",
+     "provisional_vs_validated": "n/a: the visible response clearly says the model was not built and does not claim validation.",
+     "fidelity": "The full response faithfully states the build refusal and applicable link-limit facts.",
+     "uncertainty": "It proportionately labels any future starting figures as estimates while no model currently exists.",
+     "useful_next_step": "The visible rebuild control and the proposed lean scope are useful for resolving the size-limit failure."
+    },
+    "gates": {
+     "truth_fidelity": "PASS",
+     "consent_action_truth": "PASS",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 103,
+    "questions": 1,
+    "requests_for_information": [
+     "Would you like me to rebuild a deliberately lean version containing only the two options, the six‑month horizon, faster delivery, less rework, and the onboarding diversion risk?"
+    ],
+    "duplicate_statements": 1,
+    "evidence": []
+   }
+  },
+  "preference": "B",
+  "reason": "B faithfully reports the refused 32-link build and no-created-model status, keeps the rebuild scope within the user’s stated concepts, and clearly labels any future starting figures as Olumi estimates. A incorrectly attributes the entire 17-node/32-link proposed model to the brief and invents that the two added concepts caused the limit breach."
+ }
+}

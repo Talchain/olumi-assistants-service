@@ -1,0 +1,265 @@
+{
+ "state": "D1",
+ "rep": 2,
+ "at": "2026-09-25T00:53:59.978Z",
+ "http": 200,
+ "error": null,
+ "tries": 1,
+ "latency_ms": 77538,
+ "request_sha256": "9467a944cf8ce7ef1a1807d1e8e51bb9a460c1ac23e6476b90e11a3d3a463064",
+ "response_id": "resp_00adea2b19dd0c54006ab5c5daafb487d2a601e152087cc9e9",
+ "model": "gpt-5.6-terra",
+ "usage": {
+  "input_tokens": 5166,
+  "input_tokens_details": {
+   "cache_write_tokens": 2183,
+   "cached_tokens": 2980
+  },
+  "output_tokens": 5188,
+  "output_tokens_details": {
+   "reasoning_tokens": 2960
+  },
+  "total_tokens": 10354
+ },
+ "status": "completed",
+ "scores": {
+  "A": {
+   "raw": {
+    "scores": {
+     "concise": 2,
+     "shape": 2,
+     "decisive_caveat": 2,
+     "next_move": 2,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 2,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 2,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "47 model-authored words; concise.",
+     "shape": "States the outcome first, then makes one focused clarification request.",
+     "decisive_caveat": "Retains both the link-limit failure and the need to label missing figures as Olumi estimates.",
+     "next_move": "One supported move: confirm a narrower factor scope before another build attempt.",
+     "questions": "One focused clarification request.",
+     "leader_honesty": "No ranking or implied leader.",
+     "nothing_invented": "The proposed narrower factors faithfully restate delivery speed, rework, and onboarding drag from the brief.",
+     "attribution": "Missing figures are correctly described as Olumi estimates rather than measurements.",
+     "provisional_vs_validated": "Does not imply that a model or estimates were validated.",
+     "fidelity": "Correctly reports that the first model could not be created because it exceeded the link limit.",
+     "uncertainty": "Acknowledges that missing figures would be assumptions.",
+     "useful_next_step": "Narrowing the requested structure is useful after the size-limit failure."
+    },
+    "gates": {
+     "truth_fidelity": "PASS",
+     "consent_action_truth": "FAIL",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 47,
+    "questions": 1,
+    "requests_for_information": [
+     "Please confirm whether to keep the comparison narrowly to delivery speed, rework, and onboarding drag on experienced developers over six months."
+    ],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "Unsupported future tool-action commitment",
+      "span": "“I’ll then build that leaner model”",
+      "source": "build_model_from_brief output: {\"ok\":false,\"mutated\":false}; no later build action or completed proposal is supplied."
+     }
+    ]
+   },
+   "full": {
+    "scores": {
+     "concise": 2,
+     "shape": 1,
+     "decisive_caveat": 2,
+     "next_move": 1,
+     "questions": 1,
+     "leader_honesty": 2,
+     "nothing_invented": 2,
+     "attribution": 2,
+     "provisional_vs_validated": 2,
+     "fidelity": 2,
+     "uncertainty": 2,
+     "useful_next_step": 2
+    },
+    "notes": {
+     "concise": "86 visible words; still within the default target.",
+     "shape": "The server status repeats the already-stated model-build failure.",
+     "decisive_caveat": "The visible response preserves the size-limit and provisional-estimate caveats.",
+     "next_move": "The raw clarification and server's alternative of rebuilding or specifying factors leave more than one offered next move.",
+     "questions": "There are two information requests in the visible response; they concern related scoping but are not both required.",
+     "leader_honesty": "No ranking or implied leader.",
+     "nothing_invented": "The server disclosure adds only state-supported failure information.",
+     "attribution": "Olumi estimates remain clearly attributed in the model-authored text.",
+     "provisional_vs_validated": "No validation is claimed.",
+     "fidelity": "The server disclosure accurately adds that the failed construction had already retried compaction.",
+     "uncertainty": "The missing-figure caveat remains proportionate.",
+     "useful_next_step": "Both narrowing the model and specifying important factors are useful responses to the link limit."
+    },
+    "gates": {
+     "truth_fidelity": "PASS",
+     "consent_action_truth": "FAIL",
+     "provenance": "PASS",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 86,
+    "questions": 2,
+    "requests_for_information": [
+     "Please confirm whether to keep the comparison narrowly to delivery speed, rework, and onboarding drag on experienced developers over six months.",
+     "Tell me which options and factors matter most."
+    ],
+    "duplicate_statements": 1,
+    "evidence": [
+     {
+      "item": "Repeated failure statement",
+      "span": "“The model was not built: it came back larger than a first model can be”",
+      "source": "Server-owned visible status; duplicates the raw statement “I couldn’t create the first model because the initial structure exceeded its link limit.”"
+     },
+     {
+      "item": "Unsupported future tool-action commitment",
+      "span": "“I’ll then build that leaner model”",
+      "source": "build_model_from_brief output: {\"ok\":false,\"mutated\":false}; no later build action or completed proposal is supplied."
+     }
+    ]
+   }
+  },
+  "B": {
+   "raw": {
+    "scores": {
+     "concise": 2,
+     "shape": 2,
+     "decisive_caveat": 1,
+     "next_move": 1,
+     "questions": 2,
+     "leader_honesty": 2,
+     "nothing_invented": 0,
+     "attribution": 1,
+     "provisional_vs_validated": 2,
+     "fidelity": 1,
+     "uncertainty": 1,
+     "useful_next_step": 1
+    },
+    "notes": {
+     "concise": "58 model-authored words; concise.",
+     "shape": "Gives the failed outcome first and follows with one tightly framed question.",
+     "decisive_caveat": "It gives the actual 32/30 link-limit failure, but omits the brief's requirement that any Olumi starting estimates be clearly labelled and omits onboarding capacity as a missing input.",
+     "next_move": "A tighter model is reasonable, but the proposed exclusion of inputs and requirement that the user choose estimates are unsupported.",
+     "questions": "One question.",
+     "leader_honesty": "No ranking or implied leader.",
+     "nothing_invented": "It invents an exclusion of current team size and productivity and makes user selection of estimates a condition not stated in the brief.",
+     "attribution": "It does not misstate a numeric value, but “until you choose estimates” blurs the requested distinction that starting estimates would be Olumi estimates.",
+     "provisional_vs_validated": "No estimates or model are portrayed as validated.",
+     "fidelity": "The 32-link and 30-link figures are accurate, but the proposed exclusion of “baseline productivity” is not specified by the user or result.",
+     "uncertainty": "Notes two missing inputs, but not onboarding capacity or the required Olumi-estimate labelling.",
+     "useful_next_step": "Narrowing scope can help, but excluding unknown baseline inputs is not established as the appropriate model change."
+    },
+    "gates": {
+     "truth_fidelity": "FAIL",
+     "consent_action_truth": "FAIL",
+     "provenance": "FAIL",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 58,
+    "questions": 1,
+    "requests_for_information": [
+     "Shall I build a tighter six-month model around delivery speed, rework, and onboarding drag on experienced developers, excluding current team size and baseline productivity until you choose estimates?"
+    ],
+    "duplicate_statements": 0,
+    "evidence": [
+     {
+      "item": "Invented model exclusion",
+      "span": "“excluding current team size and baseline productivity until you choose estimates”",
+      "source": "User brief: current team size and productivity were not supplied, and says “Keep any Olumi starting estimates clearly labelled as estimates”; it does not direct their exclusion or require user-chosen estimates."
+     },
+     {
+      "item": "Unsupported future tool-action proposal",
+      "span": "“shall I build a tighter six-month model”",
+      "source": "build_model_from_brief output: {\"ok\":false,\"mutated\":false}; no later build action or completed proposal is supplied."
+     },
+     {
+      "item": "Provenance conflation",
+      "span": "“until you choose estimates”",
+      "source": "User brief: “Keep any Olumi starting estimates clearly labelled as estimates.”"
+     }
+    ]
+   },
+   "full": {
+    "scores": {
+     "concise": 1,
+     "shape": 1,
+     "decisive_caveat": 1,
+     "next_move": 1,
+     "questions": 1,
+     "leader_honesty": 2,
+     "nothing_invented": 0,
+     "attribution": 1,
+     "provisional_vs_validated": 2,
+     "fidelity": 1,
+     "uncertainty": 1,
+     "useful_next_step": 1
+    },
+    "notes": {
+     "concise": "97 visible words, slightly above the default 90-word target; the added server disclosure is material but repeats the failure.",
+     "shape": "The server-written status repeats the failure already stated in the raw response.",
+     "decisive_caveat": "The link-limit caveat is retained, but the response still does not make clear that any starting estimates would be Olumi assumptions or mention onboarding capacity.",
+     "next_move": "The visible response offers a tight-build proposal plus rebuild/factor-selection alternatives; the raw proposal also contains unsupported exclusions.",
+     "questions": "The visible response contains two requests, although both relate to resolving the oversized model.",
+     "leader_honesty": "No ranking or implied leader.",
+     "nothing_invented": "The raw invented exclusion remains visible; the server disclosure does not remove it.",
+     "attribution": "The raw phrasing still shifts Olumi estimates toward being user-chosen values.",
+     "provisional_vs_validated": "No model or assumption is presented as validated.",
+     "fidelity": "The server status correctly states the failed build and retry, but it does not correct the unsupported proposed exclusions.",
+     "uncertainty": "The response identifies some missing information but incompletely handles the specified uncertainty.",
+     "useful_next_step": "The server's factor-selection route is useful, but the primary raw proposal remains improperly constrained."
+    },
+    "gates": {
+     "truth_fidelity": "FAIL",
+     "consent_action_truth": "FAIL",
+     "provenance": "FAIL",
+     "claim_permission_currentness": "PASS",
+     "usability_controls": "PASS"
+    },
+    "words": 97,
+    "questions": 2,
+    "requests_for_information": [
+     "Shall I build a tighter six-month model around delivery speed, rework, and onboarding drag on experienced developers, excluding current team size and baseline productivity until you choose estimates?",
+     "Tell me which options and factors matter most."
+    ],
+    "duplicate_statements": 1,
+    "evidence": [
+     {
+      "item": "Repeated failure statement",
+      "span": "“The model was not built: it came back larger than a first model can be”",
+      "source": "Server-owned visible status; duplicates “Olumi could not create the first model: its initial interpretation had 32 links, above the 30-link limit.”"
+     },
+     {
+      "item": "Invented model exclusion",
+      "span": "“excluding current team size and baseline productivity until you choose estimates”",
+      "source": "User brief: current team size and productivity were not supplied, and says “Keep any Olumi starting estimates clearly labelled as estimates”; it does not direct their exclusion or require user-chosen estimates."
+     },
+     {
+      "item": "Unsupported future tool-action proposal",
+      "span": "“shall I build a tighter six-month model”",
+      "source": "build_model_from_brief output: {\"ok\":false,\"mutated\":false}; no later build action or completed proposal is supplied."
+     },
+     {
+      "item": "Provenance conflation",
+      "span": "“until you choose estimates”",
+      "source": "User brief: “Keep any Olumi starting estimates clearly labelled as estimates.”"
+     }
+    ]
+   }
+  },
+  "preference": "A",
+  "reason": "A faithfully describes the failed construction and preserves the requested Olumi-estimate caveat without inventing model exclusions. B correctly gives the 32/30 limit, but adds unsupported exclusions and treats estimate selection as user-owned rather than clearly Olumi-estimated."
+ }
+}
