@@ -50,7 +50,10 @@
  *
  * ⚠ RESIDUAL — what a vocabulary classifier cannot see, stated so nobody quotes a stronger claim:
  * a designation that uses no ranking word at all ("directional support for £59", "go with the first
- * one", a bare "£59 comes first."). Those sentences are kept. Measured recall is corpus recall (AI
+ * one", a bare "£59 comes first."), and win shares written as running prose with no ranking word
+ * ("the £59 path at 71% and holding at 29%"). Those sentences are kept. Win shares ARE removed as
+ * lists ("label: N%" / "label — N%", per contiguous list summing to ~100, under a ranking heading, or
+ * on an option's own label) and as tables (a share header, an option row with a %, or a ranking row). Measured recall is corpus recall (AI
  * Quality v6: 43 real replies plus 6 authored controls), not a general guarantee.
  */
 import type { OlumiResponse } from '@talchain/schemas/boundary';
@@ -105,8 +108,12 @@ const NON_RANKING_IDIOMS: readonly RegExp[] = [
    */
   /\blead(?:'s|s')/gi,
   /\blead\s+(?:capacity|capacities|role|roles|hire|hires|hiring|engineers?|developers?|positions?|availability|effectiveness|coverage|salary|salaries|ramp[\s-]?up|onboarding|candidates?|case|cases|headcount)\b/gi,
-  /\b(?:the|a|an|another|new|current|dedicated|senior|second|one|that|this)\s+lead\s+(?:is|was|would|could|will|might|may|provides?|removes?|creates?|adds?|reduces?|improves?|brings?|consumes?|arrives?|joins?|spends?|has|needs?)\b/gi,
-  /\b[a-z]+-[a-z]+\s+lead\b(?!\s+(?:for|over|of)\b)/gi,
+  // ⚠ NOT "the lead is …" in general — "the current lead is the £59 path" is a MARGIN (review of #1871,
+  // 5825898337). "is/was" count as the role only with a role predicate.
+  /\b(?:the|a|an|another|new|current|dedicated|senior|second|one|that|this)\s+lead\s+(?:would|could|will|might|may|provides?|removes?|creates?|adds?|reduces?|improves?|brings?|consumes?|arrives?|joins?|spends?|needs?)\b/gi,
+  /\b(?:the|a|an|another|new|current|dedicated|senior|second|one|that|this)\s+lead\s+(?:is|was)\s+(?:not\s+)?(?:unavailable|available|stretched|overloaded|busy|empowered|hired|absent|part[\s-]time|full[\s-]time|effective|ineffective|a\s+(?:person|hire|role|senior|junior|manager))\b/gi,
+  // A hyphenated-adjective role only as a HEADING ("Slow-ramping lead:"); "the price-rise lead is …" is a margin.
+  /\b[a-z]+-[a-z]+\s+lead(?=\s*:)/gi,
   /^[\s\-+•*\d.)#]*lead\s+as\b/gi,
   /** "evidence-led", "feature-led": a compound adjective, never a ranking. */
   /\b[\w£]+-led\b/gi,
@@ -135,10 +142,13 @@ const NON_RANKING_IDIOMS: readonly RegExp[] = [
   /\bwithh(?:olds?|eld|olding)\s+(?:an?\s+|the\s+|any\s+)?(?:overall\s+|full\s+|final\s+)?leader(?:\s+verdict)?\b/gi,
   /\bno\s+(?:overall\s+|single\s+|clear\s+)?leader\b/gi,
   /** Method, not result: "the engine has not been told to rank …", "it ranks relative MRR instead". */
-  /\bto\s+rank\b/gi,
-  /\branks?\s+(?:relative|by|on)\b/gi,
+  // Only when someone TOLD it how to rank; "appears to rank first" is a result (review of #1871).
+  /\b(?:told|asked|set|configured|instructed|meant|supposed)\s+to\s+rank\b/gi,
+  // "ranks relative MRR", "ranks by" — never "ranks on top".
+  /\branks?\s+(?:relative|by)\b/gi,
   /** The GOAL'S direction, not an option: "assumed that a higher waiting-list-reduction score is preferable". */
-  /\b(?:higher|lower|more|less)\s+[^.;:]{0,60}?\s+is\s+(?:preferable|better)\b/gi,
+  // A SCORE's direction only, and never "preferable TO/THAN" an option (review of #1871).
+  /\b(?:higher|lower|more|less)\s+[\w-]+(?:\s+[\w-]+){0,2}\s+(?:scores?|values?|outcomes?|figures?|levels?|numbers?)\s+(?:is|are)\s+(?:preferable|better)\b(?!\s+(?:to|than)\b)/gi,
   /** Sensitivity without a named option: "changing either can change which option leads". */
   /\b(?:change|changes|changing|alter|alters|altering|affect|affects|determine|determines|decide|decides|flip|flips|switch|switches)\s+which\s+(?:option|path|plan|choice|alternative)s?\s+(?:leads?|comes?\s+out\s+ahead|wins?|is\s+(?:ahead|best))\b/gi,
   /** A NEGATED choice: "the model cannot distinguish a clear choice between …", "no clear winner". */
@@ -146,13 +156,14 @@ const NON_RANKING_IDIOMS: readonly RegExp[] = [
   /\bno\s+clear\s+(?:choice|pick|winner|leader|option)\b/gi,
   /** Sales vocabulary, not a result: "win/loss data". */
   /\bwin\s*[/-]\s*loss\b/gi,
-  /** Method: "confirm that the goal should be ranked …". */
-  /\bshould\s+be\s+ranked\b/gi,
+  /** Method: "the goal should be ranked as more reduction is better" — never "should be ranked first". */
+  /\bshould\s+be\s+ranked\s+as\s+(?:more|less|higher|lower)\b/gi,
   /** Time, not rank: "behind schedule". */
   /\bbehind\s+(?:schedule|plan|target|time)\b/gi,
   /** Ranking ASSUMPTIONS by sensitivity is sanctioned content; the route's instruction asks for it. */
   /\b(?:highest|strongest|biggest|largest|greatest)\s+(?:(?:modelled|model|mrr|arr|revenue|simulated|key|main|single|cost|price)\s+){0,2}(?:sensitivity|influence|drivers?|levers?|dependency|uncertainty|elasticity|risks?)\b/gi,
-  /\b(?:highest|top)[\s-]+priority\b/gi,
+  // Only a piece of EVIDENCE to get ("the highest-priority correction"); "the highest-priority move" recommends.
+  /\b(?:highest|top)[\s-]+priority\s+(?:corrections?|questions?|checks?|inputs?|gaps?|unknowns?|assumptions?|measurements?|evidence|tests?|data|fix(?:es)?)\b/gi,
   /**
    * Only a VALUE's plausible top, never an option's (Codex challenge on #1871: "The highest plausible MRR belongs
    * to the £59-at-release path" names the strongest option by paraphrase, so the noun must be a value word).
@@ -214,6 +225,7 @@ const RANKING_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegE
     code: 'greatest',
     re: /\b(?:greatest|largest|biggest)\s+(?:(?:modelled|expected|median|mean|projected|simulated|overall|average|net)\s+)*(?:mrr|revenue|outcomes?|results?|returns?|gains?|upside|value|payoff|benefits?|chances?|probabilit(?:y|ies)|win\s+shares?)\b/i,
   },
+  { code: 'came_out_at', re: new RegExp(String.raw`\b(?:came|comes|coming)\s+out\s+(?:at|on)\s+${PCT}`, 'i') },
   { code: 'more_than', re: /\b(?:delivers?|delivered|produces?|produced|yields?|yielded|gives?|gave|generates?|generated|returns?|returned|achieves?|achieved|earns?|earned|brings?|brought)\s+more\s+(?:[\w£$%-]+\s+){0,3}?than\b/i },
   /** Only over another OPTION ("dominates keeping £49"); "which bottleneck dominates today" is mechanism (served survey). */
   { code: 'dominates', re: /\bdominat(?:es|ed|ing)\s+(?:the\s+)?(?:other|others|alternatives?|rest|field|comparison|keeping|holding|raising|hiring|phasing|staying|launching|building|buying|£)|\bdominant\s+(?:option|choice|path|strategy|plan)\b/i },
@@ -509,13 +521,18 @@ function finerSentences(unit: string): string[] {
   return out;
 }
 
+/** A table header that names a share of runs ("| Option | Share |"), with or without a ranking word. */
+const TABLE_SHARE_HEADER = /^\s*\|\s*(?:options?|paths?|choices?|alternatives?|plans?|scenarios?)\s*\|.*\b(?:share|chance|likelihood|probability|odds)\b/i;
+
+const optionKeysOf = (labels: RankingLabelContext): Set<string> => new Set((labels.optionLabels ?? []).map(labelKey));
+
 /** A row that is only "label: number" — its meaning comes from whatever introduced it. */
-const VALUE_ROW = /^[\s\-+•*\d.)]*[^:|\n]{2,80}?:\s*[£$€]?\s?\d[\d,.]*\s?(?:%|k|m|bn|x|pp)?[\s.;,)]*$/i;
+const VALUE_ROW = /^[\s\-+•*\d.)]*[^:|\n]{2,80}?(?::|\s-)\s*[£$€]?\s?\d[\d,.]*\s?(?:%|k|m|bn|x|pp)?[\s.;,)]*$/i;
 
 const labelKey = (s: string): string => classificationCopy(s).replace(/\s+/g, ' ').trim().toLowerCase();
 
 /** "Raise to £59: 71%." — one option's share, as the whole unit. */
-const SHARE_UNIT = /^[\s\-+•*\d.)]*[^:|\n]{2,80}?:\s*(\d+(?:[.,]\d+)?)\s?%[\s.;,)]*$/;
+const SHARE_UNIT = /^[\s\-+•*\d.)]*[^:|\n]{2,80}?(?::|\s-)\s*(\d+(?:[.,]\d+)?)\s?%[\s.;,)]*$/;
 
 /**
  * Units that rank only AS A WHOLE, so no single sentence test sees them (review of #1871):
@@ -542,7 +559,12 @@ function unitsRankingAsAWhole(segs: ReadonlyArray<{ sep: string } | { units: str
       if (g !== undefined && 'sep' in g && g.sep === '\n' && isRow(k + 1)) { k += 1; continue; }
       break;
     }
-    if (rows.some((r) => unitsOf(r)!.some((u) => sentenceRanksOptions(u, labels)))) {
+    const header = unitsOf(rows[0]!)!.join('');
+    const optionShareRow = rows.some((r) => {
+      const cells = unitsOf(r)!.join('').split('|').map((c) => c.trim()).filter((c) => c !== '');
+      return cells.length >= 2 && optionKeysOf(labels).has(labelKey(cells[0]!)) && cells.slice(1).some((c) => new RegExp(PCT).test(classificationCopy(c)));
+    });
+    if (optionShareRow || TABLE_SHARE_HEADER.test(classificationCopy(header)) || rows.some((r) => unitsOf(r)!.some((u) => sentenceRanksOptions(u, labels)))) {
       for (const r of rows) unitsOf(r)!.forEach((_, j) => forced.add(`${r}:${j}`));
     }
     i = k;
@@ -572,14 +594,14 @@ function unitsRankingAsAWhole(segs: ReadonlyArray<{ sep: string } | { units: str
     }
   }
   /** A lone "<option label>: N%" row is that option's share, heading or not. */
-  const optionKeys = new Set((labels.optionLabels ?? []).map(labelKey));
+  const optionKeys = optionKeysOf(labels);
   if (optionKeys.size > 0) {
     segs.forEach((g, r) => {
       if (!('units' in g)) return;
       g.units.forEach((u, j) => {
         const copy = classificationCopy(u);
         if (SHARE_UNIT.exec(copy) === null) return;
-        const head = copy.replace(/^[\s\-+•*\d.)]*/, '').split(':')[0] ?? '';
+        const head = copy.replace(/^[\s\-+•*\d.)]*/, '').split(/:|\s-\s/)[0] ?? '';
         if (optionKeys.has(labelKey(head))) forced.add(`${r}:${j}`);
       });
     });

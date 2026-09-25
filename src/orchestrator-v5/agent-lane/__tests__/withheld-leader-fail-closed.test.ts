@@ -388,3 +388,39 @@ describe('a single option share row', () => {
     expect(out.response.assistant_text).toContain('The churn limit was not scored.');
   });
 });
+
+/**
+ * ⛔ REVIEW OF #1871 AT 9cc81d60 (5825898337): the served-survey idioms were too broad and blanked the
+ * POSITIVE result form. Each probe below is the reviewer's own; each served KEEP pin above still holds.
+ */
+describe('review of #1871 at 9cc81d60 — the result forms stay ranking', () => {
+  const graph = { nodes: [{ id: 'keep', kind: 'option', label: 'Keep Pro at £49' }, { id: 'raise', kind: 'option', label: 'Raise Pro to £59 at release' }] };
+  const labels = rankingLabelContext(graph, undefined);
+  const REVIEWER_C1: readonly string[] = [
+    'The current lead is the £59-at-release path.',
+    'The lead is narrow, and it belongs to the £59 path.',
+    'The price-rise lead is about four points.',
+    'Raising Pro to £59 is the highest-priority move for you.',
+    'On these runs, the £59 path appears to rank first.',
+    'The £59 path ranks on top across the runs.',
+    'The £59 path should be ranked first.',
+    'Higher MRR under the £59 path is preferable to holding at £49.',
+    'The £59 path came out at 71% and holding at £49 at 29%.',
+  ];
+  it.each(REVIEWER_C1.map((s) => [s] as const))('dropped: %s', (s) => {
+    expect(sentenceRanksOptions(s, labels)).toBe(true);
+  });
+  it('KEPT: the served method sentence the narrowed idiom was written for', () => {
+    expect(sentenceRanksOptions('Confirm that the waiting-list goal should be ranked as more reduction is better.', labels)).toBe(false);
+  });
+  it('em-dash share rows go, as colon rows do', () => {
+    expect(dropRankingSentences('Split:\n\n- The £59 path — 71%\n- Holding at £49 — 29%\n\nThe churn limit was not scored.', labels).text)
+      .toBe('Split:\n\nThe churn limit was not scored.');
+  });
+  it('a share table whose header has no ranking word goes whole; a factor table with a likelihood column stays', () => {
+    const share = 'Runs:\n\n| Option | Share |\n|---|---|\n| Raise Pro to £59 at release | 71% |\n| Keep Pro at £49 | 29% |\n\nThe churn limit was not scored.';
+    expect(dropRankingSentences(share, labels).text).toBe('Runs:\n\nThe churn limit was not scored.');
+    const factors = '| Factor | Likelihood |\n|---|---|\n| Product-market fit | 30% |';
+    expect(dropRankingSentences(factors, labels).text).toBe(factors);
+  });
+});
