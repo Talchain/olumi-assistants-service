@@ -284,6 +284,151 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
     });
   });
 
+  /**
+   * ⛔ A HELD STATUS QUO'S OWN STARTING VALUE IS NOT A LEVEL ANYONE STATED
+   * (RC #69 5830102377; pre-review 5830132268).
+   *
+   * MEASURED on served builds, in this lane's own captures: one "Use as starting
+   * assumptions" wrote the held status quo's levels as COPIES of the factors'
+   * starting values, and the level writer stamped them `user_specified`:
+   *   - hiring (c27a, `0303ef5`): `carry_on_as_now::developer_delivery_capacity` =
+   *     0.1333 and `::technical_leadership_capacity` = 0 — the values the SAME
+   *     starting point proposed — on pairs held by repair edges only;
+   *   - pricing (c26, `7f9a16d`): `keep_pro_at_49::pro_plan_price` = 0.245, the
+   *     brief's own £49 baseline.
+   * The flag that let them through was `user_stated: true`, which the Agent
+   * supplies. A copy of the starting value records nothing the user changed, and
+   * freezes it: a later correction to that starting value would leave "carrying
+   * on as now" at the OLD figure (the harm `heldStatusQuoPairs` exists to stop).
+   * A DIFFERENT user-stated figure is still a real correction — (b2) stands.
+   */
+  describe('(b3) a user-stated held level that restates its starting value is not a level', () => {
+    const withHeldWorkload = () => {
+      const { SQ, nodes, edges } = fixture();
+      return { SQ, nodes, edges: [...edges, held(SQ, 'onboarding_workload')] };
+    };
+
+    it('RED (pricing shape): restating the factor’s current starting value is refused, nothing is stored, and it says why', async () => {
+      const { SQ, nodes, edges } = fixture();
+      const p = fakeProduct(nodes, edges);
+      const store = new ProposalStore();
+      const caps = createAgentCapabilities(p.d, store);
+      const r = await caps.proposeOptionInterventions(ctx, {
+        interventions: [{ option_label: statusQuoLabel, factor_label: 'Developers hired', value: 0, basis: 'carrying on hires nobody', user_stated: true }],
+      });
+      expect(r.ok, JSON.stringify(r)).toBe(false);
+      expect(r.refusal).toBe('nothing_to_set');
+      expect(r.levels_not_accepted).toEqual([{
+        option: statusQuoLabel, factor: 'Developers hired', value: 0,
+        reason: `${statusQuoLabel} already keeps Developers hired at its starting value, 0. Recording that as a level changes nothing today, and would stop carrying on as now from following a later correction to the starting value, so none is recorded. Leave it out.`,
+      }]);
+      expect(store.size()).toBe(0);
+      expect(p.posted).toEqual([]);
+      expect(p.read().find((n) => n.id === SQ)).not.toHaveProperty('interventions');
+    });
+
+    it('RED (hiring shape): inside a starting point, the value THAT starting point proposes is the starting value — excluded, and ONE approval writes no status-quo level', async () => {
+      const { SQ, nodes, edges } = withHeldWorkload();
+      const p = fakeProduct(nodes, edges);
+      const store = new ProposalStore();
+      const caps = createAgentCapabilities(p.d, store);
+      const r = await caps.proposeStartingPoint(ctx, {
+        assumptions: VALUES,
+        option_levels: [
+          ...ORDINARY_LEVELS,
+          { option_label: statusQuoLabel, factor_label: 'Onboarding workload', value: 30, basis: 'a settled team of five', user_stated: true },
+          { option_label: statusQuoLabel, factor_label: 'Tech leads hired', value: 0, basis: 'no hires', user_stated: true },
+        ],
+      });
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      expect(r.levels_not_accepted).toEqual([
+        expect.objectContaining({ option: statusQuoLabel, factor: 'Onboarding workload', value: 30, reason: expect.stringContaining('at its starting value, 30.') }),
+        expect.objectContaining({ option: statusQuoLabel, factor: 'Tech leads hired', value: 0, reason: expect.stringContaining('at its starting value, 0.') }),
+      ]);
+      const ops = store.get(String(r.proposal_id))!.operations;
+      expect(ops.filter((o) => o.path.startsWith(`${SQ}::`))).toEqual([]);
+      expect(ops.filter((o) => o.op === 'set_option_intervention').map((o) => o.path).sort()).toEqual(ORDINARY_PATHS);
+      const auth = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+      expect(auth.ok, JSON.stringify(auth)).toBe(true);
+      expect(p.posted.filter((x) => x.startsWith(`level ${SQ}::`))).toEqual([]);
+      expect(p.read().find((n) => n.id === SQ)).not.toHaveProperty('interventions');
+    });
+
+    it('RED: carrying on as now then FOLLOWS a corrected starting value — no frozen status-quo level exists to disagree with it', async () => {
+      const { SQ, nodes, edges } = withHeldWorkload();
+      const p = fakeProduct(nodes, edges);
+      const store = new ProposalStore();
+      const caps = createAgentCapabilities(p.d, store);
+      const sp = await caps.proposeStartingPoint(ctx, {
+        assumptions: VALUES,
+        option_levels: [...ORDINARY_LEVELS, { option_label: statusQuoLabel, factor_label: 'Onboarding workload', value: 30, basis: 'as now', user_stated: true }],
+      });
+      expect((await caps.authoriseChange(ctx, { proposal_id: String(sp.proposal_id) })).ok).toBe(true);
+      expect(p.read().find((n) => n.id === SQ)).not.toHaveProperty('interventions');
+      // The starting value is then corrected to 40 (any writer — here, straight through registration).
+      const now = await p.d(`/assist/v1/scenarios/${SCENARIO}/graph`, {});
+      const corrected = (now.json as { graph: { nodes: Node[] } }).graph.nodes.map((n) =>
+        n.id === 'onboarding_workload' ? { ...n, observed_state: { ...(n.observed_state ?? {}), value: 0.4, raw_value: 40, cap: 100 } } : n);
+      const reg = await p.d(`/assist/v1/scenarios/${SCENARIO}/graph/register`, { graph: { nodes: corrected, edges }, expected_graph_hash: (now.json as { graph_hash: string }).graph_hash });
+      expect(reg.status).toBe(200);
+      // Carrying on as now reads the NEW figure: restating 40 is nothing, and the OLD 30 would be a change.
+      const caps2 = createAgentCapabilities(p.d, new ProposalStore());
+      const again = await caps2.proposeOptionInterventions(ctx, {
+        interventions: [{ option_label: statusQuoLabel, factor_label: 'Onboarding workload', value: 40, basis: 'as now', user_stated: true }],
+      });
+      expect(again.levels_not_accepted).toEqual([expect.objectContaining({ factor: 'Onboarding workload', value: 40, reason: expect.stringContaining('at its starting value, 40.') })]);
+      const old = await caps2.proposeOptionInterventions(ctx, {
+        interventions: [{ option_label: statusQuoLabel, factor_label: 'Onboarding workload', value: 30, basis: 'the user: carrying on stays at 30', user_stated: true }],
+      });
+      expect(old.ok, JSON.stringify(old)).toBe(true);
+      expect(old).not.toHaveProperty('levels_not_accepted');
+      expect(p.posted.filter((x) => x.startsWith(`level ${SQ}::`))).toEqual([]);
+    });
+
+    it('CONTRAST (blocker 1 stands): a DIFFERENT user-stated figure inside the same starting point IS recorded', async () => {
+      const { SQ, nodes, edges } = withHeldWorkload();
+      const p = fakeProduct(nodes, edges);
+      const caps = createAgentCapabilities(p.d, new ProposalStore());
+      const r = await caps.proposeStartingPoint(ctx, {
+        assumptions: VALUES,
+        option_levels: [...ORDINARY_LEVELS, { option_label: statusQuoLabel, factor_label: 'Onboarding workload', value: 31, basis: 'the user: carrying on adds one', user_stated: true }],
+      });
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      expect(r).not.toHaveProperty('levels_not_accepted');
+      expect((await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) })).ok).toBe(true);
+      expect(p.posted).toContain(`level ${SQ}::onboarding_workload`);
+    });
+
+    it('CONTRAST: the proposed value, not the factor’s old one, is the starting value — restating the OLD figure is a real change once the new one is adopted', async () => {
+      const { SQ, nodes, edges } = fixture();
+      const p = fakeProduct(nodes, edges);
+      const caps = createAgentCapabilities(p.d, new ProposalStore());
+      // Developers hired starts at 0; this starting point revises it to 3, and the user says carrying on stays at 0.
+      const r = await caps.proposeStartingPoint(ctx, {
+        assumptions: [{ factor_label: 'Developers hired', value: 3, unit: 'hires', basis: 'the user: three this year', revise: true } as never],
+        option_levels: [...ORDINARY_LEVELS, { option_label: statusQuoLabel, factor_label: 'Developers hired', value: 0, basis: 'the user: carrying on hires nobody', user_stated: true }],
+      });
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      expect(r).not.toHaveProperty('levels_not_accepted');
+      expect(p.posted).toEqual([]);
+      expect((await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) })).ok).toBe(true);
+      expect(p.posted).toContain(`level ${SQ}::developers_hired`);
+    });
+
+    it('CONTRAST: an ORDINARY option may set a factor to its starting value — the rule is the held status quo’s alone', async () => {
+      const { nodes, edges } = fixture();
+      const p = fakeProduct(nodes, edges);
+      const store = new ProposalStore();
+      const caps = createAgentCapabilities(p.d, store);
+      const r = await caps.proposeOptionInterventions(ctx, {
+        interventions: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 0, basis: 'the hire falls through' }],
+      });
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      expect(r).not.toHaveProperty('levels_not_accepted');
+      expect(store.get(String(r.proposal_id))!.operations.map((o) => o.path)).toEqual(['hire_a_tech_lead::tech_leads_hired']);
+    });
+  });
+
   describe('(c) structuralFacts holds the status quo instead of calling it inert', () => {
     const extras = (): { nodes: Node[]; edges: Edge[] } => {
       const { nodes, edges } = fixture();

@@ -315,6 +315,17 @@ function heldStatusQuoPairs(g: Pick<GraphRead, 'nodes' | 'edges'>): ReadonlySet<
 }
 
 /**
+ * A factor's starting value in the user's own units (Codex 5810763729 item 1): `raw_value`
+ * when the frame recorded one, else the model value multiplied back up by the cap, else the
+ * value itself (an unframed factor stores native already). `undefined` when it holds none.
+ */
+function nativeStartingValue(os: { value?: unknown; raw_value?: unknown; cap?: unknown } | undefined): number | undefined {
+  const model = typeof os?.value === 'number' ? os.value : undefined;
+  const cap = typeof os?.cap === 'number' && os.cap > 0 ? os.cap : undefined;
+  return typeof os?.raw_value === 'number' ? os.raw_value : model !== undefined && cap !== undefined ? model * cap : model;
+}
+
+/**
  * ⭐ ONE PROJECTION of a persisted node into what the Agent is shown — used by
  * EVERY tool that hands the Agent entities.
  *
@@ -1055,15 +1066,7 @@ export function createAgentCapabilities(
          * when the frame recorded one, else the model value multiplied back up by the
          * cap, else the value itself (an unframed factor stores native already).
          */
-        const os = (node.observed_state ?? {}) as { value?: unknown; raw_value?: unknown; cap?: unknown };
-        const existingModel = typeof os.value === 'number' ? os.value : undefined;
-        const existingCap = typeof os.cap === 'number' && os.cap > 0 ? os.cap : undefined;
-        const existing =
-          typeof os.raw_value === 'number'
-            ? os.raw_value
-            : existingModel !== undefined && existingCap !== undefined
-              ? existingModel * existingCap
-              : existingModel;
+        const existing = nativeStartingValue(node.observed_state as never);
         /**
          * ⭐ THE ONE CASE THE BLANKET REFUSAL WAS NEVER MEANT TO CATCH.
          *
@@ -1222,7 +1225,15 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'empty_proposal', detail: 'Nothing was proposed.' };
       }
       const a = assumptions.length > 0 ? await caps.proposeAssumptions(ctx, { assumptions }) : null;
-      const b = levels.length > 0 ? await caps.proposeOptionInterventions(ctx, { interventions: levels }) : null;
+      // What THIS starting point would make each factor's starting value — read off the stored
+      // value half, never the Agent's arguments — so a held level that only restates it is caught.
+      const valueHalf = a !== null && a.ok === true && typeof a.proposal_id === 'string' ? proposals.get(a.proposal_id) : undefined;
+      const startingValues = new Map<string, number>();
+      for (const o of valueHalf?.operations ?? []) {
+        const v = (o.value ?? {}) as { value?: unknown };
+        if (o.op === 'set_factor_value' && typeof v.value === 'number') startingValues.set(o.path, v.value);
+      }
+      const b = levels.length > 0 ? await caps.proposeOptionInterventions(ctx, { interventions: levels }, { startingValues }) : null;
       const refused = {
         ...(a !== null && a.ok !== true ? { assumptions_refused: a } : {}),
         ...(b !== null && b.ok !== true ? { option_levels_refused: b } : {}),
@@ -1301,7 +1312,7 @@ export function createAgentCapabilities(
       };
     },
 
-    async proposeOptionInterventions(ctx, args): Promise<ToolResult> {
+    async proposeOptionInterventions(ctx, args, internal): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
@@ -1466,6 +1477,31 @@ export function createAgentCapabilities(
           unframed.push({ factor: factor.label, detail });
           notAccepted.push({ option: option.label, factor: factor.label, value: raw, reason: detail });
           continue;
+        }
+
+        /**
+         * ⛔ A HELD STATUS QUO'S STARTING VALUE IS NOT A LEVEL ANYONE STATED (RC #69 5830102377,
+         * pre-review 5830132268). Only a `user_stated` level reaches here on a held pair, and that
+         * flag is the Agent's. MEASURED on served builds: one "Use as starting assumptions" wrote
+         * the held status quo's levels as COPIES of the starting values — hiring c27a `0303ef5`
+         * (0.1333 and 0, the values the same starting point proposed), pricing c26 `7f9a16d` (the
+         * brief's £49) — and the level writer stamped each `user_specified`: Olumi's figure, or
+         * the brief's, recorded as a level the user set. A copy changes nothing today and freezes
+         * the figure, so a later correction to the starting value would leave "carrying on as
+         * now" behind (`heldStatusQuoPairs`). A DIFFERENT figure is still the user's correction.
+         * The starting value is the one this starting point proposes, else the factor's own.
+         */
+        if (held.has(`${option.id}::${factor.id}`)) {
+          const proposed = internal?.startingValues?.get(factor.id);
+          const start = proposed ?? nativeStartingValue(os as never);
+          const modelStart = proposed === undefined && typeof (os as { value?: unknown }).value === 'number' ? (os as { value: number }).value : undefined;
+          if (start !== undefined && (raw === start || (modelStart !== undefined && normalised === modelStart))) {
+            notAccepted.push({
+              option: option.label, factor: factor.label, value: i?.value,
+              reason: `${option.label} already keeps ${factor.label} at its starting value, ${quotable(start)}. Recording that as a level changes nothing today, and would stop carrying on as now from following a later correction to the starting value, so none is recorded. Leave it out.`,
+            });
+            continue;
+          }
         }
 
         const current = (option.interventions ?? {})[factor.id] as { value?: unknown } | number | undefined;
