@@ -1563,11 +1563,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // proposed the missing values this turn, otherwise the next-step chip.
     const firstAnalysisBlocked = fa !== undefined && !fa.ran && (fa.reason === 'not_admissible' || fa.reason === 'refused')
       && approvals.length === 0;
+    // ⛔ P0 (RC 5826809371; AI Quality's served `eng-hiring-2`): an approval that APPLIED but left the model unable
+    // to run ended the turn with no action at all — `blocked`, no blockers, no chips — so the journey dead-ended
+    // after "Use as starting assumptions". It offers the same next step a blocked Run does. A new proposal this
+    // turn is its own next step, and a model that can run is offered Run above instead.
+    const approvedButBlocked = result.mutated
+      && result.tool_calls.some((c) => c.name === 'authorise_change' && c.ok && c.mutated)
+      && !admitsRunOffer(analysisReady)
+      && approvals.length === 0;
     const offeredNow: OfferedAction[] = [
       ...approvals,
       ...carriedApproval,
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
-      ...(runBlocked || firstAnalysisBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
+      ...(runBlocked || firstAnalysisBlocked || approvedButBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
       ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
     ];
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
