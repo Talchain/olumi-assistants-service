@@ -155,6 +155,9 @@ const NON_RANKING_IDIOMS: readonly RegExp[] = [
   /** A NEGATED choice: "the model cannot distinguish a clear choice between …", "no clear winner". */
   /\b(?:cannot|can't|could\s+not|does\s+not|did\s+not|do\s+not)\s+(?:yet\s+)?(?:distinguish|identify|establish|name|pick|make|offer|give)\s+(?:a\s+|any\s+|the\s+)?clear\s+(?:choice|pick|winner|leader|option)\b/gi,
   /\bno\s+clear\s+(?:choice|pick|winner|leader|option)\b/gi,
+  /** Served 21e3b38 first pass: "…is not validated and does not name a leading option." The negation is in the pattern. */
+  /\b(?:(?:does|do|did|can|could|will|would)\s*(?:not|n't)|cannot|never)\s+(?:yet\s+)?(?:name|identify|pick|show|put\s+forward|declare|call|single\s+out|choose)\s+(?:a|any|the|one|an)\s+(?:single\s+|overall\s+)?(?:leading|winning|best|preferred|recommended|strongest|top)\s+(?:option|choice|path|plan|alternative)\b/gi,
+  /\bno\s+(?:single\s+|overall\s+|clear\s+)?(?:leading|winning|best|preferred)\s+(?:option|choice|path|plan)\b/gi,
   /** Sales vocabulary, not a result: "win/loss data". */
   /\bwin\s*[/-]\s*loss\b/gi,
   /** Method: "the goal should be ranked as more reduction is better" — never "should be ranked first". */

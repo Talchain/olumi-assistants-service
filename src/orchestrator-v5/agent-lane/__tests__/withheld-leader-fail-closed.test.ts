@@ -305,6 +305,8 @@ describe('served survey — real replies on withheld turns', () => {
     'If it leaves you at roughly 65%, the current model’s case for raising strengthens.',
     'If less runway is needed to preserve growth, continuing or bootstrapping becomes more competitive.',
     'So the apparent MRR-only lead for keeping £49/month is a tentative finding, not a reliable decision conclusion.',
+    // The positive contrast of the served negation above.
+    'The first pass names Raise to £59 as the leading option.',
     'The current analysis cannot score this limit correctly, so its £59 lead does not demonstrate compliance with the churn requirement.',
   ];
   const SERVED_KEEP: readonly string[] = [
@@ -331,6 +333,9 @@ describe('served survey — real replies on withheld turns', () => {
     'The current model cannot distinguish a clear choice between hiring a Tech lead and hiring two developers.',
     'Both were starting assumptions rather than measured inputs; changing either can change which option leads.',
     'SaaS has upside, but the current 30% product-market-fit likelihood assumption constrains it.',
+    // Served 21e3b38 (c23), the automatic first pass:
+    '- The provisional first pass is not validated and does not name a leading option.',
+    'There is no leading option yet.',
   ];
   it.each(SERVED_C1.map((s) => [s] as const))('served C1 dropped: %s', (s) => {
     expect(sentenceRanksOptions(s)).toBe(true);
