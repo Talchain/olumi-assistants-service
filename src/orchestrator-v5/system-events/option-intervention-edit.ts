@@ -67,6 +67,7 @@ import { threadHoldsThroughMutatingCommit } from '../handlers/hold-thread-throug
 import type { FrameFreshness } from '../graph-management/types.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { reconcileTopLevelOptionsFromNodes } from '../reconcile-top-level-options.js';
+import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor } from '../agent-lane/approved-adoption-context.js';
 
 /**
  * Internal preparation for an explicit option→factor edit. This is NOT a wire
@@ -81,6 +82,12 @@ export interface OptionInterventionEditInput {
   /** Already on the model scale; raw-unit conversion is not licensed here. */
   readonly modelValue: number;
   readonly expectedGraphHash: string;
+  /**
+   * The cell's stamp when it is NOT the user's own level: an approved adoption of Olumi's
+   * proposed level (`approvedLevelSourceFor`). Absent → `user_specified`, the inspector's
+   * stamp. Never from a wire field: `executeOptionInterventionEdit` derives it server-side.
+   */
+  readonly source?: typeof APPROVED_LEVEL_ADOPTION_SOURCE;
 }
 
 /** Internal server invocation only: no member is added to the .50 wire union. */
@@ -114,7 +121,7 @@ function isEditableGraph(value: unknown): value is EditableGraph {
 export function optionInterventionPostimageIsScoped(
   before: unknown,
   after: unknown,
-  target: Pick<OptionInterventionEditInput, 'optionId' | 'factorId' | 'modelValue'>,
+  target: Pick<OptionInterventionEditInput, 'optionId' | 'factorId' | 'modelValue' | 'source'>,
 ): boolean {
   if (!isEditableGraph(before) || !isEditableGraph(after)) return false;
   if (!isDeepStrictEqual(projectGraphForPersistence(before), before)) return false;
@@ -125,7 +132,7 @@ export function optionInterventionPostimageIsScoped(
   const newNode = newNodes[0]!;
   const entry = InterventionV3.safeParse(newNode.interventions?.[target.factorId]);
   if (!entry.success || entry.data.value !== target.modelValue
-    || entry.data.source !== 'user_specified' || entry.data.target_match.node_id !== target.factorId) return false;
+    || entry.data.source !== (target.source ?? 'user_specified') || entry.data.target_match.node_id !== target.factorId) return false;
 
   const restored = structuredClone(after);
   const restoredNode = restored.nodes.find(node => node.id === target.optionId)!;
@@ -209,7 +216,8 @@ export function applyOptionInterventionEdit(input: OptionInterventionTransaction
   }
 }
 
-export type OptionInterventionExecutionInput = Omit<OptionInterventionTransactionInput, 'persistedGraph'> & {
+/** `source` is not an input here: it is derived below from the server-internal adoption context. */
+export type OptionInterventionExecutionInput = Omit<OptionInterventionTransactionInput, 'persistedGraph' | 'source'> & {
   readonly stage: OlumiResponse['stage_indicator'];
   /** Existing caller request digest: informational, NOT the idempotency key. */
   readonly requestHash: string;
@@ -235,7 +243,11 @@ export async function executeOptionInterventionEdit(input: OptionInterventionExe
   } catch {
     return { kind: 'unverified', reason: 'canonical_read_failed', commitAttempted: false };
   }
-  const candidate = applyOptionInterventionEdit({ ...input, persistedGraph: before });
+  // ⭐ Whose level this is: Olumi's, when THIS write is the approved adoption the Agent's verified
+  // proposal names (same scenario, option, factor, value); otherwise the inspector's `user_specified`.
+  // Set LAST and unconditionally: a `source` a caller slipped onto the input is overwritten, never kept.
+  const source = approvedLevelSourceFor(input.scenarioId, input.optionId, input.factorId, input.modelValue);
+  const candidate = applyOptionInterventionEdit({ ...input, persistedGraph: before, source });
   if (candidate.kind !== 'candidate') return candidate;
   const option = candidate.graph.nodes.find(node => node.id === input.optionId)!;
   const factor = candidate.graph.nodes.find(node => node.id === input.factorId)!;
@@ -402,11 +414,19 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     // must not turn the old AI estimate into a new user-authored measurement.
     if (entry.data.value === input.modelValue) return { kind: 'unchanged' };
   }
+  const operation = buildOptionEffectRawOperation({
+    optionId: option.id, optionLabel: option.label,
+    factorId: factor.id, factorLabel: factor.label, value: input.modelValue,
+  });
+  if (input.source === undefined) return { kind: 'prepared', operation };
+  // An adopted Olumi level: the encoder PRESERVES this member (`PRESERVED_INTERVENTION_SOURCES`)
+  // instead of defaulting the cell to `user_specified`, and the rationale says whose it is.
   return {
     kind: 'prepared',
-    operation: buildOptionEffectRawOperation({
-      optionId: option.id, optionLabel: option.label,
-      factorId: factor.id, factorLabel: factor.label, value: input.modelValue,
-    }),
+    operation: {
+      ...operation,
+      value: { ...(operation.value as Record<string, unknown>), source: input.source },
+      rationale: `Records the level Olumi proposed, and the user approved, for ${option.label} on ${factor.label}.`,
+    },
   };
 }

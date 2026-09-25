@@ -91,7 +91,7 @@ import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSumm
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { baselineLabelledOptionId, structuralFacts } from '../structural-facts.js';
-import { runWithApprovedAdoption } from '../approved-adoption-context.js';
+import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
@@ -216,6 +216,26 @@ function valueOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'mo
   if (proposal.provenance.authored_by === 'user_stated') return 'user_stated';
   const own = ((op.value ?? {}) as { authored_by?: unknown }).authored_by;
   return own === 'user_stated' ? 'user_stated' : 'model_proposed';
+}
+
+/**
+ * ⛔ WHO AUTHORED THIS ONE LEVEL (RC #69 5830255884) — the same rule as `valueOpAuthor`, for an
+ * option level. MEASURED on served `c1ddb50`: every level an approval wrote was stamped
+ * `user_specified`, so Olumi's proposed levels read "Set by you". A level is the user's only
+ * when the user gave it (`user_stated` on the proposal) or the whole proposal is theirs; an op
+ * without the field (a carrier stored before it existed) is Olumi's — the narrower claim.
+ */
+function levelOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'model_proposed' | 'user_stated' {
+  return valueOpAuthor(op, proposal);
+}
+
+/** One level write, inside its adoption identity when the level is Olumi's (`approved-adoption-context.ts`). */
+function writeLevelAs<T>(
+  author: 'model_proposed' | 'user_stated',
+  adoption: { scenarioId: string; proposalId: string; optionId: string; factorId: string; modelValue: number },
+  write: () => Promise<T>,
+): Promise<T> {
+  return author === 'model_proposed' ? runWithApprovedLevelAdoption(adoption, write) : write();
 }
 
 /**
@@ -798,13 +818,17 @@ export function createAgentCapabilities(
       const [optionId, factorId] = o.path.split('::');
       const v = ((o.value ?? {}) as { normalised?: number }).normalised;
       if (typeof v !== 'number') { levelStop = `no level was stored on the proposal for ${o.path}`; break; }
-      const r = await dispatch('/orchestrate/v2/turn', {
-        kind: 'system_event',
-        turn_id: authorisationTurnId(`${parent.proposal_id}#level${i}`),
-        scenario_id: ctx.scenario_id,
-        stage: 'frame',
-        event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: carried },
-      });
+      const r = await writeLevelAs(
+        levelOpAuthor(o, parent),
+        { scenarioId: ctx.scenario_id, proposalId: parent.proposal_id, optionId, factorId, modelValue: v },
+        () => dispatch('/orchestrate/v2/turn', {
+          kind: 'system_event',
+          turn_id: authorisationTurnId(`${parent.proposal_id}#level${i}`),
+          scenario_id: ctx.scenario_id,
+          stage: 'frame',
+          event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: carried },
+        }),
+      );
       if (r.status !== 200) { levelStop = `the level for ${o.path} was refused (http ${r.status})`; break; }
       const rc = receiptSummaryOf(r.json);
       if (rc.summary !== null) receipts.push(rc.summary);
@@ -1347,6 +1371,8 @@ export function createAgentCapabilities(
         option: { id: string; label: string }; factor: { id: string; label: string };
         raw: number; normalised: number; cap: number | null; unit: string; basis: string;
         derivedFrame: number | null;
+        /** The user GAVE this level (`user_stated`); otherwise it is Olumi's proposal. */
+        userStated: boolean;
       }[] = [];
 
       for (const i of input) {
@@ -1517,7 +1543,7 @@ export function createAgentCapabilities(
           option: { id: option.id, label: option.label },
           factor: { id: factor.id, label: factor.label },
           raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' ? os.unit : '',
-          basis: String(i?.basis ?? ''), derivedFrame,
+          basis: String(i?.basis ?? ''), derivedFrame, userStated: i?.user_stated === true,
         });
       }
 
@@ -1539,7 +1565,11 @@ export function createAgentCapabilities(
       const operations: ProposalOperation[] = ordered.map((i) => ({
         op: 'set_option_intervention',
         path: `${i.option.id}::${i.factor.id}`,
-        value: { normalised: i.normalised, raw: i.raw, cap: i.cap, basis: i.basis, derived_frame: i.derivedFrame },
+        value: {
+          normalised: i.normalised, raw: i.raw, cap: i.cap, basis: i.basis, derived_frame: i.derivedFrame,
+          // Per level, like `valueOpAuthor`: whose level this is travels to the writer (`levelOpAuthor`).
+          authored_by: i.userStated ? 'user_stated' : 'model_proposed',
+        },
       }));
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
@@ -1950,13 +1980,17 @@ export function createAgentCapabilities(
           const [optionId, factorId] = o.path.split('::');
           const v = ((o.value ?? {}) as { normalised?: number }).normalised;
           if (typeof v !== 'number') { failures.push({ path: o.path, detail: 'no value stored on the proposal' }); continue; }
-          const r = await dispatch('/orchestrate/v2/turn', {
-            kind: 'system_event',
-            turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#${i}`),
-            scenario_id: ctx.scenario_id,
-            stage: 'frame',
-            event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: baseHash },
-          });
+          const r = await writeLevelAs(
+            levelOpAuthor(o, decision.proposal),
+            { scenarioId: ctx.scenario_id, proposalId: decision.proposal.proposal_id, optionId, factorId, modelValue: v },
+            () => dispatch('/orchestrate/v2/turn', {
+              kind: 'system_event',
+              turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#${i}`),
+              scenario_id: ctx.scenario_id,
+              stage: 'frame',
+              event: { kind: 'option_intervention_edit', option_id: optionId, factor_id: factorId, value: v, base_graph_hash: baseHash },
+            }),
+          );
           const rc = receiptSummaryOf(r.json);
           if (rc.unreadable) failures.push({ path: o.path, detail: 'a receipt arrived but could not be read' });
           if (r.status !== 200) {
