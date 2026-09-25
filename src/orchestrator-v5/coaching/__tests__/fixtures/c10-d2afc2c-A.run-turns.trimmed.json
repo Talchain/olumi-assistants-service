@@ -1,0 +1,174 @@
+{
+  "_provenance": {
+    "source_file": "output/paul-test-20260923/construction-witness/raw/c10-d2afc2c-A.json",
+    "source_sha256": "ef64dcde88f7caae3e6ac2c2bfc48523074a343cbf0a4eff18921d228773d839",
+    "turns_kept": [
+      "t5"
+    ],
+    "served_build": "CEE d2afc2cc3829242391e9a7b3ab322db09b5c404f (staging)",
+    "route": "POST /agent/v1/turn (agent lane, served wire response)",
+    "captured": "2026-09-24 construction witness (see source_file)",
+    "trimmed": true,
+    "trim_note": "Only the Run turns are kept, and of each only: graph_hash, analysis_state (whole), analysis_ready {status, may_run, goal_node_id, freshness, freshness_reason, graph_hash_at_run, current_graph_hash, computed_at, options[{option_id,label}]}, the single analysis_result block {type, computed_against_hash, leading_option_id, summary, win_probabilities, enrichment {robustness, confidence_tier, option_comparison_status}}, and the turn's tools_called. Dropped: assistant_text, draft_graph, suggested_actions, diagnostics, provider calls, receipts and every other enrichment field. Values are byte-identical to the source for every kept field.",
+    "capture_note": "The source holds the ROUTE response only, not the internal /orchestrate/v2/turn run response the Runtime hands to captureAnalysis. Tests reconstruct that capture from the same turn's analysis_state + analysis_result (the same run: identical scenario, hash and computed_at).",
+    "why_this_fixture": "No fragile edge, robust_edges present, near tie (is_tie true): the no-flagged-link card."
+  },
+  "scenario_id": "6a2ca845-a450-4981-9c36-1d66eadf88b3",
+  "turns": {
+    "t5": {
+      "tools_called": [
+        "get_canonical_state",
+        "run_analysis"
+      ],
+      "graph_hash": "016acda0c3839090",
+      "analysis_state": {
+        "run_state": {
+          "kind": "complete_current",
+          "computed_at": "2026-09-24T06:41:24.233Z"
+        },
+        "readiness": {
+          "status": "unknown",
+          "blockers": []
+        },
+        "leader_claim": {
+          "permitted": false,
+          "withheld_reason": "options_do_not_separate",
+          "separation": "near_tie"
+        },
+        "robustness": {
+          "aggregate_level": "very_low"
+        },
+        "usable_for_prose": true,
+        "usable_for_chips": true,
+        "usable_for_followup": true,
+        "requires_rerun": false,
+        "blocked_unusable": false,
+        "contradictions": []
+      },
+      "analysis_ready": {
+        "status": "ready",
+        "may_run": true,
+        "goal_node_id": "velocity",
+        "freshness": "fresh",
+        "freshness_reason": "agent_readback_run_state_current",
+        "graph_hash_at_run": "016acda0c3839090",
+        "current_graph_hash": "016acda0c3839090",
+        "computed_at": "2026-09-24T06:41:24.233Z",
+        "options": [
+          {
+            "option_id": "hire_a_tech_lead",
+            "label": "Hire a Tech Lead"
+          },
+          {
+            "option_id": "hire_two_developers",
+            "label": "Hire Two Developers"
+          },
+          {
+            "option_id": "continue_current_staffing",
+            "label": "Continue Current Staffing"
+          },
+          {
+            "option_id": "tech_lead_plus_developer",
+            "label": "Tech Lead Plus Developer"
+          }
+        ]
+      },
+      "analysis_result": {
+        "type": "analysis_result",
+        "computed_against_hash": "016acda0c3839090",
+        "leading_option_id": "hire_a_tech_lead",
+        "summary": "Hire a Tech Lead scored highest against your goal in 37% of runs of this model, but the analysis treats this as a close call. The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.",
+        "win_probabilities": {
+          "Hire a Tech Lead": 0.370125,
+          "Hire Two Developers": 0.265375,
+          "Tech Lead Plus Developer": 0.090925,
+          "Continue Current Staffing": 0.273575
+        },
+        "enrichment": {
+          "robustness": {
+            "level": "very_low",
+            "near_tie": {
+              "gap": 0.09654999999999997,
+              "is_tie": true,
+              "threshold": 0.1,
+              "top_option_id": "hire_a_tech_lead",
+              "tied_option_ids": [
+                "hire_a_tech_lead",
+                "continue_current_staffing"
+              ],
+              "second_option_id": "continue_current_staffing"
+            },
+            "is_robust": false,
+            "confidence": 0.3331125,
+            "robust_edges": [
+              {
+                "to_id": "implementation_capacity",
+                "edge_id": "developer_hires->implementation_capacity",
+                "from_id": "developer_hires",
+                "to_label": "Implementation capacity",
+                "from_label": "Developer hires",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "onboarding_load",
+                "edge_id": "developer_hires->onboarding_load",
+                "from_id": "developer_hires",
+                "to_label": "Onboarding load",
+                "from_label": "Developer hires",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "implementation_capacity",
+                "edge_id": "hiring_mismatch->implementation_capacity",
+                "from_id": "hiring_mismatch",
+                "to_label": "Implementation capacity",
+                "from_label": "Hiring mismatch",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "technical_direction_clarity",
+                "edge_id": "hiring_mismatch->technical_direction_clarity",
+                "from_id": "hiring_mismatch",
+                "to_label": "Technical direction clarity",
+                "from_label": "Hiring mismatch",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "onboarding_load",
+                "edge_id": "hiring_ramp_up_delay->onboarding_load",
+                "from_id": "hiring_ramp_up_delay",
+                "to_label": "Onboarding load",
+                "from_label": "Hiring ramp-up delay",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "velocity",
+                "edge_id": "implementation_capacity->velocity",
+                "from_id": "implementation_capacity",
+                "to_label": "Velocity",
+                "from_label": "Implementation capacity",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              }
+            ],
+            "fragile_edges": [],
+            "display_verdict": "fragile",
+            "confidence_basis": "recommendation_stability_uncalibrated",
+            "recommended_option_id": "hire_a_tech_lead",
+            "display_verdict_reason": "varying any one of the factors we could test did not change which option is most likely to achieve your goal, but this run scored low on our other robustness checks",
+            "recommended_option_label": "Hire a Tech Lead",
+            "recommended_option_compliance": "not_applicable",
+            "recommended_option_compliance_reason": "no limits were set for this decision"
+          },
+          "confidence_tier": "fair",
+          "option_comparison_status": "computed"
+        }
+      }
+    }
+  }
+}

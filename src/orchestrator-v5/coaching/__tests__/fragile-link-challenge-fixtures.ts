@@ -13,6 +13,8 @@
  * Fixtures beyond c19 A/B (each file's `_provenance.why_this_fixture` says why):
  *   · C   — c19 scenario A's typed Run on the approved model: a NEAR TIE with one fragile edge.
  *   · c16 — CEE `fd312b5`: fragile edges on a clear winner (the DSK-P-003 badge's positive control).
+ *   · c10 — CEE `d2afc2c`: NO fragile edge, robust_edges present, a near tie (the no-flagged-link card).
+ *   · c11 — CEE `0415b19`: NO fragile edge, robust_edges present, not a near tie (the same card).
  */
 import { readFileSync } from 'node:fs';
 
@@ -42,13 +44,15 @@ export interface TrimmedRunTurnFixture {
   readonly turns: Readonly<Record<string, TrimmedRunTurn>>;
 }
 
-export type FixtureLetter = 'A' | 'B' | 'C' | 'c16';
+export type FixtureLetter = 'A' | 'B' | 'C' | 'c16' | 'c10' | 'c11';
 
 export const FIXTURE_FILES: Readonly<Record<FixtureLetter, string>> = {
   A: 'c19-8428207-A.run-turns.trimmed.json',
   B: 'c19-8428207-B.run-turns.trimmed.json',
   C: 'c19-8428207-C.run-turns.trimmed.json',
   c16: 'c16-fd312b5-A.run-turns.trimmed.json',
+  c10: 'c10-d2afc2c-A.run-turns.trimmed.json',
+  c11: 'c11-0415b19-A.run-turns.trimmed.json',
 };
 
 export const PAYLOAD_FILE = 'fragile-link-challenge.payload.json';
@@ -98,9 +102,15 @@ export function runTurnCase(letter: FixtureLetter, turnKey: string, trigger?: Ru
  * robust_edges and near_tie; near_tie loses its option ids; no
  * win_probabilities; leader withheld). Capture and readback are that one block.
  */
-export function firstPassCase(letter: FixtureLetter, turnKey: string): RunTurnCase {
+export function firstPassCase(
+  letter: FixtureLetter,
+  turnKey: string,
+  /** Applied to a clone of the served result BEFORE the block builder confines it. */
+  mutateSource: (result: Record<string, any>) => void = () => {},
+): RunTurnCase {
   const base = runTurnCase(letter, turnKey, 'auto_first_pass');
-  const result = base.turn.analysis_result as Record<string, unknown> & { enrichment: Record<string, unknown> };
+  const result = structuredClone(base.turn.analysis_result) as Record<string, any> & { enrichment: Record<string, unknown> };
+  mutateSource(result);
   const fact = RunAnalysisHandlerFactSchema.parse({
     fact_type: 'run_analysis',
     fact_version: 1,
