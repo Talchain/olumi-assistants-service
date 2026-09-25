@@ -62,7 +62,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 });
 
 type Chip = { id: string; label: string; message: string };
-type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string }; _agent: { tool_calls: { name: string; ok: boolean; refusal?: string }[]; replayed?: boolean } };
+type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string }; _agent: { tool_calls: { name: string; ok: boolean; refusal?: string }[]; replayed?: boolean; durability?: string; turn_id?: string } };
 type Carrier = { chip_id: string; emitted_at_iso: string; expires_at_iso: string; expires_at_turn_count: number; preconditions: { graph_hash?: string };
   action: { kind: string; proposal_ref: string; inline_patch: { agent_proposal: { proposal_id: string; user_id: string | null; public_label: string } } } };
 /** The approval carrier a row persisted, if any. */
@@ -164,6 +164,26 @@ describe('a pending approval survives a restart', () => {
     expect(persisted?.action.kind).toBe('apply_proposed_change');
     expect(persisted?.action.proposal_ref).toBe(approve.id);
     expect(persisted?.action.inline_patch).not.toHaveProperty('handler_id');
+  }, 60_000);
+
+  // Canonical State's deploy-survival witness (#69 5833516415): its turns carried NO turn_id, so the offer's
+  // answer row was never written and a real CEE deploy lost the approval (`unknown_proposal`).
+  it('(g) RED: NO client turn_id — propose, the process restarts, approve → SAVED; the offer turn was durable', async () => {
+    const t1 = await inProcess((a) => turn(a, { message: 'Should team size drive velocity?', turn_id: undefined }));
+    const approve = t1.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
+    expect(approve, 'the control: a real proposal was offered').toBeDefined();
+    expect(t1._agent.durability, 'the offer turn is recorded even with no client id').toBe('recorded');
+    expect(carrierIn(latestRow())?.chip_id, 'the offer is persisted with its answer row').toBe(approve!.id);
+    const t2 = await inProcess((b) => turn(b, { message: approve!.message, source: 'chip', chip: { id: approve!.id }, turn_id: undefined }));
+    expectSaved(t2);
+  }, 60_000);
+
+  it('(g) CONTRAST: a client turn_id is used exactly as given (echoed, and the row is keyed by it)', async () => {
+    const turnId = randomUUID();
+    const t1 = await inProcess((a) => turn(a, { message: 'Should team size drive velocity?', turn_id: turnId }));
+    expect(t1._agent.turn_id).toBe(turnId);
+    expect(t1._agent.durability).toBe('recorded');
+    expect(latestRow()?.turn_id).toBe(turnId);
   }, 60_000);
 
   it('CONTRAST: a stored proposal altered after it was offered is never rehydrated — nothing is written', async () => {
