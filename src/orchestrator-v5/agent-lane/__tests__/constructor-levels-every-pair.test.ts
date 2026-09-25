@@ -376,6 +376,23 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     expect(graph.nodes.filter((n) => n.id === 'hire_two_developers')).toHaveLength(1);
   });
 
+  it.each(['hire two developers', 'Hire  Two Developers', ' Hire Two Developers '])(
+    'RED (pre-review 5829776660): a duplicate option spelled differently (%j) — the SAME entity to admission — is not adopted',
+    async (spelling) => {
+      const retry = retry52([{ ...explicit52 }]);
+      retry.options.push({ ...retry.options[0]!, label: spelling, interventions: [est('Engineering delivery capacity', 60, 'story points')] });
+      const { graph } = await construct(first52(), retry);
+      userLevelKept(graph);
+    },
+  );
+
+  it('RED (same class): a duplicate factor spelled differently ("hiring  COST") is not adopted', async () => {
+    const retry = covered();
+    retry.factors.push(factor('hiring  COST', 999, 500000, 'GBP'));
+    const { graph } = await construct(c22(), retry);
+    expect(node(graph, 'hire_both')).not.toHaveProperty('interventions');
+  });
+
   it('RED (same class): a retry with a DUPLICATE factor object of the same label is not adopted', async () => {
     const retry = covered();
     retry.factors.push(factor('Hiring cost', 999, 500000, 'GBP'));
