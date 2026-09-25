@@ -678,9 +678,12 @@ describe('POST /orchestrate/v2/turn — factor_value_edit: what proves THIS oper
     //    never the retryable 500 that read as "we don't know whether it saved".
     expect(status).toBe(409);
     expect(body.error).toBe('GRAPH_DIVERGED');
-    expect(body.details?.conflict_category).toBe('rpc_cas_conflict');
-    expect(body.details?.retryable).toBe(false);
-    expect(body.details?.expected_base_graph_hash).toBe(analysisHash(g1));
+    const details = body.details as
+      | { conflict_category?: unknown; retryable?: unknown; expected_base_graph_hash?: unknown }
+      | undefined;
+    expect(details?.conflict_category).toBe('rpc_cas_conflict');
+    expect(details?.retryable).toBe(false);
+    expect(details?.expected_base_graph_hash).toBe(analysisHash(g1));
     expectNoCommitEvidence(body);
     expect(body.graph_hash).not.toBe(analysisHash(attempted));
 
