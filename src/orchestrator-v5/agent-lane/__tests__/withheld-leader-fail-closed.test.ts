@@ -291,3 +291,61 @@ describe('review of #1871 — the no-leader sentence names the admission’s rea
     expect(agentNoLeaderSentence('constraint_verdict_withheld', analysisReady)).toContain('a limit on your model');
   });
 });
+
+/**
+ * ⭐ SERVED SURVEY — real gpt-5.6-terra replies from 37 witness logs on served builds (90 withheld,
+ * analysis-bearing turns; `output/paul-test-20260923/construction-witness/raw/*turns.jsonl`), not
+ * sentences written for this test. Every drop was labelled by hand against policy #63 5824816357.
+ */
+describe('served survey — real replies on withheld turns', () => {
+  const SERVED_C1: readonly string[] = [
+    'The other paths are materially behind:',
+    '- Germany is close behind despite the assumed five-person team and 3-percentage-point launch margin impact.',
+    'The £3m option’s advantage rests on assumptions I authored, not evidence you supplied.',
+    'If it leaves you at roughly 65%, the current model’s case for raising strengthens.',
+    'If less runway is needed to preserve growth, continuing or bootstrapping becomes more competitive.',
+    'So the apparent MRR-only lead for keeping £49/month is a tentative finding, not a reliable decision conclusion.',
+    'The current analysis cannot score this limit correctly, so its £59 lead does not demonstrate compliance with the churn requirement.',
+  ];
+  const SERVED_KEEP: readonly string[] = [
+    'The current 1 Tech Lead baseline is your board edit, not evidence of an actual available or effective lead capacity.',
+    'If it were much lower, because the lead is unavailable, too stretched, or not empowered, the causal benefit would weaken.',
+    'How much of the current lead’s week is spent on technical direction, unblocking decisions, review quality, and cross-team coordination?',
+    'Would another lead remove a specific bottleneck, or create another coordination layer?',
+    'Slow-ramping lead: the Tech Lead’s benefit arrives only after a material ramp-up period.',
+    'Hiring delay and role mismatch were not set, so the analysis defaulted them to zero; that makes the comparison illustrative rather than evidence-led.',
+    'They reflect the interpretation that the same release ships in both feature-led paths, while deferral retains today’s price.',
+    'The churn limit is currently unscored, so the model withholds an overall leader.',
+    'But the analysis itself rates robustness only moderate, and it withheld a full leader verdict because it could not score the constraint.',
+    'It is not yet a recommendation.',
+    'This is moderately robust, not a final recommendation.',
+    'The strongest modelled drivers are delivery coordination, implementation capacity, and technical leadership capacity.',
+    'The adopted 250 Pro subscribers assumption is the strongest MRR driver.',
+    'These are the biggest MRR drivers.',
+    'Establishing how Germany’s servicing, pricing and channel costs affect gross margin is the highest-priority correction.',
+    'The £20k target is not expressed as a checkable 12-month MRR outcome in this result; it ranks relative MRR instead.',
+    'The analysis engine has not been told to rank lower turnover as better, so its numerical ordering should not be read as evidence.',
+    'The analysis also assumed that a higher waiting-list-reduction score is preferable.',
+    'The key unknown is which bottleneck dominates today.',
+    'Estimate price elasticity from past price tests, win/loss data, or customer research.',
+    'The current model cannot distinguish a clear choice between hiring a Tech lead and hiring two developers.',
+    'Both were starting assumptions rather than measured inputs; changing either can change which option leads.',
+    'SaaS has upside, but the current 30% product-market-fit likelihood assumption constrains it.',
+  ];
+  it.each(SERVED_C1.map((s) => [s] as const))('served C1 dropped: %s', (s) => {
+    expect(sentenceRanksOptions(s)).toBe(true);
+  });
+  it.each(SERVED_KEEP.map((s) => [s] as const))('served non-ranking kept: %s', (s) => {
+    expect(sentenceRanksOptions(s)).toBe(false);
+  });
+
+  it('two percentage lists in one reply are judged separately: the win shares go, the ownership levels stay', () => {
+    const text = 'The other results:\n\n- Raise £3m seed now: 66.7%\n- Continue current plan: 16.2%\n- Bootstrap for one year: 12.7%\n- Raise a phased seed: 4.4%\n\nAssumed ownership levels:\n- £3m seed: 65%\n- Bootstrap: 80%\n- Phased seed: 72%';
+    expect(dropRankingSentences(text).text).toBe('The other results:\n\nAssumed ownership levels:\n- £3m seed: 65%\n- Bootstrap: 80%\n- Phased seed: 72%');
+  });
+
+  it('an ordered-list item is dropped whole, never leaving its bare number behind', () => {
+    const text = 'The ordering is most sensitive to:\n\n1. **The link between growth and ARR** — this can switch the leading path towards bootstrap.\n2. **Runway** — a slower burn buys time.';
+    expect(dropRankingSentences(text).text).toBe('The ordering is most sensitive to:\n\n2. **Runway** — a slower burn buys time.');
+  });
+});

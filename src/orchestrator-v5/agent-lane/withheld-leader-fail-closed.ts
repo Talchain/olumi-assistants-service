@@ -98,6 +98,18 @@ const NON_RANKING_IDIOMS: readonly RegExp[] = [
    * survey of AI Quality's paired runs, branch aiq/agent-reply-paired-evidence @7b68d8bd).
    */
   /\b(?:team|tech|technical|engineering|project|squad|product|design|dev|development|delivery)[\s-]+leads?\b/gi,
+  /**
+   * ⭐ THE ROLE, not a margin (served survey over 37 witness logs: "the current lead's week", "another lead
+   * remove a bottleneck", "effective lead capacity", "a slow-ramping lead:"). A margin reads "a lead FOR/OVER
+   * X", "the £59 lead"; a person reads "the lead's", "the lead is/would …", "lead capacity/role".
+   */
+  /\blead(?:'s|s')/gi,
+  /\blead\s+(?:capacity|capacities|role|roles|hire|hires|hiring|engineers?|developers?|positions?|availability|effectiveness|coverage|salary|salaries|ramp[\s-]?up|onboarding|candidates?|case|cases|headcount)\b/gi,
+  /\b(?:the|a|an|another|new|current|dedicated|senior|second|one|that|this)\s+lead\s+(?:is|was|would|could|will|might|may|provides?|removes?|creates?|adds?|reduces?|improves?|brings?|consumes?|arrives?|joins?|spends?|has|needs?)\b/gi,
+  /\b[a-z]+-[a-z]+\s+lead\b(?!\s+(?:for|over|of)\b)/gi,
+  /^[\s\-+•*\d.)#]*lead\s+as\b/gi,
+  /** "evidence-led", "feature-led": a compound adjective, never a ranking. */
+  /\b[\w£]+-led\b/gi,
   /** The managerial verb: "will mainly lead and unblock work", "leads the team". */
   /\b(?:lead|leads|leading|led)\s+and\s+(?:unblock|mentor|manage|coordinate|support|coach|guide|deliver|review|grow|hire)\w*\b/gi,
   /\b(?:lead|leads|leading|led)\s+(?:(?:the|a|an|this|that|their|your|our|its|new)\s+)*(?:teams?|squads?|projects?|work|rollout|migration|effort|initiative|delivery|engineers?|developers?|hires?|hiring|people|staff|onboarding|mentoring)\b/gi,
@@ -117,10 +129,30 @@ const NON_RANKING_IDIOMS: readonly RegExp[] = [
    */
   /\b(?:at\s+best|best\s+practices?|best\s+guess(?:es)?|best\s+estimates?|best\s+available|as\s+best|best[\s-]+case)\b/gi,
   /\b(?:better\s+understand\w*|understand\w*\s+(?:it\s+|this\s+)?better|better\s+(?:evidence|data|baseline|measurements?|information|picture|sense))\b/gi,
-  /** A NEGATED recommendation is a disclaimer ("…, not a recommendation"). The verb stays ranking. */
-  /\b(?:not|no|never|rather\s+than)\s+(?:a\s+|any\s+)?recommendations?\b/gi,
+  /** A NEGATED recommendation is a disclaimer ("…, not a recommendation", "not yet a final recommendation"). The verb stays ranking. */
+  /\b(?:not|no|never|rather\s+than)\s+(?:yet\s+|really\s+|intended\s+as\s+|meant\s+as\s+)?(?:a\s+|any\s+)?(?:final\s+|firm\s+|formal\s+|definitive\s+)?recommendations?\b/gi,
+  /** The product WITHHOLDING a leader is the reason there is none ("so the model withholds an overall leader"). */
+  /\bwithh(?:olds?|eld|olding)\s+(?:an?\s+|the\s+|any\s+)?(?:overall\s+|full\s+|final\s+)?leader(?:\s+verdict)?\b/gi,
+  /\bno\s+(?:overall\s+|single\s+|clear\s+)?leader\b/gi,
+  /** Method, not result: "the engine has not been told to rank …", "it ranks relative MRR instead". */
+  /\bto\s+rank\b/gi,
+  /\branks?\s+(?:relative|by|on)\b/gi,
+  /** The GOAL'S direction, not an option: "assumed that a higher waiting-list-reduction score is preferable". */
+  /\b(?:higher|lower|more|less)\s+[^.;:]{0,60}?\s+is\s+(?:preferable|better)\b/gi,
+  /** Sensitivity without a named option: "changing either can change which option leads". */
+  /\b(?:change|changes|changing|alter|alters|altering|affect|affects|determine|determines|decide|decides|flip|flips|switch|switches)\s+which\s+(?:option|path|plan|choice|alternative)s?\s+(?:leads?|comes?\s+out\s+ahead|wins?|is\s+(?:ahead|best))\b/gi,
+  /** A NEGATED choice: "the model cannot distinguish a clear choice between …", "no clear winner". */
+  /\b(?:cannot|can't|could\s+not|does\s+not|did\s+not|do\s+not)\s+(?:yet\s+)?(?:distinguish|identify|establish|name|pick|make|offer|give)\s+(?:a\s+|any\s+|the\s+)?clear\s+(?:choice|pick|winner|leader|option)\b/gi,
+  /\bno\s+clear\s+(?:choice|pick|winner|leader|option)\b/gi,
+  /** Sales vocabulary, not a result: "win/loss data". */
+  /\bwin\s*[/-]\s*loss\b/gi,
+  /** Method: "confirm that the goal should be ranked …". */
+  /\bshould\s+be\s+ranked\b/gi,
+  /** Time, not rank: "behind schedule". */
+  /\bbehind\s+(?:schedule|plan|target|time)\b/gi,
   /** Ranking ASSUMPTIONS by sensitivity is sanctioned content; the route's instruction asks for it. */
-  /\b(?:highest|strongest|biggest|largest|greatest)\s+(?:sensitivity|influence|drivers?|levers?|dependency|uncertainty|elasticity|risks?)\b/gi,
+  /\b(?:highest|strongest|biggest|largest|greatest)\s+(?:(?:modelled|model|mrr|arr|revenue|simulated|key|main|single|cost|price)\s+){0,2}(?:sensitivity|influence|drivers?|levers?|dependency|uncertainty|elasticity|risks?)\b/gi,
+  /\b(?:highest|top)[\s-]+priority\b/gi,
   /**
    * Only a VALUE's plausible top, never an option's (Codex challenge on #1871: "The highest plausible MRR belongs
    * to the £59-at-release path" names the strongest option by paraphrase, so the noun must be a value word).
@@ -149,6 +181,9 @@ const NON_RANKING_IDIOMS: readonly RegExp[] = [
 /** A probability-like percentage: "83.28%", "15 %". */
 const PCT = String.raw`(?<![\w.])\d+(?:[.,]\d+)?\s?%`;
 
+/** A factor's own likelihood VALUE, not a win share: "the current 30% product-market-fit likelihood assumption" (served survey). */
+const LIKELIHOOD_INPUT = new RegExp(String.raw`${PCT}\s+(?:[\w'-]+\s+){0,3}?likel(?:y|ihood)\s+(?:assumption|estimate|input|parameter|value|figure)s?\b`, 'gi');
+
 /**
  * Ranking language. Each entry is ONE question — "does this sentence order the options or single
  * one out?" — asked of a sentence whose idioms and ranking-shaped labels have been blanked.
@@ -161,10 +196,15 @@ const RANKING_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegE
   /** v6 real replies: "the apparent £59 advantage". */
   {
     code: 'advantage',
-    re: /\badvantages?\s+(?:over|to|for)\b|\b(?:has|have|had|holds?|held|gives?|gave|keeps?|kept|with|shows?|showed)\s+(?:an?|the|its)\s+(?:\w+\s+)?advantage\b|(?:£\s?\d[\d,.]*k?|\d+\s?%)\s+advantage\b|\b(?:apparent|clear|slight|modest|small|narrow|provisional|overall|decisive|consistent)\s+(?:\S+\s+)?advantage\b/i,
+    re: /\badvantages?\s+(?:over|to|for)\b|\b(?:has|have|had|holds?|held|gives?|gave|keeps?|kept|with|shows?|showed)\s+(?:an?|the|its)\s+(?:\w+\s+)?advantage\b|(?:£\s?\d[\d,.]*k?|\d+\s?%)\s+advantage\b|\b(?:apparent|clear|slight|modest|small|narrow|provisional|overall|decisive|consistent)\s+(?:\S+\s+)?advantage\b|\w's\s+(?:\w+\s+)?advantage\b/i,
   },
-  /** v6 real replies: "the model-relative case for £59 is promising on MRR alone". */
-  { code: 'promising', re: /\bcase\s+for\b[^.;!?]{0,80}\b(?:promising|strong|stronger|compelling|attractive|persuasive|convincing)\b|\b(?:more|most)\s+promising\b/i },
+  /** v6 real replies: "the model-relative case for £59 is promising on MRR alone"; served: "the case for raising strengthens". */
+  { code: 'promising', re: /\bcase\s+for\b[^.;!?]{0,80}\b(?:promising|strong|stronger|strengthens|compelling|attractive|persuasive|convincing)\b|\b(?:more|most)\s+promising\b|\bbecomes?\s+more\s+(?:competitive|attractive|favou?rable|promising)\b/i },
+  /** Served: "The other paths are materially behind", "two developers are close behind". */
+  {
+    code: 'behind',
+    re: /\b(?:is|are|was|were|trails?|trailed|came|comes?|fell|falls?|lags?|lagged)\s+(?:\w+\s+)?behind\b(?!\s+(?:this|that|these|those|it|the\s+(?:result|ordering|comparison|finding|analysis|model|assumption|shift|change|scenes)))|\b(?:close|materially|well|far|just|narrowly)\s+behind\b/i,
+  },
   /** v6 real replies: "could switch the ordering to holding at £49" — names where the order goes. */
   {
     code: 'ordering',
@@ -175,7 +215,8 @@ const RANKING_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegE
     re: /\b(?:greatest|largest|biggest)\s+(?:(?:modelled|expected|median|mean|projected|simulated|overall|average|net)\s+)*(?:mrr|revenue|outcomes?|results?|returns?|gains?|upside|value|payoff|benefits?|chances?|probabilit(?:y|ies)|win\s+shares?)\b/i,
   },
   { code: 'more_than', re: /\b(?:delivers?|delivered|produces?|produced|yields?|yielded|gives?|gave|generates?|generated|returns?|returned|achieves?|achieved|earns?|earned|brings?|brought)\s+more\s+(?:[\w£$%-]+\s+){0,3}?than\b/i },
-  { code: 'dominates', re: /\bdominat(?:es|ed|ing)\b(?!\s+(?:the\s+)?(?:uncertainty|variance|spread|result|outcome|sensitivity|error|range|picture))|\bdominant\s+(?:option|choice|path|strategy|plan)\b/i },
+  /** Only over another OPTION ("dominates keeping £49"); "which bottleneck dominates today" is mechanism (served survey). */
+  { code: 'dominates', re: /\bdominat(?:es|ed|ing)\s+(?:the\s+)?(?:other|others|alternatives?|rest|field|comparison|keeping|holding|raising|hiring|phasing|staying|launching|building|buying|£)|\bdominant\s+(?:option|choice|path|strategy|plan)\b/i },
   { code: 'robust_pick', re: /\bmost\s+(?:robust|resilient|reliable|dependable)\s+(?:option|choice|path|plan|bet|route|alternative|candidate|of\s+the)\b|\b(?:is|was|looks|comes\s+out\s+as)\s+(?:the\s+)?most\s+(?:robust|resilient|reliable)\b/i },
   { code: 'first', re: /\b(?:comes?|came|coming)\s+out\s+first\b|\b(?:comes?|came)\s+first\s+(?:in|on|among|across|overall|of\s+the)\b|\b(?:finish(?:es|ed)?|placed?|places|ranks?|ranked)\s+first\b/i },
   { code: 'pick', re: /\b(?:my|our|olumi's|the\s+model's)\s+(?:top\s+)?(?:pick|choice|recommendation|preference|favourite|favorite)\b/i },
@@ -249,6 +290,7 @@ function classificationCopy(text: string): string {
 function blankIdioms(text: string): string {
   let out = neutraliseEnforcementFalsePositiveSpans(text);
   for (const re of NON_RANKING_IDIOMS) out = out.replace(re, BLANK);
+  out = out.replace(LIKELIHOOD_INPUT, BLANK);
   return out;
 }
 
@@ -439,7 +481,9 @@ const LIST_MARKER = /^(\s*(?:[-+•]|\*(?=\s)|\d+[.)])\s+)/;
 const FINER_BOUNDARY = /(?<=[.!?][*_)\]"'\u2019\u201D]*)(?=\s+[*_("'\u2018\u201C]*[A-Z£$])/g;
 
 function finerSentences(unit: string): string[] {
-  const cuts = [...unit.matchAll(FINER_BOUNDARY)].map((m) => m.index!).filter((i) => i > 0 && i < unit.length);
+  // Never cut after a piece with no letter in it: "1. **The link…**" is one list item, not two sentences.
+  const cuts = [...unit.matchAll(FINER_BOUNDARY)].map((m) => m.index!).filter((i, k, all) => i > 0 && i < unit.length
+    && /\p{L}/u.test(unit.slice(k === 0 ? 0 : all[k - 1]!, i)));
   if (cuts.length === 0) return [unit];
   const out: string[] = [];
   let from = 0;
@@ -481,16 +525,24 @@ function unitsRankingAsAWhole(segs: ReadonlyArray<{ sep: string } | { units: str
     }
     i = k;
   }
-  const shares: Array<{ key: string; pct: number }> = [];
+  // Grouped per CONTIGUOUS run (served: a win-share list and an ownership list in one reply summed to
+  // 317 together, so neither was recognised). A run ends at anything but a share unit or a single newline.
+  let run: Array<{ key: string; pct: number }> = [];
+  const close = (): void => {
+    const total = run.reduce((a, b) => a + b.pct, 0);
+    if (run.length >= 2 && total >= 97 && total <= 103) for (const x of run) forced.add(x.key);
+    run = [];
+  };
   segs.forEach((g, r) => {
-    if (!('units' in g)) return;
+    if ('sep' in g) { if (g.sep !== '\n') close(); return; }
     g.units.forEach((u, j) => {
+      if (!/\S/.test(u)) return;
       const m = SHARE_UNIT.exec(classificationCopy(u));
-      if (m !== null) shares.push({ key: `${r}:${j}`, pct: Number(m[1]!.replace(',', '.')) });
+      if (m === null) { close(); return; }
+      run.push({ key: `${r}:${j}`, pct: Number(m[1]!.replace(',', '.')) });
     });
   });
-  const total = shares.reduce((a, b) => a + b.pct, 0);
-  if (shares.length >= 2 && total >= 97 && total <= 103) for (const x of shares) forced.add(x.key);
+  close();
   return forced;
 }
 
