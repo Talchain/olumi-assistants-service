@@ -91,6 +91,7 @@ import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSumm
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { baselineLabelledOptionId, structuralFacts } from '../structural-facts.js';
+import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
@@ -1945,15 +1946,13 @@ export function createAgentCapabilities(
          * basis therefore survives only in the proposal and in what the Agent
          * says, so the result below tells it to say it.
          *
-         * ⛔ OPEN GAP (panel #63 5811761386 item 6; review of #1851, B2): so an adopted
-         * Olumi value that arrives WITHOUT levels lands here with the writer's
-         * user's-own-figure stamp, where the compound path above now stores
-         * `user_assumption`. Routing it through the compound path instead was tried and
-         * rejected (25 Sep): it changes this path's per-value identity, partial-outcome
-         * and disclosure behaviour. The fix belongs at the writer — an adoption stamp
-         * the server can verify, threaded the way `appliedProvenance` is for a panel
-         * answer — not in a second caller-side write that would leave the value
-         * mislabelled in between.
+         * ✅ CLOSED AT THE WRITER (review of #1851, B2; RC #63 5825007295): an adopted Olumi
+         * value that arrives WITHOUT levels is stamped `user_assumption` by the writer
+         * itself, from a server-internal approved-adoption context (below;
+         * `approved-adoption-context.ts`) — the same verified-identity idea as
+         * `appliedProvenance`, carried in-process instead of on the wire. Routing it through
+         * the compound path was tried first and rejected: it changes this path's per-value
+         * identity, partial-outcome and disclosure behaviour.
          */
         const applied: { factor: string; requested: number; recorded: number | null }[] = [];
         const failures: { factor: string; detail: string }[] = [];
@@ -1980,7 +1979,8 @@ export function createAgentCapabilities(
           const o = ops[i];
           const v = (o.value ?? {}) as { value?: number; unit?: string };
           if (typeof v.value !== 'number') { failures.push({ factor: o.path, detail: 'no value stored on the proposal' }); continue; }
-          const r = await dispatch('/orchestrate/v2/turn', {
+          const approvedValue = v.value;
+          const send = () => dispatch('/orchestrate/v2/turn', {
             kind: 'system_event',
             turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#${i}`),
             scenario_id: ctx.scenario_id,
@@ -1991,11 +1991,23 @@ export function createAgentCapabilities(
               // Same coherent {model, native} pair as the compound path — see the note
               // there. Only when the factor already carries a cap.
               ...(capOf(o.path) !== undefined
-                ? { value: v.value / (capOf(o.path) as number), raw_value: v.value }
-                : { value: v.value }),
+                ? { value: approvedValue / (capOf(o.path) as number), raw_value: approvedValue }
+                : { value: approvedValue }),
               ...(v.unit !== undefined && v.unit !== '' ? { unit: v.unit } : {}),
             },
           });
+          // ⭐ OLUMI'S FIGURE, ADOPTED, IS STORED AS AN ASSUMPTION (review of #1851, B2; RC #63
+          // 5825007295). This proposal was verified by `proposals.authorise` above (scenario,
+          // user, base revision), so its identity rides the in-process dispatch as a
+          // server-internal context — never a wire field — and the writer stamps
+          // `user_assumption` for exactly this target and value. A proposal the USER authored
+          // (a revision they named) sends no context: the writer's own stamp is the truth.
+          const r = decision.proposal.provenance.authored_by === 'model_proposed'
+            ? await runWithApprovedAdoption(
+              { scenarioId: ctx.scenario_id, proposalId: decision.proposal.proposal_id, targetId: o.path, rawValue: approvedValue },
+              send,
+            )
+            : await send();
           // ⛔ OWN-WRITE EVIDENCE, PER OP, FROM THIS REQUEST'S OWN RESPONSE (Codex
           // 5810763729 item 4). A later read cannot tell "my write landed" from "the old
           // number was already there" or "someone else wrote it".
