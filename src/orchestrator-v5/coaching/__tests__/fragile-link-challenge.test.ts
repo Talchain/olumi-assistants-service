@@ -322,10 +322,13 @@ describe('run-turn fragile-link challenge', () => {
     }
   });
 
-  it('(iv) no groundable edge (fragile_edges removed; labels removed) → no card, no_groundable_fragile_edge', () => {
+  it('(iv) no groundable edge (fragile_edges removed; labels removed) → no fragile-link card, and the reason says why', () => {
+    // Emptied fragile_edges hands the run to the no-flagged-link card, which needs evidence that
+    // the per-link test ran: B has NO robust_edges row, so it is refused as not evidenced.
     const noEdges = withResult(runTurnCase('B', 't2', 'explicit_run'), (r) => { r.enrichment.robustness.fragile_edges = []; });
+    expect(noEdges.turn.analysis_result.enrichment.robustness.robust_edges).toEqual([]);
     expect(runTurnCoaching(noEdges.captured, noEdges.final)).toEqual({
-      blocks: [], eligibility: { eligible: false, reason: 'no_groundable_fragile_edge' },
+      blocks: [], eligibility: { eligible: false, reason: 'edge_sensitivity_not_evidenced' },
     });
     const noLabels = withResult(runTurnCase('B', 't2', 'explicit_run'), (r) => {
       for (const e of r.enrichment.robustness.fragile_edges) { delete e.from_label; delete e.to_label; }
