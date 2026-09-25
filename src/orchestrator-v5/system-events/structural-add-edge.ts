@@ -85,6 +85,10 @@
  * graph topology, not causal beliefs". An edge a user draws between two existing
  * nodes is a causal belief by construction, so borrowing the structural
  * constants would assert certainty nobody expressed.
+ * ⭐ EXCEPT A TOPOLOGY PAIR (Sep 2026, Canvas "+ Add option"): when the persisted
+ * endpoint kinds are decision→option or option→factor, the link IS topology and
+ * is written with those constants via `enforceStructuralEdgeDefaults` — see
+ * step 5 below.
  *
  * ──────────────────────────────────────────────────────────────────────────
  * ⭐⭐ THE TWO GATES THE APPLIER ALREADY ENFORCES, PRE-CHECKED HERE ANYWAY.
@@ -121,6 +125,7 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { BASE_HASH_DIVERGED } from '../graph-management/reason-codes.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { mergeAppliedGraphForPersistence } from '../handlers/edit-graph-dispatch.js';
+import { enforceStructuralEdgeDefaults } from '../../orchestrator/tools/edit-graph.js';
 import { applyPatchOperations, PatchApplyError } from '../../orchestrator/patch-applier.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
 
@@ -345,11 +350,25 @@ export function applyStructuralAddEdge(
     // sibling here would be a hand-maintained mirror of a derivable value.
     provenance: { source: 'user_specified' as const },
   };
-  const operations: PatchOperation[] = [
-    // `applyAddEdge` reads the id off `value`, not `path`; the `from::to` path
-    // is the convention `parseEdgePath` accepts and its siblings emit.
-    { op: 'add_edge', path: `${event.from}::${event.to}`, value: addedEdge },
-  ];
+  /**
+   * ⭐ A TOPOLOGY LINK GETS THE TOPOLOGY CONSTANTS. When the persisted endpoint
+   * kinds are `decision→option` or `option→factor` — the pairs this file's
+   * header already names as topology, "not causal beliefs" — the edge is
+   * written with `STRUCTURAL_EDGE_DEFAULTS` through the SAME enforcer
+   * `edit_graph` uses (`enforceStructuralEdgeDefaults`, keyed on persisted
+   * kinds), so there is one definition of a topology edge. Without it, the
+   * Canvas's "+ Add option" link persisted causal defaults (std 0.1, exists 0.8)
+   * on a decision→option edge, which `STRUCTURAL_EDGE_NOT_CANONICAL` treats as
+   * an error. Every other pair keeps the causal defaults above, unchanged.
+   */
+  const operations: PatchOperation[] = enforceStructuralEdgeDefaults(
+    [
+      // `applyAddEdge` reads the id off `value`, not `path`; the `from::to` path
+      // is the convention `parseEdgePath` accepts and its siblings emit.
+      { op: 'add_edge', path: `${event.from}::${event.to}`, value: addedEdge },
+    ],
+    baseGraph,
+  );
 
   let candidate: GraphV3T;
   try {
