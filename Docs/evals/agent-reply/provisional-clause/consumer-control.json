@@ -1,0 +1,4 @@
+{"population":"served caf7d1a paid-search explicit Run: leader_claim.permitted=true, separation=separated, admission quantified_provisional; claim_permissions {leader_may_be_named:true, provisional:true}",
+ "arm_B_with_sentence_P":{"n":4,"named_as_provisional_model_relative_in_same_sentence":4,"machine_authored_estimates_identified":4,"winner_or_recommendation_or_best":0,"unsupported_probability_or_win_share_claims":0},
+ "arm_A_without_P":{"n":4,"named_as_provisional_model_relative_in_same_sentence":3,"machine_authored_estimates_identified":4,"winner_or_recommendation_or_best":0,"unsupported_probability_or_win_share_claims":0},
+ "method":"blind fresh-context classifier for naming/qualification/recommendation (labels-8.json, key separate); deterministic scan for probability/win-share language (0/8) — every % in the replies is the user's 25% target or the '30%' option label; estimates identified = text names Olumi/machine-authored/estimates"}
