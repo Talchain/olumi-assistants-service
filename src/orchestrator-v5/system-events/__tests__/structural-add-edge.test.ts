@@ -364,7 +364,11 @@ describe('C — a topology link is written as topology', () => {
   })
 
   it('option → factor: the same, even when the client sent a negative 0.7', () => {
-    const edge = landedEdge(run({ from: 'opt_launch', to: 'fac_churn' }), 'opt_launch', 'fac_churn')
+    const r = run({ from: 'opt_launch', to: 'fac_churn' })
+    // The dispatcher's post-commit check compares the committed edge to this
+    // value, so it must be the WRITTEN mean, not the client's -0.7.
+    if (r.kind === 'mutated') expect(r.signedMean).toBe(STRUCTURAL_EDGE_DEFAULTS.strength.mean)
+    const edge = landedEdge(r, 'opt_launch', 'fac_churn')
     expect(edge.exists_probability).toBe(STRUCTURAL_EDGE_DEFAULTS.exists_probability)
     expect(edge.strength.mean).toBe(STRUCTURAL_EDGE_DEFAULTS.strength.mean)
     expect(edge.strength.std).toBe(STRUCTURAL_EDGE_DEFAULTS.strength.std)

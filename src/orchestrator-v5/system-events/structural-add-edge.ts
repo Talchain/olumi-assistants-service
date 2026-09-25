@@ -369,6 +369,11 @@ export function applyStructuralAddEdge(
     ],
     baseGraph,
   );
+  // The edge the train will actually write — after the enforcer, not what the
+  // client sent. The postcondition below and the dispatcher's post-commit
+  // check both compare against THIS, so a topology link sent as "negative 0.7"
+  // is not refused for landing as the topology constants it was meant to be.
+  const writtenEdge = operations[0].value as typeof addedEdge;
 
   let candidate: GraphV3T;
   try {
@@ -457,8 +462,8 @@ export function applyStructuralAddEdge(
   );
   if (
     landed === undefined ||
-    landed.strength.mean !== signedMean ||
-    landed.effect_direction !== event.effect_direction
+    landed.strength.mean !== writtenEdge.strength.mean ||
+    landed.effect_direction !== writtenEdge.effect_direction
   ) {
     log.error(
       {
@@ -467,7 +472,7 @@ export function applyStructuralAddEdge(
         scenario_id: payload.scenario_id,
         found: landed !== undefined,
         landed_mean: landed?.strength.mean ?? null,
-        expected_mean: signedMean,
+        expected_mean: writtenEdge.strength.mean,
       },
       'structural_add_edge — the new connection is absent or altered in the persisted bytes; refusing',
     );
@@ -563,6 +568,6 @@ export function applyStructuralAddEdge(
     baseGraph: persistedGraph,
     from: event.from,
     to: event.to,
-    signedMean,
+    signedMean: writtenEdge.strength.mean,
   };
 }
