@@ -1400,7 +1400,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     expect(outcome.assistant_text).not.toContain('could not be checked');
   });
 
-  it('(a) withholds leading-option language, (b) names the unevaluated condition, (c) offers a repair step', async () => {
+  it('(a) withholds leading-option language, (b) names the unevaluated condition, (c) promises no unproved repair', async () => {
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(suppressedEnvelope() as unknown as V2RunResponseEnvelope),
       scenarioReader: makeScenarioReader(makeScenarioSnapshot({ graph: RATIFIED_GRAPH, rawPersistedGraph: RATIFIED_GRAPH })),
@@ -1415,8 +1415,11 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     expect(outcome.assistant_text).toContain('could not be checked');
     expect(outcome.assistant_text).toContain('Total three-year cost');
 
-    // (c) A deterministic repair step.
-    expect(outcome.assistant_text).toContain('run the analysis again');
+    // (c) ⛔ 25 Sep 2026 (#69 5831708206 / 5831722994): no restate-and-rerun
+    // promise, because no code proves a restatement changes the next Run. The
+    // deterministic closer is the residual.
+    expect(outcome.assistant_text).not.toContain('run the analysis again');
+    expect(outcome.assistant_text).toContain('It stays on the model.');
 
     // The fact's summary is the same string the user sees.
     const fact = outcome.handler_facts[0]!;
