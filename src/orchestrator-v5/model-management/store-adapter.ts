@@ -144,6 +144,11 @@ export interface ModelVersionStorePort {
   getVersionForCommittedTurn?(
     scenarioId: string, sourceTurnId: string, mutationId: string,
   ): Promise<ModelVersionRecord | null>;
+  /**
+   * The version a turn wrote, WHATEVER its creation kind — a first registration is `initial`, not
+   * `committed_mutation`. Used to hand a replayed registration its original receipt (#1926 review).
+   */
+  getVersionForSourceTurn?(scenarioId: string, sourceTurnId: string): Promise<ModelVersionRecord | null>;
   restoreVersion(write: RestoreVersionWrite): Promise<VersionWriteOutcome>;
   restoreVersionAtomic?(
     write: AtomicRestoreVersionWrite,
@@ -336,6 +341,23 @@ export class SupabaseModelVersionStore implements ModelVersionStorePort {
       .maybeSingle();
     if (error) {
       throw new ModelVersionStoreError('Committed-turn version read failed', { cause: error });
+    }
+    if (data == null) return null;
+    const row = data as Record<string, unknown>;
+    return { ...parseSummaryRow(scenarioId, row), graph: row.graph ?? null };
+  }
+
+  async getVersionForSourceTurn(scenarioId: string, sourceTurnId: string): Promise<ModelVersionRecord | null> {
+    const { data, error } = await this.client
+      .from('model_versions')
+      .select(MODEL_VERSION_RECORD_COLUMNS)
+      .eq('scenario_id', scenarioId)
+      .eq('source_turn_id', sourceTurnId)
+      .order('version_number', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      throw new ModelVersionStoreError('Source-turn version read failed', { cause: error });
     }
     if (data == null) return null;
     const row = data as Record<string, unknown>;

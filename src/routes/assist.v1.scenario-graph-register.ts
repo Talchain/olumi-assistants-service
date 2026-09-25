@@ -153,6 +153,7 @@ import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
 import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { registrationRequestHash, registrationTurnId } from "../orchestrator-v5/graph-registration/registration-identity.js";
+import { getModelManagementService } from "../orchestrator-v5/model-management/index.js";
 import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
 import { runWithPendingTurnFence, TurnFenceRejectedError } from "../orchestrator-v5/session/turn-fence.js";
 import { admitCurrentTurnFence } from "../orchestrator/turn-fence-prehandler.js";
@@ -1076,6 +1077,34 @@ export default async function route(app: FastifyInstance) {
         "Graph registration — imported graph is now the persisted graph",
       );
 
+      /**
+       * ⛔ A REPLAY HANDS BACK ITS ORIGINAL RECEIPT (#1926 post-merge review 5834986091). On a proven
+       * identical replay the version plan is `none` (the stored graph IS this operation's own), so the
+       * write takes the non-versioned branch and returns no receipt: a signed-in retry got 200
+       * `replayed:true` with no version to cite. Read the version THIS turn wrote — by its source
+       * turn, whatever its creation kind (a first registration is `initial`). Best effort: a guest,
+       * a disabled flag, or a failed read leaves the key absent, exactly as before.
+       */
+      let replayedModelVersion:
+        | { mutation_id: string | null; version_id: string; version_number: number; creation_kind: string; graph_identity_hash: string; analysis_affecting_hash: string }
+        | undefined;
+      if (appendOutcome?.replayedPriorTurn === true && appendOutcome.modelVersionReceipt === undefined) {
+        try {
+          const found = await getModelManagementService().getVersionForSourceTurn(scenarioId, turnId);
+          if (found.status === "ok") {
+            replayedModelVersion = {
+              mutation_id: found.value.mutation_id,
+              version_id: found.value.id,
+              version_number: found.value.version_number,
+              creation_kind: found.value.creation_kind,
+              graph_identity_hash: found.value.graph_identity_hash,
+              analysis_affecting_hash: found.value.analysis_affecting_hash,
+            };
+          }
+        } catch {
+          // No version identity is better than an invented one.
+        }
+      }
       return reply.code(200).send({
         schema: SCENARIO_GRAPH_REGISTRATION_SCHEMA,
         scenario_id: scenarioId,
@@ -1099,7 +1128,9 @@ export default async function route(app: FastifyInstance) {
         // "version unknown". Identity only — attribution is deliberately not
         // exposed on a service-key-reachable route.
         ...(appendOutcome?.modelVersionReceipt === undefined
-          ? {}
+          ? replayedModelVersion === undefined
+            ? {}
+            : { model_version: replayedModelVersion }
           : {
               model_version: {
                 mutation_id: appendOutcome.modelVersionReceipt.mutation_id,

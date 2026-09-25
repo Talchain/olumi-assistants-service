@@ -78,6 +78,12 @@ vi.mock("../../orchestrator/user-identity.js", async (importOriginal) => {
   return { ...actual, resolveUserIdentity };
 });
 
+const { getVersionForSourceTurn } = vi.hoisted(() => ({ getVersionForSourceTurn: vi.fn() }));
+vi.mock("../../orchestrator-v5/model-management/index.js", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, getModelManagementService: () => ({ getVersionForSourceTurn }) };
+});
+
 import registerRoute from "../assist.v1.scenario-graph-register.js";
 import { computeGraphIdentityHash } from "../../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../../orchestrator-v5/context/graph-cas-conflict.js";
@@ -160,6 +166,7 @@ beforeEach(() => {
   loadGraph.mockResolvedValue(SERVER_PRE_IMPORT);
   append.mockResolvedValue({ id: "turn-1" });
   readCommittedTurn.mockResolvedValue(null);
+  getVersionForSourceTurn.mockResolvedValue({ status: "disabled" });
 });
 
 describe("register — optional initial brief", () => {
@@ -1732,6 +1739,63 @@ describe("register — create-only construction: `null` refuses a real model, no
     const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: null, operation_id: OP });
     expect(res.statusCode).toBe(409);
     expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
+
+/**
+ * ⛔ A REPLAY HANDS BACK ITS ORIGINAL RECEIPT (#1926 post-merge review 5834986091). On a proven identical
+ * replay the write is non-versioned (the stored graph is this operation's own), so the append returns NO
+ * receipt. The mocks here deliberately do NOT inject one into `append`: the version must come from the
+ * row this turn wrote, read by its source turn (a first registration's kind is `initial`).
+ */
+describe("register — a replay returns the version its original write minted", () => {
+  const OP = "5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d";
+  const VERSION = {
+    id: "ver-1", scenario_id: SCENARIO, owner_user_id: OWNER, version_number: 1, graph_identity_hash: "g".repeat(64),
+    analysis_affecting_hash: "a".repeat(16), mutation_id: "mut-1", creation_kind: "initial",
+  };
+
+  it("RED: a replay whose append carries no receipt returns the version its source turn wrote", async () => {
+    append.mockResolvedValue({ id: "turn-1", replayedPriorTurn: true });
+    getVersionForSourceTurn.mockResolvedValue({ status: "ok", value: VERSION });
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, operation_id: OP });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().replayed).toBe(true);
+    expect(getVersionForSourceTurn).toHaveBeenCalledWith(SCENARIO, registrationTurnId(SCENARIO, OP));
+    expect(res.json().model_version).toEqual({
+      mutation_id: "mut-1", version_id: "ver-1", version_number: 1, creation_kind: "initial",
+      graph_identity_hash: "g".repeat(64), analysis_affecting_hash: "a".repeat(16),
+    });
+    await app.close();
+  });
+
+  it("CONTRAST: a guest (history disabled or no row) keeps the key ABSENT — never an invented version", async () => {
+    append.mockResolvedValue({ id: "turn-1", replayedPriorTurn: true });
+    getVersionForSourceTurn.mockResolvedValue({ status: "disabled" });
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, operation_id: OP });
+    expect(res.statusCode).toBe(200);
+    expect(Object.prototype.hasOwnProperty.call(res.json(), "model_version")).toBe(false);
+    await app.close();
+  });
+
+  it("CONTRAST: a read that throws keeps the key absent and the replay still answers 200", async () => {
+    append.mockResolvedValue({ id: "turn-1", replayedPriorTurn: true });
+    getVersionForSourceTurn.mockRejectedValue(new Error("db blip"));
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: IMPORTED, operation_id: OP });
+    expect(res.statusCode).toBe(200);
+    expect(Object.prototype.hasOwnProperty.call(res.json(), "model_version")).toBe(false);
+    await app.close();
+  });
+
+  it("CONTRAST: a first write (no replay) never reads history", async () => {
+    append.mockResolvedValue({ id: "turn-1" });
+    const app = await buildApp();
+    await post(app, SCENARIO, { graph: IMPORTED, operation_id: OP });
+    expect(getVersionForSourceTurn).not.toHaveBeenCalled();
     await app.close();
   });
 });

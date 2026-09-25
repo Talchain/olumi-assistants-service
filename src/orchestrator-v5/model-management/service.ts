@@ -304,6 +304,30 @@ export class ModelManagementService {
     }
   }
 
+  /** The version a turn wrote, whatever its creation kind (a first registration is `initial`). */
+  async getVersionForSourceTurn(
+    scenarioId: string,
+    sourceTurnId: string,
+  ): Promise<ModelManagementResult<ModelVersionRecord>> {
+    if (!this.isEnabled()) return { status: 'disabled' };
+    if (!this.store.getVersionForSourceTurn) {
+      return { status: 'error', error: {
+        code: 'store_error', recoverable: true, message: 'Committed model history is unavailable.',
+      } };
+    }
+    try {
+      const version = await this.store.getVersionForSourceTurn(scenarioId, sourceTurnId);
+      if (version === null) {
+        return { status: 'error', error: {
+          code: 'version_not_found', recoverable: true, message: 'Committed model version is unavailable.',
+        } };
+      }
+      return { status: 'ok', value: version };
+    } catch (err) {
+      return mapThrownError(err);
+    }
+  }
+
   /** Read a receipt's immutable child, not whatever version is current now. */
   async getVersionForCommittedTurn(
     scenarioId: string,
