@@ -844,6 +844,21 @@ describe('review of #1871 at c39c789d — the exits, not the leaks, are the clas
     // §5: one word elsewhere no longer disables the test.
     'For both raising and holding, 71% and 29% respectively, not anywhere near a tie.',
     'Raising takes 71% and holding 29%, not anywhere near a tie.',
+    // Pre-review 5829375898 and self-review of 03795a50: a measure must be ATTACHED to its figure, not a word on its side.
+    'For both raising and holding, the analysis gives 71% and 29% success rates respectively.',
+    'For both Keep Pro at £49 and Raise Pro to £59 at release, the analysis gives 29% and 71% success rates respectively.',
+    'For both raising and holding, the analysis gives 71% and 29% success rates.',
+    'For both raising and holding, the model gives 71% and the runs give 29%.',
+    'For both raising and holding, the model gives 71% and the simulation reports 29%.',
+    'For both raising and holding, 71% came from model A and 29% came from model B.',
+    'For both raising and holding, the model shows 71% and then shows 29%.',
+    'For both raising and holding, the first gets 71% and the second gets 29%.',
+    'For both raising and holding, the former scores 71% and the latter 29%.',
+    'For both raising and holding, 71% goes one way and 29% the other.',
+    // A word the figures share by stem is neither's own ("shows … show").
+    'For both raising and holding, 71% shows up in model A and 29% show up in model B.',
+    // "respectively" maps the figures onto the options even when each has its own measure.
+    'For both raising and holding, retention is 71% and churn 29% respectively.',
   ])('RED: removed through BOTH gates: %s', (s) => { expect(wire(s)).not.toMatch(/71|29/); });
   it.each([
     'We compared raising and holding, in that order. Across both paths, 71 and 29 per cent respectively.',
@@ -870,6 +885,8 @@ describe('review of #1871 at c39c789d — the exits, not the leaks, are the clas
     'Last quarter, 60% and 40% of signups came from ads and referrals respectively.',
     'For both raising and holding, 96% of customers stay and 4% churn.',
     'Both options split 50/50 on the retention question.',
+    'For both raising and holding, retention is 96% and churn 4%.',
+    'For both raising and holding, 40% of customers are annual and 60% are monthly.',
   ])('CONTROL: kept: %s', (s) => { expect(wire(s)).toContain(s); });
   it.each([
     // RESIDUAL, named — over-drops in the fail-closed direction: a movement or span beside a list of both options.

@@ -414,17 +414,42 @@ function isShareSplit(text: string, labels: RankingLabelContext = NO_LABELS): bo
     // An even split names no leader: "Both options split 50/50".
     const values = figs.map(([x, y]) => Number(/\d+(?:\.\d+)?/.exec(text.slice(x, y))![0]));
     if (values.every((v) => v === values[0])) continue;
-    const own: string[][] = figs.map(() => []);
-    own[0]!.push(...measureWords(before.split(CLAUSE_BREAK).pop() ?? ''));
-    for (let i = 1; i < figs.length; i += 1) {
-      const gap = text.slice(figs[i - 1]![1], figs[i]![0]);
-      const joiner = [...gap.matchAll(GAP_JOINER)].pop();
-      if (joiner === undefined) continue;
-      own[i - 1]!.push(...measureWords(gap.slice(0, joiner.index)));
-      own[i]!.push(...measureWords(gap.slice(joiner.index! + joiner[0].length)));
+    /**
+     * ⛔ A MEASURE MUST BE ATTACHED TO ITS FIGURE, not merely a content word on its side (pre-review 5829375898): "the
+     * analysis gives 71% and 29% success rates" has a word on each side and still splits the options. A figure's own
+     * measure is the word right after it ("96% of customers", "4% churn"), a word linked to it by a copula or
+     * preposition ("retention is 96%", "sit at 4%"), or — after the joiner — the parallel word before it ("… and churn
+     * 4%"). A verb straight before the first figure ("gives 71%", "shows 71%") reports it; it does not measure it.
+     * A word two figures share by stem ("gives … give", "came … came") is neither's own. And "respectively" / "in that
+     * order" map the figures onto a list by definition, so there only another list or a tie lets them through.
+     */
+    const own: Set<string>[] = figs.map(() => new Set<string>());
+    for (let i = 0; i < figs.length; i += 1) {
+      const lead = i === 0 ? (before.split(CLAUSE_BREAK).pop() ?? '') : (() => {
+        const gap = text.slice(figs[i - 1]![1], figs[i]![0]);
+        const joiner = [...gap.matchAll(GAP_JOINER)].pop();
+        return joiner === undefined ? '' : gap.slice(joiner.index! + joiner[0].length);
+      })();
+      const trail = i === figs.length - 1 ? after : (() => {
+        const gap = text.slice(figs[i]![1], figs[i + 1]![0]);
+        const joiner = [...gap.matchAll(GAP_JOINER)].pop();
+        return joiner === undefined ? '' : gap.slice(0, joiner.index);
+      })();
+      const back = lead.trim().split(/\s+/).filter((w) => w.length > 0).reverse();
+      let k = 0;
+      while (k < back.length && FIGURE_LINK.test(back[k]!)) k += 1;
+      const linked = k > 0 || i > 0;
+      const beforeWord = measureWords(back[k] ?? '')[0];
+      if (linked && beforeWord !== undefined) own[i]!.add(beforeWord.toLowerCase());
+      const fwd = trail.trim().split(/\s+/).filter((w) => w.length > 0);
+      let j = 0;
+      while (j < fwd.length && (/^(?:the|a|an)$/i.test(fwd[j]!) || FIGURE_LINK.test(fwd[j]!))) j += 1;
+      const afterWord = measureWords(fwd[j] ?? '')[0];
+      if (afterWord !== undefined) own[i]!.add(afterWord.toLowerCase());
     }
-    own[figs.length - 1]!.push(...measureWords(after));
-    if (own.every((ws) => ws.length > 0)) continue;
+    const stem = (w: string): string => w.slice(0, 4);
+    const distinct = own.map((ws, i) => [...ws].filter((w) => !own.some((other, j) => j !== i && [...other].some((o) => stem(o) === stem(w)))));
+    if (!ordered && distinct.every((ws) => ws.length > 0)) continue;
     if (otherList(after) || (optionRefs(text) === 0 && otherList(text))) continue;
     return true;
   }
@@ -593,12 +618,14 @@ const SHARE_NOUN = /^(?:shares?|chances?|probabilit(?:y|ies)|likelihood|odds|win
 const MEASURE_OR_OPINION = /^(?:support|backing|approval|favour|favor|favourability|favorability|confidence|certainty|preferences?)$/i;
 /** A noun that names the figures themselves, not what they measure: "…29% are the results". */
 const FIGURE_NOUN = /^(?:results?|outcomes?|figures?|numbers?|splits?|scores?|readings?|percentages?|totals?|picture)$/i;
+/** What links a measure to the figure after it: "retention IS 96%", "renews AT 96%", "churn OF 4%". */
+const FIGURE_LINK = /^(?:is|are|was|were|be|been|being|at|of|by|to|around|about|roughly|nearly|approximately|just|only|some)$/i;
 /** Where a gap between two figures divides: its last joiner or clause break. */
 const GAP_JOINER = /[,;:\u2013\u2014/&]|\b(?:and|or|but|nor|while|whereas|than|versus|vs|against|over|to|then|with)\b/gi;
 /** A clause break: a figure's own measure is not looked for across one. */
 const CLAUSE_BREAK = /[,;:.!?()\u2013\u2014]/;
 /** Hedges, degree words and quantifiers: they modify a figure; they never say what it measures. */
-const MODIFIER_WORD = /^(?:rather|mere|merely|just|only|even|still|almost|about|around|roughly|nearly|approximately|barely|some|fully|quite|very|much|far|instead|unlike|alike|both|either|neither|all|every|close|exactly|precisely|also|too|we|you|they|it|there)$/i;
+const MODIFIER_WORD = /^(?:former|latter|one|other|another|rather|mere|merely|just|only|even|still|almost|about|around|roughly|nearly|approximately|barely|some|fully|quite|very|much|far|instead|unlike|alike|both|either|neither|all|every|close|exactly|precisely|also|too|we|you|they|it|there)$/i;
 /** A quantifier over the options as a set: "both paths", "all options", "either option". */
 const QUANTIFIED_OPTIONS = /\b(?:both|either|each|all)\s+(?:the\s+|of\s+the\s+)?(?:paths?|options?|choices?|routes?|alternatives?|scenarios?)\b/i;
 /** A generic PLURAL option noun heads its own phrase: "both paths" ends there. */
