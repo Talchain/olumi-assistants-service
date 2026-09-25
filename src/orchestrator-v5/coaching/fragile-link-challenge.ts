@@ -127,16 +127,22 @@ export interface FragileLinkChallengeCopy {
  * 400-char sentence bound caps the two labels at 87 characters together), so
  * a length refusal can only come from a bound this module does not own.
  *
- * ⛔ WHAT THE WORDS MAY CLAIM. A `fragile_edges` row means the OUTCOME is
- * sensitive to the link (ISL: elasticity above `FRAGILE_THRESHOLD = 0.1`).
- * Whether the ranking flips is a separate measurement (`is_robust`,
+ * ⛔ WHAT THE WORDS MAY CLAIM. A `fragile_edges` row means the robustness check
+ * FLAGGED the link: as its strength changes, the FIRST-LISTED option's expected
+ * goal value moves by more than 10% of its own baseline (ISL
+ * robustness_analyzer_v2.py @3cfadcfc: ref_option = options[0] at :1138/:1203/
+ * :1257; elasticity :1237-1240; `FRAGILE_THRESHOLD = 0.1`). That is a flag on one
+ * option's outcome — so the words name the FLAG, never "the result" (an
+ * earlier wording, "found the result sensitive to the link", gave the flag a
+ * meaning the run does not measure). Whether the ranking flips is a separate
+ * measurement (`is_robust`,
  * `switch_probability`) this card never reads, and ISL states "robust but
  * sensitive to …" runs outright. So no wording says the options could swap,
  * nor sizes the change that would do it: on a decisive run whose perturbations
  * never switched the winner, that sentence would be false (#1855 review).
  */
 export function fragileLinkBodyForms(fromLabel: string, toLabel: string, firstPass: boolean): readonly string[] {
-  const flagged = `the robustness check found the result sensitive to the link from ${fromLabel} to ${toLabel} — `;
+  const flagged = `the robustness check flagged the link from ${fromLabel} to ${toLabel} as sensitive — `;
   const findings = [
     `${flagged}worth checking what the estimate of how strongly ${fromLabel} drives ${toLabel} rests on.`,
     `${flagged}worth checking what this link's estimated strength rests on.`,

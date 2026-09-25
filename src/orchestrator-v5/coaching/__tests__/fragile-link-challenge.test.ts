@@ -141,7 +141,7 @@ describe('run-turn fragile-link challenge', () => {
     expect(CoachingBlockSchema.safeParse(card).success).toBe(true);
     expect(card.target_refs).toEqual([{ id: 'pro_subscriber_base→mrr', kind: 'edge', label: 'Pro subscriber base → MRR' }]);
     expect(card.body).toBe(
-      'The robustness check found the result sensitive to the link from Pro subscriber base to MRR — worth checking what the estimate of how strongly Pro subscriber base drives MRR rests on.',
+      'The robustness check flagged the link from Pro subscriber base to MRR as sensitive — worth checking what the estimate of how strongly Pro subscriber base drives MRR rests on.',
     );
     expect(card.body.startsWith(FIRST_PASS_PREFIX)).toBe(false);
 
@@ -168,7 +168,7 @@ describe('run-turn fragile-link challenge', () => {
     const card = fragileLinkCards(out.blocks)[0]!;
     expect(CoachingBlockSchema.safeParse(card).success).toBe(true);
     expect(card.body).toBe(
-      'Before relying on this first pass on Olumi\'s estimates, note that the robustness check found the result sensitive to the link from Pro subscriber base to MRR — worth checking what the estimate of how strongly Pro subscriber base drives MRR rests on.',
+      'Before relying on this first pass on Olumi\'s estimates, note that the robustness check flagged the link from Pro subscriber base to MRR as sensitive — worth checking what the estimate of how strongly Pro subscriber base drives MRR rests on.',
     );
     expect(card.body.length).toBeLessThanOrEqual(300);
 
@@ -186,10 +186,11 @@ describe('run-turn fragile-link challenge', () => {
   });
 
   it('(iii-b) first pass with served labels the long wording cannot fit → the card, its second clause saying "this link"', () => {
-    // Served labels (construction witness pre-a693ba6-A, 23 Sep): one of the 9
-    // groundable served runs the first pass used to refuse as copy_gate.
-    const from = 'Engineering delivery capacity';
-    const to = 'Delivery throughput';
+    // Served labels (construction witness c16-fd312b5, 23 Sep). With the
+    // flag-naming wording, 17 of the 222 distinct served fragile-edge label
+    // pairs still overflow the long first-pass form; this is one of them.
+    const from = 'Engineering coordination quality';
+    const to = 'Engineering delivery velocity';
     const [longFirstPass, shortFirstPass] = fragileLinkBodyForms(from, to, true);
     // The contract's long wording cannot ship here, so this exercises the fallback.
     expect(longFirstPass!.length).toBeGreaterThan(300);
@@ -200,19 +201,24 @@ describe('run-turn fragile-link challenge', () => {
     const card = fragileLinkCards(out.blocks)[0]!;
     expect(CoachingBlockSchema.safeParse(card).success).toBe(true);
     expect(card.body).toBe(
-      'Before relying on this first pass on Olumi\'s estimates, note that the robustness check found the result sensitive to the link from Engineering delivery capacity to Delivery throughput — worth checking what this link\'s estimated strength rests on.',
+      'Before relying on this first pass on Olumi\'s estimates, note that the robustness check flagged the link from Engineering coordination quality to Engineering delivery velocity as sensitive — worth checking what this link\'s estimated strength rests on.',
     );
     expect(card.body).toBe(shortFirstPass);
     expect(card.body.length).toBeLessThanOrEqual(300);
-    expect(card.target_refs).toEqual([{ id: card.target_refs[0]!.id, kind: 'edge', label: 'Engineering delivery capacity → Delivery throughput' }]);
+    expect(card.target_refs).toEqual([{ id: card.target_refs[0]!.id, kind: 'edge', label: 'Engineering coordination quality → Engineering delivery velocity' }]);
 
     // Contrast: the explicit Run on the same labels keeps the contract's long wording.
     const explicit = withGroundedLabels(runTurnCase('B', 't2', 'explicit_run'), from, to);
     const explicitOut = runTurnCoaching(explicit.captured, explicit.final);
     expect(explicitOut.eligibility).toEqual({ eligible: true });
     expect(fragileLinkCards(explicitOut.blocks)[0]!.body).toBe(
-      'The robustness check found the result sensitive to the link from Engineering delivery capacity to Delivery throughput — worth checking what the estimate of how strongly Engineering delivery capacity drives Delivery throughput rests on.',
+      'The robustness check flagged the link from Engineering coordination quality to Engineering delivery velocity as sensitive — worth checking what the estimate of how strongly Engineering coordination quality drives Engineering delivery velocity rests on.',
     );
+
+    // And the pair that USED to need the short form (pre-a693ba6-A) now fits the
+    // long one on the first pass: the shorter wording names both ends twice there.
+    const [nowFits] = fragileLinkBodyForms('Engineering delivery capacity', 'Delivery throughput', true);
+    expect(nowFits!.length).toBeLessThanOrEqual(300);
   });
 
   it('(iii-c) every label pair the selector admits fits a card on both triggers; one character more and the selector itself refuses', () => {
@@ -258,9 +264,13 @@ describe('run-turn fragile-link challenge', () => {
     }
   });
 
-  it('(iii-d) the copy claims only what a fragile_edges row establishes (the result is sensitive to the link) — never a ranking change or its size', () => {
-    // ISL lists an edge in `fragile_edges` when the outcome's elasticity to it
-    // exceeds 0.1 (robustness_analyzer_v2.py FRAGILE_THRESHOLD); whether the
+  it('(iii-d) the copy claims only what a fragile_edges row establishes (the check FLAGGED the link) — never what it means for the result, a ranking change or its size', () => {
+    // ISL lists an edge in `fragile_edges` when the FIRST-LISTED option's expected
+    // goal value moves by more than 10% of its own baseline as the link's strength
+    // changes (robustness_analyzer_v2.py @3cfadcfc: ref_option = options[0] at
+    // :1138/:1203/:1257; elasticity :1237-1240; FRAGILE_THRESHOLD 0.1). That is a
+    // flag on one option's outcome, not on "the result". Whether the
+    // ranking flips is a SEPARATE measurement (`is_robust`, `switch_probability`)
     // ranking flips is a SEPARATE measurement (`is_robust`, `switch_probability`)
     // that this card never reads. So on a robust, decisive run the card still
     // ships — the link is still worth checking — and no wording may say the
@@ -298,7 +308,9 @@ describe('run-turn fragile-link challenge', () => {
       expect(out.eligibility, name).toEqual({ eligible: true });
       const card = fragileLinkCards(out.blocks)[0]!;
       for (const field of USER_FACING) expect(String(card[field]), `${name} / ${field}`).not.toMatch(RANKING_OR_MAGNITUDE);
-      expect(card.body, name).toMatch(/sensitive to the link from /);
+      expect(card.body, name).toMatch(/flagged the link from .+ as sensitive —/);
+      // Names the flag, not a meaning the run did not measure.
+      expect(card.body, name).not.toMatch(/the result|the outcome|the decision/i);
     }
     // Every wording the module can ship, on served labels and on the longest the selector admits.
     for (const [from, to] of [['Pro subscriber base', 'MRR'], ['Engineering delivery capacity', 'Delivery throughput']] as const) {
