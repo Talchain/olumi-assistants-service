@@ -1,0 +1,20 @@
+{
+ "state": "pricing-4",
+ "arm": "B",
+ "rep": 2,
+ "http": 200,
+ "ms": 8628,
+ "usage": {
+  "input_tokens": 10550,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 10547
+  },
+  "output_tokens": 407,
+  "output_tokens_details": {
+   "reasoning_tokens": 241
+  },
+  "total_tokens": 10957
+ },
+ "text": "No option can be put forward yet, because the model could not assess your churn constraint.\n\n- The limit is recorded as **monthly churn < 4%**, but churn is modelled as an outcome rather than measured on the constraint’s scale, so none of the options was tested for compliance with it.\n- The comparison is only moderately robust and partly rests on a machine default of **£0 non‑Pro MRR**, not user evidence. Active Pro subscribers are the largest structural driver; their source is not recorded.\n- The £20k MRR threshold also could not be scored against outcomes because the model lacks a starting MRR baseline and an explicit target frame.\n\nSo this run compares modelled MRR effects, but does not answer whether a price rise meets both parts of your stated goal."
+}

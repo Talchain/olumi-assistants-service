@@ -1,0 +1,20 @@
+{
+ "state": "eng-hiring-3",
+ "arm": "A",
+ "rep": 2,
+ "http": 200,
+ "ms": 4463,
+ "usage": {
+  "input_tokens": 13649,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 13646
+  },
+  "output_tokens": 153,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 13802
+ },
+ "text": "No option can be put forward yet because the £400k annual-salary limit was not assessable in this run.\n\n- The comparison is **fragile** and rests partly on three Olumi-supplied estimates, rather than your evidence: delivery capacity, onboarding load, and annual salary spend.\n- The model could not align the salary limit with its calculated salary-spend factor, so it excluded that constraint. It also lacks a stated goal direction and a usable Q3 shipping threshold in the analysis frame.\n- The key uncertainty is therefore not resolved: whether either hiring plan stays below **£400k/year** while delivering by Q3.\n\nA current analysis needs salary spend represented in a comparable annual £ figure before the constraint can be tested."
+}

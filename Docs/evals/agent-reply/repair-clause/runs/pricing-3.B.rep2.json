@@ -1,0 +1,20 @@
+{
+ "state": "pricing-3",
+ "arm": "B",
+ "rep": 2,
+ "http": 200,
+ "ms": 6019,
+ "usage": {
+  "input_tokens": 9979,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 9976
+  },
+  "output_tokens": 265,
+  "output_tokens_details": {
+   "reasoning_tokens": 110
+  },
+  "total_tokens": 10244
+ },
+ "text": "No option can be put forward from this run, because the **monthly churn <4%** limit was not scored.\n\n- The price comparison itself held up under the changes tested, but it does not establish compliance with your churn requirement; the modelled churn output is not on a comparable scale to that limit.\n- The result also assumes the goal means maximising MRR, rather than reaching £20k within 12 months; that timing condition was not evaluated.\n- The comparison is most sensitive to the Pro subscriber base, which is an Olumi estimate rather than a user-supplied figure.\n\nSo this is a provisional MRR comparison, not an answer to whether raising Pro to **£59/month** meets both of your stated conditions."
+}

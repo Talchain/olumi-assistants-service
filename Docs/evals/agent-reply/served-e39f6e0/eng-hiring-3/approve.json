@@ -1,0 +1,44 @@
+{
+  "assistant_text": "Saved. No version number was recorded for it.",
+  "suggested_actions": [
+    {
+      "id": "agent-run-analysis",
+      "label": "Run analysis"
+    }
+  ],
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_stale",
+      "computed_at": "2026-09-25T01:38:50.180Z",
+      "cause": "graph_changed"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld"
+    },
+    "robustness": {},
+    "usable_for_prose": true,
+    "usable_for_chips": false,
+    "usable_for_followup": true,
+    "requires_rerun": true,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "tools": [
+    {
+      "name": "authorise_change",
+      "mutated": true,
+      "refusal": null
+    }
+  ],
+  "providers": [],
+  "trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": "approve",
+    "first_analysis": null
+  }
+}

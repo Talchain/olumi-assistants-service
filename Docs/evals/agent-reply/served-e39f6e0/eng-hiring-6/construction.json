@@ -1,0 +1,48 @@
+{
+  "assistant_text": "I’ve framed this as delivery by Q3 subject to the £400k annual-salary ceiling.\n\n- A provisional first pass ran, but nobody has validated its inputs, so it is something to argue with—not an answer.\n- Your hiring quantities are recorded as working figures; salary additions are Olumi estimates: £200k/year for two seniors and £220k/year for four juniors, before employer costs.\n- It cannot test the budget without current annual salary spend, nor delivery by Q3 without the date, scope, existing capacity, and mentoring availability.\n\nThe model was saved. Questions this model does not answer yet: What is the current annual salary spend? This is required to test whether the total remains under £400k; the provisional additions assume roughly £100k per senior engineer and £55k per junior engineer annually, before employer costs. Which year does “by Q3” refer to, and how many months remain until its end? The stated horizon cannot be converted reliably into horizon_months without that date. What platform scope, existing engineering capacity, and seniority mix are already committed? The model treats hires as incremental capacity, but cannot yet quantify whether either team can ship the full platform by Q3. The provisional model assumes junior hires create more onboarding load and lower near-term effective capacity than senior hires. Confirm the availability of senior staff to mentor and review junior engineers.",
+  "suggested_actions": [],
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-09-25T01:41:34.897Z"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld",
+      "separation": "near_tie"
+    },
+    "robustness": {},
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "tools": [
+    {
+      "name": "build_model_from_brief",
+      "mutated": true,
+      "refusal": null
+    }
+  ],
+  "providers": [
+    "openai"
+  ],
+  "trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": null,
+    "first_analysis": {
+      "ran": true,
+      "run_turn_id": "00000000-0000-4000-8000-000000000000",
+      "construction_turn_id": "graph_registration:00000000-0000-4000-8000-000000000000",
+      "revision": "81d832c4c0f64d97",
+      "ms": 10050,
+      "coaching_blocks": 1
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "assistant_text": "This run cannot support a price decision yet, because it did not test your under‑4% churn requirement.\n\n- The churn limit could not be scored against the model, so no option can be put forward on the stated goal.\n- The result also rests partly on machine-authored inputs: monthly churn is assumed at **3% per month**, feature value at **60/100**, and non‑Pro MRR defaulted to **£0/month** because no figure was supplied.\n- The comparison is moderately robust only within those provisional settings; the price-to-MRR relationship is a fragile edge, so the conclusion is especially exposed to its assumptions.\n\nThe key unresolved point is what observed churn measure the <4% limit should constrain.",
+  "suggested_actions": [],
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-09-25T01:38:49.228Z"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld",
+      "separation": "separated"
+    },
+    "robustness": {
+      "aggregate_level": "moderate"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "tools": [
+    {
+      "name": "run_analysis",
+      "mutated": false,
+      "refusal": null
+    }
+  ],
+  "providers": [
+    "openai"
+  ],
+  "trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": "run",
+    "first_analysis": null
+  }
+}

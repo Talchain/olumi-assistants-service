@@ -1,0 +1,20 @@
+{
+ "state": "pricing-1",
+ "arm": "A",
+ "rep": 2,
+ "http": 200,
+ "ms": 6988,
+ "usage": {
+  "input_tokens": 10118,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 10115
+  },
+  "output_tokens": 369,
+  "output_tokens_details": {
+   "reasoning_tokens": 210
+  },
+  "total_tokens": 10487
+ },
+ "text": "No option can be put forward yet: the model could not test your **monthly churn rate < 4% per month** constraint, so it withheld any overall conclusion.\n\n- The comparison is robust only for the modelled MRR outcome; it does **not** establish that any price meets the churn limit. The £20k MRR target also lacked a usable baseline/frame for constraint scoring.\n- The analysis assumes that higher MRR is the goal direction; that was not explicitly recorded.\n- The strongest structural sensitivity is **Active Pro subscribers**, an Olumi estimate, though its attribution stability is low. The four missing brief values remain machine-authored assumptions.\n\nThe key reasoning step is to define how the 4% churn limit should be measured in the model."
+}

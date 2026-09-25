@@ -1,0 +1,43 @@
+{
+  "assistant_text": "No hiring option can be put forward from this run, because the £400k annual-salary constraint was not scorable in the model.\n\n- The comparison is **fragile**: small changes in the estimated delivery-capacity, onboarding, or salary relationships can change the ordering. All underlying figures are Olumi estimates, not user-provided evidence.\n- The most influential assumption is platform delivery capacity—currently an Olumi estimate of **2 FTE-equivalent months/month**. Its source is not recorded as operational data.\n- The model’s **annual salary spend ≤ £400k/year** limit could not be aligned to a comparable measured quantity, so it was excluded from the comparison. A current analysis needs that spending measure and its frame clarified.",
+  "suggested_actions": [],
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-09-25T01:41:45.024Z"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld",
+      "separation": "near_tie"
+    },
+    "robustness": {
+      "aggregate_level": "very_low"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "tools": [
+    {
+      "name": "run_analysis",
+      "mutated": false,
+      "refusal": null
+    }
+  ],
+  "providers": [
+    "openai"
+  ],
+  "trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": "run",
+    "first_analysis": null
+  }
+}

@@ -1,0 +1,20 @@
+{
+ "state": "pricing-4",
+ "arm": "A",
+ "rep": 2,
+ "http": 200,
+ "ms": 7657,
+ "usage": {
+  "input_tokens": 10490,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 10487
+  },
+  "output_tokens": 341,
+  "output_tokens_details": {
+   "reasoning_tokens": 178
+  },
+  "total_tokens": 10831
+ },
+ "text": "No option can be put forward from this run, because the **“monthly churn rate < 4% per month”** limit could not be scored against the model.\n\n- The price comparison itself was moderately robust under the tested assumptions, but it does not establish compliance with your churn requirement or the £20k MRR target.\n- Results are also weakened by a machine default of **£0/month** for Non‑Pro MRR; no user value was recorded. Several other inputs remain provisional machine-authored assumptions.\n- The model is structurally most sensitive to Active Pro subscribers, but this is a graph-based estimate rather than measured evidence.\n\nThe key reasoning step is to define the churn measure the 4% cap applies to, so it can be evaluated in a current analysis."
+}

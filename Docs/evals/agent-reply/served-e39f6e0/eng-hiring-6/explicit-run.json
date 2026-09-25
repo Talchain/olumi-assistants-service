@@ -1,0 +1,43 @@
+{
+  "assistant_text": "This run cannot put either hiring plan forward because the £400k constraint was not assessed.\n\n- Annual salary spend has no recorded option-level values, so the analysis treated all four options as unchanged on salary; that makes the central constraint unusable.\n- The comparison is also very fragile: delivery capacity and onboarding load are Olumi estimates, not inputs you validated.\n- The next reasoning step is to specify annual salary spend for each option—including current staffing—so the £400k limit can be tested.",
+  "suggested_actions": [],
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-09-25T01:41:52.405Z"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld",
+      "separation": "near_tie"
+    },
+    "robustness": {
+      "aggregate_level": "very_low"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "tools": [
+    {
+      "name": "run_analysis",
+      "mutated": false,
+      "refusal": null
+    }
+  ],
+  "providers": [
+    "openai"
+  ],
+  "trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": "run",
+    "first_analysis": null
+  }
+}

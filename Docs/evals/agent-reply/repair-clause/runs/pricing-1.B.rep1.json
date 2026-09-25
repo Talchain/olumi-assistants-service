@@ -1,0 +1,20 @@
+{
+ "state": "pricing-1",
+ "arm": "B",
+ "rep": 1,
+ "http": 200,
+ "ms": 5719,
+ "usage": {
+  "input_tokens": 10178,
+  "input_tokens_details": {
+   "cache_write_tokens": 7169,
+   "cached_tokens": 3006
+  },
+  "output_tokens": 275,
+  "output_tokens_details": {
+   "reasoning_tokens": 141
+  },
+  "total_tokens": 10453
+ },
+ "text": "No pricing option can be put forward yet, because the model could not test your **monthly churn rate < 4%** limit.\n\n- The comparison is otherwise robust under the changes tested, but it assumes that higher MRR is the goal; that objective direction was not explicitly stated.\n- Four inputs were supplied by Olumi rather than by you, including active subscribers, new subscribers, churn, and feature-release value, so the result remains provisional.\n- The unscored churn constraint needs to be attached to the specific modelled measure it is intended to limit; simply restating the 4% threshold would not make it testable."
+}

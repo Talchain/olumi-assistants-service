@@ -1,0 +1,43 @@
+{
+  "assistant_text": "No option can be put forward yet, because the model did not score the churn constraint.\n\n- The run compared £59, £49 and £54 per month, but could not test **monthly churn <4%**: churn is currently modelled as a calculated outcome rather than a measure on the constraint’s scale.\n- It also could not assess whether any option reaches **£20,000/month MRR**, because the goal’s direction and threshold frame were not established in the analysis.\n- The comparison is most sensitive to Pro subscriber count—currently Olumi’s estimate of **250 subscribers**, not a user-provided measurement.",
+  "suggested_actions": [],
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-09-25T01:42:08.435Z"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld",
+      "separation": "separated"
+    },
+    "robustness": {
+      "aggregate_level": "high"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "tools": [
+    {
+      "name": "run_analysis",
+      "mutated": false,
+      "refusal": null
+    }
+  ],
+  "providers": [
+    "openai"
+  ],
+  "trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": "run",
+    "first_analysis": null
+  }
+}

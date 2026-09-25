@@ -1,0 +1,20 @@
+{
+ "state": "pricing-3",
+ "arm": "A",
+ "rep": 2,
+ "http": 200,
+ "ms": 5167,
+ "usage": {
+  "input_tokens": 9919,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 9916
+  },
+  "output_tokens": 283,
+  "output_tokens_details": {
+   "reasoning_tokens": 136
+  },
+  "total_tokens": 10202
+ },
+ "text": "No option can be put forward from this run because the churn limit was not scored.\n\n- The model compared £49, £54 and £59, and the comparison held up under the changes tested; however, it cannot assess compliance with **monthly churn <4%**. That constraint is therefore excluded, not satisfied.\n- The £20k MRR target also could not be evaluated as a level because the model has no recorded MRR baseline or target frame. The comparison is consequently relative, not evidence that any option reaches £20k.\n- The result rests materially on Olumi estimates for Pro subscriber base, new Pro sign-ups, monthly churn, and feature-release value; their calibration is provisional."
+}

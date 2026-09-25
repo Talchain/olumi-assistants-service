@@ -1,0 +1,43 @@
+{
+  "assistant_text": "Challenge the assumed **near-term effective capacity of junior hires** first.\n\n- The model assumes junior engineers add less delivery capacity by Q3 and create meaningful onboarding load; both are Olumi-authored estimates, not your evidence.\n- That hinges on practical facts: time-to-hire, ramp-up, platform complexity, and whether experienced engineers can mentor and review them.\n- It matters more than a generic salary guess because it determines whether “four people” produces more usable Q3 output than two experienced hires.\n\nNo model changes or rerun made.",
+  "suggested_actions": [],
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-09-25T01:41:52.405Z"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld",
+      "separation": "near_tie"
+    },
+    "robustness": {
+      "aggregate_level": "very_low"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "tools": [
+    {
+      "name": "get_canonical_state",
+      "mutated": false,
+      "refusal": null
+    }
+  ],
+  "providers": [
+    "openai"
+  ],
+  "trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": null,
+    "first_analysis": null
+  }
+}

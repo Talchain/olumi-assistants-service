@@ -1,0 +1,20 @@
+{
+ "state": "pricing-1",
+ "arm": "B",
+ "rep": 2,
+ "http": 200,
+ "ms": 5158,
+ "usage": {
+  "input_tokens": 10178,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 10175
+  },
+  "output_tokens": 226,
+  "output_tokens_details": {
+   "reasoning_tokens": 77
+  },
+  "total_tokens": 10404
+ },
+ "text": "No pricing option can be put forward yet, because the model could not test your under‑4% monthly churn condition.\n\n- The price comparison itself held up under the tested changes, but that is not a decision result: churn is calculated within the model and cannot currently be scored against your 4% limit.\n- The £20k MRR target is also not fully evaluable in its stated level frame, because the MRR starting level is unrecorded.\n- The analysis relies on Olumi estimates for active subscribers, new subscribers, churn, and feature-release value; they are assumptions, not evidence from you.\n\nThe unresolved reasoning step is to specify which measured churn quantity the 4% limit should constrain."
+}

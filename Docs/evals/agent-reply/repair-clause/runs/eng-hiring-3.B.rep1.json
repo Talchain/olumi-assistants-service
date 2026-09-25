@@ -1,0 +1,20 @@
+{
+ "state": "eng-hiring-3",
+ "arm": "B",
+ "rep": 1,
+ "http": 200,
+ "ms": 9009,
+ "usage": {
+  "input_tokens": 13709,
+  "input_tokens_details": {
+   "cache_write_tokens": 13706,
+   "cached_tokens": 0
+  },
+  "output_tokens": 452,
+  "output_tokens_details": {
+   "reasoning_tokens": 281
+  },
+  "total_tokens": 14161
+ },
+ "text": "No hiring option can be put forward yet, because the £400k/year salary limit was not checkable in this run.\n\n- The comparison is **fragile** and rests partly on Olumi-authored estimates; delivery capacity is the most sensitive stated factor, using the adopted **12 productive engineer-months before Q3** assumption.\n- The model compared delivery effects, but it could not assess whether any scenario satisfies **annual salary spend < £400k/year**. The limit remains recorded but was excluded from the comparison.\n- It also assumed that more progress towards “shipped by Q3” is better; that direction was not explicitly stated.\n\nThe needed repair is to specify which measurable cost quantity the £400k/year limit applies to, so it can be aligned with the model rather than its calculated salary-change factor."
+}

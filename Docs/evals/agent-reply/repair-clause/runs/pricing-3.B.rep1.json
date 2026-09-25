@@ -1,0 +1,20 @@
+{
+ "state": "pricing-3",
+ "arm": "B",
+ "rep": 1,
+ "http": 200,
+ "ms": 5456,
+ "usage": {
+  "input_tokens": 9979,
+  "input_tokens_details": {
+   "cache_write_tokens": 6970,
+   "cached_tokens": 3006
+  },
+  "output_tokens": 252,
+  "output_tokens_details": {
+   "reasoning_tokens": 117
+  },
+  "total_tokens": 10231
+ },
+ "text": "No option can be put forward from this run because the monthly-churn-under-4% limit could not be checked.\n\n- The comparison treated higher MRR as the objective and held up under the tested changes, but that is not a finding that any option meets your churn requirement.\n- The result rests partly on Olumi’s provisional inputs for Pro subscriber base, new Pro sign-ups, monthly churn and feature-release value—not measured or user-supplied figures.\n- To make the constraint testable, the model needs the part of the model to which the 4% churn limit applies specified; merely restating the limit will not resolve it."
+}

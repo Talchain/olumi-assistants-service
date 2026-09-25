@@ -1,0 +1,20 @@
+{
+ "state": "eng-hiring-4",
+ "arm": "B",
+ "rep": 1,
+ "http": 200,
+ "ms": 6199,
+ "usage": {
+  "input_tokens": 14020,
+  "input_tokens_details": {
+   "cache_write_tokens": 11011,
+   "cached_tokens": 3006
+  },
+  "output_tokens": 299,
+  "output_tokens_details": {
+   "reasoning_tokens": 134
+  },
+  "total_tokens": 14319
+ },
+ "text": "No option can be put forward from this run because the salary constraint was not assessable.\n\n- The limit is **Annual salary spend ≤ £400k/year**, but the model produces that factor as a calculated change rather than a comparable annual-spend level; it was therefore excluded from the comparison.\n- The comparison is **very fragile** and outcomes were almost indistinguishable. It also assumes that more platform-delivery progress is better, rather than recording that objective explicitly.\n- The ordering is most sensitive to **delivery capacity**—an Olumi estimate, not user evidence. The model includes six machine-supplied values, so this is a provisional result rather than validation.\n\nThe key repair is to define which model component the £400k/year limit applies to in a directly comparable level frame."
+}

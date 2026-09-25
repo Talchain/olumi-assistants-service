@@ -1,0 +1,43 @@
+{
+  "assistant_text": "Challenge the assumed **12 productive engineer-months before Q3** first.\n\nIt is the analysis’s most sensitive assumption and was recorded as a user-adopted starting value, not a measurement. Ask: *what work remains, how many productive months does the current team truly have, and how much of a new hire’s time arrives before the deadline?*  \n\nThat estimate bundles scope, hiring start date, ramp-up and existing-team availability; if any is wrong, the shipping comparison changes materially. The £0 current-salary placeholder is also important, but it prevents budget testing rather than being the main delivery driver.",
+  "suggested_actions": [],
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-09-25T01:39:54.021Z"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld",
+      "separation": "separated"
+    },
+    "robustness": {
+      "aggregate_level": "very_low"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "tools": [
+    {
+      "name": "get_canonical_state",
+      "mutated": false,
+      "refusal": null
+    }
+  ],
+  "providers": [
+    "openai"
+  ],
+  "trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": null,
+    "first_analysis": null
+  }
+}

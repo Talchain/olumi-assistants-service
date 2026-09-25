@@ -1,0 +1,52 @@
+{
+  "assistant_text": "Not yet—the first pass is only a draft to challenge, not a reliable answer.\n\n- £49/month and the £20k MRR / under-4% churn constraints come from you.\n- The model currently assumes 300 active Pro subscribers, 20 new Pro subscribers/month, 3% churn, and feature value of 65/100; these are Olumi estimates, not measurements.\n- It also cannot represent the 12‑month deadline in the calculation, only the MRR threshold.\n\nThe next move is to replace the subscriber, acquisition and churn assumptions with your actual figures.\n\nThe model was saved. Questions this model does not answer yet: The starting estimates of 300 active Pro subscribers, 20 new Pro subscribers per month, 3% monthly churn, and a feature-release value score of 65 are provisional modelling assumptions, not supplied measurements. Actual values are needed for a reliable 12-month calculation. What are the current number of active Pro subscribers, monthly new Pro subscribers, and monthly Pro churn rate? What functionality is in the next Pro feature release, and is it expected to materially improve perceived value for existing and prospective Pro customers? How price-sensitive are current and prospective Pro customers at £55 and £59, including expected effects on conversion, upgrades, and churn?",
+  "suggested_actions": [],
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-09-25T01:38:39.059Z"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld"
+    },
+    "robustness": {},
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "tools": [
+    {
+      "name": "get_canonical_state",
+      "mutated": false,
+      "refusal": null
+    },
+    {
+      "name": "build_model_from_brief",
+      "mutated": true,
+      "refusal": null
+    }
+  ],
+  "providers": [
+    "openai"
+  ],
+  "trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": null,
+    "first_analysis": {
+      "ran": true,
+      "run_turn_id": "00000000-0000-4000-8000-000000000000",
+      "construction_turn_id": "graph_registration:00000000-0000-4000-8000-000000000000",
+      "revision": "905984af9e8811bf",
+      "ms": 5223,
+      "coaching_blocks": 1
+    }
+  }
+}

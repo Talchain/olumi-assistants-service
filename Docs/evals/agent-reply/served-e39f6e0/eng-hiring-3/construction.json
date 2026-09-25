@@ -1,0 +1,66 @@
+{
+  "assistant_text": "Not yet: the first pass is purely provisional, with no validated delivery or cost inputs.\n\n- Your two hiring scenarios are represented; a mixed alternative and current staffing were also included for comparison.\n- The model still lacks the Q3 date, current salary spend, hiring costs/timing, remaining scope and present capacity. The £400k constraint cannot yet be tested.\n- I can record these **Olumi assumptions, not measurements**: current salary spend **£0/year** (a placeholder because none was supplied), and delivery capacity **12 productive engineer-months before Q3** (a starting estimate).\n\nAdopt those two assumptions, or correct them?\n\nThe model was saved. Questions this model does not answer yet: Which calendar year and exact deadline does “by Q3” mean? A month horizon cannot be calculated until this is known. What is current annual salary spend, and what fully loaded annual salary should be used for a senior engineer and a junior engineer? These inputs determine whether each option remains under £400k/year. What is the current platform delivery status, remaining scope, and current productive engineering capacity? Without these, the baseline probability of shipping by Q3 is unknown. What productive-capacity uplift, onboarding time, and hiring lead-time should be assumed for senior versus junior engineers? The provisional model assumes seniors add capacity sooner while juniors impose more onboarding load, but has no measured estimates.",
+  "suggested_actions": [
+    {
+      "id": "agent-approve-proposal:prop_76b3adcb6f1d1db78b20dc04c354b74c",
+      "label": "Use as starting assumptions"
+    },
+    {
+      "id": "agent-amend-proposal",
+      "label": "Change something first"
+    }
+  ],
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-09-25T01:38:50.180Z"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld"
+    },
+    "robustness": {},
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "tools": [
+    {
+      "name": "get_canonical_state",
+      "mutated": false,
+      "refusal": null
+    },
+    {
+      "name": "build_model_from_brief",
+      "mutated": true,
+      "refusal": null
+    },
+    {
+      "name": "propose_starting_point",
+      "mutated": false,
+      "refusal": null
+    }
+  ],
+  "providers": [
+    "openai"
+  ],
+  "trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": null,
+    "first_analysis": {
+      "ran": true,
+      "run_turn_id": "00000000-0000-4000-8000-000000000000",
+      "construction_turn_id": "graph_registration:00000000-0000-4000-8000-000000000000",
+      "revision": "1fb8bddd01becacd",
+      "ms": 26449,
+      "coaching_blocks": 2
+    }
+  }
+}

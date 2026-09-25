@@ -1,0 +1,20 @@
+{
+ "state": "eng-hiring-4",
+ "arm": "A",
+ "rep": 2,
+ "http": 200,
+ "ms": 3583,
+ "usage": {
+  "input_tokens": 13960,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 13957
+  },
+  "output_tokens": 140,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 14100
+ },
+ "text": "No option can be put forward yet: the analysis could not test the **annual salary spend ≤ £400k/year** limit.\n\n- The model’s salary-spend result is calculated as a change-like internal outcome, while the £400k limit has no stated comparison frame; treating them as comparable would be misleading. The constraint was therefore left unscored.\n- The comparison is also **very low robustness** and rests mainly on Olumi estimates, including delivery capacity, salary levels, and onboarding effects. The model’s stated goal direction is also unconfirmed.\n- It does show that delivery capacity is the most sensitive assumption, but investigation priority is not established from this run alone."
+}

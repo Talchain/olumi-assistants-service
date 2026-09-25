@@ -1,0 +1,43 @@
+{
+  "assistant_text": "No hiring plan can be put forward from this run because the **£400k/year constraint was not checkable** against the model’s salary-spend measure.\n\n- The comparison is **fragile**: delivery capacity is the most sensitive assumption, and it is an Olumi estimate rather than user-provided evidence. The model’s delivery, ramp-up and Q3 assumptions remain unvalidated.\n- The run compared four scenarios, including two inferred alternatives, but the salary cap was excluded from their comparison; so it does not establish that any scenario stays within budget.\n- The useful next reasoning step is to define how total annual salary spend should be measured against the £400k cap, including which current payroll and employment costs count.",
+  "suggested_actions": [],
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-09-25T01:39:36.059Z"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld",
+      "separation": "separated"
+    },
+    "robustness": {
+      "aggregate_level": "very_low"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "tools": [
+    {
+      "name": "run_analysis",
+      "mutated": false,
+      "refusal": null
+    }
+  ],
+  "providers": [
+    "openai"
+  ],
+  "trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": "run",
+    "first_analysis": null
+  }
+}

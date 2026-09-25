@@ -1,0 +1,20 @@
+{
+ "state": "eng-hiring-5",
+ "arm": "A",
+ "rep": 1,
+ "http": 200,
+ "ms": 5642,
+ "usage": {
+  "input_tokens": 13550,
+  "input_tokens_details": {
+   "cache_write_tokens": 10601,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 252,
+  "output_tokens_details": {
+   "reasoning_tokens": 118
+  },
+  "total_tokens": 13802
+ },
+ "text": "No hiring option can be put forward from this run, because the £400k salary constraint was not assessable in the model.\n\n- The comparison is **very fragile**: small assumption changes could alter the ordering, and the options produced nearly identical model outcomes.\n- Platform delivery capacity is the most influential assumption, but it is an Olumi estimate rather than evidence you supplied.\n- The salary limit remains recorded but unscored: annual salary spend is modelled from other factors, with no compatible measured level or specified target frame. The goal direction was also assumed rather than stated.\n\nThis is a provisional model-relative result, not a decision."
+}

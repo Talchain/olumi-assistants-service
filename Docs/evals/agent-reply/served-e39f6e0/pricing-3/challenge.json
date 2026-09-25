@@ -1,0 +1,43 @@
+{
+  "assistant_text": "Challenge the assumed **300 current Pro subscribers** first.\n\n- It is Olumi’s estimate, not evidence you supplied, and the analysis identifies it as the strongest driver of the MRR outcome: a larger or smaller base directly changes the revenue effect of £49, £54 and £59.\n- It is also easy to verify from billing data, unlike the more uncertain behavioural response to a price rise.\n- Next in strategic importance, though not explicitly quantified here, is whether £59 reduces new sign-ups or raises churn—especially for existing customers versus new ones.",
+  "suggested_actions": [],
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-09-25T01:38:49.124Z"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld",
+      "separation": "separated"
+    },
+    "robustness": {
+      "aggregate_level": "high"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "tools": [
+    {
+      "name": "get_canonical_state",
+      "mutated": false,
+      "refusal": null
+    }
+  ],
+  "providers": [
+    "openai"
+  ],
+  "trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": null,
+    "first_analysis": null
+  }
+}

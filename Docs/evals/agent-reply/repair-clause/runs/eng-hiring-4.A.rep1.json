@@ -1,0 +1,20 @@
+{
+ "state": "eng-hiring-4",
+ "arm": "A",
+ "rep": 1,
+ "http": 200,
+ "ms": 5611,
+ "usage": {
+  "input_tokens": 13960,
+  "input_tokens_details": {
+   "cache_write_tokens": 11011,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 232,
+  "output_tokens_details": {
+   "reasoning_tokens": 97
+  },
+  "total_tokens": 14192
+ },
+ "text": "No option can be put forward yet: the model did not assess the **£400k/year salary limit**.\n\n- Salary spend is modelled as a calculated change, not a comparable annual-spend reading, so the constraint was withheld rather than scored incorrectly. The model also has no stated direction for the Q3 goal.\n- The comparison is **very fragile** and produced nearly identical outcomes. Delivery capacity is the most sensitive assumption; it is Olumi’s provisional estimate, not user evidence.\n- Six underlying values were supplied by Olumi because the brief did not state them. This is a provisional scenario to challenge, not a decision answer."
+}

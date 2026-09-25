@@ -1,0 +1,20 @@
+{
+ "state": "pricing-5",
+ "arm": "A",
+ "rep": 1,
+ "http": 200,
+ "ms": 3395,
+ "usage": {
+  "input_tokens": 9947,
+  "input_tokens_details": {
+   "cache_write_tokens": 6998,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 139,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 10086
+ },
+ "text": "No option can be put forward yet, because the model could not test your under‑4% monthly churn limit.\n\n- The comparison itself was robust under the tested changes, but it rests on four Olumi-supplied inputs rather than recorded evidence: Pro subscriber count, other-plan MRR, monthly Pro conversions and monthly churn.\n- The 4% limit remains unscored: the model treats churn as calculated from other factors rather than as a comparable observed monthly rate.\n- The result also assumes that higher MRR is the objective; that direction was not explicitly recorded.\n\nThe key unresolved reasoning step is to define which measured churn rate the 4% limit applies to."
+}

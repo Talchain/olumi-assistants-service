@@ -1,0 +1,20 @@
+{
+ "state": "pricing-4",
+ "arm": "B",
+ "rep": 1,
+ "http": 200,
+ "ms": 6530,
+ "usage": {
+  "input_tokens": 10550,
+  "input_tokens_details": {
+   "cache_write_tokens": 7541,
+   "cached_tokens": 3006
+  },
+  "output_tokens": 306,
+  "output_tokens_details": {
+   "reasoning_tokens": 160
+  },
+  "total_tokens": 10856
+ },
+ "text": "No option can be put forward yet: the run could not check your under‑4% monthly churn limit or evaluate the £20k MRR threshold in the model’s outcome frame.\n\n- The price comparison itself was moderately robust under the tested variations, but that is not a verdict on meeting both of your stated conditions.\n- The comparison is particularly dependent on **Active Pro subscribers**; its source is not recorded. Non‑Pro MRR was also defaulted to £0 because no starting value was supplied.\n- The modelled churn constraint needs to be attached to the part of the model it governs before it can be checked; simply restating “under 4%” will not resolve that."
+}

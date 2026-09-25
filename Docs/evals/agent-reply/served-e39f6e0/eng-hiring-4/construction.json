@@ -1,0 +1,61 @@
+{
+  "assistant_text": "I’ve mapped the trade-off, but the £400k constraint needs a payroll baseline.\n\n- **Provisional first pass only:** it uses Olumi estimates of **£110k/year per senior** and **£55k/year per junior**, excluding unspecified employment on-costs. Nothing is validated, so it cannot put an option forward.\n- I propose one **assumption, not a measurement**: current in-scope annual salary spend is **£0/year**—i.e. the full £400k is available for these hires. This is purely a placeholder; correct it if existing payroll counts.\n- The model also needs the Q3 date, remaining scope/current capacity, and hiring ramp-up to judge whether either plan can ship.\n\nDo you approve that £0/year starting assumption?\n\nThe model was saved. Questions this model does not answer yet: What is the current annual salary spend that counts toward the £400k cap? The constraint applies to total annual spend, so no defensible total-spend baseline can be assumed. Do the £400k salary figures include only base salaries, or also employer taxes, pension, benefits, recruitment fees, and contractors? The provisional salary assumptions are £110k/year per senior engineer and £55k/year per junior engineer, excluding unspecified non-salary costs. Which calendar year and starting date define the Q3 deadline? A month-based horizon cannot be calculated from “by Q3” alone. What delivery scope remains, and what productive capacity does the current team already have? This determines whether either hiring plan can ship the platform by Q3 despite ramp-up. How long will senior and junior hires take to recruit, start, and become productive? Junior capacity and rework exposure are particularly uncertain without the available mentoring capacity.",
+  "suggested_actions": [
+    {
+      "id": "agent-approve-proposal:prop_9eecebc9b8b04851a30e8814d44e75a7",
+      "label": "Use as starting assumptions"
+    },
+    {
+      "id": "agent-amend-proposal",
+      "label": "Change something first"
+    }
+  ],
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-09-25T01:38:58.999Z"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld"
+    },
+    "robustness": {},
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "tools": [
+    {
+      "name": "build_model_from_brief",
+      "mutated": true,
+      "refusal": null
+    },
+    {
+      "name": "propose_starting_point",
+      "mutated": false,
+      "refusal": null
+    }
+  ],
+  "providers": [
+    "openai"
+  ],
+  "trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": null,
+    "first_analysis": {
+      "ran": true,
+      "run_turn_id": "00000000-0000-4000-8000-000000000000",
+      "construction_turn_id": "graph_registration:00000000-0000-4000-8000-000000000000",
+      "revision": "eb41eb24352858eb",
+      "ms": 11460,
+      "coaching_blocks": 1
+    }
+  }
+}

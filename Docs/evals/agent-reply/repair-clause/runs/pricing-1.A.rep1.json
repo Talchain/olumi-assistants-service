@@ -1,0 +1,20 @@
+{
+ "state": "pricing-1",
+ "arm": "A",
+ "rep": 1,
+ "http": 200,
+ "ms": 7432,
+ "usage": {
+  "input_tokens": 10118,
+  "input_tokens_details": {
+   "cache_write_tokens": 7169,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 352,
+  "output_tokens_details": {
+   "reasoning_tokens": 215
+  },
+  "total_tokens": 10470
+ },
+ "text": "No option can be put forward yet, because the analysis could not test either of your decision constraints properly.\n\n- The £20k MRR target could not be assessed: the model lacks an MRR starting level and an explicit objective direction. The “under 4% monthly churn” limit was also left unscored because churn is modelled as a calculated change rather than a comparable monthly rate.\n- Within the incomplete comparison, results held up under the tested changes—but that is not evidence that any price satisfies your goal.\n- Active Pro subscribers exert the largest structural influence; its value is an Olumi estimate, not a user-supplied measurement."
+}

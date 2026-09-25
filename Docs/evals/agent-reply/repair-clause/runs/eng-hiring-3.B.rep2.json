@@ -1,0 +1,20 @@
+{
+ "state": "eng-hiring-3",
+ "arm": "B",
+ "rep": 2,
+ "http": 200,
+ "ms": 4035,
+ "usage": {
+  "input_tokens": 13709,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 13706
+  },
+  "output_tokens": 155,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 13864
+ },
+ "text": "No option can be put forward yet, because the £400k annual-salary limit was not assessable in this run.\n\n- The comparison is **very low robustness** and rests partly on Olumi-supplied estimates, including onboarding load and hiring effects; it is a provisional model result, not validated evidence.\n- The key unresolved issue is that annual salary spend is calculated from other factors, but the £400k/year threshold has no compatible measurement frame. As a result, salary-budget compliance was excluded from the comparison.\n- The model also has no stated direction for the shipping goal, so it assumed that a higher goal value is preferable.\n\nA current analysis needs the salary limit attached to a measurable part of the model before this constraint can be tested."
+}

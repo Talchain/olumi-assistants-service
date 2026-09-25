@@ -1,0 +1,20 @@
+{
+ "state": "pricing-5",
+ "arm": "B",
+ "rep": 2,
+ "http": 200,
+ "ms": 5721,
+ "usage": {
+  "input_tokens": 10007,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 10004
+  },
+  "output_tokens": 289,
+  "output_tokens_details": {
+   "reasoning_tokens": 118
+  },
+  "total_tokens": 10296
+ },
+ "text": "No option can be put forward yet: the analysis could not test your requirement that monthly churn stays **below 4%**.\n\n- The comparison itself held up under the changes tested, but it rests largely on Olumi estimates, including Pro subscriber count, conversions, churn and other-plan MRR—not recorded measurements.\n- The model is structurally most sensitive to **Pro subscriber count**; that is an Olumi estimate. It also treats the MRR goal as “higher is better”, an assumption rather than a stated objective direction.\n- The £20k/month target was not scored because the model lacks a baseline MRR in the same frame, and the 12‑month horizon is not represented.\n\nTo make the churn condition testable, specify which measured model component the **<4% monthly** limit applies to."
+}

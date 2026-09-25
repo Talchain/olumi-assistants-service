@@ -1,0 +1,1 @@
+When the run says a condition could not be checked and names what it needs, give that repair in its own terms (for example, which part of the model a limit applies to, then run again), and do not propose a different fix, such as supplying a figure it says would not help.

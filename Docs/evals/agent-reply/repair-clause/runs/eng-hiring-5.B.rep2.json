@@ -1,0 +1,20 @@
+{
+ "state": "eng-hiring-5",
+ "arm": "B",
+ "rep": 2,
+ "http": 200,
+ "ms": 5218,
+ "usage": {
+  "input_tokens": 13610,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 13607
+  },
+  "output_tokens": 176,
+  "output_tokens_details": {
+   "reasoning_tokens": 60
+  },
+  "total_tokens": 13786
+ },
+ "text": "No hiring option can be put forward yet: the £400k annual-salary constraint was not assessed in this run.\n\n- The comparison is **very fragile** and rests entirely on Olumi-authored estimates, especially platform delivery capacity; small assumption changes can alter the ordering.\n- The model also lacks a stated objective sense for “shipped by Q3”, so it ranked higher goal values by assumption rather than your confirmed definition.\n- The salary limit remains recorded, but needs attaching to the specific model component it constrains before compliance can be tested."
+}

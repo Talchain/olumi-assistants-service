@@ -1,0 +1,20 @@
+{
+ "state": "eng-hiring-4",
+ "arm": "B",
+ "rep": 2,
+ "http": 200,
+ "ms": 5289,
+ "usage": {
+  "input_tokens": 14020,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 14017
+  },
+  "output_tokens": 228,
+  "output_tokens_details": {
+   "reasoning_tokens": 94
+  },
+  "total_tokens": 14248
+ },
+ "text": "No option can be put forward: the **£400k/year salary limit was not assessed** in this run.\n\n- The model cannot align that limit with its calculated annual-salary-spend measure, so it withheld constraint compliance rather than report a misleading result. The goal’s direction was also assumed rather than stated.\n- The comparison is **very fragile**: outcomes were almost identical across the four modelled staffing options, and the result is particularly sensitive to the assumed link from delivery capacity to platform progress.\n- Six underlying values are Olumi estimates, not user evidence. This run is therefore a provisional model finding, not a decision answer."
+}

@@ -1,0 +1,43 @@
+{
+  "assistant_text": "Challenge the **delivery-capacity assumption** first.\n\n- The model assumes current platform capacity is **2 FTE-equivalent months per month**—an Olumi estimate, not your evidence—and that hires translate into capacity in the modelled way.\n- Test the ramp-up reality: how much productive platform capacity does each senior or junior add before Q3, after onboarding and mentoring drag?\n- Next, challenge whether the **£400k** cap covers existing payroll; the model currently uses an Olumi-estimated **£180k/year** existing spend, and the constraint could not be checked.\n\nThis uncertainty, rather than a hiring preference, is the main finding.",
+  "suggested_actions": [],
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-09-25T01:41:45.024Z"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld",
+      "separation": "near_tie"
+    },
+    "robustness": {
+      "aggregate_level": "very_low"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "tools": [
+    {
+      "name": "get_canonical_state",
+      "mutated": false,
+      "refusal": null
+    }
+  ],
+  "providers": [
+    "openai"
+  ],
+  "trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": null,
+    "first_analysis": null
+  }
+}

@@ -1,0 +1,20 @@
+{
+ "state": "eng-hiring-5",
+ "arm": "A",
+ "rep": 2,
+ "http": 200,
+ "ms": 3788,
+ "usage": {
+  "input_tokens": 13550,
+  "input_tokens_details": {
+   "cache_write_tokens": 0,
+   "cached_tokens": 13547
+  },
+  "output_tokens": 135,
+  "output_tokens_details": {
+   "reasoning_tokens": 0
+  },
+  "total_tokens": 13685
+ },
+ "text": "No option can be put forward yet: the £400k salary constraint was not assessable in this run.\n\n- The comparison is **very fragile** and rests on six Olumi-supplied values, not your evidence; platform delivery capacity is the most influential assumption.\n- The model’s salary-cap factor is calculated from other inputs, but it lacks a compatible measured baseline and target frame, so the analysis withheld constraint compliance rather than score it incorrectly.\n- The stated goal direction is also unconfirmed: the run assumed that a higher “shipped by Q3” value is preferable.\n\nThis is a provisional model result to challenge, not a hiring decision."
+}

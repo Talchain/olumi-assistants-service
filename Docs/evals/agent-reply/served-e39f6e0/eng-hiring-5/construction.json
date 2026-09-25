@@ -1,0 +1,53 @@
+{
+  "assistant_text": "I’ve drafted a model, but it cannot yet responsibly answer the hiring choice.\n\n- Your stated constraints are: ship by Q3 and keep annual salary spend under £400k.\n- Its provisional first pass uses **Olumi estimates**, not your data: £110k per senior, £55k per junior, £180k existing annual salary spend, and 2 FTE-equivalent months/month delivery capacity.\n- It also includes two comparison cases—current staffing and one senior plus one junior—but puts no option forward: the Q3 date, delivery scope, ramp-up and whether the cap includes existing payroll are unknown.\n\nWhich year and month does Q3 end, and does the £400k include current payroll?\n\nThe model was saved. Questions this model does not answer yet: Which calendar year does “Q3” refer to, and how many months remain until its end? Does the £400k annual salary-spend cap include existing staff payroll, or only the new hires? The provisional £180k existing-spend baseline is an AI modelling assumption. What are the actual fully loaded annual salaries for senior and junior engineers? The provisional assumptions are £110k and £55k respectively. What is the current platform delivery capacity, and how much capacity does each senior or junior hire add after ramp-up? The provisional capacity baseline of 2 FTE-equivalent months/month is an AI modelling assumption. What scope, remaining work, and minimum completion threshold are required to count the platform as shipped by Q3? (and 1 more)",
+  "suggested_actions": [],
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-09-25T01:41:29.748Z"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld",
+      "separation": "near_tie"
+    },
+    "robustness": {},
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "tools": [
+    {
+      "name": "get_canonical_state",
+      "mutated": false,
+      "refusal": null
+    },
+    {
+      "name": "build_model_from_brief",
+      "mutated": true,
+      "refusal": null
+    }
+  ],
+  "providers": [
+    "openai"
+  ],
+  "trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": null,
+    "first_analysis": {
+      "ran": true,
+      "run_turn_id": "00000000-0000-4000-8000-000000000000",
+      "construction_turn_id": "graph_registration:00000000-0000-4000-8000-000000000000",
+      "revision": "3c97b39c1948e133",
+      "ms": 6541,
+      "coaching_blocks": 1
+    }
+  }
+}

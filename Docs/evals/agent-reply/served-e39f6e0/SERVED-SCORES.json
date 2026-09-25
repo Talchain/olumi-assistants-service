@@ -1,0 +1,1377 @@
+{
+ "calls": 16,
+ "blocked": 0,
+ "out": [
+  {
+   "journey": "eng-hiring-3",
+   "turn": "explicit-run",
+   "http": 200,
+   "ms": 45095,
+   "usage": {
+    "input_tokens": 12184,
+    "input_tokens_details": {
+     "cache_write_tokens": 12181,
+     "cached_tokens": 0
+    },
+    "output_tokens": 2809,
+    "output_tokens_details": {
+     "reasoning_tokens": 2070
+    },
+    "total_tokens": 14993
+   },
+   "total": 14,
+   "fails": [
+    "truth_fidelity"
+   ],
+   "top_defect": "The reply gives an unsupported remedy—adding annual costs for hires and an unstated existing team—instead of asking which model component the £400k/year limit applies to.",
+   "score": {
+    "full": {
+     "scores": {
+      "concise": 1,
+      "shape": 2,
+      "decisive_caveat": 2,
+      "next_move": 0,
+      "questions": 0,
+      "leader_honesty": 2,
+      "nothing_invented": 0,
+      "attribution": 2,
+      "provisional_vs_validated": 2,
+      "fidelity": 1,
+      "uncertainty": 2,
+      "useful_next_step": 0
+     },
+     "notes": {
+      "concise": "120 words. The caveats are material, but this could be materially shorter.",
+      "shape": "Answer first, followed by three short bullets and one next-step sentence.",
+      "decisive_caveat": "Correctly preserves that the £400k/year constraint was withheld and therefore cannot support a decision.",
+      "next_move": "The proposed remedy is not the supported next move. The run says to identify which model part the limit applies to; it specifically says a current value on derived Annual salary spend does not solve the issue.",
+      "questions": "It asks no question, despite the run requiring clarification of which model component the salary limit applies to.",
+      "leader_honesty": "No option is presented as leading, favoured, or otherwise ranked.",
+      "nothing_invented": "It introduces annual costs for an 'existing team', which is not a stated model component or requested clarification.",
+      "attribution": "Delivery capacity and annual salary spend are user overrides rather than measurements; calling them adopted, non-measured assumptions is acceptable at this level.",
+      "provisional_vs_validated": "Calls the shipping comparison provisional and identifies fragility.",
+      "fidelity": "The core limitation is accurate, but the final claim that expressing costs for hires and an existing team will make the limit checkable is not established by the run and conflicts with its stated remediation.",
+      "uncertainty": "Appropriately flags provisional assumptions, fragility, missing goal direction, and target-frame problems.",
+      "useful_next_step": "The useful state-specific action is to identify the model part to which the limit applies, then record it there and rerun—not to add the unstated existing-team cost proposal."
+     },
+     "gates": {
+      "truth_fidelity": "FAIL",
+      "consent_action_truth": "PASS",
+      "provenance": "PASS",
+      "claim_permission_currentness": "PASS",
+      "usability_controls": "PASS"
+     },
+     "words": 120,
+     "questions": 0,
+     "requests_for_information": [],
+     "duplicate_statements": 0,
+     "evidence": [
+      {
+       "item": "Unsupported and potentially ineffective next move",
+       "span": "\"express salary spend as annual £ costs for the relevant hires and existing team, so the £400k limit can be checked\"",
+       "source": "/blocks/0/summary and /blocks/0/enrichment/inference_warnings[0]"
+      },
+      {
+       "item": "Missing required clarification question",
+       "span": "\"A meaningful next step is to express salary spend as annual £ costs for the relevant hires and existing team\"",
+       "source": "/blocks/0/summary: \"Tell me which part of your model it applies to and I will record it there\""
+      },
+      {
+       "item": "Invented model component/action",
+       "span": "\"relevant hires and existing team\"",
+       "source": "/draft_graph/nodes and /blocks/0/summary"
+      },
+      {
+       "item": "Truth-fidelity gate failure",
+       "span": "\"so the £400k limit can be checked\"",
+       "source": "/blocks/0/summary and /blocks/0/enrichment/inference_warnings[0]: Annual salary spend is derived, has no measured starting point, and the stated remediation is to identify the model part to which the limit applies"
+      }
+     ]
+    },
+    "top_defect": "The reply gives an unsupported remedy—adding annual costs for hires and an unstated existing team—instead of asking which model component the £400k/year limit applies to."
+   }
+  },
+  {
+   "journey": "eng-hiring-3",
+   "turn": "challenge",
+   "http": 200,
+   "ms": 45791,
+   "usage": {
+    "input_tokens": 11844,
+    "input_tokens_details": {
+     "cache_write_tokens": 10471,
+     "cached_tokens": 1370
+    },
+    "output_tokens": 2842,
+    "output_tokens_details": {
+     "reasoning_tokens": 2124
+    },
+    "total_tokens": 14686
+   },
+   "total": 16,
+   "fails": [
+    "truth_fidelity"
+   ],
+   "top_defect": "It invents an explanation of what the 12 productive engineer-month estimate “bundles” instead of limiting itself to the modelled capacity assumption and its stated provenance.",
+   "score": {
+    "full": {
+     "scores": {
+      "concise": 2,
+      "shape": 2,
+      "decisive_caveat": 1,
+      "next_move": 2,
+      "questions": 0,
+      "leader_honesty": 2,
+      "nothing_invented": 0,
+      "attribution": 2,
+      "provisional_vs_validated": 1,
+      "fidelity": 1,
+      "uncertainty": 1,
+      "useful_next_step": 2
+     },
+     "notes": {
+      "concise": "89 model-authored words; within the default limit.",
+      "shape": "Gives the recommendation first, followed by short supporting paragraphs.",
+      "decisive_caveat": "It usefully distinguishes the user-adopted capacity input from a measurement and notes the salary-testing limitation, but omits that the sensitivity/robustness evidence is provisional and overall robustness is very low.",
+      "next_move": "Challenge the delivery-capacity assumption first; this is supported by its influence rank of 1.",
+      "questions": "“Ask: what work remains, how many productive months does the current team truly have, and how much of a new hire’s time arrives before the deadline?” makes three distinct requests for information, exceeding the one-question default.",
+      "leader_honesty": "No option is called leading, favoured, or best.",
+      "nothing_invented": "The asserted components of the 12 engineer-month estimate—scope, hiring start date, ramp-up, and existing-team availability—are not supplied as components in the model or results.",
+      "attribution": "The 12 productive engineer-month value is correctly characterized as user-adopted/user-overridden rather than measured.",
+      "provisional_vs_validated": "Calling it the analysis’s most sensitive assumption is tied to the analysis, but the reply does not disclose that the sensitivity calculation is provisional pending calibration.",
+      "fidelity": "The 12 productive engineer-months-before-Q3 value and £0 current-salary value match. However, describing £0 as a “placeholder” is not established by the supplied provenance, which says user override.",
+      "uncertainty": "It acknowledges uncertainty in the capacity estimate, but not the material very-low robustness and provisional-calibration limitations of the analysis.",
+      "useful_next_step": "Clarifying the capacity estimate is useful for this goal and aligns with the highest-ranked driver."
+     },
+     "gates": {
+      "truth_fidelity": "FAIL",
+      "consent_action_truth": "PASS",
+      "provenance": "PASS",
+      "claim_permission_currentness": "PASS",
+      "usability_controls": "PASS"
+     },
+     "words": 89,
+     "questions": 3,
+     "requests_for_information": [
+      "what work remains",
+      "how many productive months the current team truly has",
+      "how much of a new hire’s time arrives before the deadline"
+     ],
+     "duplicate_statements": 0,
+     "evidence": [
+      {
+       "item": "questions score 0",
+       "span": "“Ask: what work remains, how many productive months does the current team truly have, and how much of a new hire’s time arrives before the deadline?”",
+       "source": "Developer scoring rubric, criterion 5: one question by default."
+      },
+      {
+       "item": "nothing_invented score 0; truth_fidelity FAIL",
+       "span": "“That estimate bundles scope, hiring start date, ramp-up and existing-team availability”",
+       "source": "CASE TRUTH /draft_graph/nodes and /draft_graph/edges: no supplied node, edge, or result establishes scope, hiring start date, or existing-team availability as components of the 12 productive engineer-month input."
+      }
+     ]
+    },
+    "top_defect": "It invents an explanation of what the 12 productive engineer-month estimate “bundles” instead of limiting itself to the modelled capacity assumption and its stated provenance."
+   }
+  },
+  {
+   "journey": "eng-hiring-4",
+   "turn": "explicit-run",
+   "http": 200,
+   "ms": 37943,
+   "usage": {
+    "input_tokens": 12620,
+    "input_tokens_details": {
+     "cache_write_tokens": 11247,
+     "cached_tokens": 1370
+    },
+    "output_tokens": 2517,
+    "output_tokens_details": {
+     "reasoning_tokens": 1898
+    },
+    "total_tokens": 15137
+   },
+   "total": 17,
+   "fails": [
+    "truth_fidelity"
+   ],
+   "top_defect": "The reply invents a specific payroll-and-employment-cost scoping exercise instead of asking the supported clarification about how and where the salary constraint applies in the model.",
+   "score": {
+    "full": {
+     "scores": {
+      "concise": 1,
+      "shape": 2,
+      "decisive_caveat": 2,
+      "next_move": 1,
+      "questions": 0,
+      "leader_honesty": 2,
+      "nothing_invented": 1,
+      "attribution": 2,
+      "provisional_vs_validated": 2,
+      "fidelity": 1,
+      "uncertainty": 2,
+      "useful_next_step": 1
+     },
+     "notes": {
+      "concise": "109 words, exceeding the default 90-word target, though much of the additional text is material caveat.",
+      "shape": "Clear conclusion first, followed by three short bullets.",
+      "decisive_caveat": "Correctly retains that the £400k/year constraint could not be checked and therefore cannot establish budget compliance.",
+      "next_move": "Defining the measurement/frame for the salary cap is broadly supported, but adding current payroll and employment-cost scope is not supplied by the model state.",
+      "questions": "0. It states a next step rather than asking the needed clarification.",
+      "leader_honesty": "No option is described as leading, favoured, best, or ranked.",
+      "nothing_invented": "The payroll and employment-cost scope is invented; the supplied result instead asks which part of the model the limit applies to.",
+      "attribution": "Delivery capacity is correctly identified as an Olumi/CEE-inferred estimate rather than user-provided evidence.",
+      "provisional_vs_validated": "It explicitly says assumptions remain unvalidated and does not portray the run as validation.",
+      "fidelity": "The cap and unscored-comparison caveat are accurate, but “ramp-up” is not an identified assumption in the supplied state.",
+      "uncertainty": "Appropriately identifies fragility, unvalidated assumptions, and lack of budget-compliance evidence.",
+      "useful_next_step": "Clarifying how the cap maps to the model is useful, but the proposed cost components go beyond the state and omit the stated frame/mapping issue."
+     },
+     "gates": {
+      "truth_fidelity": "FAIL",
+      "consent_action_truth": "PASS",
+      "provenance": "PASS",
+      "claim_permission_currentness": "PASS",
+      "usability_controls": "PASS"
+     },
+     "words": 109,
+     "questions": 0,
+     "requests_for_information": [],
+     "duplicate_statements": 0,
+     "evidence": [
+      {
+       "item": "questions score 0",
+       "span": "“The useful next reasoning step is to define how total annual salary spend should be measured against the £400k cap...”",
+       "source": "/blocks/0/summary — the analysis asks the user to identify which part of the model the limit applies to, but the reply asks no clarification question."
+      },
+      {
+       "item": "truth_fidelity gate FAIL",
+       "span": "“including which current payroll and employment costs count.”",
+       "source": "/blocks/0/summary and /analysis_result/enrichment/inference_warnings — these mention mapping the limit to the model and an unspecified constraint frame, not current payroll or employment-cost components."
+      }
+     ]
+    },
+    "top_defect": "The reply invents a specific payroll-and-employment-cost scoping exercise instead of asking the supported clarification about how and where the salary constraint applies in the model."
+   }
+  },
+  {
+   "journey": "eng-hiring-4",
+   "turn": "challenge",
+   "http": 200,
+   "ms": 17116,
+   "usage": {
+    "input_tokens": 12083,
+    "input_tokens_details": {
+     "cache_write_tokens": 10710,
+     "cached_tokens": 1370
+    },
+    "output_tokens": 1203,
+    "output_tokens_details": {
+     "reasoning_tokens": 516
+    },
+    "total_tokens": 13286
+   },
+   "total": 19,
+   "fails": [],
+   "top_defect": "It omits the consequential caveat that the £400k/year salary constraint was unscored, while introducing an unsupported architectural-ownership test.",
+   "score": {
+    "full": {
+     "scores": {
+      "concise": 2,
+      "shape": 2,
+      "decisive_caveat": 1,
+      "next_move": 2,
+      "questions": 0,
+      "leader_honesty": 2,
+      "nothing_invented": 1,
+      "attribution": 2,
+      "provisional_vs_validated": 2,
+      "fidelity": 2,
+      "uncertainty": 1,
+      "useful_next_step": 2
+     },
+     "notes": {
+      "concise": "82 words; concise for the request.",
+      "shape": "Direct answer followed by three short tests and one relevant conditional caveat.",
+      "decisive_caveat": "It notes that the highlighted delivery-capacity assumption is unvalidated, but omits the material warning that the £400k/year constraint could not be scored against the analysis.",
+      "next_move": "One supported move: challenge/test the delivery-capacity assumption.",
+      "questions": "No request for information is asked. The default asks for one question where useful.",
+      "leader_honesty": "No option is described as leading, favoured, or best.",
+      "nothing_invented": "The recruitment-to-productivity and architectural-ownership tests are plausible elaborations but are not supplied model assumptions or findings.",
+      "attribution": "Delivery capacity is AI-inferred; the £0/year salary-spend observed state is a user override.",
+      "provisional_vs_validated": "Correctly characterizes the AI-authored assumption as unvalidated.",
+      "fidelity": "Delivery capacity, Q3, £0/year, and the £400k cap match the supplied state.",
+      "uncertainty": "Acknowledges lack of validation, but does not mention the unscored constraint and unspecified goal direction/frame warnings.",
+      "useful_next_step": "Testing whether hires translate predictably into delivery capacity is directly useful for this model and goal."
+     },
+     "gates": {
+      "truth_fidelity": "PASS",
+      "consent_action_truth": "PASS",
+      "provenance": "PASS",
+      "claim_permission_currentness": "PASS",
+      "usability_controls": "PASS"
+     },
+     "words": 82,
+     "questions": 0,
+     "requests_for_information": [],
+     "duplicate_statements": 0,
+     "evidence": [
+      {
+       "item": "Delivery capacity is the highest-ranked sensitivity factor, but its evidence is provisional.",
+       "span": "“It is the model’s most sensitive assumption, yet it is Olumi-authored and currently unvalidated.”",
+       "source": "/blocks/0/enrichment/factor_sensitivity/0; /draft_graph/nodes (delivery_capacity)"
+      },
+      {
+       "item": "The salary-spend state is £0/year from a user override and the constraint is £400,000/year.",
+       "span": "“£0/year current in-scope salary spend” ... “£400k cap”",
+       "source": "/draft_graph/nodes (annual_salary_spend); /draft_graph/goal_constraints/0"
+      },
+      {
+       "item": "The analysis warns that the salary constraint was not scored because its frame/target could not be resolved.",
+       "span": "omitted",
+       "source": "/blocks/0/enrichment/inference_warnings (CONSTRAINT_TARGET_UNRELIABLE; CONSTRAINT_FRAME_UNSPECIFIED)"
+      },
+      {
+       "item": "Architectural ownership is not an explicit model factor, edge, finding, or stated assumption.",
+       "span": "“senior architectural ownership rather than raw implementation capacity”",
+       "source": "/draft_graph; /blocks/0/enrichment"
+      }
+     ]
+    },
+    "top_defect": "It omits the consequential caveat that the £400k/year salary constraint was unscored, while introducing an unsupported architectural-ownership test."
+   }
+  },
+  {
+   "journey": "eng-hiring-5",
+   "turn": "explicit-run",
+   "http": 200,
+   "ms": 34687,
+   "usage": {
+    "input_tokens": 11846,
+    "input_tokens_details": {
+     "cache_write_tokens": 10473,
+     "cached_tokens": 1370
+    },
+    "output_tokens": 2313,
+    "output_tokens_details": {
+     "reasoning_tokens": 1552
+    },
+    "total_tokens": 14159
+   },
+   "total": 14,
+   "fails": [
+    "truth_fidelity"
+   ],
+   "top_defect": "The reply wrongly says that obtaining a current annual-salary-spend measure is needed, despite the analysis explicitly stating that such a value cannot make the calculated quantity comparable to the constraint.",
+   "score": {
+    "full": {
+     "scores": {
+      "concise": 1,
+      "shape": 2,
+      "decisive_caveat": 2,
+      "next_move": 1,
+      "questions": 0,
+      "leader_honesty": 2,
+      "nothing_invented": 0,
+      "attribution": 2,
+      "provisional_vs_validated": 2,
+      "fidelity": 0,
+      "uncertainty": 2,
+      "useful_next_step": 0
+     },
+     "notes": {
+      "concise": "109 words; slightly over the default, with some repetition of the constraint caveat.",
+      "shape": "Direct conclusion followed by three short bullets.",
+      "decisive_caveat": "Retains that the salary constraint was not scored and the comparison is fragile.",
+      "next_move": "It implies clarification, but does not clearly give the supported primary action: specify which model quantity the constraint applies to, stamp its frame, then rerun.",
+      "questions": "No actual question is asked.",
+      "leader_honesty": "Does not name or imply a leading option or give win-probability ranking.",
+      "nothing_invented": "It invents that a spending measure is needed, although the analysis specifically says a current value for calculated Annual salary spend would not resolve the issue.",
+      "attribution": "Correctly identifies the 2 FTE-equivalent months/month value and the comparison estimates as Olumi-derived.",
+      "provisional_vs_validated": "Calls the comparison fragile and labels inputs as Olumi estimates rather than validated evidence.",
+      "fidelity": "The requested remedy conflicts with the supplied warning: the measure is calculated from inputs and has no measured starting point that would anchor the constraint.",
+      "uncertainty": "Appropriately acknowledges fragile relationships, machine-authored inputs, and the unscored constraint.",
+      "useful_next_step": "Clarifying the frame is useful, but requesting a spending measure is not; the supported next move is to identify the quantity the constraint applies to and its level/delta frame."
+     },
+     "gates": {
+      "truth_fidelity": "FAIL",
+      "consent_action_truth": "PASS",
+      "provenance": "PASS",
+      "claim_permission_currentness": "PASS",
+      "usability_controls": "PASS"
+     },
+     "words": 109,
+     "questions": 0,
+     "requests_for_information": [],
+     "duplicate_statements": 1,
+     "evidence": [
+      {
+       "item": "questions = 0",
+       "span": "“A current analysis needs that spending measure and its frame clarified.”",
+       "source": "FULL reply; this is declarative rather than an actual question."
+      },
+      {
+       "item": "nothing_invented = 0",
+       "span": "“A current analysis needs that spending measure”",
+       "source": "/blocks/0/enrichment/inference_warnings/0/message: “Setting a current value for ‘Annual salary spend’ would not change that … [it] has no measured starting point of its own to anchor to.”"
+      },
+      {
+       "item": "fidelity = 0",
+       "span": "“A current analysis needs that spending measure and its frame clarified.”",
+       "source": "/blocks/0/enrichment/inference_warnings/0/message; it requires identifying the applicable model quantity and frames the current-value remedy as ineffective."
+      },
+      {
+       "item": "useful_next_step = 0",
+       "span": "“needs that spending measure”",
+       "source": "/blocks/0/summary: “Tell me which part of your model it applies to and I will record it there; this one stays on the model. Then run the analysis again.”"
+      },
+      {
+       "item": "truth_fidelity = FAIL",
+       "span": "“A current analysis needs that spending measure”",
+       "source": "/blocks/0/enrichment/inference_warnings/0/message: a current value for calculated Annual salary spend “would not change” the problem."
+      }
+     ]
+    },
+    "top_defect": "The reply wrongly says that obtaining a current annual-salary-spend measure is needed, despite the analysis explicitly stating that such a value cannot make the calculated quantity comparable to the constraint."
+   }
+  },
+  {
+   "journey": "eng-hiring-5",
+   "turn": "challenge",
+   "http": 200,
+   "ms": 22222,
+   "usage": {
+    "input_tokens": 11516,
+    "input_tokens_details": {
+     "cache_write_tokens": 10143,
+     "cached_tokens": 1370
+    },
+    "output_tokens": 1635,
+    "output_tokens_details": {
+     "reasoning_tokens": 1034
+    },
+    "total_tokens": 13151
+   },
+   "total": 24,
+   "fails": [],
+   "top_defect": "none",
+   "score": {
+    "full": {
+     "scores": {
+      "concise": 2,
+      "shape": 2,
+      "decisive_caveat": 2,
+      "next_move": 2,
+      "questions": 2,
+      "leader_honesty": 2,
+      "nothing_invented": 2,
+      "attribution": 2,
+      "provisional_vs_validated": 2,
+      "fidelity": 2,
+      "uncertainty": 2,
+      "useful_next_step": 2
+     },
+     "notes": {
+      "concise": "89 words; the detail supports the requested challenge.",
+      "shape": "Direct answer followed by three short supporting bullets and a brief conclusion.",
+      "decisive_caveat": "Retains that the salary constraint could not be checked.",
+      "next_move": "Identifies one supported primary challenge: the delivery-capacity assumption.",
+      "questions": "One useful clarification question asks for productive capacity added before Q3, including onboarding and mentoring drag.",
+      "leader_honesty": "No option is described as leading, favoured, or best.",
+      "nothing_invented": "Capacity, onboarding drag, salary cap, and existing spend are all present in the supplied state.",
+      "attribution": "Correctly labels the capacity and existing-spend values as Olumi estimates rather than user evidence.",
+      "provisional_vs_validated": "Does not present the model assumptions or analysis as validated.",
+      "fidelity": "Preserves 2 FTE-equivalent months/month, £400k, £180k/year, and the uncheckable-constraint caveat.",
+      "uncertainty": "Proportionately flags machine-authored estimates and the unresolved constraint.",
+      "useful_next_step": "Testing pre-Q3 productive capacity after onboarding is directly useful to this staffing-and-delivery model."
+     },
+     "gates": {
+      "truth_fidelity": "PASS",
+      "consent_action_truth": "PASS",
+      "provenance": "PASS",
+      "claim_permission_currentness": "PASS",
+      "usability_controls": "PASS"
+     },
+     "words": 89,
+     "questions": 1,
+     "requests_for_information": [
+      "How much productive platform capacity does each senior or junior add before Q3, after onboarding and mentoring drag?"
+     ],
+     "duplicate_statements": 0,
+     "evidence": [
+      {
+       "item": "Current capacity, unit, and provenance",
+       "span": "“2 FTE-equivalent months per month—an Olumi estimate”",
+       "source": "/draft_graph/nodes[id=platform_delivery_capacity]/observed_state and /draft_graph/nodes[id=platform_delivery_capacity]/provenance"
+      },
+      {
+       "item": "Capacity is the primary structural sensitivity",
+       "span": "“Challenge the delivery-capacity assumption first.”",
+       "source": "/blocks[0]/enrichment/factor_sensitivity[0]"
+      },
+      {
+       "item": "Salary constraint was not checkable",
+       "span": "“the constraint could not be checked”",
+       "source": "/blocks[0]/summary and /blocks[0]/enrichment/inference_warnings[0]"
+      },
+      {
+       "item": "Existing annual spend and provenance",
+       "span": "“Olumi-estimated £180k/year existing spend”",
+       "source": "/draft_graph/nodes[id=annual_salary_spend]/observed_state"
+      }
+     ]
+    },
+    "top_defect": "none"
+   }
+  },
+  {
+   "journey": "eng-hiring-6",
+   "turn": "explicit-run",
+   "http": 200,
+   "ms": 24012,
+   "usage": {
+    "input_tokens": 12974,
+    "input_tokens_details": {
+     "cache_write_tokens": 11601,
+     "cached_tokens": 1370
+    },
+    "output_tokens": 1767,
+    "output_tokens_details": {
+     "reasoning_tokens": 1034
+    },
+    "total_tokens": 14741
+   },
+   "total": 18,
+   "fails": [
+    "truth_fidelity"
+   ],
+   "top_defect": "The reply falsely presents option-level salary values as sufficient to test the £400k constraint, although the run says the calculated salary node cannot be scored against that limit without correctly locating/representing the limit in the model.",
+   "score": {
+    "full": {
+     "scores": {
+      "concise": 2,
+      "shape": 2,
+      "decisive_caveat": 2,
+      "next_move": 1,
+      "questions": 1,
+      "leader_honesty": 2,
+      "nothing_invented": 2,
+      "attribution": 2,
+      "provisional_vs_validated": 2,
+      "fidelity": 0,
+      "uncertainty": 2,
+      "useful_next_step": 0
+     },
+     "notes": {
+      "concise": "79 words; concise.",
+      "shape": "Direct answer followed by three short bullets.",
+      "decisive_caveat": "Keeps the decisive caveat that the £400k/year constraint was not assessed.",
+      "next_move": "Requesting option-level salary values is supported by the missing-value blockers, but it does not by itself make the constraint testable.",
+      "questions": "No question is asked; one focused request for the missing salary values would have been preferable.",
+      "leader_honesty": "Does not name or imply an option leader.",
+      "nothing_invented": "The stated missing salary values, unchanged treatment, fragility, and Olumi-estimated inputs are supported.",
+      "attribution": "Correctly identifies delivery capacity and onboarding load as Olumi estimates rather than validated user inputs.",
+      "provisional_vs_validated": "Does not present the provisional analysis as validated.",
+      "fidelity": "It incorrectly says supplying annual salary spend for each option will allow the £400k limit to be tested; the run states this constraint remains unscorable because the calculated salary node has no compatible measured baseline/frame.",
+      "uncertainty": "Appropriately flags both the unassessed constraint and unvalidated estimated inputs.",
+      "useful_next_step": "The primary next step does not address the stated reason the constraint cannot be assessed: the user must identify the model part to which the limit applies; option-level values alone do not solve that."
+     },
+     "gates": {
+      "truth_fidelity": "FAIL",
+      "consent_action_truth": "PASS",
+      "provenance": "PASS",
+      "claim_permission_currentness": "PASS",
+      "usability_controls": "PASS"
+     },
+     "words": 79,
+     "questions": 0,
+     "requests_for_information": [],
+     "duplicate_statements": 0,
+     "evidence": [
+      {
+       "item": "fidelity (0)",
+       "span": "“specify annual salary spend for each option—including current staffing—so the £400k limit can be tested.”",
+       "source": "/blocks/0/summary: “Tell me which part of your model it applies to and I will record it there”; and /blocks/0/enrichment/inference_warnings/0/message: “Setting a current value for ‘Annual salary spend’ would not change that.”"
+      },
+      {
+       "item": "useful_next_step (0)",
+       "span": "“The next reasoning step is to specify annual salary spend for each option… so the £400k limit can be tested.”",
+       "source": "/blocks/0/summary: the supported repair for the unscored limit is to identify which model part it applies to; /blocks/0/enrichment/inference_warnings/0/message."
+      },
+      {
+       "item": "truth_fidelity (FAIL)",
+       "span": "“specify annual salary spend for each option—including current staffing—so the £400k limit can be tested.”",
+       "source": "/blocks/0/enrichment/inference_warnings/0/message states that a current value cannot anchor this calculated factor and the constraint was withheld rather than scored; /blocks/0/summary requires identifying the relevant model part."
+      }
+     ]
+    },
+    "top_defect": "The reply falsely presents option-level salary values as sufficient to test the £400k constraint, although the run says the calculated salary node cannot be scored against that limit without correctly locating/representing the limit in the model."
+   }
+  },
+  {
+   "journey": "eng-hiring-6",
+   "turn": "challenge",
+   "http": 200,
+   "ms": 21716,
+   "usage": {
+    "input_tokens": 12668,
+    "input_tokens_details": {
+     "cache_write_tokens": 11295,
+     "cached_tokens": 1370
+    },
+    "output_tokens": 1578,
+    "output_tokens_details": {
+     "reasoning_tokens": 795
+    },
+    "total_tokens": 14246
+   },
+   "total": 12,
+   "fails": [
+    "truth_fidelity"
+   ],
+   "top_defect": "It invents a Q3-based claim that junior hires add less delivery capacity and uses that unsupported claim to prioritise junior-hire capacity over the model’s top salary assumption.",
+   "score": {
+    "full": {
+     "scores": {
+      "concise": 2,
+      "shape": 2,
+      "decisive_caveat": 1,
+      "next_move": 0,
+      "questions": 2,
+      "leader_honesty": 2,
+      "nothing_invented": 0,
+      "attribution": 1,
+      "provisional_vs_validated": 1,
+      "fidelity": 0,
+      "uncertainty": 1,
+      "useful_next_step": 0
+     },
+     "notes": {
+      "concise": "80 words; appropriately brief.",
+      "shape": "Direct recommendation followed by three short bullets and a status disclosure.",
+      "decisive_caveat": "It identifies the junior-capacity/onboarding estimates as Olumi-authored, but omits the decisive limitation that the salary constraint could not be checked and salary values were missing for all options.",
+      "next_move": "“first” asserts an unsupported investigation priority. The supplied sensitivity identifies Annual salary spend as the biggest driver (importance rank 1), ahead of delivery capacity and onboarding load.",
+      "questions": "n/a: the user asked for a challenge target, not clarification, and instructed that the model not be changed or rerun.",
+      "leader_honesty": "No option is presented as leading, favoured, or most likely to win.",
+      "nothing_invented": "The reply introduces a Q3 timeframe, a claim that junior hires add less capacity, and a priority over salary that are not supported as stated.",
+      "attribution": "It correctly identifies the cited capacity/onboarding inputs as Olumi-authored rather than user evidence, but attaches unsupported content to those estimates.",
+      "provisional_vs_validated": "Calling the inputs Olumi-authored signals their non-user provenance, but does not clearly state that the comparison and estimates are provisional.",
+      "fidelity": "The model contains no Q3 timeframe, and it assigns the same direct 0.5 capacity-edge mean to junior and senior hires; the stated “less delivery capacity by Q3” does not match the supplied model.",
+      "uncertainty": "It acknowledges that the cited inputs are estimates, but does not mention the unresolved salary values, unscored salary constraint, or very-low robustness.",
+      "useful_next_step": "Challenging junior ramp-up could be useful, but the asserted primary priority conflicts with the model’s stated top sensitivity and its unscored/missing salary information."
+     },
+     "gates": {
+      "truth_fidelity": "FAIL",
+      "consent_action_truth": "PASS",
+      "provenance": "PASS",
+      "claim_permission_currentness": "PASS",
+      "usability_controls": "PASS"
+     },
+     "words": 80,
+     "questions": 0,
+     "requests_for_information": [],
+     "duplicate_statements": 0,
+     "evidence": [
+      {
+       "item": "Unsupported timeframe and capacity comparison",
+       "span": "“junior engineers add less delivery capacity by Q3”",
+       "source": "/blocks/0/enrichment/option_comparison and /draft_graph/edges (no Q3 timeframe; both senior_engineer_hires→incremental_delivery_capacity and junior_engineer_hires→incremental_delivery_capacity have mean 0.5)"
+      },
+      {
+       "item": "Unsupported priority claim",
+       "span": "“It matters more than a generic salary guess”",
+       "source": "/blocks/0/enrichment/factor_sensitivity (Annual salary spend is importance_rank 1 and labelled “biggest”; Incremental delivery capacity is rank 2)"
+      },
+      {
+       "item": "Unsupported primary next move",
+       "span": "“Challenge ... junior hires first.”",
+       "source": "/blocks/0/enrichment/factor_sensitivity (Annual salary spend is importance_rank 1; incremental delivery capacity is rank 2)"
+      },
+      {
+       "item": "Truth-fidelity gate failure",
+       "span": "“by Q3”",
+       "source": "/draft_graph and /blocks/0 (no Q3 timeframe is supplied anywhere in the model or analysis results)"
+      }
+     ]
+    },
+    "top_defect": "It invents a Q3-based claim that junior hires add less delivery capacity and uses that unsupported claim to prioritise junior-hire capacity over the model’s top salary assumption."
+   }
+  },
+  {
+   "journey": "pricing-1",
+   "turn": "explicit-run",
+   "http": 200,
+   "ms": 43629,
+   "usage": {
+    "input_tokens": 8556,
+    "input_tokens_details": {
+     "cache_write_tokens": 7183,
+     "cached_tokens": 1370
+    },
+    "output_tokens": 1924,
+    "output_tokens_details": {
+     "reasoning_tokens": 1275
+    },
+    "total_tokens": 10480
+   },
+   "total": 17,
+   "fails": [
+    "truth_fidelity"
+   ],
+   "top_defect": "It omits the necessary next move—asking where the churn constraint applies and then rerunning—while slightly misstating the inclusive <=4% constraint as strictly below 4%.",
+   "score": {
+    "full": {
+     "scores": {
+      "concise": 2,
+      "shape": 2,
+      "decisive_caveat": 2,
+      "next_move": 0,
+      "questions": 0,
+      "leader_honesty": 2,
+      "nothing_invented": 2,
+      "attribution": 2,
+      "provisional_vs_validated": 2,
+      "fidelity": 1,
+      "uncertainty": 2,
+      "useful_next_step": 0
+     },
+     "notes": {
+      "concise": "89 words; within the default limit.",
+      "shape": "Direct conclusion followed by exactly three short bullets.",
+      "decisive_caveat": "Correctly foregrounds that the churn constraint was not checkable, so option compliance cannot be established.",
+      "next_move": "No supported primary next action is given. The supplied analysis result says to identify which model part the churn limit applies to, record it, then rerun.",
+      "questions": "No request for the missing clarification is asked. Exact absence: no interrogative or request for information appears in the reply.",
+      "leader_honesty": "No option is called leading, favoured, or best, and no win-probability ranking is stated.",
+      "nothing_invented": "The price-to-MRR link is identified in the supplied fragility results as sensitive, with an ordering-switch possibility.",
+      "attribution": "The four listed inputs are CEE-inferred/machine-supplied values, consistent with calling them Olumi estimates rather than user-supplied measurements.",
+      "provisional_vs_validated": "It does not present the automatic analysis or its estimates as validated.",
+      "fidelity": "“under-4%”/“below 4%” changes the formal inclusive constraint operator (<= 4%) into a strict-below condition.",
+      "uncertainty": "Appropriately notes both the unscored constraint and reliance on four non-user-supplied estimates.",
+      "useful_next_step": "No next step is supplied despite a specific unresolved input preventing constraint assessment."
+     },
+     "gates": {
+      "truth_fidelity": "FAIL",
+      "consent_action_truth": "PASS",
+      "provenance": "PASS",
+      "claim_permission_currentness": "PASS",
+      "usability_controls": "PASS"
+     },
+     "words": 89,
+     "questions": 0,
+     "requests_for_information": [],
+     "duplicate_statements": 0,
+     "evidence": [
+      {
+       "item": "Missing next move",
+       "span": "No primary follow-up action appears in the reply.",
+       "source": "/blocks/0/summary: “Tell me which part of your model it applies to and I will record it there; this one stays on the model. Then run the analysis again.”"
+      },
+      {
+       "item": "Missing clarification question",
+       "span": "No interrogative or request for information appears in the reply.",
+       "source": "/blocks/0/summary identifies the needed clarification: which part of the model the churn limit applies to."
+      },
+      {
+       "item": "Constraint-operator mismatch",
+       "span": "“under-4% monthly churn limit” and “whether churn remains below 4% per month”",
+       "source": "/draft_graph/goal_constraints/0/operator is \"<=\" with value 4 and unit \"% per month\""
+      }
+     ]
+    },
+    "top_defect": "It omits the necessary next move—asking where the churn constraint applies and then rerunning—while slightly misstating the inclusive <=4% constraint as strictly below 4%."
+   }
+  },
+  {
+   "journey": "pricing-1",
+   "turn": "challenge",
+   "http": 200,
+   "ms": 23209,
+   "usage": {
+    "input_tokens": 8277,
+    "input_tokens_details": {
+     "cache_write_tokens": 6904,
+     "cached_tokens": 1370
+    },
+    "output_tokens": 1575,
+    "output_tokens_details": {
+     "reasoning_tokens": 1034
+    },
+    "total_tokens": 9852
+   },
+   "total": 20,
+   "fails": [],
+   "top_defect": "It omits the important limitation that the monthly-churn constraint was unscored (and that goal direction was assumed), which materially limits what the comparison means.",
+   "score": {
+    "full": {
+     "scores": {
+      "concise": 2,
+      "shape": 2,
+      "decisive_caveat": 1,
+      "next_move": 2,
+      "questions": 0,
+      "leader_honesty": 2,
+      "nothing_invented": 1,
+      "attribution": 2,
+      "provisional_vs_validated": 2,
+      "fidelity": 2,
+      "uncertainty": 2,
+      "useful_next_step": 2
+     },
+     "notes": {
+      "concise": "92 words is approximately the 90-word default and the detail is relevant.",
+      "shape": "Direct answer followed by three bullets and a short closing instruction.",
+      "decisive_caveat": "It identifies the price-to-MRR relationship as fragile, but omits the material warning that the churn constraint was not scored and goal direction was assumed.",
+      "next_move": "Testing customer response at £59 versus £49 is a supported, non-mutating next step.",
+      "questions": "No request for information is asked. The closing is an instruction, not a question.",
+      "leader_honesty": "No option is called leading, favoured, best, or otherwise ranked.",
+      "nothing_invented": "“conversion” and “upgrade” are not explicit model factors; the model names New Pro subscribers and Monthly churn rate instead. The proposed investigation is directionally sensible but partly reframes the model.",
+      "attribution": "The 300 subscribers, 20/month, 3% churn, and 65/100 feature value are correctly characterized as Olumi estimates.",
+      "provisional_vs_validated": "It does not present inferred assumptions or analysis as validated.",
+      "fidelity": "The £59/£49 labels, values, and stated relationships match the graph and analysis.",
+      "uncertainty": "It appropriately says the model lacks evidence for the magnitude of the effects and labels the listed inputs as estimates.",
+      "useful_next_step": "The suggested test directly informs the fragile price-to-MRR/customer-response assumption without changing or rerunning the model."
+     },
+     "gates": {
+      "truth_fidelity": "PASS",
+      "consent_action_truth": "PASS",
+      "provenance": "PASS",
+      "claim_permission_currentness": "PASS",
+      "usability_controls": "PASS"
+     },
+     "words": 92,
+     "questions": 0,
+     "requests_for_information": [],
+     "duplicate_statements": 0,
+     "evidence": [
+      {
+       "item": "questions score 0",
+       "span": "“If only one: test likely conversion, upgrade and churn changes at £59 versus £49.”",
+       "source": "Reply text; this is an instruction rather than a request for information, and the reply otherwise contains no question."
+      }
+     ]
+    },
+    "top_defect": "It omits the important limitation that the monthly-churn constraint was unscored (and that goal direction was assumed), which materially limits what the comparison means."
+   }
+  },
+  {
+   "journey": "pricing-3",
+   "turn": "explicit-run",
+   "http": 200,
+   "ms": 25692,
+   "usage": {
+    "input_tokens": 8382,
+    "input_tokens_details": {
+     "cache_write_tokens": 7009,
+     "cached_tokens": 1370
+    },
+    "output_tokens": 1573,
+    "output_tokens_details": {
+     "reasoning_tokens": 988
+    },
+    "total_tokens": 9955
+   },
+   "total": 18,
+   "fails": [],
+   "top_defect": "It explains why no option can be advanced but omits the concrete next clarification needed to make the churn constraint assessable.",
+   "score": {
+    "full": {
+     "scores": {
+      "concise": 2,
+      "shape": 2,
+      "decisive_caveat": 2,
+      "next_move": 0,
+      "questions": 0,
+      "leader_honesty": 2,
+      "nothing_invented": 2,
+      "attribution": 2,
+      "provisional_vs_validated": 2,
+      "fidelity": 2,
+      "uncertainty": 2,
+      "useful_next_step": 0
+     },
+     "notes": {
+      "concise": "92 words; this is close enough to the default and the caveats are material.",
+      "shape": "Clear conclusion followed by three short bullets.",
+      "decisive_caveat": "Correctly distinguishes a robust scenario comparison from compliance with the churn requirement.",
+      "next_move": "It gives no supported action to resolve the unscored churn constraint.",
+      "questions": "No request for the missing clarification is made.",
+      "leader_honesty": "n/a: it does not name or imply a leading option or provide win-percentage rankings.",
+      "nothing_invented": "The sensitivity claim, 300-subscriber estimate, and its Olumi provenance are supported by the analysis state.",
+      "attribution": "Correctly identifies the 300-subscriber value as Olumi-estimated rather than user evidence.",
+      "provisional_vs_validated": "It does not present the comparison or estimates as validated.",
+      "fidelity": "The churn constraint, MRR threshold, calculated-versus-measured framing issue, and subscriber-base value match the served state.",
+      "uncertainty": "It proportionately explains that constraint compliance could not be assessed and identifies estimated input provenance.",
+      "useful_next_step": "It does not tell the user how to make the churn constraint assessable or what to clarify next."
+     },
+     "gates": {
+      "truth_fidelity": "PASS",
+      "consent_action_truth": "PASS",
+      "provenance": "PASS",
+      "claim_permission_currentness": "PASS",
+      "usability_controls": "PASS"
+     },
+     "words": 92,
+     "questions": 0,
+     "requests_for_information": [],
+     "duplicate_statements": 0,
+     "evidence": [
+      {
+       "item": "Missing next move",
+       "span": "“No option can be put forward yet”",
+       "source": "/blocks/0/summary: the analysis says to identify which part of the model the limit applies to, record it there, and rerun."
+      },
+      {
+       "item": "Missing question",
+       "span": "[No question or request for clarification is present]",
+       "source": "/blocks/0/enrichment/inference_warnings: CONSTRAINT_FRAME_UNSPECIFIED says to stamp the constraint frame 'level' or 'delta'."
+      },
+      {
+       "item": "Missing useful next step",
+       "span": "“The model treats monthly churn as calculated from other inputs”",
+       "source": "/blocks/0/summary and /blocks/0/enrichment/inference_warnings: the state supplies a remediation path, but the reply does not state it."
+      }
+     ]
+    },
+    "top_defect": "It explains why no option can be advanced but omits the concrete next clarification needed to make the churn constraint assessable."
+   }
+  },
+  {
+   "journey": "pricing-3",
+   "turn": "challenge",
+   "http": 200,
+   "ms": 22977,
+   "usage": {
+    "input_tokens": 8078,
+    "input_tokens_details": {
+     "cache_write_tokens": 6705,
+     "cached_tokens": 1370
+    },
+    "output_tokens": 1577,
+    "output_tokens_details": {
+     "reasoning_tokens": 944
+    },
+    "total_tokens": 9655
+   },
+   "total": 16,
+   "fails": [
+    "truth_fidelity"
+   ],
+   "top_defect": "The reply invents an existing-versus-new-customer distinction (and unsupported comparative uncertainty) that the model does not contain.",
+   "score": {
+    "full": {
+     "scores": {
+      "concise": 2,
+      "shape": 2,
+      "decisive_caveat": 1,
+      "next_move": 2,
+      "questions": 0,
+      "leader_honesty": 2,
+      "nothing_invented": 0,
+      "attribution": 2,
+      "provisional_vs_validated": 1,
+      "fidelity": 1,
+      "uncertainty": 1,
+      "useful_next_step": 2
+     },
+     "notes": {
+      "concise": "83 words; appropriately concise for the request.",
+      "shape": "Direct answer followed by three short supporting bullets.",
+      "decisive_caveat": "It identifies the selected input as an Olumi estimate, but omits material limits: the driver sensitivity is provisional and the churn constraint was unscored.",
+      "next_move": "Challenge/verify the current Pro-subscriber-base assumption is a single, supported move; it is the highest-ranked structural driver.",
+      "questions": "No request for information is asked.",
+      "leader_honesty": "No option is called leading, favoured, or best.",
+      "nothing_invented": "It introduces unsupported claims about billing-data availability/ease and an unsupported existing-versus-new-customer behavioural distinction.",
+      "attribution": "The 300-subscriber value is correctly attributed as Olumi-estimated rather than user-supplied evidence.",
+      "provisional_vs_validated": "It does not call the model validated, but presents the driver finding without noting its provisional sensitivity/calibration status.",
+      "fidelity": "The 300-subscriber estimate and its strongest-driver status match the state, but customer-segment-specific churn/sign-up effects are not represented in the model.",
+      "uncertainty": "Some uncertainty is acknowledged, but the stated comparison that behaviour is more uncertain and the unscored churn constraint are not properly supported/explained.",
+      "useful_next_step": "Verifying a high-influence, Olumi-estimated baseline is useful for this MRR model."
+     },
+     "gates": {
+      "truth_fidelity": "FAIL",
+      "consent_action_truth": "PASS",
+      "provenance": "PASS",
+      "claim_permission_currentness": "PASS",
+      "usability_controls": "PASS"
+     },
+     "words": 83,
+     "questions": 0,
+     "requests_for_information": [],
+     "duplicate_statements": 0,
+     "evidence": [
+      {
+       "item": "questions score 0",
+       "span": "The reply contains no request for information.",
+       "source": "FULL visible text"
+      },
+      {
+       "item": "nothing_invented score 0",
+       "span": "“It is also easy to verify from billing data, unlike the more uncertain behavioural response to a price rise.”",
+       "source": "CASE TRUTH — no billing-data availability, verification ease, or relative uncertainty finding is supplied"
+      },
+      {
+       "item": "nothing_invented score 0",
+       "span": "“especially for existing customers versus new ones.”",
+       "source": "CASE TRUTH — draft_graph and analysis results contain no existing-versus-new-customer segmentation"
+      },
+      {
+       "item": "truth_fidelity gate FAIL",
+       "span": "“especially for existing customers versus new ones.”",
+       "source": "CASE TRUTH — draft_graph and analysis results contain no existing-versus-new-customer segmentation"
+      }
+     ]
+    },
+    "top_defect": "The reply invents an existing-versus-new-customer distinction (and unsupported comparative uncertainty) that the model does not contain."
+   }
+  },
+  {
+   "journey": "pricing-4",
+   "turn": "explicit-run",
+   "http": 200,
+   "ms": 29621,
+   "usage": {
+    "input_tokens": 8900,
+    "input_tokens_details": {
+     "cache_write_tokens": 7527,
+     "cached_tokens": 1370
+    },
+    "output_tokens": 2037,
+    "output_tokens_details": {
+     "reasoning_tokens": 1269
+    },
+    "total_tokens": 10937
+   },
+   "total": 16,
+   "fails": [
+    "truth_fidelity"
+   ],
+   "top_defect": "The response’s proposed clarification is wrong: it asks for an observed churn measure even though the analysis explicitly says churn has no measured baseline and that supplying one would not make the constraint scorable.",
+   "score": {
+    "full": {
+     "scores": {
+      "concise": 1,
+      "shape": 2,
+      "decisive_caveat": 2,
+      "next_move": 0,
+      "questions": 0,
+      "leader_honesty": 2,
+      "nothing_invented": 2,
+      "attribution": 2,
+      "provisional_vs_validated": 2,
+      "fidelity": 1,
+      "uncertainty": 2,
+      "useful_next_step": 0
+     },
+     "notes": {
+      "concise": "108 words, slightly above the default, but most of the length communicates material limitations and assumptions.",
+      "shape": "Clear answer first, followed by three bullets and a short closing statement.",
+      "decisive_caveat": "Retains the decisive caveat that the churn constraint was not scored, so the stated requirement cannot support a price decision.",
+      "next_move": "The closing identifies an unsupported clarification: the case says the churn target is unscorable because churn is calculated, and that merely setting a current value does not fix this. The supplied remedy is to identify which part of the model the limit applies to.",
+      "questions": "No actual request for information is asked; the closing is a declarative statement rather than a question.",
+      "leader_honesty": "No option is named or implied to be leading.",
+      "nothing_invented": "No unsupported option, figure, or result is introduced.",
+      "attribution": "The 3% churn and 60/100 feature-value inputs are CEE-inferred/machine-authored estimates; the £0 non-Pro MRR is correctly identified as a default due to no supplied value.",
+      "provisional_vs_validated": "Correctly frames the robustness result as applying only within provisional settings.",
+      "fidelity": "The unscored churn limitation and fragile price-to-MRR link are faithful, but the final statement misstates the needed clarification as an observed churn measure.",
+      "uncertainty": "Appropriately notes unscored constraint compliance, inferred/defaulted inputs, and fragility.",
+      "useful_next_step": "Clarifying an observed churn measure is not the useful state-supported next step; the state says a current churn value would not resolve the constraint-frame problem."
+     },
+     "gates": {
+      "truth_fidelity": "FAIL",
+      "consent_action_truth": "PASS",
+      "provenance": "PASS",
+      "claim_permission_currentness": "PASS",
+      "usability_controls": "PASS"
+     },
+     "words": 108,
+     "questions": 0,
+     "requests_for_information": [],
+     "duplicate_statements": 0,
+     "evidence": [
+      {
+       "item": "next_move",
+       "span": "“The key unresolved point is what observed churn measure the <4% limit should constrain.”",
+       "source": "/blocks/0/enrichment/inference_warnings/0/message and /blocks/0/summary"
+      },
+      {
+       "item": "questions",
+       "span": "“The key unresolved point is what observed churn measure the <4% limit should constrain.”",
+       "source": "Evaluation rubric criterion 5: this is not phrased as a request for information."
+      },
+      {
+       "item": "useful_next_step",
+       "span": "“what observed churn measure the <4% limit should constrain”",
+       "source": "/blocks/0/enrichment/inference_warnings/0/message: “Setting a current value for ‘Monthly churn rate’ would not change that”; /blocks/0/summary: “Tell me which part of your model it applies to”."
+      },
+      {
+       "item": "truth_fidelity",
+       "span": "“The key unresolved point is what observed churn measure the <4% limit should constrain.”",
+       "source": "/blocks/0/enrichment/inference_warnings/0/message: churn is calculated from upstream factors and has “no measured starting point of its own”; setting a current value would not resolve the issue."
+      }
+     ]
+    },
+    "top_defect": "The response’s proposed clarification is wrong: it asks for an observed churn measure even though the analysis explicitly says churn has no measured baseline and that supplying one would not make the constraint scorable."
+   }
+  },
+  {
+   "journey": "pricing-4",
+   "turn": "challenge",
+   "http": 200,
+   "ms": 20105,
+   "usage": {
+    "input_tokens": 8596,
+    "input_tokens_details": {
+     "cache_write_tokens": 7223,
+     "cached_tokens": 1370
+    },
+    "output_tokens": 1568,
+    "output_tokens_details": {
+     "reasoning_tokens": 818
+    },
+    "total_tokens": 10164
+   },
+   "total": 17,
+   "fails": [
+    "truth_fidelity"
+   ],
+   "top_defect": "It invents that the next release is a feature release and calls the churn constraint non-negotiable, neither of which is established by the case truth.",
+   "score": {
+    "full": {
+     "scores": {
+      "concise": 1,
+      "shape": 2,
+      "decisive_caveat": 2,
+      "next_move": 1,
+      "questions": 0,
+      "leader_honesty": 2,
+      "nothing_invented": 0,
+      "attribution": 2,
+      "provisional_vs_validated": 2,
+      "fidelity": 1,
+      "uncertainty": 2,
+      "useful_next_step": 2
+     },
+     "notes": {
+      "concise": "93 words, slightly above the default, though most content is relevant.",
+      "shape": "Gives a direct recommendation followed by three short questions and one additional paragraph.",
+      "decisive_caveat": "Correctly retains that the churn constraint could not be tested.",
+      "next_move": "Provides two separate challenge targets: churn and the starting values for Active Pro subscribers and Non-Pro MRR.",
+      "questions": "Asks three questions: “Is 3%...?”, “What churn increase...?”, and “Does the release...?”; default is one.",
+      "leader_honesty": "No option is described as leading, favoured, or best.",
+      "nothing_invented": "“non-negotiable” and “after the feature release” are unsupported characterisations.",
+      "attribution": "Correctly identifies the 3% churn value as machine-authored/inferred rather than measured.",
+      "provisional_vs_validated": "Does not present inferred values or the analysis as validated.",
+      "fidelity": "The £10 difference between £49 and £59 is correct, but the supplied option says “at next release,” not “after the feature release.”",
+      "uncertainty": "Acknowledges the untestable churn constraint and missing starting values.",
+      "useful_next_step": "Challenging the inferred churn assumption is useful because churn is material and its constraint was unscorable."
+     },
+     "gates": {
+      "truth_fidelity": "FAIL",
+      "consent_action_truth": "PASS",
+      "provenance": "PASS",
+      "claim_permission_currentness": "PASS",
+      "usability_controls": "PASS"
+     },
+     "words": 93,
+     "questions": 3,
+     "requests_for_information": [
+      "Is 3% current logo churn or revenue churn?",
+      "What churn increase would £59 cause, versus £49, among existing Pro customers?",
+      "Does the release create enough perceived value to offset that increase?"
+     ],
+     "duplicate_statements": 0,
+     "evidence": [
+      {
+       "item": "nothing_invented score 0",
+       "span": "“your non-negotiable <4% constraint”",
+       "source": "/draft_graph/goal_constraints/0 — constraint is explicit, but nothing identifies it as non-negotiable"
+      },
+      {
+       "item": "nothing_invented score 0",
+       "span": "“a £10 price rise after the feature release”",
+       "source": "/draft_graph/nodes/raise_59_at_next_release/label — says “at next release”; case truth does not establish a feature release"
+      },
+      {
+       "item": "questions score 0",
+       "span": "“Is 3% current logo churn or revenue churn?”; “What churn increase would £59 cause...?”; “Does the release create enough perceived value...?”",
+       "source": "Developer scoring rule 5 — one question by default"
+      },
+      {
+       "item": "truth_fidelity FAIL",
+       "span": "“a £10 price rise after the feature release”",
+       "source": "/draft_graph/nodes/raise_59_at_next_release/label — the state supports “at next release,” not a feature release"
+      },
+      {
+       "item": "truth_fidelity FAIL",
+       "span": "“non-negotiable <4% constraint”",
+       "source": "/draft_graph/goal_constraints/0 — no non-negotiable status is supplied"
+      }
+     ]
+    },
+    "top_defect": "It invents that the next release is a feature release and calls the churn constraint non-negotiable, neither of which is established by the case truth."
+   }
+  },
+  {
+   "journey": "pricing-5",
+   "turn": "explicit-run",
+   "http": 200,
+   "ms": 24377,
+   "usage": {
+    "input_tokens": 8283,
+    "input_tokens_details": {
+     "cache_write_tokens": 6910,
+     "cached_tokens": 1370
+    },
+    "output_tokens": 1653,
+    "output_tokens_details": {
+     "reasoning_tokens": 906
+    },
+    "total_tokens": 9936
+   },
+   "total": 17,
+   "fails": [
+    "truth_fidelity"
+   ],
+   "top_defect": "It falsely states that the MRR threshold frame was not established, when the threshold is explicitly a level target and the actual blocker is the missing MRR baseline for frame conversion.",
+   "score": {
+    "full": {
+     "scores": {
+      "concise": 2,
+      "shape": 2,
+      "decisive_caveat": 2,
+      "next_move": 0,
+      "questions": 0,
+      "leader_honesty": 2,
+      "nothing_invented": 2,
+      "attribution": 2,
+      "provisional_vs_validated": 2,
+      "fidelity": 1,
+      "uncertainty": 2,
+      "useful_next_step": 0
+     },
+     "notes": {
+      "concise": "90 model-authored words; concise for the analysis caveats.",
+      "shape": "Clear conclusion followed by three short bullets.",
+      "decisive_caveat": "Keeps the decisive limitation: the Monthly churn constraint was not scored.",
+      "next_move": "No supported action is proposed. The reply ends with a diagnosis rather than directing the user to resolve the constraint/goal specification and rerun.",
+      "questions": "No question is asked, despite missing facts that prevent constraint and goal-fit assessment.",
+      "leader_honesty": "No option is described as leading, favoured, or best.",
+      "nothing_invented": "The cited options, £49/£54/£59 values, unscored churn constraint, and 250-subscriber Olumi estimate are supported by the served state.",
+      "attribution": "Correctly distinguishes the 250-subscriber figure as Olumi-estimated rather than user-provided.",
+      "provisional_vs_validated": "Does not present the comparison or inferred inputs as validated.",
+      "fidelity": "Mostly faithful, but inaccurately says the goal threshold frame was not established. The MRR goal explicitly has a level threshold frame; the actual issue is that no MRR baseline exists to convert that level target into the analysis sample frame.",
+      "uncertainty": "Appropriately acknowledges material model limitations and the non-user-provided subscriber estimate.",
+      "useful_next_step": "No actionable next step is supplied for resolving the unscored constraint and goal-fit limitations."
+     },
+     "gates": {
+      "truth_fidelity": "FAIL",
+      "consent_action_truth": "PASS",
+      "provenance": "PASS",
+      "claim_permission_currentness": "PASS",
+      "usability_controls": "PASS"
+     },
+     "words": 90,
+     "questions": 0,
+     "requests_for_information": [],
+     "duplicate_statements": 0,
+     "evidence": [
+      {
+       "item": "Missing next move",
+       "span": "\"No option can be put forward yet\"",
+       "source": "CASE TRUTH /blocks/0/inference_warnings and /blocks/0/summary identify resolvable issues, but the reply gives no action such as specifying the goal direction or correctly locating/scaling the constraint."
+      },
+      {
+       "item": "Missing question",
+       "span": "Entire reply contains no request for information.",
+       "source": "CASE TRUTH /blocks/0/inference_warnings: GOAL_DIRECTION_UNATTESTED and CONSTRAINT_FRAME_UNSPECIFIED identify missing specifications."
+      },
+      {
+       "item": "Threshold-frame error",
+       "span": "\"the goal’s direction and threshold frame were not established in the analysis\"",
+       "source": "CASE TRUTH /draft_graph/nodes/1/goal_threshold_frame = \"level\"; /blocks/0/inference_warnings/GOAL_THRESHOLD_NOT_CONVERTIBLE says the problem is the missing goal-node observed_state.baseline."
+      },
+      {
+       "item": "No useful next step",
+       "span": "\"The comparison is most sensitive to Pro subscriber count—currently Olumi’s estimate of 250 subscribers, not a user-provided measurement.\"",
+       "source": "CASE TRUTH /analysis_ready/semantic_signals/material_parameters_awaiting_user_node_ids and /blocks/0/inference_warnings identify unresolved inputs, but the reply supplies no next action."
+      }
+     ]
+    },
+    "top_defect": "It falsely states that the MRR threshold frame was not established, when the threshold is explicitly a level target and the actual blocker is the missing MRR baseline for frame conversion."
+   }
+  },
+  {
+   "journey": "pricing-5",
+   "turn": "challenge",
+   "http": 200,
+   "ms": 30160,
+   "usage": {
+    "input_tokens": 7954,
+    "input_tokens_details": {
+     "cache_write_tokens": 6581,
+     "cached_tokens": 1370
+    },
+    "output_tokens": 2003,
+    "output_tokens_details": {
+     "reasoning_tokens": 1497
+    },
+    "total_tokens": 9957
+   },
+   "total": 22,
+   "fails": [
+    "truth_fidelity"
+   ],
+   "top_defect": "It invents a more specific “immediate revenue gained from a £10 increase” mechanism than the supplied model results establish.",
+   "score": {
+    "full": {
+     "scores": {
+      "concise": 2,
+      "shape": 1,
+      "decisive_caveat": 2,
+      "next_move": 2,
+      "questions": 2,
+      "leader_honesty": 2,
+      "nothing_invented": 1,
+      "attribution": 2,
+      "provisional_vs_validated": 2,
+      "fidelity": 2,
+      "uncertainty": 2,
+      "useful_next_step": 2
+     },
+     "notes": {
+      "concise": "70 words; concise for the request.",
+      "shape": "Gives the recommendation first, but presents the follow-up point as prose rather than the requested compact answer-plus-short-bullets structure.",
+      "decisive_caveat": "Correctly retains that the churn limit could not be assessed in this run.",
+      "next_move": "The primary move—challenge the 250-subscriber assumption—is supported by its rank as the biggest driver.",
+      "questions": "n/a: no clarification is needed to answer this request.",
+      "leader_honesty": "No option is called leading or otherwise ranked.",
+      "nothing_invented": "The explanation adds an unsupported claim about an immediate £10-increase revenue mechanism.",
+      "attribution": "Correctly identifies both 250 subscribers and 3% monthly churn as Olumi estimates rather than user-supplied figures.",
+      "provisional_vs_validated": "Does not portray the analysis or estimates as validated.",
+      "fidelity": "Subscriber count is 250, churn is 3% monthly, and the churn requirement was left unscored/uncheckable.",
+      "uncertainty": "Appropriately identifies the untestable churn requirement and attributes the values as estimates.",
+      "useful_next_step": "Challenging the largest model driver is useful for testing this comparison."
+     },
+     "gates": {
+      "truth_fidelity": "FAIL",
+      "consent_action_truth": "PASS",
+      "provenance": "PASS",
+      "claim_permission_currentness": "PASS",
+      "usability_controls": "PASS"
+     },
+     "words": 70,
+     "questions": 0,
+     "requests_for_information": [],
+     "duplicate_statements": 0,
+     "evidence": [
+      {
+       "item": "Unsupported causal/mechanistic claim",
+       "span": "\"It directly determines the immediate revenue gained from a £10 increase\"",
+       "source": "CASE TRUTH → blocks[0].enrichment.factor_sensitivity: Pro subscriber count is labelled the biggest structural driver; draft_graph only supplies qualitative edges to MRR, not an immediate-revenue formula or this stated £10 mechanism."
+      }
+     ]
+    },
+    "top_defect": "It invents a more specific “immediate revenue gained from a £10 increase” mechanism than the supplied model results establish."
+   }
+  }
+ ]
+}

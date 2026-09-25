@@ -1,0 +1,20 @@
+{
+ "state": "pricing-3",
+ "arm": "A",
+ "rep": 1,
+ "http": 200,
+ "ms": 5399,
+ "usage": {
+  "input_tokens": 9919,
+  "input_tokens_details": {
+   "cache_write_tokens": 6970,
+   "cached_tokens": 2946
+  },
+  "output_tokens": 252,
+  "output_tokens_details": {
+   "reasoning_tokens": 133
+  },
+  "total_tokens": 10171
+ },
+ "text": "No option can be put forward because the churn requirement was not assessed in this run.\n\n- The model compared £49, £54 and £59/month and describes the comparison as robust under its tested changes, but that does not establish compliance with monthly churn under 4%.\n- The churn limit could not be aligned with the model’s calculated churn measure; its frame is unknown, so goal-fit probabilities were withheld rather than guessed.\n- The comparison is most structurally sensitive to the Pro subscriber base—an Olumi estimate, with low attribution stability—not a recorded measurement."
+}

@@ -1,0 +1,43 @@
+{
+  "assistant_text": "The analysis cannot answer your stated decision yet, because it did not test the **£400k/year salary limit**.\n\n- The model could compare the hiring scenarios on its provisional shipping outcome, but no option can be put forward: salary spend is modelled as a derived change rather than a comparable annual £ figure, so the constraint was withheld.\n- The comparison is **fragile**. It is particularly sensitive to delivery capacity and annual salary spend—both are assumptions you adopted, not measured inputs.\n- The model also lacks an attested goal direction and a usable frame for the Q3 target.\n\nA meaningful next step is to express salary spend as annual £ costs for the relevant hires and existing team, so the £400k limit can be checked.",
+  "suggested_actions": [],
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-09-25T01:39:54.021Z"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld",
+      "separation": "separated"
+    },
+    "robustness": {
+      "aggregate_level": "very_low"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "tools": [
+    {
+      "name": "run_analysis",
+      "mutated": false,
+      "refusal": null
+    }
+  ],
+  "providers": [
+    "openai"
+  ],
+  "trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": "run",
+    "first_analysis": null
+  }
+}

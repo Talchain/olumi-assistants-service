@@ -1,0 +1,43 @@
+{
+  "assistant_text": "No option can be put forward yet, because the under-4% monthly churn limit was not checkable in this run.\n\n- The comparison itself was robust under the changes tested, but it measures an internal outcome rather than whether churn remains below **4% per month**.\n- The result rests on four Olumi estimates: active Pro subscribers, new Pro subscribers, monthly churn, and feature-release value—not user-supplied measurements.\n- The most consequential uncertainty is the link from Pro price to MRR: the tested perturbation can change the ordering, so the pricing conclusion is not settled.",
+  "suggested_actions": [],
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-09-25T01:38:53.823Z"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld",
+      "separation": "separated"
+    },
+    "robustness": {
+      "aggregate_level": "high"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "tools": [
+    {
+      "name": "run_analysis",
+      "mutated": false,
+      "refusal": null
+    }
+  ],
+  "providers": [
+    "openai"
+  ],
+  "trace": {
+    "exit_path": "agent_lane_v1",
+    "fast_path": "run",
+    "first_analysis": null
+  }
+}
