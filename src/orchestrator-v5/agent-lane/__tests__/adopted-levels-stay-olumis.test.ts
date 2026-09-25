@@ -25,6 +25,7 @@ import { projectGraphForPersistence } from '../../persisted-graph-projection.js'
 import { executeOptionInterventionEdit } from '../../system-events/option-intervention-edit.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { AGENT_TOOLS, dispatchTool } from '../runtime/agent-tools.js';
 
 const SCENARIO = '6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d';
 const USER = 'user-adopt';
@@ -163,5 +164,53 @@ describe('an approved option level carries WHOSE level it is, through the real w
     expect(p.cell('hire_a_tech_lead', 'tech_leads_hired')).toMatchObject({ value: 0.1, source: 'cee_hypothesis' });
     expect(p.cell('hire_two_developers', 'onboarding_share')).toMatchObject({ value: 0.45, source: 'user_specified' });
     expect(p.cell('hire_two_developers', 'developers_hired')).toEqual(clone(briefLevel('developers_hired', 0.2)));
+  });
+});
+
+/**
+ * ⛔ AT THE TOOL BOUNDARY, WITH THE PUBLISHED CONTRACT (pre-review 5830798442 of #1902 at `8317a0d0`).
+ * `user_stated` used to be documented ONLY as the held-status-quo exception ("omit it in every other
+ * case"), so an Agent obeying the contract could not say a level on an ordinary option was the USER's —
+ * and that level was stored as Olumi's. The flag now means one thing everywhere: the user gave this
+ * level. It records authorship, and on a held status quo it is ALSO what permits a level at all. These
+ * rows go through `dispatchTool` with JSON arguments, as the model sends them, never a direct call.
+ */
+describe('the Agent-facing contract can say whose level it is', () => {
+  const userStatedDoc = (tool: string, list: string): string => {
+    const t = AGENT_TOOLS.find((x) => x.name === tool)!;
+    const items = ((t.parameters as { properties: Record<string, { items: { properties: Record<string, { description?: string }> } }> })
+      .properties[list]!.items.properties.user_stated)!;
+    return String(items.description ?? '');
+  };
+
+  it.each([['propose_option_interventions', 'interventions'], ['propose_starting_point', 'option_levels']] as const)(
+    'RED: %s documents user_stated as "the user gave this level" — for ANY option, not only a held status quo',
+    (tool, list) => {
+      const doc = userStatedDoc(tool, list);
+      expect(doc).toContain('Set true ONLY when the USER gave this level');
+      expect(doc).toContain('without it the level is recorded as Olumi\u2019s estimate');
+      expect(doc).not.toContain('Omit it in every other case');
+    });
+
+  it('CONTROL (now contract-compliant): a user-given ORDINARY level sent through the tool boundary reads back user_specified after approval', async () => {
+    const p = product(hiring());
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const r = await dispatchTool('propose_option_interventions', JSON.stringify({
+      interventions: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'the user: one hire', user_stated: true }],
+    }), ctx, caps);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const out = await dispatchTool('authorise_change', JSON.stringify({ proposal_id: r.proposal_id }), ctx, caps);
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(p.cell('hire_a_tech_lead', 'tech_leads_hired')).toMatchObject({ value: 0.1, source: 'user_specified' });
+  });
+
+  it('CONTRAST: the same level WITHOUT the flag — Olumi\u2019s proposal — reads back cee_hypothesis', async () => {
+    const p = product(hiring());
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const r = await dispatchTool('propose_option_interventions', JSON.stringify({
+      interventions: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'one hire, as a starting point' }],
+    }), ctx, caps);
+    expect((await dispatchTool('authorise_change', JSON.stringify({ proposal_id: r.proposal_id }), ctx, caps)).ok).toBe(true);
+    expect(p.cell('hire_a_tech_lead', 'tech_leads_hired')).toMatchObject({ value: 0.1, source: 'cee_hypothesis' });
   });
 });

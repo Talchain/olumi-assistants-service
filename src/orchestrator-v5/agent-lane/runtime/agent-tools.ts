@@ -162,9 +162,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           user_stated: {
             type: 'boolean',
             description:
-              'Set true ONLY when the user has just said that carrying on as now would itself change this ' +
-              'factor, and gave the level. It permits a level on an option in `status_quo_held`; the user ' +
-              'still approves it. Omit it in every other case, and never use it to restate the factor’s ' +
+              'Set true ONLY when the USER gave this level \u2014 their own number, for this option and factor. ' +
+              'It records the level as theirs; without it the level is recorded as Olumi\u2019s estimate, so never ' +
+              'set it on a figure you proposed. On an option in `status_quo_held` it is also what permits a level ' +
+              'at all (the user said carrying on changes this factor), and never to restate the factor\u2019s ' +
               'starting value: carrying on as now already keeps that, so such a level is not recorded.',
           },
         }, ['option_label', 'factor_label', 'value', 'basis']),
@@ -203,9 +204,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           user_stated: {
             type: 'boolean',
             description:
-              'Set true ONLY when the user has just said that carrying on as now would itself change this ' +
-              'factor, and gave the level. It permits a level on an option in `status_quo_held`; the user ' +
-              'still approves it. Omit it in every other case, and never use it to restate the factor’s ' +
+              'Set true ONLY when the USER gave this level \u2014 their own number, for this option and factor. ' +
+              'It records the level as theirs; without it the level is recorded as Olumi\u2019s estimate, so never ' +
+              'set it on a figure you proposed. On an option in `status_quo_held` it is also what permits a level ' +
+              'at all (the user said carrying on changes this factor), and never to restate the factor\u2019s ' +
               'starting value: carrying on as now already keeps that, so such a level is not recorded.',
           },
         }, ['option_label', 'factor_label', 'value', 'basis']),

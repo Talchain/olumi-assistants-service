@@ -514,7 +514,7 @@ describe('(d) the Agent is told a held status quo is never given levels — in t
 
   it('RED: the options_that_change_nothing instruction says the held status quo holds today’s values, and invites a correction', () => {
     expect(instructions[0]).toContain(
-      'ask what that option would actually change, and record the answer with propose_option_interventions. ' +
+      'ask what that option would actually change, and record the answer with propose_option_interventions, with user_stated: true on each level the user gave. ' +
       'An option in `status_quo_held` is not in that list and is never given levels: say, in one short clause, that carrying ' +
       'on as now holds today’s values, and that the user can say what would change if that is wrong.',
     );
