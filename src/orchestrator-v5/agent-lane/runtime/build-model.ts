@@ -502,8 +502,9 @@ export function prepareProvisionalCandidate(model: CandidateModel): {
  * c22): every lever named its factors only in `changes` and two acted-on baselines
  * were null, so readiness asked a value question for every pair and no first
  * analysis ran. These gaps go to the ONE repair retry; nothing here invents a level.
- *  · A `changes` entry with no level on that factor is a level gap — never on the
- *    option marked is_status_quo, which is held, not set (#1873 B2).
+ *  · A `changes` entry, or an option→factor link, with no level on that factor is a
+ *    level gap — never on the option marked is_status_quo, which is held, not set
+ *    (#1873 B2).
  *  · An acted-on factor with no finite baseline is a baseline gap — EXCEPT one a
  *    user's addition could not become a total on (#1841 B1): that figure is the
  *    user's to give, and no retry is spent on it.
@@ -524,7 +525,13 @@ export function findCoverageGaps(
     if (option.is_status_quo === true) continue;
     const levelled = new Set((option.interventions ?? []).map((i) => i.factor_label));
     for (const f of levelled) if (factorLabels.has(f)) actedOn.add(f);
-    for (const f of option.changes ?? []) {
+    // An option can act on a factor through `links` alone (pre-review 5828364580):
+    // admission admits that option→factor edge, so readiness asks for its level too.
+    // A direction-unknown link is withheld by admission, so it is no pair here.
+    const linkedFactors = model.links
+      .filter((l) => l.from === option.label && factorLabels.has(l.to) && l.direction !== 'unknown')
+      .map((l) => l.to);
+    for (const f of [...(option.changes ?? []), ...linkedFactors]) {
       if (!factorLabels.has(f)) continue;
       actedOn.add(f);
       if (!levelled.has(f) && !level_gaps.some((g) => g.option === option.label && g.factor === f)) level_gaps.push({ option: option.label, factor: f });

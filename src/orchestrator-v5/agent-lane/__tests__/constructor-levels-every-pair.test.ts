@@ -214,6 +214,12 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     expect(missingValues(graph)).toEqual([]);
   });
 
+  it('CONTROL: a direction-unknown option→factor link (withheld by admission) is no level gap', () => {
+    const c = linkedOnly();
+    c.links[0] = { ...c.links[0]!, direction: 'unknown' };
+    expect(prepareProvisionalCandidate(c as unknown as CandidateModel).level_gaps).toEqual([]);
+  });
+
   it('CONTROL: a status quo linked to a factor through `links` is still never asked for a level', () => {
     const c = linkedOnly();
     c.links.push({ from: 'Continue Current Staffing', to: 'Engineering capacity', direction: 'positive', provenance: 'ai_proposed' });
