@@ -143,10 +143,15 @@ async function loadWriteReplyAnalysisInputs(
   scenarioId: string,
   requestId: string,
 ): Promise<WriteReplyAnalysisInputs> {
-  const store = getSessionStore();
+  // The store lookup sits INSIDE the guarded promise: `getSessionStore()` throws
+  // synchronously when the store is not configured, and a throw outside the
+  // `.catch` would fail the user's write over an observational read. An
+  // unavailable store degrades exactly like a failed read.
+  const markerRead = (async (): Promise<string | null> =>
+    (await getSessionStore()?.readAnalysisInvalidatedAt?.(scenarioId)) ?? null)();
   const [read, analysisInvalidatedAt] = await Promise.all([
     loadScenarioAnalysisFactsForRead(scenarioId, requestId),
-    (store?.readAnalysisInvalidatedAt?.(scenarioId) ?? Promise.resolve(null)).catch((error: unknown) => {
+    markerRead.catch((error: unknown) => {
       log.warn(
         {
           event: 'session.read_degraded',
