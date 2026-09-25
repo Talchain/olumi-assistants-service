@@ -24,6 +24,10 @@ import {
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import type { InterventionV3T } from '../../schemas/cee-v3.js';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
+import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
+import { readIsBaseline } from '../../cee/baseline-identity.js';
+import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
+import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import {
   admitCandidateConstraints,
@@ -112,6 +116,12 @@ export interface CandidateModel {
      * changes and stays silent on BY HOW MUCH.
      */
     changes?: readonly string[];
+    /**
+     * The drafter's declaration that this is the one option that keeps things as
+     * they are (strict output sends `null` otherwise). Read by `wireInertStatusQuo`
+     * BEFORE the label idioms, so a held status quo never depends on wording.
+     */
+    is_status_quo?: boolean | null;
   }[];
   readonly factors: readonly { label: string; role: 'controllable' | 'observable' | 'external'; baseline_known: boolean; baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null }[];
   readonly risks: readonly { label: string; provenance: string }[];
@@ -197,6 +207,13 @@ export interface AdmittedNode {
    * scenario returned 500 until this was fixed.
    */
   provenance?: 'from_brief' | 'ai_inferred' | 'user_set';
+  /**
+   * `cee-v3.ts` option field. Written ONLY on the option the drafter DECLARED as the
+   * status quo (`is_status_quo`) and that was wired as held — readiness's own first
+   * baseline signal, so a declared status quo is held whatever its label. The idiom
+   * fallback writes no stamp (readiness recognises the idiom itself).
+   */
+  is_baseline?: boolean;
   /** Normalised 0-1, per the contract. The stated number goes in `_raw`. */
   goal_threshold_raw?: number;
   goal_threshold_cap?: number;
@@ -371,6 +388,41 @@ function framedObservedState(f: {
 }
 
 /**
+ * ⛔ AN AI ESTIMATE IS OLUMI'S FIGURE — KEPT, AND NEVER PASSED OFF AS THE USER'S.
+ *
+ * A factor the builder ESTIMATED (`baseline_known: false`, a finite
+ * `baseline_value`) used to be dropped outright: the baseline branch below wrote
+ * `observed_state` only for a KNOWN baseline, so a freshly built model had
+ * nothing for a provisional first analysis to start from.
+ *
+ * ⭐ THE SHAPE IS CAPLESS, AND THAT IS BINDING. `{ value: raw / c, raw_value,
+ * unit?, source: 'cee_inference', extractionType: 'inferred' }` beside the node's `scale_frame: c` — exactly
+ * what `set_factor_value` writes when a user adopts a value on a framed factor
+ * (`construction-range-carrier.test.ts`). NO `observed_state.cap` and NO
+ * `declared_scale`: a capped shape would let Olumi's own guessed range refuse the
+ * user's later correction through the revise path (#1767).
+ *
+ * `source` is written LAST, after every spread, so an estimate can never inherit
+ * `brief_extraction` from a factor the user named. An estimate that cannot be
+ * framed (no usable range, negative, or above the range) stays MISSING — it is
+ * never written unframed, which would raise a blocking scale issue over a number
+ * the user never gave.
+ */
+function estimatedObservedState(
+  f: { baseline_known: boolean; baseline_value: number | null; unit: string | null },
+  c: number | null | undefined,
+): Record<string, unknown> | null {
+  if (f.baseline_known) return null;
+  const raw = f.baseline_value;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+  if (typeof c !== 'number' || !Number.isFinite(c) || c <= 1 || raw < 0 || raw > c) return null;
+  // `extractionType: 'inferred'` is the stamp the conventional builders write for a value the
+  // brief did not state; the canvas reads it to say "Olumi estimate" (served UI b017e3c2 showed
+  // "no source" without it). A value a person later sets withdraws it (`set-factor-value.ts`).
+  return { value: raw / c, raw_value: raw, ...(f.unit ? { unit: f.unit } : {}), source: 'cee_inference', extractionType: 'inferred' };
+}
+
+/**
  * ⭐ A DEFAULT FRAME, DERIVED FROM THE DATA AND DISCLOSED — the backstop.
  *
  * The builder is required to state a `plausible_max` for every factor, and a
@@ -440,6 +492,97 @@ export function demoteUnreachedLevers<N extends { id: string; kind?: string; lab
   return { nodes: out, demoted };
 }
 
+/**
+ * ⛔ AN INERT STATUS QUO IS A HELD BASELINE, NOT A BROKEN OPTION (Paul's ruling;
+ * the conventional lane already does this in `status-quo-fix.ts`).
+ *
+ * "Maintain current staffing", given no `changes` and no `interventions`, got no
+ * option→factor edge, so readiness raised `OPTION_NO_FACTOR_EDGES` — a blocker
+ * that is not waivable by exclusion — and the WHOLE model was refused. It caused
+ * 4 of 9 hiring builds to fail in an earlier witness. Yet "carry on as now" needs
+ * no level: holding every factor at its starting value IS its specification.
+ *
+ * So the ONE option whose label reads as the status quo (`labelMatchesBaseline`,
+ * the readiness authority's own idiom list) is connected to the factors the
+ * OTHER options set levels on — falling back to the factors they connect to —
+ * with deterministic repair edges. Readiness excludes exactly those edges from
+ * its mapping count (`isRepairAuthoredOptionFactorEdge`), so the option is held,
+ * not asked for a level it cannot have. Pure: it only DECIDES; the caller mints.
+ *
+ * Returns null — the option stays inert, named, and refused — when no label or
+ * TWO labels match (ambiguity is not resolved by guessing), when the matching
+ * option already has any option→factor edge, or when the basis is empty.
+ */
+export function wireInertStatusQuo(
+  nodes: readonly { id: string; kind?: string; label?: string }[],
+  edges: readonly { from: string; to: string }[],
+  interventionsByOption: ReadonlyMap<string, Readonly<Record<string, unknown>>>,
+  declaredStatusQuoIds: ReadonlySet<string> = new Set(),
+): { optionId: string; factorIds: string[] } | null {
+  const options = nodes.filter((n) => n.kind === 'option');
+  const factorIds = new Set(nodes.filter((n) => n.kind === 'factor').map((n) => n.id));
+  /** The factors this option would be held against, or null if it cannot be held (it acts, or nothing to hold). */
+  const holdAgainst = (statusQuo: { id: string }): string[] | null => {
+    if (edges.some((e) => e.from === statusQuo.id && factorIds.has(e.to))) return null;
+    const others = options.filter((o) => o.id !== statusQuo.id);
+    const basis = new Set<string>();
+    for (const o of others) {
+      for (const fid of Object.keys(interventionsByOption.get(o.id) ?? {})) if (factorIds.has(fid)) basis.add(fid);
+    }
+    if (basis.size === 0) {
+      const otherIds = new Set(others.map((o) => o.id));
+      for (const e of edges) if (otherIds.has(e.from) && factorIds.has(e.to)) basis.add(e.to);
+    }
+    return basis.size === 0 ? null : [...basis];
+  };
+  // ⭐ THE DRAFTER'S DECLARATION FIRST (served c673223: "Continue Current Staffing"
+  // is not an idiom, and the turn blocked). Two declared → null: never guess.
+  // ⛔ ONE WRONG FLAG MUST NOT BLOCK WHAT BASE HELD (review 5825562938, B1): a single
+  // declared option that cannot be held (it acts, or there is nothing to hold it
+  // against) falls back to the idiom list, exactly as if nothing were declared. No
+  // idiom is added.
+  const declared = options.filter((o) => declaredStatusQuoIds.has(o.id));
+  if (declared.length > 1) return null;
+  if (declared.length === 1) {
+    const held = holdAgainst(declared[0]!);
+    if (held !== null) return { optionId: declared[0]!.id, factorIds: held };
+  }
+  const matches = options.filter((o) => labelMatchesBaseline(o.label ?? ''));
+  if (matches.length !== 1) return null;
+  const held = holdAgainst(matches[0]!);
+  return held === null ? null : { optionId: matches[0]!.id, factorIds: held };
+}
+
+/**
+ * The shortest mechanism from `from` to `to` over `edges`, or null — THE
+ * option→risk mechanism test (#1830), exported so the producer
+ * (`runtime/build-model.ts`) asks the same question admission answers rather
+ * than a second derivation of it. Pure breadth-first search in edge order; the
+ * caller decides which edges count (admission removes every machine-authored
+ * shortcut first, so no shortcut can be its own mechanism).
+ */
+export function findMechanismPath(
+  edges: readonly { from: string; to: string }[],
+  from: string,
+  to: string,
+): readonly string[] | null {
+  const adjacency = new Map<string, string[]>();
+  for (const e of edges) adjacency.set(e.from, [...(adjacency.get(e.from) ?? []), e.to]);
+  const queue: string[][] = [[from]];
+  const seen = new Set([from]);
+  while (queue.length > 0) {
+    const path = queue.shift()!;
+    const head = path[path.length - 1]!;
+    if (head === to) return path;
+    for (const next of adjacency.get(head) ?? []) {
+      if (seen.has(next)) continue;
+      seen.add(next);
+      queue.push([...path, next]);
+    }
+  }
+  return null;
+}
+
 export function admitCandidateModel(
   model: CandidateModel,
   widened: WidenerAdditions = {},
@@ -454,18 +597,24 @@ export function admitCandidateModel(
    */
   const capByLabel = new Map<string, number>();
   const largestByLabel = new Map<string, number>();
-  const noteMagnitude = (label: string, v: unknown): void => {
+  /** Labels whose derived frame rests on at least one figure the USER stated. */
+  const userStatedFigureLabels = new Set<string>();
+  const noteMagnitude = (label: string, v: unknown, provenance: string): void => {
     if (typeof v !== 'number' || !Number.isFinite(v)) return;
     largestByLabel.set(label, Math.max(largestByLabel.get(label) ?? 0, Math.abs(v)));
+    if (provenance === 'explicit') userStatedFigureLabels.add(label);
   };
   for (const f of model.factors) {
     if (typeof f.plausible_max === 'number' && Number.isFinite(f.plausible_max) && f.plausible_max > 1) {
       capByLabel.set(f.label, f.plausible_max);
     }
-    if (f.baseline_known) noteMagnitude(f.label, f.baseline_value);
+    // ⛔ ONLY A KNOWN BASELINE. An AI estimate (`baseline_known: false`) must never
+    // derive its own frame: a guess that sets the scale it is then read against
+    // is a guess dressed as a measurement.
+    if (f.baseline_known) noteMagnitude(f.label, f.baseline_value, f.provenance);
   }
   for (const o of model.options) {
-    for (const iv of o.interventions ?? []) noteMagnitude(iv.factor_label, iv.value);
+    for (const iv of o.interventions ?? []) noteMagnitude(iv.factor_label, iv.value, iv.provenance);
   }
   const defaultedFrames: { label: string; frame: number }[] = [];
   for (const [label, largest] of largestByLabel) {
@@ -549,6 +698,12 @@ export function admitCandidateModel(
         ...(f.baseline_known && typeof f.baseline_value === 'number'
           ? { observed_state: framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }) }
           : {}),
+        // An ESTIMATE is kept on the same frame `scale_frame` carries below, as
+        // Olumi's (`estimatedObservedState`). A known baseline never reaches it.
+        ...((): Record<string, unknown> => {
+          const os = estimatedObservedState(f, capFor(f.label) ?? f.plausible_max);
+          return os === null ? {} : { observed_state: os };
+        })(),
         // ⭐ THE FRAME TRAVELS WITH THE NODE, not only with the baseline. A
         // factor with no value today still needs its range, because the value
         // a user adopts LATER is normalised against it, and so is every level
@@ -653,8 +808,9 @@ export function admitCandidateModel(
     if (seen.has(id)) continue;
     seen.add(id);
     inference_classes[id] = inferenceClassFor(e.provenance);
-    // A factor whose baseline is NOT known gets no observed_state at all —
-    // an absent value is the honest record; a zero would be a measurement.
+    // A factor with NO baseline value gets no observed_state at all — an absent
+    // value is the honest record; a zero would be a measurement. (An ESTIMATED
+    // value is kept, stamped as Olumi's: `estimatedObservedState`.)
     const label = shortLabel(e.label);
     if (label !== e.label) {
       loss.push({
@@ -724,6 +880,11 @@ export function admitCandidateModel(
     if (fid !== undefined && c !== undefined) capByFactorId.set(fid, c);
   }
   for (const d of defaultedFrames) {
+    // "Your own figures" only when a figure the user stated fed the frame; when
+    // every figure is Olumi's, saying so is the honest record.
+    const whose = userStatedFigureLabels.has(d.label)
+      ? 'your own figures are stored unchanged beside it.'
+      : "the figures it was taken from are Olumi's own estimates, not figures you gave, and are stored unchanged beside it.";
     loss.push({
       field_path: `nodes[${ids.get(d.label) ?? d.label}].observed_state.cap`,
       before: null,
@@ -732,7 +893,7 @@ export function admitCandidateModel(
         `No range was stated for "${d.label}", and a number above 1 with no range cannot be analysed ` +
         `at all \u2014 nor can a range be added afterwards. A range of 0 to ${d.frame} has been used, taken ` +
         'from the largest figure the model already holds for it. That is a unit of measurement, not a ' +
-        'forecast or a limit, and your own figures are stored unchanged beside it.',
+        `forecast or a limit, and ${whose}`,
       severity: 'warn',
     } as RepairEntry);
   }
@@ -979,27 +1140,8 @@ export function admitCandidateModel(
     && kindById.get(e.to) === 'risk'
     && !USER_AUTHORED_EDGE_SOURCES.has(String(e.provenance?.source ?? '')));
   const shortcutPairs = new Set(shortcutEdges.map((e) => `${e.from}\u0000${e.to}`));
-  const mechanismAdjacency = new Map<string, string[]>();
-  for (const e of [...topologyEdges, ...causalEdges]) {
-    if (shortcutPairs.has(`${e.from}\u0000${e.to}`)) continue;
-    mechanismAdjacency.set(e.from, [...(mechanismAdjacency.get(e.from) ?? []), e.to]);
-  }
-  /** The shortest mechanism from `from` to `to` using no shortcut, or null. */
-  const mechanismPath = (from: string, to: string): readonly string[] | null => {
-    const queue: string[][] = [[from]];
-    const seen = new Set([from]);
-    while (queue.length > 0) {
-      const path = queue.shift()!;
-      const head = path[path.length - 1]!;
-      if (head === to) return path;
-      for (const next of mechanismAdjacency.get(head) ?? []) {
-        if (seen.has(next)) continue;
-        seen.add(next);
-        queue.push([...path, next]);
-      }
-    }
-    return null;
-  };
+  const mechanismGraph = [...topologyEdges, ...causalEdges].filter((e) => !shortcutPairs.has(`${e.from}\u0000${e.to}`));
+  const mechanismPath = (from: string, to: string): readonly string[] | null => findMechanismPath(mechanismGraph, from, to);
   const foldedShortcutPairs = new Set<string>();
   for (const s of shortcutEdges) {
     const optionLabel = labelById.get(s.from) ?? s.from;
@@ -1087,7 +1229,58 @@ export function admitCandidateModel(
    * link travels in `withheld`, and the construction contract (`build-model.ts`)
    * is what makes the drafter state the link in the first place.
    */
-  const allEdges = [...topologyEdges, ...mechanismEdges];
+  /**
+   * ⭐ THE HELD STATUS QUO (`wireInertStatusQuo`). It shares the conventional
+   * lane's connectivity repair's `origin: 'repair'` and its "no effect value is
+   * implied" wording (`CONNECTIVITY_REPAIR_WIRING_REASON`), because `origin` is the
+   * one discriminator readiness reads to hold the option rather than ask for a
+   * level. The provenance SOURCE deliberately differs: that repair stamps
+   * `synthetic` (`status-quo-fix.ts:247`), while this lane stamps
+   * `cee_hypothesis`, the source every other machine-authored edge it admits
+   * carries. No level, no intervention, no `is_baseline` stamp and no user
+   * authority are written: the only claim made is the one disclosed below, and
+   * it is correctable.
+   */
+  // Read through the shared baseline-identity reader, so "is this the status quo?"
+  // has one truth table across the estate.
+  const declaredStatusQuoIds = new Set(
+    model.options
+      .filter((o) => readIsBaseline({ ...(typeof o.is_status_quo === 'boolean' ? { is_baseline: o.is_status_quo } : {}) }) === true)
+      .map((o) => ids.get(o.label))
+      .filter((id): id is string => id !== undefined),
+  );
+  const heldStatusQuo = wireInertStatusQuo(nodes, [...topologyEdges, ...mechanismEdges], interventionsByOption, declaredStatusQuoIds);
+  const heldStatusQuoEdges = (heldStatusQuo?.factorIds ?? []).map((factorId) => ({
+    ...topo(heldStatusQuo!.optionId, factorId),
+    origin: REPAIR_AUTHORED_ORIGIN,
+    provenance: { source: 'cee_hypothesis', reasoning: CONNECTIVITY_REPAIR_WIRING_REASON },
+  }));
+  if (heldStatusQuo !== null && declaredStatusQuoIds.has(heldStatusQuo.optionId)) {
+    const declaredNode = nodes.find((n) => n.id === heldStatusQuo.optionId);
+    if (declaredNode !== undefined) declaredNode.is_baseline = true;
+  }
+  if (heldStatusQuo !== null) {
+    const optionLabel = labelById.get(heldStatusQuo.optionId) ?? heldStatusQuo.optionId;
+    const names = heldStatusQuo.factorIds.map((id) => labelById.get(id) ?? id);
+    const factorList = names.length === 1 ? names[0]! : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+    // The option is no longer inert, so it is no longer reported as one.
+    for (let i = unresolved.length - 1; i >= 0; i--) {
+      const w = unresolved[i]!;
+      if (w.reason === 'option_changes_nothing' && ids.get(w.from) === heldStatusQuo.optionId) unresolved.splice(i, 1);
+    }
+    loss.push({
+      field_path: `nodes[${heldStatusQuo.optionId}].status_quo_held`,
+      before: null,
+      after: heldStatusQuo.factorIds,
+      reason:
+        `'${optionLabel}' reads as carrying on as now, so I connected it to ${factorList} with no level of its own; ` +
+        'the analysis holds each at its starting value, which may be an estimate rather than a figure you gave. ' +
+        'If carrying on as now would itself change any of them, say how.',
+      severity: 'info',
+    } as RepairEntry);
+  }
+
+  const allEdges = [...topologyEdges, ...heldStatusQuoEdges, ...mechanismEdges];
 
   /**
    * ⭐ A NODE THAT CANNOT REACH THE GOAL BLOCKS THE WHOLE ANALYSIS.

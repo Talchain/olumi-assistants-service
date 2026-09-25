@@ -25,8 +25,12 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
   let modelBodies: Record<string, unknown>[] = [];
   let runs = 0;
   // How the ONE interpreting call behaves: answers, fails with an HTTP error, or says nothing.
-  let interp: 'ok' | 'throw' | 'empty' | 'claims' = 'ok';
-  const CLAIMING = 'Your starting assumptions were applied before this run. In the current model, Hire a tech lead leads, but only weakly.';
+  let interp: 'ok' | 'throw' | 'empty' | 'claims' | 'leads' = 'ok';
+  // A NON-RANKING interpretation: this fixture's readback WITHHOLDS the leader (`constraint_verdict_withheld`),
+  // so a sentence naming a leader is dropped by the fail-closed wire gate (`withheld-leader-fail-closed.ts`)
+  // before it reaches the user. What these tests pin is the Run fast path, not a leader.
+  const LEADS = 'Your edit did not change the comparison. In the current model, Hire a tech lead leads, but only weakly.';
+  const CLAIMING = 'Your starting assumptions were applied before this run. In the current model, the result turns on Capacity.';
   // A BLOCKED Run: HTTP 200, no analysis_result, Olumi's own explanation (the real recoverable shape).
   let blocked = false;
   const BLOCKED_WORDS = 'I can\'t run the analysis yet: no option has a path to the goal.';
@@ -36,12 +40,13 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
       modelBodies.push(body);
       if (body['tool_choice'] === 'none' && interp === 'throw') return new Response(JSON.stringify({ error: { message: 'boom' } }), { status: 400 });
       if (body['tool_choice'] === 'none' && interp === 'empty') return new Response(JSON.stringify({ output: [] }), { status: 200 });
+      if (body['tool_choice'] === 'none' && interp === 'leads') return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: LEADS }] }] }), { status: 200 });
       if (body['tool_choice'] === 'none' && interp === 'claims') return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: CLAIMING }] }] }), { status: 200 });
       if (body['tool_choice'] !== 'none' && modelBodies.length === 1) {
         // The Agent path: it would first decide to call run_analysis.
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'run_analysis', call_id: 'c1', arguments: JSON.stringify({ reason: 'asked' }) }] }), { status: 200 });
       }
-      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'In the current model, Hire a tech lead leads, but only weakly.' }] }] }), { status: 200 });
+      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'In the current model, the result turns on Capacity.' }] }] }), { status: 200 });
     }));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
@@ -82,7 +87,25 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
     expect(input, 'the call sees the real run result').toContain('function_call_output');
     expect(b._diagnostic_trace.fast_path).toBe('run');
     expect(b._agent.tool_calls.map((c) => c.name)).toEqual(['run_analysis']);
-    expect(b.assistant_text).toContain('Hire a tech lead leads');
+    expect(b.assistant_text).toBe('In the current model, the result turns on Capacity.');
+  });
+
+  /**
+   * ⛔ The explicit Run on a WITHHELD verdict (witness c19w on 8428207: "£59 … leads … ~82%" while `leader_claim.permitted` was false):
+   * the interpreter's ranking sentence is dropped at the wire whatever it calls the option — this
+   * fixture's graph has no option named "Hire a tech lead", so the shared literal-label gate alone
+   * passed it — every other sentence is kept, and one no-leader sentence is appended.
+   */
+  it('RED: a typed Run whose interpretation names a leader the readback withholds → the ranking sentence is dropped', async () => {
+    interp = 'leads';
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+    } });
+    const b = r.json() as { assistant_text: string; _diagnostic_trace: { fast_path?: string } };
+    expect(b._diagnostic_trace.fast_path).toBe('run');
+    expect(b.assistant_text).not.toMatch(/\bleads\b/);
+    expect(b.assistant_text).toContain('Your edit did not change the comparison.');
+    expect(b.assistant_text).toMatch(/No single option can be put forward yet/);
   });
 
   it('CONTRAST: "Run the analysis" typed as words still goes to the Agent', async () => {

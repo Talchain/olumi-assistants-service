@@ -358,12 +358,55 @@ export interface CommitResult {
   readonly persisted_row_id: string;
   readonly modelVersionReceipt: AtomicCommittedModelVersionReceipt | null;
   /**
-   * True when CommitMetadata.graph was provided and the atomic commit
-   * succeeded (both graph and turn row written). False when graph was absent.
-   * On commit failure, commitDirectAnswer throws rather than returning false
-   * here — the caller's catch block handles that path.
+   * True when CommitMetadata.graph was provided and the append RESOLVED. False
+   * when graph was absent. On commit failure, commitDirectAnswer throws rather
+   * than returning false here — the caller's catch block handles that path.
+   *
+   * ⛔ IT MEANS "A GRAPH WAS PROVIDED", NOT "THIS ATTEMPT WROTE A GRAPH". On a
+   *    replay or a reused-id conflict the append resolves without writing
+   *    anything, and this field is still `true`. It keeps that historical
+   *    meaning because existing callers gate on it (derive them:
+   *    `git grep -n 'graphPersisted' -- src`). To attest that THIS operation
+   *    wrote, use {@link CommitResult.thisAttemptWrote}.
    */
   readonly graphPersisted: boolean;
+  /**
+   * Whether THIS call's append wrote anything: `true` when the store's append
+   * outcome carries neither a replay nor a conflict flag, i.e. the append
+   * landed as a new write (a new turn row, plus the graph when one was
+   * supplied); `false` on a replay (`replayedPriorTurn`) or a reused-id
+   * conflict (`priorTurnConflict`), where the store wrote nothing for this
+   * attempt.
+   *
+   * ⛔ THE FIELD A CONSUMER MUST REQUIRE BEFORE ATTESTING THAT THIS OPERATION
+   *    SUCCEEDED (necessary, not sufficient — see the limits below).
+   *    `performed` is always `true`, `graphPersisted` means "a graph was
+   *    provided", and on a replay or conflict `persistedGraph` /
+   *    `persistedAnalysisGraphHash` are a DISPLAY SNAPSHOT (the authoritative
+   *    reread, F3) — which can already contain this request's change because
+   *    ANOTHER writer made it. A consumer that attests success from "graph
+   *    persisted AND the snapshot contains my change" is therefore satisfiable
+   *    by the wrong operation. Any consumer claiming that THIS operation
+   *    succeeded must require `thisAttemptWrote === true`. For a genuine
+   *    replay, the original receipt (`modelVersionReceipt`) is the only
+   *    evidence that the operation committed EARLIER; on a conflict there is
+   *    none.
+   *
+   * ⚠ NO STRONGER THAN THE STORE'S FLAGS. It is derived solely from
+   *   `SessionAppendOutcome.replayedPriorTurn` / `priorTurnConflict`
+   *   (session/store.ts). The Supabase store sets those only for GRAPH-bearing
+   *   writes (a non-graph write is never classified), and its classification
+   *   is a read before the RPC, so a row inserted under the same
+   *   `(scenario_id, turn_id)` between that read and the RPC yields `true`
+   *   although the RPC replayed (supabase-store.ts `append`, "IT CAN ONLY BE
+   *   WRONG IN ONE DIRECTION"). The same direction of error also arises when
+   *   the pre-RPC classification read errors or throws, and when the prior
+   *   row's request_hash is not a string: both classify as 'new' (supabase-
+   *   store.ts `classifyPriorTurn`), so the field says `true` although the RPC
+   *   may have replayed. Closing all of these needs a replay flag from the RPC
+   *   itself — a migration, not this field.
+   */
+  readonly thisAttemptWrote: boolean;
   /**
    * Track 2 — redacted per-turn pending-action lifecycle tally from the
    * carry-forward pass (counts only). Diagnostic-only; the turn-executor
@@ -381,6 +424,13 @@ export interface CommitResult {
    *
    * `null` when this commit wrote no graph (there are no persisted bytes to
    * hash) or when the graph was empty/unhashable.
+   *
+   * ⛔ ON A REPLAY OR A REUSED-ID CONFLICT THE STORE WROTE NOTHING (F3). The
+   * candidate this turn re-ran was never stored, so its hash must never be
+   * advertised. Here the field is the analysis hash of the AUTHORITATIVE
+   * REREAD of `scenarios.graph`, or `null` when that reread failed.
+   * That reread is a DISPLAY SNAPSHOT: another writer may have moved it, so it
+   * is never evidence that THIS operation wrote — {@link thisAttemptWrote} is.
    */
   readonly persistedAnalysisGraphHash: string | null;
   /**
@@ -399,6 +449,16 @@ export interface CommitResult {
    *
    * `null` when this commit wrote no graph. Do NOT treat it as a general
    * read-back: it is this commit's own input after projection, not a re-read.
+   *
+   * ⛔ THE ONE EXCEPTION IS A REPLAY OR A REUSED-ID CONFLICT (F3). The store
+   * wrote nothing, so "this commit's own input" is bytes that never landed,
+   * and callers stamp this field onto the wire as the applied postimage
+   * (`draft_graph`). On that branch it is the AUTHORITATIVE REREAD of
+   * `scenarios.graph`, the same reread the branch already reconciles the
+   * `graph_patch` against, or `null` when that reread failed. Never the
+   * candidate. A DISPLAY SNAPSHOT only: it may already contain this request's
+   * change because ANOTHER writer made it, so it must never be used to attest
+   * that THIS operation succeeded — {@link thisAttemptWrote} is the field for that.
    */
   readonly persistedGraph: unknown | null;
 }
@@ -1634,6 +1694,9 @@ export async function commitDirectAnswer(
   // reused id carrying a different instruction.
   const priorTurnReplay = appendOutcome.replayedPriorTurn === true;
   const priorTurnConflict = appendOutcome.priorTurnConflict === true;
+  // F3: set only on this branch. The return below uses it in place of the
+  // candidate, because on a replay or conflict the candidate never landed.
+  let replayReread: { readonly graph: unknown | null } | null = null;
   if (priorTurnReplay || priorTurnConflict) {
     // ⭐⭐ A RECOVERY MUST RECONCILE AGAINST AUTHORITATIVE CURRENT STATE, NOT
     //    MERELY DECLINE TO LIE.
@@ -1687,9 +1750,23 @@ export async function commitDirectAnswer(
     //    `display_value:"17 months"` and the block carried `target_id`, yet the
     //    reply was "I couldn't read the current value just now" with
     //    `after: null`. Nothing was unreadable; the reread never ran.
-    if (patchTargetId !== null) {
+    // One reread, shared by the patch reconciliation below and by the
+    // `persistedGraph` / `persistedAnalysisGraphHash` this commit returns (F3).
+    // It runs whenever this commit carried a graph, because every caller that
+    // stamps those two fields needs the stored state, patch target or not.
+    let currentGraph: unknown | null = null;
+    let currentGraphRead = false;
+    if (writesGraph || patchTargetId !== null) {
       try {
-        const currentGraph = await store.loadGraph(metadata.scenario_id);
+        currentGraph = await store.loadGraph(metadata.scenario_id);
+        currentGraphRead = true;
+      } catch {
+        // An unreadable graph is an UNKNOWN, not a fact — fall to the neutral arm.
+      }
+    }
+    if (writesGraph) replayReread = { graph: currentGraphRead ? currentGraph : null };
+    if (patchTargetId !== null && currentGraphRead) {
+      try {
         const nodes = (currentGraph as { nodes?: unknown } | null)?.nodes;
         if (Array.isArray(nodes)) {
           for (const n of nodes) {
@@ -2060,9 +2137,20 @@ export async function commitDirectAnswer(
   });
 
   const graphPersisted = writesGraph;
+  // ⛔ F3. `writesGraph` means "a graph was PROVIDED", not "a graph LANDED". On a
+  // replay or conflict the store wrote nothing, so the candidate and its hash
+  // describe bytes that were never stored. Callers stamp these two fields onto
+  // the wire as `draft_graph` / `graph_hash`, and the UI renders them as the
+  // applied state. Hand back the authoritative reread instead (or null).
+  const replayGraph = replayReread === null ? null : replayReread.graph;
   return {
-    persistedAnalysisGraphHash,
-    persistedGraph: writesGraph ? graphForStore : null,
+    persistedAnalysisGraphHash:
+      replayReread === null
+        ? persistedAnalysisGraphHash
+        : replayGraph === null
+          ? null
+          : checkPersistedGraphInvariants(replayGraph).analysisGraphHash,
+    persistedGraph: replayReread === null ? (writesGraph ? graphForStore : null) : replayGraph,
     // Same disclosure boundary as the response above: on a CONFLICT the
     // receipt belongs to the earlier operation, not to this refused request,
     // and the two carriers must agree or a consumer reading one and rendering
@@ -2091,6 +2179,11 @@ export async function commitDirectAnswer(
     performed: true,
     persisted_row_id: persistedRowId,
     graphPersisted,
+    // ⛔ Codex 5821693599. `performed` and `graphPersisted` above are `true` on a
+    // replay or conflict although this attempt wrote nothing, and the snapshot
+    // above is a reread another writer may have moved. This is the write-truth,
+    // kept apart from that snapshot so the two can disagree (see the field doc).
+    thisAttemptWrote: !(priorTurnReplay || priorTurnConflict),
     pendingLifecycle,
   };
 }

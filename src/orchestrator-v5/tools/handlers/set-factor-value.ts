@@ -33,6 +33,7 @@ import type { SetFactorValueHandlerFact } from '@talchain/schemas/orchestrator';
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import { USER_EDIT_SOURCE } from '../../../orchestrator/canonicalise-value-ops.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
+import { approvedAdoptionSourceFor } from '../../agent-lane/approved-adoption-context.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { synthesiseDisplayValue } from '../../../cee/factor-extraction/display-value.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
@@ -549,6 +550,14 @@ export function createSetFactorValueHandler(): HandlerFn {
       inputHasUnit: parsed.inputHasUnit,
     });
 
+    // ⭐ AN APPROVED ADOPTION OF OLUMI'S FIGURE IS NOT THE USER'S OWN FIGURE (review of #1851, B2).
+    // Present only when the Agent lane applies a server-verified, Olumi-authored proposal and
+    // names exactly this scenario, target and value (`approved-adoption-context.ts`). A panel
+    // apply keeps its own verified provenance; every other write keeps today's stamp.
+    const adoptedSource = appliedProvenance === undefined
+      ? approvedAdoptionSourceFor(invocation.context.session_id, targetId, normalised.raw_value)
+      : undefined;
+
     const after: ObservedSnapshot = {
       value: normalised.value,
       raw_value: normalised.raw_value,
@@ -566,6 +575,8 @@ export function createSetFactorValueHandler(): HandlerFn {
             elicited_from: appliedProvenance.elicited_from,
           }
         : {}),
+      // The adoption stamp rides the wire patch too, so it and the persisted graph agree.
+      ...(adoptedSource !== undefined ? { source: adoptedSource } : {}),
       // ⭐ ON A FOLDED-KEY MATCH, THE FACTOR'S STORED SPELLING WINS — nothing was
       // redeclared, so a value edit must not silently re-case what the factor
       // DECLARES. This is not "fold the display path": a genuinely NEW unit (no
@@ -720,6 +731,9 @@ export function createSetFactorValueHandler(): HandlerFn {
         ...(appliedProvenance !== undefined
           ? { elicited_from: appliedProvenance.elicited_from }
           : {}),
+        // An approved adoption of Olumi's figure (defined only when there is no panel
+        // provenance — see `adoptedSource`) is stored as an assumption, not as typed.
+        ...(adoptedSource !== undefined ? { source: adoptedSource } : {}),
       };
 
       // ⭐⭐ AND THE ABSENT BRANCH MUST *CLEAR* IT, NOT MERELY DECLINE TO SET IT.

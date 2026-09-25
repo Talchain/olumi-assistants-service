@@ -25,6 +25,7 @@ import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
+import { committedValueWrite } from './fixtures/served-value-write.js';
 
 /**
  * Every option wired to every factor. The real product only records a level on
@@ -101,7 +102,7 @@ function fakeProduct(opts: {
         if (opts.failOn?.includes(target) === true) return { status: 422, json: {} };
         nodes = nodes.map((n) => (n.id === target ? { ...n, observed_state: { ...n.observed_state, value: ev.value as number } } : n));
         rev += 1;
-        return { status: 200, json: { assistant_text: 'Updated.', graph_hash: `h${rev}` } };
+        return { status: 200, json: committedValueWrite(target, { graph_hash: `h${rev}` }) };
       }
       if (ev.kind === 'option_intervention_edit') {
         const target = `${String(ev.option_id)}::${String(ev.factor_id)}`;

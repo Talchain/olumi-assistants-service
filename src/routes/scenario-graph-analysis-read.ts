@@ -23,12 +23,19 @@
  * of these would be this estate's chronic defect (the two `generateGraphHash`
  * twins, the six freshness derivations) reproduced at a new surface:
  *
- *   the graph hash      `computeAnalysisAffectingGraphHash` — the SAME function
- *                       `freshness.current_graph_hash` and a run's
- *                       `graph_hash_at_run` are computed with, so `fresh` here
- *                       means bit-for-bit what it means on a turn.
- *   the fact read       `loadPriorFactsWithReadState` — the observational read
- *                       the turn path uses, including its degraded status.
+ *   the graph hash      `deriveDecisionContextGraphHash` — the SAME projection
+ *                       (`canonicaliseForAnalysis` → `GraphStateIngressSchema`
+ *                       → `computeAnalysisAffectingGraphHash`) a run's
+ *                       `graph_hash_at_run` is stamped over and a turn's
+ *                       `freshness.current_graph_hash` is computed with, so
+ *                       `fresh` here means bit-for-bit what it means on a turn.
+ *                       (CS-AN-2: this leg once hashed the RAW bytes, which
+ *                       read a just-completed run as stale on any graph whose
+ *                       option carriers needed promotion.)
+ *   the fact read       `loadScenarioAnalysisFactsForRead`: the turn path's
+ *                       own hot-window and durable readers, reconciled by
+ *                       `reconcileScenarioAnalysisFacts`, with the window's
+ *                       degraded status kept for the fallback.
  *   the freshness       `deriveAnalysisFreshness` — pure, and given the read
  *                       status so an unreadable store yields `unknown /
  *                       derivation_failed` rather than the positive claim
@@ -88,19 +95,24 @@ import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { AnalysisStateV1 } from '@talchain/schemas/boundary';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
-import { loadPriorFactsWithReadState } from '../orchestrator-v5/build-turn-context.js';
+import {
+  deriveDecisionContextGraphHash,
+  loadScenarioAnalysisFactsForRead,
+} from '../orchestrator-v5/build-turn-context.js';
 import { buildAnalysisResultBlock } from '../orchestrator-v5/compose.js';
 import {
   composeAnalysisStateV1,
   readRawRobustnessFromResponseBody,
   projectAnalysisBlocksForRunBinding,
 } from '../orchestrator-v5/compose/analysis-state-v1.js';
-import { mayPresentLeaderClaimForFact } from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
+import {
+  leaderWithheldOnlyBecauseUnrequested,
+  mayPresentLeaderClaimForFact,
+} from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { deriveAnalysisFreshness, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
-import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
+import { isScenarioAnalysisReasoningAuthority } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
-import type { GraphStateIngress } from '../orchestrator-v5/boundary/request-extensions.js';
 import { log } from '../utils/telemetry.js';
 
 /** The additive half of the scenario-graph read's 200 body. */
@@ -148,13 +160,53 @@ export async function readScenarioAnalysis(
     // information without spending a store read on it.
     if (params.graph === null || params.graph === undefined) return NOT_ANSWERED;
 
-    const currentGraphHash = computeAnalysisAffectingGraphHash(
-      params.graph as GraphStateIngress,
-    );
+    // ⭐ CS-AN-2 — THE FRESHNESS HASH IS THE CANONICAL ONE, THE HASH THE RUN
+    // STAMPED. `loadScenarioSnapshotForRunAnalysis` hands run_analysis
+    // `rawPersistedGraph: canonicaliseForAnalysis(persistedGraph)`, and
+    // run-analysis.ts stamps `graph_hash_at_run` over that after
+    // `GraphStateIngressSchema.safeParse`. The turn path compares against the
+    // same projection. This leg used to hash the RAW persisted bytes, so on any
+    // graph whose option-intervention carriers need promotion (DGAI autosave
+    // shape: `node.data.interventions`, raw_value-only entries, …) a reload
+    // straight after a successful run said `complete_stale / graph_changed`
+    // and withheld the result the user had just computed.
+    // `deriveDecisionContextGraphHash` is exactly that projection, shared with
+    // the turn path rather than re-assembled here.
+    //
+    // ⚠ ON A GRAPH WHOSE CANONICAL PROJECTION DOES NOT PARSE, THIS FAILS
+    // CLOSED, AND THAT COSTS A RESULT. `deriveDecisionContextGraphHash` returns
+    // null, `deriveAnalysisFreshness` reports `unknown /
+    // current_graph_hash_unavailable`, and the wire says `run_state:
+    // unknown_degraded / no_graph_this_turn` with NO `analysis_result`. That is
+    // the turn path's answer too (turn-executor.ts `selectedGraphForFreshness`
+    // → `currentAnalysisGraphHashForTurn`). It is NOT free: a graph that stops
+    // parsing after its run (a node loses its label — no hashed field moves,
+    // the RAW hash still equals the stamp) loses a result the raw-hash leg
+    // would have served as current. Currency cannot be verified there, so
+    // withholding is the chosen side. And the cause `no_graph_this_turn` is
+    // imprecise on a reload that DID return a graph — a named follow-up, not
+    // fixed here. (Pinned: `scenario-analysis-canonical-hash.test.ts`,
+    // UNPARSEABLE AFTER RUN.)
+    //
+    // ⚠ THIS IS DELIBERATELY NOT THE ROUTE'S WIRE `graph_hash`, and on a
+    // repaired-shape graph the two differ. The wire value
+    // (`assist.v1.scenario-graph.ts`) is the manual-edit compare-and-set base,
+    // and the writers derive their expected base from the RAW persisted graph
+    // (`graph-cas-conflict.ts` `hashesForRawGraph`); moving it would put the
+    // base out of step with the writer on exactly these graphs. The question
+    // here is different — "does this run's result belong
+    // to this model?" — and only the projection the run was stamped over can
+    // answer it. The one hash this leg ships, `analysis_result.
+    // computed_against_hash`, is the fact's own `graph_hash_at_run` (the
+    // canonical stamp), never recomputed here: it states what the run was
+    // computed against, so it must stay the run's value. A consumer comparing
+    // it to the wire `graph_hash` on a repaired-shape graph will see them
+    // differ; `analysis_state.run_state` is the currency verdict.
+    const currentGraphHash = deriveDecisionContextGraphHash(params.graph);
 
     const store = getSessionStore();
-    const [read, analysisInvalidatedAt] = await Promise.all([
-      loadPriorFactsWithReadState(params.scenarioId, params.requestId),
+    const [{ hotWindow, factSet }, analysisInvalidatedAt] = await Promise.all([
+      loadScenarioAnalysisFactsForRead(params.scenarioId, params.requestId),
       params.analysisInvalidatedAt !== undefined
         ? Promise.resolve(params.analysisInvalidatedAt)
         : store.readAnalysisInvalidatedAt?.(params.scenarioId) ?? Promise.resolve(null),
@@ -165,8 +217,34 @@ export async function readScenarioAnalysis(
     // failed read as `none` would be a POSITIVE claim ("this scenario has never
     // been analysed") that this leg cannot support — and on the auto-run path it
     // would terminate the client's wait with the wrong answer.
-    const derivation = deriveAnalysisFreshness(read.facts, currentGraphHash, undefined, {
-      priorFactsReadOk: read.status === 'ok',
+    //
+    // ⭐ THE SCENARIO'S ANALYSIS RECORD, NOT THE LAST 20 ROWS. This leg used to
+    // read facts through the `readRecent` window alone. Every value op and every
+    // Agent turn is a row, so after ~20 of them the run's turn aged out, and the
+    // reload reported `none / never_run` and returned no result for a scenario
+    // that HAS one. The reconciled durable set is the same authority the turn
+    // path reads (`scenario_analysis_fact_set`). When it is not authority
+    // (`degraded`), this leg keeps the window behaviour it always had.
+    //
+    // ⚠ ABSENCE IS AUTHORITATIVE ONLY FOR THE COMPLETE RECORD. `capped` carries
+    // the newest real facts, but unread history sits behind the wall. Reading
+    // "no success in that page" as `none` would be a positive "never analysed"
+    // claim, so under `capped` an empty selection stays `unknown`. This is the
+    // turn path's own rule (`build-turn-context.ts`, `scenarioAnalysisFactsReadOk`).
+    //
+    // ⚠ AND NEVER FOR THE WINDOW FALLBACK. When the durable read is `degraded`
+    // the hot window is still read — a success in it is positive evidence and is
+    // compared by hash as before — but an EMPTY window is 20 rows, not the
+    // record: a run can sit behind it. So absence there is never authoritative
+    // and an empty selection reads `unknown / derivation_failed`, not
+    // `none / never_run` (Codex pre-review finding 5824695259). `readOk` is
+    // consulted only when no fact is selected, so this changes nothing else.
+    // Same rule as the turn path: only `complete` licenses "never analysed".
+    const durableAuthority = isScenarioAnalysisReasoningAuthority(factSet);
+    const facts = durableAuthority ? factSet.facts : hotWindow.facts;
+    const factsReadOk = factSet.status === 'complete';
+    const derivation = deriveAnalysisFreshness(facts, currentGraphHash, undefined, {
+      priorFactsReadOk: factsReadOk,
       analysisInvalidatedAt,
     });
 
@@ -176,7 +254,7 @@ export async function readScenarioAnalysis(
     // fact.
     // Historical selection is independent of permission to display a CURRENT
     // result. A changed graph must not replace the original run's hash/time.
-    const historical = selectRunAnalysisFact(read.facts);
+    const historical = selectRunAnalysisFact(facts);
     const selected = derivation.freshness === 'fresh' ? historical : null;
     const fact =
       selected !== null && selected.fact.fact_type === 'run_analysis'
@@ -213,6 +291,10 @@ export async function readScenarioAnalysis(
         // answers. The shared admission is the fix; copying the conjunction here
         // would have been the mirror.
         mayNameLeadingOption: fact !== null ? mayPresentLeaderClaimForFact(fact) : false,
+        // WHY it is withheld, when the fact can prove it: its own constraint verdict
+        // permitted a leader and nobody asked for this run (the automatic first
+        // pass). Otherwise the constraint token stands (#63 5825404689).
+        withheldBecauseUnrequested: fact !== null && leaderWithheldOnlyBecauseUnrequested(fact),
         rawRobustness:
           analysisResult !== null
             ? readRawRobustnessFromResponseBody({ blocks: [analysisResult] })

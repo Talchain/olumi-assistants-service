@@ -159,6 +159,13 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           factor_label: { type: 'string' },
           value: { type: 'number', description: 'In the factor\u2019s own units \u2014 the number a user would say.' },
           basis: { type: 'string' },
+          user_stated: {
+            type: 'boolean',
+            description:
+              'Set true ONLY when the user has just said that carrying on as now would itself change this ' +
+              'factor, and gave the level. It permits a level on an option in `status_quo_held`; the user ' +
+              'still approves it. Omit it in every other case.',
+          },
         }, ['option_label', 'factor_label', 'value', 'basis']),
       },
     }, ['interventions']),
@@ -192,6 +199,13 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           factor_label: { type: 'string' },
           value: { type: 'number' },
           basis: { type: 'string' },
+          user_stated: {
+            type: 'boolean',
+            description:
+              'Set true ONLY when the user has just said that carrying on as now would itself change this ' +
+              'factor, and gave the level. It permits a level on an option in `status_quo_held`; the user ' +
+              'still approves it. Omit it in every other case.',
+          },
         }, ['option_label', 'factor_label', 'value', 'basis']),
       },
     }, ['assumptions', 'option_levels']),
@@ -245,10 +259,10 @@ export interface AgentCapabilities {
     label: string; acts_on: { factor_label: string; direction: 'positive' | 'negative' }[]; rationale: string;
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
-    interventions: readonly { option_label: string; factor_label: string; value: number; basis: string }[];
+    interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
   }): Promise<ToolResult>;  proposeStartingPoint(ctx: AgentToolContext, args: {
     assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
-    option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string }[];
+    option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
   }): Promise<ToolResult>;
 }
 

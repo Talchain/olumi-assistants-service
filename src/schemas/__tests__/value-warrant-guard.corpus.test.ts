@@ -294,17 +294,20 @@ describe("the live value-bearing contract, adjudicated", () => {
     expect(report.stale.map((d) => d.id)).toEqual([]);
   });
 
-  it("the first cut is an ENUMERATION: 34 sites, 26 findings, 18 OPEN, 8 accepted", () => {
+  it("the first cut is an ENUMERATION: 36 sites, 28 findings, 20 OPEN, 8 accepted", () => {
     // Pinned so the shape of the first cut cannot move quietly. There is no date
     // trigger anywhere in this check — a CI job that turns red on a calendar is a
     // time bomb. What this gives instead is an OPEN count a human can watch.
-    expect(SITES.length).toBe(34);
-    expect(FINDINGS.length).toBe(26);
-    expect(report.open.length).toBe(18);
+    // +2 sites / +2 findings / +2 OPEN (was 34/26/18): schemas 0.56.0 (#60)
+    // declares `observed_state.cap` and `.raw_value` on the contract's NodeV3,
+    // reaching CEE with the 0.58.0 re-vendor. Recorded OPEN with their family.
+    expect(SITES.length).toBe(36);
+    expect(FINDINGS.length).toBe(28);
+    expect(report.open.length).toBe(20);
     expect(report.accepted.length).toBe(8);
     expect(SITES.filter((s) => s.verdict === "FIELD").length).toBe(4);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SOLE").length).toBe(4);
-    expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(11);
+    expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(13);
     expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(15);
   });
 
