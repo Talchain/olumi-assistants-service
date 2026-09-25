@@ -1576,12 +1576,18 @@ async function dispatchStructuralDelete(
   // WAS A STRONGER CLAIM THAN THE CODE DELIVERS, which is exactly the defect
   // class this estate calls an honest label overwritten by a false one.
   //
-  // `commitResult.persistedGraph` is `graphForStore`, and `commit.ts:372-373`
-  // says so in terms: *"Do NOT treat it as a general read-back: it is this
+  // `commitResult.persistedGraph` is `graphForStore`, and `commit.ts`
+  // (`CommitResult.persistedGraph`) says so in terms: *"Do NOT treat it as a general read-back: it is this
   // commit's own input after projection, not a re-read."* So this compares the
   // adapter's projected graph against the commit chokepoint's own SECOND
   // projection of it. It is a non-idempotent-projection check, NOT a database
   // read-back.
+  //
+  // ⛔ EXCEPT on a replay or reused-id conflict (`thisAttemptWrote === false`,
+  // #1856 F3): there it IS the authoritative reread of `scenarios.graph`, a
+  // display snapshot that can hold this change because ANOTHER writer made it,
+  // so a match here does not prove THIS operation wrote. Only
+  // `CommitResult.thisAttemptWrote` says that.
   //
   // That is still worth having — `projectGraphForPersistence` repairs,
   // normalises and reconciles, and `reconcileTopLevelOptionsFromNodes` is
@@ -2596,6 +2602,12 @@ async function dispatchStructuralRename(
   // it. It catches a non-idempotent projection reintroducing the old label; it
   // CANNOT see the store persisting something different from what it was handed.
   // A real read-back would need a post-commit SELECT this seam does not perform.
+  //
+  // ⛔ EXCEPT on a replay or reused-id conflict (`thisAttemptWrote === false`,
+  // #1856 F3): there it IS the authoritative reread of `scenarios.graph`, a
+  // display snapshot that can hold this change because ANOTHER writer made it,
+  // so a match here does not prove THIS operation wrote. Only
+  // `CommitResult.thisAttemptWrote` says that.
   const committedParse = GraphV3.safeParse(persistedGraphBytes);
   const renameLanded =
     committedParse.success &&
@@ -2893,6 +2905,12 @@ async function dispatchStructuralAdd(
   // It catches a non-idempotent projection dropping the entry or synthesising a
   // baseline; it CANNOT see the store persisting something different from what
   // it was handed.
+  //
+  // ⛔ EXCEPT on a replay or reused-id conflict (`thisAttemptWrote === false`,
+  // #1856 F3): there it IS the authoritative reread of `scenarios.graph`, a
+  // display snapshot that can hold this change because ANOTHER writer made it,
+  // so a match here does not prove THIS operation wrote. Only
+  // `CommitResult.thisAttemptWrote` says that.
   const committedParse = GraphV3.safeParse(persistedGraphBytes);
   const committedNode = committedParse.success
     ? committedParse.data.nodes.find((n) => n.id === result.addedNodeId)
@@ -3207,6 +3225,12 @@ async function dispatchStructuralAddEdge(
   // chokepoint's SECOND projection of it. It catches a non-idempotent projection
   // dropping the edge or flipping its sign; it CANNOT see the store persisting
   // something different from what it was handed.
+  //
+  // ⛔ EXCEPT on a replay or reused-id conflict (`thisAttemptWrote === false`,
+  // #1856 F3): there it IS the authoritative reread of `scenarios.graph`, a
+  // display snapshot that can hold this change because ANOTHER writer made it,
+  // so a match here does not prove THIS operation wrote. Only
+  // `CommitResult.thisAttemptWrote` says that.
   const committedParse = GraphV3.safeParse(persistedGraphBytes);
   const committedEdge = committedParse.success
     ? committedParse.data.edges.find((e) => e.from === result.from && e.to === result.to)
