@@ -16,6 +16,7 @@
 import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, authorisationTurnId, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { renormaliseOptionInterventionsForCapChange } from '../../tools/handlers/d1-shared/renormalise-interventions-for-cap-change.js';
 
 /**
  * Every option wired to every factor. The real product only records a level on
@@ -52,10 +53,18 @@ const BASE: Node[] = [
   { id: 'raise_now', kind: 'option', label: 'Raise at next release', interventions: { pro_plan_price: { value: 0.295 } } },
 ];
 
-function fakeProduct(opts: { failOn?: string[]; registerFails?: boolean } = {}) {
+function fakeProduct(opts: {
+  failOn?: string[]; registerFails?: boolean;
+  /** The level the product STORES for what was sent (the handler's own normalisation). */
+  storeAs?: (sent: number) => number;
+  /** The committed response carries the persisted `draft_graph` beside `graph_hash`, as served. Default true; false = a response without it. */
+  draftGraph?: boolean;
+  /** Nodes beyond BASE (a precise-figure factor, say). */
+  extraNodes?: Node[];
+} = {}) {
   const posted: { turn_id: string; event: Record<string, unknown> }[] = [];
   const registered: { nodes: Node[] }[] = [];
-  let nodes: Node[] = BASE.map((n) => ({ ...n, interventions: n.interventions == null ? n.interventions : { ...n.interventions } }));
+  let nodes: Node[] = [...BASE, ...(opts.extraNodes ?? [])].map((n) => ({ ...n, interventions: n.interventions == null ? n.interventions : { ...n.interventions } }));
   let rev = 0;
   const d: InternalDispatch = async (path, body) => {
     const b = (body ?? {}) as Record<string, unknown>;
@@ -73,15 +82,23 @@ function fakeProduct(opts: { failOn?: string[]; registerFails?: boolean } = {}) 
       // The real event is CAS-gated: a stale base is refused, as on the wire.
       if (ev.base_graph_hash !== `h${rev}`) return { status: 409, json: { error: 'GRAPH_DIVERGED' } };
       if (opts.failOn?.includes(`${ev.option_id}::${ev.factor_id}`) === true) return { status: 422, json: {} };
+      const stored = opts.storeAs !== undefined ? opts.storeAs(ev.value) : ev.value;
       nodes = nodes.map((n) => (n.id === ev.option_id
-        ? { ...n, interventions: { ...(n.interventions ?? {}), [ev.factor_id]: { value: ev.value } } } : n));
+        ? { ...n, interventions: { ...(n.interventions ?? {}), [ev.factor_id]: { value: stored } } } : n));
       rev += 1;
       // The served committed response carries its own persisted revision.
-      return { status: 200, json: { assistant_text: 'Recorded.', graph_hash: `h${rev}` } };
+      return { status: 200, json: {
+        assistant_text: 'Recorded.', graph_hash: `h${rev}`,
+        ...(opts.draftGraph !== false ? { draft_graph: { nodes, edges: wired(nodes) } } : {}),
+      } };
     }
+    if (readFails) return { status: 503, json: {} };
     return { status: 200, json: { graph: { nodes, edges: wired(nodes) }, graph_hash: `h${rev}` } };
   };
-  return { d, posted, registered, read: () => nodes };
+  let readFails = false;
+  /** Another writer commits directly (a collaborator, or a second tab): the model moves past us. */
+  const foreign = (edit: (ns: Node[]) => Node[]): void => { nodes = edit(nodes); rev += 1; };
+  return { d, posted, registered, read: () => nodes, foreign, failReads: () => { readFails = true; } };
 }
 
 const ASK = {
@@ -177,6 +194,379 @@ describe('the value is read against the factor’s declared range', () => {
 });
 
 describe('authorise_change records the STORED levels', () => {
+  /**
+   * ⛔ Codex challenge on #1851 (5825938003), its exact CAS-shaped sequence: our first level commits at h1;
+   * a collaborator commits the SAME pair at h2; our second level (base h1) is refused 409; the read shows
+   * THEIR level. The row keeps OUR level, theirs is reported as changed since, and the note says both.
+   */
+  it('RED: a collaborator’s level on the same pair after our write is never recorded as ours', async () => {
+    const p = fakeProduct();
+    let interleaved = false;
+    const d: InternalDispatch = async (path, body) => {
+      const b = (body ?? {}) as { kind?: string; event?: { kind?: string; option_id?: string; factor_id?: string } };
+      if (!interleaved && path === '/orchestrate/v2/turn' && b.kind === 'system_event'
+        && b.event?.option_id === 'phase_increase' && b.event.factor_id === 'feature_value') {
+        const own = await p.d(path, body);
+        interleaved = true;
+        const foreign = await p.d(path, { kind: 'system_event', turn_id: 'other-writer', event: {
+          kind: 'option_intervention_edit', option_id: 'phase_increase', factor_id: 'feature_value', value: 0.2, base_graph_hash: 'h1',
+        } });
+        expect(foreign.status, 'PRECONDITION: the other writer really committed on our pair').toBe(200);
+        return own;
+      }
+      return p.d(path, body);
+    };
+    const caps = createAgentCapabilities(d, new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, ASK);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(p.read().find((n) => n.id === 'phase_increase')?.interventions?.feature_value, 'PRECONDITION: theirs is what the model holds').toEqual({ value: 0.2 });
+    expect(applied).toMatchObject({ recorded_count: 1, requested_count: 2, failures: [{ path: 'phase_increase::pro_plan_price', detail: 'http 409' }] });
+    expect(applied.interventions).toEqual([
+      { option: 'Phase Pro price increase', factor: 'Pro feature value', requested: 0.8, recorded: 0.8 },
+      { option: 'Phase Pro price increase', factor: 'Pro plan price', requested: 54, recorded: null },
+    ]);
+    expect(applied.changed_since_by_another_writer).toEqual([
+      { option: 'Phase Pro price increase', factor: 'Pro feature value', saved: 0.8, now: 0.2, unit: 'index 0-1' },
+    ]);
+    const said = String(applied.not_represented);
+    expect(said).toContain('Phase Pro price increase \u2192 Pro plan price was NOT');
+    expect(said).toContain('Phase Pro price increase \u2192 Pro feature value was saved by this approval, but someone else has since changed it');
+    expect(said).toContain('The levels that were recorded are from what the user said');
+    expect(said).not.toContain('What each option does is now recorded');
+  });
+
+  /** One level, the user's own £54 on a factor with a 0–200 range, and the product's committed response. */
+  const PRICE_ONLY = { interventions: [ASK.interventions[0]!] };
+  const onOurWrite = (p: ReturnType<typeof fakeProduct>, then: () => void): InternalDispatch => {
+    let done = false;
+    return async (path, body) => {
+      const b = (body ?? {}) as { kind?: string };
+      if (!done && path === '/orchestrate/v2/turn' && b.kind === 'system_event') {
+        const own = await p.d(path, body);
+        expect(own.status, 'PRECONDITION: our write committed').toBe(200);
+        done = true;
+        then();
+        return own;
+      }
+      return p.d(path, body);
+    };
+  };
+  const setLevel = (option: string, factor: string, value: number | null) => (ns: Node[]): Node[] => ns.map((n) => {
+    if (n.id !== option) return n;
+    const iv = { ...(n.interventions ?? {}) };
+    if (value === null) delete iv[factor]; else iv[factor] = { value };
+    return { ...n, interventions: iv };
+  });
+
+  /**
+   * ⛔ Review of #1881 (5826400426) blocking 1: a pair OUR write committed that another writer then REMOVED.
+   * The read shows no level, so the row was counted NOT recorded — and with one op, "left the model
+   * unchanged", no markApplied: a false claim about a write that did commit, and a re-approval invited.
+   */
+  it('RED: a level we saved that someone else then removed is ours, reported removed — never "not recorded"', async () => {
+    const p = fakeProduct();
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(setLevel('phase_increase', 'pro_plan_price', null))), store);
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(p.read().find((n) => n.id === 'phase_increase')?.interventions, 'PRECONDITION: the level is gone').toEqual({});
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, applied: true, recorded_count: 1, requested_count: 1 });
+    expect(applied.interventions).toEqual([{ option: 'Phase Pro price increase', factor: 'Pro plan price', requested: 54, recorded: 54 / 200 }]);
+    expect(applied.changed_since_by_another_writer).toEqual([
+      { option: 'Phase Pro price increase', factor: 'Pro plan price', saved: 54, now: null, unit: 'GBP/month' },
+    ]);
+    const said = String(applied.not_represented);
+    expect(said).toContain('Pro plan price was saved by this approval, but someone else has since removed it');
+    expect(said).not.toMatch(/was NOT|left the model unchanged/);
+    // markApplied ran: a second "yes" to the same proposal writes nothing.
+    const again = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(again.mutated, JSON.stringify(again)).toBe(false);
+    expect(p.posted).toHaveLength(1);
+  });
+
+  /** ⛔ Review of #1881 blocking 2: the Agent quotes these figures, so they are the USER's — £54 and £60, never 0.27 and 0.3. */
+  it('RED: changed-since figures are in the user’s scale and unit', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(setLevel('phase_increase', 'pro_plan_price', 0.3))), new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied.changed_since_by_another_writer).toEqual([
+      { option: 'Phase Pro price increase', factor: 'Pro plan price', saved: 54, now: 60, unit: 'GBP/month' },
+    ]);
+    expect(String(applied.not_represented)).not.toMatch(/0\.27|0\.3\b/);
+  });
+
+  /**
+   * ⛔ Codex 5826386917: a positive control in the PRODUCTION shape — the committed response carries the persisted
+   * `draft_graph`, and the product stores a level other than the one sent. What we saved is what IT committed.
+   */
+  it('RED: with the production-shaped draft_graph, "saved" is the level the product committed, not the one sent', async () => {
+    const p = fakeProduct({ draftGraph: true, storeAs: (v) => Number((v + 0.005).toFixed(3)) });
+    const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(setLevel('phase_increase', 'pro_plan_price', 0.3))), new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied.interventions).toEqual([{ option: 'Phase Pro price increase', factor: 'Pro plan price', requested: 54, recorded: 0.275 }]);
+    expect(applied.changed_since_by_another_writer).toEqual([
+      { option: 'Phase Pro price increase', factor: 'Pro plan price', saved: 55, now: 60, unit: 'GBP/month' },
+    ]);
+  });
+
+  it('CONTROL: production-shaped draft_graph, the product’s own normalisation, and no other writer — nothing changed since', async () => {
+    const p = fakeProduct({ draftGraph: true, storeAs: (v) => Number((v + 0.005).toFixed(3)) });
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied).toMatchObject({ ok: true, recorded_count: 1 });
+    expect(applied.interventions).toEqual([{ option: 'Phase Pro price increase', factor: 'Pro plan price', requested: 54, recorded: 0.275 }]);
+    expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+    expect(applied).not.toHaveProperty('current_state_unknown');
+  });
+
+  /** ⛔ The same class: a read-back that FAILS after our writes committed is not evidence they did not. */
+  it('RED: a failed read-back after our committed writes keeps them ours and says the current state is unknown', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(onOurWrite(p, () => p.failReads()), new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, applied: true, recorded_count: 1, current_state_unknown: true });
+    expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+    const said = String(applied.not_represented);
+    expect(said).toContain('a read afterwards could not confirm what the model holds now');
+    expect(applied.revision_after, 'our own committed revision, never the pre-approval one').toBe('h1');
+    expect(said).not.toMatch(/was NOT|left the model unchanged/);
+  });
+
+  /**
+   * Another writer extends Pro plan price's range 200 → 400 the way the product does it: the factor's range moves and
+   * the PRODUCTION renormaliser rescales every option level on it to KEEP its absolute value (0.27 → 0.135, still £54).
+   */
+  const extendPriceRange = (ns: Node[]): Node[] => {
+    const g = { nodes: ns.map((n) => ({ ...n, interventions: n.interventions == null ? n.interventions : { ...n.interventions } })) };
+    const count = renormaliseOptionInterventionsForCapChange(g as never, 'pro_plan_price', 200, 400);
+    expect(count, 'PRECONDITION: the production renormaliser rewrote the levels').toBeGreaterThan(0);
+    return g.nodes.map((n) => (n.id === 'pro_plan_price' ? { ...n, observed_state: { ...n.observed_state, cap: 400, value: 49 / 400 } } : n));
+  };
+  const cell = (p: ReturnType<typeof fakeProduct>) => p.read().find((n) => n.id === 'phase_increase')?.interventions?.pro_plan_price;
+
+  /** ⛔ Review of #1881 at 29391976 (5826841372) + Codex 5826779118: a range change is not a changed level. */
+  it('RED: another writer extending the range keeps our £54 — nothing is reported as changed since', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(extendPriceRange)), new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(cell(p), 'PRECONDITION: the renormaliser kept the absolute').toEqual({ value: 54 / 400, raw_value: 54 });
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, applied: true, recorded_count: 1 });
+    expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+    expect(applied).not.toHaveProperty('current_state_unknown');
+    expect(String(applied.not_represented)).not.toContain('someone else');
+  });
+
+  it('OPPOSITE CONTROL: the range extended AND the level really changed to £60 — reported as £60, in the new range', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(onOurWrite(p, () => {
+      p.foreign(extendPriceRange);
+      p.foreign((ns) => ns.map((n) => (n.id === 'phase_increase' ? { ...n, interventions: { ...(n.interventions ?? {}), pro_plan_price: { value: 0.15, raw_value: 60 } } } : n)));
+    }), new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied.changed_since_by_another_writer).toEqual([
+      { option: 'Phase Pro price increase', factor: 'Pro plan price', saved: 54, now: 60, unit: 'GBP/month' },
+    ]);
+  });
+
+  it('RED: the range cannot be established now — the current level is unknown, never an invented amount', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign((ns) => ns.map((n) => {
+      if (n.id === 'pro_plan_price') return { ...n, observed_state: { value: 0.3, unit: 'GBP/month' } };
+      if (n.id === 'phase_increase') return { ...n, interventions: { pro_plan_price: { value: 0.3 } } };
+      return n;
+    }))), new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1, current_state_unknown: true });
+    expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+  });
+
+  it('RED: a stamped absolute that disagrees with the range is unknown, not a quoted amount', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(onOurWrite(p, () => {
+      p.foreign(extendPriceRange);
+      p.foreign((ns) => ns.map((n) => (n.id === 'phase_increase' ? { ...n, interventions: { pro_plan_price: { value: 0.135, raw_value: 99 } } } : n)));
+    }), new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied, JSON.stringify(applied)).toMatchObject({ current_state_unknown: true });
+    expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+  });
+
+  it('RED: a read with no revision is never "moved" — a differing level there is unknown, not another writer', async () => {
+    // Only the sent level is known (no committed post-state), so the read's differing level is not provably ours.
+    const p = fakeProduct({ storeAs: (v) => Number((v + 0.005).toFixed(3)), draftGraph: false });
+    let wrote = false;
+    const d: InternalDispatch = async (path, body) => {
+      const r = await p.d(path, body);
+      if (path === '/orchestrate/v2/turn' && (body as { kind?: string }).kind === 'system_event') { wrote = true; return r; }
+      return wrote && path.endsWith('/graph') ? { ...r, json: { ...r.json, graph_hash: '' } } : r;
+    };
+    const caps = createAgentCapabilities(d, new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1, current_state_unknown: true });
+    expect(String(applied.not_represented)).not.toContain('someone else');
+  });
+
+  it('RED: a read with no revision and the level ABSENT is unknown — never "someone else removed it"', async () => {
+    const p = fakeProduct();
+    let wrote = false;
+    const d: InternalDispatch = async (path, body) => {
+      const r = await p.d(path, body);
+      if (path === '/orchestrate/v2/turn' && (body as { kind?: string }).kind === 'system_event') { wrote = true; return r; }
+      if (!wrote || !path.endsWith('/graph')) return r;
+      const g = r.json.graph as { nodes: Node[] };
+      return { ...r, json: { ...r.json, graph_hash: '', graph: { ...g, nodes: g.nodes.map((n) => (n.id === 'phase_increase' ? { ...n, interventions: {} } : n)) } } };
+    };
+    const caps = createAgentCapabilities(d, new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1, current_state_unknown: true });
+    expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+  });
+
+  /**
+   * ⛔ Review of #1881 at 6868825f (5827673705): rounding to 6 significant figures BEFORE comparing made a precise
+   * figure never equal to itself, so an UNRELATED write (a goal rename) read as "someone else changed your level".
+   */
+  describe('a precise figure is compared un-rounded', () => {
+    const ARR: Node = { id: 'arr', kind: 'factor', label: 'Annual revenue', observed_state: { value: 0.5, raw_value: 1_000_000, cap: 2_000_000, unit: 'GBP' } };
+    const askArr = (value: number) => ({ interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Annual revenue', value, basis: 'the user\u2019s figure' }] });
+    const renameGoal = (ns: Node[]): Node[] => ns.map((n) => (n.id === 'mrr' ? { ...n, label: 'Monthly recurring revenue (renamed)' } : n));
+    it.each([1_234_567, 1_234_567.5])('RED: £%s, then an unrelated write — nothing is reported as changed', async (v) => {
+      const p = fakeProduct({ extraNodes: [ARR] });
+      const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(renameGoal)), new ProposalStore());
+      const prop = await caps.proposeOptionInterventions(ctx, askArr(v));
+      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1 });
+      expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+      expect(String(applied.not_represented)).not.toContain('someone else');
+    });
+    it('RED: the product stores its own normalisation of a precise figure, then an unrelated write — still nothing changed', async () => {
+      // The saved-level fallback (committed level x range) is compared un-rounded too: its rounded twin is only reported.
+      const p = fakeProduct({ extraNodes: [ARR], draftGraph: true, storeAs: (x) => x + 3e-8 });
+      const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(renameGoal)), new ProposalStore());
+      const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_567));
+      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1 });
+      expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+    });
+    /**
+     * ⛔ Pre-review of #1881 at 16a2f19e (5828080522): a relative 1e-6 band hid a collaborator's £1,001 change on
+     * £1,234,564,999, and 6-figure display rounding would have quoted £1,234,570,000 — a figure nobody entered.
+     */
+    const BIG: Node = { id: 'arr', kind: 'factor', label: 'Annual revenue', observed_state: { value: 0.5, raw_value: 1_000_000_000, cap: 2_000_000_000, unit: 'GBP' } };
+    it.each([
+      ['£1,001', 1_234_566_000],
+      ['£1', 1_234_565_000],
+    ])('RED: a collaborator moves our £1,234,564,999 by %s — reported, with THEIR exact figure', async (_l, theirs) => {
+      const p = fakeProduct({ extraNodes: [BIG] });
+      const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(setLevel('phase_increase', 'arr', theirs / 2_000_000_000))), new ProposalStore());
+      const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_564_999));
+      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      expect(applied.changed_since_by_another_writer).toEqual([
+        { option: 'Phase Pro price increase', factor: 'Annual revenue', saved: 1_234_564_999, now: theirs, unit: 'GBP' },
+      ]);
+    });
+    it('CONTROL: the same £1,234,564,999 with only an unrelated write — nothing changed', async () => {
+      const p = fakeProduct({ extraNodes: [BIG] });
+      const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(renameGoal)), new ProposalStore());
+      const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_564_999));
+      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+    });
+    /**
+     * ⛔ Pre-review of #1881 at 844486bb (5828293137): 1e-12 relative still hid £1 on £1.2tn. The same range compares the
+     * STORED levels exactly; only a range change allows float noise, of a few units in the last place.
+     */
+    const HUGE: Node = { id: 'arr', kind: 'factor', label: 'Annual revenue', observed_state: { value: 0.5, raw_value: 1e12, cap: 2e12, unit: 'GBP' } };
+    it.each([
+      ['£1', 1_234_565_000_000],
+      ['£2', 1_234_565_000_001],
+    ])('RED: on a £2tn range, a collaborator moves our £1,234,564,999,999 by %s — reported, with THEIR exact figure', async (_l, theirs) => {
+      const p = fakeProduct({ extraNodes: [HUGE] });
+      const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(setLevel('phase_increase', 'arr', theirs / 2e12))), new ProposalStore());
+      const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_564_999_999));
+      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      expect(applied.changed_since_by_another_writer).toEqual([
+        { option: 'Phase Pro price increase', factor: 'Annual revenue', saved: 1_234_564_999_999, now: theirs, unit: 'GBP' },
+      ]);
+    });
+    it('CONTROL: £1,234,564,999,999 on a £2tn range, only an unrelated write — nothing changed', async () => {
+      const p = fakeProduct({ extraNodes: [HUGE] });
+      const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(renameGoal)), new ProposalStore());
+      const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_564_999_999));
+      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+      expect(applied).not.toHaveProperty('current_state_unknown');
+    });
+    it('a write whose response carries no committed post-state: a later mismatch is UNKNOWN, never another writer', async () => {
+      // Only the SENT level is known; the product may have normalised it. Honest: "could not confirm", not "someone changed it".
+      const p = fakeProduct({ extraNodes: [ARR], draftGraph: false, storeAs: (x) => x + 3e-8 });
+      const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(renameGoal)), new ProposalStore());
+      const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_567));
+      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1, current_state_unknown: true });
+      expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+    });
+    it('CONTROL: a precise figure that someone really changed is reported, the new figure rounded for reading', async () => {
+      const p = fakeProduct({ extraNodes: [ARR] });
+      const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(setLevel('phase_increase', 'arr', 0.75))), new ProposalStore());
+      const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_567));
+      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      expect(applied.changed_since_by_another_writer).toEqual([
+        { option: 'Phase Pro price increase', factor: 'Annual revenue', saved: 1_234_567, now: 1_500_000, unit: 'GBP' },
+      ]);
+    });
+  });
+
+  it('a deleted option is named from the approved read, never by its id', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign((ns) => ns.filter((n) => n.id !== 'phase_increase'))), new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied.changed_since_by_another_writer).toEqual([
+      { option: 'Phase Pro price increase', factor: 'Pro plan price', saved: 54, now: null, unit: 'GBP/month' },
+    ]);
+    expect(String(applied.not_represented)).not.toContain('phase_increase');
+  });
+
+  /** ⛔ Absent at OUR OWN revision is not "someone removed it" — nobody else wrote. Unknown, never an invented writer. */
+  it('RED: a level absent from a read at our own committed revision is unknown, not "removed by someone else"', async () => {
+    const p = fakeProduct();
+    let wrote = false;
+    const d: InternalDispatch = async (path, body) => {
+      const r = await p.d(path, body);
+      const b = (body ?? {}) as { kind?: string };
+      if (path === '/orchestrate/v2/turn' && b.kind === 'system_event') { wrote = true; return r; }
+      if (!wrote || !path.endsWith('/graph')) return r;
+      const g = r.json.graph as { nodes: Node[] };
+      return { ...r, json: { ...r.json, graph: { ...g, nodes: g.nodes.map((n) => (n.id === 'phase_increase' ? { ...n, interventions: {} } : n)) } } };
+    };
+    const caps = createAgentCapabilities(d, new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1, current_state_unknown: true });
+    expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+    expect(String(applied.not_represented)).not.toContain('someone else');
+  });
+
+  it('CONTROL: with no other writer the same approval reports nothing changed since', async () => {
+    const p = fakeProduct();
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const prop = await caps.proposeOptionInterventions(ctx, ASK);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    expect(applied).not.toHaveProperty('changed_since_by_another_writer');
+    expect(String(applied.not_represented)).toContain('What each option does is now recorded');
+  });
+
   it('applies every level although each write moves the graph hash', async () => {
     const p = fakeProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
