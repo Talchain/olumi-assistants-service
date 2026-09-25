@@ -92,6 +92,29 @@ describe('every limit the drafter writes names a node it keeps', () => {
     expect(registered?.goal_constraints?.map((g) => g.node_id)).toEqual([node!.id]);
   });
 
+  it('the drafter is told a limit keeps the direction the user stated, with no opposite bound (review 5831251158)', async () => {
+    const { reqs } = await run(candidate('Total first-year cost'));
+    expect(reqs[0]!.instructions).toMatch(/Keep the direction the user stated: a budget, cost or spend cap is an upper bound/);
+    expect(reqs[0]!.instructions).toMatch(/never add the opposite bound to the same limit/);
+  });
+
+  it('B2 d4 SHAPE: a cap drafted both ways on a kept node is withheld, and the Agent is told in words', async () => {
+    const both = {
+      ...candidate('Total first-year cost'),
+      constraints: [
+        { metric: 'Total first-year cost', operator: '>=', value: 250000, unit: 'GBP', provenance: 'explicit' },
+        { metric: 'Total first-year cost', operator: '<=', value: 250000, unit: 'GBP', provenance: 'explicit' },
+      ],
+    };
+    const { r, registered } = await run(both);
+    expect(r.ok, 'a withheld limit is not a failed build').toBe(true);
+    expect(r.goal_constraints_carried).toBe(0);
+    expect(registered?.goal_constraints ?? []).toEqual([]);
+    const said = ((r.not_represented as string[] | undefined) ?? []).filter((s) => s.includes('Total first-year cost'));
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatch(/at least 250000GBP and as at most 250000GBP/);
+  });
+
   it('CONTRACT CONTROL: a near-synonym ("First-year cost total") attaches to nothing', async () => {
     const { r, registered } = await run(candidate('First-year cost total'));
     expect(r.ok, 'a withheld limit is not a failed build').toBe(true);
