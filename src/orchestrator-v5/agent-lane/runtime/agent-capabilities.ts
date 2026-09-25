@@ -3138,8 +3138,10 @@ export function createAgentCapabilities(
         options: ready.options ?? [],
         ...(result !== undefined ? { result } : {}),
         // The typed leader permission for THIS run, read from its own wire verdict — so the Agent names a
-        // leader only when `leader_may_be_named` (see the route's reporting instruction).
-        claim_permissions: claimPermissionsFrom(r.json.analysis_state, r.json.analysis_ready),
+        // leader only when `leader_may_be_named` (see the route's reporting instruction). `requested`: every
+        // run_analysis dispatch is one the user asked for (the Agent's own call, or the Run chip's fast path);
+        // the automatic first analysis reads its permission in `describeFirstAnalysisForAgent`, not here.
+        claim_permissions: claimPermissionsFrom(r.json.analysis_state, r.json.analysis_ready, { requested: true }),
       };
     },
   };
