@@ -1,8 +1,9 @@
 /**
  * Reuse already-produced coaching only while the final readback binds the same
- * result — and, when a run completed THIS turn, add the one run-bound
- * fragile-link challenge (`coaching/fragile-link-challenge.ts`,
- * contract `run-turn-coaching/v1`).
+ * result — and, when a run completed THIS turn, add AT MOST ONE run-bound card
+ * (contract `run-turn-coaching/v1`): the fragile-link challenge
+ * (`coaching/fragile-link-challenge.ts`) or, only when the run has no fragile
+ * row at all, the no-flagged-link card (`coaching/no-flagged-link-card.ts`).
  *
  * The Runtime integrates with one call and one input: it hands the run response
  * to `captureAnalysis` (with the run's `trigger`), then calls
@@ -16,9 +17,11 @@ import { compareAnalysisRunFactIdentity } from '../context/analysis-interpretati
 import {
   buildFragileLinkChallenge,
   isRunTurnTrigger,
+  type FragileLinkChallengeInput,
   type RunTurnCoachingEligibility,
   type RunTurnTrigger,
 } from '../coaching/fragile-link-challenge.js';
+import { buildNoFlaggedLinkCard } from '../coaching/no-flagged-link-card.js';
 
 export interface CapturedAnalysis {
   scenario_id: string;
@@ -152,8 +155,12 @@ function dedupeByBlockId(blocks: readonly CoachingBlock[]): CoachingBlock[] {
 }
 
 /**
- * The run turn's coaching: forwarded upstream cards plus AT MOST ONE
- * fragile-link challenge, and why the challenge is or is not there.
+ * The run turn's coaching: forwarded upstream cards plus AT MOST ONE run-turn
+ * card, and why it is or is not there. The no-flagged-link card is tried ONLY
+ * when the fragile-link challenge found no groundable fragile edge, and it
+ * refuses itself whenever any fragile row exists, so the two exclude each other.
+ * `eligibility` is `{ eligible: true }` for either card; the card type is read
+ * from the signal_id prefix.
  */
 export function runTurnCoaching(
   captured: CapturedAnalysis | undefined,
@@ -175,7 +182,7 @@ export function runTurnCoaching(
     return { blocks: [], eligibility: { eligible: false, reason: 'identity_mismatch' } };
   }
   // (3)–(5) grounding, claim policy, copy — the producer's gates.
-  const built = buildFragileLinkChallenge({
+  const input: FragileLinkChallengeInput = {
     analysisResult: bound.analysisResult,
     graphHash: bound.graphHash,
     computedAt: bound.computedAt,
@@ -184,11 +191,15 @@ export function runTurnCoaching(
     // `fresh`) and the hash binding above held — the strictest faithful verdict here.
     freshness: 'fresh',
     optionLabels: optionLabelsFromReady(captured.analysis_ready),
-  });
-  if (built.block === null) {
-    return { blocks: upstream, eligibility: { eligible: false, reason: built.reason } };
+  };
+  const built = buildFragileLinkChallenge(input);
+  const chosen = built.block === null && built.reason === 'no_groundable_fragile_edge'
+    ? buildNoFlaggedLinkCard(input)
+    : built;
+  if (chosen.block === null) {
+    return { blocks: upstream, eligibility: { eligible: false, reason: chosen.reason } };
   }
-  return { blocks: dedupeByBlockId([...upstream, built.block]), eligibility: { eligible: true } };
+  return { blocks: dedupeByBlockId([...upstream, chosen.block]), eligibility: { eligible: true } };
 }
 
 /** Backwards-compatible: the blocks of {@link runTurnCoaching}. */
