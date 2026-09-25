@@ -43,7 +43,8 @@ const factor = (label: string, baseline_value: number | null, plausible_max: num
 /** The served c22 shape: three levers that name their factors only in `changes`, two unset baselines, a declared status quo. */
 function c22() {
   return {
-    goal: { metric: 'Delivery velocity', operator: '>=', target_stated: false, value: null, unit: 'points per sprint', horizon_months: null, provenance: 'explicit' },
+    // The goal's current level (#1840) is REQUIRED by the strict schema; c22 stated none.
+    goal: { metric: 'Delivery velocity', operator: '>=', target_stated: false, value: null, unit: 'points per sprint', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit' },
     constraints: [],
     options: [
       { label: 'Hire Two Developers', provenance: 'explicit', is_status_quo: null, changes: ['Engineering delivery capacity', 'Hiring cost'], interventions: [] },
@@ -443,6 +444,50 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     dropped.options = dropped.options.filter((o) => o.label !== 'Hire Both');
     const { graph } = await construct(c22(), dropped);
     expect(graph.nodes.some((n) => n.id === 'hire_both')).toBe(true);
+  });
+
+  /**
+   * #1930 (signed change): admission WITHHOLDS a level below zero that it cannot restate
+   * as a level relative to today (a non-percentage unit here), keeps the option acting on
+   * the factor, and says so. The gap check reads the drafter's own candidate, where that
+   * level is present, so the pair is no gap and no retry is spent on it: the number is the
+   * user's, and a repair must not be asked to replace it. What readiness then asks is the
+   * one value the user has to give — for that pair only.
+   */
+  const CUT = 'Contractor spend change';
+  const userCut: Iv = { factor_label: CUT, value: -60000, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' };
+  const withCut = (level: Iv | null) => {
+    const c = covered();
+    c.factors.push({ ...factor(CUT, 0, 200000, 'GBP'), baseline_known: true, provenance: 'explicit' });
+    c.links.push({ from: CUT, to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed' });
+    c.options[0] = level === null
+      ? { ...c.options[0]!, changes: [CUT] }
+      : { ...c.options[0]!, interventions: [...c.options[0]!.interventions, level] };
+    return c;
+  };
+
+  it('#1930: a withheld signed level does not trigger the coverage retry — the user\'s number is withheld and said, and readiness asks for that one value', async () => {
+    const p = prepareProvisionalCandidate(withCut(userCut) as unknown as CandidateModel);
+    expect([...p.level_gaps, ...p.baseline_gaps]).toEqual([]);
+    const { graph, inputs, result } = await construct(withCut(userCut));
+    // One model call: no retry, for this pair or any other.
+    expect(inputs).toHaveLength(1);
+    // Withheld, never replaced: the option still acts on the factor, with no level of its own.
+    expect(graph.edges.some((e) => e.from === 'hire_two_developers' && e.to === 'contractor_spend_change')).toBe(true);
+    expect(node(graph, 'hire_two_developers').interventions ?? {}).not.toHaveProperty('contractor_spend_change');
+    expect(Object.keys(node(graph, 'hire_two_developers').interventions ?? {}).sort()).toEqual(['engineering_delivery_capacity', 'hiring_cost']);
+    // Said, as the user's own figure, exactly once — and never re-worded as Olumi's working figure.
+    const said = ((result.not_represented ?? []) as string[]);
+    expect(said.filter((s) => s.startsWith(`"Hire Two Developers" puts "${CUT}" at -60000 GBP`))).toHaveLength(1);
+    expect(said.filter((s) => s.includes('treated your') && s.includes(CUT))).toEqual([]);
+    // Readiness asks for exactly that one pair's value, and nothing else.
+    expect(missingValues(graph)).toEqual([`Factor "${CUT}" is currently £0. What should option "Hire Two Developers" set it to?`]);
+  });
+
+  it('CONTROL (#1930 test): the same pair with NO level is a gap, and the retry IS spent on it', async () => {
+    const { inputs } = await construct(withCut(null), withCut(null));
+    expect(inputs).toHaveLength(2);
+    expect(inputs[1]).toContain(`Hire Two Developers -> ${CUT}`);
   });
 
   it('RED: the contract asks for a level per pair and keeps `changes` for a factor with no defensible level only', () => {
