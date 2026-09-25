@@ -835,6 +835,15 @@ const QUANTIFIED_GENERIC = /\b(?:no|any|either|neither|each|every|both|all|which
 const ITEM_HEAD = /^\s*(?:(?:[-+•]|\*(?=\s)|\d+[.)])\s+)?(?:\*\*([^*]+)\*\*:?|([^:.|]{1,60}?)(?::|\s-\s))/;
 
 /**
+ * ⛔ THE STATUS QUO IS PARAPHRASED WITHOUT ITS OWN WORDS (post-merge review of #1920, 5834268638): beside "- Hire a Tech
+ * Lead leads at 55%", "- Status quo: 45%" gives "Maintain Current Staffing" its win share, yet shares no word with that
+ * label, so no rule below read it as an option. Every other option is paraphrased from its own label's words (read
+ * below); the held baseline has a closed set of names of its own. Only the WHOLE head counts, so "Baseline churn: 4%",
+ * "Current churn: 4%" and "Status quo churn: 4%" stay levels.
+ */
+const STATUS_QUO_HEAD = /^(?:(?:the|our|your)\s+)?(?:status[\s-]*quo|do[\s-]*nothing|no[\s-]*change|as[\s-]*is|business[\s-]*as[\s-]*usual|bau|baseline|current\s+(?:state|approach|plan|setup|set-up|course|situation|arrangement|way))$/i;
+
+/**
  * ⛔ A HEAD MUST NAME AN OPTION (review 5830799585, residual 5): any bold or "Label:" head that was not another node's
  * label read as an option, so "- Onboarding workload: **10%**" and "- Churn assumption: **4%**" went with a ranked
  * sibling. A head names an option by its label; by an option-shaped word, the generic noun included, since a head is one
@@ -847,6 +856,7 @@ const ITEM_HEAD = /^\s*(?:(?:[-+•]|\*(?=\s)|\d+[.)])\s+)?(?:\*\*([^*]+)\*\*:?|
 function headNamesOption(head: string, labels: RankingLabelContext): boolean {
   const optionKeys = (labels.optionLabels ?? []).map(labelKey).filter((k) => k.length > 0);
   if (optionKeys.some((k) => head.includes(k)) || OPTION_CUE.test(head)) return true;
+  if (optionKeys.length > 0 && STATUS_QUO_HEAD.test(head.trim())) return true;
   const wordsOf = (s: string): string[] => s.split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}£$€]+|[^\p{L}\p{N}]+$/gu, ''))
     .filter((w) => w.length > 1 && !FUNCTION_OR_SHARE_WORD.test(w));
   const optionWords = optionKeys.map(wordsOf);
