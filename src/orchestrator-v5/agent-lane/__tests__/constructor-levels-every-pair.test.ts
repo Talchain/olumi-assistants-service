@@ -361,6 +361,13 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     expect(saidAsYours(result)).toEqual([expect.stringContaining('your 60')]);
   });
 
+  it('RED (same class): a retry that DROPS the user\'s level but keeps the action in `changes` is not adopted', async () => {
+    const retry = retry52([]);
+    retry.options[0] = { ...retry.options[0]!, changes: ['Engineering delivery capacity'] };
+    const { graph } = await construct(first52(), retry);
+    userLevelKept(graph);
+  });
+
   it('CONTROL: a retry keeping exactly the one explicit 52 and filling the other pairs is adopted', async () => {
     const { graph } = await construct(first52(), retry52([{ ...explicit52 }]));
     userLevelKept(graph);

@@ -581,27 +581,38 @@ function keepsEveryAction(before: CandidateModel, after: CandidateModel): boolea
  * Gaps are counted as a total, so a retry supplying seven levels while erasing a
  * stated baseline of 40 "improved" and was adopted; `keepsEveryUserStatedIdentity`
  * guards names, not numbers. Every user-stated baseline (`baseline_known`, explicit)
- * and every explicit level must survive with the same value — on ANY retry,
- * compaction included. Compared on prepared candidates, so an addition already
- * made a total compares as that total on both sides.
+ * and every explicit level must survive — on ANY retry, compaction included.
+ *
+ * ⛔ READ OFF THE DRAFTS BEFORE PREPARATION (verdict 5829152814, B1). Preparation
+ * demotes an explicit level on an unknown baseline to `ai_proposed`, so a guard on
+ * prepared candidates never saw it — and a retry rewrote the user's 60 as 52 while
+ * the carried disclosure still said "your 60". So the user's levels come from the
+ * RAW first draft, and each retry entry for that pair must be either the user's
+ * entry exactly or the first draft's PREPARED form of it (an echo of the demoted 60,
+ * or of an addition already made a total). A pair preparation could not make a total
+ * (`additions_without_total`) has no prepared form and may be absent from the retry.
+ *
+ * ⛔ EVERY carrier of the pair must match, not SOME (pre-review 5829120255):
+ * admission keeps the LAST entry for a factor, so one matching duplicate proves
+ * nothing, and the same number re-stamped `ai_proposed` is no longer the user's.
  */
-function keepsEveryUserNumber(before: CandidateModel, after: CandidateModel): boolean {
-  // ⛔ EVERY carrier of the pair must match, not SOME (pre-review 5829120255):
-  // admission keeps the LAST entry for a factor, so one matching duplicate proves
-  // nothing, and the same number re-stamped `ai_proposed` is no longer the user's.
-  // `value_kind` needs no check: preparation has already made an addition a total.
-  const baselinesKept = before.factors
+function keepsEveryUserNumber(firstRaw: CandidateModel, firstPrepared: CandidateModel, retryRaw: CandidateModel): boolean {
+  type Iv = NonNullable<CandidateModel['options'][number]['interventions']>[number];
+  const same = (a: Iv, b: Iv) => a.value === b.value && a.unit === b.unit && a.provenance === b.provenance
+    && (a as Iv & { value_kind?: string }).value_kind === (b as Iv & { value_kind?: string }).value_kind;
+  const baselinesKept = firstRaw.factors
     .filter((f) => f.baseline_known && f.provenance === 'explicit' && typeof f.baseline_value === 'number')
     .every((f) => {
-      const same = after.factors.filter((g) => g.label === f.label);
-      return same.length > 0 && same.every((g) => g.baseline_known && g.provenance === 'explicit' && g.baseline_value === f.baseline_value);
+      const kept = retryRaw.factors.filter((g) => g.label === f.label);
+      return kept.length > 0 && kept.every((g) => g.baseline_known && g.provenance === 'explicit' && g.baseline_value === f.baseline_value);
     });
-  const levelsKept = before.options.every((o) => (o.interventions ?? [])
+  const levelsKept = firstRaw.options.every((o) => (o.interventions ?? [])
     .filter((i) => i.provenance === 'explicit')
     .every((i) => {
-      const carriers = (after.options.find((x) => x.label === o.label)?.interventions ?? []).filter((j) => j.factor_label === i.factor_label);
-      return carriers.length > 0 && carriers.every((j) =>
-        j.value === i.value && j.provenance === 'explicit' && j.unit === i.unit);
+      const prepared = (firstPrepared.options.find((x) => x.label === o.label)?.interventions ?? []).filter((j) => j.factor_label === i.factor_label);
+      const carriers = (retryRaw.options.find((x) => x.label === o.label)?.interventions ?? []).filter((j) => j.factor_label === i.factor_label);
+      if (carriers.length === 0) return prepared.length === 0;
+      return carriers.every((c) => same(c, i) || prepared.some((p) => same(c, p)));
     }));
   return baselinesKept && levelsKept;
 }
@@ -727,7 +738,8 @@ export async function buildModelFromBrief(
         schema: retrySchemaPinningGoal(candidate.goal),
       });
       if (retry.text.length > 0) {
-        const retryPreparation = prepareProvisionalCandidate(JSON.parse(retry.text) as CandidateModel);
+        const retryRaw = JSON.parse(retry.text) as CandidateModel;
+        const retryPreparation = prepareProvisionalCandidate(retryRaw);
         const retryCandidate = retryPreparation.candidate;
         const retryAdmitted = admitCandidateModel(retryCandidate, {});
         const retrySize = assessConstructionSize(retryAdmitted);
@@ -745,7 +757,7 @@ export async function buildModelFromBrief(
         const keepsUserMaterial = keepsEveryUserStatedIdentity(size, retrySize);
         if (
           (needsSizeRetry ? retrySize.nodes <= size.nodes && retrySize.edges <= size.edges : retrySize.within || retrySize.user_material_exceeds_limit) &&
-          keepsUserMaterial && keepsEveryUserNumber(candidate, retryCandidate) && retryPreparation.mechanism_issues.length === 0 &&
+          keepsUserMaterial && keepsEveryUserNumber(firstCandidate, candidate, retryRaw) && retryPreparation.mechanism_issues.length === 0 &&
           // ⛔ Coverage is repaired where a level is defensible, so a retry may leave a
           // gap — but it must never cover LESS, and when coverage is the only reason
           // for the retry it must cover strictly MORE (c22).
