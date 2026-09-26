@@ -1,0 +1,190 @@
+{
+  "_provenance": {
+    "source_file": "~/.claude/olumi-coaching-20260924/served/runs/20260926T0102Z/hiring-t1.json",
+    "source_sha256": "62422ca6bf82a5c85395f3b823367aef1e1b037f4a268a7f8e688f822dc58c24",
+    "turns_kept": [
+      "t1"
+    ],
+    "served_build": "CEE 3829c96 (SAME tuple before and after; R&C served check, 26 Sep 01:03Z)",
+    "route": "POST /agent/v1/turn (agent lane, guest, OpenAI-only: purity OPENAI x5)",
+    "brief": "Should I hire a Tech lead or two developers to increase velocity?",
+    "served_coaching": {
+      "eligible": false,
+      "reason": "edge_sensitivity_not_evidenced"
+    },
+    "why_this_fixture": "The automatic first pass of a tie-shaped brief: robustness.near_tie.is_tie true, fragile_edges [] (9 robust), option_comparison_status computed, leader withheld only because nobody asked. The served build emitted NO run-turn card (edge_sensitivity_not_evidenced: the confinement drops display_verdict). AI Quality 5841805590 permits a first-pass near-tie card under 5 conditions.",
+    "trim": "as build/make-limit-fixtures.py TRIM_NOTE; every kept value byte-identical to the served wire"
+  },
+  "scenario_id": "be08d688-71ca-40f0-b05a-e271dd1c4e04",
+  "turns": {
+    "t1": {
+      "tools_called": [
+        "get_canonical_state",
+        "build_model_from_brief",
+        "propose_starting_point"
+      ],
+      "graph_hash": "5a9e34ebcae91627",
+      "analysis_state": {
+        "run_state": {
+          "kind": "complete_current",
+          "computed_at": "2026-09-26T01:03:38.660Z"
+        },
+        "readiness": {
+          "status": "ready",
+          "blockers": []
+        },
+        "leader_claim": {
+          "permitted": false,
+          "withheld_reason": "unrequested_analysis_withheld",
+          "separation": "near_tie"
+        },
+        "robustness": {},
+        "usable_for_prose": true,
+        "usable_for_chips": true,
+        "usable_for_followup": true,
+        "requires_rerun": false,
+        "blocked_unusable": false,
+        "contradictions": []
+      },
+      "analysis_ready": {
+        "status": "ready",
+        "may_run": true,
+        "goal_node_id": "velocity",
+        "freshness": "fresh",
+        "freshness_reason": "agent_readback_run_state_current",
+        "graph_hash_at_run": "5a9e34ebcae91627",
+        "current_graph_hash": "5a9e34ebcae91627",
+        "computed_at": "2026-09-26T01:03:38.660Z",
+        "options": [
+          {
+            "option_id": "keep_current_team",
+            "label": "Keep Current Team"
+          },
+          {
+            "option_id": "hire_a_tech_lead",
+            "label": "Hire a Tech Lead"
+          },
+          {
+            "option_id": "hire_two_developers",
+            "label": "Hire Two Developers"
+          }
+        ]
+      },
+      "analysis_result": {
+        "type": "analysis_result",
+        "computed_against_hash": "5a9e34ebcae91627",
+        "leading_option_id": null,
+        "summary": "Olumi ran a first pass on the model it had just drafted. Nothing in it is confirmed yet, so no option is put forward and no result is called reliable. Use it to find what is wrong.",
+        "enrichment": {
+          "robustness": {
+            "near_tie": {
+              "gap": 0.05720000000000025,
+              "is_tie": true,
+              "threshold": 0.1
+            },
+            "robust_edges": [
+              {
+                "to_id": "velocity",
+                "edge_id": "coordination_effectiveness->velocity",
+                "from_id": "coordination_effectiveness",
+                "to_label": "Velocity",
+                "from_label": "Coordination effectiveness",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "coordination_effectiveness",
+                "edge_id": "coordination_overload->coordination_effectiveness",
+                "from_id": "coordination_overload",
+                "to_label": "Coordination effectiveness",
+                "from_label": "Coordination overload",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "velocity",
+                "edge_id": "delivery_capacity->velocity",
+                "from_id": "delivery_capacity",
+                "to_label": "Velocity",
+                "from_label": "Delivery capacity",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "coordination_overload",
+                "edge_id": "developer_hires->coordination_overload",
+                "from_id": "developer_hires",
+                "to_label": "Coordination overload",
+                "from_label": "Developer hires",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "delivery_capacity",
+                "edge_id": "developer_hires->delivery_capacity",
+                "from_id": "developer_hires",
+                "to_label": "Delivery capacity",
+                "from_label": "Developer hires",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "onboarding_drag",
+                "edge_id": "developer_hires->onboarding_drag",
+                "from_id": "developer_hires",
+                "to_label": "Onboarding drag",
+                "from_label": "Developer hires",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "velocity",
+                "edge_id": "onboarding_drag->velocity",
+                "from_id": "onboarding_drag",
+                "to_label": "Velocity",
+                "from_label": "Onboarding drag",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "coordination_effectiveness",
+                "edge_id": "tech_lead_hires->coordination_effectiveness",
+                "from_id": "tech_lead_hires",
+                "to_label": "Coordination effectiveness",
+                "from_label": "Tech lead hires",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "onboarding_drag",
+                "edge_id": "tech_lead_hires->onboarding_drag",
+                "from_id": "tech_lead_hires",
+                "to_label": "Onboarding drag",
+                "from_label": "Tech lead hires",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              }
+            ],
+            "fragile_edges": []
+          },
+          "confidence_tier": "fair",
+          "option_comparison_status": "computed",
+          "run_provenance": {
+            "provisional": true,
+            "initiated_by": "auto_post_construction",
+            "construction_turn_id": "graph_registration:5b18d35f-4e05-4266-9f8a-6d0e7adb6d64"
+          },
+          "inference_warnings": [
+            {
+              "code": "GOAL_DIRECTION_UNATTESTED",
+              "field": "goal_direction",
+              "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+              "severity": "warning"
+            }
+          ]
+        }
+      },
+      "served_run_turn_cards": []
+    }
+  }
+}
