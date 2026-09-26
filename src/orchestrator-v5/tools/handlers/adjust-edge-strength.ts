@@ -15,7 +15,7 @@
  * HandlerInvocation's trusted side band; natural-language callers retain the
  * legacy positive default and cannot self-authorise by inventing a parameter.
  *
- * Confirmation language uses `bandFromMagnitude` so the user-visible
+ * Confirmation language uses `edgeBandFromMagnitude` (the one edge-strength table) so the user-visible
  * text says "moderate to strong" (not "0.4 to 0.7"). Sign reversal is
  * surfaced explicitly.
  */

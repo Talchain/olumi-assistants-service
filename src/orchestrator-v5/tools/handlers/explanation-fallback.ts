@@ -39,7 +39,7 @@ import type {
 // rendered the runner-up gap as a magnitude; with those retired, the only
 // percentage this file may speak is an option's OWN win share.
 import { formatProbability } from '../../format/format-analysis-value.js';
-import { bandFromMagnitude } from '../../format/influence-bands.js';
+import { edgeBandFromMagnitude } from '../../format/edge-strength-bands.js';
 import {
   formatSensitivityDirection,
   hasMaterialInfluence,
@@ -493,9 +493,10 @@ function nameableDrivers(
 
 /**
  * Bucketed magnitude for edge strengths in structural explanations.
- * Delegates to `bandFromMagnitude` so structural prose, analysis prose,
- * and the upstream display-safe projection all read from the same
- * thresholds and vocabulary.
+ * Delegates to `edgeBandFromMagnitude`, the ONE edge-strength table (the
+ * canvas's own cuts), so an explanation names a link as the canvas draws it
+ * and as the Agent's context phrases it. Sensitivity prose keeps
+ * `bandFromMagnitude` (a different quantity).
  *
  * Returns the bare adjective (`weak | moderate | strong | very strong`)
  * because edge-strength sentences compose it with a noun ("a {band}
@@ -503,7 +504,7 @@ function nameableDrivers(
  */
 export function formatEdgeStrengthMagnitude(value: number): string {
   if (!Number.isFinite(value)) return 'weak';
-  return bandFromMagnitude(Math.abs(value));
+  return edgeBandFromMagnitude(Math.abs(value));
 }
 
 /**

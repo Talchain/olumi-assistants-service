@@ -42,7 +42,8 @@ import {
   type CompactUncertaintyDriversDisclosure,
 } from '../../orchestrator/context/graph-compact.js';
 import type { ContextPackGraph } from '../context/context-pack-assembler.js';
-import { bandFromMagnitude, NEAR_ZERO_INFLUENCE_THRESHOLD } from './influence-bands.js';
+import { NEAR_ZERO_INFLUENCE_THRESHOLD } from './influence-bands.js';
+import { edgeBandFromMagnitude } from './edge-strength-bands.js';
 
 export interface DisplaySafeNode {
   readonly id: string;
@@ -522,17 +523,17 @@ function extractNodeUnit(raw: RawNodeShape): string | undefined {
 /**
  * Convert a signed edge strength into the user-visible relationship phrase.
  *
- *   0.95  → "very strong positive link"
- *   0.70  → "strong positive link"
- *   0.65  → "moderate positive link"
- *  -0.25  → "weak negative link"
+ *   0.85  → "very strong positive link"   (bands: the ONE edge-strength table,
+ *   0.55  → "strong positive link"         `edge-strength-bands.ts` — the canvas's own
+ *   0.30  → "moderate positive link"       cuts, so the Agent names a link as the canvas
+ *  -0.10  → "weak negative link"            draws it)
  *   0.02  → "negligible link"            (sign suppressed below NEAR_ZERO_INFLUENCE_THRESHOLD)
  */
 export function relationshipPhrase(signedStrength: number): string {
   if (!Number.isFinite(signedStrength)) return NEGLIGIBLE_DIRECTED_PHRASE;
   const abs = Math.abs(signedStrength);
   if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return NEGLIGIBLE_DIRECTED_PHRASE;
-  const band = bandFromMagnitude(abs);
+  const band = edgeBandFromMagnitude(abs);
   const sign = signedStrength < 0 ? 'negative' : 'positive';
   return `${band} ${sign} link`;
 }
@@ -545,24 +546,25 @@ export function relationshipPhrase(signedStrength: number): string {
  * phrase from the signed strength alone, so it describes every edge as a
  * causal "link"; handing that string to the model on a bidirected edge is what
  * produced the witnessed false causal claim. This function keeps the SAME band
- * and the SAME sign — a user-set 0.5 is still "moderate positive", because
+ * and the SAME sign — a user-set 0.5 is still "strong positive", because
  * discarding the magnitude would trade a false causal claim for a false
  * smallness claim, the opposite-direction harm — and carries the correction in
  * the predicate instead:
  *
- *   0.50 → "moderate positive co-movement, unmeasured common cause (not a causal route)"
- *  -0.85 → "strong negative co-movement, unmeasured common cause (not a causal route)"
+ *   0.50 → "strong positive co-movement, unmeasured common cause (not a causal route)"
+ *  -0.85 → "very strong negative co-movement, unmeasured common cause (not a causal route)"
  *   0.02 → "negligible co-movement, unmeasured common cause (not a causal route)"
  *
- * Bands and the near-zero threshold come from the shared `influence-bands`
- * module — the same source as the directed path — so the two families can
- * never disagree about where a band boundary sits.
+ * Bands come from the ONE edge-strength table (`edge-strength-bands.ts`) and
+ * the near-zero threshold from `influence-bands` — the same sources as the
+ * directed path — so the two families can never disagree about where a band
+ * boundary sits.
  */
 export function bidirectedRelationshipPhrase(signedStrength: number): string {
   if (!Number.isFinite(signedStrength)) return NEGLIGIBLE_BIDIRECTED_PHRASE;
   const abs = Math.abs(signedStrength);
   if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return NEGLIGIBLE_BIDIRECTED_PHRASE;
-  const band = bandFromMagnitude(abs);
+  const band = edgeBandFromMagnitude(abs);
   const sign = signedStrength < 0 ? 'negative' : 'positive';
   return `${band} ${sign} co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`;
 }
