@@ -103,7 +103,7 @@ async function payloadForGoalLabel(label: string): Promise<Record<string, unknow
   return payloadForGraph(graphWithGoalLabel(label));
 }
 
-async function payloadForGraph(graph: unknown): Promise<Record<string, unknown>> {
+async function payloadForGraph(graph: unknown, goalConstraints?: unknown): Promise<Record<string, unknown>> {
   const snapshot: RunAnalysisScenarioSnapshot = {
     graph,
     options: [
@@ -112,6 +112,7 @@ async function payloadForGraph(graph: unknown): Promise<Record<string, unknown>>
     ],
     goal_node_id: 'goal_metric',
     rawPersistedGraph: graph,
+    ...(goalConstraints !== undefined ? { goal_constraints: goalConstraints } : {}),
   };
   const scenarioReader: ScenarioReader = vi.fn(() => Promise.resolve(snapshot));
 
@@ -191,14 +192,14 @@ describe('goal_direction reaches the PLoT payload', () => {
  * handler's own `cee.goal_direction.*` records.
  */
 describe('an attested goal_direction on the goal node reaches the PLoT payload', () => {
-  async function withDirectionLog(graph: unknown): Promise<{
+  async function withDirectionLog(graph: unknown, goalConstraints?: unknown): Promise<{
     payload: Record<string, unknown>;
     events: Array<{ level: 'info' | 'warn' } & Record<string, unknown>>;
   }> {
     const infoSpy = vi.spyOn(log, 'info');
     const warnSpy = vi.spyOn(log, 'warn');
     try {
-      const payload = await payloadForGraph(graph);
+      const payload = await payloadForGraph(graph, goalConstraints);
       const events: Array<{ level: 'info' | 'warn' } & Record<string, unknown>> = [];
       for (const [level, spy] of [['info', infoSpy], ['warn', warnSpy]] as const) {
         for (const [first] of spy.mock.calls as unknown[][]) {
@@ -230,18 +231,60 @@ describe('an attested goal_direction on the goal node reaches the PLoT payload',
     expect(events.map((e) => e.event)).toEqual(['cee.goal_direction.attested']);
   });
 
-  it('the attested sense WINS against a label that reads the other way, and the disagreement is recorded', async () => {
+  // ⛔ INVERTED (review 5844286953). A stamped `maximise` over a label that reads as a
+  // REDUCTION is the "reduce X by at least N" read as `>=` fingerprint: sending it
+  // would invert the ranking and remove ISL's GOAL_DIRECTION_UNATTESTED disclosure.
+  // The stamp is set aside and base behaviour — the label's `minimise` — is sent.
+  it('a stamped maximise over a label that reads as a REDUCTION is set aside: the label\'s minimise is sent (base behaviour), and the disagreement is a warn', async () => {
     const { payload, events } = await withDirectionLog(
       graphWithGoalLabel('Minimise monthly churn', { goal_direction: 'maximise' }),
     );
-    expect(payload.goal_direction).toBe('maximise');
+    expect(payload.goal_direction).toBe('minimise');
     expect(events).toEqual([
-      expect.objectContaining({ level: 'info', event: 'cee.goal_direction.attested', label_derived: 'minimise' }),
       expect.objectContaining({
-        level: 'warn', event: 'cee.goal_direction.label_disagrees', goal_direction: 'maximise',
-        label_derived: 'minimise', goal_node_id: 'goal_metric', provenance: 'attested_from_goal_operator',
+        level: 'info', event: 'cee.goal_direction.derived', goal_direction: 'minimise',
+        goal_node_id: 'goal_metric', provenance: 'derived_from_goal_label',
+      }),
+      expect.objectContaining({
+        level: 'warn', event: 'cee.goal_direction.label_disagrees', goal_direction: 'minimise',
+        stamped: 'maximise', label_derived: 'minimise', goal_node_id: 'goal_metric',
       }),
     ]);
+  });
+
+  // ── NB2 (review 5844286953): the stamp stands only while the goal's CURRENT
+  // goal_constraints rows state the same sense. Rows are bound to the goal BY ID.
+  const row = (node_id: string, operator: string, value: number) => ({
+    constraint_id: `gc-${node_id}-${operator}`, node_id, operator, value, label: node_id,
+  });
+
+  it('a goal row stating the OTHER sense sets the stamp aside (stale): base behaviour, and a warn naming the row', async () => {
+    const { payload, events } = await withDirectionLog(
+      graphWithGoalLabel('Revenue', { goal_direction: 'minimise' }), [row('goal_metric', '>=', 5)],
+    );
+    expect('goal_direction' in payload).toBe(false);
+    expect(events).toEqual([
+      expect.objectContaining({
+        level: 'warn', event: 'cee.goal_direction.stamp_disagrees_with_goal_operator',
+        stamped: 'minimise', goal_row_operators: ['>='], goal_node_id: 'goal_metric', goal_direction: null,
+      }),
+    ]);
+  });
+
+  it('CONTROL: a row on ANOTHER node (a limit on a factor) never sets the goal\'s stamp aside', async () => {
+    const { payload, events } = await withDirectionLog(
+      graphWithGoalLabel('Revenue', { goal_direction: 'maximise' }), [row('fac_lever', '<=', 0.5)],
+    );
+    expect(payload.goal_direction).toBe('maximise');
+    expect(events.map((e) => e.event)).toEqual(['cee.goal_direction.attested']);
+  });
+
+  it('CONTROL: a goal row stating the SAME sense keeps the stamp', async () => {
+    const { payload, events } = await withDirectionLog(
+      graphWithGoalLabel('Revenue', { goal_direction: 'minimise' }), [row('goal_metric', '<=', 8)],
+    );
+    expect(payload.goal_direction).toBe('minimise');
+    expect(events.map((e) => e.event)).toEqual(['cee.goal_direction.attested']);
   });
 
   it('an attested sense that AGREES with the label records no disagreement', async () => {
