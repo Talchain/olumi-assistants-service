@@ -261,7 +261,9 @@ export function runTurnCoaching(
     // (2d) The automatic first pass of a NEAR TIE with no flagged link (AI Quality 5841805590): no link
     // card can speak, so the one move is to ask which difference matters most. Its own gates decide;
     // when it declines, the link path's reason stands.
-    const tie = buildNearTieCard(input, record(record(final.analysisState)?.leader_claim)?.withheld_reason);
+    const readyOptions = record(captured.analysis_ready)?.options;
+    const tie = buildNearTieCard(input, record(record(final.analysisState)?.leader_claim)?.withheld_reason,
+      Array.isArray(readyOptions) ? readyOptions.length : null);
     if (tie.block !== null) return { blocks: dedupeByBlockId([...upstream, tie.block]), eligibility: { eligible: true } };
     return { blocks: upstream, eligibility: { eligible: false, reason: chosen.reason } };
   }
