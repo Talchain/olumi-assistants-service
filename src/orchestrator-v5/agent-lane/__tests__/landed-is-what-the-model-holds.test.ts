@@ -38,7 +38,7 @@ import { ProposalStore } from '../proposal.js';
 import { narrateWriteOutcome, withWriteOutcome } from '../write-outcome.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-4466554400a2';
-const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r' };
+const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_turn_text: 'Pro plan price has a strong effect on MRR.' };
 
 /** Exactly what the user reads for one approval's result (the fast path's status line). */
 const said = (r: Record<string, unknown>): string => {
