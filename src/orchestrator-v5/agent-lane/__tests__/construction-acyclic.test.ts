@@ -35,7 +35,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { CandidateModel } from '../admit-model.js';
+import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { buildModelFromBrief, prepareProvisionalCandidate, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
@@ -127,19 +127,26 @@ const SERVED_LINKS: readonly Link[] = [
   L('Non-Pro MRR', 'MRR', 'positive'),
 ];
 
+/** The one construction issue the served loop raises, word for word. */
+const SERVED_LOOP_ISSUE = '"AI feature availability" -> "AI release delay" -> "AI feature availability" is a loop: a model cannot hold one. '
+  + 'Keep the direction that carries the cause toward the goal metric, remove the link that points back, and keep every '
+  + 'option and risk connected to the goal through links whose direction you state.';
+
 /** Replace one link (matched by from/to) — every other byte of the served candidate kept. */
 const withLinks = (edit: (links: Link[]) => Link[]): CandidateModel => servedCandidate(edit([...SERVED_LINKS]));
 const restamp = (from: string, to: string, provenance: Link['provenance']) => (ls: Link[]) =>
   ls.map((l) => (l.from === from && l.to === to ? { ...l, provenance } : l));
 
-interface Built { out: Record<string, unknown>; body: Graph; graph: Graph; calls: number; inputs: string[] }
+interface Built { out: Record<string, unknown>; body: Graph; graph: Graph; calls: number; inputs: string[]; instructions: string[] }
 
 /** The REAL construction, with the drafter faked: `drafts[i]` answers call i (the last repeats). */
 async function build(...drafts: CandidateModel[]): Promise<Built> {
   let body: unknown = null;
   const inputs: string[] = [];
-  const call = (async (req: { input: string }) => {
+  const instructions: string[] = [];
+  const call = (async (req: { input: string; instructions: string }) => {
     inputs.push(req.input);
+    instructions.push(req.instructions);
     return { text: JSON.stringify(drafts[Math.min(inputs.length - 1, drafts.length - 1)]) };
   }) as unknown as CallStructuredModel;
   const d: InternalDispatch = async (path, b) => {
@@ -151,7 +158,7 @@ async function build(...drafts: CandidateModel[]): Promise<Built> {
   };
   const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', SERVED.brief, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out).slice(0, 400)).toBe(true);
-  return { out, body: body as Graph, graph: GraphV3.parse(body) as unknown as Graph, calls: inputs.length, inputs };
+  return { out, body: body as Graph, graph: GraphV3.parse(body) as unknown as Graph, calls: inputs.length, inputs, instructions };
 }
 
 const has = (g: Graph, from: string, to: string) => g.edges.some((e) => e.from === from && e.to === to);
@@ -259,17 +266,12 @@ describe('SERVED 2-loop (factor <-> risk, both Olumi’s): withheld, said, and t
   });
 
   it('RED (a): the loop is a construction issue for the ONE repair retry, naming the loop exactly', async () => {
-    const issues = prepareProvisionalCandidate(servedCandidate()).mechanism_issues;
-    expect(issues.filter((i) => /loop/i.test(i))).toEqual([
-      '"AI feature availability" -> "AI release delay" -> "AI feature availability" is a loop: a model cannot hold one. '
-      + 'Keep the direction that carries the cause toward the goal metric, remove the link that points back, and keep every '
-      + 'option and risk connected to the goal through links whose direction you state.',
-    ]);
-    // A retry that comes back STILL looped is not adopted; the backstop then acts on the first draft.
-    const { calls, inputs, out, graph } = await build(servedCandidate());
+    const { calls, inputs, instructions, out, graph } = await build(servedCandidate());
     expect(calls).toBe(2);
-    // The retry is handed exactly those issues (the input carries them as JSON).
-    expect(JSON.parse(/Construction issues: (\[.*\])\n/.exec(inputs[1]!)![1]!)).toEqual(issues);
+    // The retry is handed exactly the loop admission had to break (the input carries it as JSON).
+    expect(JSON.parse(/Construction issues: (\[.*\])\n/.exec(inputs[1]!)![1]!)).toEqual([SERVED_LOOP_ISSUE]);
+    expect(instructions[1]).toMatch(/Repair only the listed construction issues/);
+    // The retry repeats the looped draft: whatever it is adopted on, the backstop acts on the loop.
     expect(out.construction_retried).toBe(true);
     expect(loopWithheld(out)).toEqual([`${AVAILABILITY}->${DELAY}`]);
     expect(cycleFree(graph)).toBe(true);
@@ -330,8 +332,12 @@ describe('the whole class: every loop shape', () => {
     expect(has(graph, DELAY, AVAILABILITY)).toBe(false);
     expect(loopWithheld(out)).toEqual([`${DELAY}->${AVAILABILITY}`]);
     expect(saidAbout(out, 'AI release delay', 'AI feature availability')[0]).toContain('the link from "AI release delay" to "AI feature availability" was left out');
-    // Honest consequence: the risk now leads nowhere, and readiness says so rather than a loop.
-    expect(blockers(graph)).toContain('NO_PATH_TO_GOAL');
+    // ⛔ REVIEW (a): the risk left with no link gets the SAME risk -> goal repair every unconnected risk gets —
+    // computed after the loop is broken, not from the edges before it.
+    const repair = graph.edges.find((e) => e.from === DELAY && e.to === GOAL);
+    expect(repair?.effect_direction).toBe('negative');
+    expect(repair?.provenance?.source).toBe('cee_hypothesis');
+    expect(blockers(graph)).not.toContain('NO_PATH_TO_GOAL');
     expect(blockers(graph)).not.toContain('CYCLE_DETECTED');
   });
 
@@ -380,5 +386,179 @@ describe('CONTROL: an acyclic model is unchanged', () => {
     const served = (SERVED.draft_graph.edges as unknown as Edge[]).filter((e) => !(e.from === AVAILABILITY && e.to === DELAY));
     expect(body.edges).toHaveLength(served.length);
     expect(body.edges.map(canon)).toEqual(served.map(canon));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Independent verification of f504b8e0 — two blocking findings, four cheap ones.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type Addition = {
+  factors?: string[];
+  risks?: string[];
+  links?: Link[];
+  /** option label -> factor label, an `ai_proposed` level of 1 */
+  sets?: [string, string][];
+};
+/** The served candidate, plus what a case needs — nothing of the served draft changed. */
+function extended(base: CandidateModel, add: Addition): CandidateModel {
+  const c = structuredClone(base) as unknown as {
+    factors: Record<string, unknown>[]; risks: Record<string, unknown>[]; links: Link[];
+    options: { label: string; interventions?: Record<string, unknown>[] }[];
+  };
+  for (const label of add.factors ?? []) {
+    c.factors.push({ label, role: 'observable', baseline_known: false, baseline_value: 10, unit: 'index', provenance: 'ai_proposed', plausible_max: 100 });
+  }
+  for (const label of add.risks ?? []) c.risks.push({ label, provenance: 'inferred' });
+  c.links.push(...(add.links ?? []));
+  for (const [option, factor] of add.sets ?? []) {
+    const o = c.options.find((x) => x.label === option)!;
+    o.interventions = [...(o.interventions ?? []), { factor_label: factor, value: 1, value_kind: 'absolute', unit: 'index', provenance: 'ai_proposed' }];
+  }
+  return c as unknown as CandidateModel;
+}
+const speculative = (kind: 'factors' | 'risks', n: number): Addition => {
+  const labels = Array.from({ length: n }, (_, i) => `Speculative ${kind === 'factors' ? 'factor' : 'risk'} ${i}`);
+  return { [kind]: labels, links: labels.map((l) => L(l, 'MRR', kind === 'factors' ? 'positive' : 'negative', 'ai_proposed')) };
+};
+const ledger = (c: CandidateModel) => admitCandidateModel(prepareProvisionalCandidate(c).candidate, {}).loss.map((l) => String(l.field_path));
+
+describe('BLOCKING-1: a loop never costs the user their model — an oversized first draft is still built', () => {
+  it('RED: oversized + looped; the size retry EDITS its draft (the measured 8/8 route), keeps the loop, and is adopted — the backstop withholds and says it', async () => {
+    const first = extended(servedCandidate(), speculative('factors', 5));
+    const { out, graph, calls, inputs, instructions } = await build(first, servedCandidate());
+    expect(out.size_retried, 'PRECONDITION: the first draft was oversized').toBe(true);
+    expect(calls).toBe(2);
+    // A loop alone never reroutes an oversized draft away from #1898's size-only edit-own-draft retry.
+    expect(instructions[1]).toMatch(/Copy every item you keep EXACTLY/);
+    expect(inputs[1]).toContain('Your previous model, to shrink:');
+    expect(inputs[1]).not.toContain('Construction issues');
+    // …and a retry still carrying a loop the backstop can break is not refused for it.
+    expect(out.within_compact_limits).toBe(true);
+    expect(graph.nodes.some((n) => n.label.startsWith('Speculative'))).toBe(false);
+    expect(loopWithheld(out)).toEqual([`${AVAILABILITY}->${DELAY}`]);
+    expect(cycleFree(graph)).toBe(true);
+    expect(saidAbout(out, 'AI feature availability', 'AI release delay')).toHaveLength(1);
+  });
+
+  it('RED: oversized + looped; a size retry that sheds Olumi’s own added risks is adopted (no risk-retention gate a loop alone would impose)', async () => {
+    const first = extended(servedCandidate(), speculative('risks', 5));
+    const fixed = withLinks((ls) => [...ls.filter((l) => l !== DELAY_TO_AVAIL), L('AI release delay', 'New Pro conversions', 'negative')]);
+    const { out, graph } = await build(first, fixed);
+    expect(out.size_retried).toBe(true);
+    expect(out.within_compact_limits).toBe(true);
+    expect(graph.nodes.some((n) => n.label.startsWith('Speculative'))).toBe(false);
+    expect(has(graph, DELAY, NEW_CONVERSIONS)).toBe(true);
+    expect(loopWithheld(out)).toEqual([]);
+    expect(cycleFree(graph)).toBe(true);
+  });
+});
+
+describe('BLOCKING-2: the user’s link restated by Olumi is ONE link, and it is the user’s', () => {
+  it.each([
+    ['Olumi’s restatement first', (ls: Link[]) => [...ls, L('AI feature availability', 'AI release delay', 'negative', 'explicit')]],
+    ['the user’s statement first', (ls: Link[]) => [...restamp('AI feature availability', 'AI release delay', 'explicit')(ls), AVAIL_TO_DELAY]],
+  ] as const)('RED (%s): only Olumi’s back link is withheld; the user is never told their link was Olumi’s and left out; its ledger stays', async (_order, edit) => {
+    const c = withLinks(edit);
+    const { out, graph } = await build(c);
+    expect(cycleFree(graph)).toBe(true);
+    expect(loopWithheld(out)).toEqual([`${DELAY}->${AVAILABILITY}`]);
+    expect(graph.edges.some((e) => e.from === AVAILABILITY && e.to === DELAY && e.provenance?.source === 'brief_extraction')).toBe(true);
+    expect((out.not_represented as string[]).some((s) => s.includes('the link from "AI feature availability" to "AI release delay" was left out'))).toBe(false);
+    // The kept link's own projection entries are untouched (one per instance); none says it was withheld.
+    const paths = ledger(c);
+    expect(paths.filter((p) => p === `edges[${AVAILABILITY}::${DELAY}].strength.mean`)).toHaveLength(2);
+    expect(paths).not.toContain(`edges[${AVAILABILITY}::${DELAY}].loop_withheld`);
+  });
+});
+
+describe('(a) a risk a withheld loop link leaves unconnected gets the risk -> goal repair', () => {
+  it('RED: a risk and a factor linked only to each other — the risk’s link back is withheld, and the risk is connected to the goal', async () => {
+    const c = extended(servedCandidate(), {
+      factors: ['Competitor pricing'],
+      risks: ['Competitor launch'],
+      links: [L('Competitor launch', 'Competitor pricing', 'positive'), L('Competitor pricing', 'Competitor launch', 'positive')],
+    });
+    const { out, graph } = await build(c);
+    expect(loopWithheld(out)).toContain('competitor_launch->competitor_pricing');
+    const repair = graph.edges.find((e) => e.from === 'competitor_launch' && e.to === GOAL);
+    expect(repair?.effect_direction).toBe('negative');
+    expect(repair?.provenance?.source).toBe('cee_hypothesis');
+    expect(reaches(graph, 'competitor_pricing', GOAL)).toBe(true);
+    expect(blockers(graph)).not.toContain('NO_PATH_TO_GOAL');
+    expect(cycleFree(graph)).toBe(true);
+    // The repair's record says why this risk needed one — not "never connected to anything".
+    const record = admitCandidateModel(prepareProvisionalCandidate(c).candidate, {}).loss.find((l) => l.field_path === `edges[competitor_launch->${GOAL}]`);
+    expect(record?.reason).toContain('led only to "Competitor pricing", and that link was left out to break a loop');
+  });
+});
+
+describe('(b) the rules no test pinned', () => {
+  it('a structural option -> factor edge is never withheld, even where withholding it would strand nothing', async () => {
+    // "Raise to £59" sets "Launch buzz"; Olumi links "Launch buzz" back to the option. Withholding the option's own
+    // edge would strand nothing, withholding Olumi's strands "Launch buzz" — the structural edge is still never the one.
+    const c = extended(servedCandidate(), {
+      factors: ['Launch buzz'], sets: [['Raise to £59', 'Launch buzz']], links: [L('Launch buzz', 'Raise to £59', 'positive')],
+    });
+    const { out, graph } = await build(c);
+    expect(has(graph, 'raise_to_59', 'launch_buzz')).toBe(true);
+    expect(loopWithheld(out)).toContain('launch_buzz->raise_to_59');
+    expect(loopWithheld(out)).not.toContain('raise_to_59->launch_buzz');
+    expect(cycleFree(graph)).toBe(true);
+  });
+
+  it('a withheld link takes its own projection entries with it, and leaves one record that it was withheld', () => {
+    const paths = ledger(servedCandidate());
+    expect(paths.filter((p) => p.startsWith(`edges[${AVAILABILITY}::${DELAY}]`))).toEqual([`edges[${AVAILABILITY}::${DELAY}].loop_withheld`]);
+    // CONTRAST: the kept direction keeps its entries.
+    expect(paths).toContain(`edges[${DELAY}::${AVAILABILITY}].strength.mean`);
+  });
+
+  it('rule 2 outranks kind: equally far from the goal, the link whose absence strands nothing is withheld, not the risk’s only link', async () => {
+    // Referral rate -> Churn spike -> Non-Pro MRR -> Referral rate, the last the user's. Both of Olumi's links point
+    // one step toward the goal; by kind the risk's link back onto a factor would go — but it is the risk's ONLY route.
+    const c = extended(servedCandidate(), {
+      factors: ['Referral rate'], risks: ['Churn spike'],
+      links: [
+        L('Referral rate', 'Pro subscribers', 'positive'),
+        L('Referral rate', 'Churn spike', 'positive'),
+        L('Churn spike', 'Non-Pro MRR', 'negative'),
+        L('Non-Pro MRR', 'Referral rate', 'positive', 'explicit'),
+      ],
+    });
+    const { out, graph } = await build(c);
+    expect(loopWithheld(out)).toEqual([`${AVAILABILITY}->${DELAY}`, 'referral_rate->churn_spike']);
+    expect(has(graph, 'churn_spike', 'non_pro_mrr')).toBe(true);
+    expect(cycleFree(graph)).toBe(true);
+  });
+});
+
+describe('(c) the retry’s loop check is admission’s: a loop through an undeclared label costs no retry call', () => {
+  it('RED: a "loop" through a label the draft never declared registers nothing to loop — no retry', async () => {
+    const acyclicWithPhantom = withLinks((ls) => [
+      ...ls.filter((l) => l !== AVAIL_TO_DELAY),
+      L('Pro MRR', 'Ghost metric', 'positive'),
+      L('Ghost metric', 'Pro MRR', 'positive'),
+    ]);
+    expect(prepareProvisionalCandidate(acyclicWithPhantom).mechanism_issues).toEqual([]);
+    const { out, calls } = await build(acyclicWithPhantom);
+    expect(calls).toBe(1);
+    expect(out.construction_retried).toBe(false);
+    expect(loopWithheld(out)).toEqual([]);
+  });
+});
+
+describe('(d) a kept loop never says Olumi’s part of it was the user’s', () => {
+  it('RED: the user links a factor back to the option that sets it — the option’s edge is named as what it sets, not as the user’s', async () => {
+    const c = withLinks((ls) => [...ls.filter((l) => l !== AVAIL_TO_DELAY), L('AI feature availability', 'Raise to £59', 'positive', 'explicit')]);
+    const { out, graph } = await build(c);
+    expect(loopWithheld(out)).toEqual([]);
+    expect(blockers(graph)).toContain('CYCLE_DETECTED');
+    const lines = saidAbout(out, 'Raise to £59', 'AI feature availability');
+    expect(lines, JSON.stringify(out.not_represented)).toHaveLength(1);
+    expect(lines[0]).not.toMatch(/^You linked/);
+    expect(lines[0]).toContain('You linked "AI feature availability" to "Raise to £59"');
+    expect(lines[0]).toContain('the link from "Raise to £59" to "AI feature availability" is what that option sets');
+    expect(lines[0]).toMatch(/which way/i);
   });
 });
