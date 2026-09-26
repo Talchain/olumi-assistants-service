@@ -34,7 +34,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { admitCandidateModel, findMechanismPath, type CandidateModel } from '../admit-model.js';
+import { admitCandidateModel, carryWithheldOptions, findMechanismPath, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -181,6 +181,12 @@ export const BUILD_INSTRUCTIONS = [
   + 'A model below this envelope cannot carry the reasoning; a model above it buries it. Do NOT widen beyond it on this turn: no speculative options, secondary factors, or decorative risks and outcomes. '
   + 'Anything you judge material but that does not meet that bar belongs in `unknowns` as a question, NOT as a node \u2014 it can become a proposal later. '
   + `Stay within ${COMPACT_LIMITS.maxNodes} nodes and ${COMPACT_LIMITS.maxEdges} links in total, counting one link from the decision to each option. Correct, connected items beat a comprehensive map: an oversized first model is refused before it reaches the canvas.`,
+  // ⛔ AN ADDED OPTION THE MODEL CANNOT TELL APART IS A DEAD START (DL #70 5842361028 / 5842400604). Served ef99a97 and
+  // cb1778b added "Test £59 with AI release" beside the user's £59 option; the fill made them identical and the run
+  // refused NOTHING_TO_COMPARE. Admission withholds such an option and says so (`admit-model.ts`), but withholding
+  // alone leaves one valued option, which still cannot run (measured: `construction-no-identical-options.test.ts`,
+  // RECORDED LIMIT) — so the drafter is told the shape to add instead.
+  'Every option you add must differ from every other option in at least one factor level; a test, pilot or phased rollout of another option is not a separate option unless it sets a factor the model holds to a different level, such as the share of customers it reaches.',
   'Mark provenance honestly on EVERY item: "explicit" only for what the user stated, "inferred" for what you read out of the brief, "ai_proposed" for anything you added beyond it.',
   /*
    * ⛔ THE COMPANION INSTRUCTION TO `target_stated`. The schema now lets the model say
@@ -642,6 +648,8 @@ export async function buildModelFromBrief(
   // questions it parked in `unknowns`, travel with the result so the Agent can say
   // them — otherwise an option the model mislabelled as its own vanishes unseen.
   let leftOut: { kind: string; label: string }[] = [];
+  // An option the FIRST draft had withheld as indistinct, which an adopted retry then dropped: still said.
+  let carriedWithheld: readonly WithheldOption[] = [];
   const needsSizeRetry = !size.within && !size.user_material_exceeds_limit;
   // Only a missing risk mechanism asks the retry to repair. An addition with no total
   // DEGRADES instead (see `prepareProvisionalCandidate`): the figure is the user's to give.
@@ -691,6 +699,7 @@ export async function buildModelFromBrief(
           (repairIssues(preparation).length === 0 || retainsRiskHypotheses(candidate, retryCandidate))
         ) {
           const kept = new Set(retryAdmitted.nodes.map(nodeIdentity));
+          carriedWithheld = carryWithheldOptions(admitted, retryAdmitted);
           leftOut = admitted.nodes
             .filter((n) => !kept.has(nodeIdentity(n)))
             .map((n) => ({ kind: String(n.kind), label: String((n as { description?: unknown }).description ?? n.label) }));
@@ -744,6 +753,17 @@ export async function buildModelFromBrief(
    */
   const parked = (candidate as { unknowns?: unknown }).unknowns;
   const openQuestions = Array.isArray(parked) ? parked.filter((q): q is string => typeof q === 'string' && q.trim() !== '') : [];
+  /**
+   * ⛔ AN OPTION WITHHELD AS INDISTINCT IS SAID WHERE THE USER ALWAYS SEES IT (DL #70 5842400604: "never a
+   * silent duplicate"). `not_represented` reaches only the Agent's model; `open_questions` is appended to the
+   * reply by the server every time. Placed after the deadline and ahead of the drafter's own questions, so the
+   * five-question cap cannot hide it. A group of USER options nothing tells apart is asked about here, once.
+   */
+  const withheldOptions = [...(admitted.options_withheld ?? []), ...carriedWithheld];
+  openQuestions.unshift(
+    ...withheldOptions.map((w) => w.sentence),
+    ...(admitted.indistinct_stated_options ?? []).map((g) => g.question),
+  );
   /**
    * ⛔ A DEADLINE THE MODEL CANNOT HOLD IS ASKED WHERE THE USER ALWAYS SEES IT. GraphV3 has no carrier for
    * `horizon_months`, so admission records the loss in `not_represented` — but only the Agent's model reads
@@ -894,6 +914,10 @@ export async function buildModelFromBrief(
     options_that_change_nothing: admitted.withheld
       .filter((w) => w.reason === 'option_changes_nothing')
       .map((w) => w.from),
+    // Olumi's options withheld as identical by construction — the reason, beside the sentence in `open_questions`.
+    ...(withheldOptions.length > 0
+      ? { options_withheld: withheldOptions.map((w) => ({ option: w.option, like: w.like, reason: w.reason })) }
+      : {}),
     // Carried WITH the graph (GraphV3 declares `goal_constraints`), verified
     // surviving registration on deployed staging.
     goal_constraints_carried: admitted.goal_constraints.length,
