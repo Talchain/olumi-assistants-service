@@ -423,6 +423,26 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(t2.assistant_text, 'the factor is never reported as an option').not.toMatch(/Added "AI add-on price"/);
   }, 120_000);
 
+  it('[q2] RED (C2, #70 5844173937; needs Canonical\'s builder to stamp it): Olumi\'s own suggested level → ONE approval → COMMITTED as cee_hypothesis and said as Olumi\'s estimate — never stored as the user\'s', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    script = [
+      () => fnCall('propose_new_option', {
+        label: 'Test £54 at release',
+        acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 64, unit: 'GBP', estimate: true, basis: 'a step above the £59 option' } }],
+        rationale: 'Olumi suggested it; the user asked to add all of them.',
+      }),
+      () => say('I would add it at my own estimate of £64. Shall I add it?'),
+    ];
+    const t1 = await turn({ message: 'Add all of the options you suggested.' });
+    const approve = approveChipOf(t1)!;
+    expect(approve, JSON.stringify(t1._agent.tool_calls)).toBeDefined();
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    const iv = (newOption()?.interventions ?? {})['fac_price'] as { raw_value?: unknown; source?: unknown } | undefined;
+    expect(iv?.raw_value, JSON.stringify(iv)).toBe(64);
+    expect(iv?.source, 'Olumi\'s figure is never stored as the user\'s').toBe('cee_hypothesis');
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/Its level for Price is Olumi's estimate, for you to correct\./);
+  }, 120_000);
+
   it('[p3] RED: a factor with no range at all — the user\'s £54 cannot be stored on one, so the level is left UNSET (never a bare 54) and the Agent is told why', async () => {
     graphOf.set(SCENARIO, seedGraph(1, 1, 'none'));
     let proposed = '';
