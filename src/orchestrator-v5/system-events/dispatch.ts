@@ -3034,7 +3034,12 @@ export type CommitOptionLevelsResult =
   | { readonly status: 'committed'; readonly graph_hash: string;
       readonly receipt: { readonly version: number; readonly version_id: string; readonly mutation_id: string; readonly source_turn_id: string | null } | null;
       /** A verified no-op: the model already held every level (a retry). Nothing written; `receipt` is null. */
-      readonly already_applied: boolean }
+      readonly already_applied: boolean;
+      /**
+       * Each level exactly as the model holds it after this call: the writer's read-back verified every cell against
+       * the persisted bytes (a commit), or the model already held each one exactly (a verified no-op).
+       */
+      readonly committed_levels: readonly { readonly option_id: string; readonly factor_id: string; readonly value: number }[] }
   | { readonly status: 'stale' }
   | { readonly status: 'refused'; readonly reason: string; readonly pair?: { readonly option_id: string; readonly factor_id: string } }
   /** The commit was attempted and could not be read back: say it could not be confirmed, never "not saved". */
@@ -3062,8 +3067,9 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
     return { status: 'refused', reason: r.refusal?.reason ?? 'refused',
       ...(at !== undefined ? { pair: { option_id: at.option_id, factor_id: at.factor_id } } : {}) };
   }
+  const committedLevels = input.levels.map(l => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value }));
   if (r.commitSkippedReason === 'verified_no_op') {
-    return { status: 'committed', graph_hash: input.base_graph_hash, receipt: null, already_applied: true };
+    return { status: 'committed', graph_hash: input.base_graph_hash, receipt: null, already_applied: true, committed_levels: committedLevels };
   }
   const graphHash = (r.response as { graph_hash?: unknown }).graph_hash;
   if (!r.commitPerformed || typeof graphHash !== 'string' || graphHash.length === 0) return { status: 'unconfirmed' };
@@ -3074,7 +3080,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
   } catch {
     receipt = null;
   }
-  return { status: 'committed', graph_hash: graphHash, receipt, already_applied: false };
+  return { status: 'committed', graph_hash: graphHash, receipt, already_applied: false, committed_levels: committedLevels };
 }
 
 async function dispatchStructuralRename(

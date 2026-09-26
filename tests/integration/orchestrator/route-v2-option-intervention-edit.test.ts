@@ -330,7 +330,8 @@ describe('the Agent\'s in-process batch door — ONE user operation → ONE atom
 
   it('RED: two levels — one bringing its link — commit as ONE row: committed, not already applied, the revision is the model\'s', async () => {
     const r = await call(TWO, NEW_LINK);
-    expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false });
+    expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false, committed_levels: [
+      { option_id: 'option', factor_id: 'factor', value: 0.35 }, { option_id: 'option', factor_id: 'new_factor', value: 0.4 }] });
     expect(rows.size).toBe(1);
     if (r.status === 'committed') expect(r.graph_hash).toBe(currentHash());
     expect(graphNow().edges.filter(e => e.from === 'option' && e.to === 'new_factor')).toHaveLength(1);
@@ -355,7 +356,8 @@ describe('the Agent\'s in-process batch door — ONE user operation → ONE atom
   it('RED: a retry of the committed batch writes nothing more — already applied, no receipt — and the model holds both levels', async () => {
     expect((await call(TWO, NEW_LINK)).status).toBe('committed');
     const retry = await call(TWO, [], 'ffffffff-ffff-4fff-8fff-ffffffffffff');
-    expect(retry).toEqual({ status: 'committed', graph_hash: currentHash(), receipt: null, already_applied: true });
+    expect(retry).toEqual({ status: 'committed', graph_hash: currentHash(), receipt: null, already_applied: true,
+      committed_levels: TWO.map(l => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value })) });
     expect(rows.size).toBe(1);
   });
 
