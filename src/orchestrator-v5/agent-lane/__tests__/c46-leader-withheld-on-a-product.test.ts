@@ -462,6 +462,21 @@ describe('(c) precedence: the limit keeps its code and card; the unrequested fir
     for (const n of old.nodes) delete n.nonlinear_identity;
     expect(nonlinearIdentityLeaderClaimCause({ graph: old, result: fact.result, requested: true })).toEqual(NONE);
   });
+
+  it('the composer\'s own order: the unrequested first pass (policy) outranks the product; a permitted verdict takes no cause', async () => {
+    const { registered } = await build(additive());
+    const fact = await runOn(registered, [RAISE, KEEP]);
+    const raw = readRawRobustnessFromResponseBody({ blocks: [buildAnalysisResultBlock(fact)] });
+    const claim = (may: boolean, unrequested: boolean, product: boolean) => composeAnalysisStateV1({
+      canonical: CANONICAL_FRESH, mayNameLeadingOption: may, withheldBecauseUnrequested: unrequested,
+      withheldBecauseNonlinearIdentity: product, rawRobustness: raw,
+    })!.leader_claim;
+    expect(claim(false, true, true).withheld_reason).toBe(WITHHELD_UNREQUESTED_ANALYSIS);
+    expect(claim(false, false, true).withheld_reason).toBe(WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN);
+    expect(claim(false, false, false).withheld_reason).toBe(WITHHELD_CONSTRAINT_VERDICT);
+    // A cause is never a grant, and never a reason on a permitted claim.
+    expect(claim(true, false, true)).toEqual({ permitted: true, separation: 'separated' });
+  });
 });
 
 // ── (d) THE AGENT'S VIEW ───────────────────────────────────────────────────────────────────────────
