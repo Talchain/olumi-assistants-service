@@ -79,7 +79,8 @@ describe('the write-status line is composed from the tool results', () => {
     const n = narrateWriteOutcome('Saved all values and option levels. Tech Lead now leads.', [{ name: 'authorise_change' }], [PARTIAL as never]);
     expect(n.text).not.toMatch(/Saved all values and option levels/);
     expect(n.text).toBe('Tech Lead now leads.');
-    expect(n.status).toBe('Saved 1 of 1 starting values as version 2. Not saved: 0 of 2 option levels (unresolved effect relationship).');
+    // The part's reason in words, never its code (fix/agent-never-shows-instructions-or-codes; was "(unresolved effect relationship)").
+    expect(n.status).toBe('Saved 1 of 1 starting values as version 2. Not saved: 0 of 2 option levels (the option does not act on that factor, so no level could be set for it).');
   });
 
   it('already applied → says so, with the original version, and that nothing was written again', () => {

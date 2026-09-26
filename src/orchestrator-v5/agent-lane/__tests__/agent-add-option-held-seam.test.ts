@@ -365,6 +365,13 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
     expect(t2._agent.tool_calls[0], JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: false, mutated: true, refusal: 'not_verified' }));
     expect(t2.assistant_text, t2.assistant_text).not.toMatch(/\bAdded\b/);
+    /**
+     * ⛔ RED (fix/agent-never-shows-instructions-or-codes; code-read of `write-outcome.ts`): the option DID land, and
+     * the user read "Partly saved: the change was refused (not_verified)." — a code, and "refused" for a saved change.
+     * What the user reads is that it could not be confirmed, in words.
+     */
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/could not be confirmed/);
+    expect(t2.assistant_text, t2.assistant_text).not.toMatch(/Not saved|refused|not_verified|\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/);
   }, 120_000);
 
   it('[p1] RED (independent review 00:16Z): a factor whose range is its declared scale_frame — the user\'s £54 is stored on THAT range (0.27, figure kept), never as a bare 54', async () => {

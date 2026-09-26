@@ -52,7 +52,7 @@ import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
-import { narrateWriteOutcome, notAdoptedLine, staleResultLine, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { narrateWriteOutcome, notAdoptedLine, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
@@ -1488,8 +1488,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * one: the option "cannot be compared yet"). Nothing reads the tool result on this path, so
          * without this the user read "Saved" and nothing about what still blocks the comparison.
          * Server-authored text only — never model prose.
+         *
+         * ⛔ AND NEVER AN INSTRUCTION MEANT FOR THE AGENT (served f2, CEE `af719a1`, scenario `bdba963b`): the
+         * link-strength follow-up reached the user as "… Offer to run the analysis again so they can see what it
+         * changes." Every follow-up passes the same boundary (`withoutAgentDirections`), so a capability that puts
+         * Agent guidance in the wrong field drops that sentence here, and the drop is logged — not shown.
          */
-        const followUp = typeof applied.follow_up === 'string' ? applied.follow_up.trim() : '';
+        const guarded = withoutAgentDirections(typeof applied.follow_up === 'string' ? applied.follow_up : '');
+        if (guarded.dropped.length > 0) {
+          log.warn({ scenario_id: scenarioId, dropped: guarded.dropped }, 'agent-lane: a follow-up addressed to the Agent was withheld from the user');
+        }
+        const followUp = guarded.text.trim();
         const said = [narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }).status ?? '', followUp].filter((x) => x !== '').join(' ');
         const ms = Date.now() - fastStartedAt;
         result = {
