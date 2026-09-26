@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { fixtureUrl } from '../../coaching/__tests__/fragile-link-challenge-fixtures.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { statedThreshold } from '../../coaching/bound-graph.js';
+import { limitCardArm, type LimitCardArm } from '../../coaching/limit-unchecked-card.js';
 import { extractCompoundGoals, normaliseConstraintUnits, toGoalConstraints } from '../../../cee/compound-goal/extractor.js';
 import { GoalConstraintSchema } from '../../../schemas/assist.js';
 const hash = '0123456789abcdef';
@@ -586,6 +587,65 @@ test('PROVED CAUSE — CONTROLS: the same served turn keeps today\'s words whene
    assert.match(card.body,/at least one was not checked or not met/,'mixed'); assert.doesNotMatch(card.signal_id,/:unanchored$/,'mixed'); }
  // (f) no bound graph: no proof and no names.
  { const card=cardOf(statelessCapture(c.captured),c.final); assert.ok(card.signal_id.endsWith(':auto_first_pass'),'unbound'); assert.doesNotMatch(card.body,/Olumi works/,'unbound'); }
+});
+
+// ── TYPED VERDICT STATE (26 Sep): the run's own verdict state (CEE #1958 carrier) licenses its own words ──
+// `unevaluated` ⇒ "could not check" (one limit) / "at least one of" (more); `identity_unresolved` ⇒ "could not tell
+// whether … was checked"; `evaluated_infeasible`, absent, null or junk ⇒ the proof or today's words. The proved cause
+// speaks only when the state is absent/null or `unevaluated`, so a mirror that drifted from the producer fails closed.
+test('TYPED VERDICT — limitCardArm is the whole truth table',()=>{
+ for (const [proved, state, arm] of [
+  [false,undefined,'today'],[false,null,'today'],[true,undefined,'cause'],[true,null,'cause'],
+  [true,'unevaluated','cause'],[false,'unevaluated','unchecked'],
+  [true,'identity_unresolved','identity'],[false,'identity_unresolved','identity'],
+  [true,'evaluated_infeasible','today'],[false,'evaluated_infeasible','today'],
+  [true,'evaluated_feasible','today'],[true,'not_applicable','today'],[true,'foo','today'],[true,42,'today'],[false,'foo','today'],
+ ] as [boolean, unknown, LimitCardArm][]) assert.equal(limitCardArm(proved,state),arm,`${proved} ${String(state)}`);
+});
+test('TYPED VERDICT — unevaluated on a limit NOT proved (churn a root): "could not check your limit", definite, no cause',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const {captured,final}=rebind(c,unproved(structuredClone(PAUL_GRAPH) as Record<string, any>));
+ const today=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ assert.match(today.body,TODAYS_WORDS);
+ const card=runTurnCards(runTurnCoaching(captured,{...final,constraintVerdictState:'unevaluated'}).blocks)[0]!;
+ assert.ok(card.signal_id.endsWith(':auto_first_pass:named:unchecked'));
+ assert.notEqual(card.block_id,today.block_id);
+ assert.equal(card.title,'Your limit could not be checked');
+ assert.equal(card.body,'Before relying on this first pass on Olumi\'s estimates, note that it could not check your limit on “Monthly churn” (10 percent per month). That is one reason no option is put forward yet.');
+ assert.equal(card.action_prompt,'Olumi could not check my limit on “Monthly churn” (10 percent per month) in this analysis. Explain what that means for how far I can rely on this analysis. Don\'t change the model or re-run anything yet.');
+ assert.doesNotMatch(card.body,/Olumi works|not met/);
+});
+test('TYPED VERDICT — unevaluated on several limits says "at least one of" (the state proves at least one, never all)',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const two=rebind(c,withLimitsOn(['monthly_churn','pro_subscribers']));
+ const card=runTurnCards(runTurnCoaching(two.captured,{...two.final,constraintVerdictState:'unevaluated'}).blocks)[0]!;
+ assert.equal(card.title,'Not every limit could be checked');
+ assert.match(card.body,/could not check at least one of your limits on “Monthly churn” \(10 percent per month\) and “Pro subscribers” \(10 percent per month\)\./);
+ const four=rebind(c,withLimitsOn(['monthly_churn','pro_subscribers','mrr','pro_plan_price']));
+ const generic=runTurnCards(runTurnCoaching(four.captured,{...four.final,constraintVerdictState:'unevaluated'}).blocks)[0]!;
+ assert.ok(generic.signal_id.endsWith(':auto_first_pass:unchecked'));
+ assert.match(generic.body,/could not check at least one of the limits on the model\./);
+});
+test('TYPED VERDICT — identity_unresolved says neither checked nor unchecked: "could not tell whether … was checked", even when proved',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const plain=statelessCapture(c.captured);
+ const card=runTurnCards(runTurnCoaching(plain,{...c.final,graph:PAUL_GRAPH,constraintVerdictState:'identity_unresolved'}).blocks)[0]!;
+ assert.ok(card.signal_id.endsWith(':auto_first_pass:named:identity'));
+ assert.match(card.body,/could not tell whether your limit on “Monthly churn” \(10 percent per month\) was checked\./);
+ assert.doesNotMatch(card.body,/could not check|not met|Olumi works/);
+});
+test('TYPED VERDICT — the proof fails CLOSED against a recorded state that disagrees: evaluated_infeasible or junk → today\'s words',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const plain=statelessCapture(c.captured);
+ // Present control: with no state the same served turn speaks the proved cause.
+ assert.ok(runTurnCards(runTurnCoaching(plain,{...c.final,graph:PAUL_GRAPH}).blocks)[0]!.signal_id.endsWith(':unanchored'));
+ assert.ok(runTurnCards(runTurnCoaching(plain,{...c.final,graph:PAUL_GRAPH,constraintVerdictState:null}).blocks)[0]!.signal_id.endsWith(':unanchored'));
+ assert.ok(runTurnCards(runTurnCoaching(plain,{...c.final,graph:PAUL_GRAPH,constraintVerdictState:'unevaluated'}).blocks)[0]!.signal_id.endsWith(':unanchored'));
+ for (const state of ['evaluated_infeasible','foo']) {
+  const card=runTurnCards(runTurnCoaching(plain,{...c.final,graph:PAUL_GRAPH,constraintVerdictState:state}).blocks)[0]!;
+  assert.ok(card.signal_id.endsWith(':auto_first_pass:named'),state);
+  assert.match(card.body,TODAYS_WORDS,state);
+ }
 });
 
 // ── ASSUMED LINK (PR-3): a link card on a link whose numbers are Olumi's says so ──
