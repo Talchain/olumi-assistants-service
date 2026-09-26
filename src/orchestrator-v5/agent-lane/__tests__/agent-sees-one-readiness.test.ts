@@ -100,8 +100,8 @@ describe('(B) the user-facing readiness sentence', () => {
     expect(blocked).toMatch(/^The analysis can't run yet\./);
     expect(blocked).toMatch(/not connected from the decision/i);
     expect(blocked).not.toMatch(CODE_LIKE);
-    expect(readinessSentence({ checked: false, needs_from_user: [], olumi_can_offer: [], will_run_without: [] })).toMatch(/could not check/);
-    expect(readinessSentence({ checked: true, may_run: true, needs_from_user: [], olumi_can_offer: [], will_run_without: [COHORT] })).toBe(`The analysis can run now; it will leave out "${COHORT}" until its levels are set.`);
+    expect(readinessSentence({ checked: false, needs_from_user: [], olumi_can_offer: [], will_run_without: [], levels_not_set: [] })).toMatch(/could not check/);
+    expect(readinessSentence({ checked: true, may_run: true, needs_from_user: [], olumi_can_offer: [], will_run_without: [COHORT], levels_not_set: [] })).toBe(`The analysis can run now; it will leave out "${COHORT}" until its levels are set.`);
   });
 });
 

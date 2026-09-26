@@ -1318,6 +1318,164 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     });
   });
 
+  /**
+   * ⭐ CONFIRMING AN OLUMI-SIZED LINK ADOPTS IT. Served on CEE `1226b3e` / UI `853feeb7` (Canvas #70 5848798561):
+   * "The link from Pro plan price to Monthly churn is slight." Olumi's default already sat in the slight band, so
+   * `propose_link_strength` prepared a CONFIRM; the user approved, `authorise_change` answered `not_applied` and the
+   * user read "Not saved: none of it was applied." The link was unchanged. The writer drops `provenance.natural_effect`
+   * and `provenance.magnitude` on every user write (magnitude contract, R&C 5845818897, `adjust-edge-strength.ts`), and
+   * the confirmation allowlist did not admit those two removals, so every confirm on a sized link refused
+   * `confirmation_would_change_non_provenance_state`. The edge below is the served edge, verbatim.
+   */
+  describe('confirming an Olumi-sized link adopts it: the allowlist admits the magnitude contract\'s two removals, nothing wider', () => {
+    type LooseGraph = { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> } & Record<string, unknown>;
+    const FROM = 'pro_plan_price';
+    const TO = 'monthly_churn';
+    const SERVED_MEAN = 0.19999999999999998;
+    /** The served edge (`turns.jsonl`, turn 1 `draft_graph`), verbatim. */
+    const servedEdge = (): Record<string, unknown> => ({
+      to: TO,
+      from: FROM,
+      strength: { std: 0.09999999999999999, mean: SERVED_MEAN },
+      defaulted: true,
+      provenance: {
+        source: 'cee_hypothesis',
+        magnitude: 'olumi_estimate',
+        natural_effect: {
+          amount: 1,
+          amount_unit: 'percentage points',
+          strength_mean: SERVED_MEAN,
+          per_source_change: 10,
+          strength_mean_frame: 'edge_strength',
+          per_source_change_unit: 'GBP/month',
+        },
+      },
+      effect_direction: 'positive',
+      exists_probability: 0.8,
+    });
+    function withOlumiSizedLink(): LooseGraph {
+      const graph = buildPersistedGraph() as LooseGraph;
+      graph.nodes.push(
+        { id: FROM, kind: 'factor', label: 'Pro plan price' },
+        { id: TO, kind: 'factor', label: 'Monthly churn' },
+      );
+      graph.edges.push(servedEdge());
+      return graph;
+    }
+    const edgeOf = (graph: unknown, from: string, to: string) =>
+      ((graph as LooseGraph | undefined)?.edges ?? []).find((e) => e.from === from && e.to === to);
+
+    it('⭐ the approved confirm lands through the route: strength unchanged, stamped as the user\'s, Olumi\'s sizing gone — in the commit and the receipt', async () => {
+      persisted = withOlumiSizedLink();
+      const beforeStrength = structuredClone(edgeOf(persisted, FROM, TO)!.strength);
+      const beforeHash = computeAnalysisAffectingGraphHash(persisted as never);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: {
+          kind: 'system_event',
+          turn_id: `${TURN_ID_BASE}b1`,
+          scenario_id: SCENARIO_ID,
+          stage: 'frame',
+          // Exactly what `authorise_change` dispatches for a confirm (agent-capabilities.ts): magnitude = |mean|.
+          event: {
+            kind: 'edge_strength_edit',
+            from: FROM,
+            to: TO,
+            intent: 'confirm_current',
+            direction_intent: 'preserve',
+            magnitude: SERVED_MEAN,
+            expected: { mean: SERVED_MEAN, effect_direction: 'positive' },
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.body) as Record<string, unknown>;
+      expect(body.assistant_text).toContain('Confirmed the current strength');
+      const committed = edgeOf(lastAppend().graph, FROM, TO);
+      const receipt = edgeOf(body.draft_graph, FROM, TO);
+      for (const [where, edge] of [['commit', committed], ['receipt', receipt]] as const) {
+        expect(edge, where).toBeDefined();
+        expect(edge!.strength, where).toStrictEqual(beforeStrength);
+        expect(edge!.effect_direction, where).toBe('positive');
+        expect((edge!.provenance as Record<string, unknown>).source, where).toBe('user_specified');
+        expect(edge!.provenance_display, where).toBe('user_set');
+        expect(edge!.provenance, where).not.toHaveProperty('natural_effect');
+        expect(edge!.provenance, where).not.toHaveProperty('magnitude');
+        expect(edge, where).not.toHaveProperty('defaulted');
+      }
+      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).toBe(beforeHash);
+      expect(edgeOf(lastAppend().graph, 'f-demand', 'g-growth'), 'contrast: an edge the user did not touch')
+        .toMatchObject(buildPersistedGraph().edges[0]!);
+    });
+
+    describe('the pure guard', () => {
+      /** The writer's projection for a confirm on the served edge: stamped, flag cleared, Olumi's sizing dropped. */
+      const projected = (graph: LooseGraph) => {
+        const after = structuredClone(graph);
+        const target = edgeOf(after, FROM, TO)!;
+        const { natural_effect: _naturalEffect, magnitude: _magnitude, ...rest } = target.provenance as Record<string, unknown>;
+        target.provenance = { ...rest, source: 'user_specified' };
+        target.provenance_display = 'user_set';
+        delete target.defaulted;
+        return after;
+      };
+      const confirm = (before: LooseGraph, after: LooseGraph) =>
+        isProvenanceOnlyEdgeConfirmation({ before, after, from: FROM, to: TO });
+      const provenanceOf = (graph: LooseGraph, from = FROM, to = TO) =>
+        edgeOf(graph, from, to)!.provenance as Record<string, unknown>;
+
+      it('⭐ natural_effect and magnitude PRESENT → ABSENT on the target: admitted', () => {
+        const before = withOlumiSizedLink();
+        expect(confirm(before, projected(before))).toBe(true);
+      });
+
+      it('natural_effect ADDED to an unsized target: refused', () => {
+        const before = withOlumiSizedLink();
+        const target = edgeOf(before, FROM, TO)!;
+        target.provenance = { source: 'cee_hypothesis' };
+        const after = projected(before);
+        provenanceOf(after).natural_effect = (servedEdge().provenance as Record<string, unknown>).natural_effect;
+        expect(confirm(before, after)).toBe(false);
+      });
+
+      it('magnitude ADDED to an unsized target: refused', () => {
+        const before = withOlumiSizedLink();
+        edgeOf(before, FROM, TO)!.provenance = { source: 'cee_hypothesis' };
+        const after = projected(before);
+        provenanceOf(after).magnitude = 'user_stated';
+        expect(confirm(before, after)).toBe(false);
+      });
+
+      it('natural_effect REWRITTEN: refused', () => {
+        const before = withOlumiSizedLink();
+        const after = projected(before);
+        provenanceOf(after).natural_effect = {
+          ...((servedEdge().provenance as Record<string, unknown>).natural_effect as Record<string, unknown>),
+          amount: 2,
+        };
+        expect(confirm(before, after)).toBe(false);
+      });
+
+      it('CONTRAST: both removed AND provenance.reasoning rewritten: refused', () => {
+        const before = withOlumiSizedLink();
+        provenanceOf(before).reasoning = 'Olumi estimate';
+        const after = projected(before);
+        provenanceOf(after).reasoning = 'rewritten';
+        expect(confirm(before, after)).toBe(false);
+      });
+
+      it('ANOTHER edge\'s natural_effect removed: refused', () => {
+        const before = withOlumiSizedLink();
+        provenanceOf(before, 'f-demand', 'g-growth').natural_effect = (servedEdge().provenance as Record<string, unknown>).natural_effect;
+        const after = projected(before);
+        delete provenanceOf(after, 'f-demand', 'g-growth').natural_effect;
+        expect(confirm(before, after)).toBe(false);
+      });
+    });
+  });
+
   it.each([
     ['unknown authority field', validEvent({ provenance: 'user_set' })],
     [

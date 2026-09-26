@@ -159,11 +159,24 @@ function rawExactEdge(
 }
 
 /**
- * Full-graph confirmation guard. The only permitted differences are the
- * target edge's `provenance.source` and `provenance_display`, and the removal of
- * its `defaulted` flag; every other byte
- * of persisted JSON — including cosmetic/additive fields outside the analysis
- * hash — must remain deeply equal.
+ * Olumi's sizing of a link, which the writer drops on EVERY user write (magnitude
+ * contract, R&C 5845818897; `adjust-edge-strength.ts`): `natural_effect` states
+ * Olumi's β in natural units and `magnitude` says who chose it. Once the user
+ * adopts the strength, neither describes the user's own value.
+ */
+const MAGNITUDE_CONTRACT_REMOVALS = ['natural_effect', 'magnitude'] as const;
+
+/**
+ * Full-graph confirmation guard. The only permitted differences on the target
+ * edge are:
+ * - `provenance.source` and `provenance_display` (the stamp itself);
+ * - removal of its `defaulted` flag (adopting the strength ends Olumi's default);
+ * - removal of `provenance.natural_effect` and `provenance.magnitude`, because the
+ *   magnitude contract drops Olumi's sizing on any user write. Without these, every
+ *   confirm on an Olumi-sized link refused (served CEE `1226b3e`, Canvas #70 5848798561).
+ * Each removal is PRESENT → ABSENT only: a field added or rewritten still fails.
+ * Every other byte of persisted JSON — including cosmetic/additive fields outside
+ * the analysis hash — must remain deeply equal.
  */
 export function isProvenanceOnlyEdgeConfirmation(args: {
   readonly before: unknown;
@@ -206,6 +219,13 @@ export function isProvenanceOnlyEdgeConfirmation(args: {
       afterProvenance.source = structuredClone(beforeProvenance.source);
     } else {
       delete afterProvenance.source;
+    }
+    // Olumi's sizing may go from present to absent (magnitude contract). A value
+    // the write adds or rewrites is left in place and fails the equality below.
+    for (const key of MAGNITUDE_CONTRACT_REMOVALS) {
+      if (key in beforeProvenance && !(key in afterProvenance)) {
+        afterProvenance[key] = structuredClone(beforeProvenance[key]);
+      }
     }
   } else if (isRecord(afterProvenance)) {
     delete afterProvenance.source;
