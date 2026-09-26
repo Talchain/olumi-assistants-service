@@ -41,11 +41,21 @@
  * `evaluated_feasible`. So on a one-limit graph the state proves that limit was scored.
  * More than one limit → no card, until the scored ids are carried beside the state.
  *
+ * ── WHY AN OPTION THAT SETS THE LIMIT'S FACTOR SILENCES IT (#1983 review B1, AI Quality) ──
+ * An option that SETS the limited factor is checked at the level IT sets, not at today's
+ * level (ISL #179: "an option that SETS a limit's target is compared at the level it
+ * sets"). With a price cap and a "raise to £59" option, that option was checked at the
+ * user's £59, so "checked against Olumi's estimate of about £49" is false for it, and the
+ * card's ask ("give the real figure") cannot change its check. When ANY option intervenes
+ * on the limit's node, read by the one structural authority
+ * (`collectInterventionControlledFactorIds`, every shape unioned), there is no card.
+ *
  * Pure: no clock, no LLM, no telemetry.
  */
 import { CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/boundary';
 
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { collectInterventionControlledFactorIds } from '../context/intervention-controlled-drivers.js';
 import { deterministicBlockId } from '../compose/block-id.js';
 import { readRatifiedConstraints } from '../../orchestrator/context/constraint-feasibility.js';
 import { sayLevel } from './bound-graph.js';
@@ -155,7 +165,10 @@ export function composeEstimatedLimitCard(limit: EstimatedLimit): FragileLinkCha
 
 export type EstimatedLimitCardDecision =
   | { readonly block: CoachingBlock; readonly reason: null }
-  | { readonly block: null; readonly reason: 'not_checked_against_an_estimate' | 'identity_mismatch' | 'copy_gate' };
+  | {
+    readonly block: null;
+    readonly reason: 'not_checked_against_an_estimate' | 'limit_target_set_by_an_option' | 'identity_mismatch' | 'copy_gate';
+  };
 
 /**
  * Build the one estimated-limit card, or say why not. Total. `verdictState` is the
@@ -174,6 +187,10 @@ export function buildEstimatedLimitCard(
   if (verdictState !== EVALUATED_FEASIBLE) return { block: null, reason: 'not_checked_against_an_estimate' };
   const limit = estimatedLimitIn(boundGraph);
   if (limit === null) return { block: null, reason: 'not_checked_against_an_estimate' };
+  // An option that sets this factor was checked at its own level, never today's (see above).
+  if (collectInterventionControlledFactorIds(boundGraph).has(limit.nodeId)) {
+    return { block: null, reason: 'limit_target_set_by_an_option' };
+  }
 
   const copy = composeEstimatedLimitCard(limit);
   if (!copyPasses(copy)) return { block: null, reason: 'copy_gate' };

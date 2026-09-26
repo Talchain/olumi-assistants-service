@@ -979,6 +979,46 @@ test('ESTIMATED LIMIT — B1: with ONE ratified limit the state proves THAT limi
  assert.equal(readRatifiedConstraints(x).length,1);
  assert.equal(estCards(estCase('evaluated_feasible',undefined,x)).length,1);
 });
+// ── B1 (AI Quality 5845710498): an option that SETS the limit's factor is checked at the level IT sets ──
+// DERIVED (labelled): Paul's served graph with its one limit moved to his price (the file's PRICE_LIMIT, <= 59 GBP per month) and the price's
+// level re-stamped as Olumi's estimate (49). His own options raise_to_59 / raise_to_54 SET that price.
+const priceLimited = (mut: (g: Record<string, any>) => void = () => {}) => {
+ const x=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ x.goal_constraints=[PRICE_LIMIT];
+ x.nodes.find((n: any)=>n.id==='pro_plan_price').observed_state.source='cee_inference';
+ mut(x); return x;
+};
+const optionsSetting = (g: Record<string, any>, id: string) => g.nodes.filter((n: any)=>n.kind==='option'&&Object.keys(n.interventions??{}).includes(id)).map((n: any)=>n.id);
+const noOptionSetsPrice = (x: Record<string, any>) => { for (const n of x.nodes) if (n.kind==='option') delete n.interventions?.pro_plan_price; };
+test('ESTIMATED LIMIT — B1: an option that SETS the limited factor → NO "checked against Olumi\'s estimate" card; CONTRAST: no option sets it → the card speaks',()=>{
+ const g=priceLimited();
+ // Present controls: ONE ratified limit, the price is Olumi's estimate, and two of Paul's own options set it.
+ assert.equal(readRatifiedConstraints(g).length,1);
+ assert.equal(classifyValueSource(g.nodes.find((n: any)=>n.id==='pro_plan_price').observed_state.source),'ai_drafted');
+ assert.deepEqual(optionsSetting(g,'pro_plan_price'),['raise_to_59_at_release','raise_to_54_at_release']);
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,g)).length,0,'an option set the price: it was checked at its own level');
+ // ONE option setting it is enough: the other one no longer does.
+ const one=priceLimited((x)=>{delete x.nodes.find((n: any)=>n.id==='raise_to_54_at_release').interventions.pro_plan_price;});
+ assert.deepEqual(optionsSetting(one,'pro_plan_price'),['raise_to_59_at_release']);
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,one)).length,0);
+ // CONTRAST: the same graph, no option setting the price → the card speaks about that limit.
+ const free=priceLimited(noOptionSetsPrice);
+ assert.deepEqual(optionsSetting(free,'pro_plan_price'),[]);
+ const est=estCards(estCase('evaluated_feasible',undefined,free)) as any[];
+ assert.equal(est.length,1);
+ assert.match(est[0].body,/^Your limit on “Pro plan price” was checked against Olumi's estimate that it is about /);
+ assert.deepEqual(est[0].target_refs,[{kind:'factor',id:'pro_plan_price',label:'Pro plan price'}]);
+});
+test('ESTIMATED LIMIT — B1: the option read is the ONE structural authority (every carrier unioned), keyed by the node id, never the label',()=>{
+ // The intervention on the price carried ONLY as data.interventions, or ONLY in graph.options[] → still no card.
+ const dataOnly=priceLimited((x)=>{noOptionSetsPrice(x); const o=x.nodes.find((n: any)=>n.id==='raise_to_59_at_release'); o.data={interventions:{pro_plan_price:{value:0.295,source:'brief_extraction'}}};});
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,dataOnly)).length,0,'data.interventions');
+ const optionsArray=priceLimited((x)=>{noOptionSetsPrice(x); x.options=[{id:'raise_to_59_at_release',interventions:{pro_plan_price:0.295}}];});
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,optionsArray)).length,0,'graph.options[]');
+ // An option on ANOTHER factor, whose key merely resembles the label, does not silence it.
+ const other=priceLimited((x)=>{noOptionSetsPrice(x); x.nodes.find((n: any)=>n.id==='raise_to_59_at_release').interventions['Pro plan price']={value:0.3,source:'brief_extraction'};});
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,other)).length,1,'a label is not an id');
+});
 // ── THE OPTION THAT COMES OUT AHEAD PROBABLY BREAKS A LIMIT (R&C PR-8; AI Quality 5842498806, predicate CEE #1960) ──
 // DERIVED (labelled): no served turn yet carries a SCORED limit (churn is held until after Paul's test, 5842549943) or
 // the carried risks (ask 5842617884). Paul's served first pass + his WHOLE served graph, with the leader claim permitted,
