@@ -160,7 +160,8 @@ function rawExactEdge(
 
 /**
  * Full-graph confirmation guard. The only permitted differences are the
- * target edge's `provenance.source` and `provenance_display`; every other byte
+ * target edge's `provenance.source` and `provenance_display`, and the removal of
+ * its `defaulted` flag; every other byte
  * of persisted JSON — including cosmetic/additive fields outside the analysis
  * hash — must remain deeply equal.
  */
@@ -219,6 +220,13 @@ export function isProvenanceOnlyEdgeConfirmation(args: {
     );
   } else {
     delete rawAfterEdge.provenance_display;
+  }
+
+  // Adopting the strength ends Olumi's default on this edge, so the target's
+  // `defaulted` may go from present to absent. Nothing else about it may change:
+  // a flag the write adds or rewrites still fails the equality below.
+  if ('defaulted' in rawBeforeEdge && !('defaulted' in rawAfterEdge)) {
+    rawAfterEdge.defaulted = structuredClone(rawBeforeEdge.defaulted);
   }
 
   return isDeepStrictEqual(normalisedAfter, args.before);

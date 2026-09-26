@@ -215,7 +215,9 @@ describe('a constraint on a node that carries no number does not withhold the le
     const source = { goal_constraints: [constraintRow('b87d004b')] };
     const envelope = {
       ...NOTHING_SCORED,
-      _meta: { filtered_constraints: [{ constraint_id: 'constraint_b87d004b_max' }] },
+      // A DEADLINE removal: the out-of-scope kind (ruling #70 5844891057 reads the reason; a removal
+      // with no reason is a refusal and withholds — constraint-verdict-refused-limits.test.ts).
+      _meta: { filtered_constraints: [{ constraint_id: 'constraint_b87d004b_max', reason: 'temporal_deadline' }] },
     };
     const v = deriveConstraintVerdict(
       envelope,
