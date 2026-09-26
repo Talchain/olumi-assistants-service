@@ -61,10 +61,10 @@ function c22() {
     ],
     risks: [], outcomes: [],
     links: [
-      { from: 'Engineering delivery capacity', to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed' },
-      { from: 'Technical leadership capacity', to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed' },
-      { from: 'Team morale', to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed' },
-      { from: 'Onboarding load', to: 'Delivery velocity', direction: 'negative', provenance: 'ai_proposed' },
+      { from: 'Engineering delivery capacity', to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Technical leadership capacity', to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Team morale', to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Onboarding load', to: 'Delivery velocity', direction: 'negative', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
     ],
     // C46 (#1972) made identities and the goal's scope required in the strict schema; c22 declared neither.
     identities: [],
@@ -199,8 +199,8 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
       { label: 'Continue Current Staffing', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [] },
     ];
     c.links = [
-      { from: 'Hire Two Developers', to: 'Engineering capacity', direction: 'positive', provenance: 'ai_proposed' },
-      { from: 'Engineering capacity', to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed' },
+      { from: 'Hire Two Developers', to: 'Engineering capacity', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Engineering capacity', to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
     ];
     return c;
   }
@@ -225,14 +225,14 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
 
   it('CONTROL: a status quo linked to a factor through `links` is still never asked for a level', () => {
     const c = linkedOnly();
-    c.links.push({ from: 'Continue Current Staffing', to: 'Engineering capacity', direction: 'positive', provenance: 'ai_proposed' });
+    c.links.push({ from: 'Continue Current Staffing', to: 'Engineering capacity', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
     expect(prepareProvisionalCandidate(c as unknown as CandidateModel).level_gaps.filter((g) => g.option === 'Continue Current Staffing')).toEqual([]);
   });
 
   it('CONTROL (#1841 B1): a user addition on an unknown baseline still degrades — no retry, no invented total, no baseline asked for', async () => {
     const c = c22();
     c.factors = [factor('Developers', null, 50, 'people'), factor('Hiring cost', 0, 500000, 'GBP')];
-    c.links = [{ from: 'Developers', to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed' }];
+    c.links = [{ from: 'Developers', to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null }];
     c.options = [
       { label: 'Hire Two Developers', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [{ factor_label: 'Developers', value: 2, value_kind: 'additional', unit: 'people', provenance: 'explicit' }] },
       { label: 'Continue Current Staffing', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [] },
@@ -434,7 +434,7 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
   it('CONTROL: a coverage-only retry that covers no more is not adopted, even when it rewrites something else', async () => {
     const same = c22();
     same.factors[3] = factor('Team spirit', 6, 10, 'score');
-    same.links[2] = { from: 'Team spirit', to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed' };
+    same.links[2] = { from: 'Team spirit', to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null };
     const { graph, inputs } = await construct(c22(), same);
     expect(inputs).toHaveLength(2);
     expect(graph.nodes.some((n) => n.id === 'team_morale')).toBe(true);
@@ -461,7 +461,7 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
   const withCut = (level: Iv | null) => {
     const c = covered();
     c.factors.push({ ...factor(CUT, 0, 200000, 'GBP'), baseline_known: true, provenance: 'explicit' });
-    c.links.push({ from: CUT, to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed' });
+    c.links.push({ from: CUT, to: 'Delivery velocity', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
     c.options[0] = level === null
       ? { ...c.options[0]!, changes: [CUT] }
       : { ...c.options[0]!, interventions: [...c.options[0]!.interventions, level] };
