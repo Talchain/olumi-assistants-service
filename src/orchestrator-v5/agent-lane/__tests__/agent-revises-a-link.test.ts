@@ -297,4 +297,18 @@ describe('⛔ a band is recorded as the user\'s only when the user named it (AI 
     expect(bandTheUserWrote('strong', 'It has a very strong effect.')).toBe(false);
     expect(bandTheUserWrote('strong', null)).toBe(false);
   });
+
+  it('RED (#2003 follow-up): the canvas pill says "Slight" for the lowest band, so "slight" names it', () => {
+    // Named: the word on the canvas pill, and its adverb.
+    expect(bandTheUserWrote('weak', 'Make that link slight.')).toBe(true);
+    expect(bandTheUserWrote('weak', 'It only has a slight effect on churn.')).toBe(true);
+    expect(bandTheUserWrote('weak', 'Price slightly affects churn.')).toBe(true);
+    // Not named: an intensifier on a comparison, a comparative, a denial, a question, and another band.
+    expect(bandTheUserWrote('weak', 'It is slightly stronger than you think.')).toBe(false);
+    expect(bandTheUserWrote('weak', 'Churn moves slightly more than that.')).toBe(false);
+    expect(bandTheUserWrote('weak', 'The slighter effect is on churn.')).toBe(false);
+    expect(bandTheUserWrote('weak', 'It is not slight.')).toBe(false);
+    expect(bandTheUserWrote('weak', 'Is it slight?')).toBe(false);
+    expect(bandTheUserWrote('moderate', 'Make that link slight.')).toBe(false);
+  });
 });

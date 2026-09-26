@@ -75,7 +75,9 @@ const BAND_WORDS: Record<string, RegExp> = {
   'very strong': /\bvery\s+strong(?:ly)?\b/gi,
   strong: /\bstrong(?:ly)?\b/gi,
   moderate: /\bmoderate(?:ly)?\b/gi,
-  weak: /\b(?:weak(?:ly)?|barely)\b/gi,
+  // "slight" is the canvas pill's own word for this band (#2003 follow-up). "slightly" counts only when it does
+  // not intensify a comparison: "slightly stronger" / "slightly more" never name the lowest band.
+  weak: /\b(?:weak(?:ly)?|barely|slight(?:ly(?!\s+(?:more|less|\w+er)\b))?)\b/gi,
 };
 const NEGATOR = new RegExp(
   "(?:^|[^\\w'\\u2019])(?:not|never|no|nor|neither|hardly|cannot|without|doubts?|doubtful|\\w+n['\\u2019]t"
