@@ -77,11 +77,17 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     description:
       'Propose ONE change to the model. This does NOT change anything: it records an exact ' +
       'proposal and returns its id, which you keep for authorise_change: show the user what it changes, never the id, before asking them to approve. ' +
-      'Use the labels exactly as get_canonical_state returned them.',
+      'Use the labels exactly as get_canonical_state returned them. ' +
+      'The link is recorded with `strength` as the user\u2019s own estimate, so give ONLY the band the user named for it in this message; ' +
+      'if they named none, ask how strong the effect is first \u2014 a band they did not say is refused.',
     parameters: obj({
       from_label: { type: 'string' },
       to_label: { type: 'string' },
       direction: { type: 'string', enum: ['positive', 'negative'] },
+      strength: {
+        type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'],
+        description: 'The band the user said for this link in THIS message, in their own words. Never your own guess.',
+      },
       rationale: { type: 'string', description: 'Why this link matters, in the user’s terms.' },
     }, ['from_label', 'to_label', 'direction', 'rationale']),
   },
@@ -333,6 +339,8 @@ export interface AgentCapabilities {
   getCanonicalState(ctx: AgentToolContext): Promise<ToolResult>;
   proposeModelChange(ctx: AgentToolContext, args: {
     from_label: string; to_label: string; direction: 'positive' | 'negative'; rationale: string;
+    /** The band the user typed THIS turn; without it (or with one they did not type) nothing is prepared. */
+    strength?: 'weak' | 'moderate' | 'strong' | 'very strong';
   }): Promise<ToolResult>;
   authoriseChange(ctx: AgentToolContext, args: { proposal_id: string }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */

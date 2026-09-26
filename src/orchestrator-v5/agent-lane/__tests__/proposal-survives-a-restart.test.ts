@@ -119,7 +119,7 @@ describe('a pending approval survives a restart', () => {
       if (body['tool_choice'] !== 'none' && proposeNext) {
         proposeNext = false;
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'propose_model_change', call_id: 'c1',
-          arguments: JSON.stringify({ from_label: 'Team size', to_label: 'Velocity', direction: 'positive', rationale: 'It moves velocity.' }) }] }), { status: 200 });
+          arguments: JSON.stringify({ from_label: 'Team size', to_label: 'Velocity', direction: 'positive', strength: 'strong', rationale: 'It moves velocity.' }) }] }), { status: 200 });
       }
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'This would connect Team size to Velocity.' }] }] }), { status: 200 });
     }));
@@ -145,7 +145,7 @@ describe('a pending approval survives a restart', () => {
     return r.json() as Body;
   };
   const offerIn = async (a: FastifyInstance): Promise<Chip> => {
-    const t1 = await turn(a, { message: 'Should team size drive velocity?' });
+    const t1 = await turn(a, { message: 'Team size strongly drives velocity, so connect them.' });
     const approve = t1.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
     expect(approve, `the control: a real proposal was offered — ${JSON.stringify({ tools: t1._agent?.tool_calls, text: String(t1.assistant_text ?? '').slice(0, 200), chips: t1.suggested_actions })}`).toBeDefined();
     return approve!;
@@ -184,7 +184,7 @@ describe('a pending approval survives a restart', () => {
   // Canonical State's deploy-survival witness (#69 5833516415): its turns carried NO turn_id, so the offer's
   // answer row was never written and a real CEE deploy lost the approval (`unknown_proposal`).
   it('(g) RED: NO client turn_id — propose, the process restarts, approve → SAVED; the offer turn was durable', async () => {
-    const t1 = await inProcess((a) => turn(a, { message: 'Should team size drive velocity?', turn_id: undefined }));
+    const t1 = await inProcess((a) => turn(a, { message: 'Team size strongly drives velocity, so connect them.', turn_id: undefined }));
     const approve = t1.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
     expect(approve, 'the control: a real proposal was offered').toBeDefined();
     expect(t1._agent.durability, 'the offer turn is recorded even with no client id').toBe('recorded');
@@ -195,7 +195,7 @@ describe('a pending approval survives a restart', () => {
 
   it('(g) CONTRAST: a client turn_id is used exactly as given (echoed, and the row is keyed by it)', async () => {
     const turnId = randomUUID();
-    const t1 = await inProcess((a) => turn(a, { message: 'Should team size drive velocity?', turn_id: turnId }));
+    const t1 = await inProcess((a) => turn(a, { message: 'Team size strongly drives velocity, so connect them.', turn_id: turnId }));
     expect(t1._agent.turn_id).toBe(turnId);
     expect(t1._agent.durability).toBe('recorded');
     expect(latestRow()?.turn_id).toBe(turnId);
@@ -322,7 +322,7 @@ describe('a pending approval survives a restart', () => {
   // The client never saw the answer, so it re-sends the SAME committed turn (same turn_id, same body), and
   // the retry reaches a restarted process. The replay must be the original answer — including a way to
   // approve what it proposed — and must never write again.
-  const PROPOSING_MESSAGE = 'Should team size drive velocity?';
+  const PROPOSING_MESSAGE = 'Team size strongly drives velocity, so connect them.';
   const approveChipOf = (t: Body): Chip | undefined => t.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
   const canonical = () => ({ systemEvents, registers, writes, edges: edges.length });
 
