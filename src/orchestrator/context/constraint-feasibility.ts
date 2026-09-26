@@ -748,6 +748,42 @@ function collectProducerFilteredConstraintIds(
   return out;
 }
 
+/**
+ * ⭐ CONSTRAINTS PLoT SCORED BUT DID NOT CERTIFY — read off PLoT's own per-constraint marker,
+ * `constraint_results[].scale_provenance.decision_grade` (`plot-lite-service/src/types/engine-v3.ts:586-641`).
+ *
+ * WIRE (#69 5840961137, `tests/fixtures/cross-service/c50-level-demo/U1`): a `10 "percent per month"` churn limit was
+ * clamped to 1.0 against its factor's inferred range, and PLoT DELIVERED `{gc_u1: 1}` for every option with no
+ * warning code — only `scale_provenance {decision_grade: false, threshold_clamped: 'high'}`. Counting presence as
+ * "scored" named the leader as meeting the user's limit ("churn ≤ 100%").
+ *
+ * PLoT's contract is explicit that the marker "suppresses nothing" (`engine-v3.ts:637-638`): honouring it is the
+ * consumer's job, and this function is the consumer. `decision_grade` is false for a clamped threshold, an unproven
+ * scale source (`default`, `inferred_value`, …), a non-unified range or a unit mismatch (`run.ts:2418-2422`) — each a
+ * number that does not answer the user's question in the user's units, so none of them may certify a leader.
+ *
+ * ⚠ EXPLICIT `false` ONLY, BY DESIGN. An entry with no marker keeps today's reading: PLoT stamps the marker on every
+ * active constraint, so on the served wire absence does not occur for a scored limit, and treating absence as a
+ * refusal would re-read every hand-built envelope in this repo without any wire fact behind it.
+ *
+ * IDENTITY-BOUND: only an entry whose `constraint_id` is a ratified id can withhold that constraint. Pure.
+ */
+function collectNotDecisionGradeConstraintIds(
+  envelope: Record<string, unknown>,
+): Set<string> {
+  const out = new Set<string>();
+  const results = envelope.constraint_results;
+  if (!Array.isArray(results)) return out;
+  for (const entry of results) {
+    if (entry === null || typeof entry !== 'object') continue;
+    const id = readString((entry as Record<string, unknown>).constraint_id);
+    const marker = (entry as Record<string, unknown>).scale_provenance;
+    if (id === null || marker === null || typeof marker !== 'object') continue;
+    if ((marker as Record<string, unknown>).decision_grade === false) out.add(id);
+  }
+  return out;
+}
+
 /** Codes on the producer's warning channels that mean "not decision-grade". */
 function collectNotDecisionGradeCodes(
   envelope: Record<string, unknown>,
@@ -948,6 +984,20 @@ export function deriveConstraintVerdict(
   if (unscored.length > 0) {
     return verdict('unevaluated', {
       constraints: unscored,
+      leaderInfeasibility: leader,
+      outOfScopeConstraints: outOfScope,
+      unmeasuredTargetConstraints: unmeasured,
+    });
+  }
+
+  // 3b. Scored, but PLoT's own marker says the score is not decision-grade (clamped threshold, unproven scale, unit
+  //     mismatch). Not a met limit and not a broken one: the limit was not checked in the user's units.
+  const notDecisionGrade = collectNotDecisionGradeConstraintIds(envelope);
+  const uncertified = effective.filter((c) => notDecisionGrade.has(c.constraint_id));
+  if (uncertified.length > 0) {
+    return verdict('unevaluated', {
+      codes: [],
+      constraints: uncertified,
       leaderInfeasibility: leader,
       outOfScopeConstraints: outOfScope,
       unmeasuredTargetConstraints: unmeasured,
