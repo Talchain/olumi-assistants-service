@@ -1127,6 +1127,13 @@ export function createAgentCapabilities(
       const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
         graph: { ...(working as Record<string, unknown>), nodes: workingNodes },
         expected_graph_hash: carried,
+        /**
+         * ⭐ AND THE IDENTITY EXPECTATION, from the SAME read these bytes come from (`approvedRead`), as the frame
+         * writes send it. A rename that lands between that read and the route's own is outside the analysis
+         * projection, so only this refuses it; without it the whole-graph write restores the stale label
+         * (Canonical 5844410312; the #1743 counterexample #1810 closed for the frame writes).
+         */
+        ...(approvedRead.graph_identity_hash !== '' ? { expected_graph_identity_hash: approvedRead.graph_identity_hash } : {}),
         operation_id: operationId,
       });
       if (reg.status !== 200) {
