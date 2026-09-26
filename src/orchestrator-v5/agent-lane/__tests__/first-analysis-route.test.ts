@@ -281,8 +281,8 @@ describe('the Agent route runs the first analysis itself, once', () => {
 
   it('RED: an approval (fast path 2) and a forwarded canvas edit run NOTHING (test 4)', async () => {
     await buildTurn(app);
-    script = [callTool('propose_model_change', { from_label: 'Option A', to_label: 'Outcome', direction: 'positive', rationale: 'It moves the outcome directly.' })];
-    const proposed = await turn(app, { message: 'Should Option A drive the outcome directly?' });
+    script = [callTool('propose_model_change', { from_label: 'Option A', to_label: 'Outcome', direction: 'positive', strength: 'strong', rationale: 'It moves the outcome directly.' })];
+    const proposed = await turn(app, { message: 'Option A strongly drives the outcome directly, so connect them.' });
     const approve = proposed.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
     expect(approve, 'control: a real proposal was offered').toBeDefined();
     const approved = await turn(app, { message: approve!.message, source: 'chip', chip: { id: approve!.id } });
@@ -308,8 +308,8 @@ describe('the Agent route runs the first analysis itself, once', () => {
    */
   it('RED: authorise_change then run_analysis in ONE turn — the run is refused, 0 analyses (the c19w shape)', async () => {
     await buildTurn(app);
-    script = [callTool('propose_model_change', { from_label: 'Option A', to_label: 'Outcome', direction: 'positive', rationale: 'It moves the outcome directly.' })];
-    const proposed = await turn(app, { message: 'Should Option A drive the outcome directly?' });
+    script = [callTool('propose_model_change', { from_label: 'Option A', to_label: 'Outcome', direction: 'positive', strength: 'strong', rationale: 'It moves the outcome directly.' })];
+    const proposed = await turn(app, { message: 'Option A strongly drives the outcome directly, so connect them.' });
     const approve = proposed.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
     expect(approve, 'control: a real proposal was offered').toBeDefined();
     const proposalId = approve!.id.slice('agent-approve-proposal:'.length);
@@ -326,8 +326,8 @@ describe('the Agent route runs the first analysis itself, once', () => {
 
   it('CONTRAST: the NEXT turn’s explicit Run is not suppressed by the earlier approval', async () => {
     await buildTurn(app);
-    script = [callTool('propose_model_change', { from_label: 'Option A', to_label: 'Outcome', direction: 'positive', rationale: 'It moves the outcome directly.' })];
-    const proposed = await turn(app, { message: 'Should Option A drive the outcome directly?' });
+    script = [callTool('propose_model_change', { from_label: 'Option A', to_label: 'Outcome', direction: 'positive', strength: 'strong', rationale: 'It moves the outcome directly.' })];
+    const proposed = await turn(app, { message: 'Option A strongly drives the outcome directly, so connect them.' });
     const proposalId = proposed.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'))!.id.slice('agent-approve-proposal:'.length);
     script = [callTool('authorise_change', { proposal_id: proposalId }), callTool('run_analysis', { reason: 'r' })];
     await turn(app, { message: 'Yes, go ahead with that.' });
