@@ -165,7 +165,7 @@ const statedLimits = (g: SGraph) => (g.goal_constraints ?? []).map((c) => ({
  * ⭐ WHAT BASE REGISTERS, BYTE FOR BYTE. The served graphs above came back through the store, which
  * reorders keys (JSONB), so they can prove content but never bytes. These are the `/graph/register`
  * bodies origin/staging cb1778b86cc8f5c1d17285af366cc1909bab658b wrote for the same four drafts, made by
- * the generator at the bottom of this file BEFORE the rule existed (`GEN_NO_DUP_BASE=1`).
+ * the one-off generator recorded at the bottom of this file, BEFORE the rule existed.
  */
 const BASE_FIXTURE = new URL('./fixtures/staging-cb1778b-registered-graphs.json', import.meta.url);
 const BASE = (() => {
@@ -569,22 +569,24 @@ describe('the construction contract names the shape (one sentence)', () => {
 });
 
 /**
- * How `fixtures/staging-cb1778b-registered-graphs.json` was made: run this file with GEN_NO_DUP_BASE=1 on
- * a tree whose `src/` is origin/staging cb1778b86cc8f5c1d17285af366cc1909bab658b (before the rule).
+ * How `fixtures/staging-cb1778b-registered-graphs.json` was made (a one-off, kept as a record rather than
+ * as a skipped test, so the test-skip inventory stays unchanged): the block below was run as a test on a tree
+ * whose `src/` is origin/staging cb1778b86cc8f5c1d17285af366cc1909bab658b (before the rule), with
+ * GEN_NO_DUP_BASE_HEAD set to that sha.
  */
-describe.runIf(process.env.GEN_NO_DUP_BASE === '1')('generator (base only)', () => {
-  it('writes what base registers for the four served drafts', async () => {
-    const { writeFileSync } = await import('node:fs');
-    const graphs: Record<string, string> = {};
-    for (const [key, run, olumi, unknowns, horizon] of [
-      ['f-20260926T020217Z', SHAPE_1, 'ai_proposed', UNKNOWNS_1, 12],
-      ['f-20260926T022404Z', SHAPE_2, 'inferred', UNKNOWNS_2, 12],
-      ['f-20260926T001627Z', PHASED_54, 'ai_proposed', [], null],
-      ['f-20260926T022612Z', AT_49, 'ai_proposed', [], null],
-    ] as const) {
-      const { graph } = await build(candidateFromServed(run.brief.draft_graph, { olumi, unknowns: [...unknowns], horizon }));
-      graphs[key] = JSON.stringify(graph);
-    }
-    writeFileSync(BASE_FIXTURE, `${JSON.stringify({ head: process.env.GEN_NO_DUP_BASE_HEAD, graphs }, null, 1)}\n`);
-  });
-});
+// describe.runIf(process.env.GEN_NO_DUP_BASE === '1')('generator (base only)', () => {
+//   it('writes what base registers for the four served drafts', async () => {
+//     const { writeFileSync } = await import('node:fs');
+//     const graphs: Record<string, string> = {};
+//     for (const [key, run, olumi, unknowns, horizon] of [
+//       ['f-20260926T020217Z', SHAPE_1, 'ai_proposed', UNKNOWNS_1, 12],
+//       ['f-20260926T022404Z', SHAPE_2, 'inferred', UNKNOWNS_2, 12],
+//       ['f-20260926T001627Z', PHASED_54, 'ai_proposed', [], null],
+//       ['f-20260926T022612Z', AT_49, 'ai_proposed', [], null],
+//     ] as const) {
+//       const { graph } = await build(candidateFromServed(run.brief.draft_graph, { olumi, unknowns: [...unknowns], horizon }));
+//       graphs[key] = JSON.stringify(graph);
+//     }
+//     writeFileSync(BASE_FIXTURE, `${JSON.stringify({ head: process.env.GEN_NO_DUP_BASE_HEAD, graphs }, null, 1)}\n`);
+//   });
+// });
