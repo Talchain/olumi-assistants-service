@@ -182,6 +182,8 @@ export interface CandidateIdentity {
  * the ruling (#70 5841314428) is that no leader or decision-grade claim may rest on it:
  * `sign_not_provable`. When every option moves the inputs the same way, the direction holds
  * over the non-negative range and only the size is approximate: `sign_stable_provisional`.
+ * Two options that move the inputs DIFFERENTLY can swap places within the plausible range even
+ * when each is stable alone, so they are `sign_not_provable` too (`comparisons_not_sign_stable`).
  *
  * ⚠ CARRIED IN CONSTRUCTION ONLY. NodeV3 declares no field for it and the leader permission
  * is written only in `run-analysis.ts`, so this mark cannot yet reach
@@ -193,8 +195,17 @@ export interface NonlinearIdentityMark {
   readonly operation: 'product';
   readonly factor_ids: readonly string[];
   readonly verdict: NonlinearIdentityVerdict;
-  /** Options that can move the inputs apart, by node id, in model order. Empty when stable. */
+  /**
+   * Every option the verdict rests on, by node id, in model order: one that can move the inputs
+   * apart on its own (against carrying on as now), or one in a comparison below. Empty when stable.
+   */
   readonly options_not_sign_stable: readonly string[];
+  /**
+   * Pairs of options (model order) that move the product's inputs DIFFERENTLY — different inputs,
+   * different signs, different levers for two inputs, or one moving none of them — so which of the
+   * two does better can flip within the plausible range (independent verification of 6e33b95e, B1).
+   */
+  readonly comparisons_not_sign_stable: readonly (readonly [string, string])[];
 }
 
 export interface WidenerAdditions {
@@ -668,7 +679,30 @@ function unstatedGoalScope(goal: CandidateModel['goal']): { modelled: string; al
   if (s === null || s === undefined || typeof s !== 'object' || s.stated_in_brief !== false) return null;
   const modelled = typeof s.modelled === 'string' ? s.modelled.trim() : '';
   const alternative = typeof s.alternative === 'string' ? s.alternative.trim() : '';
-  return modelled === '' || alternative === '' ? null : { modelled, alternative };
+  if (modelled === '' || alternative === '') return null;
+  return metricNamesScope(String(goal.metric ?? ''), modelled, alternative) ? null : { modelled, alternative };
+}
+
+/** Words that never tell one scope from another. */
+const SCOPE_FILLER = new Set(['the', 'a', 'an', 'only', 'just', 'of', 'for', 'and', 'or', 'in', 'on', 'to', 'our', 'its', 'their']);
+const scopeWords = (text: string): Set<string> => new Set(text.toLowerCase().split(/[^a-z0-9]+/)
+  .filter((w) => w !== '' && !SCOPE_FILLER.has(w))
+  .map((w) => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w)));
+
+/**
+ * ⭐ N-a (independent verification of 6e33b95e): "Pro MRR" already SAYS which part it is. The
+ * scope counts as stated when the metric's own words contain every word that tells the modelled
+ * scope from the alternative ("pro" in "the Pro plan only" vs "all plans together") and none of
+ * the alternative's. Anything less — bare "MRR", or "Total MRR" while the model measures the Pro
+ * plan — is still named and asked. Plurals and filler words are ignored on both sides.
+ */
+function metricNamesScope(metric: string, modelled: string, alternative: string): boolean {
+  const said = scopeWords(metric);
+  const mine = scopeWords(modelled);
+  const other = scopeWords(alternative);
+  const own = [...mine].filter((w) => !other.has(w));
+  const theirs = [...other].filter((w) => !mine.has(w));
+  return own.length > 0 && own.every((w) => said.has(w)) && !theirs.some((w) => said.has(w));
 }
 
 /** `"A"`, `"A" and "B"`, `"A", "B" and "C"` — words, never ids. */
@@ -688,18 +722,38 @@ const quotedList = (items: readonly string[]): string => {
  * nothing about it is assumed. A product whose outcome does not reach the goal does not bear on
  * the comparison and is not marked.
  *
- * THE SIGN TEST. For each option, its levers are the nodes it acts on (every edge out of it
- * except a held status quo's repair edges). The sign of every simple causal path from a lever
- * to each input is taken over the admitted links (never through the outcome itself; a lever
- * that IS an input moves it +). Then:
+ * THE LEVERS. An option's levers are the nodes it acts on: every edge out of it except a held
+ * status quo's repair edges. An option AT TODAY'S LEVEL is not a lever at all (N-b): one whose
+ * every lever carries a level equal to that factor's baseline, or the declared status quo when
+ * none of its levels differs from today (a flag contradicted by a level is not trusted).
+ *
+ * THE SIGN TEST, PER OPTION. The sign of every simple causal path from a lever to each input is
+ * taken over the admitted links (never through the outcome itself; a lever that IS an input
+ * moves it +). Then:
  *  · one input moved (or none): the product moves with that input — stable;
  *  · two or more inputs moved by ONE lever, every path sign equal: they move together, and on
  *    non-negative quantities the product moves the same way — stable;
  *  · otherwise — opposite signs, a mixed input, or inputs moved by two separate levers whose
  *    relative direction the structure does not state — NOT provable (conservative).
- * Any option not provable makes the verdict `sign_not_provable`; otherwise, if any option moves
- * an input, `sign_stable_provisional`. If no option moves an input, the comparison does not
- * rest on the product and nothing is marked.
+ *
+ * ⛔ THE COMPARISON ARM (independent verification of 6e33b95e, B1). Checking each option only
+ * against the status quo let two stable options be ranked by a sum of effects that cannot rank
+ * them: an add-on raising revenue per user gains ΔR·S, a referral scheme raising subscribers
+ * gains R·ΔS′, and which is larger depends on the levels R and S sit at. So every option that
+ * reaches the goal carries a SIGNATURE — the sign with which it moves each input (or not at all)
+ * and, when it moves two or more, the lever it moves them through — and any two options whose
+ * signatures differ are a comparison the model cannot sign. Options that move the same one
+ * input the same way, or move both through the same one lever, keep one ranking.
+ *
+ * Any option or comparison not provable makes the verdict `sign_not_provable`; otherwise, if
+ * any option moves an input, `sign_stable_provisional`, whose sentence never claims that a
+ * result's or a comparison's direction holds. If no option moves an input, the comparison does
+ * not rest on the product and nothing is marked.
+ *
+ * WHOSE READING, AND OF WHAT (N-c). A declaration the brief states (`explicit`) is said as fact;
+ * any other is "Olumi reads …". A declaration on a quantity that has another direct cause — one
+ * no declared factor reaches and that reaches no declared factor, i.e. an addend — is only PART
+ * of that quantity, and is said so.
  */
 function markProductIdentities(
   declared: readonly CandidateIdentity[],
@@ -707,12 +761,14 @@ function markProductIdentities(
   nodes: readonly AdmittedNode[],
   edges: readonly { from: string; to: string; effect_direction?: string; origin?: string }[],
   goalId: string | undefined,
+  declaredStatusQuo: ReadonlySet<string> = new Set(),
 ): { marks: NonlinearIdentityMark[]; loss: RepairEntry[] } {
   const marks: NonlinearIdentityMark[] = [];
   const loss: RepairEntry[] = [];
   if (declared.length === 0) return { marks, loss };
   const kindOf = new Map(nodes.map((n) => [n.id, n.kind]));
-  const labelOf = (id: string): string => nodes.find((n) => n.id === id)?.label ?? id;
+  const nodeOf = new Map(nodes.map((n) => [n.id, n]));
+  const labelOf = (id: string): string => nodeOf.get(id)?.label ?? id;
   const QUANTITY = new Set<CandidateNodeKind>(['goal', 'outcome', 'factor']);
   const INPUT = new Set<CandidateNodeKind>(['outcome', 'factor']);
 
@@ -742,6 +798,26 @@ function markProductIdentities(
     };
     walk(from, 1);
     return budget <= 0 ? new Set([1, -1]) : signs;
+  };
+
+  // N-b: the levers each option really moves. An option at today's level moves nothing.
+  const TODAY_EPSILON = 1e-9;
+  const todayOf = (factorId: string): number | undefined => {
+    const v = nodeOf.get(factorId)?.observed_state?.value;
+    return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+  };
+  const leversOf = (o: AdmittedNode): string[] => {
+    const levers = [...new Set(edges.filter((e) => e.from === o.id && e.origin !== REPAIR_AUTHORED_ORIGIN).map((e) => e.to))];
+    if (levers.length === 0) return levers;
+    const levelOf = (t: string): number | undefined => o.interventions?.[t]?.value;
+    const atToday = (t: string): boolean => {
+      const level = levelOf(t);
+      const today = todayOf(t);
+      return level !== undefined && today !== undefined && Math.abs(level - today) <= TODAY_EPSILON;
+    };
+    const offToday = levers.some((t) => levelOf(t) !== undefined && !atToday(t));
+    if (levers.every(atToday) || (declaredStatusQuo.has(o.id) && !offToday)) return [];
+    return levers;
   };
 
   for (const d of declared) {
@@ -775,40 +851,82 @@ function markProductIdentities(
     if (why !== null) { reject(why); continue; }
     if (goalId === undefined || (outcomeId !== goalId && !reaches(outcomeId, goalId))) continue;
 
-    const notStable: string[] = [];
+    const selfNotStable: string[] = [];
+    const moving: { id: string; signature: string }[] = [];
     let movedAny = false;
     for (const o of nodes) {
       if (o.kind !== 'option') continue;
-      const levers = [...new Set(edges.filter((e) => e.from === o.id && e.origin !== REPAIR_AUTHORED_ORIGIN).map((e) => e.to))];
+      const levers = leversOf(o);
       const reaching = levers
-        .map((l) => factorIds.map((f) => pathSigns(l, f, outcomeId)))
-        .filter((perInput) => perInput.some((s) => s.size > 0));
-      if (reaching.length === 0) continue;
-      movedAny = true;
-      const moved = factorIds.filter((_, i) => reaching.some((perInput) => perInput[i]!.size > 0));
-      if (moved.length < 2) continue;
-      const provable = reaching.length === 1 && new Set(reaching[0]!.flatMap((s) => [...s])).size === 1;
-      if (!provable) notStable.push(o.id);
+        .map((l) => ({ lever: l, signs: factorIds.map((f) => pathSigns(l, f, outcomeId)) }))
+        .filter((r) => r.signs.some((s) => s.size > 0));
+      // An option that reaches the goal only around the product still takes part in the comparison.
+      if (reaching.length === 0 && !levers.some((l) => l === goalId || reaches(l, goalId))) continue;
+      const pattern = factorIds.map((_, i) => {
+        const u = new Set(reaching.flatMap((r) => [...r.signs[i]!]));
+        return u.size === 0 ? '0' : u.size === 2 ? '±' : u.has(1) ? '+' : '-';
+      });
+      const moved = pattern.filter((p) => p !== '0').length;
+      if (moved > 0) movedAny = true;
+      if (moved >= 2) {
+        const provable = reaching.length === 1 && new Set(reaching[0]!.signs.flatMap((s) => [...s])).size === 1;
+        if (!provable) selfNotStable.push(o.id);
+      }
+      const through = moved >= 2 ? `|${reaching.map((r) => r.lever).sort().join(',')}` : '';
+      moving.push({ id: o.id, signature: `${pattern.join(',')}${through}` });
     }
     if (!movedAny) continue;
+
+    const pairs: [string, string][] = [];
+    for (let i = 0; i < moving.length; i++) {
+      for (let j = i + 1; j < moving.length; j++) {
+        if (moving[i]!.signature !== moving[j]!.signature) pairs.push([moving[i]!.id, moving[j]!.id]);
+      }
+    }
+    const paired = new Set(pairs.flat());
+    const named = new Set([...selfNotStable, ...paired]);
+    const notStable = nodes.filter((n) => named.has(n.id)).map((n) => n.id);
+    const pairedInOrder = nodes.filter((n) => paired.has(n.id)).map((n) => n.id);
 
     const verdict: NonlinearIdentityVerdict = notStable.length > 0 ? 'sign_not_provable' : 'sign_stable_provisional';
     const outcomeLabel = labelOf(outcomeId);
     const inputs = quotedList(factorIds.map(labelOf));
-    marks.push({ outcome_id: outcomeId, operation: 'product', factor_ids: factorIds, verdict, options_not_sign_stable: notStable });
+    // N-c: an addend — a direct cause of the outcome outside the product's own chain.
+    const partial = [...new Set(edges.filter((e) => e.to === outcomeId).map((e) => e.from))].some((p) => {
+      const k = kindOf.get(p);
+      if (k === 'decision' || k === 'option' || factorIds.includes(p)) return false;
+      return !factorIds.some((f) => pathSigns(f, p, outcomeId).size > 0 || pathSigns(p, f, outcomeId).size > 0);
+    });
+    const stated = d.provenance === 'explicit';
+    const head = stated
+      ? `${partial ? 'Part of ' : ''}"${outcomeLabel}" is ${inputs} multiplied together`
+      : `Olumi reads ${partial ? 'part of ' : ''}"${outcomeLabel}" as ${inputs} multiplied together`;
+    marks.push({
+      outcome_id: outcomeId, operation: 'product', factor_ids: factorIds, verdict,
+      options_not_sign_stable: notStable, comparisons_not_sign_stable: pairs,
+    });
     loss.push({
       field_path: `nodes[${outcomeId}].nonlinear_identity`,
       before: { operation: 'product', factor_ids: factorIds },
-      after: { verdict, options_not_sign_stable: notStable },
+      after: { verdict, options_not_sign_stable: notStable, comparisons_not_sign_stable: pairs },
       reason: verdict === 'sign_not_provable'
-        ? `"${outcomeLabel}" is ${inputs} multiplied together, but Olumi's analysis cannot yet multiply quantities: ` +
-          `it adds up each effect separately. ${quotedList(notStable.map(labelOf))} can push ${inputs} in opposite ` +
-          `directions, so whether "${outcomeLabel}" rises or falls depends on how large each change is — and ` +
-          'adding the effects up can get even that direction wrong. So this model cannot yet show which option does ' +
-          `better on "${labelOf(goalId)}": treat its figures as a rough approximation, not a decision.`
-        : `"${outcomeLabel}" is ${inputs} multiplied together, and Olumi's analysis adds effects up rather than ` +
-          `multiplying them, so its figures for "${outcomeLabel}" are an approximation. Every option that changes ` +
-          'them moves them the same way, so the direction of the result holds, but treat its size as provisional.',
+        ? `${head}, but Olumi's analysis cannot yet multiply quantities: it adds up each effect separately.` +
+          (selfNotStable.length > 0
+            ? ` ${quotedList(selfNotStable.map(labelOf))} can push ${inputs} in opposite directions, so whether ` +
+              `"${outcomeLabel}" rises or falls depends on how large each change is — and adding the effects up can ` +
+              'get even that direction wrong.'
+            : '') +
+          (pairedInOrder.length > 0
+            ? ` ${quotedList(pairedInOrder.map(labelOf))} do not move ${inputs} the same way, so which of them does ` +
+              'better depends on the levels those quantities are at — and adding the effects up can rank them the ' +
+              'wrong way round.'
+            : '') +
+          ` So this model cannot yet show which option does better on "${labelOf(goalId)}": treat its figures as a ` +
+          'rough approximation, not a decision.'
+        : `${head}, and Olumi's analysis adds effects up rather than multiplying them, so its figures for ` +
+          `"${outcomeLabel}" are an approximation. Each option that changes them moves them only one way, so whether ` +
+          `that option raises or lowers "${outcomeLabel}" should hold; treat the size of every effect, and any gap ` +
+          'between the options, as provisional.',
       severity: verdict === 'sign_not_provable' ? 'warn' : 'info',
     } as RepairEntry);
   }
@@ -952,21 +1070,24 @@ export function admitCandidateModel(
   const loss: RepairEntry[] = [];
 
   /**
-   * ⭐ AN UNSTATED SCOPE IS NAMED IN THE GOAL ITSELF (C46; `unstatedGoalScope`). Only the
-   * DISPLAYED name changes: the entity label, which every id and link resolves by, stays the
-   * drafter's metric, so the goal keeps its id and every link still lands on it. A metric that
-   * already carries the modelled scope is left exactly as it is.
+   * ⭐ AN UNSTATED SCOPE IS RECORDED ON THE GOAL AS OLUMI'S ASSUMPTION (C46; `unstatedGoalScope`).
+   *
+   * ⛔ NEVER IN THE LABEL (independent verification of 6e33b95e, B2). The goal node carries the
+   * BRIEF's provenance (`from_brief`), so a label rewritten to "MRR (the Pro plan only)" showed
+   * Olumi's choice of scope as the user's own words. The label stays the user's metric; the
+   * modelled scope goes on the node's description, worded as Olumi's assumption, and the
+   * question is asked first (`build-model.ts`). The goal keeps its id, label and provenance.
    */
   const goalScope = unstatedGoalScope(model.goal);
-  const goalDisplay = goalScope !== null && !canonicalLabel(model.goal.metric).includes(canonicalLabel(goalScope.modelled))
-    ? `${model.goal.metric} (${goalScope.modelled})`
-    : model.goal.metric;
+  const goalScopeAssumption = goalScope === null ? undefined
+    : `Measured for ${goalScope.modelled} \u2014 Olumi's assumption; the brief does not say whether it covers ` +
+      `${goalScope.modelled} or ${goalScope.alternative}.`;
 
   // Fixed traversal order => deterministic ids.
-  const entities: { label: string; display?: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
+  const entities: { label: string; assumption?: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
     {
       label: model.goal.metric,
-      ...(goalDisplay !== model.goal.metric ? { display: goalDisplay } : {}),
+      ...(goalScopeAssumption !== undefined ? { assumption: goalScopeAssumption } : {}),
       kind: 'goal',
       provenance: model.goal.provenance,
       node: (() => {
@@ -1253,28 +1374,29 @@ export function admitCandidateModel(
     // A factor with NO baseline value gets no observed_state at all — an absent
     // value is the honest record; a zero would be a measurement. (An ESTIMATED
     // value is kept, stamped as Olumi's: `estimatedObservedState`.)
-    // `display` differs from `label` only for a goal whose unstated scope is named (C46).
-    const full = e.display ?? e.label;
-    const label = shortLabel(full);
-    if (label !== full) {
+    const label = shortLabel(e.label);
+    if (label !== e.label) {
       loss.push({
         code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
         layer: 'cee',
         field_path: `nodes[${id}].label`,
-        before: full,
+        before: e.label,
         after: label,
         reason:
-          `The label was ${full.length} characters. Any structural edit composes two labels into ` +
+          `The label was ${e.label.length} characters. Any structural edit composes two labels into ` +
           `a summary capped at 80, so a label over ${MAX_LABEL} makes the model uneditable. The full ` +
           'text is preserved on the node description and here.',
         severity: 'info',
       });
     }
+    // `assumption` is set only on a goal whose unstated scope Olumi chose (C46, B2): it follows the
+    // full label when that had to be shortened, so neither is lost.
+    const description = [label !== e.label ? e.label : undefined, e.assumption].filter((t): t is string => t !== undefined);
     nodes.push({
       id,
       kind: e.kind,
       label,
-      ...(label !== full ? { description: full } : {}),
+      ...(description.length > 0 ? { description: description.join(' \u2014 ') } : {}),
       provenance: displayProvenanceFor(e.provenance),
       ...(e.node ?? {}),
     });
@@ -1285,7 +1407,7 @@ export function admitCandidateModel(
     loss.push({
       field_path: `nodes[${ids.get(model.goal.metric)!}].goal_scope`,
       before: { metric: model.goal.metric, modelled: goalScope.modelled, alternative: goalScope.alternative },
-      after: goalDisplay,
+      after: goalScopeAssumption,
       reason:
         `The brief does not say whether your "${model.goal.metric}" goal covers ${goalScope.modelled} or ` +
         `${goalScope.alternative}, so the model measures it for ${goalScope.modelled}. Which did you mean?`,
@@ -1920,6 +2042,7 @@ export function admitCandidateModel(
     levers.nodes,
     finalEdges,
     goalForReach?.id,
+    declaredStatusQuoIds,
   );
   loss.push(...products.loss);
 
