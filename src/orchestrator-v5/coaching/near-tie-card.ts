@@ -70,7 +70,16 @@ export type NearTieCardDecision =
  * Build the one near-tie card, or say why not. Total. `withheldReason` is the
  * READBACK's `leader_claim.withheld_reason` (condition 4).
  */
-export function buildNearTieCard(input: FragileLinkChallengeInput, withheldReason: unknown): NearTieCardDecision {
+export function buildNearTieCard(
+  input: FragileLinkChallengeInput,
+  withheldReason: unknown,
+  /**
+   * The model's option count, from `analysis_ready.options` itself — NOT from the label list, which drops a
+   * blank label (contract-legal) and would read a 3-option model as "the two options" (#1949 review N1).
+   * Unknown → "the strongest options", which is true of any count.
+   */
+  optionCount: number | null = null,
+): NearTieCardDecision {
   const result = readRecord(input.analysisResult);
   if (result === null || result.type !== 'analysis_result' || result.computed_against_hash !== input.graphHash) {
     return { block: null, reason: 'identity_mismatch' };
@@ -90,13 +99,15 @@ export function buildNearTieCard(input: FragileLinkChallengeInput, withheldReaso
     && withheldReason !== WITHHELD_IDENTITY_SIGN_UNPROVEN;
   if (!isNearTie) return { block: null, reason: 'not_a_first_pass_near_tie' };
 
-  const copy = composeNearTieCard((input.optionLabels ?? []).length);
+  const copy = composeNearTieCard(optionCount ?? 0);
   if (!copyPasses(copy)) return { block: null, reason: 'copy_gate' };
 
   const signalId = `${NEAR_TIE_SIGNAL_ID_PREFIX}${input.graphHash}:${input.computedAt}:auto_first_pass`;
   const parsed = CoachingBlockSchema.safeParse({
     type: 'coaching',
-    coaching_kind: 'widening',
+    // 'orientation' ("Getting oriented" in the UI's details line): the card orients the user on the deciding
+    // criterion. 'widening' rendered "Widening the options", which misdescribes it (#1949 review N2).
+    coaching_kind: 'orientation',
     block_id: deterministicBlockId(signalId),
     signal_id: signalId,
     created_at: input.computedAt,

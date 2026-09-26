@@ -564,7 +564,8 @@ test('NEAR TIE — served hiring 3829c96 first pass (near tie, 0 fragile links, 
  const card=cards[0]!;
  assert.equal(CoachingBlockSchema.safeParse(card).success,true);
  assert.equal(card.signal_id,`${TIE_CARD}${final.graphHash}:${(final.analysisState as any).run_state.computed_at}:auto_first_pass`);
- assert.equal(card.coaching_kind,'widening');
+ // 'orientation' renders "Getting oriented" in the UI's details line; 'widening' read "Widening the options".
+ assert.equal(card.coaching_kind,'orientation');
  assert.deepEqual(card.target_refs,[]);
  // Condition 2: three options and a TOP-TWO gap → "the strongest options", never "the options"; no option named.
  assert.equal(card.body,"On Olumi's estimates the strongest options come out close, so this first pass cannot separate them. Worth saying which difference between them matters most to you.");
@@ -609,6 +610,17 @@ test('NEAR TIE — a flagged link on the same tie keeps the LINK card; a limit k
 test('NEAR TIE — an EXPLICIT Run on the same tie gets no near-tie card (the permission covers the automatic first pass)',()=>{
  const out=retie((r)=>{delete r.enrichment.run_provenance;},'explicit_run');
  assert.equal(runTurnCards(out.blocks).filter(b=>b.signal_id.startsWith(TIE_CARD)).length,0);
+});
+test('NEAR TIE — the option COUNT comes from analysis_ready.options, not the label list: a blank label never turns 3 options into "the two options" (#1949 review N1)',()=>{
+ const {c,final}=tieCase();
+ const ready=structuredClone(c.captured.analysis_ready) as any;
+ assert.equal(ready.options.length,3,'control: three options');
+ ready.options[2].label='';
+ const out=runTurnCoaching({...statelessCapture(c.captured),analysis_ready:ready},final);
+ assert.match(runTurnCards(out.blocks)[0]!.body,/^On Olumi's estimates the strongest options come out close/);
+ // No readiness at all → the count is unknown → "the strongest options" (true of any count).
+ const none=runTurnCoaching({...statelessCapture(c.captured),analysis_ready:undefined},final);
+ assert.match(runTurnCards(none.blocks)[0]!.body,/^On Olumi's estimates the strongest options come out close/);
 });
 test('NEAR TIE — with exactly two options the card says "the two options"',()=>{
  const {c,final}=tieCase();
