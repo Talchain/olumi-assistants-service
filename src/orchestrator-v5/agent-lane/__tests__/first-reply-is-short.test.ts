@@ -53,7 +53,7 @@ describe('AX2 (c): the build turn shows the two priority questions and offers th
   });
 
   it('COMPLETE: the whole list, in the producer\'s order, is still readable for the wire', () => {
-    expect(openQuestionsOf({ ok: true, open_questions: SERVED_QUESTIONS })).toEqual(SERVED_QUESTIONS);
+    expect(openQuestionsOf({ ok: true, mutated: false, open_questions: SERVED_QUESTIONS })).toEqual(SERVED_QUESTIONS);
   });
 });
 
@@ -83,5 +83,50 @@ describe('AX2 (closing): the build turn drops a ranking without explaining an ab
   it('NEVER SILENT: a build-turn reply the drop would empty still gets the sentence', () => {
     const r = enforceAgentLaneLeaderClaimsAtWire(reply(RANKING), { ...opts, sayWhyWithheld: false });
     expect(AGENT_NO_LEADER_SENTENCES.some((s) => said(r).includes(s))).toBe(true);
+  });
+});
+
+describe('AX2 (item 2): a Run reply states the product reason ONCE', () => {
+  /** The served replies before the module's sentence (`f-20260926T201724Z/05` and `/12`), and that sentence, verbatim. */
+  const SERVED_05 = 'No option can be put forward on MRR yet: the model treats MRR as depending on **Pro price × Pro subscribers**, but its comparison currently adds those effects rather than multiplying them.\n\n- The £59-with-AI scenario and the alternatives were all analysed, and each stayed under the **10% monthly churn** limit in nearly all simulated cases under the current assumptions.\n- But the £20k MRR threshold cannot yet be checked: the model lacks an observed MRR baseline to express that level in the analysis frame, and it does not represent the 12‑month deadline.';
+  const SERVED_12 = 'With monthly churn set to **12%**, the churn constraint becomes the central unresolved issue.\n\n- Continuing as now meets it in **8.22%**.\n- The cohort-test and paid-add-on scenarios show **0%** compliance in this run, but both were treated as leaving AI unavailable; the add-on price is also unknown.\n- No option can be put forward on MRR: the model still cannot multiply price by subscriber count, and it cannot test the £20k threshold or 12‑month deadline.';
+  const SERVED_CLOSING = 'No single option can be put forward yet, because Olumi reads your goal as depending on quantities that multiply together, and this model adds their effects up rather than multiplying them; running the analysis again will not change that.';
+  const RANKING = 'Raising Pro to £59 produces the strongest MRR outcome.';
+  const GRAPH = { nodes: [{ id: 'mrr', kind: 'goal', label: 'MRR' }], edges: [] };
+  const run = (text: string, reason = 'nonlinear_identity_sign_unproven', graph: unknown = GRAPH) => String(enforceAgentLaneLeaderClaimsAtWire(
+    { response_version: 2, assistant_text: `${text}\n\n${RANKING}`, suggested_actions: [], insights: [] } as never,
+    { requestId: 'r', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: reason, graph: graph as never, analysisReady: undefined },
+  ).response.assistant_text);
+
+  it('PRECONDITION: the served closing is this module\'s product-identity sentence', async () => {
+    const { agentNoLeaderSentence } = await import('../withheld-leader-fail-closed.js');
+    expect(agentNoLeaderSentence('nonlinear_identity_sign_unproven', undefined)).toBe(SERVED_CLOSING);
+  });
+
+  it('RED (served 05): the model\'s lead already says it — the ranking goes, the duplicate is not added', () => {
+    const said = run(SERVED_05);
+    expect(said).not.toContain(RANKING);
+    expect(said).toContain('No option can be put forward on MRR yet');
+    expect(said).not.toContain(SERVED_CLOSING);
+  });
+
+  it('RED (served 12): said in a bullet — still once', () => {
+    const said = run(SERVED_12);
+    expect(said).not.toContain(RANKING);
+    expect(said).not.toContain(SERVED_CLOSING);
+  });
+
+  it('CONTRAST: a reply that does not state the reason keeps the sentence', () => {
+    const withoutLead = SERVED_05.slice(SERVED_05.indexOf('- The'));
+    expect(run(withoutLead)).toContain(SERVED_CLOSING);
+  });
+
+  it('CONTRAST: another reason keeps its own sentence, whatever the reply says about multiplying', async () => {
+    const { agentNoLeaderSentence } = await import('../withheld-leader-fail-closed.js');
+    expect(run(SERVED_05, 'constraint_verdict_withheld')).toContain(agentNoLeaderSentence('constraint_verdict_withheld', undefined));
+  });
+
+  it('CONTRAST: with no goal to read, nothing is assumed said', () => {
+    expect(run(SERVED_05, 'nonlinear_identity_sign_unproven', { nodes: [], edges: [] })).toContain(SERVED_CLOSING);
   });
 });

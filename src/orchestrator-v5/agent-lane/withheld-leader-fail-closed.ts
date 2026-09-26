@@ -1016,6 +1016,27 @@ export const AGENT_NO_LEADER_SENTENCES: readonly string[] = [
   ...new Set([...Object.values(BY_WITHHELD_REASON), ...Object.values(BY_CONSTRAINT_CODE), ...Object.values(BY_ADMISSION_REASON), REASON_NOT_RECORDED].map(sentence)),
 ];
 
+/**
+ * ⭐ AX2 (DL #70 5850471417, item 2): ONE statement of the limitation on a Run turn. Served (`f-20260926T201724Z/05`,
+ * `/12`), the model's own reply said the product reason ("No option can be put forward on MRR yet: … multiplying them")
+ * and this module then said it again. The sentence is skipped ONLY when the one about to be appended IS the product-
+ * identity sentence AND a kept sentence says that reason in plain words: it names the goal (its label, read from the
+ * graph) together with multiplication. Any other reason, an admission reason, or a reply that does not say it keeps it.
+ */
+const PRODUCT_IDENTITY_SENTENCE = sentence(BY_WITHHELD_REASON[WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]!);
+const MULTIPLICATION = /\bmultipl(?:y|ies|ied|ying|ication)\b/i;
+const escapeForRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+export function replyAlreadySaysProductReason(body: string, graph: unknown): boolean {
+  const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  const goals = (Array.isArray(nodes) ? nodes : [])
+    .filter((n): n is { kind: 'goal'; label: string } => (n as { kind?: unknown } | null)?.kind === 'goal'
+      && typeof (n as { label?: unknown }).label === 'string' && ((n as { label: string }).label).trim() !== '')
+    .map((n) => new RegExp(`(^|[^\\p{L}\\p{N}])${escapeForRegExp(n.label.trim())}(?=[^\\p{L}\\p{N}]|$)`, 'iu'));
+  if (goals.length === 0) return false;
+  return splitIntoRedactableUnits(body).some((unit) => MULTIPLICATION.test(unit) && goals.some((g) => g.test(unit)));
+}
+
 function admissionModeReasonCode(analysisReady: unknown): string | undefined {
   const reasons = (analysisReady as { analysis_admission?: { reasons?: unknown } } | null | undefined)?.analysis_admission?.reasons;
   if (!Array.isArray(reasons)) return undefined;
@@ -1418,7 +1439,8 @@ export function enforceAgentLaneLeaderClaimsAtWire(
           ?? opts.leaderClaimWithheldReason;
         const closing = agentNoLeaderSentence(withheldReason, opts.analysisReady, limitCauseCodesOf((response as { blocks?: unknown }).blocks));
         const body = projected.text.trimEnd();
-        next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false ? body : `${body}\n\n${closing}` } as OlumiResponse;
+        const alreadySaid = closing === PRODUCT_IDENTITY_SENTENCE && replyAlreadySaysProductReason(body, opts.graph);
+        next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false || alreadySaid ? body : `${body}\n\n${closing}` } as OlumiResponse;
         log.info(
           {
             event: 'agent_lane.withheld_leader_ranking_dropped',
