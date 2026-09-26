@@ -13,8 +13,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
-import { figureTheUserWrote, userWordsOf } from '../stated-by-user.js';
-import { BOARD_EDIT_PREFIX } from '../history-store.js';
+import { figureTheUserWrote, typedByUser, userWordsOf } from '../stated-by-user.js';
 
 const paulGraph = JSON.parse(readFileSync(new URL('./fixtures/paul-cbd15f83-stored-graph.json', import.meta.url), 'utf8')) as unknown;
 const SERVED = 'Add an option: keep the price at £49 and run a win-back offer for churned customers. It reduces Monthly churn. Please add it.';
@@ -72,44 +71,34 @@ describe('figureTheUserWrote — present in the user\'s words, in a compatible k
     expect(figureTheUserWrote(49, 'GBP per month', '')).toBe(false);
   });
 
-  it('userWordsOf: every user text in the history, then this message — never the assistant\'s', () => {
-    const history = [
-      { role: 'user', content: [{ type: 'input_text', text: 'Test £54 vs £59.' }] },
-      { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'I suggest £64.' }] },
-    ];
-    const words = userWordsOf(history, 'Add those.');
+  it('userWordsOf: what the user typed earlier, then this turn\'s message when they typed it', () => {
+    const words = userWordsOf(['Test £54 vs £59.'], 'Add those.');
     expect(words).toContain('£54');
     expect(words).toContain('Add those.');
-    expect(words).not.toContain('£64');
+    expect(userWordsOf(['Test £54 vs £59.'], null)).toBe('Test £54 vs £59.');
+    expect(userWordsOf([], null)).toBe('');
   });
 });
 
-describe('⛔ product-authored text in a user item is never the user\'s words (#1978 review 5844589340 B1)', () => {
-  const SERVED = 'Add an option: keep the price at £49 and run a win-back offer for churned customers. It reduces Monthly churn.';
-  const note = (text: string) => ({ role: 'user', content: [{ type: 'input_text', text: `${BOARD_EDIT_PREFIX} ${text}` }] });
-
-  it('RED: a board edit narrated "from 0 hires to 1 hire" does not ground the served 0% churn level', () => {
-    const words = userWordsOf([note('Updated Tech lead hires from 0 hires to 1 hire.')], SERVED);
-    expect(figureTheUserWrote(0, 'percent per month', words), words).toBe(false);
-    expect(figureTheUserWrote(0, '%', words), words).toBe(false);
-    expect(words).not.toContain('Board edit');
+describe('⛔ the user\'s words are what they TYPED — by provenance, never by text shape (#1978 reviews 5844589340 B1, 5844805634 B2/B3)', () => {
+  it('typedByUser: a composer message is typed; a chip click, a board edit or any system event is not', () => {
+    expect(typedByUser({ kind: 'message', message: 'Test £54 at release.' })).toBe(true);
+    expect(typedByUser({ message: 'Test £54 at release.', source: 'user' })).toBe(true);
+    expect(typedByUser({ kind: 'message', source: 'chip', chip: { id: 'agent-approve-proposal:gmh_1' }, message: "Yes, add option 'Test £54 at release'." })).toBe(false);
+    expect(typedByUser({ kind: 'message', chip: { id: 'agent-run-offer' }, message: 'Run analysis.' })).toBe(false);
+    expect(typedByUser({ kind: 'message', source: 'chip', message: 'Talk me through Price.' })).toBe(false);
+    expect(typedByUser({ kind: 'system_event', event: { kind: 'factor_value_edit' } })).toBe(false);
   });
 
-  it('CONTRAST: the same 0 in the user\'s own message still grounds it', () => {
-    const words = userWordsOf([note('Updated Tech lead hires from 0 hires to 1 hire.')], 'Set churn to 0% for the win-back option.');
-    expect(figureTheUserWrote(0, '%', words)).toBe(true);
-  });
-
-  it('RED: the approval chip\'s replay of Olumi\'s own label does not ground £54 on a later turn', () => {
-    const echo = { role: 'user', content: [{ type: 'input_text', text: "Yes, add option 'Test £54 at release', link 'Choose a price' to 'Test £54 at release' and link 'Test £54 at release' to 'Price'." }] };
-    const words = userWordsOf([{ role: 'user', content: 'Suggest some pricing options.' }, echo], 'Set its level.');
-    expect(figureTheUserWrote(54, 'GBP', words), words).toBe(false);
-    expect(figureTheUserWrote(54, 'GBP', userWordsOf([], "Yes, add option 'Test £54 at release'.")), 'this turn\'s click too').toBe(false);
-  });
-
-  it('CONTRAST: a user\'s own "Yes, £54" (no quoted label) still grounds it; the fixed approvals carry no figure', () => {
-    expect(figureTheUserWrote(54, 'GBP', userWordsOf([], 'Yes, use £54 for the release price.'))).toBe(true);
-    expect(figureTheUserWrote(54, 'GBP', userWordsOf([{ role: 'user', content: 'Test £54 at release.' }, { role: 'user', content: 'Yes, add that option.' }], 'ok'))).toBe(true);
+  it('RED (B2): a natural "Yes, …" reply keeps the user\'s own figure — contractions never cut it out', () => {
+    for (const [text, value, unit] of [
+      ['Yes, but it\'s closer to 4% now, that\'s from finance.', 4, '%'],
+      ['Yes, let\'s make that one £62, it\'s what we\'ll charge.', 62, 'GBP'],
+      ['Yes, let\'s add an option at £59, that\'s the price we\'d test.', 59, 'GBP'],
+      ['Yes, it\'s 4%.', 4, '%'],
+    ] as const) {
+      expect(figureTheUserWrote(value, unit, userWordsOf([], text)), text).toBe(true);
+    }
   });
 });
 
@@ -141,6 +130,16 @@ describe('propose_new_option sends only levels the user wrote', () => {
     expect(price?.raw_value).toBe(59);
   });
 
+  it('RED (B2): "Yes, let\'s add an option at £59, that\'s the price we\'d test." → £59 is the user\'s level, never lost', async () => {
+    const { caps, sent } = setup();
+    await caps.proposeNewOption(ctxSaying(userWordsOf([], 'Yes, let\'s add an option at £59, that\'s the price we\'d test.')), {
+      label: 'Test £59 before rollout',
+      acts_on: [{ factor_label: 'Pro plan price', direction: 'positive', level: { value: 59, unit: '£' } }],
+      rationale: 'x',
+    } as never);
+    expect(levelSent(sent, 'pro_plan_price')?.raw_value, JSON.stringify(sent[0]?.body)).toBe(59);
+  });
+
   it('RED: a price the user never wrote (£64 against "£59") is sent unset', async () => {
     const { caps, sent } = setup();
     await caps.proposeNewOption(ctxSaying('Add an option: raise to £59 with a win-back offer.'), {
@@ -163,6 +162,13 @@ describe('propose_option_interventions: `user_stated` stands only on a figure th
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(authorOf(store, r.proposal_id)).toBe('model_proposed');
     expect(r.not_the_users_figure).toEqual([{ option: 'Raise to £59 at Release', factor: 'Pro plan price', value: 62 }]);
+  });
+
+  it('RED (B2): "Yes, let\'s make that one £62, it\'s what we\'ll charge." → the user\'s', async () => {
+    const { caps, store } = setup();
+    const r = await caps.proposeOptionInterventions(ctxSaying(userWordsOf([], 'Yes, let\'s make that one £62, it\'s what we\'ll charge.')), level(62) as never, undefined) as { ok?: boolean; proposal_id?: unknown };
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(authorOf(store, r.proposal_id)).toBe('user_stated');
   });
 
   it('CONTRAST: the user wrote £62 → recorded as theirs, nothing said', async () => {
@@ -188,6 +194,13 @@ describe('propose_assumptions: a revision is the user\'s only when they wrote th
     expect(r.not_the_users_figure).toEqual([{ factor: 'Monthly churn', value: 4 }]);
   });
 
+  it('RED (B2): "Yes, but it\'s closer to 4% now, that\'s from finance." → the user\'s revision', async () => {
+    const { caps, store } = setup();
+    const r = await caps.proposeAssumptions(ctxSaying(userWordsOf([], 'Yes, but it\'s closer to 4% now, that\'s from finance.')), revise as never) as { ok?: boolean; proposal_id?: unknown };
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(opAuthor(store, r.proposal_id)).toBe('user_stated');
+  });
+
   it('CONTRAST: "I think churn is more like 4%" → the user\'s revision, as before', async () => {
     const { caps, store } = setup();
     const r = await caps.proposeAssumptions(ctxSaying('I think churn is more like 4%.'), revise as never) as { ok?: boolean; proposal_id?: unknown; not_the_users_figure?: unknown };
@@ -199,9 +212,12 @@ describe('propose_assumptions: a revision is the user\'s only when they wrote th
 });
 
 describe('the Agent route binds the user\'s words to every tool it runs', () => {
-  it('RED: one tool context, built from the history and this message, used at every site', () => {
+  it('RED: one tool context, built from what the user TYPED (never the history), used at every site', () => {
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(route).toContain('user_text: userWordsOf(history, message) };');
+    expect(route).toContain('const typedNow = typedByUser(body) ? message : null;');
+    expect(route).toContain('user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };');
+    expect(route).toContain('if (typedNow !== null) histories.recordTyped(sessionId, typedNow);');
+    expect(route).not.toContain('userWordsOf(history');
     expect(route).not.toContain('{ scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }');
     expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the three dispatch sites').toBe(4);
   });

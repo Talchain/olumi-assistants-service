@@ -411,6 +411,46 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect((newOption()?.interventions ?? {})['fac_price'], narration).toBeUndefined();
   }, 120_000);
 
+  it('[p6] RED (#1978 review 5844805634 B2): an approval click replays Olumi\'s own "£54" label; a later level of 54 is still not the user\'s', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeOptionC(undefined, 'Add an option for the release price.');
+    const approve = approveChipOf(t1)!;
+    expect(approve.message, 'the click replays the Agent\'s label, with its figure').toContain('£54');
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    script = [
+      () => fnCall('propose_new_option', { label: 'Release price trial', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }], rationale: 'The user asked for one more.' }),
+      () => say('I would add it. Shall I?'),
+    ];
+    const t3 = await turn({ message: 'Add one more like it.' });
+    const again = approveChipOf(t3)!;
+    await turn({ message: again.message, source: 'chip', chip: { id: again.id } });
+    const trial = graphNow().nodes.find((x) => x.kind === 'option' && x.label === 'Release price trial');
+    expect(trial, 'the second option is added').toBeDefined();
+    expect((trial?.interventions ?? {})['fac_price']).toBeUndefined();
+  }, 120_000);
+
+  it('[p7] RED (#1978 review 5844805634 B3): after a restart, a row Olumi itself dispatched ("Add the option \u201cTest \u00a354 at release\u201d.") is reseeded — and never read as the user\'s', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    // The durable conversation as route-v2 records the Agent's own add-option dispatch (route-v2 commit userMessage).
+    await store.append({ scenario_id: SCENARIO, turn_id: 'seeded-agent-dispatch', request_hash: 'x', userMessage: 'Add the option "Test £54 at release".', assistantMessage: 'Added.', turn_class: 'handler', handler_id: 'add_option' });
+    const t1 = await proposeOptionC(54, 'Add an option for the release price.');
+    const approve = approveChipOf(t1)!;
+    expect(approve, JSON.stringify(t1._agent.tool_calls)).toBeDefined();
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(newOption(), 'the option itself is added').toBeDefined();
+    expect((newOption()?.interventions ?? {})['fac_price']).toBeUndefined();
+  }, 120_000);
+
+  it('CONTRAST [p8]: a figure the user TYPED in an earlier turn of this session is still theirs', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    script = [() => say('Noted — £54 at release. Shall I add it as an option?')];
+    await turn({ message: 'I want to test £54 at release.' });
+    const t2 = await proposeOptionC(54, 'Yes, add it.');
+    const approve = approveChipOf(t2)!;
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect((newOption()?.interventions ?? {})['fac_price'], 'the user\'s £54').toEqual(expect.objectContaining({ raw_value: 54 }));
+  }, 120_000);
+
   it('[p3] RED: a factor with no range at all — the user\'s £54 cannot be stored on one, so the level is left UNSET (never a bare 54) and the Agent is told why', async () => {
     graphOf.set(SCENARIO, seedGraph(1, 1, 'none'));
     let proposed = '';

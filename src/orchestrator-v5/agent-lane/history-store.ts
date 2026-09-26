@@ -102,7 +102,7 @@ export function historyFromDurableTurns(
 /** Marks a board edit in the Agent's history: the user's own change, already applied — never a request to the Agent. */
 export const BOARD_EDIT_PREFIX = '(Board edit \u2014 the user changed this directly on the canvas and Olumi has already applied it; it is not a request to you.)';
 
-export function isBoardEditNote(item: unknown): boolean {
+function isBoardEditNote(item: unknown): boolean {
   const content = (item as { content?: unknown })?.content;
   const first = Array.isArray(content) ? (content[0] as { text?: unknown } | undefined)?.text : content;
   return typeof first === 'string' && first.startsWith(BOARD_EDIT_PREFIX);
@@ -121,8 +121,12 @@ export function needsDurableSeed(held: readonly unknown[]): boolean {
   return !held.some((i) => (i as { role?: unknown })?.role === 'user' && !isBoardEditNote(i));
 }
 
+/** How many typed messages a session keeps for grounding (`stated-by-user.ts`); board edits never count against it. */
+const MAX_TYPED_WORDS = 40;
+
 export class HistoryStore {
   private readonly items = new Map<string, unknown[]>();
+  private readonly typed = new Map<string, string[]>();
 
   constructor(
     private readonly maxSessions = DEFAULT_MAX_SESSIONS,
@@ -150,5 +154,21 @@ export class HistoryStore {
 
   get size(): number {
     return this.items.size;
+  }
+
+  /** What the user TYPED in this session, as this process saw it — never a chip's text, a board-edit note or a reseeded row. */
+  typedWords(sessionId: string): readonly string[] {
+    return this.typed.get(sessionId) ?? [];
+  }
+
+  recordTyped(sessionId: string, text: string): void {
+    if (text.trim() === '') return;
+    const next = [...(this.typed.get(sessionId) ?? []), text].slice(-MAX_TYPED_WORDS);
+    this.typed.delete(sessionId);
+    if (this.typed.size >= this.maxSessions) {
+      const oldest = this.typed.keys().next().value;
+      if (oldest !== undefined) this.typed.delete(oldest);
+    }
+    this.typed.set(sessionId, next);
   }
 }

@@ -27,7 +27,6 @@
  */
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import { unitPhraseFamily } from './unit-conflict.js';
-import { isBoardEditNote } from './history-store.js';
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
@@ -44,40 +43,29 @@ export function figureTheUserWrote(value: number, unit: unknown, userText: strin
 }
 
 /**
- * Olumi's own words replayed as the user's, with the labels it quoted taken out. An approval chip's message is
- * product-authored — "Yes, add option 'Test £54 at release', link 'Choose a price' to …" (the held chip,
- * `buildGmHeldPublicCopy`) — and the click replays it as a user message, so a figure only the Agent put in a label
- * would read as written once the user approved the option. Everything between the first and last quote of a
- * "Yes, …" message goes; a user who typed "Yes, let's try £54, it's fine" loses £54 too, which fails toward
- * under-claiming, never over.
+ * Whether this request is something the user TYPED: a composer message. A chip click is not — every chip's text is
+ * Olumi's (an approval replaying the Agent's own labels, a suggestion, a coaching prompt) — and neither is a system
+ * event such as a board edit.
  */
-function withoutEchoedLabels(text: string): string {
-  if (!text.startsWith('Yes, ')) return text;
-  const first = text.indexOf("'");
-  const last = text.lastIndexOf("'");
-  return first >= 0 && last > first ? `${text.slice(0, first)}${text.slice(last + 1)}` : text;
+export function typedByUser(body: Record<string, unknown>): boolean {
+  const kind = body['kind'];
+  const chip = body['chip'];
+  return (kind === undefined || kind === 'message') && (chip === null || chip === undefined) && body['source'] !== 'chip';
 }
 
 /**
- * The user's own words in this conversation: every `role: 'user'` text in the history the Agent is given, then this
- * turn's message. A figure the user gave two turns ago ("test £54 vs £59", then "add those") is still theirs.
+ * The user's own words in this conversation: what they TYPED earlier in this session (`HistoryStore.typedWords`), then
+ * this turn's message when they typed it. A figure the user gave two turns ago ("test £54 vs £59", then "add those") is
+ * still theirs.
  *
- * ⛔ PRODUCT-AUTHORED TEXT IN A USER ITEM IS NOT THE USER'S (#1978 review 5844589340 B1). The route records a board
- * edit as a `role: 'user'` note in Olumi's own narration ("Updated Tech lead hires from 0 hires to 1 hire."), so its
- * 0 grounded the served 0-level defect after any such edit; board-edit notes are skipped. The labels an approval
- * chip quotes are removed (`withoutEchoedLabels`).
+ * ⛔ PROVENANCE, NEVER TEXT SHAPE (#1978 reviews 5844589340 B1, 5844805634 B2/B3). The Agent's history carries text
+ * that is not the user's in `role: 'user'` items: Olumi's narration of a board edit, a chip's replay of the Agent's
+ * own labels, and — after a restart, when history is reseeded from the durable conversation — rows Olumi itself
+ * dispatched ("Add the option \u201cTest \u00a354 at release\u201d.", a run's reason). Stripping by punctuation lost
+ * the user's own "Yes, but it's closer to 4%". So the words are recorded as they are typed, by the route, and nothing
+ * else is ever read as the user's. After a restart the earlier words are gone: a figure is then left unset and asked
+ * for — under-claiming, never over.
  */
-export function userWordsOf(history: readonly unknown[] | undefined, message: string): string {
-  const said: string[] = [];
-  for (const item of history ?? []) {
-    const it = item as { role?: unknown; content?: unknown } | null;
-    if (it?.role !== 'user' || isBoardEditNote(it)) continue;
-    if (typeof it.content === 'string') { said.push(withoutEchoedLabels(it.content)); continue; }
-    if (!Array.isArray(it.content)) continue;
-    for (const part of it.content as { type?: unknown; text?: unknown }[]) {
-      if (part?.type === 'input_text' && typeof part.text === 'string') said.push(withoutEchoedLabels(part.text));
-    }
-  }
-  said.push(withoutEchoedLabels(message));
-  return said.join('\n');
+export function userWordsOf(typedEarlier: readonly string[], typedNow: string | null): string {
+  return [...typedEarlier, ...(typedNow !== null ? [typedNow] : [])].join('\n');
 }
