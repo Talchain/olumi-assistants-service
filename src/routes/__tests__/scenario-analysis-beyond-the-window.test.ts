@@ -185,7 +185,13 @@ describe('a DEGRADED durable read cannot prove a run never happened (the hot win
 
     const result = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: GRAPH, requestId: 'complete-empty' });
 
-    expect(result.analysis_state?.run_state.kind).toBe('never_run');
+    // (B): the read route carries the model's admission verdict, and GRAPH is not
+    // admissible — so an AUTHORITATIVE absence on a blocked model reads `blocked`
+    // (which requires `freshness === 'none'`). The DEGRADED ABSENCE case above
+    // reads `unknown_degraded` on the same graph: absence is still decided only
+    // by a complete durable record.
+    expect(result.analysis_state?.run_state.kind).toBe('blocked');
+    expect(result.analysis_state?.readiness.status).toBe('blocked');
     expect(result.analysis_result).toBeNull();
   });
 });
