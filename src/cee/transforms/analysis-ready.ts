@@ -538,6 +538,10 @@ function renderFactorCurrentLevel(
  * level exactly 0 or 1), over the factor's graph fields and every level the options set on it: a structured test, no
  * unit wording read. Its words are `switchStateWords`, the vocabulary `statementWords` already says "switching on" in.
  * A switch's level is exact, so its words rank ahead of every string rung; any other factor renders exactly as before.
+ *
+ * ⛔ BOTH STATES MUST BE IN USE. `isSwitch` alone admits a quantity whose every level is 0 (frame 1 by default): a £ cost
+ * observed at £0 with an option at level 0 (`intervention-native-quantity.test.ts`) is not "off". So a factor is said as a
+ * switch only when its held and option levels include both 0 and 1.
  */
 function switchFactorIds(factorNodeMap: ReadonlyMap<string, NodeV3T>, options: readonly OptionV3T[]): Set<string> {
   const levels = new Map<string, number[]>();
@@ -556,7 +560,9 @@ function switchFactorIds(factorNodeMap: ReadonlyMap<string, NodeV3T>, options: r
       observed_state: node.observed_state as MagnitudeNode["observed_state"],
       option_levels: levels.get(id) ?? [],
     };
-    if (isSwitch(mn, resolveMagnitudeFrame(mn))) out.add(id);
+    const held = typeof node.observed_state?.value === "number" ? [node.observed_state.value] : [];
+    const used = [...held, ...mn.option_levels];
+    if (isSwitch(mn, resolveMagnitudeFrame(mn)) && used.includes(0) && used.includes(1)) out.add(id);
   }
   return out;
 }
@@ -675,8 +681,10 @@ function buildInterventionDetail(
     ...(unit !== undefined && { unit }),
   };
 
-  // A switch's state is said in words, ahead of every string route (see `switchFactorIds`).
-  const switchWords = isSwitchFactor ? switchStateWords(normalisedValue) : undefined;
+  // A switch's state is said in words, ahead of every string route (see `switchFactorIds`). A native amount the option
+  // stated that is not the level itself is a quantity, not a state: it keeps its own presentation.
+  const statesAQuantity = carriedNativeValue !== null && carriedNativeValue !== normalisedValue;
+  const switchWords = isSwitchFactor && !statesAQuantity ? switchStateWords(normalisedValue) : undefined;
   if (switchWords !== undefined) return { display_value: switchWords, ...ownFields };
 
   // A carried native amount owns its numeric presentation. A display string

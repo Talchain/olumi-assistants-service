@@ -23,6 +23,7 @@ interface ServedOption {
   option_id: string;
   label: string;
   interventions: Record<string, number>;
+  raw_interventions?: Record<string, number>;
   served_intervention_details: Record<string, { display_value: string }> | null;
 }
 interface Served {
@@ -41,6 +42,7 @@ function v3Options(options: ServedOption[]): OptionV3T[] {
     id: o.option_id,
     label: o.label,
     status: "ready",
+    ...(o.raw_interventions ? { raw_interventions: o.raw_interventions } : {}),
     interventions: Object.fromEntries(Object.entries(o.interventions).map(([fid, value]) => [fid, {
       value,
       source: "brief_extraction",
@@ -114,5 +116,20 @@ describe("UF-3 — a switch's state is said as on / off", () => {
     const at06 = options.find((o) => o.label === "£49 with AI Release")!.option_id;
     expect(detail(payload, at1, "next_ai_feature_released")).toBe("1");
     expect(detail(payload, at06, "next_ai_feature_released")).toBe("0.6");
+  });
+
+  it("contrast: both states must be in use; a factor whose every level is 0 is no switch", () => {
+    const options = B.options.map((o) => "next_ai_feature_released" in o.interventions
+      ? { ...o, interventions: { ...o.interventions, next_ai_feature_released: 0 } } : o);
+    const id = options.find((o) => o.label === "£59 with AI Release")!.option_id;
+    expect(detail(build(B, options), id, "next_ai_feature_released")).not.toMatch(/^(on|off)$/);
+  });
+
+  it("a native amount the option stated is a quantity, not a state; a carrier equal to the level is still 'on'", () => {
+    const withCarrier = (raw: number) => B.options.map((o) => o.label === "£59 with AI Release"
+      ? { ...o, raw_interventions: { next_ai_feature_released: raw } } : o);
+    const id = B.options.find((o) => o.label === "£59 with AI Release")!.option_id;
+    expect(detail(build(B, withCarrier(5000)), id, "next_ai_feature_released")).not.toBe("on");
+    expect(detail(build(B, withCarrier(1)), id, "next_ai_feature_released")).toBe("on");
   });
 });
