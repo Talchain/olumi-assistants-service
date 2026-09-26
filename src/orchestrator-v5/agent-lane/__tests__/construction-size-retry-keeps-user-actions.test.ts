@@ -28,10 +28,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import { Ajv } from 'ajv';
-import { BUILD_INSTRUCTIONS, buildCandidateSchema, buildModelFromBrief, prepareProvisionalCandidate, retrySchemaPinningGoal } from '../runtime/build-model.js';
-import type { CandidateModel } from '../admit-model.js';
+import { BUILD_INSTRUCTIONS, buildCandidateSchema, buildModelFromBrief, prepareProvisionalCandidate, retainsRiskHypotheses, retrySchemaPinningGoal } from '../runtime/build-model.js';
+import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
-import { COMPACT_LIMITS } from '../construction-size-gate.js';
+import { COMPACT_LIMITS, assessConstructionSize, retryInstruction } from '../construction-size-gate.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
@@ -101,6 +101,13 @@ function oversized(d: Draft): Draft {
 }
 
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
+
+/** The first draft's size verdict, as the builder measures it (prepared, then admitted) — for byte pins of the retry prompt. */
+const firstVerdict = (d: Draft) => assessConstructionSize(admitCandidateModel(prepareProvisionalCandidate(d as unknown as CandidateModel).candidate, {}));
+
+/** B1 (5842265540): the COMBINED size+repair retry's repair rule — which options may go, and never "Preserve every option". */
+const COMPACTION_REPAIR_RULE = 'Repair only the listed construction issues. Keep every option the brief states, and every other option in your previous model unless you ADDED it beyond the brief: an option you added is the only kind that may go. '
+  + 'Every option you keep still acts on each factor it acted on that you keep. Preserve every risk hypothesis, its causal direction and path to the goal; do not delete an option the brief states, or a risk hypothesis, to clear validation.';
 
 type Graph = { nodes: Array<Record<string, unknown> & { id: string; kind: string }>; edges: Array<{ from: string; to: string }> };
 type Req = { instructions: string; input: string };
@@ -298,6 +305,7 @@ describe('(2) an OVERSIZED draft with a repair issue gets the repair instruction
   const REPAIR_RULE = /Repair only the listed construction issues\. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation\./;
   const BUDGET = `The limit is ${COMPACT_LIMITS.maxNodes} nodes and ${COMPACT_LIMITS.maxEdges} links.`;
   const ONLY_REPAIRS = 'The only other change allowed is the repair each listed construction issue asks for, made in place on the item it names.';
+  const COPY_RULE_TEXT = 'Return your previous model with only the items you ADDED beyond the brief removed. Copy every item you keep EXACTLY as it is in your previous model: the same label, wording, provenance and relationships. Do not rename, merge, reword or re-add anything.';
 
   const withMechanismIssue = (): Draft => {
     const d = oversized(covered());
@@ -318,7 +326,7 @@ describe('(2) an OVERSIZED draft with a repair issue gets the repair instruction
     ['a level gap', () => oversized(c22()), 'Hire Two Developers -> Engineering delivery capacity: give the level'],
     ['a baseline gap', withBaselineGap, 'Engineering delivery capacity: give a baseline_value'],
     ['a missing risk mechanism', withMechanismIssue, 'Hire Two Developers -> Delivery slip: retain this risk hypothesis'],
-  ])('RED: with %s, the ONE retry carries the budget, the copy-exactly rule, the repair rule and the issue, on the first draft', async (_arm, draft, issue) => {
+  ])('RED: with %s, the ONE retry carries the budget, the copy-exactly rule, the compaction\'s repair rule and the issue, on the first draft', async (_arm, draft, issue) => {
     const first = draft();
     const { reqs, result } = await construct(first, first);
     expect(result.refusal ?? result.size_retried, 'PRECONDITION: the draft was oversized').toBeTruthy();
@@ -329,7 +337,13 @@ describe('(2) an OVERSIZED draft with a repair issue gets the repair instruction
     // The copy rule, then the one exception it allows, then the repair instructions — in that order.
     expect(retry.instructions).toContain(ONLY_REPAIRS);
     expect(retry.instructions.indexOf(ONLY_REPAIRS)).toBeGreaterThan(retry.instructions.search(COPY_RULE));
-    expect(retry.instructions).toMatch(REPAIR_RULE);
+    // ⛔ B1 (5842265540): beside "Remove what you ADDED … speculative options" the retry was also told "Preserve every
+    // option" — and adoption refused the very shed the size instruction asked for. The compaction's repair rule says
+    // which options may go (only ones Olumi added), and never "Preserve every option".
+    expect(retry.instructions).not.toMatch(REPAIR_RULE);
+    expect(retry.instructions).not.toContain('Preserve every option');
+    // Byte for byte: the base rules, the budget, the copy rule, its one exception, then the compaction's repair rule.
+    expect(retry.instructions).toBe(`${BUILD_INSTRUCTIONS} ${retryInstruction(firstVerdict(first))} ${COPY_RULE_TEXT} ${ONLY_REPAIRS} ${COMPACTION_REPAIR_RULE}`);
     expect(retry.input.startsWith(BRIEF)).toBe(true);
     expect(retry.input).toContain(issue);
     expect(retry.input, 'the first draft itself, so kept items can be copied').toContain(JSON.stringify(first));
@@ -353,6 +367,130 @@ describe('(2) an OVERSIZED draft with a repair issue gets the repair instruction
     expect(reqs).toHaveLength(2);
     expect(reqs[1]!.instructions).toMatch(COPY_RULE);
     expect(reqs[1]!.instructions).not.toMatch(REPAIR_RULE);
+    expect(reqs[1]!.instructions).not.toContain(COMPACTION_REPAIR_RULE);
     expect(reqs[1]!.input).toContain('Your previous model, to shrink: ');
+    // Byte for byte what it was before B1's fix: the size-only prompt is not touched.
+    expect(reqs[1]!.instructions).toBe(`${BUILD_INSTRUCTIONS} ${retryInstruction(firstVerdict(oversized(covered())))} ${COPY_RULE_TEXT}`);
+  });
+});
+
+/**
+ * ⛔ B1 (verdict 5842265540): THE COMBINED SIZE+REPAIR RETRY MAY SHED AN OPTION OLUMI ADDED.
+ *
+ * An oversized first draft with coverage gaps (the served c22 shape) takes the COMBINED branch, where
+ * `retainsRiskHypotheses` was required and ended "every first-draft option is still there" — so a retry that did
+ * exactly what the size instruction asked (shed the model-added "Hire Both", provenance ai_proposed) and levelled
+ * every kept lever was REFUSED `model_too_large` and nothing registered. Base staging ef99a97 adopted the same pair.
+ * On a size retry, option retention belongs to `keepsEveryUserStatedIdentity` (the user's options) and
+ * `compactionKeepsWhatOptionsDo` (what every kept option does); a within-size repair retry is unchanged.
+ */
+describe('(3) B1: the combined size+repair retry may shed an option Olumi added — and nothing else', () => {
+  const optionIds = (g: Graph) => g.nodes.filter((n) => n.kind === 'option').map((n) => n.id).sort();
+  const levels = (g: Graph, id: string) => Object.keys((g.nodes.find((n) => n.id === id) as { interventions?: object }).interventions ?? {}).sort();
+  const without = (d: Draft, label: string): Draft => ({ ...d, options: d.options.filter((o) => o.label !== label) });
+
+  /** An Olumi risk reached through "Onboarding load" by each named option (a mechanism through a factor, not a direct link). */
+  function withRisk(d: Draft, via: string[]): Draft {
+    d.risks.push({ label: 'Delivery slip', provenance: 'ai_proposed' });
+    d.links.push(
+      { from: 'Onboarding load', to: 'Delivery slip', direction: 'positive', provenance: 'ai_proposed' },
+      { from: 'Delivery slip', to: GOAL, direction: 'negative', provenance: 'ai_proposed' },
+    );
+    d.options = d.options.map((o) => (via.includes(o.label) ? { ...o, changes: [...o.changes, 'Onboarding load'] } : o));
+    return d;
+  }
+
+  it('PRECONDITIONS: the first draft is the served combined shape — oversized, 7 level gaps and 2 baseline gaps, no mechanism issue — and "Hire Both" is Olumi\'s', async () => {
+    const first = oversized(c22());
+    expect(first.options.find((o) => o.label === 'Hire Both')?.provenance).toBe('ai_proposed');
+    const prep = prepareProvisionalCandidate(first as unknown as CandidateModel);
+    expect(prep.mechanism_issues).toEqual([]);
+    expect(prep.level_gaps).toHaveLength(7);
+    expect(prep.level_gaps).toContainEqual({ option: 'Hire Both', factor: 'Engineering delivery capacity' });
+    expect(prep.baseline_gaps.map((g) => g.factor).sort()).toEqual(['Engineering delivery capacity', 'Technical leadership capacity']);
+    expect(firstVerdict(first).nodes).toBeGreaterThan(COMPACT_LIMITS.maxNodes);
+  });
+
+  it('RED (B1, the reviewer\'s executed reproduction): a retry that sheds the model-added "Hire Both" and levels every kept lever IS adopted', async () => {
+    const { result, graph, reqs, registered } = await construct(oversized(c22()), without(covered(), 'Hire Both'));
+    expect(reqs).toHaveLength(2);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result.size_retried).toBe(true);
+    expect(result.within_compact_limits).toBe(true);
+    expect(registered).toHaveLength(1);
+    // The registered model is the RETRY: Olumi's option is gone, the user's two and the held status quo remain, by id.
+    expect(optionIds(graph!)).toEqual(['continue_current_staffing', 'hire_a_tech_lead', 'hire_two_developers']);
+    expect(graph!.nodes.some((n) => n.id === 'hire_both')).toBe(false);
+    // Every kept user option is levelled on EVERY lever it acts on — by id, both ways.
+    expect(actsOn(graph!, 'hire_two_developers')).toEqual(['engineering_delivery_capacity', 'hiring_cost']);
+    expect(levels(graph!, 'hire_two_developers')).toEqual(['engineering_delivery_capacity', 'hiring_cost']);
+    expect(actsOn(graph!, 'hire_a_tech_lead')).toEqual(['hiring_cost', 'technical_leadership_capacity']);
+    expect(levels(graph!, 'hire_a_tech_lead')).toEqual(['hiring_cost', 'technical_leadership_capacity']);
+    expect(missingValues(graph!)).toEqual([]);
+    expect(result.options_that_change_nothing).toEqual([]);
+    // Never silently: the shed option is said.
+    expect((result.left_out_to_stay_compact as { label: string }[]).map((x) => x.label)).toContain('Hire Both');
+  });
+
+  it('RED (B1, same class, the risk position): "Hire Both" reached an Olumi risk through a factor — shedding it whole is still adopted, and the risk stays on its path', async () => {
+    const first = withRisk(oversized(c22()), ['Hire Both']);
+    expect(prepareProvisionalCandidate(first as unknown as CandidateModel).mechanism_issues, 'PRECONDITION: a mechanism, not a repair issue').toEqual([]);
+    const retry = without(withRisk(covered(), []), 'Hire Both');
+    const { result, graph } = await construct(first, retry);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result.size_retried).toBe(true);
+    expect(optionIds(graph!)).toEqual(['continue_current_staffing', 'hire_a_tech_lead', 'hire_two_developers']);
+    expect(graph!.nodes.some((n) => n.id === 'delivery_slip' && n.kind === 'risk')).toBe(true);
+    expect(missingValues(graph!)).toEqual([]);
+  });
+
+  // ── Controls: what a combined retry still may NOT do ─────────────────────────────────────────────────
+
+  it.each<[string]>([['Hire Two Developers'], ['Hire a Tech Lead']])(
+    'CONTROL (combined branch, keepsEveryUserStatedIdentity): a retry that drops the USER-stated option "%s" is NOT adopted',
+    async (label) => {
+      expect(c22().options.find((o) => o.label === label)?.provenance).toBe('explicit');
+      expectRefusedNotAdopted(await construct(oversized(c22()), without(covered(), label)));
+    },
+  );
+
+  it('CONTROL (combined branch, compactionKeepsWhatOptionsDo): a retry that sheds "Hire Both" but deletes the kept user option\'s actions is NOT adopted', async () => {
+    const retry = without(covered(), 'Hire Both');
+    retry.options[0] = { ...retry.options[0]!, changes: [], interventions: [] };
+    expect(retry.options[0]!.label).toBe('Hire Two Developers');
+    expectRefusedNotAdopted(await construct(oversized(c22()), retry));
+  });
+
+  it('CONTROL (combined branch, per-risk path check kept): a KEPT user option that loses its path to a risk is NOT adopted, though "Hire Both" is shed', async () => {
+    const first = withRisk(oversized(c22()), ['Hire Two Developers', 'Hire Both']);
+    const retry = without(withRisk(covered(), []), 'Hire Both');
+    // The user option still acts on "Onboarding load" (so the compaction guard is satisfied), but the factor no longer
+    // reaches the risk: the risk is re-fed from "Team morale", which no option acts on, so the option has no path to it.
+    retry.options[0] = { ...retry.options[0]!, interventions: [...retry.options[0]!.interventions, est('Onboarding load', 2, 'score')] };
+    retry.links = retry.links.filter((l) => !(l.from === 'Onboarding load' && l.to === 'Delivery slip'));
+    retry.links.push({ from: 'Team morale', to: 'Delivery slip', direction: 'positive', provenance: 'ai_proposed' });
+    expect(retry.options.some((o) => [...o.changes, ...o.interventions.map((i) => i.factor_label)].includes('Team morale')), 'PRECONDITION: no option acts on the new feeder').toBe(false);
+    expectRefusedNotAdopted(await construct(first, retry));
+  });
+
+  it('CONTROL (within-size repair retry, unchanged): shedding "Hire Both" is NOT adopted — the first draft is registered, "Hire Both" and all', async () => {
+    const { result, graph, reqs, registered } = await construct(c22(), without(covered(), 'Hire Both'));
+    expect(reqs).toHaveLength(2);
+    expect(result.size_retried).toBe(false);
+    expect(registered).toHaveLength(1);
+    expect(optionIds(graph!)).toEqual(['continue_current_staffing', 'hire_a_tech_lead', 'hire_both', 'hire_two_developers']);
+  });
+
+  it('CONTROL (within-size, the guard itself): retainsRiskHypotheses still requires every option and every option\'s risk path outside a compaction', () => {
+    const prep = (d: Draft) => prepareProvisionalCandidate(d as unknown as CandidateModel).candidate;
+    // Every option: a within-size repair may not shed even an option Olumi added.
+    expect(retainsRiskHypotheses(prep(c22()), prep(without(covered(), 'Hire Both')), false)).toBe(false);
+    expect(retainsRiskHypotheses(prep(c22()), prep(covered()), false)).toBe(true);
+    // Every option's risk path: shedding the option that carried it is refused outside a compaction …
+    const first = prep(withRisk(c22(), ['Hire Both']));
+    expect(retainsRiskHypotheses(first, prep(without(withRisk(covered(), []), 'Hire Both')), false)).toBe(false);
+    // … and exempt only on a compaction, where option retention is owned by the identity and compaction guards.
+    expect(retainsRiskHypotheses(first, prep(without(withRisk(covered(), []), 'Hire Both')), true)).toBe(true);
+    expect(retainsRiskHypotheses(prep(c22()), prep(without(covered(), 'Hire Both')), true)).toBe(true);
   });
 });

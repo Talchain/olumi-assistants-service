@@ -717,8 +717,23 @@ function keepsEveryUserNumber(firstRaw: CandidateModel, firstPrepared: Candidate
   return baselinesKept && levelsKept;
 }
 
-/** A repair may replace an invalid direct edge, but must preserve its signed path. */
-function retainsRiskHypotheses(before: CandidateModel, after: CandidateModel): boolean {
+/**
+ * A repair may replace an invalid direct edge, but must preserve its signed path.
+ *
+ * ⛔ ON A COMPACTION IT DOES NOT OWN OPTION RETENTION (B1, verdict 5842265540). It ended "every first-draft option is
+ * still there", and since #1891 made every coverage gap a repair issue it is required on the COMBINED size+repair
+ * retry too — the served c22 shape. So a retry that did what the size instruction asks (shed the model-added
+ * "Hire Both") and levelled every kept lever was refused `model_too_large` and nothing registered, where base staging
+ * ef99a97 adopted it. On a compaction (`compaction`: the first draft was oversized) an option shed WHOLE is judged by
+ * `keepsEveryUserStatedIdentity` (a user's option may not go) and `compactionKeepsWhatOptionsDo` (what every kept
+ * option does), so here it is exempt twice over: from the every-option clause, and from the per-risk path check —
+ * a shed option has no path, and requiring one would be requiring the option. Every risk's own checks, and every
+ * KEPT option's path to every risk, still hold. "Shed" is judged by admission's identity (`canonicalLabel`), so an
+ * option kept under another spelling is not exempt. A within-size repair (`compaction` false) is unchanged.
+ */
+export function retainsRiskHypotheses(before: CandidateModel, after: CandidateModel, compaction: boolean): boolean {
+  const shedWhole = (option: CandidateModel['options'][number]): boolean =>
+    compaction && !after.options.some((kept) => canonicalLabel(kept.label) === canonicalLabel(option.label));
   const paths = (model: CandidateModel, from: string, to: string): Set<number> => {
     const links = [
       ...model.links.filter((l) => l.direction !== 'unknown').map((l) => ({ from: l.from, to: l.to, sign: l.direction === 'negative' ? -1 : 1 })),
@@ -740,12 +755,13 @@ function retainsRiskHypotheses(before: CandidateModel, after: CandidateModel): b
     const downstream = paths(after, risk.label, after.goal.metric);
     if (downstream.size === 0 || [...paths(before, risk.label, before.goal.metric)].some((s) => !downstream.has(s))) return false;
     for (const option of before.options) {
+      if (shedWhole(option)) continue;
       const prior = paths(before, option.label, risk.label);
       const repaired = paths(after, option.label, risk.label);
       if ([...prior].some((s) => !repaired.has(s))) return false;
     }
   }
-  return before.options.every((o) => after.options.some((kept) => kept.label === o.label));
+  return compaction || before.options.every((o) => after.options.some((kept) => kept.label === o.label));
 }
 
 /** The size retry's edit rule (measured: `construction-size-retry-edits-first-draft.test.ts`). */
@@ -760,6 +776,17 @@ const SIZE_RETRY_EDITS_FIRST_DRAFT =
  */
 const REPAIRS_ARE_THE_ONLY_EDITS =
   'The only other change allowed is the repair each listed construction issue asks for, made in place on the item it names.';
+/**
+ * ⛔ THE COMPACTION'S REPAIR RULE NEVER SAYS "PRESERVE EVERY OPTION" (B1, verdict 5842265540). Beside
+ * `retryInstruction` ("Remove what you ADDED … speculative options") and `SIZE_RETRY_EDITS_FIRST_DRAFT`, the combined
+ * size+repair retry was also told "Preserve every option" — two orders that cannot both be obeyed. It now says which
+ * options may go (only ones Olumi added), matching what adoption enforces: `keepsEveryUserStatedIdentity` (every option
+ * the brief states), `compactionKeepsWhatOptionsDo` (what every kept option does), and `retainsRiskHypotheses` (every
+ * risk hypothesis, and every kept option's path to it). A within-size repair retry keeps its own rule, byte for byte.
+ */
+const COMPACTION_REPAIR_RULE =
+  'Repair only the listed construction issues. Keep every option the brief states, and every other option in your previous model unless you ADDED it beyond the brief: an option you added is the only kind that may go. '
+  + 'Every option you keep still acts on each factor it acted on that you keep. Preserve every risk hypothesis, its causal direction and path to the goal; do not delete an option the brief states, or a risk hypothesis, to clear validation.';
 
 export async function buildModelFromBrief(
   scenarioId: string,
@@ -849,7 +876,9 @@ export async function buildModelFromBrief(
         // that rule too, beside the repair instructions (#1891 delta); a within-size repair retry is unchanged.
         instructions: repairIssues(preparation).length === 0 && needsSizeRetry
           ? `${BUILD_INSTRUCTIONS} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT}`
-          : `${BUILD_INSTRUCTIONS} ${needsSizeRetry ? `${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT} ${REPAIRS_ARE_THE_ONLY_EDITS}` : ''} Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
+          : needsSizeRetry
+            ? `${BUILD_INSTRUCTIONS} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT} ${REPAIRS_ARE_THE_ONLY_EDITS} ${COMPACTION_REPAIR_RULE}`
+            : `${BUILD_INSTRUCTIONS}  Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
         input: repairIssues(preparation).length > 0
           ? `${brief}\n\nConstruction issues: ${JSON.stringify(repairIssues(preparation))}\nCandidate to repair${needsSizeRetry ? ' (your previous model, to shrink)' : ''}: ${JSON.stringify(firstCandidate)}`
           : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(firstCandidate)}`,
@@ -883,7 +912,7 @@ export async function buildModelFromBrief(
           // for the retry it must cover strictly MORE (c22).
           gapCount(retryPreparation) <= gapCount(preparation) &&
           (needsSizeRetry || preparation.mechanism_issues.length > 0 || gapCount(retryPreparation) < gapCount(preparation)) &&
-          (repairIssues(preparation).length === 0 || retainsRiskHypotheses(candidate, retryCandidate)) &&
+          (repairIssues(preparation).length === 0 || retainsRiskHypotheses(candidate, retryCandidate, needsSizeRetry)) &&
           // A compaction may shed what the model added, never what a kept option does; a repair may not shed an action.
           (needsSizeRetry ? compactionKeepsWhatOptionsDo(candidate, retryCandidate) : keepsEveryAction(candidate, retryCandidate))
         ) {
