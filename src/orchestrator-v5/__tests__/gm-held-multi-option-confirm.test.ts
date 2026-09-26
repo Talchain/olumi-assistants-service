@@ -126,7 +126,7 @@ afterEach(() => {
 describe('(A) a multi-option hold confirmed through the real executor', () => {
   it('"yes" lands every option, its decision link and its values in ONE commit, with zero model calls', async () => {
     const pending = heldPending();
-    expect((pending.action as { inline_patch: { operations: unknown[] } }).inline_patch.operations).toHaveLength(12);
+    expect((pending.action as unknown as { inline_patch: { operations: unknown[] } }).inline_patch.operations).toHaveLength(12);
     pendingActionsForRead = [pending];
     const adapter = throwingRoutingAdapter();
 
