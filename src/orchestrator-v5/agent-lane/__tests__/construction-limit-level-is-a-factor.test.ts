@@ -128,7 +128,14 @@ async function register(wire: Record<string, unknown>): Promise<{ graph: Graph; 
   };
   const out = await buildModelFromBrief('88888888-8888-4888-8888-888888888888', BRIEF, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out)).toBe(true);
-  return { graph: GraphV3.parse(body) as unknown as Graph, out };
+  const graph = GraphV3.parse(body) as unknown as Graph;
+  // The served fixtures predate goal direction (NodeV3 `goal_direction`, CEE-minted from the user's stated
+  // operator). Bind it here — Paul's "reaching £20k" is `>=`, so the goal is attested `maximise` — and compare
+  // every row below on the served-era shape, so each row keeps its byte-for-byte meaning.
+  const goal = graph.nodes.find((n) => n.kind === 'goal') as (Node & { goal_direction?: unknown }) | undefined;
+  expect(goal?.goal_direction, 'the stated >= goal carries its attested direction').toBe('maximise');
+  if (goal) delete goal.goal_direction;
+  return { graph, out };
 }
 
 const byId = (g: Graph, id: string): Node | undefined => g.nodes.find((n) => n.id === id);
