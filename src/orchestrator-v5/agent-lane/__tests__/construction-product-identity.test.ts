@@ -333,10 +333,18 @@ describe('rule 3 (control): nothing is inferred from a label', () => {
     expect(identityLoss(admitCandidateModel(pricing([]) as unknown as CandidateModel))).toEqual([]);
   });
 
-  it('the declaration adds nothing to the registered graph (the typed mark is not graph content)', async () => {
+  it('the declaration adds ONLY its carrier on the product\'s node (C46 (a)) — the verdict is not graph content', async () => {
     const withIt = await build(pricing([PRO_MRR_IDENTITY]));
     const without = await build(pricing([]));
-    expect(JSON.stringify(withIt.raw)).toBe(JSON.stringify(without.raw));
+    const nodes = (withIt.raw as { nodes: Record<string, unknown>[] }).nodes;
+    // By identity: the one carrier sits on the declared product's node, and says which nodes multiply.
+    expect(nodes.filter((n) => 'nonlinear_identity' in n).map((n) => n.id)).toEqual(['pro_mrr']);
+    expect(nodes.find((n) => n.id === 'pro_mrr')!.nonlinear_identity)
+      .toEqual({ operation: 'product', factor_ids: ['pro_plan_price', 'pro_subscribers'], stated_in_brief: false });
+    // And nothing else moved: without that one key the graph is byte-identical to the undeclared build.
+    const stripped = structuredClone(withIt.raw) as { nodes: Record<string, unknown>[] };
+    for (const n of stripped.nodes) delete n.nonlinear_identity;
+    expect(JSON.stringify(stripped)).toBe(JSON.stringify(without.raw));
   });
 });
 
@@ -582,8 +590,11 @@ describe('rule 5 (B1): two options that move the inputs differently cannot be ra
  * label for label, and its admitted edges are bound to the captured edge set below (the AI <-> release-delay
  * cycle included, as served). The identity is the one the ruling names: Pro MRR = price x Pro subscribers.
  */
+// ⚠ Since staging #1956 (6dd42ebf, "a first model is never a loop"), admission withholds Olumi's closing link of
+// the served AI <-> release-delay cycle (`ai_feature_availability>ai_release_delay:-`) and says so; the rest of
+// the captured structure is unchanged, and so is every C46 rule this fixture pins.
 const CAPTURED_EDGES = [
-  'ai_feature_availability>ai_release_delay:-', 'ai_feature_availability>new_pro_conversions', 'ai_feature_availability>pro_mrr',
+  'ai_feature_availability>new_pro_conversions', 'ai_feature_availability>pro_mrr',
   'ai_release_delay>ai_feature_availability:-', 'decision_mrr>keep_49_price', 'decision_mrr>phased_54_price', 'decision_mrr>raise_to_59',
   'keep_49_price>ai_feature_availability:repair', 'keep_49_price>pro_plan_price:repair', 'monthly_churn>pro_subscribers:-',
   'new_pro_conversions>pro_subscribers', 'non_pro_mrr>mrr', 'phased_54_price>ai_feature_availability', 'phased_54_price>pro_plan_price',
@@ -833,13 +844,25 @@ describe('N-c: whose reading it is, and whether it is the whole of the total', (
   });
 });
 
-describe('HANDOFF pin: the mark does not reach the persisted graph, so the leader claim cannot read it yet', () => {
-  it('GraphV3 has no declared carrier for the identity: an undeclared key on the outcome node is stripped', async () => {
+/**
+ * Was the HANDOFF pin ("GraphV3 has no declared carrier, so the mark cannot reach the leader claim"). C46 (a)
+ * closes it: NodeV3 now DECLARES `nonlinear_identity`, so the checked declaration survives the strict parse
+ * on the run path, and a malformed one is dropped rather than refusing the stored graph. The end-to-end leg
+ * (register → parse → loader → `run_analysis`) is `c46-leader-withheld-on-a-product.test.ts`.
+ */
+describe('CARRIER pin (C46 (a)): the declaration reaches the persisted graph, the leader claim reads it', () => {
+  it('GraphV3 keeps the carrier admission wrote on the product\'s node', async () => {
+    const { raw } = await build(pricing([PRO_MRR_IDENTITY]));
+    const reparsed = GraphV3.parse(structuredClone(raw)) as unknown as { nodes: Record<string, unknown>[] };
+    expect(reparsed.nodes.find((n) => n.id === 'pro_mrr')!.nonlinear_identity)
+      .toEqual({ operation: 'product', factor_ids: ['pro_plan_price', 'pro_subscribers'], stated_in_brief: false });
+  });
+
+  it('a malformed carrier (no `stated_in_brief`) is dropped, never a reason to refuse the stored graph', async () => {
     const { raw } = await build(pricing([PRO_MRR_IDENTITY]));
     const graph = structuredClone(raw) as { nodes: Record<string, unknown>[] };
-    const outcome = graph.nodes.find((n) => n.id === 'pro_mrr')!;
-    outcome.nonlinear_identity = { operation: 'product', factor_ids: ['pro_plan_price', 'pro_subscribers'] };
+    graph.nodes.find((n) => n.id === 'pro_mrr')!.nonlinear_identity = { operation: 'product', factor_ids: ['pro_plan_price', 'pro_subscribers'] };
     const reparsed = GraphV3.parse(graph) as unknown as { nodes: Record<string, unknown>[] };
-    expect(reparsed.nodes.find((n) => n.id === 'pro_mrr')).not.toHaveProperty('nonlinear_identity');
+    expect(reparsed.nodes.find((n) => n.id === 'pro_mrr')!.nonlinear_identity).toBeUndefined();
   });
 });
