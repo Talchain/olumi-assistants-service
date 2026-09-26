@@ -118,7 +118,8 @@ import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approv
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
 import { contradictsItsName, figureTheUserWrote } from '../stated-by-user.js';
-import { defaultFrameFor } from '../admit-model.js';
+import { defaultFrameFor, nonlinearIdentityForAgent } from '../admit-model.js';
+import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel } from './build-model.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
@@ -126,6 +127,35 @@ import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
+
+/**
+ * ⛔ C46 (d) — THE AGENT IS TOLD WHEN THE LEADER RESTS ON A PRODUCT THE ANALYSIS ONLY ADDS UP.
+ *
+ * `claim_permissions` is the Agent's only view of the leader permission. A C46 reason the wire carries
+ * (`nonlinear_identity_sign_unproven`) must not reach it as an unknown code, and — AI Quality option (i),
+ * #70 5842615260 — while a limit or the unrequested first pass holds the `withheld_reason` field, the
+ * product cause is still TRUE and still said: it rides beside that reason as `nonlinear_identity`, with
+ * its plain-English sentence (goal and factors named; no direction, no figure, no option).
+ *
+ * REMOVE-ONLY: it can set `leader_may_be_named` false, never true, and it leaves `withheld_reason` as the
+ * wire published it, so the limit card's cause and this one both stand. Schema-free: `claim_permissions`
+ * is the Agent's internal view, never a wire member.
+ */
+function withNonlinearIdentity(permissions: unknown, graph: unknown): unknown {
+  const p = (permissions ?? {}) as { withheld_reason?: unknown };
+  const finding = nonlinearIdentityForAgent(graph, p.withheld_reason === WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN);
+  if (finding === null) return permissions;
+  return {
+    ...(permissions as Record<string, unknown>),
+    leader_may_be_named: false,
+    nonlinear_identity: {
+      reason: WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
+      say: finding.sentence,
+      note: 'Say this sentence to the user as a reason no option is put forward on this model yet, beside any other '
+        + 'reason given here. Do not name a leading option, a direction or a win percentage for this goal.',
+    },
+  };
+}
 
 /**
  * ⭐ DID *THIS* `factor_value_edit` COMMIT A WRITE? Read from its OWN response only.
@@ -3393,6 +3423,11 @@ export function createAgentCapabilities(
           analysisResult: read.analysis_result,
           analysisAdmission: read.analysis_admission,
         });
+        // ⛔ C46 (d): the first pass withholds its leader as unrequested (policy), so the product cause is
+        // carried beside that reason, read from the model just built — only where an analysis exists.
+        if (firstAnalysis.ran === true || firstAnalysis.reason === 'already_ran_for_construction') {
+          firstAnalysis = { ...firstAnalysis, claim_permissions: withNonlinearIdentity(firstAnalysis.claim_permissions, after.raw) };
+        }
         if (outcome.ran) {
           firstAnalysisThisRequest = {
             revisionHash: after.graph_hash,
@@ -3770,6 +3805,13 @@ export function createAgentCapabilities(
       const blocks = (r.json.blocks as { type: string }[] | undefined) ?? [];
       const result = blocks.find((b) => b.type === 'analysis_result');
       onAnalysis?.({ scenario_id: ctx.scenario_id, status: r.status, analysis_state: r.json.analysis_state, analysis_ready: r.json.analysis_ready, blocks });
+      const permissions = claimPermissionsFrom(r.json.analysis_state, r.json.analysis_ready, { requested: true });
+      // ⛔ C46 (d): only a run that produced a result and withheld its leader is read against the model
+      // (one graph read); a named leader means the Run's own stamp found no product in the way.
+      let graphForProduct: unknown;
+      if (result !== undefined && permissions.leader_may_be_named !== true) {
+        try { graphForProduct = (await readGraph(ctx.scenario_id))?.raw; } catch { graphForProduct = undefined; }
+      }
       return {
         ok: r.status === 200,
         mutated: false,
@@ -3784,7 +3826,7 @@ export function createAgentCapabilities(
         // leader only when `leader_may_be_named` (see the route's reporting instruction). `requested`: every
         // run_analysis dispatch is one the user asked for (the Agent's own call, or the Run chip's fast path);
         // the automatic first analysis reads its permission in `describeFirstAnalysisForAgent`, not here.
-        claim_permissions: claimPermissionsFrom(r.json.analysis_state, r.json.analysis_ready, { requested: true }),
+        claim_permissions: graphForProduct === undefined ? permissions : withNonlinearIdentity(permissions, graphForProduct),
       };
     },
   };
