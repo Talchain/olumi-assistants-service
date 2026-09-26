@@ -642,6 +642,8 @@ describe('rule 7: a route around the product that opposes the route through it c
     expect(line?.startsWith('Olumi reads part of "MRR" as "Pro plan price" and "Pro subscribers" multiplied together, but')).toBe(true);
     expect(line).toContain(DISCOUNT_BOTH_WAYS);
     expect(line).not.toContain('should hold');
+    // Said once, in its own words — not again as merely "other than through".
+    expect(line).not.toContain('"Offer annual discount" changes "MRR" other than through');
   });
 
   it('RED (3)+(4): against carrying on as now ALONE, the discount\'s + and − routes leave its sign unproven', () => {
@@ -672,6 +674,27 @@ describe('rule 7: a route around the product that opposes the route through it c
     const [line] = markLine(wire);
     expect(line).toContain(RAISE_BOTH_WAYS);
     expect(line).not.toContain('should hold');
+  });
+
+  it('RED (4): the outcome\'s OWN direction onto the goal is carried — a product that LOWERS MRR, against a route that raises it', () => {
+    // Discount cost = discount rate × Pro subscribers, and it comes OFF MRR; the discount also adds subscribers,
+    // who reach MRR directly. Through the product the discount lowers MRR, around it raises MRR.
+    const wire = small({
+      options: [CARRY_ON, { label: 'Offer discount', changes: ['Discount rate'] }],
+      factors: [{ label: 'Discount rate', role: 'controllable', baseline: 5 }, { label: 'Pro subscribers', baseline: 300 }],
+      outcomes: ['Discount cost'],
+      links: [
+        ['Discount rate', 'Discount cost', 'positive'], ['Discount rate', 'Pro subscribers', 'positive'],
+        ['Pro subscribers', 'Discount cost', 'positive'], ['Pro subscribers', 'MRR', 'positive'], ['Discount cost', 'MRR', 'negative'],
+      ],
+      identities: [{ outcome: 'Discount cost', operation: 'product', factors: ['Discount rate', 'Pro subscribers'], provenance: 'inferred' }],
+    });
+    expect(marks(wire)).toEqual([{
+      outcome_id: 'discount_cost', operation: 'product', factor_ids: ['discount_rate', 'pro_subscribers'],
+      verdict: 'sign_not_provable', options_not_sign_stable: ['offer_discount'], comparisons_not_sign_stable: [],
+    }]);
+    expect(markLine(wire)[0]).toContain(
+      '"Offer discount" can push "MRR" one way through "Discount rate" and "Pro subscribers" multiplied together and the other way by another route');
   });
 
   it('CONTROL (4): the same two routes agreeing in direction keep the sign — provisional, as before', () => {
