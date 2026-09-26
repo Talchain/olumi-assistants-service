@@ -686,16 +686,24 @@ function composeRunState(input: AnalysisStateComposeInput): AnalysisRunState {
 
   // 2. The MODEL is unanalysable — a statement about the model, not a failure
   //    of the engine.
-  // (B) — `blocked` names the RUN only when there is KNOWN to be no run to
-  // describe (`freshness === 'none'`). With a selected prior fact the kind stays
-  // `complete_current` / `complete_stale` below, and the blocking admission
-  // rides in `readiness` (status + blockers). An UNREADABLE record (`unknown`)
-  // keeps `unknown_degraded`: masking it as `blocked` would hide that a run may
-  // exist behind the failed read.
+  // (B) — `blocked` names the RUN only when there is no run record to describe
+  // on this exit: KNOWN absent (`freshness === 'none'`), or NOT CONSULTED — a
+  // graph-less exit that threads readiness without a fact read
+  // (`current_graph_hash_unavailable`), where `blocked` is the pre-(B) answer
+  // and the one the UI's "the model needs a change" note reads. With a selected
+  // prior fact the kind stays `complete_current` / `complete_stale` below, and
+  // the blocking admission rides in `readiness` (status + blockers). A record
+  // that was READ AND FAILED (`derivation_failed`, `invariant_failed`, a legacy
+  // fact) keeps `unknown_degraded`: masking it as `blocked` would hide that a
+  // run may exist behind the failed read.
+  const runRecordAbsentOrUnconsulted =
+    canonical.freshness === 'none' ||
+    (canonical.freshness === 'unknown' &&
+      canonical.freshness_reason === 'current_graph_hash_unavailable');
   if (
     canonical.status === 'blocked' &&
     canonical.selected_fact_index === null &&
-    canonical.freshness === 'none'
+    runRecordAbsentOrUnconsulted
   ) {
     return {
       kind: 'blocked',
