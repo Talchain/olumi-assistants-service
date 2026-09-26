@@ -49,6 +49,12 @@ describe('the run result the Agent reads (served levelless-reason-PIN2 turn 3)',
     expect(withoutStrongestDriverClause('Raise to £59 leads because Paid AI add-on revenue is the strongest driver. It rests on four estimates.'))
       .toBe('Raise to £59 leads. It rests on four estimates.');
   });
+
+  it('N1 (Canonical, measured): a factor label with a dot in it is still dropped', () => {
+    expect(withoutStrongestDriverClause('Launch leads because Pro plan v2.0 adoption is the strongest driver. It rests on two estimates.'))
+      .toBe('Launch leads. It rests on two estimates.');
+    expect(withoutStrongestDriverClause('Raise leads because Price (£49.00) is the strongest driver.')).toBe('Raise leads.');
+  });
 });
 
 describe('the real runAnalysis hands the Agent the projection; the user-facing blocks are untouched', () => {
