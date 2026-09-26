@@ -2177,6 +2177,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           || stateFacts.current_state_unknown === true
           ? { state_facts: stateFacts }
           : {}),
+        // ⭐ AX1 (DL #70 5850280205: "a typed `break_even` state fact"): the arithmetic the paragraph above says, as
+        // data — every figure, whose it is, and the target line — so a surface or a rewording never re-derives it.
+        ...(breakEven !== null ? { break_even: breakEven } : {}),
       },
       /**
        * ⭐ EVERY GENERATIVE ATTEMPT THIS TURN MADE, off the provider policy's ledger

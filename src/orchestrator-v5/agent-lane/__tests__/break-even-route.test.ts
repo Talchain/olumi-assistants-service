@@ -51,7 +51,7 @@ describe('AX1: a Run whose leader is withheld for the product still answers with
 
   const pressRun = async () => (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.', source: 'chip_click', chip: { action_type: 'run_analysis' },
-  } })).json() as { assistant_text: string; _diagnostic_trace?: { fast_path?: string } };
+  } })).json() as { assistant_text: string; _diagnostic_trace?: { fast_path?: string }; _agent?: { break_even?: unknown } };
 
   it('RED (served F8): the Run\'s reply carries the break-even and the target arithmetic, after the gate', async () => {
     const b = await pressRun();
@@ -61,14 +61,31 @@ describe('AX1: a Run whose leader is withheld for the product still answers with
     expect(b.assistant_text).toContain('not the analysis ranking the options');
   });
 
+  it('RED (served F8): the same arithmetic is on the wire as a typed fact, `_agent.break_even` (SERVED FIELD)', async () => {
+    const b = await pressRun();
+    expect(b._agent?.break_even).toMatchObject({
+      goal: 'MRR', unit: 'GBP/month', baseline_price: 49, baseline_volume: 300, baseline_volume_by: 'approved', baseline_goal: 14_700,
+      options: [
+        { option: 'Raise Pro to £59', price: 59, price_by: 'user', keep_at_least: 250 },
+        { option: 'Hold £49 with AI release', price: 49, price_by: 'user' },
+        { option: 'Raise Pro to £54', price: 54, price_by: 'olumi', keep_at_least: 273 },
+      ],
+      target: { value: 20_000, needs: [{ price: 59, volume: 339 }, { price: 54, volume: 371 }, { price: 49, volume: 409 }] },
+    });
+  });
+
   it('CONTRAST: a readback that permits the leader adds nothing (the analysis answers)', async () => {
     permitted = true;
     const b = await pressRun();
     expect(b.assistant_text).not.toContain('The arithmetic still answers');
+    expect(b._agent, JSON.stringify(b)).toBeDefined();
+    expect(Object.hasOwn(b._agent!, 'break_even')).toBe(false);
   });
 
   it('CONTRAST: a turn that ran no analysis adds nothing, even though the readback still carries the withheld run', async () => {
-    const b = (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'What does churn mean here?' } })).json() as { assistant_text: string };
+    const b = (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'What does churn mean here?' } })).json() as { assistant_text: string; _agent?: Record<string, unknown> };
     expect(b.assistant_text).not.toContain('The arithmetic still answers');
+    expect(b._agent, JSON.stringify(b)).toBeDefined();
+    expect(Object.hasOwn(b._agent!, 'break_even')).toBe(false);
   });
 });
