@@ -91,3 +91,18 @@ describe('propose_starting_point says whether one approval will make the analysi
     expect(String(r.note)).not.toMatch(/could still not run/i);
   });
 });
+
+describe('(#1957 review, advisory 2) a quoted reason never repeats "can\'t be analysed"', () => {
+  it('the one helper strips only that opening; both the sentence and the pre-approval note use it', async () => {
+    const { withoutCantRunOpening } = await import('../readiness-view.js');
+    const fallback = "This model can't be analysed yet. The values involved are Olumi's own suggestions, not yours.";
+    expect(withoutCantRunOpening(fallback)).toBe("The values involved are Olumi's own suggestions, not yours.");
+    expect(withoutCantRunOpening('Name at least two different options you are weighing, then run analysis.'))
+      .toBe('Name at least two different options you are weighing, then run analysis.');
+    const caps = readFileSync(new URL('../runtime/agent-capabilities.ts', import.meta.url), 'utf8');
+    const note = caps.slice(caps.indexOf('const stillBlockedNote'), caps.indexOf('const levelPathsOf'));
+    expect(note).toContain('withoutCantRunOpening(v.reason)');
+    const view = readFileSync(new URL('../readiness-view.ts', import.meta.url), 'utf8');
+    expect(view).toContain("const reason = withoutCantRunOpening(view.reason ?? '');");
+  });
+});
