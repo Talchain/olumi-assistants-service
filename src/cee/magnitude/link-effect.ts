@@ -300,10 +300,12 @@ function statementWords(
   amount: number, perSourceChange: number, source: MagnitudeNode, target: MagnitudeNode,
   sourceFrame: number | undefined, targetFrame: number | undefined,
 ): string {
-  const unit = unitOf(source);
+  // The source's change is said by the SAME rule as the target's (`amountWords`): a percentage LEVEL moves in points.
+  // Served (audit MAG-4/UF-2, bf-20260926T202507Z): "raising "Monthly churn" by 1 % lowers "MRR" …" beside "… raises
+  // "Monthly churn" by 1.5 points" in one reply. "1 %" reads as a relative change (6% → 6.06%), not the point meant.
   const cause = isSwitch(source, sourceFrame) && perSourceChange === 1
     ? `switching on "${source.label}"`
-    : `${perSourceChange > 0 ? 'raising' : 'lowering'} "${source.label}" by ${fmt(Math.abs(perSourceChange))}${unit === undefined ? '' : ` ${unit}`}`;
+    : `${perSourceChange > 0 ? 'raising' : 'lowering'} "${source.label}" by ${amountWords(perSourceChange, source, sourceFrame)}`;
   return `${cause} ${amount < 0 ? 'lowers' : 'raises'} "${target.label}" by ${amountWords(amount, target, targetFrame)}`;
 }
 
