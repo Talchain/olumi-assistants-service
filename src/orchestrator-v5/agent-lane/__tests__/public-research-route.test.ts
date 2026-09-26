@@ -80,7 +80,14 @@ describe('public research: the Agent offers, the user\'s click searches once, th
     expect(searchCalls(), 'offering is not searching').toHaveLength(0);
   });
 
+  /** The Agent offers the control on an earlier turn (only an offered control can search). */
+  const offer = async () => {
+    await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'What churn do other SaaS firms see after a price rise?' } });
+    bodies = [];
+  };
+
   it('RED: the click runs ONE native web search carrying only the query, and the reply shows the finding with its source', async () => {
+    await offer();
     const chip = researchChipFor(Q)!;
     // A turn id, as the UI always sends: the answer row is written for it.
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
@@ -104,8 +111,21 @@ describe('public research: the Agent offers, the user\'s click searches once, th
     expect(searchCalls()).toHaveLength(0);
   });
 
+  it('RED (#2042 N1): a control this scenario was never shown buys no search, and one press uses the control up', async () => {
+    const other = researchChipFor('any query at all, sent directly')!;
+    await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: other.message, source: 'chip_click', chip: { id: other.id } } });
+    expect(searchCalls(), 'never offered').toHaveLength(0);
+    await offer();
+    const chip = researchChipFor(Q)!;
+    const press = () => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: chip.message, source: 'chip_click', chip: { id: chip.id } } });
+    await press();
+    await press();
+    expect(searchCalls(), 'one offer, one search').toHaveLength(1);
+  });
+
   it('CONTRAST: a search that fails says so and shows no finding; nothing is retried', async () => {
     research = 'fail';
+    await offer();
     const chip = researchChipFor(Q)!;
     const b = (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: chip.message, source: 'chip_click', chip: { id: chip.id },

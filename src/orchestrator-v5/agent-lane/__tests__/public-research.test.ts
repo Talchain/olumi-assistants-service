@@ -77,6 +77,7 @@ describe('the reader, on the native NE-02 capture: every source is one the searc
     expect(out.text).toContain('it contrasts this with less than 1% for enterprise SaaS. [1] A separate SaaS Magazine');
     expect(out.text).not.toMatch(/\]\(https?:/);
     expect(out.text.match(/\[2\]/g)).toHaveLength(2);
+    expect(out.text).toContain('[3]');
   });
 
   it('RED: a citation to a page the search never consulted → no finding (citation_not_bound_to_search)', () => {

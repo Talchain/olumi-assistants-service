@@ -28,7 +28,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
 import { OPENAI_ONLY, assertProviderAllowed, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
-import { approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
+import { RESEARCH_CHIP_PREFIX, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
@@ -165,6 +165,30 @@ function rememberOffered(key: string, actions: readonly OfferedAction[]): void {
     if (oldest !== undefined) offeredActions.delete(oldest);
   }
   offeredActions.set(key, actions);
+}
+
+/**
+ * ⛔ A SEARCH IS BOUGHT ONLY FROM A CONTROL THIS SCENARIO AND SUBJECT WAS SHOWN, ONCE (AI Conversation, #2042 N1). The chip
+ * id is a public hash of its query, so a direct request could otherwise send any query and spend a paid search. The ids
+ * offered are remembered per scenario and subject, and a press uses its id up. After a restart nothing is remembered: the
+ * press then reaches the Agent as words, which never search, and the Agent can offer the search again.
+ */
+const RESEARCH_OFFERS_MAX = 500;
+const researchOffers = new Map<string, Set<string>>();
+function rememberResearchOffers(key: string, offered: readonly OfferedAction[]): void {
+  const ids = offered.filter((a) => a.id.startsWith(RESEARCH_CHIP_PREFIX)).map((a) => a.id);
+  if (ids.length === 0) return;
+  const held = researchOffers.get(key) ?? new Set<string>();
+  researchOffers.delete(key);
+  if (researchOffers.size >= RESEARCH_OFFERS_MAX) {
+    const oldest = researchOffers.keys().next().value;
+    if (oldest !== undefined) researchOffers.delete(oldest);
+  }
+  for (const id of ids) held.add(id);
+  researchOffers.set(key, held);
+}
+function takeResearchOffer(key: string, id: unknown): boolean {
+  return typeof id === 'string' && researchOffers.get(key)?.delete(id) === true;
 }
 
 /**
@@ -1009,6 +1033,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       method: 'POST',
       headers: { authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`, 'content-type': 'application/json' },
       body: JSON.stringify(researchRequestBody(query, model)),
+      // Bounded (#2042 N2): the captured search took 15 s; a hung one is said as unfinished, never waited on.
+      signal: AbortSignal.timeout(60_000),
     });
     if (!r.ok) {
       const text = await r.text();
@@ -1679,8 +1705,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * web search. No model is changed and no tool can act. The reply is Olumi's own text over the reader's outcome:
      * the finding with the sources the search consulted, or a plain failure that describes no finding.
      */
+    const researchChipId = (body['chip'] as { id?: unknown } | null | undefined)?.id;
     const researchQuery = result === undefined && approvedProposal === undefined
-      ? approvedQueryOf((body['chip'] as { id?: unknown } | null | undefined)?.id, message) : null;
+      && approvedQueryOf(researchChipId, message) !== null && takeResearchOffer(approveKey, researchChipId)
+      ? approvedQueryOf(researchChipId, message) : null;
     if (researchQuery !== null) {
       const fastStartedAt = Date.now();
       let outcome: ResearchOutcome;
@@ -1892,6 +1920,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     ];
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
     rememberApprove(approveKey, offeredNow);
+    rememberResearchOffers(approveKey, offeredNow);
     // What this answer row persists: the Run offer, and the exact proposal behind the approve chip it offers
     // — or, on a turn that offers none, the one still outstanding (a question between the offer and the "yes"
     // must not drop what a restart needs to find it).
