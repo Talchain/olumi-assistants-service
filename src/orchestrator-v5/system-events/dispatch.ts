@@ -55,7 +55,6 @@ import { getSessionStore } from '../session/index.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
 import { createHash } from 'node:crypto';
 import { executeOptionInterventionBatch, executeOptionInterventionEdit } from './option-intervention-edit.js';
-import { modelVersionMutationReceiptFromResponse } from '../model-management/mutation-receipt.js';
 import { runWithApprovedLevelAdoptions } from '../agent-lane/approved-adoption-context.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
@@ -234,6 +233,8 @@ export interface DispatchSystemEventResult {
   readonly commitSkippedReason?: SystemEventCommitSkipReason;
   /** A refused option-level batch: why, and which target (all or nothing — nothing was written). */
   readonly refusal?: { readonly reason: string; readonly index?: number };
+  /** A committed option-level write: the commit's own verified version receipt (null: guest / no version). */
+  readonly committedVersion?: { readonly version: number; readonly version_id: string; readonly mutation_id: string; readonly source_turn_id: string | null } | null;
   /**
    * V5 finaliser contract — system event readiness, by event kind:
    *
@@ -2914,6 +2915,9 @@ export async function dispatchOptionLevelsBatch(
         ...(committedReceipt !== undefined ? { draft_graph: committedReceipt } : {}),
       },
       commitPerformed: true,
+      ...(outcome.modelVersionReceipt !== undefined ? { committedVersion: outcome.modelVersionReceipt === null ? null : {
+        version: outcome.modelVersionReceipt.version_number, version_id: outcome.modelVersionReceipt.version_id,
+        mutation_id: outcome.modelVersionReceipt.mutation_id, source_turn_id: outcome.modelVersionReceipt.source_turn_id } } : {}),
       // Readiness from the bytes that LANDED. `undefined` only when the
       // committed graph did not parse — an honest absence, not a guess.
       ...(graphForReadiness !== null ? { analysisReady: canonicalReady } : {}),
@@ -3079,13 +3083,8 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
   }
   const graphHash = (r.response as { graph_hash?: unknown }).graph_hash;
   if (!r.commitPerformed || typeof graphHash !== 'string' || graphHash.length === 0) return { status: 'unconfirmed' };
-  let receipt: Extract<CommitOptionLevelsResult, { status: 'committed' }>['receipt'] = null;
-  try {
-    const m = modelVersionMutationReceiptFromResponse(r.response);
-    receipt = m === null ? null : { version: m.sequence, version_id: m.version_id, mutation_id: m.mutation_id, source_turn_id: m.source_turn_id };
-  } catch {
-    receipt = null;
-  }
+  // The commit's own receipt, already verified by the writer against this turn and postimage (no second parser).
+  const receipt = r.committedVersion ?? null;
   return { status: 'committed', graph_hash: graphHash, receipt, already_applied: false, committed_levels: committedLevels };
 }
 
