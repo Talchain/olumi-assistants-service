@@ -282,7 +282,8 @@ function committedThenMoved(
  * (Canvas #70, UI cd6a82e4 + CEE 5f941f2): the receipt the user read was "Recorded … as weak (0.1 …)" beside a Slight pill.
  * Every preview, public label (and so the "Recorded" receipt) and note that names a link's band uses this word.
  */
-const linkBandWord = (band: InfluenceBand): string => (band === 'weak' ? 'slight' : band);
+// ONE authority for the word (R&C #2023 review): the shared map beside the band table, never a second copy here.
+const linkBandWord = (band: InfluenceBand): string => CANVAS_BAND_WORD[band];
 
 /** Marks a compound starting point, so a newer one can replace it before approval. */
 const STARTING_POINT_BASIS = 'a starting point \u2014 values and what each option sets \u2014 for the user to adopt or correct in one approval';
