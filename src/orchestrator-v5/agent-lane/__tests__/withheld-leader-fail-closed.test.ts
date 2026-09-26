@@ -138,6 +138,13 @@ describe('the no-leader sentence', () => {
     expect(agentNoLeaderSentence(undefined, analysisReady)).toContain('every estimate this comparison rests on is still Olumi');
   });
 
+  it('C46 (H7): a product the analysis adds up is said as that — never "not recorded", never "run it again"', () => {
+    expect(agentNoLeaderSentence('nonlinear_identity_sign_unproven', { status: 'ready' })).toBe(
+      'No single option can be put forward yet, because your goal depends on quantities that multiply together and this model ' +
+      'adds their effects up rather than multiplying them; running the analysis again will not change that.',
+    );
+  });
+
   it('says the reason is not recorded rather than guessing one', () => {
     expect(agentNoLeaderSentence('some_future_code', undefined)).toContain('the reason is not recorded');
   });

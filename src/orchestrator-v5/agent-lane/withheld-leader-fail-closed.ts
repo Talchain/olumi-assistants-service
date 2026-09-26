@@ -76,6 +76,7 @@ import {
   leaderClaimReasonKind,
   WITHHELD_CONSTRAINT_VERDICT,
   WITHHELD_NEAR_TIE,
+  WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
   WITHHELD_RUN_IDENTITY_CONFLICT,
   WITHHELD_RUN_IDENTITY_UNCONFIRMED,
   WITHHELD_SEPARATION_UNAVAILABLE,
@@ -944,6 +945,11 @@ const BY_WITHHELD_REASON: Readonly<Record<string, string>> = {
     'because this result could not be confirmed as an analysis of the model as it stands; run the analysis again',
   [WITHHELD_RUN_IDENTITY_CONFLICT]:
     'because this result could not be confirmed as an analysis of the model as it stands; run the analysis again',
+  // C46 (H7): the goal and factors are named by the Agent's `claim_permissions.nonlinear_identity.say`; this
+  // deterministic clause names the missing capability without them, and never asks for a re-run that cannot help.
+  [WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]:
+    'because your goal depends on quantities that multiply together and this model adds their effects up rather than ' +
+    'multiplying them; running the analysis again will not change that',
 };
 
 /** Keyed by the admission's `permitted_analysis_mode` reason code, when the claim itself did not withhold. */
