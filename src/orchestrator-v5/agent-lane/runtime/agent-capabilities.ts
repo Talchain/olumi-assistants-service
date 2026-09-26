@@ -1108,9 +1108,9 @@ export function createAgentCapabilities(
       ...levelFigureOf(o),
     }));
     // ⛔ THE LINKS AND LEVELS ARE ONE COMMIT OR NONE — so what would stop them is checked BEFORE anything is written.
-    if (levelOps.length + linkOps.length > 0) {
+    if (levelOps.length + linkOps.length + valueOps.length > 0) {
       if (opts.commitOptionLevels === undefined) {
-        return notApplied('levels_writer_unavailable', 'The option levels could not be written as one change, so nothing was written.');
+        return notApplied('levels_writer_unavailable', 'This change could not be written as one, so nothing was written.');
       }
       const unstored = levelInputs.find((l) => typeof l.value !== 'number');
       if (unstored !== undefined) {
@@ -1171,6 +1171,8 @@ export function createAgentCapabilities(
     // figure — the same step the single-kind path takes after its write, done
     // here BEFORE the one write so it is part of what is conditional.
     const framed: { factor: string; value: number; range: number }[] = [];
+    /** The range each framed factor is given — sent to the writer as a typed frame, never as graph bytes. */
+    const frameCaps = new Map<string, number>();
     workingNodes = workingNodes.map((n) => {
       if (!valueOps.some((o) => o.path === n.id)) return n;
       if (typeof n.scale_frame === 'number' && n.scale_frame > 1) return n;
@@ -1180,6 +1182,7 @@ export function createAgentCapabilities(
       const range = defaultFrameFor(raw);
       if (range <= 1) return n;
       framed.push({ factor: n.label, value: raw, range });
+      frameCaps.set(n.id, range);
       return { ...n, observed_state: { ...os, value: raw / range, raw_value: raw, cap: range, declared_scale: 'unit_interval' } };
     });
     // ⛔ A LEVEL IS A NUMBER ON ITS FACTOR'S FRAME. If this approval's own
@@ -1209,6 +1212,7 @@ export function createAgentCapabilities(
       const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
       if (typeof raw !== 'number' || range <= 1) return n;
       framed.push({ factor: n.label, value: raw, range });
+      frameCaps.set(n.id, range);
       return { ...n, observed_state: { ...os, value: raw / range, raw_value: raw, cap: range, declared_scale: 'unit_interval' } };
     });
     /**
@@ -1236,56 +1240,27 @@ export function createAgentCapabilities(
       return { ...n, observed_state: { ...os, source: ADOPTED_ASSUMPTION_SOURCE } };
     });
 
-    // ONE conditional write for every value (and any range they need).
+    /**
+     * ⭐ THE WHOLE APPROVAL IS ONE COMMIT (Canonical #70 5849037691; the door, CEE #2031). The values were written
+     * through `/graph/register` — their own commit and receipt — and THEN the links and levels through the door, so a
+     * refused level left the values written (`partially_applied`, two receipts). The values (in the user's units) and
+     * the ranges they need now ride the SAME port call as the links and levels: one commit and one receipt, or none.
+     * The in-memory pass above stays: it refuses before anything is sent, and the read-back checks against it.
+     */
     const receipts: ReceiptSummary[] = [];
     let valuesLanded = false;
     let carried = parent.base_graph_identity_hash;
-    if (valueOps.length > 0 || framed.length > 0) {
-      const operationId = authorisationTurnId(`${parent.proposal_id}#values`);
-      const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
-        graph: { ...(working as Record<string, unknown>), nodes: workingNodes },
-        expected_graph_hash: carried,
-        /**
-         * ⭐ AND THE IDENTITY EXPECTATION, from the SAME read these bytes come from (`approvedRead`), as the frame
-         * writes send it. A rename that lands between that read and the route's own is outside the analysis
-         * projection, so only this refuses it; without it the whole-graph write restores the stale label
-         * (Canonical 5844410312; the #1743 counterexample #1810 closed for the frame writes).
-         */
-        ...(approvedRead.graph_identity_hash !== '' ? { expected_graph_identity_hash: approvedRead.graph_identity_hash } : {}),
-        operation_id: operationId,
-      });
-      if (reg.status !== 200) {
-        const code = String((reg.json.details as { code?: unknown } | undefined)?.code ?? reg.json.code ?? '');
-        return notApplied(
-          code === 'GRAPH_STALE' ? 'model_changed_since_approval' : 'values_not_written',
-          code === 'GRAPH_STALE'
-            ? 'The model changed after this was approved, so nothing was written. Read it again and propose afresh.'
-            : `The values could not be saved (http ${reg.status}). Nothing was written.`,
-        );
-      }
-      valuesLanded = true;
-      const mv = reg.json.model_version as { version_number?: unknown; version_id?: unknown; mutation_id?: unknown } | undefined;
-      if (mv !== undefined && typeof mv.version_id === 'string') {
-        receipts.push({
-          version: Number(mv.version_number), version_id: mv.version_id,
-          mutation_id: typeof mv.mutation_id === 'string' ? mv.mutation_id : '',
-          source_turn_id: registrationTurnId(ctx.scenario_id, operationId),
-        } as ReceiptSummary);
-      }
-      const next = reg.json.graph_hash;
-      if (typeof next !== 'string' || next.length === 0) {
-        // No authoritative revision for our own write: we cannot prove the next
-        // CAS base, so no level is written on a guess.
-        return {
-          ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id,
-          refusal: levelOps.length > 0 ? 'partially_applied' : 'not_applied',
-          detail: 'The values were saved; the option levels were not written because the saved revision could not be confirmed.',
-          parts: [{ part: 'values', ok: true, recorded_count: valueOps.length, requested_count: valueOps.length }, ...(levelOps.length > 0 ? [{ part: 'option_levels', ok: false, recorded_count: 0, requested_count: levelOps.length }] : [])],
-          receipts,
-        };
-      }
-      carried = next;
-    }
+    const values = valueOps.map((o) => {
+      const v = (o.value ?? {}) as { value?: number; unit?: string };
+      return {
+        factor_id: o.path, value: v.value as number,
+        ...(typeof v.unit === 'string' && v.unit !== '' ? { unit: v.unit } : {}),
+        author: valueOpAuthor(o, parent) === 'user_stated' ? 'user_specified' as const : 'model_proposed' as const,
+      };
+    });
+    const frames = [...frameCaps].map(([factor_id, cap]) => ({ factor_id, cap }));
+    const expectedValueOf = new Map(workingNodes.filter((n) => valueOps.some((o) => o.path === n.id))
+      .map((n) => [n.id, (n.observed_state as { value?: unknown } | undefined)?.value]));
 
     // (3) ⭐ THE LINKS AND LEVELS AS ONE COMMIT (Canonical #70 5847348206): the product's N-ary level writer commits the
     // whole approved scope on the revision our values write produced (or the approved one) — any pair refused means
@@ -1295,7 +1270,7 @@ export function createAgentCapabilities(
     const linksAdded: string[] = [];
     const labelOf = (id: string): string => approvedRead.nodes.find((n) => n.id === id)?.label ?? id;
     const pairWords = (p: { option_id: string; factor_id: string }): string => `${labelOf(p.option_id)} \u2192 ${labelOf(p.factor_id)}`;
-    if (levelInputs.length + linkOps.length > 0) {
+    if (levelInputs.length + linkOps.length + values.length + frames.length > 0) {
       const links = linkOps.map((o) => pairOf(o.path));
       const levels = levelInputs.map((l) => ({ ...l, value: l.value as number }));
       const res = await opts.commitOptionLevels!({
@@ -1304,18 +1279,23 @@ export function createAgentCapabilities(
         turn_id: authorisationTurnId(`${parent.proposal_id}#levels`),
         links,
         levels,
+        ...(values.length > 0 ? { values } : {}),
+        ...(frames.length > 0 ? { frames } : {}),
       });
       if (res.status === 'unconfirmed') {
         // ⛔ The commit was attempted and could not be read back: neither saved nor refused (#1995's `not_confirmed`).
         return {
           ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id,
           refusal: 'not_confirmed', receipts,
-          detail: 'The links and option levels were sent as one change, but Olumi could not read the model back to confirm them. Say exactly that; never say they were saved or not saved.',
+          detail: 'This change was sent as one, but Olumi could not read the model back to confirm it. Say exactly that; never say they were saved or not saved.',
         };
       } else if (res.status === 'stale') {
-        levelStop = 'the model changed after this was approved, so no link or option level was written';
+        levelStop = 'the model changed after this was approved, so nothing in this change was written';
       } else if (res.status === 'refused') {
-        levelStop = `${res.pair !== undefined ? `the level for ${pairWords(res.pair)} was refused` : 'the option levels were refused'}, so no link or option level was written`;
+        const what = res.pair !== undefined ? `the level for ${pairWords(res.pair)}`
+          : res.value !== undefined ? `the value for ${labelOf(res.value.factor_id)}`
+            : res.frame !== undefined ? `the range for ${labelOf(res.frame.factor_id)}` : 'part of this change';
+        levelStop = `${what} was refused, so nothing in this change was written`;
       } else {
         if (res.receipt !== null) receipts.push({ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' });
         carried = res.graph_hash;
@@ -1323,16 +1303,18 @@ export function createAgentCapabilities(
         const check = await readGraph(ctx.scenario_id);
         const holds = check !== null
           && levels.every((l) => heldLevelOf(check, l.option_id, l.factor_id) === l.value)
-          && links.every((k) => check.edges.some((e) => e.from === k.option_id && e.to === k.factor_id));
+          && links.every((k) => check.edges.some((e) => e.from === k.option_id && e.to === k.factor_id))
+          && [...expectedValueOf].every(([id, v]) => (check.nodes.find((n) => n.id === id)?.observed_state as { value?: unknown } | undefined)?.value === v);
         if (!holds) {
           return {
             ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id,
             refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
-            detail: 'The links and option levels were sent as one change, but reading the model back did not show all of them. Say exactly that; never say they were saved or not saved.',
+            detail: 'This change was sent as one, but reading the model back did not show all of it. Say exactly that; never say it was saved or not saved.',
           };
         }
         levelsRecorded = levels.length;
         linksAdded.push(...links.map(pairWords));
+        valuesLanded = values.length > 0;
       }
     }
 

@@ -84,28 +84,26 @@ async function approve(opts: Parameters<typeof product>[0]) {
   return { p, out };
 }
 
-describe('the starting point\'s one value write asserts the identity it read', () => {
-  it('RED: a rename between the approval\'s read and the write → refused (GRAPH_STALE), the new label kept, nothing written', async () => {
+/**
+ * ⭐ SINCE THE ONE-COMMIT CONSUMER (Canonical #70 5849037691; the door, CEE #2031) THE AGENT SENDS NO GRAPH AT ALL for
+ * a starting point: its values ride the port as typed cells, and the writer patches the CURRENT model. The class this
+ * file guarded — a whole-graph write replaying the approval's stale read over a collaborator's rename — is closed by
+ * construction, and these rows pin that: the rename survives, and no whole-graph write is the Agent's own (every one it
+ * makes carries its `operation_id`; the register calls here are the port fake's).
+ */
+describe('a starting point never replays the model it read: the rename survives, and the Agent sends no graph', () => {
+  it('RED: a rename between the approval\'s read and the write → the collaborator\'s label survives, and the approval lands', async () => {
     const { p, out } = await approve({ renameAfterReads: 1 });
-    const valueWrite = p.registered[0];
-    expect(valueWrite, 'the value write was attempted').toBeDefined();
-    expect(valueWrite!.expected_graph_identity_hash, 'bound to the approval\'s own read').toBe('id-0');
-    expect(out.ok).toBe(false);
-    expect(out.mutated).toBe(false);
-    expect(out.refusal).toBe('not_applied');
-    expect(out.reason).toBe('model_changed_since_approval');
     expect(p.label('hire_lead'), 'the collaborator\'s rename survives').toBe('Hire a Staff Engineer');
-  });
-
-  it('CONTROL: no rename → the same write lands', async () => {
-    const { p, out } = await approve({});
-    expect(p.registered[0]!.expected_graph_identity_hash).toBe('id-0');
+    expect(p.registered.every((b) => !('operation_id' in b)), 'no whole-graph write of the Agent\'s own').toBe(true);
+    expect(p.registered.every((b) => ((b.graph as { nodes: Node[] }).nodes.find((n) => n.id === 'hire_lead')?.label) === 'Hire a Staff Engineer'),
+      'no write carries the approval\'s stale label').toBe(true);
     expect(out.ok, JSON.stringify(out)).toBe(true);
   });
 
-  it('a read with no identity hash → none is asserted (never fabricated); the analysis expectation still goes', async () => {
-    const { p } = await approve({ noIdentity: true });
-    expect('expected_graph_identity_hash' in p.registered[0]!).toBe(false);
-    expect(p.registered[0]!.expected_graph_hash).toBe('h0');
+  it('CONTROL: no rename → the same approval lands, and still no whole-graph write is the Agent\'s own', async () => {
+    const { p, out } = await approve({});
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(p.registered.every((b) => !('operation_id' in b))).toBe(true);
   });
 });
