@@ -158,6 +158,21 @@ function levelIsPercentOver100(target: LimitTargetScale): boolean {
   );
 }
 
+/**
+ * ⛔⛔ CAN PLoT READ A FRAMED LIMIT IN THIS UNIT ON THIS LEVEL'S OWN SCALE? (#70 5843365832)
+ *
+ * PLoT's percent rung is `[0,100]` whatever the target's own frame (`intervention-normaliser.ts` at b09c0f2: :1493
+ * reads only a goal's `goal_threshold_cap`; :1564-1567). WIRE, engine-direct: the same 4% root level scored P(meet ≤
+ * 10%) 1 on a frame of 100 and 0.017 on 20; the same 12% level 0.017 on 100 and 1 on 200 — all `decision_grade: true`.
+ * So a percent-ROW unit is provable only on a level that IS the percentage ÷ 100 (`levelIsPercentOver100`, the
+ * canonicaliser's own test). Every other unit is `true` here: a spelling outside the row ("% per month") reaches
+ * `deriveRange`, which reads the node's cap.
+ */
+export function percentLimitFrameProvable(unit: string | undefined, target: LimitTargetScale | undefined): boolean {
+  if (unit === undefined || !PERCENT_HEADS.includes(norm(unit))) return true;
+  return target !== undefined && levelIsPercentOver100(target);
+}
+
 export function canonicaliseLimitUnit(value: number, unit: string | undefined, target?: LimitTargetScale): UnitCanonical {
   if (unit === undefined) return { value };
   const verbatim: UnitCanonical = { value, unit };

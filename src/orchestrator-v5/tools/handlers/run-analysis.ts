@@ -107,7 +107,12 @@ import { findFirstInvalidNumeric } from './numeric-integrity.js';
 import { validateEnrichmentShadow } from './enrichment-validation.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
 import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
-import { carryLevelLimitBaselines, levelLimitBaselineNodeIds } from './level-limit-baseline.js';
+import {
+  carryLevelLimitBaselines,
+  levelLimitBaselineNodeIds,
+  unprovablePercentFrameIds,
+  withholdUnprovablePercentFrames,
+} from './level-limit-baseline.js';
 import {
   AnalysisNotReadyError,
   readinessQuestions,
@@ -927,7 +932,21 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (snapshot.seed !== undefined) plotPayload.seed = snapshot.seed;
     if (snapshot.n_samples !== undefined) plotPayload.n_samples = snapshot.n_samples;
     if (snapshot.goal_constraints !== undefined) {
-      plotPayload.goal_constraints = snapshot.goal_constraints;
+      // A framed percent limit on a level PLoT would read on another scale is sent UNFRAMED on this wire copy, so it
+      // fails closed instead of being scored against the wrong number (`level-limit-baseline.ts`). The record is untouched.
+      plotPayload.goal_constraints = withholdUnprovablePercentFrames(graphForAnalysis, snapshot.goal_constraints);
+      const frameWithheld = unprovablePercentFrameIds(graphForAnalysis, snapshot.goal_constraints);
+      if (frameWithheld.length > 0) {
+        log.info(
+          {
+            event: 'run_analysis.percent_limit_frame_withheld',
+            request_id: invocation.requestId,
+            scenario_id: args.scenario_id,
+            constraint_ids: frameWithheld,
+          },
+          'run_analysis sent a percent limit unframed: its target level is not held as a percentage out of 100 (wire copy only; no magnitudes)',
+        );
+      }
     }
     // ROADMAP 2.920 — the user's ATTESTED objective sense, MINIMISE ONLY.
     //

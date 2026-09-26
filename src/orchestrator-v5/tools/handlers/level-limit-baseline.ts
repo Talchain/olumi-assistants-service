@@ -31,6 +31,7 @@
  */
 import { valuesMatch } from '../../../utils/reduction-framing.js';
 import { deriveInferredValues } from '../../coaching/inferred-value-disclosure.js';
+import { percentLimitFrameProvable, type LimitTargetScale } from '../../agent-lane/admit-constraint.js';
 
 type Rec = Record<string, unknown>;
 
@@ -104,4 +105,72 @@ export function carryLevelLimitBaselines<G>(graph: G, goalConstraints: unknown, 
         : n,
     ),
   } as G;
+}
+
+/**
+ * ⛔⛔ A PERCENT LIMIT IS SENT FRAMED ONLY WHERE PLoT READS IT ON THE LEVEL'S OWN SCALE (#70 5843365832).
+ *
+ * PLoT's percent rung is `[0,100]` whatever the target's frame, so a FRAMED percent limit on a level held on another
+ * frame is scored against the wrong number and certified (WIRE: the same 4% root level read P(meet ≤ 10%) 1 on a frame
+ * of 100 and 0.017 on 20; the same 12% read 0.017 on 100 and 1 on 200, all `decision_grade: true`). Unframed, ISL
+ * refuses it (`frame_not_stamped`): an honest "could not be checked".
+ *
+ * ⛔ WHY AT RUN TIME, ON THE WIRE COPY (the B2 lesson). The frame is the user's meaning and stays on the record; whether
+ * PLoT can read it depends on the target's frame WHEN THE RUN HAPPENS — a node with no level yet may be framed later,
+ * and a value writer may frame it differently. It also covers every writer of the row at one site: agent-lane
+ * admission and V5 `add_constraint` (which stamps a frame on factor targets too).
+ *
+ * A node carrying its own `goal_threshold_cap` is read on `[0, cap]` before the percent rung, so it is left alone.
+ */
+function unprovablePercentFrameIndices(graph: unknown, goalConstraints: unknown): number[] {
+  const out: number[] = [];
+  if (!Array.isArray(goalConstraints)) return out;
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  goalConstraints.forEach((c, i) => {
+    if (!isRec(c) || (c.value_frame !== 'level' && c.value_frame !== 'delta')) return;
+    const node = nodes.find((n) => n.id === c.node_id);
+    const gtc = node?.goal_threshold_cap;
+    if (typeof gtc === 'number' && Number.isFinite(gtc) && gtc > 0) return;
+    if (percentLimitFrameProvable(typeof c.unit === 'string' ? c.unit : undefined, node === undefined ? undefined : targetScaleOf(node))) return;
+    out.push(i);
+  });
+  return out;
+}
+
+/** The node's scale as admission reads it (`admit-model.ts`): its `observed_state` plus its `scale_frame`. */
+function targetScaleOf(node: Rec): LimitTargetScale {
+  const os = isRec(node.observed_state) ? node.observed_state : {};
+  const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+  const unit = typeof os.unit === 'string' ? os.unit : undefined;
+  const cap = num(os.cap);
+  const value = num(os.value);
+  const rawValue = num(os.raw_value);
+  const scaleFrame = num(node.scale_frame);
+  return {
+    ...(unit !== undefined ? { unit } : {}),
+    ...(cap !== undefined ? { cap } : {}),
+    ...(value !== undefined ? { value } : {}),
+    ...(rawValue !== undefined ? { raw_value: rawValue } : {}),
+    ...(scaleFrame !== undefined ? { scale_frame: scaleFrame } : {}),
+  };
+}
+
+/** The constraint ids (or `#<index>` for a row with none) whose frame this run withholds on the wire. */
+export function unprovablePercentFrameIds(graph: unknown, goalConstraints: unknown): string[] {
+  if (!Array.isArray(goalConstraints)) return [];
+  return unprovablePercentFrameIndices(graph, goalConstraints).map((i) => {
+    const c = goalConstraints[i] as Rec;
+    return typeof c.constraint_id === 'string' ? c.constraint_id : `#${i}`;
+  });
+}
+
+/** The wire copy of `goalConstraints` with each unprovable percent frame removed. Returns the input itself when none. */
+export function withholdUnprovablePercentFrames<C>(graph: unknown, goalConstraints: C): C {
+  const idx = new Set(unprovablePercentFrameIndices(graph, goalConstraints));
+  if (idx.size === 0 || !Array.isArray(goalConstraints)) return goalConstraints;
+  return goalConstraints.map((c: unknown, i: number) => {
+    if (!idx.has(i) || !isRec(c)) return c;
+    const { value_frame: _withheld, ...rest } = c;
+    return rest;
+  }) as C;
 }
