@@ -42,7 +42,7 @@ const ACTS_ON = {
       description: 'Whether this option pushes the factor up or down. State it; never guess it for the user.',
     },
     level: obj({
-      value: { type: 'number', description: 'The figure the user stated, in the factor\u2019s own units (e.g. 54 for \u00a354).' },
+      value: { type: 'number', description: 'The figure the user stated FOR THIS FACTOR, in the factor\u2019s own units (e.g. 54 for \u00a354 on a price). A figure given for something else (a price, when this factor is a churn rate) is never this factor\u2019s level: leave level out.' },
       unit: { type: 'string', description: 'The unit the user stated, if any.' },
     }, ['value']),
   }, ['factor_label', 'direction']),
