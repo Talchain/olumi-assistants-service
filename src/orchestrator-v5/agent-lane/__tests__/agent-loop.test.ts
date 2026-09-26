@@ -24,6 +24,8 @@ const caps = (over: Partial<AgentCapabilities> = {}): AgentCapabilities => ({
   proposeNewOption: async () => ({ ok: true, mutated: false, proposal_id: 'prop_n' }),
   proposeOptionInterventions: async () => ({ ok: true, mutated: false, proposal_id: 'prop_i' }),
   proposeStartingPoint: async () => ({ ok: true, mutated: false, proposal_id: 'prop_s' }),
+  // The goal's current level (`goal-current-level.ts`) — a REQUIRED member, for the same reason as the rest.
+  proposeGoalCurrentLevel: async () => ({ ok: true, mutated: false, proposal_id: 'prop_g' }),
   ...over,
 });
 

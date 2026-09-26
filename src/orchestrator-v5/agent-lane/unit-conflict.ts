@@ -13,10 +13,22 @@
  */
 import { unitFamilyOf, type UnitFamily } from '../routing/value-unit-resolution.js';
 
-export function unitPhraseFamily(unit: unknown): UnitFamily | null {
+/** The leading token of a unit phrase, as written ("GBP MRR" → "GBP", "£/month" → "£"); null when there is none. */
+export function unitPhraseHead(unit: unknown): string | null {
   if (typeof unit !== 'string') return null;
-  const lead = unit.trim().toLowerCase().split(/[\s/]+/)[0];
-  return lead === undefined || lead === '' ? null : unitFamilyOf(lead);
+  const lead = unit.trim().split(/[\s/]+/)[0];
+  return lead === undefined || lead === '' ? null : lead;
+}
+
+/** What follows the leading token, case-folded ("GBP MRR" → "mrr", "£ per month" → "per month"); '' when nothing. */
+export function unitPhraseTail(unit: unknown): string {
+  if (typeof unit !== 'string') return '';
+  return unit.trim().split(/[\s/]+/).slice(1).join(' ').toLowerCase();
+}
+
+export function unitPhraseFamily(unit: unknown): UnitFamily | null {
+  const lead = unitPhraseHead(unit);
+  return lead === null ? null : unitFamilyOf(lead.toLowerCase());
 }
 
 export function unitsConflict(stated: unknown, factorUnit: unknown): { stated: UnitFamily; factor: UnitFamily } | null {
