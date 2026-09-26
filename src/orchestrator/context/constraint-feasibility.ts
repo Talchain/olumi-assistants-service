@@ -607,6 +607,47 @@ export function constraintTargetCarriesNoQuantity(node: Record<string, unknown>)
 const nodeCarriesNoQuantity = constraintTargetCarriesNoQuantity;
 
 /**
+ * ⛔ THE LIMITS WHOSE LEADER RESULT IS OLUMI'S OWN ESTIMATE, NOT A CHECK (AI Quality, #70 5844226031).
+ *
+ * An option that SETS a limit's target (its `interventions[<target>]`) is compared at the level it sets once ISL
+ * scores such rows (ISL #179): every draw carries that level, so its result is a flat 1 or 0. When that level is the
+ * USER's (`user_specified`, or `brief_extraction` — the same `user_stated` class in `obligation-provenance.ts`), the
+ * result is a real check of what they told us. When it is anything else — `cee_hypothesis` (a starting-point fill, an
+ * approved Olumi estimate) or an entry with no stated source — the "check" only restates Olumi's guess, and a
+ * `decision_grade` scale marker cannot tell the two apart: it certifies the RANGE, not whose level produced the score.
+ *
+ * Returns the ratified constraint ids whose target the LEADING option sets with a non-user level. Only the leader
+ * matters: the verdict is the leader's. Pure; reads the graph the run ANALYSED (the one whose options went to PLoT).
+ * Empty on anything malformed or absent — the caller then gets today's verdict exactly.
+ */
+const USER_LEVEL_SOURCES: ReadonlySet<string> = new Set(['user_specified', 'brief_extraction']);
+
+export function collectLeaderEstimatedTargetIds(
+  graph: unknown,
+  ratified: readonly RatifiedConstraint[],
+  leadingOptionId: string | null | undefined,
+): Set<string> {
+  const out = new Set<string>();
+  if (typeof leadingOptionId !== 'string' || leadingOptionId.length === 0) return out;
+  const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  if (!Array.isArray(nodes)) return out;
+  const leader = nodes.find(
+    (n): n is Record<string, unknown> => n !== null && typeof n === 'object' && (n as { id?: unknown }).id === leadingOptionId,
+  );
+  const interventions = leader?.interventions;
+  if (interventions === null || typeof interventions !== 'object') return out;
+  for (const c of ratified) {
+    if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
+    if (!Object.prototype.hasOwnProperty.call(interventions, c.node_id)) continue;
+    const entry = (interventions as Record<string, unknown>)[c.node_id];
+    const source = entry !== null && typeof entry === 'object' ? (entry as { source?: unknown }).source : undefined;
+    if (typeof source === 'string' && USER_LEVEL_SOURCES.has(source)) continue;
+    out.add(c.constraint_id);
+  }
+  return out;
+}
+
+/**
  * The constraint ids whose TARGET NODE carries no quantity to compare against.
  *
  * PURE, and it FAILS TOWARD TODAY'S BEHAVIOUR at every step — no graph, an
@@ -941,6 +982,11 @@ export function deriveConstraintVerdict(
    * parameter makes, and for the same reason).
    */
   unmeasuredTargetIds?: ReadonlySet<string>,
+  /**
+   * Constraint ids whose target the LEADING option sets with a non-user level ({@link collectLeaderEstimatedTargetIds}),
+   * derived at the call site that holds the analysed graph. OPTIONAL, and omitted is today's verdict exactly.
+   */
+  leaderEstimatedTargetIds?: ReadonlySet<string>,
 ): ConstraintVerdict {
   // Computed unconditionally so it can be carried on every state (see
   // `leaderInfeasibility`). Fails open to `{ infeasible: false }`.
@@ -1055,7 +1101,11 @@ export function deriveConstraintVerdict(
   //    (c) the LEADING option itself carries no per-option score for it
   //        (collectLeaderScoredConstraintIds): the identity-bound half of
   //        PLoT's per-option `constraints_decision_grade` participation rule.
-  //    `codes` stays `[]` for (b): the producer shipped no code, and a
+  //    (d) the LEADING option SETS the limit's target with a level that is not
+  //        the user's ({@link collectLeaderEstimatedTargetIds}): its score is
+  //        Olumi's own estimate restated, so it licenses neither a compliance
+  //        nor a breach claim (AI Quality, #70 5844226031).
+  //    `codes` stays `[]` for (b) and (d): the producer shipped no code, and a
   //    CEE-minted one must never be filed as a producer code.
   const notDecisionGrade = collectProducerNotDecisionGradeConstraintIds(envelope);
   const leaderScored = collectLeaderScoredConstraintIds(envelope, leadingOptionId);
@@ -1063,7 +1113,8 @@ export function deriveConstraintVerdict(
     (c) =>
       !evaluated.has(c.constraint_id) ||
       notDecisionGrade.has(c.constraint_id) ||
-      (leaderScored !== null && !leaderScored.has(c.constraint_id)),
+      (leaderScored !== null && !leaderScored.has(c.constraint_id)) ||
+      leaderEstimatedTargetIds?.has(c.constraint_id) === true,
   );
   if (unverified.length > 0) {
     return verdict('unevaluated', {
