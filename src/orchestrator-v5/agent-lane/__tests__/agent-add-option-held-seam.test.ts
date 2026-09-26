@@ -401,6 +401,93 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(JSON.stringify(newOption()!.interventions ?? {}), 'no number stored without a range').not.toMatch(/\d/);
   }, 120_000);
 
+  it('[F4] RED: "add two options" → ONE proposal carrying both → ONE button → one click → BOTH added, each linked from the decision and levelled, runnable, OpenAI only', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    script = [
+      () => fnCall('propose_new_option', { options: [
+        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }] },
+        { label: 'Raise to £64 for new customers', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 64, unit: 'GBP' } }] },
+      ], rationale: 'The user asked for both.' }),
+      () => say('I would add both options, each linked from the decision. Shall I add them?'),
+    ];
+    const t1 = await turn({ message: 'Add two options: test £54 at release, and raise to £64 for new customers.' });
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify({ chips: t1.suggested_actions, tools: t1._agent.tool_calls })).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    expect(t1.suggested_actions.filter((c) => c.id.startsWith('agent-approve-proposal:')), 'exactly ONE approve button').toHaveLength(1);
+    expect(inner.filter((b) => (b['chip'] as { intent?: string } | undefined)?.intent === 'add_option'), 'ONE inner add').toHaveLength(1);
+    const held = await heldOnLatestRow();
+    expect(held, 'ONE hold').toHaveLength(1);
+    const added = held[0]!.action.inline_patch!.operations!.filter((o) => o.op === 'add_node').map((o) => o.path);
+    expect(added, 'the hold carries BOTH options').toHaveLength(2);
+
+    const callsBefore = openAiCalls;
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(openAiCalls - callsBefore, 'a typed approval makes no model call').toBe(0);
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const g = graphNow();
+    for (const [label, level] of [['Test £54 at release', 0.27], ['Raise to £64 for new customers', 0.32]] as const) {
+      const opt = g.nodes.find((x) => x.kind === 'option' && x.label === label);
+      expect(opt, label).toBeDefined();
+      expect(g.edges.some((e) => e.from === 'dec_x' && e.to === opt!.id), `${label}: linked FROM THE DECISION`).toBe(true);
+      expect(((opt!.interventions ?? {})['fac_price'] as { value?: number } | undefined)?.value, label).toBeCloseTo(level, 6);
+    }
+    expect((await readiness())?.may_run, 'runnable after the add').toBe(true);
+    expect(await heldOnLatestRow(), 'the hold is consumed').toEqual([]);
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/Added "Test £54 at release".*Added "Raise to £64 for new customers"/s);
+    expect(routerCalls).toEqual([]);
+    for (const b of [t1, t2]) for (const pc of b._provider_calls ?? []) expect(pc.provider).toBe('openai');
+  }, 120_000);
+
+  it('[F4] the hold the store keeps must add EVERY option asked for — a hold missing one is never offered', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    // After route-v2 answers the propose, the stored hold loses the second option (its node and every op after it).
+    onInnerSent = (b) => {
+      if ((b['chip'] as { intent?: string } | undefined)?.intent !== 'add_option') return;
+      const row = latestRow();
+      const pa = (row?.pending_actions ?? [])[0] as { action?: { inline_patch?: { operations?: { op: string }[] } } } | undefined;
+      const ops = pa?.action?.inline_patch?.operations;
+      if (ops === undefined) return;
+      const second = ops.findIndex((o, i) => i > 0 && o.op === 'add_node');
+      if (second > 0) pa!.action!.inline_patch!.operations = ops.slice(0, second);
+    };
+    script = [
+      () => fnCall('propose_new_option', { options: [
+        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }] },
+        { label: 'Raise to £64 for new customers', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 64, unit: 'GBP' } }] },
+      ], rationale: 'x' }),
+      () => say('That could not be prepared.'),
+    ];
+    const t1 = await turn({ message: 'Add both.' });
+    expect(t1._agent.tool_calls.find((c) => c.name === 'propose_new_option'), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, refusal: 'not_prepared' }));
+    expect(approveChipOf(t1)).toBeUndefined();
+  }, 120_000);
+
+  it('[F4] all or nothing: one option in the batch cannot be prepared (it names a factor the model does not have) → NOTHING is prepared or sent', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    script = [
+      () => fnCall('propose_new_option', { options: [
+        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }] },
+        { label: 'Bundle support', acts_on: [{ factor_label: 'Support quality', direction: 'positive' }] },
+      ], rationale: 'x' }),
+      () => say('One of those could not be prepared.'),
+    ];
+    const t1 = await turn({ message: 'Add both.' });
+    expect(t1._agent.tool_calls.find((c) => c.name === 'propose_new_option'), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false }));
+    expect(inner, 'nothing sent').toEqual([]);
+    expect(approveChipOf(t1)).toBeUndefined();
+  }, 120_000);
+
+  it('[F4] more options than one change can carry (5 > 4) → refused in plain words, nothing sent', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    script = [
+      () => fnCall('propose_new_option', { options: Array.from({ length: 5 }, (_, i) => ({ label: `Price point ${i + 1}`, acts_on: [{ factor_label: 'Price', direction: 'positive' }] })), rationale: 'x' }),
+      () => say('That is more than one change can carry.'),
+    ];
+    const t1 = await turn({ message: 'Add five price points.' });
+    expect(t1._agent.tool_calls.find((c) => c.name === 'propose_new_option')).toEqual(expect.objectContaining({ ok: false, refusal: 'too_many_options' }));
+    expect(inner).toEqual([]);
+  }, 120_000);
+
   it('two options asked for in one turn → the FIRST is held and offered (one button), the second is refused in plain words — never zero buttons', async () => {
     graphOf.set(SCENARIO, seedGraph());
     script = [
@@ -425,10 +512,21 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(approveChipOf(t1)).toBeUndefined();
   }, 120_000);
 
-  it('refuses, and sends NOTHING, an option too large to hold as one change (over the 8-change batch cap)', async () => {
+  it('[F4] an option acting on 7 factors (9 changes) is HELD — the typed transaction\'s cap, not the model-batch cap of 8', async () => {
     graphOf.set(SCENARIO, seedGraph(7));
     script = [
-      () => fnCall('propose_new_option', { label: 'Everything at once', acts_on: Array.from({ length: 7 }, (_, i) => ({ factor_label: i === 0 ? 'Price' : `Factor ${i}`, direction: 'positive' })), rationale: 'x' }),
+      () => fnCall('propose_new_option', { label: 'Broad relaunch', acts_on: Array.from({ length: 7 }, (_, i) => ({ factor_label: i === 0 ? 'Price' : `Factor ${i}`, direction: 'positive' })), rationale: 'x' }),
+      () => say('Shall I add it?'),
+    ];
+    const t1 = await turn({ message: 'Add a broad relaunch option.' });
+    expect(t1._agent.tool_calls.find((c) => c.name === 'propose_new_option'), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true }));
+    expect(approveChipOf(t1)?.id).toMatch(/gmh_/);
+  }, 120_000);
+
+  it('refuses, and sends NOTHING, a change too large to hold as one (over the typed transaction\'s 32-change cap)', async () => {
+    graphOf.set(SCENARIO, seedGraph(31));
+    script = [
+      () => fnCall('propose_new_option', { label: 'Everything at once', acts_on: Array.from({ length: 31 }, (_, i) => ({ factor_label: i === 0 ? 'Price' : `Factor ${i}`, direction: 'positive' })), rationale: 'x' }),
       () => say('That is too many links for one change.'),
     ];
     const t1 = await turn({ message: 'Add an option that changes everything.' });

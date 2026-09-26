@@ -24,7 +24,8 @@ import {
 } from '../coaching/fragile-link-challenge.js';
 import { buildNoFlaggedLinkCard } from '../coaching/no-flagged-link-card.js';
 import { buildLimitUncheckedCard, leaderWithheldForALimit } from '../coaching/limit-unchecked-card.js';
-import { graphBoundToHash, soleLimitNodeLabel } from '../coaching/bound-graph.js';
+import { graphBoundToHash, limitNodeLabels } from '../coaching/bound-graph.js';
+import { buildNearTieCard } from '../coaching/near-tie-card.js';
 import { edgeAuthorshipIn } from '../coaching/edge-strength-authorship.js';
 import { WITHHELD_NEAR_TIE } from '../compose/analysis-state-v1.js';
 import { summaryAsksUserToRepairALimit } from '../coaching/constraint-gap-disclosure.js';
@@ -247,8 +248,8 @@ export function runTurnCoaching(
   // confinement.ts), so the prose gate above is blind there. A refused limit card
   // fails CLOSED (no card), never back to a link card.
   if (leaderWithheldForALimit(final.analysisState)) {
-    const limitLabel = boundGraph !== null ? soleLimitNodeLabel(boundGraph) ?? undefined : undefined;
-    const limit = buildLimitUncheckedCard(input, limitLabel);
+    const limitLabels = boundGraph !== null ? limitNodeLabels(boundGraph) ?? undefined : undefined;
+    const limit = buildLimitUncheckedCard(input, limitLabels);
     if (limit.block === null) return { blocks: upstream, eligibility: { eligible: false, reason: limit.reason } };
     return { blocks: dedupeByBlockId([...upstream, limit.block]), eligibility: { eligible: true } };
   }
@@ -257,6 +258,13 @@ export function runTurnCoaching(
     ? buildNoFlaggedLinkCard(input)
     : built;
   if (chosen.block === null) {
+    // (2d) The automatic first pass of a NEAR TIE with no flagged link (AI Quality 5841805590): no link
+    // card can speak, so the one move is to ask which difference matters most. Its own gates decide;
+    // when it declines, the link path's reason stands.
+    const readyOptions = record(captured.analysis_ready)?.options;
+    const tie = buildNearTieCard(input, record(record(final.analysisState)?.leader_claim)?.withheld_reason,
+      Array.isArray(readyOptions) ? readyOptions.length : null);
+    if (tie.block !== null) return { blocks: dedupeByBlockId([...upstream, tie.block]), eligibility: { eligible: true } };
     return { blocks: upstream, eligibility: { eligible: false, reason: chosen.reason } };
   }
   return { blocks: dedupeByBlockId([...upstream, chosen.block]), eligibility: { eligible: true } };

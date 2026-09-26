@@ -29,11 +29,12 @@ import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchai
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
-import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
+import { isPercentScaledUnit, unitPinnedScaleFrame } from '../../cee/draft/records/unit-scale-class.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import {
   admitCandidateConstraints,
+  canonicaliseLimitUnit,
   type CandidateConstraint,
   type AdmittedConstraint,
 } from './admit-constraint.js';
@@ -361,6 +362,24 @@ export interface AdmittedModel {
   readonly treated_as_context?: readonly string[];
   /** Declared products that options move (`markProductIdentities`); each is also a `loss` entry. */
   readonly nonlinear_identities?: readonly NonlinearIdentityMark[];
+  /**
+   * Options Olumi added that nothing the model holds tells apart from another option — withheld
+   * (`option_indistinct`, `admitCandidateModel`), each with the step said to the user. Not in `withheld`,
+   * which is a list of LINKS by contract; the ledger records each in `loss`.
+   */
+  readonly options_withheld?: readonly WithheldOption[];
+  /** USER-stated options that nothing the model holds tells apart: all kept, and asked about ONCE per group. */
+  readonly indistinct_stated_options?: readonly { readonly options: readonly string[]; readonly question: string }[];
+}
+
+export interface WithheldOption {
+  /** The option's full text, as drafted. */
+  readonly option: string;
+  /** The option it cannot be told from, as drafted. */
+  readonly like: string;
+  readonly reason: 'option_indistinct';
+  /** What the user is told, word for word. */
+  readonly sentence: string;
 }
 
 /** Shorten to the label budget at a word boundary, never mid-word. */
@@ -1670,9 +1689,208 @@ function restateSignedPercentChanges(model: CandidateModel): {
   return { model: { ...model, factors, options }, restated };
 }
 
+/**
+ * ⛔ CONSTRUCTION NEVER RETURNS OPTIONS THAT ARE IDENTICAL BY CONSTRUCTION (Delivery Lead, #70
+ * 5842361028 / 5842400604 — MG (b)).
+ *
+ * MEASURED on served CEE ef99a97 and cb1778b, Paul's pricing brief: the drafter added "Test £59 with AI
+ * release" — no level, acting on the same two factors as the user's £59 option. The starting point
+ * filled both from the same source, they came out identical, and the run refused `NOTHING_TO_COMPARE`
+ * with `may_run: false`. 2 of 29 served first passes in the DL corpus (scanned 26 Sep 03:11Z); the fill is reproduced exactly
+ * in `construction-no-identical-options.test.ts`.
+ *
+ * ⭐ "IDENTICAL" IS PLoT'S IDENTITY AFTER THAT FILL, because `NOTHING_TO_COMPARE` is PLoT's refusal: an
+ * option is its intervention map, `nodeId:value` pairs snapped to 1e-9 (`analysis-ready-core.ts`
+ * `comparisonSurvivesDedup`, mirroring PLoT `identical-options.ts`). One cell per option per factor,
+ * read off the ADMITTED graph (after levels are known):
+ *  · `set`  — the option sets a level (its `interventions`): a key with a value;
+ *  · `open` — it acts on the factor with no level yet (an option -> factor edge other than the held
+ *    status quo's repair edge, `REPAIR_AUTHORED_ORIGIN`): a key the fill will give a value;
+ *  · `held` — it does not act on the factor: no key.
+ *
+ * ⛔ WITHHELD ONLY WHEN ANOTHER OPTION COVERS IT — ONE WAY, NEVER "CANNOT BE TOLD APART" (independent review
+ * of b0a51c3e, 26 Sep). `b` COVERS `a` when they hold the same factors (a key one has and the other lacks is
+ * a difference no fill undoes) and every level `a` sets, `b` sets to the same level. `a` then sets nothing
+ * the model can hold that `b` does not — the DL's "differs only in something unmodelled" — and the same-source
+ * fill turns it into `b` (on the wire, it did). An open cell can equal at most ONE level, so it never makes
+ * two options with different set levels alike: the first rule's symmetric reading withheld an Olumi "£54"
+ * as a level-less test's twin, and made every priced Olumi option a twin of a user option with no price.
+ *  · An option with a level no other option sets to that level is never covered, so it is always kept.
+ *  · Covering is transitive, so the option a withheld one is named against is always one that stays.
+ *  · Two options that cover each other are identical as drafted: the user's stays, else the first drafted.
+ *
+ * ⛔ THE STATUS QUO IS NEVER A CANDIDATE, AND A LEVEL EQUAL TO TODAY IS STILL A COMPARATOR. Its map is EMPTY,
+ * never filled, and PLoT counts only valued maps (EXECUTED on all four served runs, first pass and approval).
+ * So it is neither withheld nor named, and an option acting like it is judged against the other options only
+ * — as a twin it withheld the served "£49 with AI release" once the status quo acted on factors. Measured: the
+ * served approved model with the test option removed refuses `NO_COMPARISON_NEXT_STEP`; with that option set
+ * to today's £49 alone it PROCEEDS — an Olumi option that only restates today's level is the valued stand-in
+ * the run needs (`construction-no-identical-options.test.ts`).
+ */
+const sameLevel = (a: number, b: number): boolean => Math.round(a / 1e-9) === Math.round(b / 1e-9);
+type Cell = { readonly kind: 'set'; readonly value: number } | { readonly kind: 'open' } | { readonly kind: 'held' };
+/** On one factor, `b` covers `a`: both hold it or neither does, and a level `a` sets is `b`'s level too. */
+function cellCovered(a: Cell, b: Cell): boolean {
+  if ((a.kind === 'held') !== (b.kind === 'held')) return false;
+  return a.kind !== 'set' || (b.kind === 'set' && sameLevel(a.value, b.value));
+}
+
+const fullLabelOf = (n: { label: string; description?: string }): string => n.description ?? n.label;
+
+/**
+ * Pure over an admitted model. Returns the Olumi-added options to withhold (each with a KEPT option that
+ * covers it) and the groups of USER-stated options to ask about once.
+ *
+ * Never withheld: a USER-stated option (`inferenceClassFor` → `brief_stated`, i.e. provenance
+ * `explicit`); the status quo (stamped `is_baseline`, held by repair edges, declared `is_status_quo`, or
+ * read as one by the readiness idioms, `labelMatchesBaseline`); and an option that acts on nothing —
+ * `option_changes_nothing` owns that shape and keeps it, named (`goal-reachability.test.ts`). The last two
+ * are never named either.
+ */
+function judgeOptionIdentity(
+  admitted: AdmittedModel,
+  declaredStatusQuoLabels: ReadonlySet<string>,
+): { withheld: { id: string; option: string; like: string }[]; statedGroups: string[][] } {
+  const factors = admitted.nodes.filter((n) => n.kind === 'factor');
+  const factorIds = new Set(factors.map((f) => f.id));
+  const options = admitted.nodes.filter((n) => n.kind === 'option');
+  const actsOn = new Map(options.map((o) => [o.id, new Set<string>()] as const));
+  const heldByRepair = new Set<string>();
+  for (const e of admitted.edges) {
+    if (!actsOn.has(e.from) || !factorIds.has(e.to)) continue;
+    if ((e as { origin?: unknown }).origin === REPAIR_AUTHORED_ORIGIN) { heldByRepair.add(e.from); continue; }
+    actsOn.get(e.from)!.add(e.to);
+  }
+  const cell = (o: AdmittedNode, f: string): Cell => {
+    const lv = o.interventions?.[f];
+    if (lv !== undefined && Number.isFinite(lv.value)) return { kind: 'set', value: lv.value };
+    if (actsOn.get(o.id)!.has(f)) return { kind: 'open' };
+    return { kind: 'held' };
+  };
+  const covers = (b: AdmittedNode, a: AdmittedNode): boolean => factors.every((f) => cellCovered(cell(a, f.id), cell(b, f.id)));
+  const isStatusQuo = (o: AdmittedNode): boolean =>
+    o.is_baseline === true || heldByRepair.has(o.id)
+    || declaredStatusQuoLabels.has(canonicalLabel(fullLabelOf(o))) || labelMatchesBaseline(fullLabelOf(o));
+  const actsOnNothing = (o: AdmittedNode): boolean => actsOn.get(o.id)!.size === 0 && Object.keys(o.interventions ?? {}).length === 0;
+  const userStated = (o: AdmittedNode): boolean => admitted.inference_classes[o.id] === 'brief_stated';
+  const order = new Map(options.map((o, i) => [o.id, i] as const));
+  /** Of two options identical as drafted, the one that stays: the user's, then the first drafted. */
+  const outranks = (p: AdmittedNode, o: AdmittedNode): boolean =>
+    (Number(userStated(p)) - Number(userStated(o)) || order.get(o.id)! - order.get(p.id)!) > 0;
+  /** A strict order: `p` covers `o`, and `o` does not cover `p` back unless `p` outranks it. */
+  const dominates = (p: AdmittedNode, o: AdmittedNode): boolean =>
+    p.id !== o.id && covers(p, o) && (!covers(o, p) || outranks(p, o));
+
+  const pool = options.filter((o) => !isStatusQuo(o) && !actsOnNothing(o));
+  const out = new Set(pool.filter((o) => !userStated(o) && pool.some((p) => dominates(p, o))).map((o) => o.id));
+  // Named against the first drafted option that covers it and STAYS — one always exists (a maximal cover).
+  const withheld = pool.filter((o) => out.has(o.id)).map((o) => {
+    const like = pool.find((p) => !out.has(p.id) && dominates(p, o))!;
+    return { id: o.id, option: fullLabelOf(o), like: fullLabelOf(like) };
+  });
+
+  // A USER option another user option covers: asked about once, with the first drafted user option that covers
+  // it and that none covers in turn. Every pair in a group is then alike on every level either sets.
+  const stated = pool.filter(userStated);
+  const groups = new Map<string, AdmittedNode[]>();
+  for (const o of stated) {
+    const head = stated.find((p) => dominates(p, o) && !stated.some((q) => dominates(q, p)));
+    if (head !== undefined) groups.set(head.id, [...(groups.get(head.id) ?? [head]), o]);
+  }
+  const statedGroups = [...groups.values()]
+    .map((g) => [...g].sort((a, b) => order.get(a.id)! - order.get(b.id)!).map(fullLabelOf));
+  return { withheld, statedGroups };
+}
+
+/**
+ * The step the user is told, in the words the server appends (`write-outcome.ts` `openQuestionsLine`). Domain
+ * neutral on purpose: the same shape was drafted for pricing ("Test £59 with AI release", served) and hiring
+ * ("Pilot Developer Hire", `fixtures/live-hiring-envelope-candidate-20260923.json`). "As drafted": Olumi's draft,
+ * never the user's words.
+ */
+const indistinctStep = (option: string, like: string): string =>
+  `I left out "${option}" as a separate option: as drafted it sets nothing the model can hold that "${like}" does not — `
+  + 'a test, pilot or staged rollout needs its own level on a factor the model holds. It stays open as a next step.';
+const statedIndistinctQuestion = (labels: readonly string[]): string => {
+  const quoted = labels.map((l) => `"${l}"`);
+  const which = quoted.length === 2
+    ? `${quoted[0]} different from ${quoted[1]}`
+    : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]} different from each other`;
+  return `What makes ${which}? As drafted, nothing the model holds tells them apart, so the analysis cannot compare them yet.`;
+};
+
+/**
+ * What an adopted retry must still say (never silently): a withheld option the retry does not carry at
+ * all. One the retry keeps, or withholds itself, is the retry's to report.
+ */
+export function carryWithheldOptions(first: AdmittedModel, retry: AdmittedModel): readonly WithheldOption[] {
+  const present = new Set([
+    ...retry.nodes.filter((n) => n.kind === 'option').map((n) => canonicalLabel(fullLabelOf(n))),
+    ...(retry.options_withheld ?? []).map((w) => canonicalLabel(w.option)),
+  ]);
+  return (first.options_withheld ?? []).filter((w) => !present.has(canonicalLabel(w.option)));
+}
+
+/**
+ * Admission, with options identical by construction withheld (see `judgeOptionIdentity`).
+ *
+ * ⭐ WITHHELD BEFORE ANYTHING IS MEASURED OR REGISTERED. When an Olumi option is withheld, the candidate
+ * is admitted AGAIN without it (and without every link naming it), so ids, the held status quo, reach,
+ * levers and the size gate (`build-model.ts` measures `assessConstructionSize(admitted)`) all see
+ * exactly the graph that is registered — as if the drafter had never drafted it. It is said, never
+ * silent: `options_withheld` carries the step, and the ledger records it.
+ */
 export function admitCandidateModel(
   candidateModel: CandidateModel,
   widened: WidenerAdditions = {},
+): AdmittedModel {
+  const declared = new Set(candidateModel.options
+    .filter((o) => readIsBaseline({ ...(typeof o.is_status_quo === 'boolean' ? { is_baseline: o.is_status_quo } : {}) }) === true)
+    .map((o) => canonicalLabel(o.label)));
+  const first = admitOnce(candidateModel, widened);
+  const verdict = judgeOptionIdentity(first, declared);
+  // Never withhold a name another entity shares: removing its links would take that entity's with it.
+  const otherNames = new Set([
+    candidateModel.goal.metric, ...candidateModel.factors.map((f) => f.label), ...candidateModel.risks.map((r) => r.label),
+    ...candidateModel.outcomes.map((o) => o.label),
+  ].map(canonicalLabel));
+  const withheld = verdict.withheld.filter((w) => !otherNames.has(canonicalLabel(w.option)));
+  const questionsFor = (m: AdmittedModel, groups: string[][]) =>
+    groups.length === 0 ? m : { ...m, indistinct_stated_options: groups.map((g) => ({ options: g, question: statedIndistinctQuestion(g) })) };
+  if (withheld.length === 0) return questionsFor(first, verdict.statedGroups);
+
+  const gone = new Set(withheld.map((w) => canonicalLabel(w.option)));
+  const names = (l: { from: string; to: string }) => gone.has(canonicalLabel(l.from)) || gone.has(canonicalLabel(l.to));
+  const second = admitOnce(
+    { ...candidateModel, options: candidateModel.options.filter((o) => !gone.has(canonicalLabel(o.label))), links: candidateModel.links.filter((l) => !names(l)) },
+    {
+      ...widened,
+      ...(widened.proposed_options !== undefined ? { proposed_options: widened.proposed_options.filter((o) => !gone.has(canonicalLabel(o.label))) } : {}),
+      ...(widened.proposed_links !== undefined ? { proposed_links: widened.proposed_links.filter((l) => !names(l)) } : {}),
+    },
+  );
+  const options_withheld: WithheldOption[] = withheld.map((w) => ({
+    option: w.option, like: w.like, reason: 'option_indistinct', sentence: indistinctStep(w.option, w.like),
+  }));
+  return {
+    ...questionsFor(second, judgeOptionIdentity(second, declared).statedGroups),
+    loss: [
+      ...second.loss,
+      ...withheld.map((w, i) => ({
+        field_path: `nodes[${w.id}].option_indistinct`,
+        before: w.option,
+        after: null,
+        reason: options_withheld[i]!.sentence,
+        severity: 'warn',
+      } as RepairEntry)),
+    ],
+    options_withheld,
+  };
+}
+
+function admitOnce(
+  candidateModel: CandidateModel,
+  widened: WidenerAdditions,
 ): AdmittedModel {
   const { model, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
 
@@ -2083,6 +2301,49 @@ export function admitCandidateModel(
     } as RepairEntry);
   }
 
+  /** The node a limit names: its exact label, else a case-insensitive label match; never a fuzzy guess. */
+  const nodeIdForMetric = (metric: string): string | undefined => {
+    const exact = ids.get(metric);
+    if (exact !== undefined) return exact;
+    const wanted = metric.trim().toLowerCase();
+    for (const [label, id] of ids) if (label.trim().toLowerCase() === wanted) return id;
+    return undefined;
+  };
+
+  /**
+   * ⛔ A LIMIT THE USER STATED ON A LEVEL NAMES A QUANTITY THAT CAN HOLD ONE (R&C 5842795947, DL 5842800634).
+   *
+   * SERVED (CEE 08f6f90, Paul's brief "…keeping monthly churn under 10%…"): in about 2 of 7 first passes the drafter
+   * made "Monthly churn" an OUTCOME. The limit attached, but Paul's "about 4% today, from our billing data" had nowhere
+   * to land — "Monthly churn is currently an outcome, not a factor that can hold a starting value" — because the value
+   * writer takes only a factor (`SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS`). Drafted as a factor, the same journey
+   * reached a proposal 5/5.
+   *
+   * So an OUTCOME named by a limit that (a) the user stated (the brief-stated class, `admit-constraint.ts`
+   * `isUserAuthored`'s rule) and (b) is a percentage LEVEL is admitted as an observable FACTOR: the same id, label,
+   * authorship and links, and exactly the served factor-kind shape. A level here is a unit that pins a frame on its own
+   * (`unitPinnedScaleFrame`) AND that the limit canonicaliser carries as a plain `"%"` on that frame — a percent head
+   * with at most a period ("% per month"), above 1 and up to 100. "percentage points" / "pp" (a change), "% change vs …", a money or
+   * count limit, a goal and a risk are left exactly as they were. The frame is the one the unit pins (a unit of
+   * measurement, which is what the served factor-kind node carries); no starting value is written — the slot stays
+   * empty for the user's own figure. An outcome carries no value or frame to keep (its entity has no `node` payload).
+   */
+  const limitedLevelFrames = new Map<string, number>();
+  for (const c of model.constraints) {
+    if (inferenceClassFor(c.provenance) !== 'brief_stated') continue;
+    const frame = unitPinnedScaleFrame(c.unit, c.value);
+    if (frame === undefined || canonicaliseLimitUnit(c.value, c.unit, { scale_frame: frame }).unit !== '%') continue;
+    const id = nodeIdForMetric(c.metric);
+    if (id !== undefined) limitedLevelFrames.set(id, frame);
+  }
+  for (const n of nodes) {
+    const frame = limitedLevelFrames.get(n.id);
+    if (frame === undefined || n.kind !== 'outcome') continue;
+    n.kind = 'factor';
+    n.category = 'observable';
+    n.scale_frame = frame;
+  }
+
   const allLinks: CandidateLink[] = [...model.links, ...(widened.proposed_links ?? [])];
   const resolvable: CandidateLink[] = [];
   const unresolved: { from: string; to: string; reason: string; detail: string }[] = [];
@@ -2307,14 +2568,7 @@ export function admitCandidateModel(
   const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
   const constraintResult = admitCandidateConstraints(
     model.constraints,
-    (metric) => {
-      const exact = ids.get(metric);
-      if (exact !== undefined) return exact;
-      // Fall back to a case-insensitive label match; never a fuzzy guess.
-      const wanted = metric.trim().toLowerCase();
-      for (const [label, id] of ids) if (label.trim().toLowerCase() === wanted) return id;
-      return undefined;
-    },
+    nodeIdForMetric,
     // A limit's unit is canonicalised against ITS node's scale — the one PLoT will normalise it against.
     (nodeId) => {
       const n = nodeById.get(nodeId);
