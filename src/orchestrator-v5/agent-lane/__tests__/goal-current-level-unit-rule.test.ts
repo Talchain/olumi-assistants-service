@@ -66,6 +66,11 @@ describe('refused: never recorded as the goal\'s current level', () => {
     expect(!r.ok && r.refusal).toBe(refusal);
     expect(!r.ok && r.detail).toContain(goalUnit);
   });
+
+  it.each([['USD'], ['$'], ['EUR'], ['USD MRR'], ['pounds']])('another currency (%j) is named as a currency difference, with no rate applied', (stated) => {
+    const r = read(12000, stated, 'GBP MRR');
+    expect(!r.ok && r.detail).toContain('is not in the currency of "G"');
+  });
 });
 
 describe('NAMED RESIDUAL (fail open, as the lane does) — pinned so a change is a decision, not drift', () => {

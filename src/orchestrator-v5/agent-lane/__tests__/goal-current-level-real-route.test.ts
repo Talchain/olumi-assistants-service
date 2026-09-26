@@ -154,6 +154,9 @@ describe('BLOCKING — a figure in another currency is refused, never relabelled
     expect(r.refusal).toBe('unit_mismatch');
     expect(r.detail).toContain(named);
     expect(r.detail).toContain('GBP MRR');
+    // The plain reason says WHY: another currency, and no rate is applied.
+    expect(r.detail).toContain('is not in the currency of "MRR"');
+    expect(r.detail).toContain('No exchange rate is ever applied');
   });
 
   it.each([
