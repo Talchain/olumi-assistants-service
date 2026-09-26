@@ -525,7 +525,9 @@ export interface SemanticQualitySignals {
    * `semanticQualitySufficient` refuses a leader while
    * `material_parameters_user_stated === 0`, and `SEMANTIC_REASON` already tells
    * the user the refusal can be lifted by setting "a value on a factor one of the
-   * options changes, or somewhere on the chain from there to your goal". That
+   * options changes, or on another factor on the chain from there to your goal"
+   * (reworded 26 Sep from "…or somewhere on the chain…": an outcome's or risk's
+   * level on that chain never reaches the ordering, so naming it over-promised). That
    * sentence describes a SET the consumer cannot compute: materiality is
    * reachability over the comparison's substrate ({@link comparisonSubstrate}),
    * and nothing downstream has it. This publishes it.
@@ -779,19 +781,41 @@ export function comparisonSubstrate(graph: unknown): {
  * `epsilon_std`, every observed factor its PU): the goal's level at 0.48 left win-%
  * and outcome means byte-identical, while the CONTRAST — a non-root FACTOR's level,
  * churn 0.04 → 0.90 — moved carry-on's win 0.066 → 0.182 (#70 5845401108). So this
- * excludes the goal, and deliberately not every non-root.
+ * excludes the goal, and deliberately not every non-root FACTOR.
  *
  * Counting it let one chat sentence ("our MRR is £12,000") license a named winner
  * (Model Generation, #70 5845326220). The goal's level still bears on the goal-TARGET
  * claim, which `goal_target_stated` gates, and it stays in the whole-model census.
  * Edges INTO the goal are untouched: their strengths do move the ordering.
  *
- * ⚠ STOPPED AT THE EVIDENCE: an unconstrained non-root `outcome` / `risk` baseline
- * looks alike (no PU reaches it either), but that is UNVERIFIED on the wire and is not
- * ruled here.
+ * ⭐ AND THE SAME FOR EVERY BASELINE NO PARAMETER UNCERTAINTY CARRIES. PLoT passes
+ * `kind` through unchanged (`translator-v3.ts:710`), so an `outcome` or `risk` node's
+ * level reaches the engine only through a constraint's pinned PU — and on the worked
+ * capture below even that did not move the ordering. SERVED witness, engine-direct
+ * PLoT `b09c0f2` + ISL `2795a8c`, 0 LLM calls, this module's own worked capture
+ * (`quality-evidence/goal-baseline-ranking-20260926/served_outcome_baseline.py`):
+ * `out_csat` (a non-root outcome, `brief_extraction`) at 0.87 vs 0.30 → every option's
+ * win-% byte-identical, with and without a limit on it; CONTROL, moving one option's
+ * level on the same run → the win-% moved (opt_phased 0.002 → 0.165).
+ *
+ * So a baseline earns material credit only on a `factor`: PLoT sends a PU for every
+ * observed factor, so its level is the node's base on every draw (and a factor an
+ * option sets is the one whose level the options that leave it alone run at). The
+ * goal, an outcome and a risk are excluded. A constrained outcome is excluded too
+ * although its pinned PU puts its level in the engine, and so is the rare option that
+ * sets a non-factor directly: both err toward refusing, the direction this module is
+ * required to fail in.
+ *
+ * ⚠ THE KNOWN REMAINDER, left as it was and stated so nobody reads this as the whole
+ * rule: a factor EVERY option sets still earns credit, though its level is never read
+ * (the same served run: `fac_4day_adoption`, set by all three options, at 0.9 →
+ * identical). The exact rule — credit a level only where one option sets the node and
+ * another leaves it alone — re-records this module's core fixture, whose two options
+ * both set `fac_price` (#70 5845505012). This change adds no wrong pass; it removes the
+ * outcome / risk / goal ones.
  */
 function baselineReachesTheOrdering(node: Record<string, unknown>): boolean {
-  return node.kind !== 'goal';
+  return node.kind === 'factor';
 }
 
 /**
@@ -1089,7 +1113,7 @@ const SEMANTIC_REASON: Readonly<
   user_stated_not_material: {
     code: 'USER_STATED_PARAMETERS_NOT_MATERIAL',
     message:
-      'The values you have set sit outside what this comparison turns on, so every estimate behind it is still Olumi’s. Figures can be shown as provisional, but no option can be called the leader until you have set a value on a factor one of the options changes, or somewhere on the chain from there to your goal.',
+      'The values you have set sit outside what this comparison turns on, so every estimate behind it is still Olumi’s. Figures can be shown as provisional, but no option can be called the leader until you have set a value on a factor one of the options changes, or on another factor on the chain from there to your goal.',
   },
   material_user_stated: {
     code: 'CONFIDENCE_PARAMETERS_PARTLY_USER_STATED',
