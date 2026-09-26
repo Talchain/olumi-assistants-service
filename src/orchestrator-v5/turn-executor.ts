@@ -195,6 +195,16 @@ import {
   composeCoachingRoutingMessage,
   resolveCoachingIntent,
 } from './coaching/typed-intent-directive.js';
+// ⭐ PROACTIVE DSK-P-002 — the offer leg. The gate reads `data/dsk/v1.json`
+// through the verified loader, so editing the catalogue changes behaviour.
+import { assessOutsideViewEligibility } from './coaching/outside-view-eligibility.js';
+import {
+  buildOutsideViewOffer,
+  deriveOutsideViewHistory,
+  type OutsideViewOffer,
+  attachOutsideViewOffer,
+} from './coaching/outside-view-offer.js';
+import { deriveConversationTextSignals } from './compose/conversation-text-signals.js';
 import {
   buildStructuralRemainderNotice,
   buildUnmappedPartsNotice,
@@ -10478,6 +10488,83 @@ export async function runTurnExecutor(
     let handlerOutcome: HandlerOutcome | null = null;
     let handlerIdForCommit: V5ActionType | null = null;
     let composedOk: OlumiResponse | null = null;
+    /**
+     * ⭐ THE PROACTIVE DSK-P-002 OFFER — the consumer that did not exist.
+     *
+     * `compose/conversation-text-signals.ts` computes DSK-TR-002's text signal, is
+     * tested, is attested against the bundle bytes, and had NO CALL SITE in `src/`.
+     * This is it.
+     *
+     * MEMOISED AND LAZY: only the two SUBSTANTIVE compose branches ask for it, so
+     * the other exits pay nothing. An offer must never ride a refusal, an error or
+     * a functional reply — which is why this is NOT applied at the response
+     * finaliser, where every response shape would receive it.
+     *
+     * ⚠ FAILS CLOSED, ALWAYS. A throw anywhere costs the offer and nothing else: a
+     * coaching nudge must never fail a turn.
+     */
+    let outsideViewMemo: OutsideViewOffer | null | undefined;
+    const outsideViewOffer = (): OutsideViewOffer | null => {
+      if (outsideViewMemo !== undefined) return outsideViewMemo;
+      outsideViewMemo = null;
+      try {
+        const userMessage = typeof payload.message === 'string' ? payload.message : '';
+        const verdict = assessOutsideViewEligibility({
+          signals: deriveConversationTextSignals(
+            userMessage,
+            context.prior_turns,
+            context.prior_turns_total,
+          ),
+          userMessage,
+          stage: context.stage,
+          // A persisted model IS the decision description — P-002's first
+          // `required_input`. Without one there is nothing to take an outside view
+          // ON, and the gate returns `needs_input` rather than offering.
+          hasDecisionDescription: context.persistedGraph !== null,
+          // ⛔ THE CURRENT MESSAGE IS PASSED. Without it the decline and engage
+          // turns could not see their own message and the offer was re-attached
+          // to the reply acknowledging them (review probes P1, P1b, P2).
+          ...deriveOutsideViewHistory(context.prior_turns, userMessage),
+          // ⛔ DECLARED BUT UNREACHABLE FROM THIS CALL SITE, AND SAID SO RATHER THAN
+          // IMPLIED. The `user_states_no_comparable_cases` arm is exercised by the
+          // unit suite but has NO PRODUCER here: deciding "the user has told me this
+          // decision is unprecedented" needs a predicate over natural language, and
+          // a hand-written phrase list over user prose is the hazard this lane
+          // already measured twice — the estimate/fact distinction is not in the
+          // words. Until a corpus-backed recogniser exists this stays false, so the
+          // arm is honest-but-dark rather than silently live.
+          userStatesNoComparableCases: false,
+        });
+        outsideViewMemo = buildOutsideViewOffer(verdict, {
+          sessionId: context.session_id,
+          createdAt: new Date().toISOString(),
+        });
+      } catch {
+        outsideViewMemo = null;
+      }
+      return outsideViewMemo;
+    };
+    /** Append the offer's card and chips to a SUBSTANTIVE answer; identity if absent. */
+    const withOutsideViewOffer = (resp: OlumiResponse): OlumiResponse => {
+      const offer = outsideViewOffer();
+      // ⛔⛔ NEVER SHOW A CARD THE USER CANNOT DECLINE.
+      //
+      // `chip-finalizer.ts` caps the `chip_prompt_`/`chip_action_` suggestion
+      // family at 3 and keeps the EARLIER chips. The Canvas Completion lane's
+      // review measured both failure rows: with 2 base suggestion chips "Not now"
+      // was trimmed, and with 3 base chips BOTH offer chips were trimmed — while
+      // the card survived either way, because blocks are not budgeted. The user
+      // was asked a question with no way to say no, and it came back next turn.
+      //
+      // The decline is now emitted first, so a one-slot budget keeps it. If there
+      // is no slot at all, the whole offer stands down: silence is honest, an
+      // un-refusable prompt is not. The budget is asserted against the real
+      // finaliser in `__tests__`, not trusted from this comment.
+      // ⭐ ONE IMPLEMENTATION, shared with the spec that pins it. The inline
+      // version could not be mutated to RED because no fixture here saturates the
+      // chip family; `attachOutsideViewOffer` is imported by both.
+      return attachOutsideViewOffer(resp, offer);
+    };
     // V5 P0.2 — a flip-threshold proposal's pending action, emitted on a
     // what_would_flip turn and merged into the committed pending_actions.
     let flipProposalPending: PendingAction | undefined;
@@ -13806,7 +13893,7 @@ export async function runTurnExecutor(
       // boundary violation, degrade to a safe rerun response; otherwise pass
       // the LLM prose + chips through unchanged.
       const coachGuarded = applyCoachingOutputGuard(sanitised.output, coachComposedChips);
-      composedOk = composeAnswer({
+      composedOk = withOutsideViewOffer(composeAnswer({
         assistant_text: coachGuarded.assistant_text,
         stage: context.stage,
         suggested_actions: coachGuarded.suggested_actions,
@@ -13826,7 +13913,7 @@ export async function runTurnExecutor(
           sourceFact: promptAnalysisSourceFact,
           freshness: promptAnalysisFreshness,
         }),
-      });
+      }));
       stagesCompleted.push('compose');
       // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION. The coach ANSWER prose
       // shapes by default (it is a substantive answer). Detect the ONE case that
@@ -14006,7 +14093,7 @@ export async function runTurnExecutor(
         !converseGuarded.suggested_actions.some((c) => c.action_type === 'run_analysis')
           ? [analysisElectionOfferChip, ...converseGuarded.suggested_actions]
           : converseGuarded.suggested_actions;
-      composedOk = composeAnswer({
+      composedOk = withOutsideViewOffer(composeAnswer({
         assistant_text: converseGuarded.assistant_text,
         stage: context.stage,
         suggested_actions: converseChipsWithOffer,
@@ -14018,7 +14105,7 @@ export async function runTurnExecutor(
           sourceFact: promptAnalysisSourceFact,
           freshness: promptAnalysisFreshness,
         }),
-      });
+      }));
       stagesCompleted.push('compose');
       // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION. The converse / text_only
       // ANSWER prose (the primary F1 target) shapes by default. Detect the ONE
