@@ -42,7 +42,7 @@ import { log } from '../utils/telemetry.js';
 import { asVerdictState } from '../orchestrator/context/constraint-feasibility.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
-import { runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
+import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { readinessSentence, readinessViewOf } from '../orchestrator-v5/agent-lane/readiness-view.js';
@@ -952,12 +952,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const text = await r.text();
       throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
     }
-    const j = (await r.json()) as { output: Record<string, unknown>[]; usage?: unknown };
+    const j = (await r.json()) as { output: Record<string, unknown>[]; usage?: unknown; status?: unknown; incomplete_details?: { reason?: unknown } | null };
     // Never throws, and records nothing for a malformed payload, so a successful call
     // cannot be turned into a failed one by the measurement of it.
     recordProviderUsage(usageHandle, j.usage);
-    // The usage sidecar is read above and is not part of the transport contract.
-    return { output: j.output };
+    // The usage sidecar is read above and is not part of the transport contract. Completion status IS (AIX-001):
+    // an `incomplete` 200 can carry a partial answer.
+    return {
+      output: j.output,
+      ...(typeof j.status === 'string' ? { status: j.status } : {}),
+      ...(typeof j.incomplete_details?.reason === 'string' ? { incomplete_reason: j.incomplete_details.reason } : {}),
+    };
   });
 
   /**
@@ -1588,7 +1593,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⛔ THE REASONING ITEM TRAVELS WITH ITS MESSAGE (served `f828a61`, witness c9: every turn after a
         // Run was refused "Item 'msg_…' of type 'message' was provided without its required 'reasoning'
         // item", HTTP 502). Kept in output order, exactly as the Agent loop keeps its whole output.
-        if (answer.trim().length > 0) interpreted = { answer, messages: out.filter((o) => o.type === 'reasoning' || o.type === 'message') as Record<string, unknown>[] };
+        if (answerIsIncomplete(resp as never)) log.warn({ scenario_id: scenarioId, incomplete_reason: (resp as { incomplete_reason?: unknown }).incomplete_reason ?? null }, 'agent-lane: fast-path interpretation incomplete — answering from the run itself');
+        else if (answer.trim().length > 0) interpreted = { answer, messages: out.filter((o) => o.type === 'reasoning' || o.type === 'message') as Record<string, unknown>[] };
         else log.warn({ scenario_id: scenarioId }, 'agent-lane: fast-path interpretation was empty — answering from the run itself');
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: fast-path interpretation failed — answering from the run itself');
@@ -1641,9 +1647,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     histories.set(sessionId, [...result.items]);
 
     // A hop limit is never returned as an empty answer.
-    const text = result.stopped_reason === 'hop_limit' && result.assistant_text.length === 0
-      ? 'I was not able to finish that within this turn. Ask me again and I will continue.'
-      : result.assistant_text;
+    // ⛔ AN UNFINISHED ANSWER IS ANSWERED FROM THE TURN'S OWN OUTCOME (AIX-001): after a run, the run's own
+    // explanation-unavailable sentence (no second model call, no second run); otherwise the hop-limit sentence.
+    const runThisTurn = ((): Record<string, unknown> | undefined => {
+      for (let i = result.tool_calls.length - 1; i >= 0; i -= 1) {
+        if (result.tool_calls[i]!.name === 'run_analysis') return result.tool_results[i] as Record<string, unknown> | undefined;
+      }
+      return undefined;
+    })();
+    const text = result.stopped_reason === 'incomplete'
+      ? (runThisTurn !== undefined ? interpretationUnavailableText(runThisTurn) : 'I was not able to finish that within this turn. Ask me again and I will continue.')
+      : result.stopped_reason === 'hop_limit' && result.assistant_text.length === 0
+        ? 'I was not able to finish that within this turn. Ask me again and I will continue.'
+        : result.assistant_text;
 
     // ⭐ `answerKind` is REQUIRED and load-bearing: route egress synthesises
     // `_answer_shape` only for 'substantive'. An Agent's conversational reply
