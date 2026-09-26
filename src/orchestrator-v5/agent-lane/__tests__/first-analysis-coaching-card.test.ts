@@ -231,8 +231,11 @@ describe('the automatic first analysis shows the fragile-link coaching card', ()
     expect(CoachingBlockSchema.safeParse(card).success).toBe(true);
     const computedAt = (PAUL_T1.analysis_state.run_state as { computed_at: string }).computed_at;
     // Reverting agent-v1-turn.ts's `graph: readbackGraph` turns this RED: the card falls back to the generic words.
-    expect(card.signal_id).toBe(`coach:limit_unchecked:${PAUL_T1.graph_hash}:${computedAt}:auto_first_pass:named`);
+    // Churn is worked out from price and adoption on this graph and no run option sets it, so the route's card also
+    // says the PROVED cause (`:unanchored`): the route hands the run's own analysis_ready options to the proof.
+    expect(card.signal_id).toBe(`coach:limit_unchecked:${PAUL_T1.graph_hash}:${computedAt}:auto_first_pass:named:unanchored`);
     expect(String(card.body)).toContain('your limit on “Monthly churn”');
+    expect(String(card.body)).toContain('Olumi works that out from other parts of your model');
     expect(String(card.action_prompt)).toContain('my limit on “Monthly churn”');
     expect(card.action_label).toBe('What this means for my limit');
     expect(card.graph_hash_at_generation).toBe(r.graph_hash);

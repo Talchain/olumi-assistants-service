@@ -45,7 +45,7 @@ import {
   buildAddOptionsTransaction,
   MAX_OPTIONS_PER_TRANSACTION,
   type AddOptionGraphView,
-  type AddOptionSkipReason,
+  type AddOptionsSkipReason,
 } from '../routing/add-option-transaction.js';
 import { log } from '../../utils/telemetry.js';
 
@@ -73,7 +73,9 @@ export type AddOptionTransactionOutcome =
   | {
       readonly kind: 'skip';
       readonly reason:
-        | AddOptionSkipReason
+        // Every builder refusal except `too_many_options`, which is REFUSED with a sentence, not skipped —
+        // including the new-factor reasons (ruling #70 5843972346).
+        | Exclude<AddOptionsSkipReason, 'too_many_options'>
         | 'gm_not_live'
         | 'no_graph_hash'
         | 'unreadable_graph'
@@ -133,7 +135,7 @@ function joinQuoted(labels: readonly string[]): string {
 }
 
 /** Positive completeness disclosure — the option lands analysable. */
-function buildConfiguredNotice(label: string): string {
+export function buildConfiguredNotice(label: string): string {
   return (
     `'${label}' comes with its effect values, so once you apply this it is ` +
     `configured and the analysis can run.`
@@ -195,7 +197,12 @@ function toGraphView(currentGraph: unknown): AddOptionGraphView | null {
   const parsed = GraphV3.safeParse(currentGraph);
   if (!parsed.success) return null;
   return {
-    nodes: parsed.data.nodes.map((n) => ({ id: n.id, kind: n.kind, label: n.label })),
+    nodes: parsed.data.nodes.map((n) => ({
+      id: n.id,
+      kind: n.kind,
+      label: n.label,
+      ...(typeof (n as { category?: unknown }).category === 'string' ? { category: (n as { category: string }).category } : {}),
+    })),
     edges: parsed.data.edges.map((e) => ({ from: e.from, to: e.to })),
   };
 }
@@ -335,10 +342,19 @@ export function dispatchAddOptionTransaction(
   // gate's structural heads-up fires exactly when there are no factor links,
   // which is precisely `configured === false` here (one factor edge per value),
   // so relying on it never drops the disclosure.
+  //
+  // ⛔ "READY TO ANALYSE" NEEDS EVERY LINK VALUED, NOT ONE (review 5844092217 B2). `configured` means "at
+  // least one effect value", so a MIXED option — one factor valued, another linked with no size (the F4
+  // add-on: price set, the new factor unset) — was told "it is configured and the analysis can run" in
+  // the same turn as "I don't have those numbers". The affirmation now needs NO linked-unvalued factor;
+  // the linked-unvalued notice below says what is missing. `configured` itself (the outcome field
+  // route-v2 reads) is unchanged.
+  const readyToAnalyse = (p: (typeof proposals)[number]): boolean =>
+    p.configured && p.linkedUnvaluedFactorIds.length === 0;
   const multi = proposals.length > 1;
-  const configuredLabels = proposals.filter((p) => p.configured).map((p) => p.optionLabel);
+  const configuredLabels = proposals.filter(readyToAnalyse).map((p) => p.optionLabel);
   const disclosure = !multi
-    ? configured
+    ? readyToAnalyse(first)
       ? buildConfiguredNotice(optionLabel)
       : null
     : configuredLabels.length > 0
@@ -357,8 +373,11 @@ export function dispatchAddOptionTransaction(
   // stops matching, the worst case is both sentences shipping, never a
   // silently dropped disclosure.
   const linkedNotices: string[] = [];
+  // A factor this batch ADDS is not in the pre-edit graph: name it from the batch (contract 5843960061).
   const labelOf = (id: string): string =>
-    graphView.nodes.find((n) => n.id === id)?.label ?? id;
+    built.newFactors.find((f) => f.id === id)?.label ??
+    graphView.nodes.find((n) => n.id === id)?.label ??
+    id;
   for (const p of proposals) {
     if (p.linkedUnvaluedFactorIds.length === 0) continue;
     linkedNotices.push(

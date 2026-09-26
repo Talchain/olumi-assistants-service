@@ -30,6 +30,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_new_option: { label: 'Add this option', message: 'Yes, add that option.' },
   // The goal's current level, as the user stated it (`goal-current-level.ts`).
   propose_goal_current_level: { label: 'Record this current level', message: 'Yes, record it.' },
+  // A link's strength recorded as the user's own (challenge → authorised revision): one button, carried like the rest.
+  propose_link_strength: { label: 'Record this link', message: 'Yes, record that.' },
 };
 
 export const AMEND_CHIP: SuggestedAction = {
