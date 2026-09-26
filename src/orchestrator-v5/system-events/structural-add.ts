@@ -198,6 +198,8 @@ export type StructuralAddResult =
       readonly kind: 'mutated';
       readonly response: OlumiResponse;
       readonly mutatedGraph: unknown;
+      /** The ops this write applied — the hold thread-through's fulfilment input (#1947 review). */
+      readonly appliedOperations: readonly PatchOperation[];
       readonly handlerFacts: readonly HandlerFact[];
       readonly graph: GraphV3T;
       readonly baseGraph: unknown;
@@ -804,6 +806,7 @@ export function applyStructuralAdd(params: ApplyStructuralAddParams): Structural
       stage_indicator: payload.stage,
     },
     mutatedGraph: projectedGraph,
+    appliedOperations: operations,
     handlerFacts: [factCheck.data],
     graph: projectedParse.data,
     baseGraph: persistedGraph,

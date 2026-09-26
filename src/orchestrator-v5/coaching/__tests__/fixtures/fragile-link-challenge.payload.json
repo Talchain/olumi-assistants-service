@@ -49,12 +49,12 @@
         "type": "coaching",
         "coaching_kind": "assumption_check",
         "title": "Check the limits before relying on this",
-        "body": "This analysis could not confirm that the options stay within the limits on the model: at least one was not checked or not met. That is why no option is put forward yet.",
+        "body": "This analysis could not confirm that the options stay within the limits on the model: at least one was not checked or not met. That is one reason no option is put forward yet.",
         "source": "deterministic_signal",
         "target_refs": [],
         "priority_rank": 15,
         "action_label": "What this means for my limits",
-        "action_prompt": "Olumi could not confirm the options stay within the limits on my model: at least one was not checked or was not met, so no option is put forward yet. Explain what that means for how far I can rely on this analysis. Don't change the model or re-run anything yet."
+        "action_prompt": "Olumi could not confirm the options stay within the limits on my model: at least one was not checked or was not met, which is one reason no option is put forward yet. Explain what that means for how far I can rely on this analysis. Don't change the model or re-run anything yet."
       }
     ],
     "eligibility": {
@@ -73,12 +73,12 @@
         "type": "coaching",
         "coaching_kind": "assumption_check",
         "title": "Check the limits before relying on this",
-        "body": "Before relying on this first pass on Olumi's estimates, note that it could not confirm that the options stay within the limits on the model: at least one was not checked or not met. That is why no option is put forward yet.",
+        "body": "Before relying on this first pass on Olumi's estimates, note that it could not confirm that the options stay within the limits on the model: at least one was not checked or not met. That is one reason no option is put forward yet.",
         "source": "deterministic_signal",
         "target_refs": [],
         "priority_rank": 15,
         "action_label": "What this means for my limits",
-        "action_prompt": "Olumi could not confirm the options stay within the limits on my model: at least one was not checked or was not met, so no option is put forward yet. Explain what that means for how far I can rely on this analysis. Don't change the model or re-run anything yet."
+        "action_prompt": "Olumi could not confirm the options stay within the limits on my model: at least one was not checked or was not met, which is one reason no option is put forward yet. Explain what that means for how far I can rely on this analysis. Don't change the model or re-run anything yet."
       }
     ],
     "eligibility": {

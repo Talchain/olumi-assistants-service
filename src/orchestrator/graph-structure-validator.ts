@@ -106,6 +106,25 @@ export interface StructuralViolation {
    *  readiness blocker can name it by id instead of only in `detail` prose. */
   option_id?: string;
   option_label?: string;
+  /** (B4, the whole class) The factor a per-node violation is about. */
+  factor_id?: string;
+  factor_label?: string;
+}
+
+/**
+ * (B4, the whole class) — the id-scope of a per-NODE violation: an option names
+ * `option_id`, a factor names `factor_id`, and any other kind names nothing
+ * (never an invented scope). Every per-node check spreads this, so a new check
+ * cannot name its node in prose only.
+ */
+function elementScope(node: { id: string; kind: string; label?: string }): Partial<StructuralViolation> {
+  if (node.kind === 'option') {
+    return { option_id: node.id, ...(node.label ? { option_label: node.label } : {}) };
+  }
+  if (node.kind === 'factor') {
+    return { factor_id: node.id, ...(node.label ? { factor_label: node.label } : {}) };
+  }
+  return {};
 }
 
 export interface StructuralValidationResult {
@@ -167,13 +186,22 @@ const MIN_OPTIONS = 2;
  * projection. A surface that describes a proposal takes `preview`; a surface
  * that describes the model as it stands takes `current`.
  */
+/**
+ * ⚠ THESE STRINGS ARE SAID TO THE USER, VERBATIM — in the chat (the unblock answer
+ * quotes them) and on the UI's Run gate. The UI's jargon guard (DGAI
+ * `ceeTextGuard.ts` `isSafeCeeText`) withholds a WHOLE blocker list when any one
+ * message says "node", "edge" or "graph", and the gate then degrades to a label
+ * rung that names no remedy ('"New option" and "New option" are not ready for
+ * analysis yet', served 26 Sep, UI c3c2d539, after a canvas "+ Add option").
+ * Pinned by `graph-structure-validator.copy.test.ts`.
+ */
 export const VIOLATION_COPY: Record<
   StructuralViolationCode,
   { readonly preview: string; readonly current: string }
 > = {
   ORPHAN_NODE: {
-    preview: 'This change would leave a node with no connections.',
-    current: 'A node in the model has no connections.',
+    preview: 'This change would leave a part of the model with no connections.',
+    current: 'A part of the model has no connections.',
   },
   // 1.16 item C: the message and the predicate now agree — checkPathToGoal's
   // second loop flags nodes that cannot REACH the goal via forward directed
@@ -181,8 +209,8 @@ export const VIOLATION_COPY: Record<
   // decision. Loop 1 (goal reachable from the decision) also reports under
   // this code; "cannot reach the goal" reads correctly for both.
   NO_PATH_TO_GOAL: {
-    preview: 'This change would leave a node that cannot reach the goal.',
-    current: 'A node in the model cannot reach the goal.',
+    preview: 'This change would leave a part of the model that cannot reach the goal.',
+    current: 'A part of the model cannot reach the goal.',
   },
   CYCLE_DETECTED: {
     preview: 'This change would create a circular dependency in the model.',
@@ -213,20 +241,20 @@ export const VIOLATION_COPY: Record<
   // divergence invented for symmetry's sake would be a second string nobody
   // needs.
   NODE_LIMIT_EXCEEDED: {
-    preview: `Olumi can analyse models of up to ${GRAPH_MAX_NODES} nodes. This one goes past that — remove a node to make room.`,
-    current: `Olumi can analyse models of up to ${GRAPH_MAX_NODES} nodes. This one goes past that — remove a node to make room.`,
+    preview: `Olumi can analyse models of up to ${GRAPH_MAX_NODES} parts. This one goes past that — remove one to make room.`,
+    current: `Olumi can analyse models of up to ${GRAPH_MAX_NODES} parts. This one goes past that — remove one to make room.`,
   },
   EDGE_LIMIT_EXCEEDED: {
     preview: `Olumi can analyse models of up to ${GRAPH_MAX_EDGES} connections. This one goes past that — remove a connection to make room.`,
     current: `Olumi can analyse models of up to ${GRAPH_MAX_EDGES} connections. This one goes past that — remove a connection to make room.`,
   },
   NO_GOAL: {
-    preview: 'The model would have no goal node.',
-    current: 'The model has no goal node.',
+    preview: 'The model would have no goal.',
+    current: 'The model has no goal.',
   },
   NO_DECISION: {
-    preview: 'The model would have no decision node.',
-    current: 'The model has no decision node.',
+    preview: 'The model would have no decision.',
+    current: 'The model has no decision.',
   },
   FEWER_THAN_TWO_OPTIONS: {
     preview: 'The model would have fewer than two options.',
@@ -236,8 +264,8 @@ export const VIOLATION_COPY: Record<
   // leaves an option unwired and a loaded model with an unwired option are the
   // same sentence. Kept identical rather than split for the sake of it.
   OPTION_NO_FACTOR_EDGES: {
-    preview: 'An option has no factor connections and cannot be analysed. Add at least one factor edge.',
-    current: 'An option has no factor connections and cannot be analysed. Add at least one factor edge.',
+    preview: 'An option has no factor connections and cannot be analysed. Connect it to at least one factor.',
+    current: 'An option has no factor connections and cannot be analysed. Connect it to at least one factor.',
   },
   // PR #413 review FIXUP 3 — distinct from NO_PATH_TO_GOAL: a floating
   // option can reach the goal, but nothing selects it.
@@ -404,6 +432,7 @@ function checkOrphanNodes(graph: GraphV3T, violations: StructuralViolation[]): v
       violations.push({
         code: 'ORPHAN_NODE',
         detail: `Node "${node.id}" (${node.label}) has no edges`,
+        ...elementScope(node),
       });
     }
   }
@@ -440,6 +469,7 @@ function checkOptionFactorEdges(graph: GraphV3T, violations: StructuralViolation
       violations.push({
         code: 'OPTION_NO_FACTOR_EDGES',
         detail: `Option "${node.id}" (${node.label}) has no outbound edge to a factor — it cannot be analysed. Add at least one option → factor edge.`,
+        ...elementScope(node),
       });
     }
   }
@@ -472,8 +502,7 @@ function checkOptionDecisionEdges(graph: GraphV3T, violations: StructuralViolati
       violations.push({
         code: 'OPTION_NOT_LINKED_TO_DECISION',
         detail: `Option "${node.id}" (${node.label}) has no inbound edge from a decision — nothing selects it. Add a decision → option edge.`,
-        option_id: node.id,
-        ...(node.label ? { option_label: node.label } : {}),
+        ...elementScope(node),
       });
     }
   }
@@ -618,6 +647,7 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
       violations.push({
         code: 'NO_PATH_TO_GOAL',
         detail: `Node "${node.id}" (${node.label}) cannot reach the goal via directed paths`,
+        ...elementScope(node),
       });
     }
   }

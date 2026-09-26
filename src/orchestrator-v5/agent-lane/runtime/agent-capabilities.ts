@@ -17,9 +17,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
 import { AGENT_ADD_OPTION_CHIP_ID, AGENT_RUN_ANALYSIS_CHIP_ID } from '../../handlers/agent-chip-ids.js';
-import { buildAddOptionTransaction } from '../../routing/add-option-transaction.js';
+import { buildAddOptionsTransaction, MAX_OPTIONS_PER_TRANSACTION } from '../../routing/add-option-transaction.js';
 import { GM_HELD_HANDLER_ID, GM_HELD_OPERATIONS_MAX_JSON_CHARS, gmHeldProposalRef } from '../../handlers/edit-graph-referee-gate.js';
-import { PROPOSAL_CAP } from '../../graph-management/types.js';
+import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js';
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 
@@ -40,6 +40,11 @@ import { isPendingActionExpired, type PendingAction } from '../../session/pendin
  * satisfies the wire. The trade is legibility in the turn log for a stable
  * idempotency key, and the stable key is what the replay arm needs.
  */
+
+/** A value whose unit is another kind than its factor's (a price as churn): left out, and the Agent says why. */
+const UNIT_MISMATCH_NOTE =
+  'Left out because the figure is in a different kind of unit from the factor (for example a price given for a rate). '
+  + 'Never record a figure the user gave for something else as this factor\u2019s value; ask for its own figure if needed.';
 
 /** What the Agent is told to say about a named input that cannot hold a value. */
 const NOT_A_FACTOR_NOTE =
@@ -96,8 +101,11 @@ import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSumm
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
+import { readinessViewOf } from '../readiness-view.js';
+import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
+import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel } from './build-model.js';
@@ -302,7 +310,17 @@ interface GraphRead {
     data?: unknown;
   }[];
   /** `origin` is read only to recognise a repair-authored edge (`isRepairAuthoredOptionFactorEdge`). */
-  readonly edges: { from: string; to: string; origin?: unknown }[];
+  readonly edges: {
+    from: string;
+    to: string;
+    origin?: unknown;
+    /** Read only by `projectLinks` — whose link it is, and how strong (C33). */
+    provenance?: unknown;
+    strength?: unknown;
+    exists_probability?: unknown;
+    effect_direction?: unknown;
+    defaulted?: unknown;
+  }[];
   readonly analysis_state: unknown;
   /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
   readonly raw: Record<string, unknown>;
@@ -464,6 +482,85 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
             ...(n.provenance === undefined ? {} : { provenance: n.provenance }),
           };
         }
+
+/**
+ * ⭐ (B) WHAT THE AGENT NEEDS TO EXPLAIN THE MODEL HONESTLY — the goal as the user stated it, the limits they
+ * set, whose each link is, and the ONE readiness verdict (C33 5838970895; ChatGPT 5839692762 B).
+ *
+ * Every value is a stored carrier passed through, never re-derived: the goal target through the ONE trio
+ * reader (`pickGoalThresholdTrio`, raw figure only — never the normalised `goal_threshold`, which is the
+ * constant 0.8 on every headroom-derived cap), limits from `goal_constraints` as stored, link strength and
+ * provenance as stored. Readiness is `readinessViewOf` — the route's own admission verdict, in plain words.
+ */
+function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'analysis_state'>): Record<string, unknown> {
+  const str = (v: unknown): v is string => typeof v === 'string' && v !== '';
+  const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+  const labelOf = new Map(g.nodes.map((n) => [n.id, n.label] as const));
+  const goals = g.nodes.filter((n) => n.kind === 'goal').map((n) => {
+    const trio = pickGoalThresholdTrio(n as never) as { goal_threshold_raw?: number; goal_threshold_unit?: string };
+    const frame = (n as { goal_threshold_frame?: unknown }).goal_threshold_frame;
+    return {
+      id: n.id,
+      label: n.label,
+      ...(trio.goal_threshold_raw === undefined ? {} : {
+        target: {
+          value: trio.goal_threshold_raw,
+          ...(trio.goal_threshold_unit === undefined ? {} : { unit: trio.goal_threshold_unit }),
+          ...(str(frame) ? { frame } : {}),
+        },
+      }),
+    };
+  });
+  const limits = (Array.isArray(g.raw.goal_constraints) ? g.raw.goal_constraints : [])
+    .filter((c): c is Record<string, unknown> => c !== null && typeof c === 'object')
+    .filter((c) => str(c.operator) && num(c.value))
+    .map((c) => ({
+      // Named as the run-turn limit card names it (#1935): the node the limit sits on, joined by id; the row's
+      // own label only when that node is absent — so the card and the Agent say the same words for one limit.
+      on: (str(c.node_id) ? labelOf.get(c.node_id) : undefined) ?? (str(c.label) ? c.label : 'the goal'),
+      operator: c.operator,
+      value: c.value,
+      ...(str(c.unit) ? { unit: c.unit } : {}),
+      ...(str(c.provenance) ? { stated_by: c.provenance } : {}),
+    }));
+  const links = g.edges.map((e) => {
+    const source = (e.provenance !== null && typeof e.provenance === 'object') ? (e.provenance as { source?: unknown }).source : e.provenance;
+    const st = (e.strength !== null && typeof e.strength === 'object') ? e.strength as { mean?: unknown; std?: unknown } : undefined;
+    return {
+      from: e.from,
+      to: e.to,
+      ...(str(source) ? { source } : {}),
+      ...(str(e.effect_direction) ? { direction: e.effect_direction } : {}),
+      ...(st !== undefined && num(st.mean) ? { strength: { mean: st.mean, ...(num(st.std) ? { std: st.std } : {}) } } : {}),
+      ...(num(e.exists_probability) ? { exists_probability: e.exists_probability } : {}),
+      ...(e.defaulted === true ? { defaulted: true } : {}),
+      ...(str(e.origin) ? { origin: e.origin } : {}),
+    };
+  });
+  return {
+    ...(goals.length === 1 ? { goal: goals[0] } : goals.length > 1 ? { goals } : {}),
+    ...(limits.length > 0 ? { limits } : {}),
+    links,
+    readiness: readinessViewOf(g.raw),
+    ...(earlierAnalysisOf(g.analysis_state) ?? {}),
+  };
+}
+
+const pickKeys = (o: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> =>
+  Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
+
+/**
+ * ⛔ AN EARLIER ANALYSIS IS NOT PERMISSION TO RUN. The read route's `analysis_state.readiness` is a
+ * PLACEHOLDER (`{status:'unknown', blockers:[]}`; an empty list the composer treats as "nothing blocking"),
+ * so it is dropped here: whether a run may happen now is `readiness`, only. What the stored RESULT is — an
+ * earlier run, current or stale — stays, named `earlier_analysis` so it is never read as admission.
+ */
+function earlierAnalysisOf(state: unknown): { analysis: Record<string, unknown> } | undefined {
+  if (state === null || typeof state !== 'object') return undefined;
+  const { readiness: _placeholder, ...rest } = state as Record<string, unknown>;
+  const kind = (rest.run_state as { kind?: unknown } | undefined)?.kind;
+  return { analysis: { ...(typeof kind === 'string' ? { earlier_analysis: kind } : {}), ...rest } };
+}
 
 /**
  * ⛔ A NAME SHARED BY TWO ACCEPTABLE TARGETS NAMES NEITHER.
@@ -691,6 +788,18 @@ export function createAgentCapabilities(
     const ops = (hold.action as { inline_patch?: { operations?: unknown } }).inline_patch?.operations;
     return Array.isArray(ops) ? ops.filter((o): o is { op: string; path: string; value?: unknown } =>
       o !== null && typeof o === 'object' && typeof (o as { op?: unknown }).op === 'string' && typeof (o as { path?: unknown }).path === 'string') : [];
+  };
+  /** Every live held add-option, as the approval it awaits. A failed read lists none — never a guess. */
+  const liveHeldAwaiting = async (scenarioId: string): Promise<{ proposal_id: string; public_label: string }[]> => {
+    if (opts.readPendingActions === undefined) return [];
+    let pendings: readonly PendingAction[];
+    try { pendings = await opts.readPendingActions(scenarioId); } catch { return []; }
+    return pendings
+      .filter((p) => typeof p.chip_id === 'string' && /^gmh_[0-9a-f]{12}$/.test(p.chip_id)
+        && p.action.kind === 'apply_proposed_change'
+        && (p.action as { inline_patch?: { handler_id?: unknown } }).inline_patch?.handler_id === GM_HELD_HANDLER_ID
+        && !isPendingActionExpired(p, Date.now()))
+      .map((p) => ({ proposal_id: p.chip_id as string, public_label: resolveProposalRenderCopy(p.action as { kind: string; public_label?: string }).label }));
   };
   /** A level is set when the option's intervention for that factor carries a number (either stored shape). */
   const hasLevel = (node: { interventions?: unknown } | undefined, factorId: string): boolean => {
@@ -1095,6 +1204,49 @@ export function createAgentCapabilities(
     }
     return missing;
   };
+  /**
+   * ⭐ WHAT THE ONE VERDICT WOULD SAY IF THIS WERE APPROVED (served ef99a97 / cb1778b: a starting point that filled
+   * every level but made two options identical — the user's one approval led straight to "nothing to compare").
+   * The stored graph with the proposal's levels (and value presence) applied, read by the SAME `readinessViewOf`.
+   * A preview for the Agent's words only; nothing here is written.
+   */
+  const readinessIfApplied = async (ctx: AgentToolContext, ops: readonly ProposalOperation[]): Promise<ReturnType<typeof readinessViewOf>> => {
+    const g = await readGraph(ctx.scenario_id);
+    if (g === null) return readinessViewOf(undefined);
+    const raw = JSON.parse(JSON.stringify(g.raw)) as { nodes?: { id?: unknown; interventions?: unknown; observed_state?: Record<string, unknown> }[] };
+    const byId = new Map((raw.nodes ?? []).map((n) => [String(n.id), n] as const));
+    for (const o of ops) {
+      if (o.op === 'set_option_intervention') {
+        const [optionId, factorId] = o.path.split('::') as [string, string];
+        const v = (o.value as { normalised?: unknown } | undefined)?.normalised;
+        const n = byId.get(optionId);
+        if (n !== undefined && typeof v === 'number') n.interventions = { ...((n.interventions ?? {}) as Record<string, unknown>), [factorId]: { value: v } };
+      } else if (o.op === 'set_factor_value') {
+        const n = byId.get(o.path);
+        const v = (o.value as { value?: unknown } | undefined)?.value;
+        const cap = n?.observed_state?.cap;
+        if (n !== undefined && typeof v === 'number') {
+          // Stored against the factor's range when it has one; the verdict reads presence and range, never this figure's meaning.
+          const stored = typeof cap === 'number' && cap > 0 ? v / cap : v <= 1 ? v : 1;
+          n.observed_state = { ...(n.observed_state ?? {}), value: stored };
+        }
+      }
+    }
+    return readinessViewOf(raw);
+  };
+  /**
+   * What the Agent must say BEFORE the approval when the preview still blocks: the verdict's own words — the
+   * user's demands, else the refusal's `reason` (the run path's `blockedNextStep`) — never an example that may not
+   * fit this model (#1957 review: a one-option model was told to ask about "identical options").
+   */
+  const stillBlockedNote = (v: ReturnType<typeof readinessViewOf>): string => {
+    if (!v.checked || v.may_run !== false) return '';
+    const why = [...v.needs_from_user.map((i) => i.message), ...(v.needs_from_user.length === 0 && v.reason !== undefined ? [v.reason] : [])]
+      .map((m) => m.trim().replace(/\.+$/, ''))
+      .filter((m) => m !== '');
+    return ` Even after this approval the analysis could still not run: ${why.length > 0 ? why.join('. ') : 'the model would still be blocked'}. `
+      + 'Say so plainly BEFORE asking for approval, and ask the user for what this cannot settle — never invent a difference or a figure.';
+  };
   const levelPathsOf = (ps: readonly StructuredProposal[]): Set<string> =>
     new Set(ps.flatMap((p) => p.operations).filter((o) => o.op === 'set_option_intervention').map((o) => o.path));
   /**
@@ -1151,11 +1303,13 @@ export function createAgentCapabilities(
         // has to infer topology from an edge list, and measurably does it worse
         // than the product it is being compared against.
         structure: structuralFacts(g.nodes, g.edges),
-        analysis: g.analysis_state,
+        // (B) goal target, limits, links, the ONE readiness verdict, and the earlier analysis kept apart from it.
+        ...projectModelContext(g),
         // Every proposal this user has been shown and not yet approved, newest
-        // first. An approval with nothing to bind to is an approval that
+        // first — including a held add-option, which lives in the session store,
+        // not in memory. An approval with nothing to bind to is an approval that
         // silently does nothing.
-        awaiting_your_approval: proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id),
+        awaiting_your_approval: [...await liveHeldAwaiting(ctx.scenario_id), ...proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)],
       };
     },
 
@@ -1254,6 +1408,7 @@ export function createAgentCapabilities(
       const notAFactor: { label: string; kind: string }[] = [];
       const ambiguous: AmbiguousTarget[] = [];
       const occupied: { label: string; current_value: number }[] = [];
+      const unitMismatch: { label: string; value: unknown; unit: string; factor_unit: string }[] = [];
       const seen = new Set<string>();
       const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number }[] = [];
 
@@ -1268,6 +1423,12 @@ export function createAgentCapabilities(
         }
         if (res.kind === 'other') { notAFactor.push({ label: res.node.label, kind: String(res.node.kind) }); continue; }
         const node = res.node;
+        // ⛔ A figure in another kind of unit is never this factor's value (`unit-conflict.ts`): left out, and said.
+        const nodeUnit = factorUnitOf(g.raw, node);
+        if (unitsConflict(a?.unit, nodeUnit) !== null) {
+          unitMismatch.push({ label: node.label, value: a?.value, unit: String(a?.unit), factor_unit: String(nodeUnit) });
+          continue;
+        }
         /**
          * ⛔ THE APPROVAL MUST SHOW THE USER'S OWN NUMBER, NOT THE MODEL'S DIVISOR
          * (Codex 5810763729 item 1). `observed_state.value` is the number read against
@@ -1320,6 +1481,7 @@ export function createAgentCapabilities(
           unresolved_labels: unresolved, already_valued: occupied,
           ...(notAFactor.length > 0 ? { not_a_factor: notAFactor } : {}),
           ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
+          ...(unitMismatch.length > 0 ? { unit_mismatch: unitMismatch, unit_mismatch_note: UNIT_MISMATCH_NOTE } : {}),
           detail:
             'None of those could be adopted. Read the state again and use the labels exactly as they appear; ' +
             'factors that already hold a value are left alone.',
@@ -1393,6 +1555,7 @@ export function createAgentCapabilities(
         // so the user is never asked to approve a value that cannot be saved.
         ...(notAFactor.length > 0 ? { not_a_factor: notAFactor, not_a_factor_note: NOT_A_FACTOR_NOTE } : {}),
         ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
+        ...(unitMismatch.length > 0 ? { unit_mismatch: unitMismatch, unit_mismatch_note: UNIT_MISMATCH_NOTE } : {}),
         note:
           'Nothing has changed. Show the user each value and what it rests on, say plainly that these are ' +
           'assumptions to adopt or correct and NOT measurements, and call authorise_change with this ' +
@@ -1469,7 +1632,9 @@ export function createAgentCapabilities(
             ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor } : {}), ...ambiguity, ...refused,
           });
         }
-        return { ...made[0], ...ambiguity, ...refused };
+        const ifApproved = await readinessIfApplied(ctx, only?.operations ?? []);
+        return { ...made[0], ...ambiguity, ...refused, readiness_if_approved: ifApproved,
+          ...(stillBlockedNote(ifApproved) !== '' ? { note: `${String(made[0].note ?? '')}${stillBlockedNote(ifApproved)}` } : {}) };
       }
       const halves = made.map((r) => proposals.get(r.proposal_id as string)).filter((p): p is StructuredProposal => p !== undefined);
       if (halves.length !== 2 || halves[0].base_graph_identity_hash !== halves[1].base_graph_identity_hash) {
@@ -1499,7 +1664,9 @@ export function createAgentCapabilities(
       replaceEarlierStartingPoints(ctx);
       proposals.put(compound);
       for (const h of halves) proposals.discard(h.proposal_id);
+      const ifApproved = await readinessIfApplied(ctx, compound.operations);
       return {
+        readiness_if_approved: ifApproved,
         ok: true, mutated: false,
         proposal_id: compound.proposal_id,
         public_label: compound.public_label,
@@ -1519,7 +1686,7 @@ export function createAgentCapabilities(
         note:
           'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +
           'assumptions to adopt or correct, NOT measurements, and that ONE approval applies all of them. Then call ' +
-          'authorise_change with this proposal_id once they agree.',
+          'authorise_change with this proposal_id once they agree.' + stillBlockedNote(ifApproved),
       };
     },
 
@@ -3069,6 +3236,9 @@ export function createAgentCapabilities(
         // The SAME projection get_canonical_state uses — see projectEntity.
         entities: after.nodes.map(projectEntity),
         structure: structuralFacts(after.nodes, after.edges),
+        // (B) The goal as stated, the limits, and the ONE readiness verdict — the same projection as
+        // get_canonical_state, so the first reply never contradicts the Run control.
+        ...pickKeys(projectModelContext(after), ['goal', 'goals', 'limits', 'readiness']),
         ...(firstAnalysis !== undefined ? { first_analysis: firstAnalysis } : {}),
       };
     },
@@ -3085,23 +3255,29 @@ export function createAgentCapabilities(
       if (heldOptionThisRequest !== undefined) {
         return {
           ok: false, mutated: false, refusal: 'one_option_per_approval',
-          detail: `"${heldOptionThisRequest}" is already prepared and waiting for the user's approval. Options are added one approval `
-            + 'at a time for now: offer that one, say plainly which others you will add next, and add each after the user approves the previous one.',
+          detail: `${heldOptionThisRequest} is already prepared and waiting for the user's approval. Every option the user asked for `
+            + 'goes into ONE propose_new_option call (`options`, up to 4): a second proposal in the same reply would have no button of '
+            + 'its own. Offer the one that is prepared, and say plainly which you will add after the user approves it.',
         };
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const asked = Array.isArray(args?.acts_on)
-        ? args.acts_on.map((x) => (x ?? {}) as { factor_label?: unknown; direction?: unknown; level?: { value?: unknown; unit?: unknown } | null })
-        : [];
-      const plan = planNewOption(g.nodes as never, {
-        label: String(args?.label ?? ''),
-        acts_on: asked.map((a) => ({ factor_label: String(a.factor_label ?? ''), direction: a.direction === 'negative' ? 'negative' as const : 'positive' as const })),
-        rationale: String(args?.rationale ?? ''),
-      });
-      if (!plan.ok) {
-        return { ok: false, mutated: false, refusal: plan.refusal, detail: plan.detail,
-          ...(plan.unresolved_labels ? { unresolved_labels: plan.unresolved_labels } : {}) };
+      type Asked = { factor_label?: unknown; direction?: unknown; level?: { value?: unknown; unit?: unknown } | null };
+      const askedOf = (xs: unknown): Asked[] => (Array.isArray(xs) ? xs.map((x) => (x ?? {}) as Asked) : []);
+      /**
+       * ⭐ SEVERAL OPTIONS, ONE CHANGE (F4; Canonical's typed transaction #1940, contract #70 5841655730). "Add A
+       * and B" is ONE proposal the user approves once: every option is built into ONE held batch, and it lands
+       * whole or not at all. A single option may still be sent without `options`.
+       */
+      const specs = Array.isArray(args?.options) && args.options.length > 0
+        ? (args.options as unknown[]).map((o) => ({ label: String((o as { label?: unknown } | null)?.label ?? ''), acts_on: askedOf((o as { acts_on?: unknown } | null)?.acts_on) }))
+        : [{ label: String(args?.label ?? ''), acts_on: askedOf(args?.acts_on) }];
+      if (specs.length > MAX_OPTIONS_PER_TRANSACTION) {
+        return {
+          ok: false, mutated: false, refusal: 'too_many_options',
+          detail: `One change can add at most ${MAX_OPTIONS_PER_TRANSACTION} options; this asks for ${specs.length}. Nothing was prepared. `
+            + `Offer the first ${MAX_OPTIONS_PER_TRANSACTION} as one change, and add the rest after the user approves it.`,
+        };
       }
       /**
        * ⛔ AN OPTION IS LINKED FROM THE DECISION IT ANSWERS — and only when that decision is unambiguous. With
@@ -3117,17 +3293,34 @@ export function createAgentCapabilities(
         };
       }
       const decision = decisions[0]!;
+      // Each option is planned against the model PLUS the options before it: distinct ids, and no two options by one name.
+      const plans: { spec: (typeof specs)[number]; plan: Extract<ReturnType<typeof planNewOption>, { ok: true }> }[] = [];
+      for (const spec of specs) {
+        const view = [...g.nodes, ...plans.map((x) => ({ id: x.plan.optionId, kind: 'option', label: x.plan.label }))];
+        const plan = planNewOption(view as never, {
+          label: spec.label,
+          acts_on: spec.acts_on.map((a) => ({ factor_label: String(a.factor_label ?? ''), direction: a.direction === 'negative' ? 'negative' as const : 'positive' as const })),
+          rationale: String(args?.rationale ?? ''),
+        });
+        if (!plan.ok) {
+          return { ok: false, mutated: false, refusal: plan.refusal,
+            detail: `${specs.length > 1 ? `"${spec.label}": ` : ''}${plan.detail}${specs.length > 1 ? ' Nothing was prepared for any of the options: they are one change.' : ''}`,
+            ...(plan.unresolved_labels ? { unresolved_labels: plan.unresolved_labels } : {}) };
+        }
+        plans.push({ spec, plan });
+      }
       /**
-       * ⛔ ONE CHANGE HAS A SIZE LIMIT, checked BEFORE anything is sent. The product holds at most
-       * PROPOSAL_CAP changes in one batch; an option costs one, its decision link one, and one per factor it
-       * acts on. Over the limit the product would refuse the batch, and that refusal takes a path this lane
-       * must never reach — so it is refused here, in plain words, with nothing sent.
+       * ⛔ ONE CHANGE HAS A SIZE LIMIT, checked BEFORE anything is sent. A typed transaction CEE builds holds at
+       * most TYPED_TRANSACTION_ENVELOPE_CAP changes; each option costs one, its decision link one, and one per
+       * factor it acts on. Over the limit the product would refuse the batch — so it is refused here, in plain
+       * words, with nothing sent.
        */
-      if (2 + plan.actsOn.length > PROPOSAL_CAP) {
+      const envelopes = plans.reduce((n, x) => n + 2 + x.plan.actsOn.length, 0);
+      if (envelopes > TYPED_TRANSACTION_ENVELOPE_CAP) {
         return {
           ok: false, mutated: false, refusal: 'too_many_links',
-          detail: `One change can add an option acting on at most ${PROPOSAL_CAP - 2} factors; this one names ${plan.actsOn.length}. `
-            + 'Nothing was prepared. Suggest adding it with the factors it changes most, then linking the rest.',
+          detail: `That is ${envelopes} changes in one, and one change can carry at most ${TYPED_TRANSACTION_ENVELOPE_CAP} (each option, its link from the decision, and one per factor it acts on). `
+            + 'Nothing was prepared. Suggest adding the options with the factors they change most, then linking the rest.',
         };
       }
       /**
@@ -3139,38 +3332,59 @@ export function createAgentCapabilities(
        * writer derives a range and attaches it to the factor, which this one-change transaction cannot do, and
        * a bare figure beside levels stored as fractions would put one factor on two scales.
        */
-      const rawNodes = ((g.raw as { nodes?: unknown }).nodes as { id: string; kind?: string; label?: string; description?: string; observed_state?: { cap?: unknown; unit?: unknown } }[] | undefined) ?? [];
+      const rawNodes = ((g.raw as { nodes?: unknown }).nodes as { id: string; kind?: string; label?: string; description?: string }[] | undefined) ?? [];
       const norm = (v: unknown): string => String(v ?? '').trim().toLowerCase();
-      const levelById = new Map<string, { value: number; unit?: string }>();
-      for (const a of asked) {
-        const v = a.level?.value;
-        if (typeof v !== 'number' || !Number.isFinite(v)) continue;
-        const f = rawNodes.find((x) => x.kind === 'factor' && (norm(x.label) === norm(a.factor_label) || norm(x.description) === norm(a.factor_label)));
-        if (f !== undefined) levelById.set(f.id, { value: v, ...(typeof a.level?.unit === 'string' && a.level.unit.trim() !== '' ? { unit: a.level.unit.trim() } : {}) });
-      }
-      const outOfRange: { factor: string; value: number; range: number }[] = [];
-      const levelsNotSet: { factor: string; value: number; reason: string }[] = [];
-      const interventions = plan.actsOn.map((f) => {
-        const lvl = levelById.get(f.id);
-        if (lvl === undefined) return { factor_id: f.id, value: null };
-        const factor = g.nodes.find((x) => x.id === f.id);
-        const frame = levelFrameOf(factor);
-        if (frame !== null) {
-          const v = lvl.value / frame;
-          if (!(v >= 0 && v <= 1)) {
-            outOfRange.push({ factor: f.label, value: lvl.value, range: frame });
+      const outOfRange: { option: string; factor: string; value: number; range: number }[] = [];
+      const unitMismatch: { option: string; factor: string; value: number; unit: string; factor_unit: string }[] = [];
+      const levelsNotSet: { option: string; factor: string; value: number; reason: string }[] = [];
+      const entries = plans.map(({ spec, plan }) => {
+        const levelById = new Map<string, { value: number; unit?: string }>();
+        for (const a of spec.acts_on) {
+          const v = a.level?.value;
+          if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+          const f = rawNodes.find((x) => x.kind === 'factor' && (norm(x.label) === norm(a.factor_label) || norm(x.description) === norm(a.factor_label)));
+          if (f !== undefined) levelById.set(f.id, { value: v, ...(typeof a.level?.unit === 'string' && a.level.unit.trim() !== '' ? { unit: a.level.unit.trim() } : {}) });
+        }
+        const set = new Map<string, { value: number; unit?: string }>();
+        const interventions = plan.actsOn.map((f) => {
+          const lvl = levelById.get(f.id);
+          if (lvl === undefined) return { factor_id: f.id, value: null };
+          const factor = g.nodes.find((x) => x.id === f.id);
+          // ⛔ A figure in another kind of unit is never this factor's level (`unit-conflict.ts`: a price as churn).
+          const factorUnit = factorUnitOf(g.raw, factor);
+          if (unitsConflict(lvl.unit, factorUnit) !== null) {
+            unitMismatch.push({ option: plan.label, factor: f.label, value: lvl.value, unit: String(lvl.unit), factor_unit: String(factorUnit) });
             return { factor_id: f.id, value: null };
           }
-          const os = (factor?.observed_state ?? {}) as { unit?: unknown };
-          const unit = lvl.unit ?? (typeof os.unit === 'string' && os.unit !== '' ? os.unit : undefined);
-          return { factor_id: f.id, value: v, raw_value: lvl.value, ...(unit !== undefined ? { unit } : {}) };
-        }
-        if (lvl.value >= 0 && lvl.value <= 1) return { factor_id: f.id, value: lvl.value };
-        levelsNotSet.push({ factor: f.label, value: lvl.value,
-          reason: `The model has no range for ${f.label} to read ${lvl.value} against, so this change leaves that level unset. `
-            + `Once the option is added, propose that level with propose_option_interventions, which records a range for ${f.label}.` });
-        return { factor_id: f.id, value: null };
+          const frame = levelFrameOf(factor);
+          if (frame !== null) {
+            const v = lvl.value / frame;
+            if (!(v >= 0 && v <= 1)) {
+              outOfRange.push({ option: plan.label, factor: f.label, value: lvl.value, range: frame });
+              return { factor_id: f.id, value: null };
+            }
+            const os = (factor?.observed_state ?? {}) as { unit?: unknown };
+            const unit = lvl.unit ?? (typeof os.unit === 'string' && os.unit !== '' ? os.unit : undefined);
+            set.set(f.id, lvl);
+            return { factor_id: f.id, value: v, raw_value: lvl.value, ...(unit !== undefined ? { unit } : {}) };
+          }
+          if (lvl.value >= 0 && lvl.value <= 1) { set.set(f.id, lvl); return { factor_id: f.id, value: lvl.value }; }
+          levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
+            reason: `The model has no range for ${f.label} to read ${lvl.value} against, so this change leaves that level unset. `
+              + `Once the option is added, propose that level with propose_option_interventions, which records a range for ${f.label}.` });
+          return { factor_id: f.id, value: null };
+        });
+        return { plan, set, entry: { label: plan.label, option_id: plan.optionId, interventions } };
       });
+      if (unitMismatch.length > 0) {
+        const m = unitMismatch[0]!;
+        return {
+          ok: false, mutated: false, refusal: 'level_unit_mismatch', unit_mismatch: unitMismatch,
+          detail: `${m.value} ${m.unit} is not a level for ${m.factor}, which the model measures in ${m.factor_unit}. Nothing was prepared. `
+            + 'A figure the user gave for something else (a price, say) is never another factor\u2019s level. Call propose_new_option '
+            + `once more with that level left out, and ask the user for ${m.factor}\u2019s own figure only if they want to set it.`,
+        };
+      }
       if (outOfRange.length > 0) {
         const o = outOfRange[0]!;
         return {
@@ -3179,24 +3393,27 @@ export function createAgentCapabilities(
             + 'Ask the user for a figure within that range, in the same units, or whether that range itself is wrong.',
         };
       }
-      const parameters = { parent_decision_id: decision.id, label: plan.label, option_id: plan.optionId, interventions };
+      const parameters = entries.length === 1
+        ? { parent_decision_id: decision.id, ...entries[0]!.entry }
+        : { parent_decision_id: decision.id, options: entries.map((e) => e.entry) };
       // The product's own transaction, run here purely: a spec it would not build is never sent.
-      const built = buildAddOptionTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
-      if (!built.matched || JSON.stringify(built.proposal.operations).length > GM_HELD_OPERATIONS_MAX_JSON_CHARS) {
+      const built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
+      if (!built.matched || JSON.stringify(built.operations).length > GM_HELD_OPERATIONS_MAX_JSON_CHARS) {
         return { ok: false, mutated: false, refusal: 'not_prepared',
-          detail: 'That option could not be prepared as one change, so nothing was sent or changed. Tell the user plainly.' };
+          detail: 'That could not be prepared as one change, so nothing was sent or changed. Tell the user plainly.' };
       }
+      const labels = plans.map((x) => x.plan.label);
       const r = await dispatch('/orchestrate/v2/turn', {
         kind: 'message', turn_id: authorisationTurnId(`agent_add_option:${ctx.scenario_id}:${JSON.stringify(parameters)}`), scenario_id: ctx.scenario_id,
-        stage: 'frame', turn_class: 'frame', source: 'chip', message: `Add the option "${plan.label}".`,
+        stage: 'frame', turn_class: 'frame', source: 'chip', message: `Add ${labels.map((l) => `the option "${l}"`).join(' and ')}.`,
         chip: { id: AGENT_ADD_OPTION_CHIP_ID, intent: 'add_option', parameters },
       });
       /**
-       * ⛔ HELD, OR NOT PROPOSED. The only proof is the product's own handle for THIS option, bound by identity
-       * (`gmh_` over the scenario and this option's id) — and, where the store can be read, the held batch itself
-       * adding this option WITH its decision link. Anything else is a hard failure: never retried in other words.
+       * ⛔ HELD, OR NOT PROPOSED. The only proof is the product's own handle for THIS batch (`gmh_` over the
+       * scenario and the FIRST option's id), and, where the store can be read, the held batch itself adding
+       * EVERY option WITH its decision link. Anything else is a hard failure: never retried in other words.
        */
-      const ref = gmHeldProposalRef(ctx.scenario_id, `node:${plan.optionId}`);
+      const ref = gmHeldProposalRef(ctx.scenario_id, `node:${plans[0]!.plan.optionId}`);
       const offered = Array.isArray(r.json.suggested_actions) ? r.json.suggested_actions as { id?: unknown; label?: unknown; message?: unknown }[] : [];
       const heldChip = r.status === 200 ? offered.find((c) => c?.id === ref) : undefined;
       let heldBatchOk = heldChip !== undefined;
@@ -3204,34 +3421,42 @@ export function createAgentCapabilities(
         try {
           const hold = await liveHeldHold(ctx.scenario_id, ref);
           const ops = hold !== undefined ? heldOpsOf(hold) : [];
-          heldBatchOk = ops.some((o) => o.op === 'add_node' && o.path === plan.optionId)
-            && ops.some((o) => o.op === 'add_edge' && o.path === `${decision.id}::${plan.optionId}`);
+          heldBatchOk = plans.every(({ plan }) => ops.some((o) => o.op === 'add_node' && o.path === plan.optionId)
+            && ops.some((o) => o.op === 'add_edge' && o.path === `${decision.id}::${plan.optionId}`));
         } catch {
           heldBatchOk = false;
         }
       }
       if (!heldBatchOk) {
         return { ok: false, mutated: false, refusal: 'not_prepared',
-          detail: 'Olumi could not prepare that option as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
+          detail: 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
       }
-      heldOptionThisRequest = plan.label;
-      return {
-        ok: true, mutated: false,
-        proposal_id: ref,
-        public_label: typeof heldChip!.label === 'string' && heldChip!.label.trim() !== '' ? heldChip!.label : plan.publicLabel,
-        held_message: typeof heldChip!.message === 'string' ? heldChip!.message : '',
-        base_revision: g.graph_hash,
-        option: { label: plan.label, linked_from: String(decision.label ?? ''), acts_on: plan.actsOn.map((a) => a.label) },
-        ...(levelsNotSet.length > 0 ? { levels_not_set: levelsNotSet } : {}),
+      heldOptionThisRequest = labels.map((l) => `"${l}"`).join(' and ');
+      const described = entries.map(({ plan, set }) => ({
+        label: plan.label,
+        linked_from: String(decision.label ?? ''),
+        acts_on: plan.actsOn.map((a) => a.label),
         levels: plan.actsOn.map((f) => {
-          const lvl = levelsNotSet.some((x) => x.factor === f.label) ? undefined : levelById.get(f.id);
+          const lvl = set.get(f.id);
           return lvl !== undefined
             ? { factor: f.label, value: lvl.value, ...(lvl.unit !== undefined ? { unit: lvl.unit } : {}), stated_by: 'user' }
             : { factor: f.label, value: null, still_needed: true };
         }),
+      }));
+      return {
+        ok: true, mutated: false,
+        proposal_id: ref,
+        public_label: typeof heldChip!.label === 'string' && heldChip!.label.trim() !== '' ? heldChip!.label : plans[0]!.plan.publicLabel,
+        held_message: typeof heldChip!.message === 'string' ? heldChip!.message : '',
+        base_revision: g.graph_hash,
+        ...(described.length === 1
+          ? { option: { label: described[0]!.label, linked_from: described[0]!.linked_from, acts_on: described[0]!.acts_on }, levels: described[0]!.levels }
+          : { options: described }),
+        ...(levelsNotSet.length > 0 ? { levels_not_set: levelsNotSet } : {}),
         note:
-          'Nothing has changed yet. Show the user the option, that it is linked from the decision, what it acts on and each '
-          + 'level — saying plainly which have no level yet — never the id, and call authorise_change with this proposal_id once they agree.',
+          `Nothing has changed yet. Show the user ${described.length === 1 ? 'the option' : `all ${described.length} options, as ONE change they approve once`}, `
+          + 'that each is linked from the decision, what it acts on and each level — saying plainly which have no level yet — never the id, '
+          + 'and call authorise_change with this proposal_id once they agree.',
       };
     },
 
@@ -3269,6 +3494,21 @@ export function createAgentCapabilities(
         message: args.reason,
         chip: { id: AGENT_RUN_ANALYSIS_CHIP_ID, action_type: 'run_analysis' },
       });
+      /**
+       * ⛔ A RUN THAT FAILED IS NOT A RUN THAT WAS REFUSED (served 319dde1, 01:42Z). The run turn answered 500
+       * (the saved model could not be read), and the Agent explained it from the stale analysis state as "the saved
+       * graph has changed" — a cause that was false. Olumi cannot know the reason from here, so the Agent is told
+       * exactly what is true: it did not run, nothing changed, try again — and to give no other reason.
+       */
+      if (r.status !== 200) {
+        onAnalysis?.({ scenario_id: ctx.scenario_id, status: r.status, blocks: [] });
+        return {
+          ok: false, mutated: false, ran: false, refusal: 'run_failed', http: r.status,
+          detail: 'The analysis could not be run: something went wrong on Olumi\u2019s side while starting it, so nothing ran and nothing in the '
+            + 'model changed. Tell the user exactly that and suggest trying again in a moment; do not give any other reason, and do not '
+            + 'describe an earlier result as the current one.',
+        };
+      }
       const ready = (r.json.analysis_ready ?? {}) as Record<string, unknown>;
       const blocks = (r.json.blocks as { type: string }[] | undefined) ?? [];
       const result = blocks.find((b) => b.type === 'analysis_result');
@@ -3296,7 +3536,14 @@ export function createAgentCapabilities(
     // The approval guard's writer: every return path of `authoriseChange`, one place.
     async authoriseChange(ctx, args): Promise<ToolResult> {
       const r = await caps.authoriseChange(ctx, args);
-      if (r.applied === true || r.mutated === true) approvalAppliedThisRequest = true;
+      if (r.applied === true || r.mutated === true) {
+        approvalAppliedThisRequest = true;
+        // ⭐ (B) WHAT THE MODEL NEEDS NOW, from the graph as stored after the write — one place for every
+        // apply path (the in-turn tool and the typed-approve fast path). A failed read says "not checked".
+        let after: GraphRead | null = null;
+        try { after = await readGraph(ctx.scenario_id); } catch { after = null; }
+        return { ...r, readiness_after: readinessViewOf(after?.raw) };
+      }
       return r;
     },
   };
