@@ -19,8 +19,10 @@
  *     { initiated_by:'auto_post_draft', provisional:true, draft_turn_id }.
  *     No schema change: `enrichment` is `z.record(z.unknown())` at every
  *     published contract version, so this validates at 0.43.0 and 0.46.0
- *     alike and the UI's transport keep-list simply strips it — the feature
- *     degrades to an ordinary completed analysis exactly as required.
+ *     alike. (Schemas 0.57.0 keep-lists and types it, so it now reaches the
+ *     browser; a UI that does not read it still sees an ordinary completed
+ *     analysis, exactly as required.) The construction trigger
+ *     (`{ constructionTurnId }`) stamps `auto_post_construction` instead.
  *
  *  3. PROVISIONAL LABELLING, user-visible: the committed assistant answer
  *     opens with the provisional-disclosure sentence, so the conversation
@@ -89,12 +91,16 @@ import {
   RUN_PROVENANCE_ENRICHMENT_KEY,
 } from '../chip-click-dispatch.js';
 import {
+  buildConstructionAutoRunProvenance,
+  hasUserSeenRunAnalysisResult,
   isAutoInitiatedRunAnalysisFact,
 } from '../../context/run-initiator.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const DRAFT_TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+/** The construction's registration turn id (the shape `registrationTurnId` derives). */
+const CONSTRUCTION_TURN_ID = 'graph_registration:dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
 const DEFAULT_TURN_CONTEXT = {
   stage: 'analyse' as const,
@@ -287,5 +293,78 @@ describe('dispatchChipClickRunAnalysis — autoRun trigger ABSENT (the negative 
     expect(out.outcome).toBe('ok');
     if (out.outcome !== 'ok') return;
     expect(out.response.assistant_text.includes(AUTO_RUN_PROVISIONAL_DISCLOSURE)).toBe(false);
+  });
+});
+
+describe('dispatchChipClickRunAnalysis — autoRun trigger for a CONSTRUCTION (the Agent lane\'s first analysis)', () => {
+  function committedRunFact() {
+    const meta = commitDirectAnswerMock.mock.calls[0][1];
+    return meta.handler_facts.find((f: { fact_type: string }) => f.fact_type === 'run_analysis');
+  }
+
+  it('stamps the CONSTRUCTION provenance — the matching builder, not the post-draft one', async () => {
+    await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-auto-construction',
+      autoRun: { constructionTurnId: CONSTRUCTION_TURN_ID },
+    });
+    const fact = committedRunFact();
+    const enrichment = fact.result.enrichment as Record<string, unknown>;
+    // Bound to the production builder AND to the literal wire shape, so neither
+    // a builder drift nor a writer that picks the wrong builder can pass.
+    expect(enrichment[RUN_PROVENANCE_ENRICHMENT_KEY]).toEqual(
+      buildConstructionAutoRunProvenance(CONSTRUCTION_TURN_ID),
+    );
+    expect(enrichment[RUN_PROVENANCE_ENRICHMENT_KEY]).toEqual({
+      initiated_by: 'auto_post_construction',
+      provisional: true,
+      construction_turn_id: CONSTRUCTION_TURN_ID,
+    });
+    // No draft member leaks in from the other arm.
+    expect(
+      Object.prototype.hasOwnProperty.call(enrichment[RUN_PROVENANCE_ENRICHMENT_KEY], 'draft_turn_id'),
+    ).toBe(false);
+    // The PLoT-originated key survives — spread, not replace.
+    expect(enrichment.results).toEqual({ report: { option_probabilities: { opt_a: 0.7 } } });
+  });
+
+  it('WRITER → READER round trip: auto-initiated (confinement on) AND seen (delivered in the user\'s own response)', async () => {
+    await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-auto-construction',
+      autoRun: { constructionTurnId: CONSTRUCTION_TURN_ID },
+    });
+    const fact = committedRunFact();
+    expect(isAutoInitiatedRunAnalysisFact(fact)).toBe(true);
+    expect(hasUserSeenRunAnalysisResult(fact)).toBe(true);
+  });
+
+  it('CONTRAST: the post-draft trigger still stamps the post-draft provenance, which reads NOT seen', async () => {
+    await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-auto',
+      autoRun: { draftTurnId: DRAFT_TURN_ID },
+    });
+    const fact = committedRunFact();
+    expect((fact.result.enrichment as Record<string, unknown>)[RUN_PROVENANCE_ENRICHMENT_KEY]).toEqual({
+      initiated_by: 'auto_post_draft',
+      provisional: true,
+      draft_turn_id: DRAFT_TURN_ID,
+    });
+    expect(isAutoInitiatedRunAnalysisFact(fact)).toBe(true);
+    expect(hasUserSeenRunAnalysisResult(fact)).toBe(false);
+  });
+
+  it('the other two auto-run consequences are unchanged: no userMessage, and the provisional disclosure opens the answer', async () => {
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-auto-construction',
+      autoRun: { constructionTurnId: CONSTRUCTION_TURN_ID },
+    });
+    const meta = commitDirectAnswerMock.mock.calls[0][1];
+    expect(Object.prototype.hasOwnProperty.call(meta, 'userMessage')).toBe(false);
+    expect(out.outcome).toBe('ok');
+    if (out.outcome !== 'ok') return;
+    expect(out.response.assistant_text.startsWith(AUTO_RUN_PROVISIONAL_DISCLOSURE)).toBe(true);
   });
 });

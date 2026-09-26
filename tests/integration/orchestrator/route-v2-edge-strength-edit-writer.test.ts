@@ -19,6 +19,8 @@ import {
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../../src/orchestrator-v5/context/graph-identity.js';
 import { GraphStaleWriteError } from '../../../src/orchestrator-v5/session/store.js';
+import { isProvenanceOnlyEdgeConfirmation } from '../../../src/orchestrator-v5/system-events/edge-strength-edit.js';
+import { log } from '../../../src/utils/telemetry.js';
 
 function buildPersistedGraph() {
   return {
@@ -46,6 +48,7 @@ const loadGraphMock = vi.fn();
 const readMostRecentPendingActionsMock = vi.fn();
 const readRecentMock = vi.fn();
 const readFactsForMock = vi.fn().mockResolvedValue([]);
+const readScenarioRunAnalysisFactsForMock = vi.fn();
 let persisted: unknown = buildPersistedGraph();
 let graphCasRpcEnforce = true;
 const commitReceiptState = vi.hoisted(() => ({
@@ -65,6 +68,11 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     readRecent: readRecentMock,
     readFactsFor: readFactsForMock,
     readMostRecentPendingActions: readMostRecentPendingActionsMock,
+    // The scenario's durable analysis record: COMPLETE and EMPTY — what "never
+    // analysed" means. Without the port the record is degraded, and an empty
+    // 20-row window alone cannot prove absence (every writer's reply now uses the
+    // shared rule, dispatch.ts `deriveWriteReplyFreshness`).
+    readScenarioRunAnalysisFactsFor: readScenarioRunAnalysisFactsForMock,
     loadGraph: loadGraphMock,
     loadGraphAndBriefText: async () => ({ graph: persisted, briefText: null }),
     invalidateScoped: async (_scenarioId: string, scope: unknown) => ({
@@ -284,6 +292,8 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
   beforeEach(() => {
     persisted = buildPersistedGraph();
     graphCasRpcEnforce = true;
+    readScenarioRunAnalysisFactsForMock.mockReset();
+    readScenarioRunAnalysisFactsForMock.mockResolvedValue({ facts: [], total_count: 0 });
     commitReceiptState.mode = 'normal';
     appendMock.mockReset();
     appendMock.mockResolvedValue({ id: 'mock-row-id' });
@@ -590,6 +600,11 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     readRecentMock.mockResolvedValueOnce([{ id: 'prior-run-row' }]);
     readFactsForMock.mockRejectedValueOnce(
       new Error('simulated prior-fact read failure'),
+    );
+    // BOTH reads degraded: a complete durable record would decide on its own (its
+    // absence is authoritative), so "we could not read the history" needs both.
+    readScenarioRunAnalysisFactsForMock.mockRejectedValueOnce(
+      new Error('simulated durable analysis-fact read failure'),
     );
 
     const response = await app.inject({
@@ -1032,6 +1047,142 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     expect(response.body).not.toContain('draft_graph');
   });
 
+  // F4: a REUSED turn id carrying a different request. The store signals
+  // `priorTurnConflict` and writes nothing, so the commit's graph fields are the
+  // reread snapshot (which still holds -0.4). Before the gate, the writer's
+  // readback check compared that snapshot to its own candidate (-0.7) and
+  // answered a KNOWN no-write with a retryable 500 — a retry under the same id
+  // conflicts again. It must answer the commit's corrected reply instead.
+  it('F4: a reused-id CONFLICT answers the commit\'s corrected reply (no success, no retryable 500) and presents the stored snapshot', async () => {
+    const infoSpy = vi.spyOn(log, 'info');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      throw new Error('fetch attempted in a no-provider test');
+    });
+    try {
+      appendMock.mockResolvedValueOnce({ id: 'prior-row', priorTurnConflict: true });
+      const stored = structuredClone(persisted) as ReturnType<typeof buildPersistedGraph>;
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payloadFor(validEvent(), 'f4'),
+      });
+
+      // Premise: the request reached the append WITH a candidate at -0.7, and
+      // the store (whose graph this harness never mutates) still holds -0.4.
+      expect(appendMock).toHaveBeenCalledTimes(1);
+      expect(committedEdge()?.strength).toMatchObject({ mean: -0.7 });
+      expect(await appendMock.mock.results[0]!.value).toMatchObject({ priorTurnConflict: true });
+      expect(persisted).toEqual(stored);
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.body) as Record<string, unknown>;
+      expect(String(body.assistant_text)).toMatch(/did not make that change/i);
+      const patches = ((body.blocks ?? []) as Array<Record<string, unknown>>).filter(
+        (block) => block.type === 'graph_patch',
+      );
+      expect(patches.filter((patch) => patch.status === 'applied')).toEqual([]);
+      expect(body.model_version_receipt).toBeUndefined();
+      // The stored snapshot, for display only — never the unwritten candidate.
+      const draftGraph = body.draft_graph as Record<string, unknown>;
+      const edge = (draftGraph.edges as Array<Record<string, unknown>>).find(
+        (candidate) => candidate.from === 'f-demand' && candidate.to === 'g-growth',
+      );
+      expect(edge).toMatchObject({ strength: { mean: -0.4 } });
+      expect(body.graph_hash).toBe(computeAnalysisAffectingGraphHash(stored as never));
+      // No success attestation for this attempt; the probe does see the
+      // writer's no-write line in the same run (present control).
+      const messages = infoSpy.mock.calls.map((call) => String(call[1]));
+      expect(messages.filter((m) => m.startsWith('V5 edge_strength_edit committed'))).toEqual([]);
+      expect(
+        messages.filter((m) => m.startsWith('V5 edge_strength_edit — this attempt wrote nothing')),
+      ).toHaveLength(1);
+      expect(llmChatMock).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      infoSpy.mockRestore();
+      fetchSpy.mockRestore();
+    }
+  });
+
+  // F4: a replay flag is not proof the edit happened — a committed REFUSAL row
+  // under the same turn id replays too. "Already recorded" is said only when the
+  // reread edge carries the requested mean, direction AND user-set provenance;
+  // the three cases pin each side of the writer's `requestedChangeVisibleIn`.
+  it('F4: a REPLAY with no receipt naming this turn never says "already recorded"; it says the change is in the model only when the reread edge carries the requested strength and user-set provenance', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      throw new Error('fetch attempted in a no-provider test');
+    });
+    const NOT_IN_MODEL =
+      'Nothing new was written just now, and that change is not in the model at the moment.';
+    const IN_MODEL =
+      'Nothing new was written just now, and the model already reflects that change.';
+    const post = async (event: Record<string, unknown>, suffix: string) => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payloadFor(event, suffix),
+      });
+      expect(response.statusCode).toBe(200);
+      return JSON.parse(response.body) as Record<string, unknown>;
+    };
+    const storedEdge = () =>
+      ((persisted as { edges: Array<Record<string, unknown>> }).edges).find(
+        (edge) => edge.from === 'f-demand' && edge.to === 'g-growth',
+      );
+    try {
+      // (1) set -0.7, NOT visible — the store still holds -0.4.
+      appendMock.mockResolvedValueOnce({ id: 'prior-row', replayedPriorTurn: true });
+      const notVisible = await post(validEvent(), 'f5');
+      expect(await appendMock.mock.results[0]!.value).toMatchObject({ replayedPriorTurn: true });
+      expect(storedEdge()).toMatchObject({ strength: { mean: -0.4 } });
+      expect(String(notVisible.assistant_text)).toBe(NOT_IN_MODEL);
+      expect(notVisible.model_version_receipt).toBeUndefined();
+
+      // (2) set -0.7, visible — the store holds the committed edit.
+      appendMock.mockImplementationOnce(async (write: { graph?: unknown }) => {
+        persisted = write.graph;
+        return { id: 'prior-row', replayedPriorTurn: true };
+      });
+      const visible = await post(validEvent(), 'f6');
+      expect(storedEdge()).toMatchObject({
+        strength: { mean: -0.7 },
+        provenance: { source: 'user_specified' },
+      });
+      // Visible, but no receipt names this turn: in the model, attributed to no one.
+      expect(String(visible.assistant_text)).not.toMatch(/already been recorded/i);
+      expect(String(visible.assistant_text)).toBe(IN_MODEL);
+      expect(visible.model_version_receipt).toBeUndefined();
+
+      // (3) confirm_current, tuple unchanged by design, provenance NOT stamped in
+      //     the store — the stamp is the whole change, so it is not visible.
+      persisted = buildPersistedGraph();
+      appendMock.mockResolvedValueOnce({ id: 'prior-row', replayedPriorTurn: true });
+      const unstamped = await post(
+        validEvent({
+          magnitude: 0.4,
+          expected: { mean: -0.4, effect_direction: 'negative' },
+          intent: 'confirm_current',
+        }),
+        'f7',
+      );
+      expect(committedEdge()).toMatchObject({
+        strength: { mean: -0.4 },
+        provenance: { source: 'user_specified' },
+      });
+      expect(storedEdge()).toMatchObject({
+        strength: { mean: -0.4 },
+        provenance: { source: 'cee_hypothesis' },
+      });
+      expect(String(unstamped.assistant_text)).toBe(NOT_IN_MODEL);
+
+      expect(llmChatMock).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it('commits an honest no-graph refusal without inventing a graph write', async () => {
     persisted = null;
     const response = await app.inject({
@@ -1045,6 +1196,126 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     expect(lastAppend().graph).toBeUndefined();
     expect((JSON.parse(response.body) as Record<string, unknown>).assistant_text)
       .toMatch(/no saved model/i);
+  });
+
+  /**
+   * `defaulted: true` says Olumi applied a default strength (EdgeV3, `schemas/cee-v3.ts`). This writer stamps the
+   * edge `user_specified` in the same write, so a surviving flag contradicts that stamp. Served (F) row F8 on
+   * `fd4c483` measured it twice (`f-20260926T083927Z`, `f-20260926T084243Z`). The Agent's `get_canonical_state`,
+   * admissibility ("a strength this system chose") and coaching then read the user's own strength as a placeholder.
+   */
+  describe('a strength the user sets or confirms is no longer marked defaulted', () => {
+    type LooseGraph = { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> } & Record<string, unknown>;
+    function withDefaultedEdges(): LooseGraph {
+      const graph = buildPersistedGraph() as LooseGraph;
+      graph.edges[0]!.defaulted = true;
+      graph.nodes.push({ id: 'f-price', kind: 'factor', label: 'Price' });
+      graph.edges.push({
+        from: 'f-price',
+        to: 'g-growth',
+        strength: { mean: 0.5, std: 0.125 },
+        exists_probability: 0.8,
+        effect_direction: 'positive',
+        provenance: { source: 'cee_hypothesis', reasoning: 'Projected' },
+        provenance_display: 'ai_inferred',
+        defaulted: true,
+      });
+      return graph;
+    }
+    const edgeOf = (graph: unknown, from: string, to: string) =>
+      ((graph as LooseGraph | undefined)?.edges ?? []).find((e) => e.from === from && e.to === to);
+
+    it('⭐ a SET clears it on the edge it stamps as the user\'s, in the commit and the receipt; the untouched edge keeps it', async () => {
+      persisted = withDefaultedEdges();
+      const response = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: payloadFor(validEvent(), 'a1') });
+
+      expect(response.statusCode).toBe(200);
+      expect(committedEdge()).toMatchObject({ strength: { mean: -0.7 }, provenance: { source: 'user_specified' } });
+      expect(committedEdge()).not.toHaveProperty('defaulted');
+      const body = JSON.parse(response.body) as Record<string, unknown>;
+      expect(edgeOf(body.draft_graph, 'f-demand', 'g-growth')).not.toHaveProperty('defaulted');
+      expect(edgeOf(lastAppend().graph, 'f-price', 'g-growth'), 'contrast: an edge the user did not touch').toMatchObject({ defaulted: true });
+    });
+
+    it('⭐ confirm_current adopts the strength as the user\'s: the flag clears, the analysis hash does not move', async () => {
+      persisted = withDefaultedEdges();
+      const beforeHash = computeAnalysisAffectingGraphHash(persisted as never);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payloadFor(
+          validEvent({ magnitude: 0.4, direction_intent: 'preserve', expected: { mean: -0.4, effect_direction: 'negative' }, intent: 'confirm_current' }),
+          'a2',
+        ),
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.body) as Record<string, unknown>;
+      expect(body.assistant_text).toContain('Confirmed the current strength');
+      expect(committedEdge()).toMatchObject({ strength: { mean: -0.4, std: 0.1 }, provenance: { source: 'user_specified' } });
+      expect(committedEdge()).not.toHaveProperty('defaulted');
+      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).toBe(beforeHash);
+      expect(edgeOf(lastAppend().graph, 'f-price', 'g-growth'), 'contrast: an edge the user did not touch').toMatchObject({ defaulted: true });
+    });
+
+    it('the Agent\'s approval path (the same typed event at stage frame, agent-capabilities.ts) clears it too', async () => {
+      persisted = withDefaultedEdges();
+      const response = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: {
+          kind: 'system_event',
+          turn_id: `${TURN_ID_BASE}a3`,
+          scenario_id: SCENARIO_ID,
+          stage: 'frame',
+          event: { kind: 'edge_strength_edit', from: 'f-demand', to: 'g-growth', intent: 'set', direction_intent: 'preserve', magnitude: 0.7, expected: { mean: -0.4, effect_direction: 'negative' } },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(committedEdge()).toMatchObject({ strength: { mean: -0.7 }, provenance: { source: 'user_specified' } });
+      expect(committedEdge()).not.toHaveProperty('defaulted');
+    });
+
+    describe('the confirmation allowlist admits exactly `defaulted` → absent on the target edge, nothing wider', () => {
+      const stamped = (graph: LooseGraph) => {
+        const after = structuredClone(graph);
+        const target = edgeOf(after, 'f-demand', 'g-growth')!;
+        target.provenance = { ...(target.provenance as Record<string, unknown>), source: 'user_specified' };
+        target.provenance_display = 'user_set';
+        return after;
+      };
+      const confirm = (before: LooseGraph, after: LooseGraph) =>
+        isProvenanceOnlyEdgeConfirmation({ before, after, from: 'f-demand', to: 'g-growth' });
+
+      it('⭐ the target\'s flag removed: admitted', () => {
+        const before = withDefaultedEdges();
+        const after = stamped(before);
+        delete edgeOf(after, 'f-demand', 'g-growth')!.defaulted;
+        expect(confirm(before, after)).toBe(true);
+      });
+
+      it('the flag ADDED to the target: refused', () => {
+        const before = buildPersistedGraph() as LooseGraph;
+        const after = stamped(before);
+        edgeOf(after, 'f-demand', 'g-growth')!.defaulted = true;
+        expect(confirm(before, after)).toBe(false);
+      });
+
+      it('the target\'s flag flipped to false: refused', () => {
+        const before = withDefaultedEdges();
+        const after = stamped(before);
+        edgeOf(after, 'f-demand', 'g-growth')!.defaulted = false;
+        expect(confirm(before, after)).toBe(false);
+      });
+
+      it('ANOTHER edge\'s flag removed: refused', () => {
+        const before = withDefaultedEdges();
+        const after = stamped(before);
+        delete edgeOf(after, 'f-price', 'g-growth')!.defaulted;
+        expect(confirm(before, after)).toBe(false);
+      });
+    });
   });
 
   it.each([

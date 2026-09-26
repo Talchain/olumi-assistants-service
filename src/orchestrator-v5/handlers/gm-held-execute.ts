@@ -72,6 +72,7 @@ import { detectOptionOwnValueSubstitution } from '../routing/option-observed-sta
 import { elideCascadeRedundantRemoveEdges } from '../graph-management/cascade-removes.js';
 import { propagateConfirmedInterventionRemovals } from '../graph-management/confirmed-intervention-removals.js';
 import type { FrameFreshness } from '../graph-management/types.js';
+import { boundTypedEnvelopeCap } from '../graph-management/types.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
 import { log } from '../../utils/telemetry.js';
@@ -462,7 +463,12 @@ export type GmHeldResumeRead =
   /** GM held pending recognised, but no executable payload (legacy lane-8
    *  pendings, oversize-degraded holds, or a malformed round-trip). */
   | { readonly kind: 'no_payload' }
-  | { readonly kind: 'ok'; readonly operations: readonly ValidatedPatchOperation[] };
+  | {
+      readonly kind: 'ok';
+      readonly operations: readonly ValidatedPatchOperation[];
+      /** (A) — the typed cap the hold was refereed under; absent → `PROPOSAL_CAP`. */
+      readonly envelopeCap?: number;
+    };
 
 /**
  * Recognise a GM held pending and extract its executable payload.
@@ -478,7 +484,12 @@ export function readGmHeldResume(pending: PendingAction): GmHeldResumeRead {
   if (patch.handler_id !== GM_HELD_HANDLER_ID) return { kind: 'not_gm_held' };
   const parsed = PatchOperationsArraySchema.safeParse(patch.operations);
   if (!parsed.success) return { kind: 'no_payload' };
-  return { kind: 'ok', operations: parsed.data };
+  const envelopeCap = boundTypedEnvelopeCap(patch.envelope_cap);
+  return {
+    kind: 'ok',
+    operations: parsed.data,
+    ...(envelopeCap !== undefined ? { envelopeCap } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -487,6 +498,8 @@ export function readGmHeldResume(pending: PendingAction): GmHeldResumeRead {
 
 export interface GmHeldExecuteInput {
   readonly operations: readonly ValidatedPatchOperation[];
+  /** (A) — the hold's recorded typed cap (`readGmHeldResume`); absent → default. */
+  readonly envelopeCap?: number;
   /** The CURRENT graph (persisted authority; hash-verified by the caller). */
   readonly currentGraph: unknown;
   /** Like-for-like hash of `currentGraph` (already matched the pin). */
@@ -638,6 +651,7 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
     turnId: input.turnId,
     requestId: input.requestId,
     dispatchPath: 'gm_held_resume',
+    ...(input.envelopeCap !== undefined ? { envelopeCap: input.envelopeCap } : {}),
   });
   if (!confirmationSatisfies(decision.governing)) {
     return { status: 'referee_blocked', governing: decision.governing };

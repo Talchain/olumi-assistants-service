@@ -17,6 +17,7 @@
 import { describe, expect, it } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { committedValueWrite } from './fixtures/served-value-write.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440000';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r' };
@@ -101,7 +102,7 @@ function product(opts: { frameRefusal?: boolean; competingWriter?: 'attaches_ran
         : n));
 
       rev += 1;
-      return { status: 200, json: { assistant_text: 'Updated.' } };
+      return { status: 200, json: committedValueWrite(ev.target_id) };
     }
     reads += 1;
     // Models a readback that fails only AFTER the refusal, so the unknown-state
@@ -306,7 +307,7 @@ describe('⛔ LIMB 1 (caller half) — an intervening rename is NOT overwritten'
           ? { ...n, observed_state: { ...n.observed_state, value: ev.value, raw_value: ev.value } }
           : n));
         rev += 1;
-        return { status: 200, json: { assistant_text: 'Updated.' } };
+        return { status: 200, json: committedValueWrite(ev.target_id) };
       }
       reads += 1;
       const served = { status: 200, json: { graph: { nodes, edges: [] }, graph_hash: `h${rev}` } };
@@ -385,7 +386,7 @@ describe('⛔ LIMB 1 (the assertion half) — the frame write carries the identi
           ? { ...n, observed_state: { ...n.observed_state, value: ev.value, raw_value: ev.value } }
           : n));
         rev += 1;
-        return { status: 200, json: { assistant_text: 'Updated.' } };
+        return { status: 200, json: committedValueWrite(ev.target_id) };
       }
       // The read route supplies BOTH hashes; the identity one moves on any edit,
       // including a rename that leaves the analysis hash alone.
@@ -444,7 +445,7 @@ describe('⛔ LIMB 1 (the assertion half) — the frame write carries the identi
       if (path === '/orchestrate/v2/turn' && b.kind === 'system_event') {
         const ev = b.event as { target_id: string; value: number };
         nodes = nodes.map((x) => (x.id === ev.target_id ? { ...x, observed_state: { ...x.observed_state, value: ev.value, raw_value: ev.value } } : x));
-        rev += 1; return { status: 200, json: { assistant_text: 'ok' } };
+        rev += 1; return { status: 200, json: committedValueWrite(ev.target_id) };
       }
       return { status: 200, json: { graph: { nodes, edges: [] }, graph_hash: `analysis-h${rev}` } };
     };

@@ -35,7 +35,7 @@
  * target — both of which are questions for the user.
  */
 
-import { STRENGTH_DEFAULT_SIGNATURE, type RepairEntry } from '@talchain/schemas';
+import type { RepairEntry } from '@talchain/schemas';
 import type { AdmittedModel } from './admit-model.js';
 
 /** Percentage of defaulted magnitudes at which results must carry a caveat. */
@@ -103,14 +103,18 @@ export function assessAnalysisAdmissibility(model: AdmittedModel): Admissibility
   }
 
   // 4. Most magnitudes are projections — a caveat even when the above do not fire.
+  //
+  // ⛔ NOT "placeholders at the standard value (0.5)" any more (magnitude contract, D6): a placeholder is now sized to
+  // its target's range, and `defaulted` also marks an estimate whose spread is Olumi's. So the sentence names what
+  // is true of every marked edge — some figure on it is this system's — and no single value.
   const projected = model.edges.filter((e) => e.defaulted === true).length;
   const percent = model.edges.length === 0 ? 0 : (projected / model.edges.length) * 100;
   if (percent >= DEFAULTED_LIMIT_PERCENT) {
     reasons.push({
       code: 'majority_magnitudes_projected',
       message:
-        `${projected} of ${model.edges.length} link strengths are placeholders at the standard ` +
-        `value (${STRENGTH_DEFAULT_SIGNATURE.mean}), not measurements. Results would show the ` +
+        `${projected} of ${model.edges.length} link strengths rest on a figure this system chose ` +
+        `(an estimate, a placeholder or a spread), not a measurement. Results would show the ` +
         `shape of your reasoning, not its size.`,
     });
   }

@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { planNewOption, newOptionFollowUp } from '../propose-new-option.js';
+import { planNewOption } from '../propose-new-option.js';
 
 const NODES = [
   { id: 'goal', kind: 'goal', label: 'Increase velocity' },
@@ -63,14 +63,4 @@ describe('planning a new option', () => {
     expect(p.actsOn.map((a) => a.id)).toEqual(['lead_time']);
   });
 
-  it('⛔ the follow-up says it CANNOT be compared yet — it must not read as done', () => {
-    const p = planNewOption(NODES, { label: 'Hire a contractor', acts_on: [{ factor_label: 'Lead time', direction: 'positive' }], rationale: 'r' });
-    expect(p.ok).toBe(true);
-    if (!p.ok) return;
-    const text = newOptionFollowUp(p);
-    expect(text).toContain('cannot be compared yet');
-    expect(text).toContain('holds up the comparison for every option');
-    // and it must NOT claim the model is ready
-    expect(text).not.toMatch(/ready to (run|analyse|compare)/i);
-  });
 });

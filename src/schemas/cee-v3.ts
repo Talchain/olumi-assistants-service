@@ -245,6 +245,19 @@ export const NodeV3 = z.object({
    */
   goal_threshold_frame: GoalThresholdFrame.optional(),
   /**
+   * ⛔ WHO STATED THE GOAL TARGET, AND THE TARGET THEY STATED (goal nodes; written by the UI's register).
+   *
+   * THIS DECLARATION IS LOAD-BEARING, the same warning `goal_threshold_frame` carries above. The UI keeps
+   * `threshold_source: 'user'` + `success_threshold` as its durable per-goal source of truth. Undeclared,
+   * both survived the register write (passthrough) and were then SILENTLY DELETED by the next unrelated
+   * turn-path write's re-parse; served on `bed9a0c`, the user's stated target then read back as not stated.
+   * `field-safety.ts` still denies every producer from SETTING `threshold_source` (ruling J2); this only
+   * keeps what was written. A malformed value is dropped exactly as before (`.catch`), never a new reason
+   * to refuse a stored graph.
+   */
+  threshold_source: z.string().max(64).optional().catch(undefined),
+  success_threshold: z.number().finite().nullable().optional().catch(undefined),
+  /**
    * ⭐⭐ THE PER-FACTOR SCALE FRAME (factor nodes only) — the divisor pass 3d
    * projected this factor's baseline and every option intervention magnitude
    * onto, so within-factor ratios are exact.
@@ -430,6 +443,51 @@ export const NodeV3 = z.object({
    *  there while `provenance` returns 41 and `label` 80), so this is not a
    *  published-contract change. A consumer on a stale pin simply drops it. */
   label_placeholder: z.boolean().optional(),
+  /**
+   * ⛔ C46 — THIS QUANTITY IS ITS FACTORS MULTIPLIED TOGETHER (goal / outcome / factor nodes).
+   *
+   * The analyse path is a linear SCM (`node = intercept + Σ parent × strength`, #70
+   * 5841215337): it ADDS the factors' effects, so for a product such as MRR = price ×
+   * subscribers it can get even the SIGN of an option's effect wrong (£49 → £59: −1,360 at
+   * 100 subscribers, +640 at 300; the linear model says −960 at both). The ruling (#70
+   * 5841314428) is that no leader may be named on it where the sign can flip.
+   *
+   * CEE-MINTED at construction (`agent-lane/admit-model.ts` `markProductIdentities`) from a
+   * product the drafter DECLARED and admission checked structurally — never from a label.
+   * It persists the DECLARATION, never a verdict: `run_analysis` re-runs the same sign test
+   * on the graph it actually analysed (`nonlinearIdentityLeaderWithhold`), so an option added
+   * after construction is judged too. `stated_in_brief` says whose reading it is (the
+   * brief's, or Olumi's), so the sentence never presents Olumi's reading as the user's.
+   *
+   * ⚠ THIS DECLARATION IS LOAD-BEARING, NOT DOCUMENTATION — the warning `goal_threshold_frame`
+   * carries. `NodeV3` is a plain `z.object`, so an undeclared `nonlinear_identity` is SILENTLY
+   * DELETED by `GraphV3.safeParse` on the run path and the withhold reaches nothing.
+   *
+   * ABSENCE MEANS NO DECLARED PRODUCT — every graph persisted before this field, and every
+   * linear brief, reads exactly as before. A malformed value is dropped (`.catch`), never a
+   * new reason to refuse a stored graph. REMOVE-ONLY BY CONSTRUCTION: the only reader can
+   * withhold a leader claim, never grant one.
+   *
+   * WHO CAN WRITE IT, stated precisely (the `goal_direction` precedent's wording):
+   *  · an UPDATE cannot — the root is absent from `aiEditableFieldRoots('node')`, so
+   *    `field-safety.ts` refuses any `update_node` op naming it;
+   *  · the draft path does not — its field-by-field `transformNodeToV3` does not copy it;
+   *  · ⚠ a model `add_node` COULD carry it (`CEE_ANALYSIS_OWNED_ROOTS` does not list it). Its
+   *    worst case is an over-withheld leader, never a false one. Listing it there is a
+   *    follow-up for the field-safety owner.
+   *
+   * NOT VALUE-BEARING: it names which nodes multiply, never a magnitude. Not mirrored in
+   * `openapi.yaml`; a consumer on a stale pin simply drops it.
+   */
+  nonlinear_identity: z
+    .object({
+      operation: z.literal('product'),
+      factor_ids: z.array(z.string().min(1)).min(2),
+      stated_in_brief: z.boolean(),
+    })
+    .strict()
+    .optional()
+    .catch(undefined),
 }); // CIL Phase 1: declared fields only — unknown fields stripped with warning
 export type NodeV3T = z.infer<typeof NodeV3>;
 
@@ -445,6 +503,20 @@ export const EdgeProvenanceV3 = z.object({
   source: z.enum(["brief_extraction", "cee_hypothesis", "domain_knowledge", "user_specified"]),
   /** Optional reasoning */
   reasoning: z.string().optional(),
+  /** Who sized the link (magnitude contract D9); `source: 'user_specified'` wins at read time. A malformed value is dropped. */
+  magnitude: z.enum(["user_stated", "olumi_estimate", "olumi_placeholder"]).optional().catch(undefined),
+  /**
+   * The size the link carries in natural units (magnitude contract; #70 5845713522). `strength_mean` is the β it was
+   * written for: a reader says it only while the edge's mean equals it (R&C 5845818897). A malformed value is dropped.
+   */
+  natural_effect: z.object({
+    amount: z.number().finite(),
+    amount_unit: z.string(),
+    per_source_change: z.number().finite(),
+    per_source_change_unit: z.string(),
+    strength_mean: z.number().finite(),
+    strength_mean_frame: z.literal("edge_strength"),
+  }).optional().catch(undefined),
 }).passthrough(); // CIL Phase 0: preserve additive fields
 export type EdgeProvenanceV3T = z.infer<typeof EdgeProvenanceV3>;
 

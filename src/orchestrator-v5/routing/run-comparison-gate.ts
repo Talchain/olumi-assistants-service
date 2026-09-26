@@ -67,7 +67,7 @@ import { textNamesLeadingOption } from '../compose/leading-option-egress-guard.j
 // and deliberately NOT the scenario selector: see
 // `readMayNameLeadingOptionVerdictForFact`'s docstring for why a second
 // selection ceremony here is the defect and this is not.
-import { readMayNameLeadingOptionVerdictForFact } from '../context/claim-safety-read.js';
+import { mayPresentComparedRunLeader, mayPresentComparedRunVerdicts } from '../coaching/compared-run-leader.js';
 
 export type RunComparisonFreshness = 'fresh' | 'stale' | 'unknown' | 'none';
 
@@ -851,14 +851,24 @@ export function tryRunComparisonGate(
   // per-run verdict can only
   // narrow it further. Every value is `<=` the pre-fix boolean, so a turn that
   // withheld still withholds and no leader becomes newly nameable.
+  //
+  // ⛔ AND THE RUN MUST HAVE BEEN ASKED FOR (review of #1857, B3). An automatic run's leader is
+  // never PRESENTED (`mayPresentLeaderClaimForFact` = verdict ∧ `wasAnalysisRequestedByUser`),
+  // so a comparison may not name it either — "Offshore still leads" after a construction
+  // auto-run designates a leader the user was never given. Same narrowing direction: `<=` the
+  // verdict-only value, and the withheld-prior arm below composes the rest.
   const authority: RunComparisonLeaderAuthority = {
-    prior:
-      input.mayNameLeadingOption
-      && readMayNameLeadingOptionVerdictForFact(pair.prior).may_name_leading_option,
-    current:
-      input.mayNameLeadingOption
-      && readMayNameLeadingOptionVerdictForFact(pair.current).may_name_leading_option,
+    prior: mayPresentComparedRunLeader(input.mayNameLeadingOption, pair.prior),
+    current: mayPresentComparedRunLeader(input.mayNameLeadingOption, pair.current),
   };
+  // ⛔ AND ITS TRUST VERDICT (review of #1857, B5/N3): an unrequested run's robustness band is
+  // confined like its leader, so "where before it was <band>" may not describe it. The
+  // comparison is composed from a delta with the band movement removed; the sensitivity
+  // science (driver influence) stays, as confinement keeps it.
+  const presentedDelta: typeof delta =
+    mayPresentComparedRunVerdicts(pair.prior) && mayPresentComparedRunVerdicts(pair.current)
+      ? delta
+      : { ...delta, robustness_changed: false };
 
   // ⭐ THE SAME TWO FACTS THE DELTA WAS PROJECTED FROM. `pair` is this gate's
   // own selection, so the band is computed over the pair the sentence
@@ -886,7 +896,7 @@ export function tryRunComparisonGate(
       // apply unchanged — framed by the attribution limit and the offer.
       assistant_text: [
         SAME_INPUTS_LEAD_TEXT,
-        ...composeComparisonParts(delta, authority, movementLicence),
+        ...composeComparisonParts(presentedDelta, authority, movementLicence),
         SAME_INPUTS_OFFER_TEXT,
       ].join(' '),
       // No chip: re-running the same inputs produces the same pair again.
@@ -900,7 +910,7 @@ export function tryRunComparisonGate(
   return {
     matched: true,
     mode: 'compared',
-    assistant_text: composeComparison(delta, authority, movementLicence),
+    assistant_text: composeComparison(presentedDelta, authority, movementLicence),
     suggested_actions: [],
     // Deliberately NOT gated on `authority`. This field has exactly one
     // consumer — the `v5.run_comparison_gate` telemetry event in

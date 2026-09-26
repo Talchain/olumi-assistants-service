@@ -161,6 +161,12 @@ import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
 import { log } from "../utils/telemetry.js";
+import { loadMostRecentPendingActionsIntegrityStrict } from "../orchestrator-v5/build-turn-context.js";
+import {
+  emitHoldLapseTelemetry,
+  threadHoldsThroughMutatingCommit,
+} from "../orchestrator-v5/handlers/hold-thread-through.js";
+import type { PendingAction } from "../orchestrator-v5/session/pending-action.js";
 
 /** Wire schema discriminator. Frozen — the UI lane builds against this. */
 export const SCENARIO_GRAPH_REGISTRATION_SCHEMA =
@@ -169,6 +175,71 @@ export const SCENARIO_GRAPH_REGISTRATION_SCHEMA =
 /** `scenarios.id` is a UUID column, so a non-UUID id cannot name a row. */
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * ⭐ A REGISTER THREADS LIVE CONSENT HOLDS THROUGH ITS WRITE (served 26 Sep
+ * 03:1xZ on CEE `e3b0844`, #70 5842670630): a register of the UNCHANGED graph
+ * returned 200 with the same hash, and the user's held add-option then read
+ * "that proposal is no longer available". This write omitted `pending_actions`,
+ * the RPC defaulted it to `[]`, and the pending read takes only the newest row —
+ * so every register (the UI's re-registers and imports, and the Agent's own
+ * register-based value writes) destroyed every pending approval.
+ *
+ * The SAME seam the other mutating writers use (#1947): each prior pending is
+ * threaded over the bytes this register stores — a still-valid hold is
+ * re-pinned to their hash, an invalidated one lapses with telemetry
+ * (`site: graph_registration`; a register composes no prose, so there is no
+ * notice to carry), and every other pending passes through untouched.
+ * `appliedOperations: []`: a register is a whole-graph replace with no
+ * per-operation record, and nothing it stores is credited as FULFILLING an
+ * offer — it may re-send the very graph the offer was made on.
+ *
+ * NOT a conversational turn, so no turn-TTL decrement (the commit carry-forward
+ * owns that on real turns). Returns `undefined` — today's write, no
+ * `pending_actions` key — when there is nothing to thread or the read failed;
+ * the failure is logged, never silent.
+ */
+async function threadLiveHoldsThroughRegistration(input: {
+  readonly scenarioId: string;
+  readonly turnId: string;
+  readonly requestId: string;
+  readonly graphForStore: unknown;
+  readonly graphHashForStore: string | null;
+}): Promise<readonly PendingAction[] | undefined> {
+  let prior: readonly PendingAction[];
+  try {
+    prior = await loadMostRecentPendingActionsIntegrityStrict(input.scenarioId, input.requestId);
+  } catch (err) {
+    log.warn(
+      {
+        event: "v5.scenario_graph_register.pending_wipe_risk",
+        request_id: input.requestId,
+        scenario_id: input.scenarioId,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      "Graph registration — prior pending read failed; the register writes without threading live holds",
+    );
+    return undefined;
+  }
+  if (prior.length === 0) return undefined;
+  const result = threadHoldsThroughMutatingCommit({
+    priorPendingActions: prior,
+    graphAfterCommit: input.graphForStore,
+    graphHashAfterCommit: input.graphHashForStore,
+    appliedOperations: [],
+    nowMs: Date.now(),
+    scenarioId: input.scenarioId,
+    turnId: input.turnId,
+    requestId: input.requestId,
+  });
+  emitHoldLapseTelemetry(result.lapsed, {
+    requestId: input.requestId,
+    scenarioId: input.scenarioId,
+    turnId: input.turnId,
+    site: "graph_registration",
+  });
+  return result.threaded;
+}
 
 export default async function route(app: FastifyInstance) {
   // Tier DERIVED from RATE_BUCKET_REGISTRY. This is a WRITE — it is registered
@@ -637,7 +708,45 @@ export default async function route(app: FastifyInstance) {
          * is safe to discard and a caller asserting emptiness has not asked to.
          */
         const rawGraphPresent = baseGraphForInvariants !== null && baseGraphForInvariants !== undefined;
-        if (expectedGraphIdentityHash === null && rawGraphPresent) {
+        /**
+         * ⛔ AN ENTITY-LESS STORED GRAPH IS ABSENT FOR THIS ASSERTION (create-only construction,
+         * #69 5834761926 / 5834838346). `{nodes:[], edges:[]}` parses, has no identity, and is
+         * raw-present, so the guard below refused ordinary creation into an emptied scenario as
+         * "content that could not be read". There is nothing in it to protect. A present graph that
+         * does NOT parse as that still refuses: that is the case the guard exists for.
+         */
+        const rawGraphEntityLess = (() => {
+          if (baseGraphForInvariants === null || typeof baseGraphForInvariants !== "object") return false;
+          const { nodes, edges } = baseGraphForInvariants as { nodes?: unknown; edges?: unknown };
+          return Array.isArray(nodes) && nodes.length === 0 && Array.isArray(edges) && edges.length === 0;
+        })();
+        /**
+         * ⛔ AN IDENTICAL RETRY IS ITS OWN REPLAY, NOT A COMPETING WRITER. A construction whose
+         * response was lost is retried with the SAME operation and the SAME bytes; by then the graph
+         * it wrote is present, so the absence check below refused it before the replay arm inside
+         * the atomic writer could return the original receipt. Only a PROVEN identical commit — the
+         * derived turn id already holds this exact request hash — passes through; the writer then
+         * replays (SQL replay precedes CAS) and writes nothing. A different request under the same
+         * operation, no committed turn, or a read that fails all still refuse: none proves a replay.
+         */
+        const identicalCommittedReplay = async (): Promise<boolean> => {
+          if (operationId === undefined || typeof store.readCommittedTurn !== "function") return false;
+          try {
+            const committed = await store.readCommittedTurn(scenarioId, registrationTurnId(scenarioId, operationId));
+            if (committed === null) return false;
+            const bytes = projectGraphForPersistence(parsed.data, {
+              scenarioId,
+              turnClass: "direct_answer",
+              source: "graph_registration",
+            });
+            return committed.request_hash === registrationRequestHash(bytes, brief.value);
+          } catch {
+            return false;
+          }
+        };
+        const replayOfThisOperation =
+          rawGraphPresent && !rawGraphEntityLess ? await identicalCommittedReplay() : false;
+        if (expectedGraphIdentityHash === null && rawGraphPresent && !rawGraphEntityLess && !replayOfThisOperation) {
           log.warn(
             {
               event: "v5.scenario_graph_register.expected_absent_graph_unhashable",
@@ -667,7 +776,7 @@ export default async function route(app: FastifyInstance) {
               ),
             );
         }
-        if (expectedGraphIdentityHash !== null) {
+        if (expectedGraphIdentityHash !== null && !replayOfThisOperation) {
           log.warn(
             {
               event: "v5.scenario_graph_register.expected_absent_graph_present",
@@ -848,6 +957,15 @@ export default async function route(app: FastifyInstance) {
         });
         appendOutcome = await runWithPendingTurnFence(scenarioId, turnId, async () => {
           await admitCurrentTurnFence();
+          // Inside the fence, so no turn can commit a newer hold between this
+          // read and the write that carries it.
+          const threadedPendings = await threadLiveHoldsThroughRegistration({
+            scenarioId,
+            turnId,
+            requestId,
+            graphForStore,
+            graphHashForStore: computeExpectedGraphCasHashes(graphForStore).expectedGraphAnalysisHash,
+          });
           return appendCheckedGraphWrite({
           store,
           writesGraph: true,
@@ -890,6 +1008,7 @@ export default async function route(app: FastifyInstance) {
             // `none`/`skip` outcome leaves the write byte-identical to before.
             ...(versionPlan.kind === "plan" ? { modelVersion: versionPlan.write } : {}),
             ...(brief.value === undefined ? {} : { briefText: brief.value }),
+            ...(threadedPendings === undefined ? {} : { pending_actions: threadedPendings }),
             expectedGraphIdentityHash,
             expectedGraphAnalysisHash,
           },

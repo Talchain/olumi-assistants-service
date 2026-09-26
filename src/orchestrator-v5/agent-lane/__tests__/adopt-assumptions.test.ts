@@ -16,6 +16,7 @@
 import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, authorisationTurnId, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { committedValueWrite } from './fixtures/served-value-write.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440000';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r' };
@@ -52,7 +53,7 @@ function fakeProduct(opts: { rescale?: Record<string, number>; failOn?: string[]
       const stored = opts.rescale?.[ev.target_id] ?? ev.value;
       nodes = nodes.map((n) => (n.id === ev.target_id ? { ...n, observed_state: { ...n.observed_state, value: stored } } : n));
       rev += 1;
-      return { status: 200, json: { assistant_text: 'Updated.' } };
+      return { status: 200, json: committedValueWrite(ev.target_id) };
     }
     return { status: 200, json: { graph: { nodes, edges: [] }, graph_hash: `h${rev}` } };
   };

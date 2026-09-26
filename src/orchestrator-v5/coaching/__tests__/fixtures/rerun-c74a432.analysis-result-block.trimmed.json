@@ -1,0 +1,332 @@
+{
+  "_provenance": {
+    "source": "served staging turn: UI a9968d8c · CEE c74a432 (independent review 5831920107). The explicit RERUN of the panel edit-chain witness: the turn whose body contains clearly ahead.",
+    "source_file": "output/panel-lane/witness-20260925/edit-chain-1142-a9968d8c/turns.jsonl",
+    "source_file_sha256": "9f6efdea7a1296d2fbbeb5f647651b712444c6aaaf65a03f5ba866f33b56d2fe",
+    "turn_index": "line 3 of 3 (0-based index 2)",
+    "turn_line_sha256": "649794ee1efc09c5caa02aeaccc6f51a01d1d15484870eb618d6023a3a008cb2",
+    "turn_at": "2026-09-25T11:44:38.372Z",
+    "url": "https://cee-staging.onrender.com/proxy/v5/turn",
+    "status": 200,
+    "verdict": "openai_verified",
+    "served_build": "CEE c74a432 (staging) per the witness record; base c1ddb50 is its ancestor and coaching/, compose/claim-safety-cage.ts and tools/handlers/run-analysis.ts are identical between them (git diff --stat c1ddb50..c74a432 empty on those paths)",
+    "trimmed": true,
+    "trim_note": "Kept: json.blocks[0] (the single analysis_result block) with type, summary, leading_option_id, win_probabilities and computed_against_hash, and ONLY the enrichment keys the headline builder needs on this envelope: option_comparison (the winner source) plus the three whose removal ALONE changes the built headline (factor_sensitivity, robustness, inference_warnings), measured by removing each of the 13 served keys in turn from the untrimmed block. Each kept key is WHOLE. Also kept: json.analysis_state.leader_claim. Dropped: every other enrichment key (decision_brief, including its PLoT-produced headline_banded.text, flip_thresholds, p_win_sensitivity, edge_e_values, factor_evppi, decision_evpi, confidence_tier, option_comparison_status, conditional_winners), the three coaching/exercise blocks, and every other top-level key. Values re-serialised by jq from the parsed line. CAPTURE, not invented."
+  },
+  "blocks": [
+    {
+      "type": "analysis_result",
+      "summary": "Raise Price to £50 scored highest against your goal in 84% of runs of this model, but treat this as provisional: the link between Price per seat and Monthly revenue is fragile. 'Keep £40 Price' was analysed as no change — the factors it compares against were held at the values your model records today.",
+      "leading_option_id": "raise_price_to_50",
+      "win_probabilities": {
+        "Keep £40 Price": 0.12323333333333326,
+        "Phase to £45 Price": 0.04083333333333276,
+        "Raise Price to £50": 0.8359333333333198
+      },
+      "computed_against_hash": "7453b32eead3bacb",
+      "enrichment": {
+        "option_comparison": [
+          {
+            "id": "keep_40_price",
+            "label": "Keep £40 Price",
+            "status": "computed",
+            "outcome": {
+              "p10": 0.0411322454984728,
+              "p50": 0.13130052878348025,
+              "p90": 0.22952625490162457,
+              "std": 0.07274686111011726,
+              "mean": 0.1344694560506155,
+              "n_samples": 10000,
+              "validity_ratio": 1,
+              "n_valid_samples": 10000,
+              "percentiles_source": "samples"
+            },
+            "downside": {
+              "p05": 0,
+              "cvar_10": 0.006986097520922024,
+              "expected_regret": 0.018814989926480143
+            },
+            "option_id": "keep_40_price",
+            "option_label": "Keep £40 Price",
+            "win_probability": 0.12323333333333326
+          },
+          {
+            "id": "raise_price_to_50",
+            "label": "Raise Price to £50",
+            "status": "computed",
+            "outcome": {
+              "p10": 0.04303722815414841,
+              "p50": 0.15325219431493675,
+              "p90": 0.2552696611144696,
+              "std": 0.08040651003975065,
+              "mean": 0.15303053407431821,
+              "n_samples": 10000,
+              "validity_ratio": 1,
+              "n_valid_samples": 10000,
+              "percentiles_source": "samples"
+            },
+            "downside": {
+              "p05": 0,
+              "cvar_10": 0.006804125677462556,
+              "expected_regret": 0.0002539119027774753
+            },
+            "option_id": "raise_price_to_50",
+            "option_label": "Raise Price to £50",
+            "win_probability": 0.8359333333333198
+          },
+          {
+            "id": "phase_to_45_price",
+            "label": "Phase to £45 Price",
+            "status": "computed",
+            "outcome": {
+              "p10": 0.042395065481968176,
+              "p50": 0.14195374216434756,
+              "p90": 0.24245158253621876,
+              "std": 0.07645073560047157,
+              "mean": 0.14374999506246686,
+              "n_samples": 10000,
+              "validity_ratio": 1,
+              "n_valid_samples": 10000,
+              "percentiles_source": "samples"
+            },
+            "downside": {
+              "p05": 0,
+              "cvar_10": 0.006994707802144092,
+              "expected_regret": 0.009534450914628808
+            },
+            "option_id": "phase_to_45_price",
+            "option_label": "Phase to £45 Price",
+            "win_probability": 0.04083333333333276
+          }
+        ],
+        "factor_sensitivity": [
+          {
+            "source": "graph",
+            "direction": "positive",
+            "factor_id": "active_seats",
+            "confidence": 0.60465,
+            "elasticity": 1,
+            "evpi_method": "heuristic",
+            "driver_label": "biggest",
+            "factor_label": "Active seats",
+            "value_source": "user_override",
+            "evidence_hint": false,
+            "influence_rank": 1,
+            "rank_flip_rate": 0,
+            "importance_rank": 1,
+            "influence_score": 1,
+            "importance_basis": "graph_structural",
+            "confidence_source": "plot_unified_from_isl_bootstrap",
+            "sensitivity_score": 0.5,
+            "flip_risk_category": "correlated",
+            "value_of_information": 0,
+            "attribution_stability": "low",
+            "confidence_components": {
+              "sampling_stability": 0.25,
+              "structural_certainty": 0.8
+            },
+            "confidence_provenance": {
+              "input_quality": "standard",
+              "is_provisional": true,
+              "formula_version": "plot_unified_v3",
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "computation_source": "plot_unified_from_isl_bootstrap"
+            },
+            "evpi_percentage_points": 0,
+            "range_derivation_source": "inferred_value"
+          },
+          {
+            "source": "graph",
+            "direction": "negative",
+            "factor_id": "monthly_churn_rate",
+            "confidence": 0.6000000000000001,
+            "elasticity": 0.25,
+            "evpi_method": "heuristic",
+            "driver_label": "moderate",
+            "factor_label": "Monthly churn rate",
+            "evidence_hint": false,
+            "influence_rank": 3,
+            "importance_rank": 2,
+            "influence_score": 0.25,
+            "importance_basis": "graph_structural",
+            "confidence_source": "plot_unified_from_graph",
+            "sensitivity_score": -0.125,
+            "flip_risk_category": "negligible",
+            "value_of_information": 0,
+            "confidence_components": {
+              "sampling_stability": null,
+              "structural_certainty": 0.8
+            },
+            "confidence_provenance": {
+              "input_quality": "standard",
+              "is_provisional": true,
+              "formula_version": "plot_unified_v2",
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "computation_source": "plot_unified_from_graph"
+            },
+            "evpi_percentage_points": 0,
+            "range_derivation_source": "default"
+          },
+          {
+            "source": "graph",
+            "direction": "negative",
+            "factor_id": "price_churn_sensitivity",
+            "confidence": 0.5,
+            "elasticity": 0.125,
+            "evpi_method": "heuristic",
+            "driver_label": "minor",
+            "factor_label": "Price-churn sensitivity",
+            "evidence_hint": false,
+            "influence_rank": 4,
+            "importance_rank": 3,
+            "influence_score": 0.125,
+            "importance_basis": "graph_structural",
+            "confidence_source": "plot_unified_from_graph",
+            "sensitivity_score": -0.0625,
+            "flip_risk_category": "negligible",
+            "value_of_information": 0,
+            "confidence_components": {
+              "sampling_stability": null,
+              "structural_certainty": 0.5
+            },
+            "confidence_provenance": {
+              "input_quality": "degenerate_fallback",
+              "is_provisional": true,
+              "formula_version": "plot_unified_v2",
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "computation_source": "plot_unified_from_graph"
+            },
+            "evpi_percentage_points": 0,
+            "range_derivation_source": "default"
+          },
+          {
+            "source": "graph",
+            "direction": "positive",
+            "factor_id": "price_per_seat",
+            "confidence": 0.3,
+            "elasticity": 0,
+            "zero_reason": "intervention_override",
+            "driver_label": "strong",
+            "factor_label": "Price per seat",
+            "value_source": "brief_extraction",
+            "influence_rank": 2,
+            "rank_flip_rate": 0,
+            "importance_rank": 4,
+            "influence_score": 0.875,
+            "importance_basis": "graph_structural",
+            "confidence_source": "plot_unified_from_isl_bootstrap",
+            "sensitivity_score": 0,
+            "flip_risk_category": "isolated",
+            "value_of_information": 0,
+            "attribution_stability": "negligible",
+            "confidence_components": {
+              "sampling_stability": 0,
+              "structural_certainty": 0.5
+            },
+            "confidence_provenance": {
+              "input_quality": "standard",
+              "is_provisional": true,
+              "formula_version": "plot_unified_v3",
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "computation_source": "plot_unified_from_isl_bootstrap"
+            },
+            "range_derivation_source": "explicit_cap"
+          }
+        ],
+        "robustness": {
+          "level": "moderate",
+          "near_tie": {
+            "gap": 0.7126999999999865,
+            "is_tie": false,
+            "threshold": 0.1,
+            "top_option_id": "raise_price_to_50",
+            "tied_option_ids": [
+              "raise_price_to_50"
+            ],
+            "second_option_id": "keep_40_price"
+          },
+          "is_robust": true,
+          "confidence": 0.7941366666666537,
+          "robust_edges": [
+            {
+              "to_id": "monthly_churn_rate",
+              "edge_id": "price_per_seat->monthly_churn_rate",
+              "from_id": "price_per_seat",
+              "to_label": "Monthly churn rate",
+              "from_label": "Price per seat",
+              "alternative_winner_id": null,
+              "alternative_winner_label": null
+            }
+          ],
+          "fragile_edges": [
+            {
+              "to_id": "monthly_revenue",
+              "edge_id": "price_per_seat->monthly_revenue",
+              "from_id": "price_per_seat",
+              "visible": true,
+              "severity": "warning",
+              "to_label": "Monthly revenue",
+              "from_label": "Price per seat",
+              "switch_probability": 0.4864,
+              "alternative_winner_id": "keep_40_price",
+              "alternative_winner_label": "Keep £40 Price",
+              "marginal_switch_probability": 0.2
+            },
+            {
+              "to_id": "active_seats",
+              "edge_id": "elevated_churn->active_seats",
+              "from_id": "elevated_churn",
+              "visible": false,
+              "severity": "warning",
+              "to_label": "Active seats",
+              "from_label": "Elevated churn",
+              "switch_probability": 0.1316,
+              "alternative_winner_id": "keep_40_price",
+              "alternative_winner_label": "Keep £40 Price",
+              "marginal_switch_probability": 0
+            }
+          ],
+          "display_verdict": "moderate",
+          "confidence_basis": "recommendation_stability_uncalibrated",
+          "recommended_option_id": "raise_price_to_50",
+          "display_verdict_reason": "varying any one of the factors we could test did not change which option is most likely to achieve your goal, and this run mostly held up under the other changes we tested",
+          "recommended_option_label": "Raise Price to £50",
+          "recommended_option_compliance": "not_applicable",
+          "recommended_option_compliance_reason": "no limits were set for this decision"
+        },
+        "inference_warnings": [
+          {
+            "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+            "message": "5 edge E-value entries were omitted from edge_e_values: 5 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+            "severity": "info"
+          },
+          {
+            "code": "ROOT_NODE_DEFAULT_VALUE",
+            "field": "nodes[price_churn_sensitivity].observed_state.value",
+            "message": "No starting value was provided for \"Price-churn sensitivity\", so the analysis used a default of 0.0. Results for downstream nodes may be unreliable until a real value or range is set.",
+            "severity": "info",
+            "node_label": "Price-churn sensitivity"
+          },
+          {
+            "code": "GOAL_DIRECTION_UNATTESTED",
+            "field": "goal_direction",
+            "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+            "severity": "warning"
+          },
+          {
+            "code": "GOAL_ANCESTOR_DATA_GAP",
+            "field": "nodes[monthly_revenue]",
+            "message": "Goal node 'monthly_revenue' is scored from its forward-propagated outcome distribution, but root ancestor(s) 'price_churn_sensitivity' carry no observed value or ParameterUncertainty and defaulted to 0.0 — goal-level probabilities partially rest on placeholder zeros (insufficient data).",
+            "severity": "info"
+          }
+        ]
+      }
+    }
+  ],
+  "analysis_state": {
+    "leader_claim": {
+      "permitted": true,
+      "separation": "separated"
+    }
+  }
+}

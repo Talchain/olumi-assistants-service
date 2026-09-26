@@ -5,14 +5,14 @@
  *   - Percentages: no space before "%".  "5%" not "5 %".
  *   - Currency: no space between symbol and number. "£50,000" not "£ 50,000".
  *   - Other units: single space.          "12 months", "800 customers".
- *   - Edge strengths: never raw decimals — always influence-band words via
- *     `bandFromMagnitude` (already shared, do not duplicate).
+ *   - Edge strengths: never raw decimals — always band words via
+ *     `edgeBandFromMagnitude` (the ONE edge-strength table, the canvas's own cuts; do not duplicate).
  */
 
 import {
-  bandFromMagnitude,
   NEAR_ZERO_INFLUENCE_THRESHOLD,
 } from '../../../format/influence-bands.js';
+import { edgeBandFromMagnitude } from '../../../format/edge-strength-bands.js';
 import type { PendingAction } from '../../../session/pending-action.js';
 import {
   durationNotEvaluatedSentence,
@@ -594,7 +594,7 @@ export interface EdgeAdjustmentInput {
 }
 
 /**
- * Decision-language edge adjustment confirmation. Uses `bandFromMagnitude`
+ * Decision-language edge adjustment confirmation. Uses `edgeBandFromMagnitude`
  * for strength and surfaces direction reversal explicitly. Never emits
  * the raw mean.
  */
@@ -724,6 +724,6 @@ export function formatEdgeStrengthConfirmed(input: {
 function describeBandWithDirection(mean: number): string {
   const abs = Math.abs(mean);
   if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return 'no material influence';
-  const band = bandFromMagnitude(abs);
+  const band = edgeBandFromMagnitude(abs);
   return mean < 0 ? `${band} (negative)` : band;
 }

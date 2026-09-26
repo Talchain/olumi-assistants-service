@@ -28,6 +28,7 @@ import {
   BUILD_INSTRUCTIONS,
   buildCandidateSchema,
   buildModelFromBrief,
+  prepareProvisionalCandidate,
   type CallStructuredModel,
 } from '../runtime/build-model.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
@@ -135,13 +136,21 @@ describe('the banked live candidate is admitted whole and analysable in structur
       'edges[hire_a_tech_lead::tech_leads_hired]',
       'edges[hire_two_developers::developers_hired]',
       'edges[maintain_current_staffing::existing_team_continuity]',
-      'edges[pilot_developer_hire::developers_hired]',
     ]);
   });
 
-  it('every option reaches the goal, with no ORPHAN_NODE / NO_PATH_TO_GOAL', () => {
-    expect(optionsReachingGoal(a)).toEqual({ total: 4, reaching: 4 });
+  /**
+   * ⛔ "Pilot Developer Hire" IS WITHHELD, AND SAID (DL #70 5842361028 / 5842400604, MG (b)). Olumi added it
+   * with no level, acting on exactly the factors "Hire Two Developers" acts on — the shape that dead-started
+   * served pricing ("Test £59 with AI release", `construction-no-identical-options.test.ts`). Until that rule
+   * this row read 4 of 4 options and the pilot's duplicate link was recorded above; it is now not registered
+   * at all, and named with its reason instead.
+   */
+  it('every option reaches the goal, with no ORPHAN_NODE / NO_PATH_TO_GOAL — and the indistinct pilot is named, not registered', () => {
+    expect(optionsReachingGoal(a)).toEqual({ total: 3, reaching: 3 });
     expect(structuralBlockers(a)).toEqual([]);
+    expect(a.nodes.some((n) => n.id === 'pilot_developer_hire')).toBe(false);
+    expect(a.options_withheld?.map((w) => [w.option, w.like, w.reason])).toEqual([['Pilot Developer Hire', 'Hire Two Developers', 'option_indistinct']]);
   });
 
   it('keeps both of the user’s options, by identity', () => {
@@ -156,7 +165,7 @@ describe('the banked live candidate is admitted whole and analysable in structur
     expect(v.by_kind['factor']).toBeGreaterThanOrEqual(4);
   });
 
-  it('builds through buildModelFromBrief in ONE call and registers once', async () => {
+  it('builds through buildModelFromBrief with no size retry, spending only the coverage retry, and registers once', async () => {
     const calls: string[] = [];
     const fn = vi.fn(async (req: { instructions: string }) => {
       calls.push(req.instructions);
@@ -170,7 +179,11 @@ describe('the banked live candidate is admitted whole and analysable in structur
     const out = await buildModelFromBrief(SCENARIO, BRIEF, d, fn);
     expect(out.ok, JSON.stringify(out).slice(0, 300)).toBe(true);
     expect(out['size_retried']).toBe(false);
-    expect(calls).toHaveLength(1);
+    // The banked capture names most levers' factors with no level (the c22 class), so
+    // the ONE retry spent is the coverage repair; it has no mechanism issue to repair.
+    expect(prepareProvisionalCandidate(BANKED).mechanism_issues).toEqual([]);
+    expect(prepareProvisionalCandidate(BANKED).level_gaps.length).toBeGreaterThan(0);
+    expect(calls).toHaveLength(2);
     expect(paths.filter((p) => p.endsWith('/graph/register'))).toHaveLength(1);
   });
 });
@@ -233,8 +246,9 @@ describe('⛔ the kept option -> factor edge carries the user’s authorship of 
     expect(source(a, 'hire_two_developers', 'developers_hired')).toBe('brief_extraction');
     expect(source(a, 'hire_a_tech_lead', 'tech_leads_hired')).toBe('brief_extraction');
     // CONTRAST, same admission: an `ai_proposed` restatement, and a structural
-    // edge with no restatement at all, stay Olumi's.
-    expect(source(a, 'pilot_developer_hire', 'developers_hired')).toBe('cee_hypothesis');
+    // edge with no restatement at all, stay Olumi's. ("Pilot Developer Hire" carried the
+    // other ai_proposed restatement; it is withheld as indistinct now — see above — so
+    // "Maintain Current Staffing", the same class of restatement, holds the contrast.)
     expect(source(a, 'maintain_current_staffing', 'existing_team_continuity')).toBe('cee_hypothesis');
     expect(source(a, 'hire_two_developers', 'onboarding_workload')).toBe('cee_hypothesis');
     expect(assessConstructionSize(a).brief_stated_keys.edges).toEqual([

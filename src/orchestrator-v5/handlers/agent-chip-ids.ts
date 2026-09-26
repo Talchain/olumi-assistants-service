@@ -11,3 +11,11 @@
  * Its own module so neither side imports the other's dependency tree.
  */
 export const AGENT_RUN_ANALYSIS_CHIP_ID = 'agent-run-analysis';
+
+/**
+ * The chip id the OpenAI Agent lane's `propose_new_option` sends with its typed add-option turn
+ * (`intent: 'add_option'`), so the option is added through the product's own atomic transaction
+ * (`dispatchAddOptionTransaction` → one held pending → one commit) — never through separate system
+ * events that left it unlinked from the decision (Paul's manual test, 25 Sep; C52).
+ */
+export const AGENT_ADD_OPTION_CHIP_ID = 'agent-add-option';

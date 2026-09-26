@@ -275,6 +275,44 @@ export function readUnit(unit: string | null | undefined): UnitReading {
 }
 
 /**
+ * C47 — A CURRENCY INSIDE A COMPOSITE UNIT. Producers store money targets and
+ * prices with qualifiers: `GBP MRR`, `MRR (GBP)`, `£/month`, `GBP per month`.
+ * `readUnit` reads those as `plain`, so a money figure could never match its own
+ * carrier (Paul's £20k goal read as "not modelled" beside "Target 20,000 GBP MRR").
+ *
+ * STRICT, ONE-WAY: exactly one token must read as a currency through
+ * `readUnit` (magnitude letters included, so `£k per month` is ×1000), and EVERY
+ * other token must be a recognised rate/metric qualifier. Any other word leaves
+ * the unit `plain` — `GBP widgets` is not money. `readUnit` itself is unchanged,
+ * so its commit-time callers (the money invariant) are unaffected.
+ */
+const CURRENCY_UNIT_QUALIFIERS: ReadonlySet<string> = new Set([
+  'mrr', 'arr', 'revenue', 'recurring', 'per', 'a', 'month', 'months', 'mo',
+  'monthly', 'year', 'years', 'yr', 'annum', 'annual', 'annually', 'pa', 'pcm', '/',
+]);
+
+export function readCurrencyUnitWithQualifiers(unit: string | null | undefined): UnitReading {
+  const direct = readUnit(unit);
+  if (direct.kind !== "plain" || typeof unit !== "string") return direct;
+  const tokens = unit
+    .replace(/[()]/g, " ")
+    .replace(/\//g, " / ")
+    .split(/\s+/)
+    .filter((t) => t.length > 0);
+  if (tokens.length < 2) return direct;
+  let found: UnitReading | null = null;
+  for (let i = 0; i < tokens.length; i += 1) {
+    const reading = readUnit(tokens[i]);
+    if (reading.kind !== "currency") continue;
+    const rest = tokens.filter((_, j) => j !== i);
+    if (!rest.every((t) => CURRENCY_UNIT_QUALIFIERS.has(t.toLowerCase()))) continue;
+    if (found !== null) return direct; // two currencies: ambiguous, stay plain
+    found = reading;
+  }
+  return found ?? direct;
+}
+
+/**
  * Relative tolerance for the magnitude comparison. Values arrive normalised
  * and re-scaled (`0.8 × 1e6`), so binary floating point makes exact equality
  * the wrong test; 1e-9 is far tighter than any real amount collision.

@@ -994,15 +994,27 @@ export function createAddConstraintHandler(): HandlerFn {
       // label-only change gets its own distinct receipt below — never a
       // value-change claim, never a total no-op either (the label DID
       // change and is persisted).
+      // ⛔ "UNCHANGED" MEANS THE TARGET THE USER READS (#1924 follow-up, #69 5834662051). The UI
+      // writes the stamp (`threshold_source: 'user'` + `success_threshold`) WITHOUT the raw target on
+      // its stamp-only surfaces and reads the stamp first. A restatement that matches the RAW target
+      // but not a user stamp is a change the user will see, never "already … no need to change it".
+      // An absent or cleared stamp agrees by definition: the UI then reads raw.
+      const userStampDisagrees =
+        ownsGoalThresholdChannel &&
+        targetNode.threshold_source === 'user' &&
+        typeof targetNode.success_threshold === 'number' &&
+        targetNode.success_threshold !== params.value;
       const rowValueUnchanged =
         existing !== undefined &&
         existing.value === newConstraint.value &&
-        existing.unit === newConstraint.unit;
+        existing.unit === newConstraint.unit &&
+        !userStampDisagrees;
       const nodeChannelUnchanged =
         ownsGoalThresholdChannel &&
         typeof targetNode.goal_threshold_raw === 'number' &&
         targetNode.goal_threshold_raw === params.value &&
-        targetNode.goal_threshold_unit === newConstraint.unit;
+        targetNode.goal_threshold_unit === newConstraint.unit &&
+        !userStampDisagrees;
       const valueUnchanged = rowValueUnchanged || nodeChannelUnchanged;
       const labelChanged = existing !== undefined && existing.label !== newConstraint.label;
       // F9 — the node's goal_threshold_raw/_unit/_cap fields are the exact
@@ -1330,6 +1342,12 @@ export function createAddConstraintHandler(): HandlerFn {
               goalNode.goal_threshold_unit,
             );
             goalNode.goal_threshold_raw = params.value; // user units (display + has_goal_target)
+            // ⛔ THE TARGET AND THE UI'S STAMP ARE ONE PAIR (#1921 follow-up, #69 5834364983). NodeV3 now
+            // keeps `threshold_source` + `success_threshold` through every write, and the UI reads a stated
+            // target from that stamp first — so moving the raw target without it left a stale figure on
+            // screen after a reload. This row is `provenance: 'explicit'` (the user stated it): the pair is theirs.
+            goalNode.success_threshold = params.value;
+            goalNode.threshold_source = 'user';
             // Unit is ALWAYS reconciled (review hardening): the node's
             // threshold unit follows the constraint row's effective unit.
             // Gate-1 doctrine note: with `existing?.unit` now in the

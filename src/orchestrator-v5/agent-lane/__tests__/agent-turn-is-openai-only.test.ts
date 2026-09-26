@@ -102,7 +102,7 @@ describe('the Agent route is OpenAI-only, all the way down', () => {
     // No key beyond the purity five and the two measurement fields may appear, or this
     // projection would hide a field nobody reviewed.
     for (const c of calls) {
-      expect(Object.keys(c).sort()).toEqual([...PURITY].concat('duration_ms').sort());
+      expect(Object.keys(c).sort()).toEqual([...PURITY, 'duration_ms'].sort());
     }
   });
 

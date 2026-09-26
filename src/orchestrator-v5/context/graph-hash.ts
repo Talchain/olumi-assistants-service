@@ -81,6 +81,7 @@ export function computeDeterministicGraphHash(
  *     intercept,
  *     prior: { distribution, range_min, range_max },
  *     encoding_map,
+ *     nonlinear_identity (C46 carrier, as stored),
  *     interventions: per-factor { value, value_type, encoding_map,
  *                                  target_match: { node_id } }
  *   }
@@ -286,6 +287,9 @@ function projectNode(raw: unknown): NodeProjection {
     'goal_threshold_cap',
     'intercept',
     'encoding_map',
+    // C46 (#1972): the declaration the leader withhold is judged on. In the identity so `fresh` means the run's own
+    // carrier; absent on every graph before #1972, so no stored graph changes hash.
+    'nonlinear_identity',
   ] as const) {
     if (r[key] !== undefined) out[key] = r[key];
   }

@@ -62,7 +62,7 @@ import {
   CLASSIFY_FAILED,
   type MutationReasonCode,
 } from './reason-codes.js';
-import { CANDIDATE_KINDS, PROPOSAL_CAP } from './types.js';
+import { boundTypedEnvelopeCap, CANDIDATE_KINDS, PROPOSAL_CAP } from './types.js';
 import type {
   CandidateKind,
   CandidateMutationEnvelope,
@@ -540,11 +540,16 @@ function advanceBatchGraph(
  * exceeding the T4.0 `PROPOSAL_CAP` (8) is REJECTED as a whole in O(1), so a
  * sparse hostile array with a huge `length` cannot force unbounded
  * parsing/allocation.
+ *
+ * (A) `options.envelopeCap` widens the cap for a CEE-BUILT typed transaction
+ * only, bounded by `boundTypedEnvelopeCap` (never above
+ * `TYPED_TRANSACTION_ENVELOPE_CAP`). Absent, it is `PROPOSAL_CAP`, unchanged.
  */
 export function refereeMutationBatch(
   rawBatch: unknown,
   currentGraph: unknown,
   frame: MutationFrame | null,
+  options?: { readonly envelopeCap?: number },
 ): RefereeVerdict[] {
   if (!Array.isArray(rawBatch)) {
     return [refereeMutation(rawBatch, currentGraph, frame)];
@@ -555,9 +560,10 @@ export function refereeMutationBatch(
   } catch {
     return [batchRejected(SCHEMA_INVALID, 'Batch could not be read.')];
   }
-  if (len > PROPOSAL_CAP) {
+  const cap = boundTypedEnvelopeCap(options?.envelopeCap) ?? PROPOSAL_CAP;
+  if (len > cap) {
     // Fail closed, bounded: never iterate an over-cap (possibly huge/sparse) array.
-    return [batchRejected(BATCH_CAP_EXCEEDED, `Batch exceeds the ${PROPOSAL_CAP}-envelope cap.`)];
+    return [batchRejected(BATCH_CAP_EXCEEDED, `Batch exceeds the ${cap}-envelope cap.`)];
   }
   let workingGraph: unknown = currentGraph;
   const out: RefereeVerdict[] = [];

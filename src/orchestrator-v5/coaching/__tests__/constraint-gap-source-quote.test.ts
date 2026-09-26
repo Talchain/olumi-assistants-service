@@ -106,9 +106,11 @@ describe('WS-A 2(a) — the unevaluated disclosure quotes the user back to thems
     expect(suffix).toContain('One limit on your model could not be checked');
     expect(suffix).toContain('“Keep gross margin at or above 78%”');
     expect(suffix).toContain('From your brief: “without dropping gross margin below 78%”.');
-    // The repair step still closes the message — the quote is additive, not a
-    // replacement for the one-step resolution path.
-    expect(suffix).toContain('Tell me the limit you meant in your own words');
+    // The closer still closes the message — the quote is additive, not a
+    // replacement for it. (25 Sep 2026, #69 5831708206: the closer no longer
+    // promises a restate-and-rerun repair; nothing proves one works.)
+    expect(suffix.endsWith(' It stays on the model.')).toBe(true);
+    expect(suffix).not.toContain('Tell me the limit you meant');
   });
 
   it('asserts presence in the submitted text, never authorship of the row', () => {
@@ -181,10 +183,12 @@ describe('WS-A 2(a) — the unevaluated disclosure quotes the user back to thems
     expect(grammarAdmits(suffix)).toBe(true);
   });
 
-  it('a quoteless row produces exactly the message it produced before this change', () => {
+  it('a quoteless row produces exactly the labelled message, with no quote rung', () => {
     // The no-regression rung: absence of a quote must be byte-identical to the
-    // pre-WS-A output, so the estate's pinned disclosure copy is untouched for
-    // every row that carries no `source_quote`.
+    // labelled form, so the estate's pinned disclosure copy is untouched for
+    // every row that carries no `source_quote`. (The labelled form itself
+    // changed on 25 Sep 2026: no asserted cause and no restate-and-rerun
+    // promise for a row nothing scored, #69 5831708206.)
     const suffix = buildConstraintDisclosureFromState(
       'unevaluated',
       readRatifiedConstraints({ goal_constraints: [{ constraint_id: 'c1', label: 'A limit' }] }),
@@ -192,9 +196,8 @@ describe('WS-A 2(a) — the unevaluated disclosure quotes the user back to thems
     );
     expect(suffix).toBe(
       ' One limit on your model could not be checked: “A limit”.' +
-        ' We could not line it up with anything this analysis measures, so it was not part of the comparison.' +
-        ' Tell me the limit you meant in your own words and I will record it; this one stays on the model.' +
-        ' Then run the analysis again.',
+        ' This model could not check it yet, so it was not part of the comparison.' +
+        ' It stays on the model.',
     );
   });
 });

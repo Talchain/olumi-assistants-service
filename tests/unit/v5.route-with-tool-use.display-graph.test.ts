@@ -197,8 +197,8 @@ describe('display-safe graph reaches Sonnet via buildUserMessage (A2.1)', () => 
     const content = userMessageContent(calls[0]!.args);
 
     // Decision-language phrases present.
-    expect(content).toContain('strong positive link'); // 0.75 → strong
-    expect(content).toContain('moderate negative link'); // -0.4 → moderate
+    expect(content).toContain('very strong positive link'); // 0.75 → very strong (edge table ≥ 0.7)
+    expect(content).toContain('strong negative link'); // -0.4 → strong (edge table 0.4–0.7)
     expect(content).toContain('negligible link'); // 0.02 → negligible
 
     // Human labels surfaced for edge endpoints.
@@ -321,8 +321,8 @@ describe('display-safe graph reaches Sonnet via buildUserMessage (A2.1)', () => 
 
     const parsed = parseContextPackFromUserMessage(userMessageContent(calls[0]!.args));
     expect(parsed.graph.edges).toHaveLength(2);
-    expect(parsed.graph.edges[0]!['relationship']).toBe('moderate positive link');
-    expect(parsed.graph.edges[1]!['relationship']).toBe('moderate negative link');
+    expect(parsed.graph.edges[0]!['relationship']).toBe('strong positive link');
+    expect(parsed.graph.edges[1]!['relationship']).toBe('strong negative link');
     // No raw fields leak from the canonical-shape input either.
     for (const edge of parsed.graph.edges) {
       expect(edge).not.toHaveProperty('strength');

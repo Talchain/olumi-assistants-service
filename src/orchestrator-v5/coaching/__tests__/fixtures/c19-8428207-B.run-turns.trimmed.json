@@ -1,0 +1,259 @@
+{
+  "_provenance": {
+    "source_file": "output/paul-test-20260923/construction-witness/raw/c19-8428207-B.json",
+    "source_sha256": "6b472c0f2ac0dc4a22937b5b1a2a79d568da4c2fe7f61e37e99d1781ac7d34a3",
+    "turns_kept": [
+      "t2"
+    ],
+    "served_build": "CEE 8428207aa3e5524bb7c2ca482b9694af4b40f246 (staging)",
+    "route": "POST /agent/v1/turn (agent lane, served wire response)",
+    "captured": "2026-09-24 ~16:45-16:48Z by the OpenAI Runtime witness c19",
+    "trimmed": true,
+    "trim_note": "Only the Run turns are kept, and of each only: graph_hash, analysis_state (whole), analysis_ready {status, may_run, goal_node_id, freshness, freshness_reason, graph_hash_at_run, current_graph_hash, computed_at, options[{option_id,label}]}, the single analysis_result block {type, computed_against_hash, leading_option_id, summary, win_probabilities, enrichment {robustness, confidence_tier, option_comparison_status}}, and the turn's tools_called. Dropped: assistant_text, draft_graph, suggested_actions, diagnostics, provider calls, receipts and every other enrichment field. Values are byte-identical to the source for every kept field.",
+    "capture_note": "The source holds the ROUTE response only, not the internal /orchestrate/v2/turn run response the Runtime hands to captureAnalysis. Tests reconstruct that capture from the same turn's analysis_state + analysis_result (the same run: identical scenario, hash and computed_at)."
+  },
+  "scenario_id": "11362815-38d2-4600-a993-15d0a41e5e08",
+  "turns": {
+    "t2": {
+      "tools_called": [
+        "run_analysis"
+      ],
+      "graph_hash": "2cac03f2a47449be",
+      "analysis_state": {
+        "run_state": {
+          "kind": "complete_current",
+          "computed_at": "2026-09-24T16:47:26.848Z"
+        },
+        "readiness": {
+          "status": "unknown",
+          "blockers": []
+        },
+        "leader_claim": {
+          "permitted": false,
+          "withheld_reason": "constraint_verdict_withheld",
+          "separation": "separated"
+        },
+        "robustness": {
+          "aggregate_level": "low"
+        },
+        "usable_for_prose": true,
+        "usable_for_chips": true,
+        "usable_for_followup": true,
+        "requires_rerun": false,
+        "blocked_unusable": false,
+        "contradictions": []
+      },
+      "analysis_ready": {
+        "status": "ready",
+        "may_run": true,
+        "goal_node_id": "mrr",
+        "freshness": "fresh",
+        "freshness_reason": "agent_readback_run_state_current",
+        "graph_hash_at_run": "2cac03f2a47449be",
+        "current_graph_hash": "2cac03f2a47449be",
+        "computed_at": "2026-09-24T16:47:26.848Z",
+        "options": [
+          {
+            "option_id": "raise_price_at_release",
+            "label": "Raise Price at Release"
+          },
+          {
+            "option_id": "keep_current_pro_price",
+            "label": "Keep Current Pro Price"
+          },
+          {
+            "option_id": "pilot_59_at_release",
+            "label": "Pilot £59 at Release"
+          }
+        ]
+      },
+      "analysis_result": {
+        "type": "analysis_result",
+        "computed_against_hash": "2cac03f2a47449be",
+        "leading_option_id": null,
+        "summary": "Ran analysis on your current scenario. One limit on your model could not be checked: “Monthly churn < 4percent per month”. We could not line it up with anything this analysis measures, so it was not part of the comparison. The part of your model it points at is worked out from other parts, so it has no measured starting point of its own, and restating the limit cannot give it one. Tell me which part of your model it applies to and I will record it there; this one stays on the model. Then run the analysis again.",
+        "win_probabilities": {
+          "Pilot £59 at Release": 0.5422666666666659,
+          "Keep Current Pro Price": 0.1778666666666662,
+          "Raise Price at Release": 0.2798666666666671
+        },
+        "enrichment": {
+          "robustness": {
+            "level": "low",
+            "near_tie": {
+              "gap": 0.2623999999999988,
+              "is_tie": false,
+              "threshold": 0.1
+            },
+            "is_robust": false,
+            "confidence": 0.5422666666666659,
+            "robust_edges": [],
+            "fragile_edges": [
+              {
+                "to_id": "mrr",
+                "edge_id": "pro_subscriber_base->mrr",
+                "from_id": "pro_subscriber_base",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "MRR",
+                "from_label": "Pro subscriber base",
+                "switch_probability": 0.4876,
+                "alternative_winner_id": "raise_price_at_release",
+                "alternative_winner_label": "Raise Price at Release",
+                "marginal_switch_probability": 0.31
+              },
+              {
+                "to_id": "churn_limit_breach",
+                "edge_id": "monthly_churn->churn_limit_breach",
+                "from_id": "monthly_churn",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Churn-limit breach",
+                "from_label": "Monthly churn",
+                "switch_probability": 0.3916,
+                "alternative_winner_id": "raise_price_at_release",
+                "alternative_winner_label": "Raise Price at Release",
+                "marginal_switch_probability": 0.21
+              },
+              {
+                "to_id": "revenue_per_pro_subscriber",
+                "edge_id": "pro_plan_price->revenue_per_pro_subscriber",
+                "from_id": "pro_plan_price",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Revenue per Pro subscriber",
+                "from_label": "Pro plan price",
+                "switch_probability": 0.3832,
+                "alternative_winner_id": "keep_current_pro_price",
+                "alternative_winner_label": "Keep Current Pro Price",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "pro_subscriber_base",
+                "edge_id": "new_pro_conversion_rate->pro_subscriber_base",
+                "from_id": "new_pro_conversion_rate",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Pro subscriber base",
+                "from_label": "New Pro conversion rate",
+                "switch_probability": 0.3688,
+                "alternative_winner_id": "raise_price_at_release",
+                "alternative_winner_label": "Raise Price at Release",
+                "marginal_switch_probability": 0.23
+              },
+              {
+                "to_id": "monthly_churn",
+                "edge_id": "price_rollout_scope->monthly_churn",
+                "from_id": "price_rollout_scope",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Monthly churn",
+                "from_label": "Price rollout scope",
+                "switch_probability": 0.354,
+                "alternative_winner_id": "raise_price_at_release",
+                "alternative_winner_label": "Raise Price at Release",
+                "marginal_switch_probability": 0.18
+              },
+              {
+                "to_id": "monthly_churn",
+                "edge_id": "pro_plan_price->monthly_churn",
+                "from_id": "pro_plan_price",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Monthly churn",
+                "from_label": "Pro plan price",
+                "switch_probability": 0.3452,
+                "alternative_winner_id": "raise_price_at_release",
+                "alternative_winner_label": "Raise Price at Release"
+              },
+              {
+                "to_id": "new_pro_conversion_rate",
+                "edge_id": "price_rollout_scope->new_pro_conversion_rate",
+                "from_id": "price_rollout_scope",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "New Pro conversion rate",
+                "from_label": "Price rollout scope",
+                "switch_probability": 0.262,
+                "alternative_winner_id": "raise_price_at_release",
+                "alternative_winner_label": "Raise Price at Release",
+                "marginal_switch_probability": 0.23
+              },
+              {
+                "to_id": "new_pro_conversion_rate",
+                "edge_id": "pro_plan_price->new_pro_conversion_rate",
+                "from_id": "pro_plan_price",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "New Pro conversion rate",
+                "from_label": "Pro plan price",
+                "switch_probability": 0.2604,
+                "alternative_winner_id": "raise_price_at_release",
+                "alternative_winner_label": "Raise Price at Release"
+              },
+              {
+                "to_id": "pro_subscriber_base",
+                "edge_id": "monthly_churn->pro_subscriber_base",
+                "from_id": "monthly_churn",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Pro subscriber base",
+                "from_label": "Monthly churn",
+                "switch_probability": 0.2112,
+                "alternative_winner_id": "raise_price_at_release",
+                "alternative_winner_label": "Raise Price at Release",
+                "marginal_switch_probability": 0.21
+              },
+              {
+                "to_id": "mrr",
+                "edge_id": "churn_limit_breach->mrr",
+                "from_id": "churn_limit_breach",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "MRR",
+                "from_label": "Churn-limit breach",
+                "switch_probability": 0.1988,
+                "alternative_winner_id": "raise_price_at_release",
+                "alternative_winner_label": "Raise Price at Release",
+                "marginal_switch_probability": 0.23
+              },
+              {
+                "to_id": "mrr",
+                "edge_id": "revenue_per_pro_subscriber->mrr",
+                "from_id": "revenue_per_pro_subscriber",
+                "visible": false,
+                "severity": "warning",
+                "to_label": "MRR",
+                "from_label": "Revenue per Pro subscriber",
+                "switch_probability": 0.1148,
+                "alternative_winner_id": "keep_current_pro_price",
+                "alternative_winner_label": "Keep Current Pro Price",
+                "marginal_switch_probability": 0.33
+              },
+              {
+                "to_id": "revenue_per_pro_subscriber",
+                "edge_id": "price_rollout_scope->revenue_per_pro_subscriber",
+                "from_id": "price_rollout_scope",
+                "visible": false,
+                "severity": "warning",
+                "to_label": "Revenue per Pro subscriber",
+                "from_label": "Price rollout scope",
+                "switch_probability": 0.086,
+                "alternative_winner_id": "raise_price_at_release",
+                "alternative_winner_label": "Raise Price at Release",
+                "marginal_switch_probability": 0.46
+              }
+            ],
+            "display_verdict": "fragile",
+            "confidence_basis": "recommendation_stability_uncalibrated",
+            "display_verdict_reason": "small changes to your assumptions could change which option is most likely to achieve your goal",
+            "recommended_option_compliance": "not_assessed",
+            "recommended_option_compliance_reason": "we could not check every limit you set on this run"
+          },
+          "confidence_tier": "needs_work",
+          "option_comparison_status": "computed"
+        }
+      }
+    }
+  }
+}

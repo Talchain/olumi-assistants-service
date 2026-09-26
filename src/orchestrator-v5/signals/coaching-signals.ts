@@ -46,7 +46,10 @@ import {
 } from '../coaching/intervening-change.js';
 import type { RecentChangeAction } from '../context/recent-changes.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
-import { hasUserSeenRunAnalysisResult } from '../context/run-initiator.js';
+import {
+  hasUserSeenRunAnalysisResult,
+  isAutoInitiatedRunAnalysisFact,
+} from '../context/run-initiator.js';
 import { deriveEditComparisonReach } from '../coaching/edit-comparison-reach.js';
 import {
   licenceToReportMovementDirection,
@@ -920,6 +923,13 @@ function buildRerunAcknowledgement(input: CoachingSignalInput): {
   // let the sentence attribute a change to a comparison it did not precede.
   const selected = selectRunAnalysisFact(input.priorFacts);
   if (selected === null) return none;
+  // ⛔ A CONFINED PRIOR'S LEADER WAS NEVER SHOWN. An auto-initiated run is SEEN
+  // when it is the construction auto-run (its figures reach the user), but
+  // unrequested-analysis confinement withheld its leader — and every sentence
+  // `compareRuns` composes names an option against the prior ("X still
+  // leads"). So the re-run is acknowledged comparison-free, the same degrade
+  // the withheld arm uses. Pinned by `coaching-construction-auto-run.test.ts`.
+  if (isAutoInitiatedRunAnalysisFact(selected.fact)) return none;
 
   const prior = projectRunFact(selected.fact);
   const current = projectRunFact(currentFact);

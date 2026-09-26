@@ -32,8 +32,10 @@
  */
 
 import type { ConstraintVerdict as ContractConstraintVerdict } from "@talchain/schemas/orchestrator";
+import { EnrichmentScaleProvenanceSchema } from "@talchain/schemas/boundary";
 
 import { readOptionResultSources } from "./option-result-source.js";
+import { classifyValueSource, earnsAuthorshipCredit } from "../../cee/graph-readiness/obligation-provenance.js";
 
 export interface WinnerConstraintFeasibility {
   /** True when the WINNING option violates a hard constraint. */
@@ -303,9 +305,11 @@ export type ConstraintVerdictState =
   /**
    * At least one ratified constraint was NOT evaluated to decision grade, on
    * evidence that cannot be confused with a keying failure: either the producer
-   * said so explicitly (a not-decision-grade code, or
-   * `constraints_status: 'unavailable'`), or the id spaces demonstrably line up
-   * elsewhere and this constraint still has no score. "Your condition was not
+   * said so explicitly (a not-decision-grade code,
+   * `constraints_status: 'unavailable'`, or the constraint's OWN
+   * `constraint_results[].scale_provenance` marker not certifying
+   * `decision_grade: true`), or the id spaces demonstrably line up elsewhere
+   * and this constraint still has no score. "Your condition was not
    * checked" is assertable HERE AND NOWHERE ELSE.
    */
   | 'unevaluated'
@@ -540,7 +544,7 @@ export function readRatifiedConstraints(source: unknown): RatifiedConstraint[] {
  *
  * It is a strict SUPERSET of the `carriesValue` conjunction in
  * `cee/transforms/schema-v3.ts` (observed_state · prior · display_value ·
- * intercept · goal_threshold · goal_threshold_raw), plus the two scale carriers
+ * intercept · goal_threshold · goal_threshold_raw · success_threshold), plus the two scale carriers
  * that module has no reason to consult (`scale_frame`, `goal_threshold_cap`)
  * and the V1 `data` carrier. Superset, not mirror: were the two to disagree,
  * this one says "carries a value" wherever that one does, which is the safe
@@ -554,6 +558,7 @@ const NODE_QUANTITY_FIELDS: readonly string[] = [
   "intercept",
   "goal_threshold",
   "goal_threshold_raw",
+  "success_threshold",
   "goal_threshold_cap",
   "scale_frame",
   "data",
@@ -601,6 +606,77 @@ export function constraintTargetCarriesNoQuantity(node: Record<string, unknown>)
 
 /** Internal alias kept so the read-time collector reads as it always did. */
 const nodeCarriesNoQuantity = constraintTargetCarriesNoQuantity;
+
+/**
+ * ⛔ THE LIMITS WHOSE LEADER RESULT IS OLUMI'S OWN ESTIMATE, NOT A CHECK (AI Quality, #70 5844226031).
+ *
+ * An option that SETS a limit's target is compared at the level it sets once ISL scores such rows (ISL #179): every
+ * draw carries that level, so its result is a flat 1 or 0. When that level is the USER's own figure, the result is a
+ * real check of what they told us. When it is not — Olumi's estimate (`cee_hypothesis`, a `cee_inference` observed
+ * level), a ratified-only estimate (`user_confirmed`), or a level with no readable owner — the "check" only restates
+ * the guess, and a `decision_grade` scale marker cannot tell the two apart: it certifies the RANGE, not whose level
+ * produced the score.
+ *
+ * WHOSE LEVEL, from ONE authority: `earnsAuthorshipCredit(classifyValueSource(stamp))` (`obligation-provenance.ts`),
+ * the predicate that file names for exactly this question ("must NOT be used to unlock comparative_leader … That is
+ * the authorship question"). No second list of sources lives here.
+ *
+ * WHICH LEVEL, from what PLoT RECEIVED (review of 3f2f6714, 5844327116): the leader's WIRE option (`gate.options`)
+ * decides whether it sets the target, because a status quo the gate HELD sets it on the wire only. For a factor the
+ * gate held on the leader (`gate.held`), the level IS that factor's own observed level, so its owner is the factor's
+ * `observed_state.source`; otherwise it is the intervention entry's own `source` (the wire entry, then the graph's).
+ * Without `wire`, the graph's option node is read (the pre-review behaviour, kept for direct callers).
+ *
+ * Returns the ratified constraint ids whose target the LEADING option sets with a level that is not the user's own.
+ * Only the leader matters: the verdict is the leader's. Pure; empty on anything malformed or absent.
+ */
+export interface LeaderWireOptions {
+  /** The options PLoT received, pre-projection objects (`run-analysis.ts` `gate.options`). */
+  readonly options: ReadonlyArray<Record<string, unknown>>;
+  /** The gate's hold record: which factor ids CEE supplied on which option (`gate.held`). */
+  readonly held: ReadonlyArray<{ readonly option_id: string; readonly factor_ids: readonly string[] }>;
+}
+
+const sourceOf = (entry: unknown): unknown =>
+  entry !== null && typeof entry === 'object' ? (entry as { source?: unknown }).source : undefined;
+
+export function collectLeaderEstimatedTargetIds(
+  graph: unknown,
+  ratified: readonly RatifiedConstraint[],
+  leadingOptionId: string | null | undefined,
+  wire?: LeaderWireOptions,
+): Set<string> {
+  const out = new Set<string>();
+  if (typeof leadingOptionId !== 'string' || leadingOptionId.length === 0) return out;
+  const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  const nodes: Record<string, unknown>[] = Array.isArray(rawNodes)
+    ? rawNodes.filter((n): n is Record<string, unknown> => n !== null && typeof n === 'object')
+    : [];
+  const nodeById = (id: string) => nodes.find((n) => n.id === id);
+  const asObject = (v: unknown): Record<string, unknown> | undefined =>
+    v !== null && typeof v === 'object' ? (v as Record<string, unknown>) : undefined;
+  const graphInterventions = asObject(nodeById(leadingOptionId)?.interventions);
+  let setBy: Record<string, unknown> | undefined;
+  let heldFactors: ReadonlySet<string> = new Set();
+  if (wire !== undefined) {
+    const option = wire.options.find((o) => o.id === leadingOptionId || o.option_id === leadingOptionId);
+    setBy = asObject(option?.interventions);
+    heldFactors = new Set(wire.held.filter((h) => h.option_id === leadingOptionId).flatMap((h) => h.factor_ids));
+  } else {
+    setBy = graphInterventions;
+  }
+  if (setBy === undefined) return out;
+  for (const c of ratified) {
+    if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
+    if (!Object.prototype.hasOwnProperty.call(setBy, c.node_id)) continue;
+    const stamp = heldFactors.has(c.node_id)
+      ? sourceOf(asObject(nodeById(c.node_id))?.observed_state)
+      : (sourceOf(setBy[c.node_id]) ?? sourceOf(graphInterventions?.[c.node_id]));
+    if (earnsAuthorshipCredit(classifyValueSource(stamp))) continue;
+    out.add(c.constraint_id);
+  }
+  return out;
+}
 
 /**
  * The constraint ids whose TARGET NODE carries no quantity to compare against.
@@ -701,6 +777,91 @@ function collectEvaluatedConstraintIds(
 }
 
 /**
+ * The ratified-constraint ids the LEADING option ITSELF carries a finite
+ * per-option satisfaction probability for (`option_comparison[].constraint_probabilities`,
+ * both wire shapes), or `null` when there is no leader to name.
+ *
+ * WHY: PLoT's own per-option trust marker (`constraints_decision_grade`,
+ * run.ts b09c0f2 :3346-3372) is the AND of TWO conjuncts — FULL participation
+ * (every active constraint present in THIS option's map; "a MISSING verdict is
+ * itself a trust failure") and every marker `decision_grade: true`. That
+ * aggregate carries no constraint identity, so it is not read; this is its
+ * first conjunct, bound to the leader's option id x the ratified constraint id.
+ * Without it a ratified id scored only for a DIFFERENT option (the top-level
+ * `constraint_results` row is derived from the FIRST option, :2584-2590)
+ * reached rule 4, where `deriveWinnerConstraintInfeasibility` ignores ids the
+ * leader lacks, and read as a pass for a leader that was never scored.
+ *
+ * A leader id that matches no option entry yields the EMPTY set (fail-closed).
+ * Pure.
+ */
+function collectLeaderScoredConstraintIds(
+  envelope: Record<string, unknown>,
+  leadingOptionId: string | null | undefined,
+): Set<string> | null {
+  if (typeof leadingOptionId !== 'string' || leadingOptionId.length === 0) return null;
+  const entry = findWinnerEntry(envelope, leadingOptionId);
+  if (entry === null) return new Set();
+  return new Set(readConstraintSatisfactionProbs(entry).map((p) => p.id));
+}
+
+/**
+ * The constraint ids whose identity-bound `constraint_results[]` entry the
+ * PRODUCER ITSELF does not certify as decision-grade.
+ *
+ * THE FIELD. `constraint_results[i].scale_provenance` is PLoT's per-constraint
+ * trust marker (`plot-lite-service` b09c0f2 `src/types/engine-v3.ts`
+ * `ConstraintScaleProvenance`; built by `routes/v2/run.ts`
+ * `buildConstraintScaleProvenance`), typed on the shared contract CEE already
+ * pins as `EnrichmentScaleProvenanceSchema` (`@talchain/schemas/boundary`).
+ * `decision_grade` is PLoT's conjunction of every reason a probability can be
+ * numerically real and still not mean what the user asked: a threshold clamped
+ * onto [0,1], a range source outside its allowlist (`default`,
+ * `inferred_value`, ...), `range_unified: false`, or a unit mismatch. This
+ * module does not re-derive any of those reasons and does not read
+ * `threshold_clamped` on its own: the producer's conjunction is the answer.
+ *
+ * THE RULE IS THE CONTRACT'S, APPLIED WHERE IDENTITY EXISTS. An entry certifies
+ * its constraint ONLY when its marker parses under the contract schema AND
+ * `decision_grade === true`. Explicit `false` (any reason), a malformed marker,
+ * or a present entry carrying NO marker all fail closed — the contract says
+ * "Absence of this marker means NOT decision-grade (fail-closed). Consumers
+ * MUST NOT treat a missing marker as trustworthy."
+ *
+ * IDENTITY-BOUND. Only `constraint_id` is collected and the caller matches it
+ * against the ratified ids exactly, so PLoT's own synthesised goal constraint
+ * (source `default`, never ratified) condemns nothing. The per-option
+ * `constraints_decision_grade` is deliberately NOT read: it is an AND over the
+ * participating constraints with no identity, false on partial participation,
+ * so it cannot say WHICH limit is unverified.
+ *
+ * ⚠ BOUNDARY, STATED EXACTLY. A ratified constraint scored ONLY in the
+ * per-option map, with no `constraint_results` entry of its own, is not
+ * reached here (no identity-bound marker exists to read). At b09c0f2 that
+ * shape cannot occur under `constraints_status: 'computed'` (the
+ * exact-correspondence guard in `buildConstraintFields`), so it is a
+ * version-skew gap, recorded rather than closed in this change.
+ *
+ * Pure.
+ */
+function collectProducerNotDecisionGradeConstraintIds(
+  envelope: Record<string, unknown>,
+): Set<string> {
+  const out = new Set<string>();
+  const results = envelope.constraint_results;
+  if (!Array.isArray(results)) return out;
+  for (const entry of results) {
+    if (entry === null || typeof entry !== 'object') continue;
+    const obj = entry as Record<string, unknown>;
+    const id = readString(obj.constraint_id);
+    if (id === null) continue;
+    const marker = EnrichmentScaleProvenanceSchema.safeParse(obj.scale_provenance);
+    if (!marker.success || marker.data.decision_grade !== true) out.add(id);
+  }
+  return out;
+}
+
+/**
  * Collect every constraint id the PRODUCER DELIBERATELY REMOVED before
  * computing, from its own disclosure channel `_meta.filtered_constraints[]`.
  *
@@ -713,14 +874,23 @@ function collectEvaluatedConstraintIds(
  * silently failed to score — and the second reading is what withheld the
  * leading option on every brief carrying a time phrase.
  *
- * NO REASON ALLOWLIST, DELIBERATELY (CLAUDE.md trap 12). PLoT types `reason`
- * as an open `string` and emits two values today (`temporal_deadline`,
- * `temporal_against_normalised_goal`); a hand-listed set here would be a
- * mirror that goes silently short the day a third is added, and the missing
- * entry would fail in the WITHHOLDING direction — i.e. straight back into this
- * defect. The semantics that matter are carried by PRESENCE in the channel,
- * not by the reason text: a constraint the producer states it removed before
- * computing cannot have been scored, and no user restatement can change that.
+ * ⛔ WHICH REMOVALS ARE "OUT OF SCOPE" — AI Quality claim-permission ruling
+ * (#70 5844891057). The channel carries TWO kinds of removal, and they are
+ * different claims:
+ *   · the model CANNOT test the limit (PLoT `normalisation/constraint-filter.ts`:
+ *     `temporal_deadline`, `temporal_against_normalised_goal`) — "this analysis
+ *     does not test that" is true, and the leader may be named on what it does test;
+ *   · PLoT REFUSED a limit it could test once its frame or units are stated
+ *     (ROADMAP 2.878 `delta_frame_value_altered_by_normalisation`; PLoT #370
+ *     `percent_unit_disagrees_with_target_frame`) — that is "not checked", owed a
+ *     units repair, and the leader stays withheld until it is.
+ * So only the first kind is partitioned off ({@link OUT_OF_SCOPE_FILTER_REASONS}).
+ * Every other reason — a fidelity refusal, one CEE has never seen, or none —
+ * stays a ratified limit with no score, and rule 3 makes it `unevaluated`.
+ * The list sits on the PERMISSIVE side on purpose: a reason missing from it
+ * fails toward withholding, never toward naming a leader past a limit nobody
+ * checked. (This supersedes 2.349's "no reason allowlist": presence proves the
+ * limit was not scored, not that the model cannot score it.)
  *
  * IDENTITY-BOUND. Only ids are collected, and the caller matches them against
  * the ratified ids exactly — a filtered record naming something we never
@@ -733,8 +903,8 @@ function collectEvaluatedConstraintIds(
  */
 function collectProducerFilteredConstraintIds(
   envelope: Record<string, unknown>,
-): Set<string> {
-  const out = new Set<string>();
+): { outOfScope: Set<string>; refused: Set<string> } {
+  const out = { outOfScope: new Set<string>(), refused: new Set<string>() };
   const meta = envelope._meta;
   if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) return out;
   const filtered = (meta as Record<string, unknown>).filtered_constraints;
@@ -742,10 +912,23 @@ function collectProducerFilteredConstraintIds(
   for (const entry of filtered) {
     if (entry === null || typeof entry !== 'object') continue;
     const id = readString((entry as Record<string, unknown>).constraint_id);
-    if (id !== null) out.add(id);
+    if (id === null) continue;
+    const reason = readString((entry as Record<string, unknown>).reason);
+    (reason !== null && OUT_OF_SCOPE_FILTER_REASONS.has(reason) ? out.outOfScope : out.refused).add(id);
   }
   return out;
 }
+
+/**
+ * The producer's removal reasons that mean "the model cannot test this limit"
+ * (PLoT `normalisation/constraint-filter.ts`, verified at PLoT staging
+ * `b09c0f2`). The ONLY reasons partitioned off as out of scope — see
+ * {@link collectProducerFilteredConstraintIds}.
+ */
+export const OUT_OF_SCOPE_FILTER_REASONS: ReadonlySet<string> = new Set([
+  'temporal_deadline',
+  'temporal_against_normalised_goal',
+]);
 
 /** Codes on the producer's warning channels that mean "not decision-grade". */
 function collectNotDecisionGradeCodes(
@@ -796,17 +979,21 @@ function collectNotDecisionGradeCodes(
  *      survives the partition the answer is `not_applicable`, the same as for
  *      a turn with no ratified constraints.
  *   1. (S1/S2) An explicit producer verdict — a not-decision-grade CODE, or
- *      `constraints_status: 'unavailable'` — condemns the whole constraint
+ *      any PRESENT `constraints_status` other than `'computed'` — condemns the whole constraint
  *      block, so every ratified constraint is `unevaluated`. This outranks the
  *      identity question because the producer has told us in words that it did
  *      not reach decision grade; no id reconciliation is needed to believe it.
  *   2. Evaluations present but ZERO reconcile ⇒ `identity_unresolved`. Zero
  *      overlap is required: a single match proves the id spaces DO line up, so
  *      any remaining unscored constraint is genuinely unscored.
- *   3. (S3) A ratified constraint with no score, where step 2 did not fire ⇒
- *      `unevaluated` for exactly those constraints. This is the honest "applied,
- *      then silently unscored" case, and it covers "nothing was scored at all"
- *      (no evaluations ⇒ no id space to reconcile ⇒ no ambiguity).
+ *   3. (S3) A ratified constraint with no score, where step 2 did not fire, OR
+ *      one whose identity-bound `constraint_results` entry the producer does
+ *      not certify as decision-grade ⇒ `unevaluated` for exactly those
+ *      constraints. This is the honest "applied, then silently unscored" case,
+ *      it covers "nothing was scored at all" (no evaluations ⇒ no id space to
+ *      reconcile ⇒ no ambiguity), and it covers "scored on a scale the
+ *      producer itself says is not decision-grade" (C50 U1: a clamped
+ *      threshold scoring P = 1 for every option).
  *   4. Otherwise every ratified constraint was scored, and the LEADER decides:
  *      `evaluated_infeasible` if it breaks one, else `evaluated_feasible`.
  *
@@ -848,6 +1035,11 @@ export function deriveConstraintVerdict(
    * parameter makes, and for the same reason).
    */
   unmeasuredTargetIds?: ReadonlySet<string>,
+  /**
+   * Constraint ids whose target the LEADING option sets with a non-user level ({@link collectLeaderEstimatedTargetIds}),
+   * derived at the call site that holds the analysed graph. OPTIONAL, and omitted is today's verdict exactly.
+   */
+  leaderEstimatedTargetIds?: ReadonlySet<string>,
 ): ConstraintVerdict {
   // Computed unconditionally so it can be carried on every state (see
   // `leaderInfeasibility`). Fails open to `{ infeasible: false }`.
@@ -892,8 +1084,12 @@ export function deriveConstraintVerdict(
   const unmeasured: RatifiedConstraint[] = [];
   const effective: RatifiedConstraint[] = [];
   for (const c of ratified) {
-    if (producerFiltered.has(c.constraint_id)) {
+    if (producerFiltered.outOfScope.has(c.constraint_id)) {
       outOfScope.push(c);
+    } else if (producerFiltered.refused.has(c.constraint_id)) {
+      // REFUSED by the producer (ruling #70 5844891057): it stays a ratified limit with no score, so
+      // rule 3 makes it `unevaluated`, before the unmeasured partition could name a leader past it.
+      effective.push(c);
     } else if (unmeasuredTargetIds?.has(c.constraint_id) === true) {
       unmeasured.push(c);
     } else {
@@ -915,8 +1111,15 @@ export function deriveConstraintVerdict(
   }
 
   const codes = collectNotDecisionGradeCodes(envelope);
+  // Any PRESENT status other than 'computed' is the producer saying the block
+  // carries no decision-grade verdict. PLoT b09c0f2 emits 'unavailable' and
+  // 'error' (ConstraintFeatureStatus also types 'skipped'); reading only
+  // 'unavailable' let an 'error' run's per-option probabilities — which carry
+  // no per-row scale marker — reach rule 4 as a pass. Absent status is today's
+  // path (older/hand-built envelopes).
+  const statusRaw = envelope.constraints_status;
   const statusUnavailable =
-    readString(envelope.constraints_status) === "unavailable";
+    statusRaw !== undefined && statusRaw !== null && statusRaw !== "computed";
 
   // 1. The producer's own explicit verdict on the whole block.
   if (codes.length > 0 || statusUnavailable) {
@@ -930,10 +1133,13 @@ export function deriveConstraintVerdict(
   }
 
   const evaluated = collectEvaluatedConstraintIds(envelope);
-  const unscored = effective.filter((c) => !evaluated.has(c.constraint_id));
+  // A limit the producer REFUSED is unscored for a reason it stated, not because the id spaces
+  // failed to line up — so it never counts toward rule 2's "nothing reconciles" (it lands in rule 3).
+  const reconcilable = effective.filter((c) => !producerFiltered.refused.has(c.constraint_id));
+  const unscored = reconcilable.filter((c) => !evaluated.has(c.constraint_id));
 
   // 2. Evaluations exist; not one of them is an id we ratified.
-  if (evaluated.size > 0 && unscored.length === effective.length) {
+  if (evaluated.size > 0 && reconcilable.length > 0 && unscored.length === reconcilable.length) {
     return verdict('identity_unresolved', {
       constraints: [...effective],
       leaderInfeasibility: leader,
@@ -942,11 +1148,37 @@ export function deriveConstraintVerdict(
     });
   }
 
-  // 3. Genuinely unscored — either nothing was evaluated at all, or the
-  //    overlap above proves the id spaces line up and these still have no score.
-  if (unscored.length > 0) {
+  // 3. NOT VERIFIED — the union of three statements, in graph order:
+  //    (a) genuinely unscored: nothing was evaluated at all, or the overlap
+  //        above proves the id spaces line up and these still have no score;
+  //    (b) scored, but the producer's own per-constraint marker does not
+  //        certify the score as decision-grade (clamp, default range, unit,
+  //        range divergence, or a missing/malformed marker). PLoT's doctrine:
+  //        "an untrusted scale licenses neither a compliance claim nor a breach
+  //        claim", so (b) outranks rule 4 in BOTH directions. An id in (b) is
+  //        always in `evaluated` (constraint_results ids are collected there),
+  //        so rule 2 above can never be reached by it.
+  //    (c) the LEADING option itself carries no per-option score for it
+  //        (collectLeaderScoredConstraintIds): the identity-bound half of
+  //        PLoT's per-option `constraints_decision_grade` participation rule.
+  //    (d) the LEADING option SETS the limit's target with a level that is not
+  //        the user's ({@link collectLeaderEstimatedTargetIds}): its score is
+  //        Olumi's own estimate restated, so it licenses neither a compliance
+  //        nor a breach claim (AI Quality, #70 5844226031).
+  //    `codes` stays `[]` for (b) and (d): the producer shipped no code, and a
+  //    CEE-minted one must never be filed as a producer code.
+  const notDecisionGrade = collectProducerNotDecisionGradeConstraintIds(envelope);
+  const leaderScored = collectLeaderScoredConstraintIds(envelope, leadingOptionId);
+  const unverified = effective.filter(
+    (c) =>
+      !evaluated.has(c.constraint_id) ||
+      notDecisionGrade.has(c.constraint_id) ||
+      (leaderScored !== null && !leaderScored.has(c.constraint_id)) ||
+      leaderEstimatedTargetIds?.has(c.constraint_id) === true,
+  );
+  if (unverified.length > 0) {
     return verdict('unevaluated', {
-      constraints: unscored,
+      constraints: unverified,
       leaderInfeasibility: leader,
       outOfScopeConstraints: outOfScope,
       unmeasuredTargetConstraints: unmeasured,
@@ -964,6 +1196,118 @@ export function deriveConstraintVerdict(
         outOfScopeConstraints: outOfScope,
         unmeasuredTargetConstraints: unmeasured,
       });
+}
+
+// ===========================================================================
+// THE LEADER PROBABLY BREAKS A LIMIT IT IS ALLOWED TO BE NAMED UNDER
+// ===========================================================================
+
+/**
+ * Below this, a scored and ratified limit is more likely BROKEN than met by the leading option (AI Quality claim-permission
+ * ruling, #70 5842498806, accepted by Delivery Lead 5842513799).
+ */
+export const LEADER_LIMIT_RISK_THRESHOLD = 0.5;
+
+/** One ratified limit the leading option is more likely than not to break, on a producer-certified score. */
+export interface LeaderLimitRisk {
+  readonly constraint_id: string;
+  readonly label: string | null;
+  readonly source_quote: string | null;
+  /** P(the LEADING option meets this limit), read from the leader's own per-option score. */
+  readonly probability: number;
+}
+
+/**
+ * ⛔ THE ONE PREDICATE for "the leader may be named, but it probably breaks the user's limit" — consumed by the reply
+ * (OpenAI Runtime) and the card (R&C), never re-derived (#70 5842539827).
+ *
+ * WHY. `deriveConstraintVerdict` returns `evaluated_infeasible` only at P ≤ {@link HARD_VIOLATION_FLOOR} (a "does not
+ * satisfy" claim is definitional there). From just above that floor to 0.99 it is `evaluated_feasible`: the leader is
+ * permitted and `constraint-gap-disclosure` says nothing. A leader that meets the limit with P = 0.3 was therefore named
+ * with the limit unmentioned — silent. The ruling: while a ratified limit is scored and the leader's P < 0.5, the leader
+ * may be named ONLY if the same reply/card names the limit and says it is more likely than not to be broken on these
+ * estimates; never "meets", "keeps … under" or "within".
+ *
+ * RETURNED ONLY ON EVIDENCE, each conjunct identity-bound to the ratified `constraint_id` (the #1943 rules, reused):
+ *   · the limit is RATIFIED (only `ratified` is iterated — PLoT's synthesised goal constraint condemns nothing);
+ *   · its `constraint_results` entry is PRODUCER-CERTIFIED: the marker parses under the contract and
+ *     `decision_grade === true` (a clamped, defaulted or unit-mismatched score licenses neither a compliance nor a
+ *     breach claim — those are `unevaluated`, whose own disclosure already speaks);
+ *   · the LEADER carries its own finite per-option score for it (`findWinnerEntry` → `constraint_probabilities`);
+ *   · that score is < {@link LEADER_LIMIT_RISK_THRESHOLD}.
+ * No leader, no matching entry, or no certified score ⇒ `[]` — this predicate never invents a risk.
+ *
+ * It does not read the verdict state: callers gate on `evaluated_feasible` (under `unevaluated` the limit copy already
+ * speaks; under `evaluated_infeasible` the leader is withheld). Pure; graph order.
+ */
+export function deriveLeaderLimitRisks(
+  envelope: Record<string, unknown>,
+  leadingOptionId: string | null | undefined,
+  ratified: readonly RatifiedConstraint[],
+): LeaderLimitRisk[] {
+  if (typeof leadingOptionId !== 'string' || leadingOptionId.length === 0) return [];
+  const entry = findWinnerEntry(envelope, leadingOptionId);
+  if (entry === null) return [];
+  const leaderProbability = new Map(readConstraintSatisfactionProbs(entry).map((p) => [p.id, p.probability] as const));
+  const certified = collectProducerCertifiedConstraintIds(envelope);
+  const out: LeaderLimitRisk[] = [];
+  for (const c of ratified) {
+    const probability = leaderProbability.get(c.constraint_id);
+    if (probability === undefined || !certified.has(c.constraint_id)) continue;
+    if (probability < LEADER_LIMIT_RISK_THRESHOLD) {
+      out.push({ constraint_id: c.constraint_id, label: c.label, source_quote: c.source_quote ?? null, probability });
+    }
+  }
+  return out;
+}
+
+/**
+ * ⭐ THE ONE READER over a persisted run fact — the readback carrier's source (#70 5842617884 / 5842658396).
+ *
+ * The transport block drops `constraint_results` (`P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP`), so
+ * {@link deriveLeaderLimitRisks} over a readback block can only ever return `[]`. The FACT does not drop it: the run
+ * fact stores `enrichment` = the verbatim PLoT body (`run-analysis.ts`, `enrichment: response`) and
+ * `leading_option_id` = the SAME variable {@link deriveConstraintVerdict} was given. So the carrier reads the risks off
+ * the fact, beside {@link readConstraintVerdictStateFromResult}, under the same freshness gate — the same bytes the
+ * verdict used, no second envelope, no schema change.
+ *
+ * `ratified` is the caller's `readRatifiedConstraints` of the hash-bound graph (identical to the run's set while the
+ * freshness gate holds). `null` when the fact carries no PLoT body to read; `[]` when it does and no limit is at risk.
+ * Pure.
+ */
+export function readLeaderLimitRisksFromResult(
+  result: unknown,
+  ratified: readonly RatifiedConstraint[],
+): LeaderLimitRisk[] | null {
+  if (!isPlainObject(result)) return null;
+  const record = result as Record<string, unknown>;
+  const enrichment = record.enrichment;
+  if (!isPlainObject(enrichment)) return null;
+  const leader = typeof record.leading_option_id === 'string' && record.leading_option_id.length > 0
+    ? record.leading_option_id
+    : null;
+  return deriveLeaderLimitRisks(enrichment as Record<string, unknown>, leader, ratified);
+}
+
+/**
+ * The constraint ids whose `constraint_results` entry the PRODUCER certifies: the marker parses under
+ * `EnrichmentScaleProvenanceSchema` AND `decision_grade === true`. The positive twin of
+ * {@link collectProducerNotDecisionGradeConstraintIds} — same parse, same rule — for a caller that needs PROOF of
+ * certification rather than proof of its absence (a ratified id with no entry at all is in neither set). Pure.
+ */
+function collectProducerCertifiedConstraintIds(envelope: Record<string, unknown>): Set<string> {
+  const out = new Set<string>();
+  const results = envelope.constraint_results;
+  if (!Array.isArray(results)) return out;
+  for (const entry of results) {
+    if (entry === null || typeof entry !== 'object') continue;
+    const obj = entry as Record<string, unknown>;
+    const id = readString(obj.constraint_id);
+    if (id === null) continue;
+    const marker = EnrichmentScaleProvenanceSchema.safeParse(obj.scale_provenance);
+    if (marker.success && marker.data.decision_grade === true) out.add(id);
+  }
+  return out;
 }
 
 // ===========================================================================
@@ -1204,7 +1548,7 @@ export function readConstraintVerdictStateFromResult(
 }
 
 /** Narrow an unknown to a contract state, or `null`. Derived from the enum. */
-function asVerdictState(value: unknown): ConstraintVerdictState | null {
+export function asVerdictState(value: unknown): ConstraintVerdictState | null {
   if (typeof value !== 'string') return null;
   return Object.prototype.hasOwnProperty.call(MAY_NAME_LEADING_OPTION, value)
     ? (value as ConstraintVerdictState)

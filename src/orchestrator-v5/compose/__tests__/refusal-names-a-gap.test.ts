@@ -159,8 +159,10 @@ describe('PRECONDITION — the capture reproduces the staging row', () => {
     expect((mute as unknown as { is_baseline?: boolean } | undefined)?.is_baseline).not.toBe(true);
     expect(mute?.status).toBe('needs_user_mapping');
 
+    // (B4 class, 26 Sep): the structural issues about this option now ALSO name
+    // it by id, so the naming issue is selected by CODE as well as by option.
     const naming = (readiness?.readiness_issues ?? []).filter(
-      (i) => i.option_id === MUTE_OPTION_ID,
+      (i) => i.option_id === MUTE_OPTION_ID && i.code === 'OPTION_NEEDS_MAPPING',
     );
     expect(naming).toHaveLength(1);
     expect(naming[0].code).toBe('OPTION_NEEDS_MAPPING');
@@ -178,9 +180,13 @@ describe('THE REFUSAL NAMES THE GAP ON THE WIRE', () => {
     const blockers = composedReadiness(mutedReadinessPayload()).blockers as Array<
       Record<string, unknown>
     >;
-    const mine = blockers.filter((b) => b.option_id === MUTE_OPTION_ID);
+    const mine = blockers.filter((b) => b.option_id === MUTE_OPTION_ID && b.code === 'OPTION_NEEDS_MAPPING');
     expect(mine).toHaveLength(1);
     expect(mine[0].option_label).toBe(MUTE_OPTION_LABEL);
+    // (B4 class) every blocker that names this option carries its label too.
+    for (const b of blockers.filter((x) => x.option_id === MUTE_OPTION_ID)) {
+      expect(b.option_label).toBe(MUTE_OPTION_LABEL);
+    }
     expect(mine[0].message).toContain(MUTE_OPTION_LABEL);
   });
 

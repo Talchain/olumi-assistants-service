@@ -2694,6 +2694,66 @@ export async function loadPriorFactsWithReadState(
   }
 }
 
+/**
+ * THE RELOAD'S ANALYSIS FACTS: the same reads a turn makes, reconciled by the
+ * same pure authority, for a read that is not a turn.
+ *
+ * `loadPriorFactsWithReadState` reads analysis through the `readRecent` window
+ * ALONE (SESSION_READ_WINDOW_TURNS, default 20 rows). Every value op and every
+ * Agent turn is a row, so once the run's turn aged out, the reload reported
+ * `none / never_run` and dropped the result: the same cliff
+ * `newest_analysis_fact` (above) was introduced to stop on the turn path.
+ *
+ * This composes the turn path's OWN readers: `fetchPriorTurns` then
+ * `fetchPriorFacts` (the hot window WITH row identity, which the reconciler
+ * needs to detect a split snapshot), and `fetchScenarioAnalysisFacts` (the
+ * durable exact-count page), handed to `reconcileScenarioAnalysisFacts`. There
+ * is no new derivation, and no second copy of either read's degradation handling.
+ *
+ * `hotWindow` is returned alongside, so that when the reconciled set is not
+ * reasoning authority (`degraded`), the caller keeps today's window behaviour
+ * exactly. Its `status` carries the same conjunction the turn path makes: an
+ * empty fact list is trustworthy only if BOTH the turns read and the facts read
+ * succeeded.
+ */
+export async function loadScenarioAnalysisFactsForRead(
+  scenarioId: string,
+  requestId: string,
+  sessionStore?: SessionStore,
+): Promise<{
+  readonly hotWindow: PriorFactsReadResult;
+  readonly factSet: ScenarioAnalysisFactSet;
+}> {
+  const store = sessionStore ?? tryGetSessionStore(requestId, scenarioId);
+  if (store === undefined) {
+    // No store is an UNKNOWN, never "no analysis": both carriers fail weak.
+    return {
+      hotWindow: { status: 'degraded', facts: [] },
+      factSet: reconcileScenarioAnalysisFacts({ scenarioId, hotWindowFacts: [] }),
+    };
+  }
+  const [priorTurnsRead, durableRead] = await Promise.all([
+    fetchPriorTurns(scenarioId, requestId, store),
+    fetchScenarioAnalysisFacts(scenarioId, requestId, store),
+  ]);
+  const { facts, factsWithTurn, readOk } = await fetchPriorFacts(
+    priorTurnsRead.turns,
+    requestId,
+    scenarioId,
+    store,
+  );
+  const hotReadOk = readOk && priorTurnsRead.readOk;
+  return {
+    hotWindow: hotReadOk ? { status: 'ok', facts } : { status: 'degraded', facts: [] },
+    factSet: reconcileScenarioAnalysisFacts({
+      scenarioId,
+      hotWindowFacts: facts,
+      hotWindowFactsWithIdentity: factsWithTurn,
+      durableRead,
+    }),
+  };
+}
+
 export async function loadPriorFactsQuietly(
   scenarioId: string,
   requestId: string,

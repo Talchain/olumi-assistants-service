@@ -15,7 +15,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilitiesWithLevelsPort as createAgentCapabilities } from './fixtures/levels-port.js';
 import { ProposalStore } from '../proposal.js';
 
 const SCENARIO = '8b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e';

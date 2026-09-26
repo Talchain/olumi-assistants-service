@@ -219,6 +219,10 @@ export interface ReadinessLike {
   /** Carried through verbatim; the selector never introspects adjustments. */
   readonly model_adjustments?: readonly unknown[];
   readonly goal_node_id?: string | null;
+  /** The run-admission verdict (`admission.willProceed`) when the producer
+   *  supplied it. `false` means a NEW run is not currently permitted — it says
+   *  nothing about whether an EARLIER result exists or is usable. */
+  readonly may_run?: boolean | null;
 }
 
 /**
@@ -510,8 +514,15 @@ function assembleCanonicalState(params: AssembleCanonicalStateParams): Canonical
 
   // ── Predicates ──
   // Hard block: nothing is usable.
+  // ⭐ (B) — ADMISSION IS ABOUT THE MODEL, NOT THE RESULT (#70; schemas
+  // `AnalysisReadinessSchema`: "a model can have a complete result while
+  // readiness has since regressed"). A blocked model that HAS a prior run keeps
+  // that run usable as stale/current context; only a blocked model with NO run
+  // has nothing to show. Before (B) `status === 'blocked'` alone made the prior
+  // result unusable for every purpose — Paul's 17:45Z replies lost their run.
+  const runAdmitted = params.readiness?.may_run !== false && status !== 'blocked';
   const blockedUnusable =
-    status === 'blocked' ||
+    (status === 'blocked' && !hasFact) ||
     contradictions.includes('scenario_claims_analysis_no_fact');
 
   // Trust downgrade: a fact exists but is not chip-safe; surface a rerun.
@@ -537,8 +548,11 @@ function assembleCanonicalState(params: AssembleCanonicalStateParams): Canonical
   // "analysis exists to reference".
   const usableForFollowupContext = hasFact && !blockedUnusable;
 
+  // (B) — a rerun is offered only when one is currently PERMITTED. Offering it
+  // beside a blocking admission told the Agent "a fresh analysis is the next
+  // valid step" while the Run control refused (Paul, 17:45Z).
   const requiresRerun =
-    hasFact && (derivation.freshness === 'stale' || trustDowngrade);
+    hasFact && (derivation.freshness === 'stale' || trustDowngrade) && runAdmitted;
 
   return {
     version: CANONICAL_ANALYSIS_STATE_VERSION,

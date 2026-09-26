@@ -189,8 +189,12 @@ describe('C2 binding at the reached finaliser/composer seam', () => {
 
   it.each(['refused', 'blocked', 'running'] as const)('does not replace a known %s lifecycle with an identity failure', (kind) => {
     const run = fact();
+    // (B): a `blocked` lifecycle is a blocked model with NO run to describe. A
+    // selected fact keeps its complete_* kind and carries the admission in
+    // `readiness` (admission-preserves-prior-run.test.ts), so the blocked case is
+    // built with no selected fact; the identity binding below is unchanged.
     const freshness = {
-      ...deriveAnalysisFreshness([run], HASH),
+      ...deriveAnalysisFreshness(kind === 'blocked' ? [] : [run], HASH),
       ...(kind === 'refused' ? { refusal_declared: true as const } : {}),
     };
     const readiness = kind === 'blocked' ? { status: 'blocked' as const, blocked_reason: 'fixture_blocker' } : undefined;

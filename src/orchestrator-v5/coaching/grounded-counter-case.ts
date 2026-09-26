@@ -205,6 +205,16 @@ export function composeGroundedCounterCase(
  */
 function isComposable(sentence: string): boolean {
   if (sentence.length > GROUNDED_COUNTER_CASE_MAX) return false;
+  return passesGroundedProseGates(sentence);
+}
+
+/**
+ * The three prose gates alone — forbidden phrase, raw decimal, id-shaped token
+ * — WITHOUT this module's length bound, so a sibling surface with its own bound
+ * (the run-turn fragile-link challenge, `fragile-link-challenge.ts`) asks the
+ * SAME question with the SAME imported gate objects instead of a second copy.
+ */
+export function passesGroundedProseGates(sentence: string): boolean {
   if (findForbiddenPhraseHit(sentence) !== null) return false;
   if (RAW_DECIMAL_RE.exec(sentence) !== null) return false;
 

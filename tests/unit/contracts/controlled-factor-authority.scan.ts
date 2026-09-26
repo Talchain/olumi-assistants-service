@@ -138,6 +138,22 @@ export const AUTHORITY_ALLOWLIST: Readonly<
     count: 1,
     allowedArgs: ['rawPersistedGraphForLevers'],
   },
+  'orchestrator-v5/coaching/estimated-limit-card.ts': {
+    // #1983 review B1/B1′ (AI Quality 5845710498, 5845889883): the run-turn
+    // "checked against Olumi's estimate" card stays silent when ANY option sets
+    // the limit's factor. Post-analysis, read-only, and it can only SILENCE a
+    // card (an empty set ⇒ today's behaviour). Both carriers are
+    // persisted-derived:
+    //   · `boundGraph`: the readback graph (`final.graph`, the saved model read
+    //     after the turn) admitted only when its analysis-affecting hash equals
+    //     the bound run's own (`graphBoundToHash`), else null;
+    //   · `{ options: runOptions }`: the bound run's `analysis_ready.options`,
+    //     which CEE built from the saved model at run time (the UI never sends a
+    //     graph). Read because the held graph may carry no option interventions.
+    // No request-first browser copy on either leg.
+    count: 2,
+    allowedArgs: ['boundGraph', '{ options: runOptions }'],
+  },
 };
 
 /**

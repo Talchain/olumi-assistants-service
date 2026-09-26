@@ -64,11 +64,16 @@ function buildPersistedGraph() {
           },
         },
         { id: 'other_factor', kind: 'factor', label: 'Reach', observed_state: { value: 0.6, source: 'brief_extraction' } },
-        // A factor the option is NOT wired to — the refusal fixture.
+        // A factor joined to the option the REVERSE way (unlinked_factor → option) — the refusal fixture: there is
+        // no forward effect relationship, and a forward link beside the reverse one would make a cycle. (A factor
+        // with NO edge to the option is no longer a refusal: the level brings its link, DL #70 5847137399.)
         { id: 'unlinked_factor', kind: 'factor', label: 'Unrelated', observed_state: { value: 0.3, source: 'brief_extraction' } },
+        // A factor with no edge to the option at all: a level on it brings its option → factor link in the same commit.
+        { id: 'new_factor', kind: 'factor', label: 'Adoption', observed_state: { value: 0.3, source: 'brief_extraction' } },
       ],
       edges: [
         ['option', 'factor'], ['option', 'other_factor'], ['factor', 'goal'], ['other_factor', 'goal'],
+        ['unlinked_factor', 'option'],
       ].map(([from, to]) => ({
         from, to, strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive',
       })),
@@ -78,6 +83,8 @@ function buildPersistedGraph() {
 }
 
 let persisted: unknown = buildPersistedGraph();
+/** When set, the store's atomic append reports this version receipt (as `append_turn_atomic_v5` does). */
+let receiptFor: ((write: Record<string, unknown>) => Record<string, unknown>) | undefined;
 const rows = new Map<string, { id: string; write: Record<string, unknown> }>();
 
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
@@ -113,7 +120,7 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
       const id = `row-${rows.size + 1}`;
       rows.set(key, { id, write: JSON.parse(JSON.stringify(write)) });
       if (write.graph !== undefined) persisted = write.graph;
-      return { id };
+      return { id, ...(receiptFor !== undefined ? { modelVersionReceipt: receiptFor(write) } : {}) };
     },
     getScenarioOwner: async () => null,
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
@@ -135,6 +142,7 @@ vi.mock('../../../src/adapters/llm/router.js', () => ({
 }));
 
 const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route-v2.js');
+const { runWithApprovedLevelAdoption } = await import('../../../src/orchestrator-v5/agent-lane/approved-adoption-context.js');
 
 const SCENARIO_ID = '55555555-5555-4555-8555-555555555555';
 let turnCounter = 0;
@@ -198,6 +206,26 @@ describe('POST /orchestrate/v2/turn — option_intervention_edit, at the wire', 
     expect(body.graph_hash).not.toBe(before);
   });
 
+  /**
+   * ⭐ THE ADOPTION IDENTITY SURVIVES THE REAL ROUTE (review of #1902 at `8317a0d0`, residual 1). The
+   * Agent's approval dispatches in-process through `app.inject()`; AsyncLocalStorage must reach the
+   * writer through Fastify's handler, not only through a direct call. Cold read of the durable bytes.
+   */
+  it('ADOPTED — inside its adoption identity the cell lands cee_hypothesis at the wire; without it, user_specified', async () => {
+    const adopted = await runWithApprovedLevelAdoption(
+      { scenarioId: SCENARIO_ID, proposalId: 'prop_route', optionId: 'option', factorId: 'factor', modelValue: 0.3 },
+      () => post(app, { kind: 'option_intervention_edit', option_id: 'option', factor_id: 'factor', value: 0.3, base_graph_hash: currentHash() }),
+    );
+    expect(adopted.statusCode).toBe(200);
+    const cell = () => ((persisted as { nodes: Array<Record<string, unknown>> }).nodes
+      .find(n => n.id === 'option') as { interventions: Record<string, { value: number; source: string }> }).interventions.factor;
+    expect(cell()).toMatchObject({ value: 0.3, source: 'cee_hypothesis' });
+
+    const typed = await post(app, { kind: 'option_intervention_edit', option_id: 'option', factor_id: 'factor', value: 0.35, base_graph_hash: currentHash() });
+    expect(typed.statusCode).toBe(200);
+    expect(cell()).toMatchObject({ value: 0.35, source: 'user_specified' });
+  });
+
   it('VERIFIED NO-OP — 200, not a retryable server failure', async () => {
     // The model already holds 0.2 for this cell. Nothing is written, and
     // nothing has gone wrong: telling the client to retry would be false.
@@ -245,6 +273,18 @@ describe('POST /orchestrate/v2/turn — option_intervention_edit, at the wire', 
     expect(rows.size).toBe(0);
   });
 
+  it('A LEVEL BRINGS ITS LINK — 200: an option with no edge to the factor gets the link AND the level in ONE row (DL #70 5847137399)', async () => {
+    const res = await post(app, {
+      kind: 'option_intervention_edit',
+      option_id: 'option', factor_id: 'new_factor', value: 0.4, base_graph_hash: currentHash(),
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(rows.size, 'ONE commit: the link and the level land together').toBe(1);
+    const written = [...rows.values()][0]!.write.graph as { edges: { from: string; to: string }[]; nodes: { id: string; interventions?: Record<string, { value: number }> }[] };
+    expect(written.edges.filter(e => e.from === 'option' && e.to === 'new_factor')).toHaveLength(1);
+    expect(written.nodes.find(n => n.id === 'option')?.interventions?.new_factor?.value).toBe(0.4);
+  });
+
   it('THE SET DISCRIMINATES — the four outcomes are four different answers', async () => {
     // The guard against a "fix" that learns one answer. Same event kind, same
     // scenario, same store: only the request or the model differs.
@@ -269,5 +309,91 @@ describe('POST /orchestrate/v2/turn — option_intervention_edit, at the wire', 
       .toEqual([200, 200, 409, 422]);
     // …and the two 200s are not the same 200: one wrote, one did not.
     expect(rows.size, 'exactly one of the two 200s should have appended').toBe(1);
+  });
+});
+
+describe('the Agent\'s in-process batch door — ONE user operation → ONE atomic commit (ChatGPT #70 5847200462, BF5)', () => {
+  let commitOptionLevelsInProcess: typeof import('../../../src/orchestrator-v5/system-events/dispatch.js').commitOptionLevelsInProcess;
+  beforeAll(async () => {
+    ({ commitOptionLevelsInProcess } = await import('../../../src/orchestrator-v5/system-events/dispatch.js'));
+  });
+  beforeEach(() => {
+    persisted = buildPersistedGraph();
+    rows.clear();
+  });
+  type Level = { option_id: string; factor_id: string; value: number; author: 'user_specified' | 'model_proposed' };
+  const call = (levels: Level[], links: { option_id: string; factor_id: string }[], turnId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee') =>
+    commitOptionLevelsInProcess({ scenario_id: SCENARIO_ID, turn_id: turnId, base_graph_hash: currentHash(), links, levels }, 'req-batch');
+  const graphNow = () => persisted as { edges: { from: string; to: string; provenance?: { source?: string } }[];
+    nodes: { id: string; interventions?: Record<string, { value: number; source?: string }> }[] };
+  const TWO: Level[] = [{ option_id: 'option', factor_id: 'factor', value: 0.35, author: 'user_specified' },
+    { option_id: 'option', factor_id: 'new_factor', value: 0.4, author: 'user_specified' }];
+  const NEW_LINK = [{ option_id: 'option', factor_id: 'new_factor' }];
+
+  it('RED: two levels — one bringing its link — commit as ONE row: committed, not already applied, the revision is the model\'s', async () => {
+    const r = await call(TWO, NEW_LINK);
+    expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false, committed_levels: [
+      { option_id: 'option', factor_id: 'factor', value: 0.35 }, { option_id: 'option', factor_id: 'new_factor', value: 0.4 }] });
+    expect(rows.size).toBe(1);
+    if (r.status === 'committed') expect(r.graph_hash).toBe(currentHash());
+    expect(graphNow().edges.filter(e => e.from === 'option' && e.to === 'new_factor')).toHaveLength(1);
+    expect(graphNow().nodes.find(n => n.id === 'option')?.interventions?.factor?.value).toBe(0.35);
+    expect(graphNow().nodes.find(n => n.id === 'option')?.interventions?.new_factor?.value).toBe(0.4);
+  });
+
+  it('RED: the SECOND level refused → refused, naming its pair, and NOTHING committed (neither the first level nor the link)', async () => {
+    const before = JSON.stringify(persisted);
+    const r = await call([TWO[1]!, { option_id: 'option', factor_id: 'unlinked_factor', value: 0.4, author: 'user_specified' }], NEW_LINK);
+    expect(r).toEqual({ status: 'refused', reason: 'unresolved_effect_relationship', pair: { option_id: 'option', factor_id: 'unlinked_factor' } });
+    expect(rows.size).toBe(0);
+    expect(JSON.stringify(persisted)).toBe(before);
+  });
+
+  it('what was approved is what is written: links that differ from the ones the levels need → refused, nothing written', async () => {
+    const r = await call(TWO, []);
+    expect(r).toEqual({ status: 'refused', reason: 'links_mismatch' });
+    expect(rows.size).toBe(0);
+  });
+
+  it('RED: a retry of the committed batch writes nothing more — already applied, no receipt — and the model holds both levels', async () => {
+    expect((await call(TWO, NEW_LINK)).status).toBe('committed');
+    const retry = await call(TWO, [], 'ffffffff-ffff-4fff-8fff-ffffffffffff');
+    expect(retry).toEqual({ status: 'committed', graph_hash: currentHash(), receipt: null, already_applied: true,
+      committed_levels: TWO.map(l => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value })) });
+    expect(rows.size).toBe(1);
+  });
+
+  it('an Olumi level (model_proposed) is stamped Olumi\'s — the level AND the link it brings (#2004 N1) — through the server-side authority', async () => {
+    const r = await call([{ option_id: 'option', factor_id: 'new_factor', value: 0.4, author: 'model_proposed' }], NEW_LINK);
+    expect(r.status, JSON.stringify(r)).toBe('committed');
+    expect(graphNow().nodes.find(n => n.id === 'option')?.interventions?.new_factor?.source).toBe('cee_hypothesis');
+    expect(graphNow().edges.find(e => e.from === 'option' && e.to === 'new_factor')?.provenance?.source).toBe('cee_hypothesis');
+  });
+
+  it('ONE receipt: a committed batch hands back the commit\'s OWN version receipt, bound to this turn (Canvas N, #2007)', async () => {
+    receiptFor = (write) => ({
+      mutation_id: '33333333-3333-4333-8333-333333333333', version_id: '44444444-4444-4444-8444-444444444444', version_number: 7,
+      graph_identity_hash: 'a'.repeat(64), analysis_affecting_hash: 'b'.repeat(64), hash_algorithm: 'sha256',
+      identity_projection_version: 'v1', identity_normaliser_version: 'v1', graph_schema_version: 'graph.v3',
+      actor_kind: 'system', authored_by: null, creation_kind: 'committed_mutation', source_version_id: null,
+      parent_version_id: null, root_version_id: null, undo_version_id: null, event_id: 'evt-batch',
+      graph: write.graph, source_turn_id: write.turn_id,
+    });
+    try {
+      const r = await call(TWO, NEW_LINK);
+      expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false, receipt: {
+        version: 7, version_id: '44444444-4444-4444-8444-444444444444', mutation_id: '33333333-3333-4333-8333-333333333333',
+        source_turn_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' } });
+      expect(rows.size, 'ONE commit carries it').toBe(1);
+    } finally {
+      receiptFor = undefined;
+    }
+  });
+
+  it('a stale base → stale, nothing written', async () => {
+    const r = await commitOptionLevelsInProcess({ scenario_id: SCENARIO_ID, turn_id: 'abababab-abab-4bab-8bab-abababababab',
+      base_graph_hash: 'deadbeefdeadbeef', links: NEW_LINK, levels: TWO }, 'req-batch');
+    expect(r).toEqual({ status: 'stale' });
+    expect(rows.size).toBe(0);
   });
 });

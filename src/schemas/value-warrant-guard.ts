@@ -680,10 +680,11 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
     decision:
       "OPEN — the contract's own `observed_state`, which is a DIFFERENT object " +
       "from CEE's: it carries `declared_scale` and `elicited_from` (which CEE's " +
-      "does not declare) and lacks `cap`, `raw_value`, `stated_role` and " +
-      "`extractionType` (which CEE's has). Three numbers, one unit, same " +
-      "ambiguity. Settle alongside the CEE half, not separately — a warrant " +
-      "added to one side of a twin changes nothing.",
+      "does not declare) and lacks `stated_role` and `extractionType` (which " +
+      "CEE's has). Since schemas 0.56.0 (#60, reaching CEE with the 0.58.0 " +
+      "re-vendor) it also declares `cap` and `raw_value`, so it is now FIVE " +
+      "numbers, one unit, same ambiguity. Settle alongside the CEE half, not " +
+      "separately — a warrant added to one side of a twin changes nothing.",
   },
   {
     id: "scope-ambiguous:contract.NodeV3Schema::observed_state.baseline",
@@ -691,6 +692,24 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
     decision:
       "OPEN — same object. Settle with " +
       "scope-ambiguous:contract.NodeV3Schema::observed_state.value.",
+  },
+  {
+    id: "scope-ambiguous:contract.NodeV3Schema::observed_state.cap",
+    status: "OPEN",
+    decision:
+      "OPEN — same object; the contract's declaration of CEE's `cap` arrives " +
+      "with schemas 0.56.0 (#60) in the 0.58.0 re-vendor. The same DENOMINATOR " +
+      "risk as scope-ambiguous:cee.NodeV3::observed_state.cap. Settle with " +
+      "scope-ambiguous:contract.NodeV3Schema::observed_state.value.",
+  },
+  {
+    id: "scope-ambiguous:contract.NodeV3Schema::observed_state.raw_value",
+    status: "OPEN",
+    decision:
+      "OPEN — same object; the contract's declaration of CEE's `raw_value` " +
+      "arrives with schemas 0.56.0 (#60) in the 0.58.0 re-vendor. Its CEE twin's " +
+      "docblock is the evidence one `unit` cannot frame all the numbers. Settle " +
+      "with scope-ambiguous:contract.NodeV3Schema::observed_state.value.",
   },
   {
     id: "scope-ambiguous:contract.NodeV3Schema::observed_state.std",
@@ -751,6 +770,19 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "attestation for it; the sibling numeric that makes this row SHARED is " +
       "`value`, and `value` has its own field-scoped `value_frame`. Nothing " +
       "here is ambiguous once both are read together.",
+  },
+  // ── SCOPE-AMBIGUOUS: the UI-stated goal target (declared 25 Sep 2026) ────────
+  {
+    id: "scope-ambiguous:cee.NodeV3::success_threshold",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — its warrant is `threshold_source`, by the writer's own contract. " +
+      "The UI writes the pair together on the goal node and reads `success_threshold` " +
+      "as the user's stated target ONLY under `threshold_source === 'user'` (UI " +
+      "store.ts ~:2407), so the level-scoped stamp does name this value. CEE only " +
+      "PRESERVES both through a re-parse (declared so an unrelated edit stops " +
+      "erasing them; goal-target-stamp-survives-mutation.test.ts) and neither reads " +
+      "nor writes them; CEE's own target stays `goal_threshold_raw` with its unit.",
   },
 ];
 

@@ -208,6 +208,8 @@ export type StructuralRenameResult =
       readonly response: OlumiResponse;
       /** The projected graph to persist (full ingress shape, not the GraphV3 subset). */
       readonly mutatedGraph: unknown;
+      /** The ops this write applied — the hold thread-through's fulfilment input (#1947 review). */
+      readonly appliedOperations: readonly PatchOperation[];
       readonly handlerFacts: readonly HandlerFact[];
       /** GraphV3 view of `mutatedGraph` — the adapter's own readback. */
       readonly graph: GraphV3T;
@@ -888,6 +890,7 @@ export function applyStructuralRename(
       stage_indicator: payload.stage,
     },
     mutatedGraph: projectedGraph,
+    appliedOperations: operations,
     handlerFacts: [factCheck.data],
     graph: projectedParse.data,
     baseGraph: persistedGraph,

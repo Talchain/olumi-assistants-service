@@ -134,6 +134,9 @@ describe('wiring — the run_analysis handler consumes the objective-contradicti
     // The leader-permission argument: the tail NAMES options, so it may only
     // ship where the headline actually named one.
     expect(args).toContain('headline !== null');
+    // The goal frame the headline builder decided (R&C round 1, F1): the tail
+    // must not say "against your goal" where the headline has withdrawn it.
+    expect(args).toContain('goalFrame');
   });
 
   it('appends the disclosure to the summary, LAST — the order the egress grammar admits', () => {
@@ -170,6 +173,7 @@ describe('egress — the sentence actually reaches the user', () => {
       PRICING_GRAPH,
       RECORDS_WITH_GOAL_PROBABILITY,
       true,
+      'goal_framed',
     );
     expect(disclosure).toBe(
       ' Two different questions have two different answers here: “Hold at £49 Per Seat (Status Quo)”' +
@@ -195,6 +199,7 @@ describe('egress — the sentence actually reaches the user', () => {
       leverAimGraph,
       RECORDS_NO_GOAL_PROBABILITY,
       true,
+      'goal_framed',
     );
     expect(disclosure).toBe(
       ' “Hold at £49 Per Seat (Status Quo)” scored highest against your goal most often without moving' +
@@ -217,6 +222,7 @@ describe('egress — the sentence actually reaches the user', () => {
       PRICING_GRAPH,
       RECORDS_WITH_GOAL_PROBABILITY,
       true,
+      'goal_framed',
     );
     // Precondition pinned in-test: there IS a tail to admit.
     expect(disclosure).not.toBe('');
@@ -260,6 +266,7 @@ describe('egress — the sentence actually reaches the user', () => {
         { option_id: 'opt_raise', option_label: longLabelB.slice(0, 60), win_probability: 0.2782, probability_of_goal: 0.48 },
       ],
       true,
+      'goal_framed',
     );
     expect(disclosure).not.toBe('');
     const summary = composeSummaryWithRealHeadline(
@@ -293,6 +300,7 @@ describe('egress — the sentence actually reaches the user', () => {
       leverAimGraph,
       RECORDS_WITH_GOAL_PROBABILITY,
       true,
+      'goal_framed',
     );
     expect(disclosure).toContain('is more likely to reach your stated target');
     expect(disclosure).not.toContain('the way your goal asks');
@@ -322,6 +330,7 @@ describe('silence — a run with nothing honest to add changes the summary by ZE
       PRICING_GRAPH,
       RECORDS_NO_GOAL_PROBABILITY,
       true,
+      'goal_framed',
     );
     expect(disclosure).toBe('');
     expect(composeSummaryAsHandlerDoes(disclosure)).toBe(
@@ -354,6 +363,7 @@ describe('silence — a run with nothing honest to add changes the summary by ZE
       PRICING_GRAPH,
       RECORDS_WITH_GOAL_PROBABILITY,
       true,
+      'goal_framed',
     );
     expect(disclosure).not.toBe(''); // positive control: there is a tail to test
     expect(isAllowedRunAnalysisAssistantText(composeSummaryAsHandlerDoes(disclosure))).toBe(false);
@@ -365,24 +375,25 @@ describe('silence — a run with nothing honest to add changes the summary by ZE
   it('a WITHHELD headline ships nothing, even when a contradiction exists', () => {
     // Positive control: there IS something to suppress.
     expect(
-      composeObjectiveContradictionDisclosure(PRICING_GRAPH, RECORDS_WITH_GOAL_PROBABILITY, true),
+      composeObjectiveContradictionDisclosure(PRICING_GRAPH, RECORDS_WITH_GOAL_PROBABILITY, true, 'goal_framed'),
     ).not.toBe('');
     expect(
-      composeObjectiveContradictionDisclosure(PRICING_GRAPH, RECORDS_WITH_GOAL_PROBABILITY, false),
+      composeObjectiveContradictionDisclosure(PRICING_GRAPH, RECORDS_WITH_GOAL_PROBABILITY, false, 'goal_framed'),
     ).toBe('');
   });
 
   it('no analysis, one option, or a junk graph ⇒ silence, never a throw', () => {
-    expect(composeObjectiveContradictionDisclosure(PRICING_GRAPH, [], true)).toBe('');
+    expect(composeObjectiveContradictionDisclosure(PRICING_GRAPH, [], true, 'goal_framed')).toBe('');
     expect(
       composeObjectiveContradictionDisclosure(
         PRICING_GRAPH,
         [RECORDS_WITH_GOAL_PROBABILITY[0]!],
         true,
+        'goal_framed',
       ),
     ).toBe('');
     for (const junk of [null, undefined, 42, 'graph', [], {}]) {
-      expect(composeObjectiveContradictionDisclosure(junk, RECORDS_NO_GOAL_PROBABILITY, true)).toBe(
+      expect(composeObjectiveContradictionDisclosure(junk, RECORDS_NO_GOAL_PROBABILITY, true, 'goal_framed')).toBe(
         '',
       );
     }

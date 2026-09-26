@@ -72,8 +72,12 @@ describe('U1 — the unevaluated voice must not tell the user the ranking is voi
     for (const lie of RANKING_IS_VOID) expect(s).not.toContain(lie);
   });
 
-  it('U1c it KEEPS the honest half — we could not line it up', () => {
-    expect(say('unevaluated')).toContain('could not line');
+  it('U1c it KEEPS the honest half, and since 25 Sep asserts no cause for it', () => {
+    // "We could not line it up with anything this analysis measures" named a
+    // cause the inputs cannot establish on a row nothing scored (#69
+    // 5831708206). The honest half is now the observable alone.
+    expect(say('unevaluated')).toContain('This model could not check it yet');
+    expect(say('unevaluated')).not.toContain('could not line');
   });
 
   it('U1d and states the true consequence its two siblings already state', () => {

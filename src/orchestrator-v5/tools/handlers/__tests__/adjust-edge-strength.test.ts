@@ -127,8 +127,8 @@ describe('adjust_edge_strength handler', () => {
         makeProposal({ entityId: 'f-budget→g-revenue', strength: 0.7, operator: 'set' }),
       ),
     );
-    expect(outcome.assistant_text).toContain('moderate');
-    expect(outcome.assistant_text).toContain('strong');
+    expect(outcome.assistant_text).toContain('from strong to very strong') // 0.5 → 0.7 on the one edge-strength table (canvas cuts 0.2 / 0.4 / 0.7);
+    expect(outcome.assistant_text).not.toContain('moderate');
     expect(outcome.assistant_text).not.toMatch(/0\.\d/);
     const mutated = outcome.mutated_graph as GraphV3T;
     const edge = mutated.edges.find((e) => e.from === 'f-budget' && e.to === 'g-revenue');

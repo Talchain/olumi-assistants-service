@@ -48,6 +48,7 @@ import type {
 
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import {
+  collectLeaderEstimatedTargetIds,
   deriveConstraintVerdict,
   readRatifiedConstraints,
   projectClaimSafety,
@@ -68,6 +69,11 @@ import {
   applyIntakeToLeaderPermission,
 } from '../../../orchestrator/context/intake-option-reconciliation.js';
 import { buildIntakeOptionDisclosure } from '../../coaching/intake-option-disclosure.js';
+// ⛔ C46 stage 1 (b): a leader on a product the analysis only adds up (MRR = price × subscribers).
+import {
+  applyNonlinearIdentityToLeaderPermission,
+  nonlinearIdentityLeaderWithhold,
+} from '../../agent-lane/admit-model.js';
 // D-ask-1 extended to CEE-inferred FACTOR values: the analysis says whose
 // numbers it ran on. See inferred-value-disclosure.ts for the measurement.
 import {
@@ -107,6 +113,14 @@ import { findFirstInvalidNumeric } from './numeric-integrity.js';
 import { validateEnrichmentShadow } from './enrichment-validation.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
 import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
+import {
+  carryLevelLimitBaselines,
+  carryLimitTargetCaps,
+  levelLimitBaselineNodeIds,
+  limitTargetCaps,
+  unprovablePercentFrameIds,
+  withholdUnprovablePercentFrames,
+} from './level-limit-baseline.js';
 import {
   AnalysisNotReadyError,
   readinessQuestions,
@@ -148,6 +162,7 @@ import {
 import {
   buildAnalysisResultHeadline,
   describeAnalysisHeadline,
+  describeGoalFrame,
 } from '../../coaching/analysis-result-headline.js';
 // ⭐ THE WITHHELD-SEPARABILITY DISCLOSURE. See its module docstring: the
 // headline builder computed `separation` and `contenders`, withheld the
@@ -896,8 +911,37 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       ...opt,
       interventions: requestProjection.perOption[index] ?? {},
     }));
+    // A level limit on a node the options move is checked against that node's CURRENT level: carried on this wire
+    // copy only, never persisted, so a later edit of the level can never leave a stale copy behind
+    // (`level-limit-baseline.ts`).
+    const baselineGraph = carryLevelLimitBaselines(graphForAnalysis, snapshot.goal_constraints, snapshot.goal_node_id);
+    if (baselineGraph !== graphForAnalysis) {
+      log.info(
+        {
+          event: 'run_analysis.level_limit_baseline_carried',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          node_ids: [...levelLimitBaselineNodeIds(graphForAnalysis, snapshot.goal_constraints, snapshot.goal_node_id)],
+        },
+        'run_analysis carried the current level of a level-limited node as its baseline (wire copy only; no magnitudes)',
+      );
+    }
+    // A level limit on a factor is read on that factor's OWN scale: its cap carried as `goal_threshold_cap` on this
+    // wire copy only, where the limit is spelled in the factor's own unit (`limitTargetCaps`, `level-limit-baseline.ts`).
+    const wireGraph = carryLimitTargetCaps(baselineGraph, snapshot.goal_constraints);
+    if (wireGraph !== baselineGraph) {
+      log.info(
+        {
+          event: 'run_analysis.limit_target_cap_carried',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          node_ids: [...limitTargetCaps(baselineGraph, snapshot.goal_constraints).keys()],
+        },
+        'run_analysis carried a level-limited factor\'s own cap as goal_threshold_cap (wire copy only; no magnitudes)',
+      );
+    }
     const plotPayload: Record<string, unknown> = {
-      graph: graphForAnalysis,
+      graph: wireGraph,
       // No-rank ruling (2026-08-14): the GATED submission set — identical to
       // snapshot.options unless the gate held the status quo at its observed
       // position, or EXCLUDED an option with no values set (disclosed below).
@@ -910,7 +954,21 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (snapshot.seed !== undefined) plotPayload.seed = snapshot.seed;
     if (snapshot.n_samples !== undefined) plotPayload.n_samples = snapshot.n_samples;
     if (snapshot.goal_constraints !== undefined) {
-      plotPayload.goal_constraints = snapshot.goal_constraints;
+      // A framed percent limit on a level PLoT would read on another scale is sent UNFRAMED on this wire copy, so it
+      // fails closed instead of being scored against the wrong number (`level-limit-baseline.ts`). The record is untouched.
+      plotPayload.goal_constraints = withholdUnprovablePercentFrames(graphForAnalysis, snapshot.goal_constraints);
+      const frameWithheld = unprovablePercentFrameIds(graphForAnalysis, snapshot.goal_constraints);
+      if (frameWithheld.length > 0) {
+        log.info(
+          {
+            event: 'run_analysis.percent_limit_frame_withheld',
+            request_id: invocation.requestId,
+            scenario_id: args.scenario_id,
+            constraint_ids: frameWithheld,
+          },
+          'run_analysis sent a percent limit unframed: its target level is not held as a percentage out of 100 (wire copy only; no magnitudes)',
+        );
+      }
     }
     // ROADMAP 2.920 — the user's ATTESTED objective sense, MINIMISE ONLY.
     //
@@ -1735,10 +1793,33 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     //
     // Pinned by `__tests__/run-analysis-derived-constraint-target.test.ts`,
     // which executes this handler and reads the verdict off the persisted fact.
+    // ⛔ The leader's result on a limit whose target it SETS at a level that is not the user's own is that level
+    // restated, not a check (AI Quality, #70 5844226031): read off the options PLoT received, and passed as the FIFTH
+    // argument — the fourth stays deliberately omitted (see above).
+    // WIRE, not graph (review 5844327116): a status quo the gate HELD sets the target on the wire only.
+    const leaderEstimatedTargetIds = collectLeaderEstimatedTargetIds(
+      graphForAnalysis,
+      ratifiedConstraints,
+      leadingOptionId ?? null,
+      { options: submittedOptions, held: gate.held },
+    );
+    if (leaderEstimatedTargetIds.size > 0) {
+      log.info(
+        {
+          event: 'run_analysis.limit_rests_on_olumi_estimate',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          constraint_ids: [...leaderEstimatedTargetIds],
+        },
+        'run_analysis: a limit on a quantity the leading option sets at Olumi\'s estimate is not counted as checked',
+      );
+    }
     const constraintVerdict = deriveConstraintVerdict(
       response as Record<string, unknown>,
       ratifiedConstraints,
       leadingOptionId ?? null,
+      undefined,
+      leaderEstimatedTargetIds,
     );
     // ⚠ NO TELEMETRY EVENT FOR THE UNMEASURED-TARGET PARTITION, AND THAT IS A
     // DISCLOSED GAP RATHER THAN AN OVERSIGHT — the same call, for the same
@@ -1915,7 +1996,47 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // never disagree about which factors are unset.
       unsetOptionEffectFactorIds: unsetOptionEffectFactorIds(unsetOptionEffects),
     };
-    const headline = buildAnalysisResultHeadline(headlineInput);
+    // ⛔ C46 STAGE 1 (b) — THE LEADER PLoT RANKED FIRST, ON A PRODUCT THIS ENGINE ONLY ADDS UP.
+    //
+    // The goal node's persisted declaration (`cee-v3.ts` NodeV3 `nonlinear_identity`) is re-judged by
+    // construction's own sign test on the graph this Run analysed (`nonlinearIdentityLeaderWithhold`):
+    // when the leader, BY ID, is not proven against an option this run compared, no leader may be named
+    // (ruling #70 5841314428). The linear engine's own interval is never the proof (AI Quality #70
+    // 5842580505). No carrier ⇒ `null`, so every linear brief and every graph persisted before the
+    // carrier runs byte-identical.
+    //
+    // ⚠ TWO SEAMS, ONE FINDING, THE INTAKE PRECEDENT'S SHAPE (ROADMAP 2.579): the headline is withheld
+    // HERE, in the same response, and the persisted permission is folded at the one stamp below. Gating
+    // only the stamp would ship "{X} currently leads" beside a fact that says no leader may be named —
+    // the G-CEE-1 contradiction. `headline !== null` stays the leader permission for every tail below.
+    const nonlinearIdentityWithhold = leadingOptionId === null
+      ? null
+      : nonlinearIdentityLeaderWithhold(snapshot.graph, leadingOptionId, {
+        comparedOptionIds: [...analysedOptionIds],
+        goalId: snapshot.goal_node_id,
+      });
+    if (nonlinearIdentityWithhold !== null) {
+      // Ids and counts only — no labels, no figures.
+      log.info(
+        {
+          event: 'cee.nonlinear_identity.leader_withheld',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          leading_option_id: leadingOptionId,
+          outcome_node_id: nonlinearIdentityWithhold.outcome_id,
+          unproven_against_count: nonlinearIdentityWithhold.against.length,
+        },
+        'run_analysis: leader withheld — its sign on a multiplied goal is not proven',
+      );
+    }
+    const headline = nonlinearIdentityWithhold !== null ? null : buildAnalysisResultHeadline(headlineInput);
+    // ⛔ THE GOAL FRAME THE HEADLINE WAS COMPOSED UNDER (R&C round 1, F1). The
+    // objective-contradiction tail below must not say "against your goal" where
+    // this headline has withdrawn it, nor assert attainment while the frame is
+    // withdrawn (R&C round 2, R3-2). Same pure builder, same input: one
+    // derivation for both halves of the summary. It does not touch the leader
+    // permission, which stays `headline !== null`.
+    const goalFrame = describeGoalFrame(headlineInput);
     // D-ask-1 (2.11 P0-1) disclosure — claim-safety-critical: when the run
     // only completed because the scaffold filled placeholder interventions,
     // the summary MUST say those numbers are defaults and point at the
@@ -2085,6 +2206,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       snapshot.rawPersistedGraph,
       resultRecords,
       headline !== null,
+      goalFrame,
     );
     // ⭐ THE UNSET-OPTION-EFFECT DISCLOSURE, LAST OF THE FIVE.
     //
@@ -2279,9 +2401,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // nothing true to say about the constraint evidence — see
         // `applyIntakeToLeaderPermission` for the full statement of that
         // residual.
-        constraint_verdict: applyIntakeToLeaderPermission(
-          projectClaimSafety(constraintVerdict),
-          intakeReconciliation,
+        // ⛔ C46 stage 1 (b): a THIRD remove-only conjunct, the intake precedent's shape — it can only
+        // take the permission away, and leaves `constraint_verdict_state` untouched (its REASON is chosen
+        // at compose, where the constraint code keeps precedence: AI Quality option (i), #70 5842615260).
+        constraint_verdict: applyNonlinearIdentityToLeaderPermission(
+          applyIntakeToLeaderPermission(
+            projectClaimSafety(constraintVerdict),
+            intakeReconciliation,
+          ),
+          nonlinearIdentityWithhold,
         ),
       },
     };

@@ -122,8 +122,8 @@ describe('formatEdgeAdjustment', () => {
     const text = formatEdgeAdjustment({
       fromLabel: 'churn',
       toLabel: 'revenue',
-      beforeMean: 0.4,
-      afterMean: 0.7,
+      beforeMean: 0.3,
+      afterMean: 0.55,
     });
     expect(text).toContain('moderate');
     expect(text).toContain('strong');
@@ -156,8 +156,8 @@ describe('formatEdgeAdjustment', () => {
     const text = formatEdgeAdjustment({
       fromLabel: 'churn',
       toLabel: 'revenue',
-      beforeMean: -0.4,
-      afterMean: -0.7,
+      beforeMean: -0.3,
+      afterMean: -0.55,
     });
     expect(text).toContain('moderate (negative)');
     expect(text).toContain('strong (negative)');
@@ -185,7 +185,7 @@ describe('formatEdgeAdjustment', () => {
       fromLabel: 'churn',
       toLabel: 'revenue',
       beforeMean: 0,
-      afterMean: 0.5,
+      afterMean: 0.3,
       beforeDirection: 'negative',
       afterDirection: 'positive',
     });
@@ -253,8 +253,8 @@ describe('formatEdgeAdjustment — no false band transition', () => {
     const text = formatEdgeAdjustment({
       fromLabel: 'Two Developers',
       toLabel: 'Coordination Overhead Risk',
-      beforeMean: 0.35,
-      afterMean: 0.55,
+      beforeMean: 0.25,
+      afterMean: 0.35,
     });
     expect(text).not.toMatch(/from moderate to moderate/);
     expect(text).toContain('still moderate');
@@ -266,8 +266,8 @@ describe('formatEdgeAdjustment — no false band transition', () => {
     const text = formatEdgeAdjustment({
       fromLabel: 'churn',
       toLabel: 'revenue',
-      beforeMean: 0.4,
-      afterMean: 0.7,
+      beforeMean: 0.3,
+      afterMean: 0.55,
     });
     expect(text).toContain('from moderate to strong');
     expect(text).not.toContain('still');
@@ -290,8 +290,8 @@ describe('formatEdgeAdjustment — no false band transition', () => {
     const text = formatEdgeAdjustment({
       fromLabel: 'a',
       toLabel: 'b',
-      beforeMean: 0.4,
-      afterMean: 0.5,
+      beforeMean: 0.25,
+      afterMean: 0.35,
       beforeDirection: 'positive',
       afterDirection: 'negative',
     });
@@ -311,8 +311,8 @@ describe('formatEdgeAdjustment — no false band transition', () => {
     const flipped = formatEdgeAdjustment({
       fromLabel: 'a',
       toLabel: 'b',
-      beforeMean: 0.4,
-      afterMean: 0.5,
+      beforeMean: 0.25,
+      afterMean: 0.35,
       beforeDirection: 'positive',
       afterDirection: 'negative',
     });

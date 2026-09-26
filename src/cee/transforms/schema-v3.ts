@@ -1557,7 +1557,9 @@ function projectNodeProvenance(
       node.display_value !== undefined ||
       typeof node.intercept === "number" ||
       typeof node.goal_threshold === "number" ||
-      typeof node.goal_threshold_raw === "number";
+      typeof node.goal_threshold_raw === "number" ||
+      // The UI's stated goal target (#1921): a magnitude, the sibling of goal_threshold_raw.
+      typeof node.success_threshold === "number";
     if (carriesValue) continue;
 
     const tokenCount = node.label.trim().split(/\s+/).filter(Boolean).length;

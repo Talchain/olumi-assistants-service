@@ -85,6 +85,10 @@
  * graph topology, not causal beliefs". An edge a user draws between two existing
  * nodes is a causal belief by construction, so borrowing the structural
  * constants would assert certainty nobody expressed.
+ * ⭐ EXCEPT A TOPOLOGY PAIR (Sep 2026, Canvas "+ Add option"): when the persisted
+ * endpoint kinds are decision→option or option→factor, the link IS topology and
+ * is written with those constants via `enforceStructuralEdgeDefaults` — see
+ * step 5 below.
  *
  * ──────────────────────────────────────────────────────────────────────────
  * ⭐⭐ THE TWO GATES THE APPLIER ALREADY ENFORCES, PRE-CHECKED HERE ANYWAY.
@@ -121,6 +125,7 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { BASE_HASH_DIVERGED } from '../graph-management/reason-codes.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { mergeAppliedGraphForPersistence } from '../handlers/edit-graph-dispatch.js';
+import { enforceStructuralEdgeDefaults } from '../../orchestrator/tools/edit-graph.js';
 import { applyPatchOperations, PatchApplyError } from '../../orchestrator/patch-applier.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
 
@@ -148,6 +153,8 @@ export type StructuralAddEdgeResult =
       readonly kind: 'mutated';
       readonly response: OlumiResponse;
       readonly mutatedGraph: unknown;
+      /** The ops this write applied — the hold thread-through's fulfilment input (#1947 review). */
+      readonly appliedOperations: readonly PatchOperation[];
       readonly handlerFacts: readonly HandlerFact[];
       readonly graph: GraphV3T;
       readonly baseGraph: unknown;
@@ -259,7 +266,42 @@ export function applyStructuralAddEdge(
   }
   const baseGraph = graphParse.data;
 
-  // ── 2. THE STALE GATE, before anything is resolved ───────────────────────
+  // ── 2. THE DUPLICATE GATE, BEFORE THE STALE GATE — an idempotent no-op ────
+  // Same shape as the sibling's id collision: `base_graph_hash` can be perfectly
+  // fresh and the edge still already be present, because it is present in the
+  // very graph the user was looking at.
+  //
+  // ⭐ AND IT RUNS FIRST (C32, Delivery Lead ruling #70 5841216898). The link the
+  // user asked for already exists in the SERVER's graph, so nothing needs
+  // writing whatever base they claim; refusing it as stale would answer a 409
+  // for a link that is there. That is exactly Canvas "+ Add option": the option
+  // add now writes `decision → option` itself (`structural-add.ts`), and the
+  // follow-up link event still carries the PRE-add hash. Nothing is written on
+  // this path, so deciding it before the stale gate cannot let a stale base
+  // write anything.
+  if (baseGraph.edges.some((e) => e.from === event.from && e.to === event.to)) {
+    log.info(
+      {
+        event: 'v5.system_event.structural_add_edge.edge_already_exists',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+      },
+      'structural_add_edge — that edge is already present; refusing rather than duplicating',
+    );
+    // A decision → option link has no strength to open, so the causal sentence
+    // would point the user at a control that does not exist.
+    const kindOf = (id: string): string | undefined => baseGraph.nodes.find((n) => n.id === id)?.kind;
+    const isDecisionLink = kindOf(event.from) === 'decision' && kindOf(event.to) === 'option';
+    return refuse(
+      payload,
+      'edge_already_exists',
+      isDecisionLink
+        ? `${labelOf(baseGraph, event.to)} is already an option for ${labelOf(baseGraph, event.from)}, so there was nothing to change.`
+        : `${labelOf(baseGraph, event.from)} and ${labelOf(baseGraph, event.to)} are already connected, so I've left the model as it is. Open that connection to change its strength.`,
+    );
+  }
+
+  // ── 3. THE STALE GATE, before anything is resolved ───────────────────────
   const currentBaseHash = computeAnalysisAffectingGraphHash(
     persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
   );
@@ -286,7 +328,7 @@ export function applyStructuralAddEdge(
     );
   }
 
-  // ── 3. THE ENDPOINT GATE — a dangling edge is what the contract forbids ──
+  // ── 4. THE ENDPOINT GATE — a dangling edge is what the contract forbids ──
   // The applier throws NODE_NOT_FOUND, which is the enforcement. This exists
   // for the SENTENCE: "one end of that connection isn't in the model" is
   // followable, "I couldn't apply that" is not.
@@ -310,26 +352,6 @@ export function applyStructuralAddEdge(
     );
   }
 
-  // ── 4. THE DUPLICATE GATE — the hash cannot catch this either ────────────
-  // Same shape as the sibling's id collision: `base_graph_hash` can be perfectly
-  // fresh and the edge still already be present, because it is present in the
-  // very graph the user was looking at.
-  if (baseGraph.edges.some((e) => e.from === event.from && e.to === event.to)) {
-    log.info(
-      {
-        event: 'v5.system_event.structural_add_edge.edge_already_exists',
-        request_id: requestId,
-        scenario_id: payload.scenario_id,
-      },
-      'structural_add_edge — that edge is already present; refusing rather than duplicating',
-    );
-    return refuse(
-      payload,
-      'edge_already_exists',
-      `${labelOf(baseGraph, event.from)} and ${labelOf(baseGraph, event.to)} are already connected, so I've left the model as it is. Open that connection to change its strength.`,
-    );
-  }
-
   // ── 5. the canonical PatchOperation train ────────────────────────────────
   const signedMean = signedMeanFor(event.magnitude, event.effect_direction);
   const addedEdge = {
@@ -345,11 +367,30 @@ export function applyStructuralAddEdge(
     // sibling here would be a hand-maintained mirror of a derivable value.
     provenance: { source: 'user_specified' as const },
   };
-  const operations: PatchOperation[] = [
-    // `applyAddEdge` reads the id off `value`, not `path`; the `from::to` path
-    // is the convention `parseEdgePath` accepts and its siblings emit.
-    { op: 'add_edge', path: `${event.from}::${event.to}`, value: addedEdge },
-  ];
+  /**
+   * ⭐ A TOPOLOGY LINK GETS THE TOPOLOGY CONSTANTS. When the persisted endpoint
+   * kinds are `decision→option` or `option→factor` — the pairs this file's
+   * header already names as topology, "not causal beliefs" — the edge is
+   * written with `STRUCTURAL_EDGE_DEFAULTS` through the SAME enforcer
+   * `edit_graph` uses (`enforceStructuralEdgeDefaults`, keyed on persisted
+   * kinds), so there is one definition of a topology edge. Without it, the
+   * Canvas's "+ Add option" link persisted causal defaults (std 0.1, exists 0.8)
+   * on a decision→option edge, which `STRUCTURAL_EDGE_NOT_CANONICAL` treats as
+   * an error. Every other pair keeps the causal defaults above, unchanged.
+   */
+  const operations: PatchOperation[] = enforceStructuralEdgeDefaults(
+    [
+      // `applyAddEdge` reads the id off `value`, not `path`; the `from::to` path
+      // is the convention `parseEdgePath` accepts and its siblings emit.
+      { op: 'add_edge', path: `${event.from}::${event.to}`, value: addedEdge },
+    ],
+    baseGraph,
+  );
+  // The edge the train will actually write — after the enforcer, not what the
+  // client sent. The postcondition below and the dispatcher's post-commit
+  // check both compare against THIS, so a topology link sent as "negative 0.7"
+  // is not refused for landing as the topology constants it was meant to be.
+  const writtenEdge = operations[0].value as typeof addedEdge;
 
   let candidate: GraphV3T;
   try {
@@ -438,8 +479,8 @@ export function applyStructuralAddEdge(
   );
   if (
     landed === undefined ||
-    landed.strength.mean !== signedMean ||
-    landed.effect_direction !== event.effect_direction
+    landed.strength.mean !== writtenEdge.strength.mean ||
+    landed.effect_direction !== writtenEdge.effect_direction
   ) {
     log.error(
       {
@@ -448,7 +489,7 @@ export function applyStructuralAddEdge(
         scenario_id: payload.scenario_id,
         found: landed !== undefined,
         landed_mean: landed?.strength.mean ?? null,
-        expected_mean: signedMean,
+        expected_mean: writtenEdge.strength.mean,
       },
       'structural_add_edge — the new connection is absent or altered in the persisted bytes; refusing',
     );
@@ -539,11 +580,12 @@ export function applyStructuralAddEdge(
       stage_indicator: payload.stage,
     },
     mutatedGraph: projectedGraph,
+    appliedOperations: operations,
     handlerFacts: [factCheck.data],
     graph: projectedParse.data,
     baseGraph: persistedGraph,
     from: event.from,
     to: event.to,
-    signedMean,
+    signedMean: writtenEdge.strength.mean,
   };
 }

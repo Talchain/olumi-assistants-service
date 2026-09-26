@@ -1263,7 +1263,7 @@ describe("prompt loading", () => {
     // Actionable catalogue reason surfaced (one of the user-facing
     // VIOLATION_MESSAGES strings), not the vague generic copy.
     expect(text).toMatch(
-      /cannot reach the goal|no goal node|circular dependency|no connections|fewer than two options|no decision node/i,
+      /cannot reach the goal|no goal\b|circular dependency|no connections|fewer than two options|no decision\b/i,
     );
     expect(text).not.toContain("inconsistency in the model structure");
     // Raw internal detail stays suppressed.

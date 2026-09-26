@@ -699,8 +699,13 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
     expect(turn.raw).toContain('Total three-year cost');
     expect(turn.assistantText).toContain('Total three-year cost');
     expect(turn.assistantText).toContain('could not be checked');
-    // (c) the repair step is present
-    expect(turn.assistantText).toContain('Tell me the limit you meant');
+    // (c) ⛔ 25 Sep 2026 (#69 5831708206 / 5831722994): NO repair is promised.
+    // `CONSTRAINT_OUT_OF_DOMAIN` is raised from the defective row, which stays on
+    // the model, so a restated sibling is condemned again by rule 1 on the next
+    // Run; no code proves a restatement lands. The voice states the verdict and
+    // the residual, and that is what must reach the serialised bytes.
+    expect(turn.assistantText).not.toContain('Tell me the limit you meant');
+    expect(turn.assistantText).toContain('This model could not check it yet');
   });
 
   it('IDENTITY_UNRESOLVED: the honest wording reaches the wire, and says neither false thing', async () => {
@@ -743,7 +748,7 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
     // The curly quotes around the label are the one non-ASCII part of the copy
     // and the likeliest thing to be mangled by an egress sanitiser or a JSON
     // escape. And the disclosure composes LAST, so the confirmation ending on
-    // the repair step is what proves it was not truncated at the tail — the
+    // its closer is what proves it was not truncated at the tail — the
     // failure mode a `toContain` on the subject sentence alone would miss.
     plotResponse = plotEnvelope({
       constraintsStatus: 'unavailable',
@@ -751,7 +756,9 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
     });
     const turn = await runAnalysisTurn(app);
     expect(turn.confirmation).toContain('\u201cTotal three-year cost\u201d');
-    expect(turn.confirmation.endsWith('Then run the analysis again.')).toBe(true);
+    // 25 Sep 2026: the disclosure now ends on the residual closer, not a repair
+    // step (no code proves a restatement lands, #69 5831708206).
+    expect(turn.confirmation.endsWith('It stays on the model.')).toBe(true);
     // Single-line: the allowlist rejects any confirmation containing a newline,
     // so a multi-line disclosure would be silently replaced by the fallback.
     expect(turn.confirmation).not.toContain('\n');
@@ -769,7 +776,7 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
     });
     const turn = await runAnalysisTurn(app);
     expect(turn.confirmation).toContain('could not be checked');
-    expect(turn.confirmation).toContain('Tell me the limit you meant');
+    expect(turn.confirmation).toContain('It stays on the model.');
     expect(turn.confirmation.startsWith(FALLBACK)).toBe(true);
     // The withheld headline is why the confirmation opens with the locked
     // template rather than "Hire Marketing Manager currently leads".
@@ -2088,12 +2095,24 @@ describe('2.349 R2 — gap 5 at the serialised HTTP boundary', () => {
     // can never change the outcome"* for the out-of-scope class.
     //
     // So it binds instead to the part that identifies the VOICE and cannot
-    // move with the arm — the consequence sentence — plus the invariant the
-    // test is actually about: a repair the user can act on is still offered.
+    // move with the arm — the consequence sentence — plus what the arm must
+    // still say.
+    //
+    // ⚠ REBOUND AGAIN (25 Sep). The arm used to offer "tell me which part of
+    // your model it applies to and I will record it". Served `e39f6e0`
+    // disproved that ask: the limit already sits on the derived target the
+    // user would name, and the re-run stayed unchecked (2/2); a saved starting
+    // level on that target did not help either (PLoT anchors a derived target
+    // only by a delta frame or every-option pins). Per RC's ruling (#63
+    // 5825683899) the arm now says plainly that the limit cannot be checked in
+    // this model yet, invites nothing, and keeps the residual — so this binds
+    // to that, and to the ask's absence.
     expect(turn.assistantText).toContain(
       'We could not line it up with anything this analysis measures',
     );
-    expect(turn.assistantText).toContain('and I will record it');
+    expect(turn.assistantText).toContain('cannot be checked in this model yet');
+    expect(turn.assistantText).toContain('this one stays on the model unchecked');
+    expect(turn.assistantText).not.toContain('and I will record it');
   });
 
   it('MIXED: a second, genuinely unscored constraint still withholds AND both are disclosed', async () => {

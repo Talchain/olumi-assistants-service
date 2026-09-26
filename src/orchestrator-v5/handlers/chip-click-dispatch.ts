@@ -75,7 +75,9 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { extractGraphOptionIds } from '../context/option-identity.js';
 import {
   buildAutoRunProvenance,
+  buildConstructionAutoRunProvenance,
   RUN_PROVENANCE_ENRICHMENT_KEY,
+  type AutoRunProvenance,
 } from '../context/run-initiator.js';
 import {
   deriveAnalysisFreshness,
@@ -156,12 +158,13 @@ export const AUTO_RUN_POST_DRAFT_CHIP_ID = 'auto_run_post_draft';
  * Same carrier pattern as the decision_review enricher (a freshly-cloned
  * record, PLoT keys preserved). NO schema change: `enrichment` is
  * `z.record(z.unknown())` at every published contract version, so the stamp
- * validates at the UI's deployed 0.43.0 pin and at 0.46.0 alike. It is NOT on
- * the wire transport keep-list (`P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` — which
- * must stay element-for-element equal to the schemas package's
- * CEE_UI_ENRICHMENT_KEEP_LIST), so today's UI sees an ordinary completed
- * analysis: the graceful-degradation posture R2 requires. Surfacing it to the
- * browser is a schemas-train keep-list change, deliberately not made here.
+ * validates at the UI's deployed 0.43.0 pin and at 0.46.0 alike. ⚠ UPDATED
+ * (schemas 0.58.0): it IS now on the wire transport keep-list
+ * (`P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP`, element-for-element equal to the
+ * schemas package's CEE_UI_ENRICHMENT_KEEP_LIST), typed as
+ * `AnalysisEnrichmentSchema.run_provenance`, so the browser can label an
+ * automatic first pass. A UI that does not read it still sees an ordinary
+ * completed analysis — the graceful-degradation posture R2 requires.
  */
 // ⭐ MOVED to `../context/run-initiator.js` (2026-08-20) — the ONE owner of the
 // auto-run marker vocabulary, imported by the writer below AND by the coaching
@@ -254,10 +257,10 @@ export { RUN_PROVENANCE_ENRICHMENT_KEY };
  * (the "caveat first, top-down" contract `tools/handlers/staleness-prefix.ts`
  * states). The numbers ALSO land on the canvas via
  * `routes/scenario-graph-analysis-read.ts` → the UI's provisional-delivery
- * hook, and THAT surface carries no label, because
- * `RUN_PROVENANCE_ENRICHMENT_KEY` is not on the transport keep-list. Labelling
- * the canvas is a UI change plus a schemas keep-list train — the boundary this
- * lane stops at, reported rather than crossed.
+ * hook. ⚠ UPDATED (schemas 0.58.0): `RUN_PROVENANCE_ENRICHMENT_KEY` now rides
+ * the transport keep-list, so that block carries the typed marker; labelling
+ * the canvas from it is the UI's change, and until it ships that surface still
+ * carries no label.
  *
  * ⚠ AND IT IS A PROVENANCE CAVEAT, NOT A CURRENCY ONE (trap 21). It answers
  * "has this had any user input?"; `StalenessCaveat` ('stale' | 'unconfirmed')
@@ -276,10 +279,20 @@ export const AUTO_RUN_PROVISIONAL_DISCLOSURE =
  *   2. the run_analysis fact is stamped with `enrichment.run_provenance`;
  *   3. the assistant answer opens with AUTO_RUN_PROVISIONAL_DISCLOSURE.
  */
-export interface ChipClickAutoRunTrigger {
-  /** The fresh-draft turn this run was initiated for (provenance only). */
-  readonly draftTurnId: string;
-}
+export type ChipClickAutoRunTrigger =
+  | {
+      /** The fresh-draft turn this run was initiated for (provenance only). */
+      readonly draftTurnId: string;
+    }
+  | {
+      /**
+       * The Agent-lane construction this run was initiated for — its registration
+       * turn id (provenance, and the first-analysis runner's dedup key). Stamps
+       * `auto_post_construction` instead of `auto_post_draft`; the other two
+       * consequences above are identical.
+       */
+      readonly constructionTurnId: string;
+    };
 
 /**
  * ⭐⭐ STANDING INVARIANT FOR STATE-RECOVERY CODE (2.1353 r4):
@@ -1267,17 +1280,22 @@ export async function dispatchDeterministicChipClick(
  */
 function stampAutoRunProvenance(
   facts: readonly HandlerFact[],
-  draftTurnId: string,
+  trigger: ChipClickAutoRunTrigger,
 ): readonly HandlerFact[] {
   return facts.map((fact) => {
     if (fact.fact_type !== 'run_analysis') return fact;
+    // The matching builder for the trigger's arm — run-initiator.ts owns each shape.
+    const provenance: AutoRunProvenance =
+      'constructionTurnId' in trigger
+        ? buildConstructionAutoRunProvenance(trigger.constructionTurnId)
+        : buildAutoRunProvenance(trigger.draftTurnId);
     return {
       ...fact,
       result: {
         ...fact.result,
         enrichment: {
           ...(fact.result.enrichment ?? {}),
-          [RUN_PROVENANCE_ENRICHMENT_KEY]: buildAutoRunProvenance(draftTurnId),
+          [RUN_PROVENANCE_ENRICHMENT_KEY]: provenance,
         },
       },
     };
@@ -1674,11 +1692,12 @@ export async function dispatchChipClickRunAnalysis(
 
     // R2 — provisional provenance stamp, BEFORE the compose/commit seams so
     // the persisted fact, the composed block source and the freshness read
-    // all see one fact object. The wire block's transport keep-list strips
-    // the key (see RUN_PROVENANCE_ENRICHMENT_KEY), so today's UI renders an
-    // ordinary completed analysis — the required graceful degradation.
+    // all see one fact object. From schemas 0.58.0 the wire block's transport
+    // keep-list CARRIES the key (see RUN_PROVENANCE_ENRICHMENT_KEY); a UI that
+    // does not read it renders an ordinary completed analysis — the required
+    // graceful degradation.
     if (params.autoRun !== undefined) {
-      enrichedFacts = stampAutoRunProvenance(enrichedFacts, params.autoRun.draftTurnId);
+      enrichedFacts = stampAutoRunProvenance(enrichedFacts, params.autoRun);
     }
 
     // V5 coaching parity — emit the same post-analysis suggested_actions

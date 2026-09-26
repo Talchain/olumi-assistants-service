@@ -139,11 +139,11 @@ describe('formatGraphForContext — option reachability projection', () => {
     expect(out.edges[0]!.edge_type).toBe('bidirected');
     // The type reaching the model is NECESSARY AND NOT SUFFICIENT. What the
     // model echoes is the `relationship` STRING, and this fixture built the
-    // witnessed lie (strength 0.5 + bidirected -> "moderate positive link")
+    // witnessed lie (strength 0.5 + bidirected -> "moderate positive link"; on today's edge table, "strong positive link")
     // while asserting past it. Pinned in full by the discriminating pair in
     // the block below; asserted here so the fixture that CONSTRUCTS the lie
     // can never again pass beside it.
-    expect(out.edges[0]!.relationship).not.toBe('moderate positive link');
+    expect(out.edges[0]!.relationship).not.toBe('strong positive link');
   });
 
   it('UNRECOGNISED_EDGE_TYPE_IS_DROPPED_NOT_COERCED', () => {
@@ -200,8 +200,10 @@ describe('formatGraphForContext — option reachability projection', () => {
   it('BIDIRECTED_RELATIONSHIP_IS_NOT_CAUSAL_LINK_LANGUAGE', () => {
     const edge = confoundedEdge(formatGraphForContext(confoundedPack('bidirected')));
     // Identity-bound to the edge by from/to, never by a value predicate.
-    // The exact string the deployed build handed the model:
-    expect(edge.relationship).not.toBe('moderate positive link');
+    // The directed phrase this 0.5 edge would get (the deployed build handed the
+    // model "moderate positive link" on the old sensitivity cuts; on the one
+    // edge-strength table it reads "strong positive link"):
+    expect(edge.relationship).not.toBe('strong positive link');
     // No directed-route language of any band or sign on a bidirected edge.
     expect(edge.relationship).not.toMatch(/\blink\b/);
     // The ratified in-repo predicate — defaults-v19.ts:76 and
@@ -216,7 +218,7 @@ describe('formatGraphForContext — option reachability projection', () => {
     // a false CAUSAL claim for a false SMALLNESS claim about a user-set 0.5 —
     // the opposite-direction harm, and #1163's false-negative one level down.
     const edge = confoundedEdge(formatGraphForContext(confoundedPack('bidirected')));
-    expect(edge.relationship).toContain('moderate');
+    expect(edge.relationship).toContain('strong');
     expect(edge.relationship).toContain('positive');
     expect(edge.relationship).not.toContain('negligible');
   });
@@ -228,14 +230,14 @@ describe('formatGraphForContext — option reachability projection', () => {
     // edges"), so the loose form's blast radius is every drafted edge in the
     // estate. Detection must be `=== 'bidirected'`.
     const edge = confoundedEdge(formatGraphForContext(confoundedPack(undefined)));
-    expect(edge.relationship).toBe('moderate positive link');
+    expect(edge.relationship).toBe('strong positive link');
     expect(edge).not.toHaveProperty('edge_type');
   });
 
   it('DIRECTED_EDGE_TYPE_EXPLICIT_KEEPS_ITS_LINK_PHRASE', () => {
     // The arm that kills an `edge_type !== undefined` detection.
     const edge = confoundedEdge(formatGraphForContext(confoundedPack('directed')));
-    expect(edge.relationship).toBe('moderate positive link');
+    expect(edge.relationship).toBe('strong positive link');
   });
 
   it('BIDIRECTED_UNRECOGNISED_PHRASE_FALLS_BACK_WITHOUT_CAUSAL_LANGUAGE', () => {

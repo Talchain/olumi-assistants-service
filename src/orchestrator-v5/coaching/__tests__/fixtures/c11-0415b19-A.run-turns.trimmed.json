@@ -1,0 +1,167 @@
+{
+  "_provenance": {
+    "source_file": "output/paul-test-20260923/construction-witness/raw/c11-0415b19-A.json",
+    "source_sha256": "e3816dfa9e35011b524c04a9febb01d7735abe90066181163c093194352ac3da",
+    "turns_kept": [
+      "t5"
+    ],
+    "served_build": "CEE 0415b191b0d6a306282584ab0c160e8aead31e6d (staging)",
+    "route": "POST /agent/v1/turn (agent lane, served wire response)",
+    "captured": "2026-09-24 construction witness (see source_file)",
+    "trimmed": true,
+    "trim_note": "Only the Run turns are kept, and of each only: graph_hash, analysis_state (whole), analysis_ready {status, may_run, goal_node_id, freshness, freshness_reason, graph_hash_at_run, current_graph_hash, computed_at, options[{option_id,label}]}, the single analysis_result block {type, computed_against_hash, leading_option_id, summary, win_probabilities, enrichment {robustness, confidence_tier, option_comparison_status}}, and the turn's tools_called. Dropped: assistant_text, draft_graph, suggested_actions, diagnostics, provider calls, receipts and every other enrichment field. Values are byte-identical to the source for every kept field.",
+    "capture_note": "The source holds the ROUTE response only, not the internal /orchestrate/v2/turn run response the Runtime hands to captureAnalysis. Tests reconstruct that capture from the same turn's analysis_state + analysis_result (the same run: identical scenario, hash and computed_at).",
+    "why_this_fixture": "No fragile edge, robust_edges present, NOT a near tie (is_tie false): the same no-flagged-link card (near_tie is never an input)."
+  },
+  "scenario_id": "62ea332f-532f-4dc1-ba2e-247922c07038",
+  "turns": {
+    "t5": {
+      "tools_called": [
+        "get_canonical_state",
+        "run_analysis"
+      ],
+      "graph_hash": "0ff062a406961d47",
+      "analysis_state": {
+        "run_state": {
+          "kind": "complete_current",
+          "computed_at": "2026-09-24T07:26:53.777Z"
+        },
+        "readiness": {
+          "status": "unknown",
+          "blockers": []
+        },
+        "leader_claim": {
+          "permitted": true,
+          "separation": "separated"
+        },
+        "robustness": {
+          "aggregate_level": "low"
+        },
+        "usable_for_prose": true,
+        "usable_for_chips": true,
+        "usable_for_followup": true,
+        "requires_rerun": false,
+        "blocked_unusable": false,
+        "contradictions": []
+      },
+      "analysis_ready": {
+        "status": "ready",
+        "may_run": true,
+        "goal_node_id": "engineering_velocity",
+        "freshness": "fresh",
+        "freshness_reason": "agent_readback_run_state_current",
+        "graph_hash_at_run": "0ff062a406961d47",
+        "current_graph_hash": "0ff062a406961d47",
+        "computed_at": "2026-09-24T07:26:53.777Z",
+        "options": [
+          {
+            "option_id": "maintain_current_staffing",
+            "label": "Maintain Current Staffing"
+          },
+          {
+            "option_id": "hire_a_tech_lead",
+            "label": "Hire a Tech Lead"
+          },
+          {
+            "option_id": "hire_two_developers",
+            "label": "Hire Two Developers"
+          }
+        ]
+      },
+      "analysis_result": {
+        "type": "analysis_result",
+        "computed_against_hash": "0ff062a406961d47",
+        "leading_option_id": "maintain_current_staffing",
+        "summary": "Maintain Current Staffing scored highest against your goal in 57% of runs of this model. The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.",
+        "win_probabilities": {
+          "Hire a Tech Lead": 0.2847000000000002,
+          "Hire Two Developers": 0.14239999999999992,
+          "Maintain Current Staffing": 0.5728999999999996
+        },
+        "enrichment": {
+          "robustness": {
+            "level": "low",
+            "near_tie": {
+              "gap": 0.28819999999999946,
+              "is_tie": false,
+              "threshold": 0.1,
+              "top_option_id": "maintain_current_staffing",
+              "tied_option_ids": [
+                "maintain_current_staffing"
+              ],
+              "second_option_id": "hire_a_tech_lead"
+            },
+            "is_robust": false,
+            "confidence": 0.5156099999999997,
+            "robust_edges": [
+              {
+                "to_id": "development_capacity",
+                "edge_id": "hiring_quality_risk->development_capacity",
+                "from_id": "hiring_quality_risk",
+                "to_label": "Development capacity",
+                "from_label": "Hiring quality risk",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "team_coordination_effectiveness",
+                "edge_id": "leadership_bottleneck_risk->team_coordination_effectiveness",
+                "from_id": "leadership_bottleneck_risk",
+                "to_label": "Team coordination effectiveness",
+                "from_label": "Leadership bottleneck risk",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "engineering_velocity",
+                "edge_id": "team_coordination_effectiveness->engineering_velocity",
+                "from_id": "team_coordination_effectiveness",
+                "to_label": "Engineering velocity",
+                "from_label": "Team coordination effectiveness",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "onboarding_workload",
+                "edge_id": "tech_lead_headcount->onboarding_workload",
+                "from_id": "tech_lead_headcount",
+                "to_label": "Onboarding workload",
+                "from_label": "Tech lead headcount",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "technical_leadership_capacity",
+                "edge_id": "tech_lead_headcount->technical_leadership_capacity",
+                "from_id": "tech_lead_headcount",
+                "to_label": "Technical leadership capacity",
+                "from_label": "Tech lead headcount",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "team_coordination_effectiveness",
+                "edge_id": "technical_leadership_capacity->team_coordination_effectiveness",
+                "from_id": "technical_leadership_capacity",
+                "to_label": "Team coordination effectiveness",
+                "from_label": "Technical leadership capacity",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              }
+            ],
+            "fragile_edges": [],
+            "display_verdict": "fragile",
+            "confidence_basis": "recommendation_stability_uncalibrated",
+            "recommended_option_id": "maintain_current_staffing",
+            "display_verdict_reason": "varying any one of the factors we could test did not change which option is most likely to achieve your goal, but this run scored low on our other robustness checks",
+            "recommended_option_label": "Maintain Current Staffing",
+            "recommended_option_compliance": "not_applicable",
+            "recommended_option_compliance_reason": "no limits were set for this decision"
+          },
+          "confidence_tier": "fair",
+          "option_comparison_status": "computed"
+        }
+      }
+    }
+  }
+}

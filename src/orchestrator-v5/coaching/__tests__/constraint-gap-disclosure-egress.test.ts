@@ -142,8 +142,12 @@ describe('T1 gap disclosure — reaches the wire', () => {
     expect(out).not.toBe(FALLBACK);
     // (b) the condition is named
     expect(out).toContain('Total three-year cost');
-    // (c) the repair step is present
-    expect(out).toContain('Tell me the limit you meant in your own words and I will record it');
+    // (c) ⛔ 25 Sep 2026 (#69 5831708206 / 5831722994): NO restate-and-rerun
+    // promise. `codes: []` proves no remedy, so the voice states the verdict and
+    // the residual and invites nothing. Pinned in BOTH directions so a copy edit
+    // that restores the promise REDs here, not on the next walk.
+    expect(out).not.toContain('Tell me the limit you meant');
+    expect(out).toContain('This model could not check it yet, so it was not part of the comparison. It stays on the model.');
     // and the withheld-recommendation statement survives. ROADMAP 2.653: this
     // used to pin 'conditions you set', which was an ATTRIBUTION claim, not the
     // withholding statement it was labelled as — and a false one whenever the
@@ -159,13 +163,15 @@ describe('T1 gap disclosure — reaches the wire', () => {
 
   it('the count-only form (label unusable) also reaches the wire', () => {
     // A constraint with no usable label degrades to the count phrasing. That
-    // form carries requirement (c) and the "not checked" statement, so it must
+    // form carries the "not checked" statement and the residual, so it must
     // survive too — otherwise an unlabelled constraint discloses nothing.
+    // (25 Sep 2026: and, like every unknown-cause row, no repair promise.)
     const composed = composeSummary([{ constraint_id: 'c_x', label: null }]);
     const out = throughForwarder(composed);
     expect(out).not.toBe(FALLBACK);
     expect(out).toContain('could not be checked');
-    expect(out).toContain('Tell me the limit you meant');
+    expect(out).toContain('It stays on the model.');
+    expect(out).not.toContain('Tell me the limit you meant');
   });
 
   it('the composed summary is on the egress allowlist', () => {
@@ -202,7 +208,7 @@ describe('T1 gap disclosure — the three INDEPENDENT blockers, named separately
     const out = throughForwarder(composed);
     expect(out).not.toBe(FALLBACK);
     expect(out).toContain('could not be checked');
-    expect(out).toContain('Tell me the limit you meant');
+    expect(out).toContain('It stays on the model.');
     expect(out).not.toContain('LLLL');
   });
 

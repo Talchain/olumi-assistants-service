@@ -211,8 +211,13 @@ describe("CEE→UI: keep-list membership pins", () => {
     expect(CEE_UI_ENRICHMENT_KEEP_LIST).toContain("decision_brief");
   });
 
-  it("keep-list is exactly the CEE compose.ts P0B list (18 keys)", () => {
-    expect(CEE_UI_ENRICHMENT_KEEP_LIST).toHaveLength(18);
+  it("run_provenance is keep-listed (schemas 0.58.0, the provisional-run marker)", () => {
+    expect(CEE_UI_ENRICHMENT_KEEP_LIST).toContain("run_provenance");
+    expect(P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP).toContain("run_provenance");
+  });
+
+  it("keep-list is exactly the CEE compose.ts P0B list (19 keys)", () => {
+    expect(CEE_UI_ENRICHMENT_KEEP_LIST).toHaveLength(19);
   });
 });
 
@@ -566,6 +571,13 @@ const WITHHELD_RULING_BY_TRANSPORT_KEY: ReadonlyMap<string, WithheldRuling> =
     // win_probability. `winner_flips` survives because it says THAT the winner
     // changes, never WHICH option it changes to.
     ["conditional_winners", "projected"],
+    // schemas 0.58.0 — `run_provenance`, the provisional-run marker.
+    // `pass_through`, DERIVED: the stamp is { initiated_by, provisional, one turn
+    // id } — no member names an option, so the leading-option guard has nothing
+    // to catch. And "nobody asked for this run and none of it is confirmed" is
+    // the disclosure a withheld-leader turn most needs to keep, not a claim to
+    // withhold.
+    ["run_provenance", "pass_through"],
   ]);
 
 describe("CEE→UI: every transport key has an explicit withheld ruling", () => {

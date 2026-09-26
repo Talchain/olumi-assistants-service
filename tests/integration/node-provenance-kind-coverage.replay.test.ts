@@ -582,6 +582,16 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
    *     loop's current scope, and the semantic answer above is the one that
    *     stays true if the scope ever widens. Recorded in that order on purpose.
    */
+  /*
+   * ── DECISION RECORDED, 25 Sep: `success_threshold` + `threshold_source` (#1921) ──
+   * The UI's own goal-target stamp, which CEE now declares so a turn-path re-parse stops deleting it.
+   *   · `success_threshold` IS value-bearing: it is the target the user stated, a magnitude, the exact
+   *     sibling of `goal_threshold_raw` (already in `carriesValue`). It joins `carriesValue`
+   *     (schema-v3.ts) and, to keep that list's strict superset honest, `NODE_QUANTITY_FIELDS`
+   *     (constraint-feasibility.ts).
+   *   · `threshold_source` is NOT value-bearing: it names WHO stated the target, a provenance, the same
+   *     case as `goal_threshold_cap_provenance` above. It asserts no magnitude and must not join.
+   */
   it("the NodeV3 key set is unchanged — a new field forces a value-bearing decision", () => {
     expect(Object.keys(NodeV3.shape).sort()).toEqual([
       // COLLAB Track A, 18 Sep. THE VALUE-BEARING DECISION THIS GUARD DEMANDS,
@@ -613,11 +623,17 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "label",
       "label_authored",
       "label_placeholder",
+      // C46 stage 1 (#70 5841833807) — THE VALUE-BEARING DECISION: `nonlinear_identity` is NOT value-bearing and
+      // must NOT join `carriesValue`. It names WHICH nodes multiply (`operation: 'product'`, `factor_ids`) and
+      // whose reading that is (`stated_in_brief`) — a statement about the model's form, never a magnitude.
+      "nonlinear_identity",
       "observed_state",
       "prior",
       "provenance",
       "scale_frame",
       "source_quote",
+      "success_threshold",
+      "threshold_source",
       "uncertainty_drivers",
     ]);
   });

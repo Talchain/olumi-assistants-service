@@ -162,6 +162,14 @@ export interface ScaffoldPlan {
   readonly will_scaffold_options: boolean;
   readonly option_count: number;
   readonly scaffolded_option_ids: readonly string[];
+  /**
+   * The options the run will LEAVE OUT — the gate's `excluded`, and only those. `scaffolded_option_ids` also
+   * lists the options the run HOLDS (a status quo held at the factors' current values), and a held option is
+   * SUBMITTED and compared. Every "leave out" claim reads this list, never the touched one: on the served
+   * `bf-20260926T054503Z` graph the Agent said it would leave out "Status Quo" while the same run computed it.
+   * The run's own record makes the same split (`run-analysis.ts`).
+   */
+  readonly excluded_option_ids: readonly string[];
 }
 
 /**
@@ -195,6 +203,7 @@ export function computeScaffoldPlan(input: AnalysableOptionGateInput): ScaffoldP
       touchedIds.length > 0 && outcome.options.length >= PLOT_MIN_COMPARISON_OPTIONS,
     option_count: touchedIds.length,
     scaffolded_option_ids: touchedIds,
+    excluded_option_ids: outcome.excluded.map((s) => s.option_id),
   };
 }
 

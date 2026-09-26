@@ -4321,6 +4321,53 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           });
           // commit_failed keeps its pre-#658 fallback: the free-text edit path
           // (leave the executor-door flag false).
+        } else if (addOptionOutcome.kind === 'refused') {
+          // (A) — a typed batch the hold cannot carry (too many options, or past
+          // the hold payload cap). ANSWERED here, with no pending and no graph
+          // write: re-parsing typed parameters through the free-text edit lane is
+          // the "typed chip re-inferred from text" class S2 exists to kill. Prior
+          // live holds are threaded so this answer wipes no consent.
+          let refusedWire = addOptionOutcome.response;
+          try {
+            const commitResult = await commitDirectAnswer(addOptionOutcome.response, {
+              scenario_id: ingress.scenario_id,
+              turn_id: ingress.turn_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(ingress),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - routeStartedAt,
+              handler_facts: [],
+              pending_actions: [],
+              priorPendingActions: addOptionPriorPendings,
+              coaching_state: null,
+              userMessage: ingress.message,
+            });
+            refusedWire = commitResult.response;
+          } catch (err) {
+            log.warn(
+              {
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+                reason: addOptionOutcome.reason,
+                err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+              },
+              'S3-C3 add-option — refusal commit failed; answering without a turn row',
+            );
+          }
+          emit(TelemetryEvents.V5AddOptionTransaction, {
+            request_id: requestId,
+            outcome: `refused:${addOptionOutcome.reason}`,
+          });
+          return sendFinalised200(reply, requestId, 'add_option_transaction', refusedWire, {
+            graph: null,
+            ...(await claimSafety.forExit()),
+            answerKind: 'functional',
+            requestStartedAt: routeStartedAt,
+            scenarioId: ingress.scenario_id,
+            turnId: ingress.turn_id,
+            userMessage: ingress.message,
+          });
         } else {
           emit(TelemetryEvents.V5AddOptionTransaction, {
             request_id: requestId,

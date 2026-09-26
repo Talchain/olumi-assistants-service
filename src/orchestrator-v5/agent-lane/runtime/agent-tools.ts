@@ -12,11 +12,32 @@
  * server-side loop and not an MCP surface OpenAI calls from outside.
  */
 
+/**
+ * ⭐ THE CANVAS'S WORD FOR THE LOWEST BAND IS "Slight" (Canvas #70 5847910497). The `strength` enum keeps the wire value
+ * `weak`, but the user reads "Slight" on every link pill. Served on CEE `92c2e34`: told "the link … is slight", the model
+ * asked "does slight mean weak?"; the user's "Yes." named no band, so it was refused, and the user was then told to say
+ * "weak" — a word the canvas never shows. `bandTheUserWrote` already grounds "slight" (#2008); this tells the model so.
+ */
+export const SLIGHT_IS_WEAK =
+  ' The canvas calls the lowest band Slight: when the user calls a link slight, that IS `weak` \u2014 pass `weak`, and never ask '
+  + 'whether slight means weak. When you ask the user for a band, use the canvas\u2019s words: slight, moderate, strong or very strong.';
+
 export interface AgentToolContext {
   /** Bound from the request, never from model output. */
   readonly scenario_id: string;
   readonly authenticated_user_id: string | null;
   readonly request_id: string;
+  /**
+   * The user's own words in this conversation (its user messages, this turn's last), bound by the route — never
+   * from model output. A figure is recorded as the user's only when it is written here (`stated-by-user.ts`);
+   * absent, nothing is.
+   */
+  readonly user_text?: string;
+  /**
+   * THIS turn's message when the user typed it (never a chip's text), bound by the route. A link's strength band is
+   * the user's only when named here (`bandTheUserWrote`): a band word elsewhere in the conversation is about something else.
+   */
+  readonly user_turn_text?: string;
 }
 
 export interface ToolDefinition {
@@ -29,6 +50,26 @@ export interface ToolDefinition {
 const obj = (props: Record<string, unknown>, required: string[]): Record<string, unknown> => ({
   type: 'object', additionalProperties: false, properties: props, required,
 });
+
+
+/** The factors ONE option would change — shared by the single and the several-option forms of propose_new_option. */
+const ACTS_ON = {
+  type: 'array',
+  description: 'The factors this option would change, and which way. At least one.',
+  items: obj({
+    factor_label: { type: 'string' },
+    direction: {
+      type: 'string', enum: ['positive', 'negative'],
+      description: 'Whether this option pushes the factor up or down. State it; never guess it for the user.',
+    },
+    level: obj({
+      value: { type: 'number', description: 'The figure the user stated FOR THIS FACTOR, in the factor\u2019s own units (e.g. 54 for \u00a354 on a price). A figure given for something else (a price, when this factor is a churn rate) is never this factor\u2019s level: leave level out. With no figure from the user, leave level out \u2014 never 0 or any placeholder to mean \u201cnot set\u201d \u2014 unless it is your OWN suggested figure for an option you suggested: then set estimate.' },
+      unit: { type: 'string', description: 'The unit the user stated, if any.' },
+      estimate: { type: 'boolean', description: 'true ONLY when this figure is your own suggestion, not the user\u2019s (an option you proposed, at the figure you proposed). It is recorded and shown as Olumi\u2019s estimate, never as the user\u2019s. Needs basis.' },
+      basis: { type: 'string', description: 'With estimate: why this figure, in plain words the user can check.' },
+    }, ['value']),
+  }, ['factor_label', 'direction']),
+};
 
 export const AGENT_TOOLS: readonly ToolDefinition[] = [
   {
@@ -46,11 +87,17 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     description:
       'Propose ONE change to the model. This does NOT change anything: it records an exact ' +
       'proposal and returns its id, which you keep for authorise_change: show the user what it changes, never the id, before asking them to approve. ' +
-      'Use the labels exactly as get_canonical_state returned them.',
+      'Use the labels exactly as get_canonical_state returned them. ' +
+      'The link is recorded with `strength` as the user\u2019s own estimate, so give ONLY the band the user named for it in this message; ' +
+      'if they named none, ask how strong the effect is first \u2014 a band they did not say is refused.' + SLIGHT_IS_WEAK,
     parameters: obj({
       from_label: { type: 'string' },
       to_label: { type: 'string' },
       direction: { type: 'string', enum: ['positive', 'negative'] },
+      strength: {
+        type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'],
+        description: 'The band the user said for this link in THIS message, in their own words. Never your own guess.',
+      },
       rationale: { type: 'string', description: 'Why this link matters, in the user’s terms.' },
     }, ['from_label', 'to_label', 'direction', 'rationale']),
   },
@@ -120,26 +167,83 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     name: 'propose_new_option',
     description:
       'Add an option the user has just asked for, when the model does NOT already have it. '
-      + 'This does NOT change anything: it records an exact proposal and returns its id, which you keep for '
+      + 'This does NOT change anything: it prepares ONE complete change and returns its id, which you keep for '
       + 'authorise_change: show the user the option and what it will be linked to, never the id, before asking them to approve. '
-      + 'Name the factors it would change, using the labels get_canonical_state returned — an option linked to nothing '
-      + 'cannot be compared and blocks the comparison for every other option. '
-      + 'It adds the option and its links ONLY; say what it does to each factor afterwards with propose_option_interventions.',
+      + 'The option is linked from the decision automatically. Name the factors it would change, using the labels '
+      + 'get_canonical_state returned. Give a level for a figure the user stated, in their own units; for an option YOU suggested you may give '
+      + 'your own suggested figure with estimate: true and a basis, recorded and shown as Olumi\u2019s estimate. Never a placeholder. '
+      + 'A factor with no level is added with no level, and you say plainly what is still needed. '
+      + 'When the user asks for SEVERAL options (up to 4), put them ALL in `options` in ONE call: they become ONE change the '
+      + 'user approves once, and it lands whole or not at all. If an option changes something the model has NO factor for, '
+      + 'add that factor in the SAME change with `new_factors` (never link the option to an unrelated factor instead), and name '
+      + 'it in `acts_on`. Only for something the user asked the option to change; what it changes and which way come from the '
+      + 'user\u2019s words, or where it is plain from the option itself (a paid add-on adds revenue); if it is unclear, ask. Once a call has prepared a change, never call it again in the '
+      + 'same reply. A call that was REFUSED prepared nothing: you may call it once more in the same reply, corrected as the '
+      + 'refusal says.',
     parameters: obj({
-      label: { type: 'string', description: 'The option in the user\u2019s own words.' },
-      acts_on: {
+      label: { type: 'string', description: 'ONE option in the user\u2019s own words. For several, use `options` instead.' },
+      acts_on: ACTS_ON,
+      options: {
         type: 'array',
-        description: 'The factors this option would change, and which way. At least one.',
+        description: 'Several options the user asked for (2 to 4), each with its own label and factors. One change, one approval.',
         items: obj({
-          factor_label: { type: 'string' },
-          direction: {
-            type: 'string', enum: ['positive', 'negative'],
-            description: 'Whether this option pushes the factor up or down. State it; never guess it for the user.',
+          label: { type: 'string', description: 'The option in the user\u2019s own words.' },
+          acts_on: ACTS_ON,
+        }, ['label', 'acts_on']),
+      },
+      new_factors: {
+        type: 'array',
+        description: 'Factors the model does NOT have that these options change, added in this same change. Each is named in an option\u2019s acts_on.',
+        items: obj({
+          label: { type: 'string', description: 'The factor in the user\u2019s words (e.g. "AI add-on price").' },
+          affects: {
+            type: 'array',
+            description: 'What this factor changes that the model already has (the goal, an outcome, a risk, or a factor no option sets), and which way. At least one.',
+            items: obj({
+              label: { type: 'string', description: 'A label exactly as get_canonical_state gives it.' },
+              direction: { type: 'string', enum: ['positive', 'negative'], description: 'Whether raising this factor raises (positive) or lowers (negative) it: from the user\u2019s words, or where it is plain from the option itself (a paid add-on adds revenue); if it is unclear, ask. The preview names it so the user can correct it.' },
+            }, ['label', 'direction']),
           },
-        }, ['factor_label', 'direction']),
+        }, ['label', 'affects']),
       },
       rationale: { type: 'string', description: 'Why this option is worth comparing, in the user\u2019s terms.' },
-    }, ['label', 'acts_on', 'rationale']),
+    }, ['rationale']),
+  },
+  {
+    type: 'function',
+    name: 'propose_link_strength',
+    description:
+      'Record how strong an EXISTING link is, as the user\u2019s own estimate, when the user has just said it (for example '
+      + '"that effect is strong", or "it actually pushes the other way"). This does NOT change anything: it prepares ONE change '
+      + 'and returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
+      + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
+      + 'recorded as theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
+      + 'Give `direction` ONLY when the user said the link pushes the other way. Never use this for a strength the user did not state: '
+      + 'if they have not named a band in their own words, ask which it is first \u2014 a band they did not say is refused.' + SLIGHT_IS_WEAK,
+    parameters: obj({
+      from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
+      to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
+      strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The strength the user stated.' },
+      direction: { type: 'string', enum: ['positive', 'negative'], description: 'ONLY when the user said the link pushes the other way.' },
+      rationale: { type: 'string', description: 'What the user said, in their words.' },
+    }, ['from_label', 'to_label', 'strength', 'rationale']),
+  },
+  {
+    type: 'function',
+    name: 'propose_goal_target',
+    description:
+      'Set the goal’s success target to the figure the user has just stated (for example "we need at least £60k MRR", '
+      + '"keep churn under 5%"). This does NOT change anything: it prepares ONE change and returns its id, which you keep for '
+      + 'authorise_change: show the user what it sets, never the id, before they approve. Give the figure exactly as the user '
+      + 'wrote it, in their units (60000, with the unit £, for £60k), and whether they said at least or at most. Never use this '
+      + 'for a figure or a direction the user did not state: if they have not given both in their own words, ask first — '
+      + 'a figure or direction they did not state is refused.',
+    parameters: obj({
+      constraint_type: { type: 'string', enum: ['at_least', 'at_most'], description: 'at_least when the user said the goal must reach at least the figure; at_most when they said it must stay at or under it.' },
+      value: { type: 'number', description: 'The figure the user stated, in their own units.' },
+      unit: { type: 'string', description: 'The unit of that figure, as the user gave it (for example £, % or customers).' },
+      rationale: { type: 'string', description: 'What the user said, in their words.' },
+    }, ['constraint_type', 'value', 'unit', 'rationale']),
   },
   {
     type: 'function',
@@ -159,6 +263,15 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           factor_label: { type: 'string' },
           value: { type: 'number', description: 'In the factor\u2019s own units \u2014 the number a user would say.' },
           basis: { type: 'string' },
+          user_stated: {
+            type: 'boolean',
+            description:
+              'Set true ONLY when the USER gave this level \u2014 their own number, for this option and factor. ' +
+              'It records the level as theirs; without it the level is recorded as Olumi\u2019s estimate, so never ' +
+              'set it on a figure you proposed. On an option in `status_quo_held` it is also what permits a level ' +
+              'at all (the user said carrying on changes this factor), and never to restate the factor\u2019s ' +
+              'starting value: carrying on as now already keeps that, so such a level is not recorded.',
+          },
         }, ['option_label', 'factor_label', 'value', 'basis']),
       },
     }, ['interventions']),
@@ -192,9 +305,42 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           factor_label: { type: 'string' },
           value: { type: 'number' },
           basis: { type: 'string' },
+          user_stated: {
+            type: 'boolean',
+            description:
+              'Set true ONLY when the USER gave this level \u2014 their own number, for this option and factor. ' +
+              'It records the level as theirs; without it the level is recorded as Olumi\u2019s estimate, so never ' +
+              'set it on a figure you proposed. On an option in `status_quo_held` it is also what permits a level ' +
+              'at all (the user said carrying on changes this factor), and never to restate the factor\u2019s ' +
+              'starting value: carrying on as now already keeps that, so such a level is not recorded.',
+          },
         }, ['option_label', 'factor_label', 'value', 'basis']),
       },
     }, ['assumptions', 'option_levels']),
+  },
+  {
+    type: 'function',
+    name: 'propose_goal_current_level',
+    description:
+      'Record the CURRENT level of the model’s goal when the user has just stated it (for example "our MRR is ' +
+      '£12,000 today" when the goal is MRR). Without it the analysis cannot compare today with the goal’s ' +
+      'target. This does NOT change anything: it records an exact proposal and returns its id, which you keep for ' +
+      'authorise_change: show the user the figure, never the id, before asking them to approve. Only the user’s own ' +
+      'figure for the goal’s OWN metric: never your estimate, and never a figure they gave for something else (a ' +
+      'price, a subscriber count, a rate). Use the goal’s label exactly as get_canonical_state returned it.',
+    parameters: obj({
+      goal_label: { type: 'string' },
+      value: { type: 'number', description: 'The figure the user stated, in their units (12000 for £12,000; never scaled).' },
+      unit: { type: 'string', description: 'The unit the user stated, if any (e.g. GBP).' },
+      goal_is: {
+        type: 'string', enum: ['at_least', 'above', 'at_most', 'below'],
+        description: 'How the user put the goal’s target: reach at least it, get strictly above it, stay at most it, or stay strictly below it. If they have not said, ask them; never guess.',
+      },
+      user_stated: {
+        type: 'boolean',
+        description: 'true ONLY when the USER gave this figure as the goal’s current level. Never set it for a figure you estimated.',
+      },
+    }, ['goal_label', 'value', 'unit', 'goal_is', 'user_stated']),
   },
 ];
 
@@ -214,7 +360,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'authorise_change'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_link_strength', 'propose_goal_target', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -230,25 +376,55 @@ export interface ToolResult {
   readonly [k: string]: unknown;
 }
 
+/**
+ * Server-internal input to the level proposer — never read from tool arguments
+ * (`dispatchTool` passes two). `startingValues`: factor id → the native figure
+ * the SAME starting point proposes for it, so a held status-quo level that only
+ * restates that figure is recognised before anyone is asked to approve it.
+ */
+export interface ProposeLevelsInternal {
+  readonly startingValues?: ReadonlyMap<string, number>;
+}
+
 export interface AgentCapabilities {
   getCanonicalState(ctx: AgentToolContext): Promise<ToolResult>;
   proposeModelChange(ctx: AgentToolContext, args: {
     from_label: string; to_label: string; direction: 'positive' | 'negative'; rationale: string;
+    /** The band the user typed THIS turn; without it (or with one they did not type) nothing is prepared. */
+    strength?: 'weak' | 'moderate' | 'strong' | 'very strong';
   }): Promise<ToolResult>;
   authoriseChange(ctx: AgentToolContext, args: { proposal_id: string }): Promise<ToolResult>;
+  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
+  proposeLinkStrength?(ctx: AgentToolContext, args: {
+    from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong';
+    direction?: 'positive' | 'negative'; rationale: string;
+  }): Promise<ToolResult>;
+  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
+  proposeGoalTarget?(ctx: AgentToolContext, args: {
+    constraint_type: 'at_least' | 'at_most'; value: number; unit: string; rationale: string;
+  }): Promise<ToolResult>;
   runAnalysis(ctx: AgentToolContext, args: { reason: string }): Promise<ToolResult>;
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
-    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
+    // `revise` is in the tool's schema (above) and read by the capability (`a?.revise === true`); the type now says so.
+    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string; revise?: boolean }[];
   }): Promise<ToolResult>;
   proposeNewOption(ctx: AgentToolContext, args: {
-    label: string; acts_on: { factor_label: string; direction: 'positive' | 'negative' }[]; rationale: string;
+    label?: string; acts_on?: { factor_label: string; direction: 'positive' | 'negative' }[]; rationale: string;
+    /** Several options as ONE change (F4): each `{label, acts_on}`, up to 4. */
+    options?: { label: string; acts_on: { factor_label: string; direction: 'positive' | 'negative' }[] }[];
+    /** Factors the model lacks, added in the SAME change (`planNewFactors`): each named in an option's acts_on. */
+    new_factors?: readonly { label: string; affects: readonly { label: string; direction?: 'positive' | 'negative' }[] }[];
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
-    interventions: readonly { option_label: string; factor_label: string; value: number; basis: string }[];
-  }): Promise<ToolResult>;  proposeStartingPoint(ctx: AgentToolContext, args: {
+    interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
+  }, internal?: ProposeLevelsInternal): Promise<ToolResult>;  proposeStartingPoint(ctx: AgentToolContext, args: {
     assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
-    option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string }[];
+    option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
+  }): Promise<ToolResult>;
+  /** The goal's current level as the user stated it — held for approval (`../goal-current-level.ts`). */
+  proposeGoalCurrentLevel(ctx: AgentToolContext, args: {
+    goal_label: string; value: number; unit: string; goal_is: 'at_least' | 'above' | 'at_most' | 'below'; user_stated: boolean;
   }): Promise<ToolResult>;
 }
 
@@ -288,10 +464,20 @@ export async function dispatchTool(
       return caps.proposeAssumptions(ctx, args as never);
     case 'propose_new_option':
       return caps.proposeNewOption(ctx, args as never);
+    case 'propose_link_strength':
+      return caps.proposeLinkStrength !== undefined
+        ? caps.proposeLinkStrength(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'Link strengths cannot be recorded here. Nothing was changed.' };
+    case 'propose_goal_target':
+      return caps.proposeGoalTarget !== undefined
+        ? caps.proposeGoalTarget(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A goal’s target cannot be set here. Nothing was changed.' };
     case 'propose_option_interventions':
       return caps.proposeOptionInterventions(ctx, args as never);
     case 'propose_starting_point':
       return caps.proposeStartingPoint(ctx, args as never);
+    case 'propose_goal_current_level':
+      return caps.proposeGoalCurrentLevel(ctx, args as never);
     default:
       // An unknown tool is never silently ignored: the Agent is told plainly.
       return { ok: false, mutated: false, refusal: 'unknown_tool', tool: name };

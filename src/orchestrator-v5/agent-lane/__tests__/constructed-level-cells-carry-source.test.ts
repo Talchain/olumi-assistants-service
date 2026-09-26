@@ -131,10 +131,11 @@ describe('a constructed option level states where it came from', () => {
     expect(cell(admitCandidateModel(withProvenance(provenance), {}))).toEqual({ value: 0.1, source: 'cee_hypothesis' });
   });
 
-  it('the out-of-range write site carries the same claim (level kept exactly as stated)', () => {
-    // 25 hires against a stated range of 20: kept raw, not squeezed, and ledgered.
-    expect(cell(admitCandidateModel(withProvenance('explicit', 25), {}))).toEqual({ value: 25, source: 'brief_extraction' });
-    expect(cell(admitCandidateModel(withProvenance('inferred', 25), {}))).toEqual({ value: 25, source: 'cee_hypothesis' });
+  it('an above-range level carries the same claim (the range widens; the level is never kept raw)', () => {
+    // 25 hires against a stated range of 20: the range widens to 0..100 (said), so the level is
+    // 0.25 in the factor's one value space — never a raw 25 beside normalised siblings (#69 5835137365).
+    expect(cell(admitCandidateModel(withProvenance('explicit', 25), {}))).toEqual({ value: 0.25, source: 'brief_extraction' });
+    expect(cell(admitCandidateModel(withProvenance('inferred', 25), {}))).toEqual({ value: 0.25, source: 'cee_hypothesis' });
   });
 
   it('⛔ NO constructed level ever claims user authority, and every one is in the writer’s enum', () => {

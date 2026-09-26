@@ -30,11 +30,13 @@ const link = (from: string, to: string, provenance = 'inferred') => ({ from, to,
 function candidate(opts: { extraFactors: number; options?: string[]; explicitLinks?: [string, string][] }) {
   const names = Array.from({ length: opts.extraFactors }, (_, i) => `Secondary factor ${i}`);
   const options = opts.options ?? ['Hire a tech lead', 'Hire two developers'];
+  // Each option carries an estimated level and the factor an estimated baseline, as the constructor
+  // now asks (c22): a level-free draft spends the coverage retry, which these size tests do not measure.
   return {
     goal: { metric: 'Velocity', operator: '>=', value: 20, unit: 'points', horizon_months: 6, provenance: 'explicit' },
     constraints: [],
-    options: options.map((label) => ({ label, provenance: 'explicit', changes: ['Delivery capacity'], interventions: [] })),
-    factors: [factor('Delivery capacity', 'inferred'), ...names.map((n) => factor(n))],
+    options: options.map((label) => ({ label, provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Delivery capacity', value: 60, value_kind: 'absolute', unit: 'points', provenance: 'ai_proposed' }] })),
+    factors: [{ ...factor('Delivery capacity', 'inferred'), baseline_value: 50 }, ...names.map((n) => factor(n))],
     risks: [],
     outcomes: [{ label: 'Velocity', provenance: 'inferred' }],
     links: [
@@ -45,6 +47,8 @@ function candidate(opts: { extraFactors: number; options?: string[]; explicitLin
     unknowns: [],
   };
 }
+/** The one question for two user options nothing tells apart (`admit-model.ts`, DL #70 5842361028 / 5842400604). */
+const STATED_TWINS = 'What makes "Hire a tech lead" different from "Hire two developers"? As drafted, nothing the model holds tells them apart, so the analysis cannot compare them yet.';
 const sizeOf = (c: unknown) => assessConstructionSize(admitCandidateModel(c as CandidateModel, {}));
 
 function structuredSequence(...payloads: readonly unknown[]) {
@@ -177,7 +181,10 @@ describe('⛔ identity is the FULL stated text and the stated direction (Panel p
     expect(registered(dp.paths)).toBe(1);
     const left = out.left_out_to_stay_compact as { kind: string; label: string }[] | undefined;
     expect(left?.map((x) => x.label).sort()).toEqual(Array.from({ length: 13 }, (_, i) => `Secondary factor ${i + 2}`).sort());
-    expect(out.open_questions).toEqual(['Does team morale matter here?']);
+    // The stated 6-month deadline is asked first (construction-goal-losses-are-said.test.ts), then what the retry parked.
+    // This fixture's two USER options both act on "Delivery capacity" with no level, so nothing the model holds tells
+    // them apart: they are kept and asked about once, ahead of the parked questions (construction-no-identical-options.test.ts).
+    expect(out.open_questions).toEqual(['Does "Velocity" get there within 6 months? The model holds no deadline yet, so no result answers that.', STATED_TWINS, 'Does team morale matter here?']);
     expect((out.not_represented as string[]).join(' ')).toMatch(/13 item\(s\) from the first draft were left out/);
   });
 
@@ -189,7 +196,7 @@ describe('⛔ identity is the FULL stated text and the stated direction (Panel p
     const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn) as Record<string, unknown>;
     expect(s.calls, 'vacuity: no retry — this is the common path').toHaveLength(1);
     expect(out.ok, JSON.stringify(out)).toBe(true);
-    expect(out.open_questions).toEqual(['Is the bottleneck coordination or capacity?', 'What does onboarding cost the current team?']);
+    expect(out.open_questions).toEqual(['Does "Velocity" get there within 6 months? The model holds no deadline yet, so no result answers that.', STATED_TWINS, 'Is the bottleneck coordination or capacity?', 'What does onboarding cost the current team?']);
   });
 
   it('CONTRAST: a first model within the limit reports nothing left out', async () => {

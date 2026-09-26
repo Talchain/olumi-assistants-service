@@ -561,9 +561,15 @@ export default async function route(app: FastifyInstance) {
         // already follow, and for the same reason: a value taken from anywhere
         // else is a hand-maintained mirror that starts lying the moment the
         // graph moves. It is deliberately NOT threaded out of
-        // `readScenarioAnalysis`, which computes the identical hash internally:
-        // that helper answers "not answered" for a graph with no analysis and
-        // swallows its own failures, so the write base would inherit an
+        // `readScenarioAnalysis`, and that helper does NOT compute this hash:
+        // its freshness comparison uses the CANONICAL analysis hash
+        // (`deriveDecisionContextGraphHash` — the projection a run stamps
+        // `graph_hash_at_run` over), while this wire `graph_hash` stays the RAW
+        // hash of the bytes returned here, the compare-and-set base the writers
+        // derive from the persisted graph. The two agree on a graph already in
+        // canonical shape and differ only on repaired-shape graphs (CS-AN-2).
+        // The helper also answers "not answered" for a graph with no analysis
+        // and swallows its own failures, so the write base would inherit an
         // unrelated precondition and vanish exactly when a never-analysed
         // scenario is the one being edited.
         //
@@ -603,6 +609,15 @@ export default async function route(app: FastifyInstance) {
         // questions).
         analysis_state: analysis.analysis_state,
         analysis_result: analysis.analysis_result,
+        // The selected fact's own constraint verdict state — present exactly when
+        // `analysis_result` is (same fact, same gate). See `ScenarioAnalysisRead`.
+        ...(analysis.analysis_constraint_verdict_state !== undefined
+          ? { analysis_constraint_verdict_state: analysis.analysis_constraint_verdict_state }
+          : {}),
+        // The selected fact's leader-limit risks — same fact, same gates as the state above.
+        ...(analysis.analysis_leader_limit_risks !== undefined
+          ? { analysis_leader_limit_risks: analysis.analysis_leader_limit_risks }
+          : {}),
         /**
          * ⭐ MAY A RUN BE ADMITTED RIGHT NOW — the question `analysis_state`
          * does not answer. It reports whether a FACT HAS LANDED for this graph;

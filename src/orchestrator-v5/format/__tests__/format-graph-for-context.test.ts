@@ -91,18 +91,20 @@ function assertNoNumbersInEdges(edges: readonly unknown[]): void {
 }
 
 describe('relationshipPhrase', () => {
+  // Bands: the ONE edge-strength table (`edge-strength-bands.ts`, the canvas's own
+  // cuts 0.2 / 0.4 / 0.7), so the Agent names a link as the canvas draws it.
   it('classifies positive bands by magnitude', () => {
-    expect(relationshipPhrase(0.65)).toBe('moderate positive link');
-    expect(relationshipPhrase(0.70)).toBe('strong positive link');
-    expect(relationshipPhrase(0.95)).toBe('very strong positive link');
+    expect(relationshipPhrase(0.30)).toBe('moderate positive link');
+    expect(relationshipPhrase(0.55)).toBe('strong positive link');
+    expect(relationshipPhrase(0.85)).toBe('very strong positive link');
     expect(relationshipPhrase(0.99)).toBe('very strong positive link');
     expect(relationshipPhrase(0.10)).toBe('weak positive link');
   });
 
   it('classifies negative bands and preserves sign', () => {
-    expect(relationshipPhrase(-0.25)).toBe('weak negative link');
-    expect(relationshipPhrase(-0.5)).toBe('moderate negative link');
-    expect(relationshipPhrase(-0.85)).toBe('strong negative link');
+    expect(relationshipPhrase(-0.15)).toBe('weak negative link');
+    expect(relationshipPhrase(-0.3)).toBe('moderate negative link');
+    expect(relationshipPhrase(-0.5)).toBe('strong negative link');
     expect(relationshipPhrase(-1.0)).toBe('very strong negative link');
   });
 
@@ -117,9 +119,13 @@ describe('relationshipPhrase', () => {
     expect(relationshipPhrase(Number.POSITIVE_INFINITY)).toBe('negligible link');
   });
 
-  it('crosses band boundaries inclusively at lower bound', () => {
-    expect(relationshipPhrase(0.30)).toBe('moderate positive link');
-    expect(relationshipPhrase(0.299)).toBe('weak positive link');
+  it('crosses band boundaries inclusively at lower bound — the canvas cuts 0.2 / 0.4 / 0.7', () => {
+    expect(relationshipPhrase(0.20)).toBe('moderate positive link');
+    expect(relationshipPhrase(0.199)).toBe('weak positive link');
+    expect(relationshipPhrase(0.40)).toBe('strong positive link');
+    expect(relationshipPhrase(0.399)).toBe('moderate positive link');
+    expect(relationshipPhrase(0.70)).toBe('very strong positive link');
+    expect(relationshipPhrase(0.699)).toBe('strong positive link');
   });
 });
 
@@ -142,10 +148,10 @@ function bidirectedGraph(strength: number): ContextPackGraph {
 
 describe('bidirectedRelationshipPhrase', () => {
   it('keeps the band and the sign, and carries the negation in the predicate', () => {
-    expect(bidirectedRelationshipPhrase(0.5)).toBe(`moderate positive co-movement, ${COMMON_CAUSE}`);
-    expect(bidirectedRelationshipPhrase(0.85)).toBe(`strong positive co-movement, ${COMMON_CAUSE}`);
-    expect(bidirectedRelationshipPhrase(-0.85)).toBe(`strong negative co-movement, ${COMMON_CAUSE}`);
-    expect(bidirectedRelationshipPhrase(-0.25)).toBe(`weak negative co-movement, ${COMMON_CAUSE}`);
+    expect(bidirectedRelationshipPhrase(0.3)).toBe(`moderate positive co-movement, ${COMMON_CAUSE}`);
+    expect(bidirectedRelationshipPhrase(0.5)).toBe(`strong positive co-movement, ${COMMON_CAUSE}`);
+    expect(bidirectedRelationshipPhrase(-0.5)).toBe(`strong negative co-movement, ${COMMON_CAUSE}`);
+    expect(bidirectedRelationshipPhrase(-0.15)).toBe(`weak negative co-movement, ${COMMON_CAUSE}`);
     expect(bidirectedRelationshipPhrase(0.99)).toBe(`very strong positive co-movement, ${COMMON_CAUSE}`);
   });
 
@@ -158,10 +164,11 @@ describe('bidirectedRelationshipPhrase', () => {
 
   it('shares the directed path band boundaries exactly — one source of truth', () => {
     // Forking the band constants would let the two families disagree about
-    // where "moderate" starts. Both read influence-bands.ts.
-    expect(bidirectedRelationshipPhrase(0.30)).toContain('moderate');
-    expect(bidirectedRelationshipPhrase(0.299)).toContain('weak');
-    expect(bidirectedRelationshipPhrase(0.95)).toContain('very strong');
+    // where "moderate" starts. Both read edge-strength-bands.ts.
+    expect(bidirectedRelationshipPhrase(0.20)).toContain('moderate');
+    expect(bidirectedRelationshipPhrase(0.199)).toContain('weak');
+    expect(bidirectedRelationshipPhrase(0.70)).toContain('very strong');
+    expect(bidirectedRelationshipPhrase(0.699)).toMatch(/^strong/);
   });
 
   it('suppresses sign below the near-zero threshold, mirroring the directed path', () => {
@@ -228,7 +235,7 @@ describe('formatGraphForContext — edge transformation', () => {
       to: 'fac_leads',
       from_label: 'Marketing Spend',
       to_label: 'New Leads',
-      relationship: 'moderate positive link',
+      relationship: 'strong positive link',
       coefficient_confidence: 'moderate',
       provenance: 'ai_inferred',
     });
@@ -237,7 +244,7 @@ describe('formatGraphForContext — edge transformation', () => {
       to: 'goal_growth',
       from_label: 'New Leads',
       to_label: 'Quarterly Growth',
-      relationship: 'moderate negative link',
+      relationship: 'strong negative link',
     });
   });
 
@@ -573,8 +580,8 @@ describe('formatGraphForContext — canonical & legacy edge shapes', () => {
         ],
       }),
     );
-    expect(out.edges[0]!.relationship).toBe('moderate positive link');
-    expect(out.edges[1]!.relationship).toBe('moderate negative link');
+    expect(out.edges[0]!.relationship).toBe('strong positive link');
+    expect(out.edges[1]!.relationship).toBe('strong negative link');
     // Raw fields fully stripped from canonical-shape output.
     const json = JSON.stringify(out.edges);
     expect(json).not.toMatch(/"strength":/);
@@ -604,8 +611,8 @@ describe('formatGraphForContext — canonical & legacy edge shapes', () => {
         ],
       }),
     );
-    expect(out.edges[0]!.relationship).toBe('strong positive link');
-    expect(out.edges[1]!.relationship).toBe('moderate negative link');
+    expect(out.edges[0]!.relationship).toBe('very strong positive link');
+    expect(out.edges[1]!.relationship).toBe('strong negative link');
   });
 
   it('treats signed numeric strength as the source of truth (no direction inversion)', () => {
@@ -619,7 +626,7 @@ describe('formatGraphForContext — canonical & legacy edge shapes', () => {
     // Numeric `strength` is already signed — `effect_direction` MUST NOT
     // overwrite a signed numeric. The brief defines compact edges as
     // sign-bearing; only canonical {mean} gets direction applied.
-    expect(out.edges[0]!.relationship).toBe('moderate negative link');
+    expect(out.edges[0]!.relationship).toBe('strong negative link');
   });
 });
 

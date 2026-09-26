@@ -315,6 +315,7 @@ export function threadHoldsThroughMutatingCommit(
         // GM hold with an executable batch: VALIDATE against the new graph.
         const assessment = assessHeldBatchAgainstGraph({
           operations: read.operations,
+          ...(read.envelopeCap !== undefined ? { envelopeCap: read.envelopeCap } : {}),
           currentGraph: input.graphAfterCommit,
           currentGraphHash: newHash,
           scenarioId: input.scenarioId,
@@ -421,7 +422,7 @@ export function emitHoldLapseTelemetry(
     readonly requestId: string;
     readonly scenarioId: string;
     readonly turnId: string;
-    readonly site: 'edit_graph_dispatch' | 'draft_graph_dispatch';
+    readonly site: 'edit_graph_dispatch' | 'draft_graph_dispatch' | 'system_event_dispatch' | 'graph_registration';
   },
 ): void {
   for (const l of lapsed) {

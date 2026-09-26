@@ -26,14 +26,16 @@ const link = (from: string, to: string) => ({ from, to, direction: 'positive', p
 /** A candidate whose ADMITTED size is driven by `extraFactors`. */
 function candidate(extraFactors: number) {
   const names = Array.from({ length: extraFactors }, (_, i) => `Secondary factor ${i}`);
+  // Each option carries an estimated level and the factor an estimated baseline, as the constructor
+  // now asks (c22): a level-free draft spends the coverage retry, which these size tests do not measure.
   return {
     goal: { metric: 'Velocity', operator: '>=', value: 20, unit: 'points', horizon_months: 6, provenance: 'explicit' },
     constraints: [],
     options: [
-      { label: 'Hire a tech lead', provenance: 'explicit', changes: ['Delivery capacity'], interventions: [] },
-      { label: 'Hire two developers', provenance: 'explicit', changes: ['Delivery capacity'], interventions: [] },
+      { label: 'Hire a tech lead', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Delivery capacity', value: 60, value_kind: 'absolute', unit: 'points', provenance: 'ai_proposed' }] },
+      { label: 'Hire two developers', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Delivery capacity', value: 60, value_kind: 'absolute', unit: 'points', provenance: 'ai_proposed' }] },
     ],
-    factors: [factor('Delivery capacity', 'inferred'), ...names.map((n) => factor(n))],
+    factors: [{ ...factor('Delivery capacity', 'inferred'), baseline_value: 50 }, ...names.map((n) => factor(n))],
     risks: [],
     outcomes: [{ label: 'Velocity', provenance: 'inferred' }],
     links: [link('Delivery capacity', 'Velocity'), ...names.map((n) => link(n, 'Velocity'))],
@@ -86,6 +88,27 @@ describe('an oversized first model gets exactly ONE bounded retry', () => {
     expect(out['within_compact_limits']).toBe(true);
     expect(s.calls).toHaveLength(2);
     expect(registered(dp.paths)).toBe(1); // ONE graph write, not two
+  });
+
+  it('a compaction may shed a model-added factor an option acted on — the repair-only "keep every action" guard does not apply to it', async () => {
+    const first = candidate(20);
+    first.options[0] = { ...first.options[0]!, changes: ['Secondary factor 10'] as never[] };
+    const s = structuredSequence(first, candidate(3));
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, dispatcher().d, s.fn);
+    expect(out['size_retried']).toBe(true);
+    expect(out['within_compact_limits']).toBe(true);
+    expect(s.calls).toHaveLength(2);
+  });
+
+  it('a compaction that CHANGES a baseline the user stated is not adopted — the model stays oversized and is refused honestly', async () => {
+    const stated = (c: ReturnType<typeof candidate>, v: number) => {
+      c.factors[0] = { ...c.factors[0]!, baseline_known: true, baseline_value: v as never, provenance: 'explicit' };
+      return c;
+    };
+    const s = structuredSequence(stated(candidate(20), 50), stated(candidate(3), 60));
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, dispatcher().d, s.fn);
+    expect(s.calls).toHaveLength(2);
+    expect(out['refusal']).toBe('model_too_large');
   });
 
   it('passes the budget and the protect-the-brief rule in the retry instruction', async () => {
@@ -166,7 +189,7 @@ describe('⭐ the cap never overrides the user', () => {
       ...candidate(0),
       options: Array.from({ length: COMPACT_LIMITS.maxNodes + 2 }, (_, i) => ({
         label: `User option ${i}`, provenance: 'explicit',
-        changes: ['Delivery capacity'], interventions: [],
+        changes: [], interventions: [{ factor_label: 'Delivery capacity', value: 60, value_kind: 'absolute', unit: 'points', provenance: 'ai_proposed' }],
       })),
     };
     const s = structuredSequence(userHeavy);

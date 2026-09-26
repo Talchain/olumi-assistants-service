@@ -239,8 +239,22 @@ describe('once #1010 + UI #752 deliver the auto-run result, an auto-run IS a res
     expect(signal?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
     expect(signal?.signal_id).not.toBe('FIRST_ANALYSIS_COMPLETE');
     expect(signal?.coaching_text).not.toBe(COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({}));
-    // Bound to the composed comparison, not merely to "some other signal fired".
-    expect(signal?.coaching_text).toContain('The result is unchanged');
+    // Bound to the production composer, not merely to "some other signal fired".
+    // ⛔ COMPARISON-FREE, deliberately (24 Sep): an auto-initiated run's leader is
+    // never presented (`mayPresentLeaderClaimForFact` needs a user request), and
+    // every sentence `compareRuns` composes names an option against the prior —
+    // "X still leads" asserts a designation the user was never given. So a
+    // re-run against an auto-run prior is acknowledged without the comparison.
+    expect(signal?.coaching_text).toBe(
+      COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({
+        runDelta: null,
+        interveningChange: null,
+        movementLicence: null,
+        interveningChangeIsInert: false,
+        sameRecordedModel: false,
+      }),
+    );
+    expect(signal?.coaching_text).not.toContain('still leads');
   });
 
   it('THE INVERSION, mixed history: an auto-run prior alongside a user prior still re-runs', () => {

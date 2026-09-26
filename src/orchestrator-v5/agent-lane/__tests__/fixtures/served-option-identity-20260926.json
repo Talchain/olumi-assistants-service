@@ -1,0 +1,3139 @@
+{
+ "_source": "Read-only copy of served DL acceptance (F) captures, Paul's pricing brief, guest API turns. Path: ~/Documents/GitHub/output/rc-delivery-lead-20260925/scratchpad/acceptance-f-runs/<run>/{01-F1-brief,02-F1s-approve1}.json. Fields copied verbatim: json.draft_graph, json.assistant_text, request.body.message; may_run and NOTHING_TO_COMPARE are counted from the same file. CEE sha from each run's summary.json. DL #70 5842361028 / 5842400604.",
+ "runs": {
+  "f-20260926T020217Z": {
+   "cee": "ef99a97",
+   "brief": {
+    "message": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase the Pro plan price from £49 to £59 per month with the next AI feature release?",
+    "draft_graph": {
+     "nodes": [
+      {
+       "id": "decision_mrr",
+       "kind": "decision",
+       "label": "Decision: MRR",
+       "provenance": "ai_inferred"
+      },
+      {
+       "id": "mrr",
+       "kind": "goal",
+       "label": "MRR",
+       "provenance": "from_brief",
+       "goal_threshold": 0.8,
+       "goal_threshold_cap": 25000,
+       "goal_threshold_raw": 20000,
+       "goal_threshold_unit": "£ per month",
+       "goal_threshold_frame": "level",
+       "goal_threshold_cap_provenance": "target_derived_headroom"
+      },
+      {
+       "id": "keep_current_pricing",
+       "kind": "option",
+       "label": "Keep current pricing",
+       "provenance": "ai_inferred",
+       "is_baseline": true
+      },
+      {
+       "id": "59_with_ai_release",
+       "kind": "option",
+       "label": "£59 with AI release",
+       "provenance": "from_brief",
+       "interventions": {
+        "pro_plan_price": {
+         "value": 0.295,
+         "source": "brief_extraction"
+        }
+       }
+      },
+      {
+       "id": "test_59_with_ai_release",
+       "kind": "option",
+       "label": "Test £59 with AI release",
+       "provenance": "ai_inferred"
+      },
+      {
+       "id": "pro_plan_price",
+       "kind": "factor",
+       "label": "Pro plan price",
+       "category": "controllable",
+       "provenance": "from_brief",
+       "observed_state": {
+        "cap": 200,
+        "unit": "£ per month",
+        "value": 0.245,
+        "source": "brief_extraction",
+        "raw_value": 49,
+        "declared_scale": "unit_interval"
+       }
+      },
+      {
+       "id": "ai_feature_availability",
+       "kind": "factor",
+       "label": "AI feature availability",
+       "category": "controllable",
+       "provenance": "ai_inferred"
+      },
+      {
+       "id": "monthly_churn",
+       "kind": "factor",
+       "label": "Monthly churn",
+       "category": "observable",
+       "provenance": "from_brief",
+       "scale_frame": 100
+      },
+      {
+       "id": "pro_plan_subscribers",
+       "kind": "factor",
+       "label": "Pro plan subscribers",
+       "category": "observable",
+       "provenance": "ai_inferred",
+       "scale_frame": 2000
+      },
+      {
+       "id": "new_pro_plan_conversion",
+       "kind": "factor",
+       "label": "New Pro plan conversion",
+       "category": "observable",
+       "provenance": "ai_inferred",
+       "scale_frame": 100
+      },
+      {
+       "id": "price_driven_churn",
+       "kind": "risk",
+       "label": "Price-driven churn",
+       "provenance": "ai_inferred"
+      },
+      {
+       "id": "ai_value_mismatch",
+       "kind": "risk",
+       "label": "AI value mismatch",
+       "provenance": "ai_inferred"
+      }
+     ],
+     "edges": [
+      {
+       "to": "keep_current_pricing",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "59_with_ai_release",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "test_59_with_ai_release",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_availability",
+       "from": "59_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "brief_extraction"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "59_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "brief_extraction"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "test_59_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_availability",
+       "from": "test_59_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "keep_current_pricing",
+       "origin": "repair",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "price_driven_churn",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_churn",
+       "from": "price_driven_churn",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "ai_value_mismatch",
+       "from": "ai_feature_availability",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_churn",
+       "from": "ai_value_mismatch",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "pro_plan_subscribers",
+       "from": "monthly_churn",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "new_pro_plan_conversion",
+       "from": "ai_feature_availability",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "new_pro_plan_conversion",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "pro_plan_subscribers",
+       "from": "new_pro_plan_conversion",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "mrr",
+       "from": "pro_plan_subscribers",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "mrr",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      }
+     ],
+     "node_count": 12,
+     "edge_count": 18,
+     "goal_constraints": [
+      {
+       "unit": "% per month",
+       "label": "Monthly churn",
+       "value": 10,
+       "node_id": "monthly_churn",
+       "operator": "<=",
+       "provenance": "explicit",
+       "constraint_id": "agent-lane:monthly_churn:<="
+      }
+     ]
+    },
+    "assistant_text": "Not yet: the model needs a starting point before it can compare the pricing choices.\n\n- Your stated baseline is **£49/month**; carrying on as now holds today’s values.\n- Proposed assumptions—not measurements: AI feature availability **0%**, monthly churn **8%**, new-Pro conversion **5%**, and **200 Pro subscribers**. These are working figures to adopt or correct.\n- The release options would set AI availability to **100%**; the test option would set price to your stated **£59/month**. The model cannot yet record assumed churn, subscriber, or conversion effects for those options because they are not directly linked to them.\n\nThe 12-month deadline is retained in the brief but cannot be represented in this model’s goal calculation. Approve this complete starting point if you want to use these assumptions.\n\nThe first analysis could not run yet: Review all 3 readiness issues together before analysis.\n\nI saved the model I drafted. The figures above are not recorded until you approve them. Questions this model does not answer yet: Does \"MRR\" get there within 12 months? The model holds no deadline yet, so no result answers that. Current MRR is not stated; it is required to estimate the probability of reaching £20k MRR within 12 months, but has not been estimated. Current monthly churn is not stated; it must be measured against the under-10% monthly constraint. Current number of Pro plan subscribers is not stated; this is required to quantify the direct MRR effect of changing the Pro plan price. Current new-Pro-plan conversion rate is not stated; this is needed to estimate whether the AI release offsets any price-related conversion loss. (and 3 more)",
+    "may_run": false,
+    "nothing_to_compare_count": 0
+   },
+   "approve": {
+    "message": "Yes, use those.",
+    "draft_graph": {
+     "nodes": [
+      {
+       "id": "decision_mrr",
+       "kind": "decision",
+       "label": "Decision: MRR",
+       "provenance": "ai_inferred"
+      },
+      {
+       "id": "mrr",
+       "kind": "goal",
+       "label": "MRR",
+       "provenance": "from_brief",
+       "goal_threshold": 0.8,
+       "goal_threshold_cap": 25000,
+       "goal_threshold_raw": 20000,
+       "goal_threshold_unit": "£ per month",
+       "goal_threshold_frame": "level",
+       "goal_threshold_cap_provenance": "target_derived_headroom"
+      },
+      {
+       "id": "keep_current_pricing",
+       "kind": "option",
+       "label": "Keep current pricing",
+       "provenance": "ai_inferred",
+       "is_baseline": true
+      },
+      {
+       "id": "59_with_ai_release",
+       "kind": "option",
+       "label": "£59 with AI release",
+       "provenance": "from_brief",
+       "interventions": {
+        "pro_plan_price": {
+         "value": 0.295,
+         "source": "brief_extraction"
+        },
+        "ai_feature_availability": {
+         "value": 1,
+         "source": "cee_hypothesis",
+         "target_match": {
+          "node_id": "ai_feature_availability",
+          "confidence": "high",
+          "match_type": "exact_id"
+         }
+        }
+       }
+      },
+      {
+       "id": "test_59_with_ai_release",
+       "kind": "option",
+       "label": "Test £59 with AI release",
+       "provenance": "ai_inferred",
+       "interventions": {
+        "pro_plan_price": {
+         "value": 0.295,
+         "source": "user_specified",
+         "target_match": {
+          "node_id": "pro_plan_price",
+          "confidence": "high",
+          "match_type": "exact_id"
+         }
+        },
+        "ai_feature_availability": {
+         "value": 1,
+         "source": "cee_hypothesis",
+         "target_match": {
+          "node_id": "ai_feature_availability",
+          "confidence": "high",
+          "match_type": "exact_id"
+         }
+        }
+       }
+      },
+      {
+       "id": "pro_plan_price",
+       "kind": "factor",
+       "label": "Pro plan price",
+       "category": "controllable",
+       "provenance": "from_brief",
+       "observed_state": {
+        "cap": 200,
+        "unit": "£ per month",
+        "value": 0.245,
+        "source": "brief_extraction",
+        "raw_value": 49,
+        "declared_scale": "unit_interval"
+       }
+      },
+      {
+       "id": "ai_feature_availability",
+       "kind": "factor",
+       "label": "AI feature availability",
+       "category": "controllable",
+       "provenance": "user_set",
+       "display_value": "0%",
+       "observed_state": {
+        "cap": 100,
+        "unit": "%",
+        "value": 0,
+        "source": "user_assumption",
+        "raw_value": 0,
+        "declared_scale": "unit_interval"
+       }
+      },
+      {
+       "id": "monthly_churn",
+       "kind": "factor",
+       "label": "Monthly churn",
+       "category": "observable",
+       "provenance": "user_set",
+       "scale_frame": 100,
+       "display_value": "8 % per month",
+       "observed_state": {
+        "unit": "% per month",
+        "value": 0.08,
+        "source": "user_assumption",
+        "raw_value": 8
+       }
+      },
+      {
+       "id": "pro_plan_subscribers",
+       "kind": "factor",
+       "label": "Pro plan subscribers",
+       "category": "observable",
+       "provenance": "user_set",
+       "scale_frame": 2000,
+       "display_value": "200 subscribers",
+       "observed_state": {
+        "unit": "subscribers",
+        "value": 0.1,
+        "source": "user_assumption",
+        "raw_value": 200
+       }
+      },
+      {
+       "id": "new_pro_plan_conversion",
+       "kind": "factor",
+       "label": "New Pro plan conversion",
+       "category": "observable",
+       "provenance": "user_set",
+       "scale_frame": 100,
+       "display_value": "5%",
+       "observed_state": {
+        "unit": "%",
+        "value": 0.05,
+        "source": "user_assumption",
+        "raw_value": 5
+       }
+      },
+      {
+       "id": "price_driven_churn",
+       "kind": "risk",
+       "label": "Price-driven churn",
+       "provenance": "ai_inferred"
+      },
+      {
+       "id": "ai_value_mismatch",
+       "kind": "risk",
+       "label": "AI value mismatch",
+       "provenance": "ai_inferred"
+      }
+     ],
+     "edges": [
+      {
+       "to": "keep_current_pricing",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "59_with_ai_release",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "test_59_with_ai_release",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_availability",
+       "from": "59_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "brief_extraction"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "59_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "brief_extraction"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "test_59_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_availability",
+       "from": "test_59_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "keep_current_pricing",
+       "origin": "repair",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "price_driven_churn",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_churn",
+       "from": "price_driven_churn",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "ai_value_mismatch",
+       "from": "ai_feature_availability",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_churn",
+       "from": "ai_value_mismatch",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "pro_plan_subscribers",
+       "from": "monthly_churn",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "new_pro_plan_conversion",
+       "from": "ai_feature_availability",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "new_pro_plan_conversion",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "pro_plan_subscribers",
+       "from": "new_pro_plan_conversion",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "mrr",
+       "from": "pro_plan_subscribers",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "mrr",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      }
+     ],
+     "node_count": 12,
+     "edge_count": 18,
+     "goal_constraints": [
+      {
+       "unit": "% per month",
+       "label": "Monthly churn",
+       "value": 10,
+       "node_id": "monthly_churn",
+       "operator": "<=",
+       "provenance": "explicit",
+       "constraint_id": "agent-lane:monthly_churn:<="
+      }
+     ]
+    },
+    "assistant_text": "Note: the analysis needed a range for some factors and Olumi chose one so it could run — AI feature availability (0 to 100). Those ranges are not yours. Tell me the right ones and I will replace them.\n\nSaved 4 of 4 starting values. Saved 3 of 3 option levels.",
+    "may_run": false,
+    "nothing_to_compare_count": 2
+   }
+  },
+  "f-20260926T022404Z": {
+   "cee": "cb1778b",
+   "brief": {
+    "message": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase the Pro plan price from £49 to £59 per month with the next AI feature release?",
+    "draft_graph": {
+     "nodes": [
+      {
+       "id": "decision_mrr",
+       "kind": "decision",
+       "label": "Decision: MRR",
+       "provenance": "ai_inferred"
+      },
+      {
+       "id": "mrr",
+       "kind": "goal",
+       "label": "MRR",
+       "provenance": "from_brief",
+       "goal_threshold": 0.8,
+       "goal_threshold_cap": 25000,
+       "goal_threshold_raw": 20000,
+       "goal_threshold_unit": "£ per month",
+       "goal_threshold_frame": "level",
+       "goal_threshold_cap_provenance": "target_derived_headroom"
+      },
+      {
+       "id": "keep_pro_price_at_49",
+       "kind": "option",
+       "label": "Keep Pro Price at £49",
+       "provenance": "from_brief",
+       "is_baseline": true
+      },
+      {
+       "id": "raise_pro_price_to_59",
+       "kind": "option",
+       "label": "Raise Pro Price to £59",
+       "provenance": "from_brief",
+       "interventions": {
+        "pro_plan_price": {
+         "value": 0.295,
+         "source": "brief_extraction"
+        }
+       }
+      },
+      {
+       "id": "test_59_with_ai_release",
+       "kind": "option",
+       "label": "Test £59 With AI Release",
+       "provenance": "ai_inferred"
+      },
+      {
+       "id": "pro_plan_price",
+       "kind": "factor",
+       "label": "Pro Plan Price",
+       "category": "controllable",
+       "provenance": "from_brief",
+       "observed_state": {
+        "cap": 200,
+        "unit": "£ per month",
+        "value": 0.245,
+        "source": "brief_extraction",
+        "raw_value": 49,
+        "declared_scale": "unit_interval"
+       }
+      },
+      {
+       "id": "ai_feature_value",
+       "kind": "factor",
+       "label": "AI Feature Value",
+       "category": "controllable",
+       "provenance": "ai_inferred",
+       "scale_frame": 100,
+       "observed_state": {
+        "unit": "score out of 100",
+        "value": 0.5,
+        "source": "cee_inference",
+        "raw_value": 50,
+        "extractionType": "inferred"
+       }
+      },
+      {
+       "id": "upgrade_conversion",
+       "kind": "factor",
+       "label": "Upgrade Conversion",
+       "category": "observable",
+       "provenance": "ai_inferred",
+       "scale_frame": 100,
+       "observed_state": {
+        "unit": "%",
+        "value": 0.05,
+        "source": "cee_inference",
+        "raw_value": 5,
+        "extractionType": "inferred"
+       }
+      },
+      {
+       "id": "pro_plan_subscribers",
+       "kind": "factor",
+       "label": "Pro Plan Subscribers",
+       "category": "observable",
+       "provenance": "ai_inferred",
+       "scale_frame": 2000,
+       "observed_state": {
+        "unit": "subscribers",
+        "value": 0.125,
+        "source": "cee_inference",
+        "raw_value": 250,
+        "extractionType": "inferred"
+       }
+      },
+      {
+       "id": "monthly_churn",
+       "kind": "factor",
+       "label": "Monthly Churn",
+       "category": "observable",
+       "provenance": "ai_inferred",
+       "scale_frame": 100,
+       "observed_state": {
+        "unit": "% per month",
+        "value": 0.07,
+        "source": "cee_inference",
+        "raw_value": 7,
+        "extractionType": "inferred"
+       }
+      },
+      {
+       "id": "price_resistance",
+       "kind": "risk",
+       "label": "Price Resistance",
+       "provenance": "ai_inferred"
+      }
+     ],
+     "edges": [
+      {
+       "to": "keep_pro_price_at_49",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "raise_pro_price_to_59",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "test_59_with_ai_release",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_value",
+       "from": "raise_pro_price_to_59",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "raise_pro_price_to_59",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "brief_extraction"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "test_59_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_value",
+       "from": "test_59_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "keep_pro_price_at_49",
+       "origin": "repair",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "mrr",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "price_resistance",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "upgrade_conversion",
+       "from": "ai_feature_value",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_churn",
+       "from": "ai_feature_value",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "pro_plan_subscribers",
+       "from": "upgrade_conversion",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "mrr",
+       "from": "pro_plan_subscribers",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_churn",
+       "from": "price_resistance",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "pro_plan_subscribers",
+       "from": "monthly_churn",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      }
+     ],
+     "node_count": 11,
+     "edge_count": 16,
+     "goal_constraints": [
+      {
+       "unit": "%",
+       "label": "Monthly Churn",
+       "value": 10,
+       "node_id": "monthly_churn",
+       "operator": "<=",
+       "provenance": "explicit",
+       "constraint_id": "agent-lane:monthly_churn:<=",
+       "provenance_unit_relabelled": {
+        "rule": "agent_lane_limit_unit_v1",
+        "pre_normalisation_unit": "% per month",
+        "pre_normalisation_value": 10
+       }
+      }
+     ]
+    },
+    "assistant_text": "Not yet—there’s no valid comparison until the AI release’s effect is made explicit.\n\n- Your stated goal is **£20k MRR** with **monthly churn at or below 10%**. The 12‑month deadline cannot be represented in this model, so it cannot test timing yet.\n- Current MRR is unknown. The baselines of **250 Pro subscribers**, **5% upgrade conversion**, **7% monthly churn**, and AI value of **50/100** are Olumi assumptions, not measurements.\n- I’ve proposed these assumptions: the AI release raises value to **65/100** for both the £59 launch and the £59 test; the test charges **£59/month**. Carrying on at £49 holds today’s values.\n\nDo you approve these assumptions for a first comparison?\n\nThe first analysis could not run yet: Review all 3 readiness issues together before analysis.\n\nI saved the model I drafted. The figures above are not recorded until you approve them. Questions this model does not answer yet: Does \"MRR\" get there within 12 months? The model holds no deadline yet, so no result answers that. Current MRR is not stated, so the probability of reaching £20k MRR cannot yet be calculated from a known starting point. The provisional baselines for AI Feature Value (50/100), Upgrade Conversion (5%), Pro Plan Subscribers (250), and Monthly Churn (7% per month) are modelling assumptions, not measurements; replace them with current data before adopting a price decision. How much will the next AI feature release improve perceived value, upgrade conversion, and retention? What share of current and prospective Pro customers would resist, downgrade, or churn at £59, and will existing subscribers be grandfathered? (and 1 more) The analysis can't run yet.",
+    "may_run": false,
+    "nothing_to_compare_count": 0
+   },
+   "approve": {
+    "message": "Yes, use those.",
+    "draft_graph": {
+     "nodes": [
+      {
+       "id": "decision_mrr",
+       "kind": "decision",
+       "label": "Decision: MRR",
+       "provenance": "ai_inferred"
+      },
+      {
+       "id": "mrr",
+       "kind": "goal",
+       "label": "MRR",
+       "provenance": "from_brief",
+       "goal_threshold": 0.8,
+       "goal_threshold_cap": 25000,
+       "goal_threshold_raw": 20000,
+       "goal_threshold_unit": "£ per month",
+       "goal_threshold_frame": "level",
+       "goal_threshold_cap_provenance": "target_derived_headroom"
+      },
+      {
+       "id": "keep_pro_price_at_49",
+       "kind": "option",
+       "label": "Keep Pro Price at £49",
+       "provenance": "from_brief",
+       "is_baseline": true
+      },
+      {
+       "id": "raise_pro_price_to_59",
+       "kind": "option",
+       "label": "Raise Pro Price to £59",
+       "provenance": "from_brief",
+       "interventions": {
+        "pro_plan_price": {
+         "value": 0.295,
+         "source": "brief_extraction"
+        },
+        "ai_feature_value": {
+         "value": 0.65,
+         "source": "cee_hypothesis",
+         "target_match": {
+          "node_id": "ai_feature_value",
+          "confidence": "high",
+          "match_type": "exact_id"
+         }
+        }
+       }
+      },
+      {
+       "id": "test_59_with_ai_release",
+       "kind": "option",
+       "label": "Test £59 With AI Release",
+       "provenance": "ai_inferred",
+       "interventions": {
+        "pro_plan_price": {
+         "value": 0.295,
+         "source": "user_specified",
+         "target_match": {
+          "node_id": "pro_plan_price",
+          "confidence": "high",
+          "match_type": "exact_id"
+         }
+        },
+        "ai_feature_value": {
+         "value": 0.65,
+         "source": "cee_hypothesis",
+         "target_match": {
+          "node_id": "ai_feature_value",
+          "confidence": "high",
+          "match_type": "exact_id"
+         }
+        }
+       }
+      },
+      {
+       "id": "pro_plan_price",
+       "kind": "factor",
+       "label": "Pro Plan Price",
+       "category": "controllable",
+       "provenance": "from_brief",
+       "observed_state": {
+        "cap": 200,
+        "unit": "£ per month",
+        "value": 0.245,
+        "source": "brief_extraction",
+        "raw_value": 49,
+        "declared_scale": "unit_interval"
+       }
+      },
+      {
+       "id": "ai_feature_value",
+       "kind": "factor",
+       "label": "AI Feature Value",
+       "category": "controllable",
+       "provenance": "ai_inferred",
+       "scale_frame": 100,
+       "observed_state": {
+        "unit": "score out of 100",
+        "value": 0.5,
+        "source": "cee_inference",
+        "raw_value": 50,
+        "extractionType": "inferred"
+       }
+      },
+      {
+       "id": "upgrade_conversion",
+       "kind": "factor",
+       "label": "Upgrade Conversion",
+       "category": "observable",
+       "provenance": "ai_inferred",
+       "scale_frame": 100,
+       "observed_state": {
+        "unit": "%",
+        "value": 0.05,
+        "source": "cee_inference",
+        "raw_value": 5,
+        "extractionType": "inferred"
+       }
+      },
+      {
+       "id": "pro_plan_subscribers",
+       "kind": "factor",
+       "label": "Pro Plan Subscribers",
+       "category": "observable",
+       "provenance": "ai_inferred",
+       "scale_frame": 2000,
+       "observed_state": {
+        "unit": "subscribers",
+        "value": 0.125,
+        "source": "cee_inference",
+        "raw_value": 250,
+        "extractionType": "inferred"
+       }
+      },
+      {
+       "id": "monthly_churn",
+       "kind": "factor",
+       "label": "Monthly Churn",
+       "category": "observable",
+       "provenance": "ai_inferred",
+       "scale_frame": 100,
+       "observed_state": {
+        "unit": "% per month",
+        "value": 0.07,
+        "source": "cee_inference",
+        "raw_value": 7,
+        "extractionType": "inferred"
+       }
+      },
+      {
+       "id": "price_resistance",
+       "kind": "risk",
+       "label": "Price Resistance",
+       "provenance": "ai_inferred"
+      }
+     ],
+     "edges": [
+      {
+       "to": "keep_pro_price_at_49",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "raise_pro_price_to_59",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "test_59_with_ai_release",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_value",
+       "from": "raise_pro_price_to_59",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "raise_pro_price_to_59",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "brief_extraction"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "test_59_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_value",
+       "from": "test_59_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "keep_pro_price_at_49",
+       "origin": "repair",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "mrr",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "price_resistance",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "upgrade_conversion",
+       "from": "ai_feature_value",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_churn",
+       "from": "ai_feature_value",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "pro_plan_subscribers",
+       "from": "upgrade_conversion",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "mrr",
+       "from": "pro_plan_subscribers",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_churn",
+       "from": "price_resistance",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "pro_plan_subscribers",
+       "from": "monthly_churn",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      }
+     ],
+     "node_count": 11,
+     "edge_count": 16,
+     "goal_constraints": [
+      {
+       "unit": "%",
+       "label": "Monthly Churn",
+       "value": 10,
+       "node_id": "monthly_churn",
+       "operator": "<=",
+       "provenance": "explicit",
+       "constraint_id": "agent-lane:monthly_churn:<=",
+       "provenance_unit_relabelled": {
+        "rule": "agent_lane_limit_unit_v1",
+        "pre_normalisation_unit": "% per month",
+        "pre_normalisation_value": 10
+       }
+      }
+     ]
+    },
+    "assistant_text": "Saved. No version number was recorded for it. The analysis can't run yet.",
+    "may_run": false,
+    "nothing_to_compare_count": 2
+   }
+  },
+  "f-20260926T001627Z": {
+   "cee": "85ce874",
+   "brief": {
+    "message": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase the Pro plan price from £49 to £59 per month with the next AI feature release?",
+    "draft_graph": {
+     "nodes": [
+      {
+       "id": "decision_mrr",
+       "kind": "decision",
+       "label": "Decision: MRR",
+       "provenance": "ai_inferred"
+      },
+      {
+       "id": "mrr",
+       "kind": "goal",
+       "label": "MRR",
+       "provenance": "from_brief",
+       "goal_threshold": 0.8,
+       "goal_threshold_cap": 25000,
+       "goal_threshold_raw": 20000,
+       "goal_threshold_unit": "£ per month",
+       "goal_threshold_frame": "level",
+       "goal_threshold_cap_provenance": "target_derived_headroom"
+      },
+      {
+       "id": "raise_to_59_with_release",
+       "kind": "option",
+       "label": "Raise to £59 with release",
+       "provenance": "from_brief",
+       "interventions": {
+        "pro_plan_price": {
+         "value": 0.295,
+         "source": "brief_extraction"
+        }
+       }
+      },
+      {
+       "id": "keep_current_pricing",
+       "kind": "option",
+       "label": "Keep current pricing",
+       "provenance": "ai_inferred",
+       "is_baseline": true
+      },
+      {
+       "id": "raise_to_54_with_release",
+       "kind": "option",
+       "label": "Raise to £54 with release",
+       "provenance": "ai_inferred",
+       "interventions": {
+        "pro_plan_price": {
+         "value": 0.27,
+         "source": "cee_hypothesis"
+        }
+       }
+      },
+      {
+       "id": "pro_plan_price",
+       "kind": "factor",
+       "label": "Pro plan price",
+       "category": "controllable",
+       "provenance": "from_brief",
+       "observed_state": {
+        "cap": 200,
+        "unit": "£ per month",
+        "value": 0.245,
+        "source": "brief_extraction",
+        "raw_value": 49,
+        "declared_scale": "unit_interval"
+       }
+      },
+      {
+       "id": "ai_feature_release_availability",
+       "kind": "factor",
+       "label": "AI feature release availability",
+       "category": "controllable",
+       "provenance": "ai_inferred",
+       "observed_state": {
+        "unit": "binary availability",
+        "value": 0
+       }
+      },
+      {
+       "id": "price_sensitivity",
+       "kind": "factor",
+       "label": "Price sensitivity",
+       "category": "observable",
+       "provenance": "ai_inferred",
+       "scale_frame": 100
+      },
+      {
+       "id": "monthly_churn",
+       "kind": "factor",
+       "label": "Monthly churn",
+       "category": "observable",
+       "provenance": "from_brief",
+       "scale_frame": 100
+      },
+      {
+       "id": "pro_subscribers",
+       "kind": "factor",
+       "label": "Pro subscribers",
+       "category": "observable",
+       "provenance": "ai_inferred",
+       "scale_frame": 2000
+      },
+      {
+       "id": "price_driven_churn_risk",
+       "kind": "risk",
+       "label": "Price-driven churn risk",
+       "provenance": "ai_inferred"
+      }
+     ],
+     "edges": [
+      {
+       "to": "raise_to_59_with_release",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "keep_current_pricing",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "raise_to_54_with_release",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_release_availability",
+       "from": "raise_to_59_with_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "brief_extraction"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "raise_to_59_with_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "brief_extraction"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_release_availability",
+       "from": "raise_to_54_with_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "raise_to_54_with_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "keep_current_pricing",
+       "origin": "repair",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "mrr",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "price_sensitivity",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "pro_subscribers",
+       "from": "ai_feature_release_availability",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_churn",
+       "from": "ai_feature_release_availability",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "price_driven_churn_risk",
+       "from": "price_sensitivity",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_churn",
+       "from": "price_driven_churn_risk",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "pro_subscribers",
+       "from": "monthly_churn",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "mrr",
+       "from": "pro_subscribers",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      }
+     ],
+     "node_count": 11,
+     "edge_count": 16,
+     "goal_constraints": [
+      {
+       "unit": "% per month",
+       "label": "Monthly churn",
+       "value": 10,
+       "node_id": "monthly_churn",
+       "operator": "<=",
+       "provenance": "explicit",
+       "constraint_id": "agent-lane:monthly_churn:<="
+      }
+     ]
+    },
+    "assistant_text": "Not enough is known to judge the £59 move reliably; the first pass is provisional and unvalidated.\n\n- Your stated £49/month starting price is recorded. Carrying on as now holds today’s values.\n- To make a first comparison, I propose these **assumptions, not measurements**: 200 Pro subscribers; 7% monthly churn (3 points below your limit); price sensitivity of 20/100.\n- The £59 option uses the AI release; I also added a £54-with-release comparison, both with the feature available.\n\nApprove these starting assumptions, or correct them.\n\nI saved the model I drafted. The figures above are not recorded until you approve them. Questions this model does not answer yet: Current MRR is not stated; it is required to estimate the probability of reaching £20k within 12 months, but has not been guessed. Current Pro subscriber count is not stated; it is required to calculate MRR and the subscriber growth needed to reach £20k. Current monthly churn is not stated; it is required to assess headroom against the under-10% monthly churn constraint. The conversion, retention, and acquisition effect of the next AI feature release is unknown. The share of Pro customers likely to downgrade or cancel following a £10 price increase is unknown; this determines the size of the price-driven churn risk. (and 1 more)",
+    "may_run": true,
+    "nothing_to_compare_count": 0
+   },
+   "approve": {
+    "message": "Yes, use those.",
+    "draft_graph": {
+     "nodes": [
+      {
+       "id": "decision_mrr",
+       "kind": "decision",
+       "label": "Decision: MRR",
+       "provenance": "ai_inferred"
+      },
+      {
+       "id": "mrr",
+       "kind": "goal",
+       "label": "MRR",
+       "provenance": "from_brief",
+       "goal_threshold": 0.8,
+       "goal_threshold_cap": 25000,
+       "goal_threshold_raw": 20000,
+       "goal_threshold_unit": "£ per month",
+       "goal_threshold_frame": "level",
+       "goal_threshold_cap_provenance": "target_derived_headroom"
+      },
+      {
+       "id": "raise_to_59_with_release",
+       "kind": "option",
+       "label": "Raise to £59 with release",
+       "provenance": "from_brief",
+       "interventions": {
+        "pro_plan_price": {
+         "value": 0.295,
+         "source": "brief_extraction"
+        },
+        "ai_feature_release_availability": {
+         "value": 1,
+         "source": "user_specified",
+         "target_match": {
+          "node_id": "ai_feature_release_availability",
+          "confidence": "high",
+          "match_type": "exact_id"
+         }
+        }
+       }
+      },
+      {
+       "id": "keep_current_pricing",
+       "kind": "option",
+       "label": "Keep current pricing",
+       "provenance": "ai_inferred",
+       "is_baseline": true
+      },
+      {
+       "id": "raise_to_54_with_release",
+       "kind": "option",
+       "label": "Raise to £54 with release",
+       "provenance": "ai_inferred",
+       "interventions": {
+        "pro_plan_price": {
+         "value": 0.27,
+         "source": "cee_hypothesis"
+        },
+        "ai_feature_release_availability": {
+         "value": 1,
+         "source": "cee_hypothesis",
+         "target_match": {
+          "node_id": "ai_feature_release_availability",
+          "confidence": "high",
+          "match_type": "exact_id"
+         }
+        }
+       }
+      },
+      {
+       "id": "pro_plan_price",
+       "kind": "factor",
+       "label": "Pro plan price",
+       "category": "controllable",
+       "provenance": "from_brief",
+       "observed_state": {
+        "cap": 200,
+        "unit": "£ per month",
+        "value": 0.245,
+        "source": "brief_extraction",
+        "raw_value": 49,
+        "declared_scale": "unit_interval"
+       }
+      },
+      {
+       "id": "ai_feature_release_availability",
+       "kind": "factor",
+       "label": "AI feature release availability",
+       "category": "controllable",
+       "provenance": "ai_inferred",
+       "observed_state": {
+        "unit": "binary availability",
+        "value": 0
+       }
+      },
+      {
+       "id": "price_sensitivity",
+       "kind": "factor",
+       "label": "Price sensitivity",
+       "category": "observable",
+       "provenance": "user_set",
+       "scale_frame": 100,
+       "display_value": "20 index out of 100",
+       "observed_state": {
+        "unit": "index out of 100",
+        "value": 0.2,
+        "source": "user_assumption",
+        "raw_value": 20
+       }
+      },
+      {
+       "id": "monthly_churn",
+       "kind": "factor",
+       "label": "Monthly churn",
+       "category": "observable",
+       "provenance": "user_set",
+       "scale_frame": 100,
+       "display_value": "7 % per month",
+       "observed_state": {
+        "unit": "% per month",
+        "value": 0.07,
+        "source": "user_assumption",
+        "raw_value": 7
+       }
+      },
+      {
+       "id": "pro_subscribers",
+       "kind": "factor",
+       "label": "Pro subscribers",
+       "category": "observable",
+       "provenance": "user_set",
+       "scale_frame": 2000,
+       "display_value": "200 subscribers",
+       "observed_state": {
+        "unit": "subscribers",
+        "value": 0.1,
+        "source": "user_assumption",
+        "raw_value": 200
+       }
+      },
+      {
+       "id": "price_driven_churn_risk",
+       "kind": "risk",
+       "label": "Price-driven churn risk",
+       "provenance": "ai_inferred"
+      }
+     ],
+     "edges": [
+      {
+       "to": "raise_to_59_with_release",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "keep_current_pricing",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "raise_to_54_with_release",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_release_availability",
+       "from": "raise_to_59_with_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "brief_extraction"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "raise_to_59_with_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "brief_extraction"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_release_availability",
+       "from": "raise_to_54_with_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "raise_to_54_with_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "keep_current_pricing",
+       "origin": "repair",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "mrr",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "price_sensitivity",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "pro_subscribers",
+       "from": "ai_feature_release_availability",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_churn",
+       "from": "ai_feature_release_availability",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "price_driven_churn_risk",
+       "from": "price_sensitivity",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_churn",
+       "from": "price_driven_churn_risk",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "pro_subscribers",
+       "from": "monthly_churn",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "mrr",
+       "from": "pro_subscribers",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      }
+     ],
+     "node_count": 11,
+     "edge_count": 16,
+     "goal_constraints": [
+      {
+       "unit": "% per month",
+       "label": "Monthly churn",
+       "value": 10,
+       "node_id": "monthly_churn",
+       "operator": "<=",
+       "provenance": "explicit",
+       "constraint_id": "agent-lane:monthly_churn:<="
+      }
+     ]
+    },
+    "assistant_text": "Saved 3 of 3 starting values. Saved 2 of 2 option levels.",
+    "may_run": true,
+    "nothing_to_compare_count": 0
+   }
+  },
+  "f-20260926T022612Z": {
+   "cee": "cb1778b",
+   "brief": {
+    "message": "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase the Pro plan price from £49 to £59 per month with the next AI feature release?",
+    "draft_graph": {
+     "nodes": [
+      {
+       "id": "decision_mrr",
+       "kind": "decision",
+       "label": "Decision: MRR",
+       "provenance": "ai_inferred"
+      },
+      {
+       "id": "mrr",
+       "kind": "goal",
+       "label": "MRR",
+       "provenance": "from_brief",
+       "goal_threshold": 0.8,
+       "goal_threshold_cap": 25000,
+       "goal_threshold_raw": 20000,
+       "goal_threshold_unit": "GBP/month",
+       "goal_threshold_frame": "level",
+       "goal_threshold_cap_provenance": "target_derived_headroom"
+      },
+      {
+       "id": "current_setup",
+       "kind": "option",
+       "label": "Current setup",
+       "provenance": "ai_inferred",
+       "is_baseline": true
+      },
+      {
+       "id": "59_with_ai_release",
+       "kind": "option",
+       "label": "£59 with AI release",
+       "provenance": "from_brief",
+       "interventions": {
+        "pro_plan_price": {
+         "value": 0.295,
+         "source": "brief_extraction"
+        },
+        "ai_feature_availability": {
+         "value": 1,
+         "source": "cee_hypothesis"
+        }
+       }
+      },
+      {
+       "id": "49_with_ai_release",
+       "kind": "option",
+       "label": "£49 with AI release",
+       "provenance": "ai_inferred",
+       "interventions": {
+        "pro_plan_price": {
+         "value": 0.245,
+         "source": "brief_extraction"
+        },
+        "ai_feature_availability": {
+         "value": 1,
+         "source": "cee_hypothesis"
+        }
+       }
+      },
+      {
+       "id": "pro_plan_price",
+       "kind": "factor",
+       "label": "Pro plan price",
+       "category": "controllable",
+       "provenance": "from_brief",
+       "observed_state": {
+        "cap": 200,
+        "unit": "GBP/month",
+        "value": 0.245,
+        "source": "brief_extraction",
+        "raw_value": 49,
+        "declared_scale": "unit_interval"
+       }
+      },
+      {
+       "id": "ai_feature_availability",
+       "kind": "factor",
+       "label": "AI feature availability",
+       "category": "controllable",
+       "provenance": "ai_inferred"
+      },
+      {
+       "id": "monthly_new_pro_subscribers",
+       "kind": "factor",
+       "label": "Monthly new Pro subscribers",
+       "category": "observable",
+       "provenance": "ai_inferred",
+       "scale_frame": 500,
+       "observed_state": {
+        "unit": "subscribers/month",
+        "value": 0.04,
+        "source": "cee_inference",
+        "raw_value": 20,
+        "extractionType": "inferred"
+       }
+      },
+      {
+       "id": "monthly_churn",
+       "kind": "factor",
+       "label": "Monthly churn",
+       "category": "observable",
+       "provenance": "ai_inferred",
+       "scale_frame": 100,
+       "observed_state": {
+        "unit": "%",
+        "value": 0.07,
+        "source": "cee_inference",
+        "raw_value": 7,
+        "extractionType": "inferred"
+       }
+      },
+      {
+       "id": "pro_subscriber_base",
+       "kind": "factor",
+       "label": "Pro subscriber base",
+       "category": "observable",
+       "provenance": "ai_inferred",
+       "scale_frame": 2000,
+       "observed_state": {
+        "unit": "subscribers",
+        "value": 0.1,
+        "source": "cee_inference",
+        "raw_value": 200,
+        "extractionType": "inferred"
+       }
+      },
+      {
+       "id": "price_resistance",
+       "kind": "risk",
+       "label": "Price resistance",
+       "provenance": "ai_inferred"
+      }
+     ],
+     "edges": [
+      {
+       "to": "current_setup",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "59_with_ai_release",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "49_with_ai_release",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "59_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_availability",
+       "from": "59_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "49_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_availability",
+       "from": "49_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "current_setup",
+       "origin": "repair",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_availability",
+       "from": "current_setup",
+       "origin": "repair",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "mrr",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "price_resistance",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "price_resistance",
+       "from": "ai_feature_availability",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_new_pro_subscribers",
+       "from": "ai_feature_availability",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_new_pro_subscribers",
+       "from": "price_resistance",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_churn",
+       "from": "price_resistance",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "pro_subscriber_base",
+       "from": "monthly_new_pro_subscribers",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "pro_subscriber_base",
+       "from": "monthly_churn",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "mrr",
+       "from": "pro_subscriber_base",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      }
+     ],
+     "node_count": 11,
+     "edge_count": 18,
+     "goal_constraints": [
+      {
+       "unit": "%",
+       "label": "Monthly churn",
+       "value": 10,
+       "node_id": "monthly_churn",
+       "operator": "<=",
+       "provenance": "explicit",
+       "constraint_id": "agent-lane:monthly_churn:<="
+      }
+     ]
+    },
+    "assistant_text": "A provisional first pass cannot put an option forward yet: its constraint verdict is withheld.\n\n- Your £20k MRR target and monthly churn ceiling of 10% are represented, but the 12‑month deadline cannot be modelled here.\n- The model already treats the AI-release options as £59/£49 respectively, with the feature fully available; current setup holds today’s values.\n- It needs one starting assumption: AI feature availability is **0% today**, inferred from “next release” — not a measurement.\n\nAdopt that assumption, or correct it?\n\nI saved the model I drafted. The figures above are not recorded until you approve them. Questions this model does not answer yet: Does \"MRR\" get there within 12 months? The model holds no deadline yet, so no result answers that. Current MRR is not stated, so the probability of reaching £20k cannot yet be calculated from a known starting point. The provisional baseline of 200 Pro subscribers is an AI modelling assumption; provide the current paying Pro subscriber count. The provisional baseline of 20 monthly new Pro subscribers is an AI modelling assumption; provide recent monthly new Pro subscriptions or trials-to-paid conversion. The provisional 7% monthly churn estimate is not a measurement; provide current Pro-plan monthly logo or subscriber churn, and confirm whether the under-10% constraint uses the same definition. (and 2 more) The analysis can run now.",
+    "may_run": true,
+    "nothing_to_compare_count": 0
+   },
+   "approve": {
+    "message": "Yes, use those.",
+    "draft_graph": {
+     "nodes": [
+      {
+       "id": "decision_mrr",
+       "kind": "decision",
+       "label": "Decision: MRR",
+       "provenance": "ai_inferred"
+      },
+      {
+       "id": "mrr",
+       "kind": "goal",
+       "label": "MRR",
+       "provenance": "from_brief",
+       "goal_threshold": 0.8,
+       "goal_threshold_cap": 25000,
+       "goal_threshold_raw": 20000,
+       "goal_threshold_unit": "GBP/month",
+       "goal_threshold_frame": "level",
+       "goal_threshold_cap_provenance": "target_derived_headroom"
+      },
+      {
+       "id": "current_setup",
+       "kind": "option",
+       "label": "Current setup",
+       "provenance": "ai_inferred",
+       "is_baseline": true
+      },
+      {
+       "id": "59_with_ai_release",
+       "kind": "option",
+       "label": "£59 with AI release",
+       "provenance": "from_brief",
+       "interventions": {
+        "pro_plan_price": {
+         "value": 0.295,
+         "source": "brief_extraction"
+        },
+        "ai_feature_availability": {
+         "value": 1,
+         "source": "cee_hypothesis"
+        }
+       }
+      },
+      {
+       "id": "49_with_ai_release",
+       "kind": "option",
+       "label": "£49 with AI release",
+       "provenance": "ai_inferred",
+       "interventions": {
+        "pro_plan_price": {
+         "value": 0.245,
+         "source": "brief_extraction"
+        },
+        "ai_feature_availability": {
+         "value": 1,
+         "source": "cee_hypothesis"
+        }
+       }
+      },
+      {
+       "id": "pro_plan_price",
+       "kind": "factor",
+       "label": "Pro plan price",
+       "category": "controllable",
+       "provenance": "from_brief",
+       "observed_state": {
+        "cap": 200,
+        "unit": "GBP/month",
+        "value": 0.245,
+        "source": "brief_extraction",
+        "raw_value": 49,
+        "declared_scale": "unit_interval"
+       }
+      },
+      {
+       "id": "ai_feature_availability",
+       "kind": "factor",
+       "label": "AI feature availability",
+       "category": "controllable",
+       "provenance": "user_set",
+       "display_value": "0%",
+       "observed_state": {
+        "unit": "%",
+        "value": 0,
+        "source": "user_assumption",
+        "raw_value": 0
+       }
+      },
+      {
+       "id": "monthly_new_pro_subscribers",
+       "kind": "factor",
+       "label": "Monthly new Pro subscribers",
+       "category": "observable",
+       "provenance": "ai_inferred",
+       "scale_frame": 500,
+       "observed_state": {
+        "unit": "subscribers/month",
+        "value": 0.04,
+        "source": "cee_inference",
+        "raw_value": 20,
+        "extractionType": "inferred"
+       }
+      },
+      {
+       "id": "monthly_churn",
+       "kind": "factor",
+       "label": "Monthly churn",
+       "category": "observable",
+       "provenance": "ai_inferred",
+       "scale_frame": 100,
+       "observed_state": {
+        "unit": "%",
+        "value": 0.07,
+        "source": "cee_inference",
+        "raw_value": 7,
+        "extractionType": "inferred"
+       }
+      },
+      {
+       "id": "pro_subscriber_base",
+       "kind": "factor",
+       "label": "Pro subscriber base",
+       "category": "observable",
+       "provenance": "ai_inferred",
+       "scale_frame": 2000,
+       "observed_state": {
+        "unit": "subscribers",
+        "value": 0.1,
+        "source": "cee_inference",
+        "raw_value": 200,
+        "extractionType": "inferred"
+       }
+      },
+      {
+       "id": "price_resistance",
+       "kind": "risk",
+       "label": "Price resistance",
+       "provenance": "ai_inferred"
+      }
+     ],
+     "edges": [
+      {
+       "to": "current_setup",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "59_with_ai_release",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "49_with_ai_release",
+       "from": "decision_mrr",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "59_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_availability",
+       "from": "59_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "49_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_availability",
+       "from": "49_with_ai_release",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "pro_plan_price",
+       "from": "current_setup",
+       "origin": "repair",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "ai_feature_availability",
+       "from": "current_setup",
+       "origin": "repair",
+       "strength": {
+        "std": 0.01,
+        "mean": 1
+       },
+       "provenance": {
+        "source": "cee_hypothesis",
+        "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 1
+      },
+      {
+       "to": "mrr",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "price_resistance",
+       "from": "pro_plan_price",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "price_resistance",
+       "from": "ai_feature_availability",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_new_pro_subscribers",
+       "from": "ai_feature_availability",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_new_pro_subscribers",
+       "from": "price_resistance",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "monthly_churn",
+       "from": "price_resistance",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "pro_subscriber_base",
+       "from": "monthly_new_pro_subscribers",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "pro_subscriber_base",
+       "from": "monthly_churn",
+       "strength": {
+        "std": 0.125,
+        "mean": -0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "negative",
+       "exists_probability": 0.8
+      },
+      {
+       "to": "mrr",
+       "from": "pro_subscriber_base",
+       "strength": {
+        "std": 0.125,
+        "mean": 0.5
+       },
+       "defaulted": true,
+       "provenance": {
+        "source": "cee_hypothesis"
+       },
+       "effect_direction": "positive",
+       "exists_probability": 0.8
+      }
+     ],
+     "node_count": 11,
+     "edge_count": 18,
+     "goal_constraints": [
+      {
+       "unit": "%",
+       "label": "Monthly churn",
+       "value": 10,
+       "node_id": "monthly_churn",
+       "operator": "<=",
+       "provenance": "explicit",
+       "constraint_id": "agent-lane:monthly_churn:<="
+      }
+     ]
+    },
+    "assistant_text": "Saved. No version number was recorded for it. The analysis can run now.",
+    "may_run": true,
+    "nothing_to_compare_count": 0
+   }
+  }
+ }
+}

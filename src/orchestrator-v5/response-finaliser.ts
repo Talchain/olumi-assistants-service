@@ -287,6 +287,37 @@ export interface FinaliserContext {
    */
   readonly mayNameLeadingOption?: boolean;
   /**
+   * The CALLER that decided `mayNameLeadingOption === false` states that its
+   * refusal was the unrequested-analysis confinement (a permitting verdict,
+   * withheld only because nobody asked for the run). Read only when the turn is
+   * not entitled; absent = the constraint token.
+   *
+   * ⚠ THE FINALISER MUST NOT DERIVE THIS ITSELF. It never learns which fact the
+   * refusal came from: the verdict can come from a partial fact the freshness
+   * selector skips, from this turn's own run while `priorFacts` is the
+   * PRE-handler window, or from the durable newest fact. Deriving it from a fact
+   * the finaliser picked named a user's own Run "unrequested" (#1876
+   * CHANGES_REQUIRED; `leader-claim-withheld-cause-binding.test.ts`). No turn
+   * exit sets it today: the turn verdict is constraint-only, and the Agent lane
+   * serves `leader_claim` from the reload read, which binds the cause to one fact.
+   */
+  readonly leaderWithheldBecauseUnrequested?: boolean;
+  /**
+   * C46 stage 1 — the CALLER that decided `mayNameLeadingOption === false` states that its refusal was the
+   * product stamp: the refusal's OWN fact withheld a leader its constraint verdict permitted, because the goal
+   * is a product the analysis only adds up (`nonlinearIdentityLeaderClaimCause`, judged on the graph THAT RUN
+   * analysed — OpenAI Runtime #70 5843934816). Read only when the turn is not entitled; absent = the constraint
+   * token. The composer's order puts the unrequested first pass above it (AI Quality #70 5841878117).
+   *
+   * ⚠ THE FINALISER MUST NOT DERIVE THIS ITSELF, for both reasons the field above gives and one more: deriving it
+   * would mean walking `graph`, which this context declares as a nullness signal only. The handoff patch's
+   * derivation (from `selectRunAnalysisFact(priorFacts)` and `graph`) named a user's failed limit as the product
+   * (`c46-finaliser-cause-is-stated.test.ts`, RED A). No turn exit sets it yet: the turn caller that reads it off
+   * the refusal's own fact is handoff H2b (OpenAI Runtime). The Agent lane's `leader_claim` comes from the reload
+   * read, which binds it to one fact (`scenario-graph-analysis-read.ts`, H1).
+   */
+  readonly leaderWithheldBecauseNonlinearIdentity?: boolean;
+  /**
    * The turn context's PERSISTED-GRAPH freshness derivation, carried to every
    * non-execute exit by `claimSafety.forExit()` (see `TurnExitStamp`).
    *
@@ -597,6 +628,10 @@ function attachAnalysisState(
     freshness: ctx.analysisStateFreshness ?? ctx.freshness,
     readiness: ctx.analysisReady,
     mayNameLeadingOption: ctx.mayNameLeadingOption,
+    // Stated by the caller that refused, never derived here (see the ctx field).
+    withheldBecauseUnrequested: ctx.leaderWithheldBecauseUnrequested === true,
+    // C46 (H2): stated by the same caller, on the same terms — never derived here.
+    withheldBecauseNonlinearIdentity: ctx.leaderWithheldBecauseNonlinearIdentity === true,
     // Read from the body as it will ship, not from the fact: when the
     // withheld-claim projection has redacted `near_tie`, the separation half
     // is genuinely unknown to the consumer and `leader_claim` must say so.

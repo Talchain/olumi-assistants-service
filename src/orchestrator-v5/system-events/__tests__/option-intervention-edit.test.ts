@@ -67,9 +67,14 @@ describe('explicit option-intervention preparation — existing canonical operat
     expect(computeAnalysisAffectingGraphHash(after)).not.toBe(computeAnalysisAffectingGraphHash(pristine));
   });
 
-  it('is identity-bound rather than label-bound and refuses an unlinked same-label neighbour', () => {
-    expect(prepare(graph()).kind).toBe('prepared');
-    expect(prepare(graph(), { factorId: 'other_factor' })).toMatchObject({ kind: 'refused' });
+  it('is identity-bound rather than label-bound: an unlinked same-label neighbour is addressed by ITS id (and brings its own link)', () => {
+    expect(prepare(graph())).not.toHaveProperty('linkOperation');
+    // DL #70 5847137399: an unlinked pair is no longer refused — the level brings its link in the same commit. The
+    // identity rule is unchanged: both operations name `other_factor`, never the same-label `factor`.
+    const neighbour = prepare(graph(), { factorId: 'other_factor' });
+    expect(neighbour).toMatchObject({ kind: 'prepared', linkOperation: { op: 'add_edge', path: 'option::other_factor' } });
+    if (neighbour.kind !== 'prepared') throw new Error('Expected prepared operation');
+    expect(neighbour.operation.path).toBe('/nodes/option/data/interventions/other_factor');
   });
 
   it('refuses stale expected state; the exact same input on its current state prepares', () => {

@@ -11,7 +11,8 @@ import type {
   AtomicCommittedModelVersionReceipt, SessionStore, SessionTurnWrite,
 } from '../../session/store.js';
 import type { PendingAction } from '../../session/pending-action.js';
-import { applyOptionInterventionEdit, executeOptionInterventionEdit } from '../option-intervention-edit.js';
+import { applyOptionInterventionEdit, executeOptionInterventionBatch, executeOptionInterventionEdit } from '../option-intervention-edit.js';
+import { runWithApprovedLevelAdoption } from '../../agent-lane/approved-adoption-context.js';
 
 const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const TURN_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
@@ -532,6 +533,10 @@ describe('option-intervention transaction — real commit, serialized store boun
     // The twin's own precondition: the receipt was really parsed and attached,
     // so the case above refused a PRESENT receipt rather than an absent one.
     expect(matched.response.model_version_receipt?.version_id).toBe(receiptBase.version_id);
+    // The writer hands its own verified receipt to its caller too (the Agent's in-process door reads THIS, never a
+    // second parse of the response).
+    expect((matched as { modelVersionReceipt?: { version_number: number; source_turn_id: string } }).modelVersionReceipt)
+      .toMatchObject({ version_number: 2, source_turn_id: TURN_ID });
   });
 
   /**
@@ -821,5 +826,162 @@ describe('a no-target entry keeps its unrelated metadata through commit', () => 
     const neighbourBefore = interventionsOfOption(before).other_factor;
     const neighbourAfter = interventionsOfOption(cold).other_factor;
     expect(neighbourAfter).toEqual(neighbourBefore);
+  });
+});
+
+/**
+ * ⛔ AN ADOPTED OLUMI LEVEL IS STORED AS OLUMI'S, NOT "SET BY YOU" (RC #69 5830255884;
+ * pre-review 5830301003). MEASURED on served `c1ddb50`: every level an approval of Olumi's
+ * starting point wrote came back `source: 'user_specified'`. This writer was built for the
+ * inspector, where the user types the level, and its encoder defaults the cell to
+ * `user_specified`. The server-internal adoption context (never a wire field) names the ONE
+ * write that is Olumi's proposed level; only that write keeps `cee_hypothesis`. Read back from
+ * the durable bytes on a cold store, not from the candidate.
+ */
+describe('option-intervention transaction — an adopted Olumi level keeps Olumi\u2019s stamp', () => {
+  const adoption = (over: Partial<{ scenarioId: string; optionId: string; factorId: string; modelValue: number }> = {}) => ({
+    scenarioId: SCENARIO_ID, proposalId: 'prop_adopted', optionId: 'option', factorId: 'factor', modelValue: 0.3, ...over,
+  });
+  const cellOf = (g: ReturnType<typeof canonicalGraph>) =>
+    g.nodes.find(n => n.id === 'option')!.interventions!.factor as Record<string, unknown>;
+
+  it('RED: inside its adoption identity the committed cell reads cee_hypothesis on a cold reload', async () => {
+    const before = canonicalGraph();
+    const persistence = jsonStore(before);
+    const result = await runWithApprovedLevelAdoption(adoption(), () =>
+      executeOptionInterventionEdit(inputFor(before), persistence.fresh()));
+    expect(result.kind).toBe('committed');
+    expect(cellOf(persistence.durableGraph())).toMatchObject({ value: 0.3, source: 'cee_hypothesis' });
+    const mirrored = (persistence.durableGraph().options as Array<Record<string, unknown>>)
+      .find(o => o.id === 'option') as { interventions?: Record<string, unknown> } | undefined;
+    if (mirrored?.interventions?.factor !== undefined) {
+      expect(JSON.stringify(mirrored.interventions.factor)).not.toContain('user_specified');
+    }
+  });
+
+  it('CONTRAST: the inspector\u2019s write (no adoption identity) is still the user\u2019s level', async () => {
+    const before = canonicalGraph();
+    const persistence = jsonStore(before);
+    expect((await executeOptionInterventionEdit(inputFor(before), persistence.fresh())).kind).toBe('committed');
+    expect(cellOf(persistence.durableGraph())).toMatchObject({ value: 0.3, source: 'user_specified' });
+  });
+
+  it.each([
+    ['another value', { modelValue: 0.31 }],
+    ['another factor', { factorId: 'other_factor' }],
+    ['another option', { optionId: 'other_option' }],
+    ['another scenario', { scenarioId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' }],
+  ] as const)('CONTROL: an identity naming %s confers nothing — the write stays user_specified', async (_what, over) => {
+    const before = canonicalGraph();
+    const persistence = jsonStore(before);
+    const result = await runWithApprovedLevelAdoption(adoption(over), () =>
+      executeOptionInterventionEdit(inputFor(before), persistence.fresh()));
+    expect(result.kind).toBe('committed');
+    expect(cellOf(persistence.durableGraph())).toMatchObject({ value: 0.3, source: 'user_specified' });
+  });
+
+  it('CONTROL: a caller cannot hand the writer a stamp — execution derives it, ignoring any supplied source', async () => {
+    const before = canonicalGraph();
+    const persistence = jsonStore(before);
+    const forged = { ...inputFor(before), source: 'cee_hypothesis' } as unknown as Parameters<typeof executeOptionInterventionEdit>[0];
+    expect((await executeOptionInterventionEdit(forged, persistence.fresh())).kind).toBe('committed');
+    expect(cellOf(persistence.durableGraph())).toMatchObject({ value: 0.3, source: 'user_specified' });
+  });
+});
+
+describe('a level brings its link — the real commit (DL #70 5847137399: ONE atomic commit)', () => {
+  it('RED: an unlinked option gets its link AND its level in ONE durable row, ONE fact and ONE read-back, and says so', async () => {
+    const before = clone(canonicalGraph());
+    before.edges = before.edges.filter(e => !(e.from === 'option' && e.to === 'other_factor'));
+    delete (before.nodes.find(n => n.id === 'option')!.interventions as Record<string, unknown>).other_factor;
+    const seeded = projectGraphForPersistence(before) as ReturnType<typeof canonicalGraph>;
+    const persistence = jsonStore(seeded);
+    const result = await executeOptionInterventionEdit(inputFor(seeded, { factorId: 'other_factor', modelValue: 0.4 }), persistence.fresh());
+    expect(result.kind, JSON.stringify(result)).toBe('committed');
+    if (result.kind !== 'committed') return;
+    expect(persistence.attempts).toHaveLength(1);
+    expect(persistence.durableRows()).toHaveLength(1);
+    const stored = persistence.durableRows()[0]!;
+    expect(stored.handler_facts).toHaveLength(1);
+    expect(stored.handler_facts[0]).toMatchObject({ result: { status: 'applied', operations_count: 2 } });
+    const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
+    expect(cold.edges.filter(e => e.from === 'option' && e.to === 'other_factor')).toEqual([
+      expect.objectContaining({ exists_probability: 1, provenance: { source: 'user_specified' } }),
+    ]);
+    expect(cold.nodes.find(n => n.id === 'option')!.interventions).toMatchObject({
+      other_factor: { value: 0.4, source: 'user_specified', target_match: { node_id: 'other_factor' } },
+    });
+    expect(result.response.assistant_text).toContain('is now linked to');
+  });
+});
+
+describe('ONE user operation → ONE atomic commit, for a WHOLE approved batch (ChatGPT #70 5847200462, BF5\'s two levels)', () => {
+  function unlinkedOtherFactor() {
+    const g = clone(canonicalGraph());
+    g.edges = g.edges.filter(e => !(e.from === 'option' && e.to === 'other_factor'));
+    delete (g.nodes.find(n => n.id === 'option')!.interventions as Record<string, unknown>).other_factor;
+    return projectGraphForPersistence(g) as ReturnType<typeof canonicalGraph>;
+  }
+  const batchFor = (g: ReturnType<typeof canonicalGraph>, targets: { optionId: string; factorId: string; modelValue: number }[]) => {
+    const { optionId: _o, factorId: _f, modelValue: _v, ...common } = inputFor(g);
+    return { ...common, targets };
+  };
+
+  it('RED: two levels — one needing its link — land as ONE durable row, ONE fact, ONE read-back; reload agrees', async () => {
+    const seeded = unlinkedOtherFactor();
+    const persistence = jsonStore(seeded);
+    const result = await executeOptionInterventionBatch(batchFor(seeded, [
+      { optionId: 'option', factorId: 'factor', modelValue: 0.3 },
+      { optionId: 'option', factorId: 'other_factor', modelValue: 0.4 },
+    ]), persistence.fresh());
+    expect(result.kind, JSON.stringify(result)).toBe('committed');
+    if (result.kind !== 'committed') return;
+    expect(persistence.attempts).toHaveLength(1);
+    expect(persistence.durableRows()).toHaveLength(1);
+    expect(persistence.durableRows()[0]!.handler_facts).toHaveLength(1);
+    expect(persistence.durableRows()[0]!.handler_facts[0]).toMatchObject({ result: { status: 'applied', operations_count: 3 } });
+    const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
+    expect(result.graph).toEqual(cold);
+    expect(cold.edges.filter(e => e.from === 'option' && e.to === 'other_factor')).toHaveLength(1);
+    expect(cold.nodes.find(n => n.id === 'option')!.interventions).toMatchObject({
+      factor: { value: 0.3, source: 'user_specified' }, other_factor: { value: 0.4, source: 'user_specified' },
+    });
+    expect(result.response.assistant_text).toContain('is now linked to');
+  });
+
+  it('RED: the SECOND level refused → NOTHING committed — no attempt, no row, the first level and the link not written', async () => {
+    const seeded = unlinkedOtherFactor();
+    const pristine = clone(seeded);
+    const persistence = jsonStore(seeded);
+    const result = await executeOptionInterventionBatch(batchFor(seeded, [
+      { optionId: 'option', factorId: 'factor', modelValue: 0.3 },
+      { optionId: 'option', factorId: 'other_factor', modelValue: 1.5 },
+    ]), persistence.fresh());
+    expect(result).toEqual({ kind: 'refused', reason: 'invalid_model_value', index: 1 });
+    expect(persistence.attempts).toHaveLength(0);
+    expect(persistence.durableRows()).toHaveLength(0);
+    expect(await persistence.fresh().loadGraph(SCENARIO_ID)).toEqual(pristine);
+  });
+
+  it('RED: a retry of the committed batch writes NOTHING more — a verified no-op — and reload still holds both levels', async () => {
+    const seeded = unlinkedOtherFactor();
+    const persistence = jsonStore(seeded);
+    const targets = [{ optionId: 'option', factorId: 'factor', modelValue: 0.3 }, { optionId: 'option', factorId: 'other_factor', modelValue: 0.4 }];
+    expect((await executeOptionInterventionBatch(batchFor(seeded, targets), persistence.fresh())).kind).toBe('committed');
+    const now = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID)) as ReturnType<typeof canonicalGraph>;
+    const retry = await executeOptionInterventionBatch(batchFor(now, targets), persistence.fresh());
+    expect(retry).toEqual({ kind: 'unchanged' });
+    expect(persistence.durableRows()).toHaveLength(1);
+  });
+
+  it('a duplicate pair in one batch is refused before anything is prepared', async () => {
+    const seeded = unlinkedOtherFactor();
+    const persistence = jsonStore(seeded);
+    const result = await executeOptionInterventionBatch(batchFor(seeded, [
+      { optionId: 'option', factorId: 'factor', modelValue: 0.3 },
+      { optionId: 'option', factorId: 'factor', modelValue: 0.35 },
+    ]), persistence.fresh());
+    expect(result).toEqual({ kind: 'refused', reason: 'duplicate_target' });
+    expect(persistence.attempts).toHaveLength(0);
   });
 });

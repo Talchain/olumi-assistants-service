@@ -263,7 +263,8 @@ describe('2.675 — each voice keeps ITS truth conditions, and none borrows anot
     // into the voice that was already fixed, nor disturb it.
     const unevaluated = buildConstraintDisclosureFromState('unevaluated', ONE);
     expect(unevaluated).toContain('One limit on your model could not be checked');
-    expect(unevaluated).toContain('We could not line it up with anything this analysis measures');
+    // 25 Sep 2026 (#69 5831708206): no asserted cause on a row nothing scored.
+    expect(unevaluated).toContain('This model could not check it yet');
     expect(unevaluated).not.toContain('could not be matched');
     expect(unevaluated).not.toContain('This analysis does not test');
     expect(unevaluated).not.toContain('was checked on this run');

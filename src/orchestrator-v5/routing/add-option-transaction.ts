@@ -81,8 +81,10 @@
  */
 import { z } from 'zod';
 
+import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { normaliseIdBase } from '../../cee/utils/id-normalizer.js';
+import { InterventionV3 } from '../../schemas/cee-v3.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
 
 /**
@@ -95,6 +97,10 @@ export interface AddOptionGraphView {
     readonly id: string;
     readonly kind: string;
     readonly label?: string;
+    /** A factor's category — which factors a NEW factor may point at depends on it. */
+    readonly category?: string;
+    /** An option's levels (`NodeV3.interventions`), read only to refuse a second option with the SAME levels. */
+    readonly interventions?: unknown;
   }>;
   readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string }>;
 }
@@ -135,6 +141,11 @@ const InterventionSpecSchema = z.object({
   // raw_value is deliberately polymorphic (categorical/boolean raw values keep
   // their original type); its NUMBER branch must still be finite.
   raw_value: z.union([FiniteNumber, z.string(), z.boolean()]).optional(),
+  // C2 (#70 5844217159): WHOSE this level is. Absent = the user's (today's bytes). `cee_hypothesis` is Olumi's
+  // estimate, the literal an adopted Olumi level already carries. Derived from the contract's own enum, never
+  // restated; `brief_extraction` is the drafter's and never an Agent's. Typed, so any other value is
+  // `parameters_invalid` — refused, never dropped and stamped as the user's.
+  source: InterventionV3.shape.source.extract(['user_specified', 'cee_hypothesis']).optional(),
 });
 
 const AddOptionParamsSchema = z.object({
@@ -154,7 +165,16 @@ export type AddOptionSkipReason =
   | 'option_id_invalid'
   | 'factor_not_found'
   | 'factor_not_factor'
-  | 'duplicate_factor';
+  | 'duplicate_factor'
+  // The option would set exactly the levels an existing option sets: the engine cannot tell them apart
+  // (PLoT `validation/identical-options.ts` calls it a validation error), and the run drops one silently.
+  | 'same_levels_as_existing_option';
+
+/** The existing option a refused one would duplicate, so the refusal names it. */
+export interface SameLevelsAs {
+  readonly id: string;
+  readonly label: string;
+}
 
 export interface AddOptionProposal {
   readonly operations: PatchOperation[];
@@ -170,7 +190,13 @@ export interface AddOptionProposal {
 
 export type AddOptionBuildResult =
   | { readonly matched: true; readonly proposal: AddOptionProposal }
-  | { readonly matched: false; readonly reason: AddOptionSkipReason };
+  | { readonly matched: false; readonly reason: AddOptionSkipReason; readonly sameAs?: SameLevelsAs };
+
+/**
+ * (A) — the most options ONE typed transaction may add. Four options of up to
+ * six factors each stay inside `TYPED_TRANSACTION_ENVELOPE_CAP` (4 × 8 = 32).
+ */
+export const MAX_OPTIONS_PER_TRANSACTION = 4;
 
 /** Canonical id pattern (mirrors NodeV3/OptionV3 `id`). */
 const CANONICAL_ID_RE = /^[a-z0-9_:-]+$/;
@@ -188,6 +214,48 @@ function findNode(
 
 function nodeIdExists(graph: AddOptionGraphView, id: string): boolean {
   return graph.nodes.some((n) => n.id === id);
+}
+
+/** PLoT's tolerance for "the same level" (`validation/identical-options.ts` EPSILON). */
+const SAME_LEVEL_EPSILON = 1e-9;
+
+/** An option's VALUED levels, factor id → value. A null or non-numeric entry is a link without a level, not a level. */
+function levelsOf(raw: unknown): Map<string, number> {
+  const levels = new Map<string, number>();
+  if (raw === null || typeof raw !== 'object') return levels;
+  for (const [factorId, entry] of Object.entries(raw as Record<string, unknown>)) {
+    const value =
+      typeof entry === 'number'
+        ? entry
+        : entry !== null && typeof entry === 'object' ? (entry as { value?: unknown }).value : undefined;
+    if (typeof value === 'number' && Number.isFinite(value)) levels.set(factorId, value);
+  }
+  return levels;
+}
+
+/**
+ * ⛔ A SECOND OPTION WITH THE SAME LEVELS IS NOT A NEW CHOICE (served DL browser run bf-20260926T101424Z turn 3:
+ * "Test £54 versus £59 by customer cohort before rollout" set only `pro_plan_price` to the value "Raise Pro to £54"
+ * already set; the run left it out with no warning and its card read "Not analysed"). Compared on the VALUED levels,
+ * exactly as the engine compares them: same factors, each within PLoT's epsilon. An existing option's unsized link
+ * does not tell it apart — the served "Raise Pro to £54" had one, and the run still dropped the duplicate. The caller
+ * never compares a NEW option with no levels or an unsized link: it is added as today and readiness names what is missing.
+ */
+function existingOptionWithSameLevels(bundle: Record<string, unknown>, graph: AddOptionGraphView): SameLevelsAs | undefined {
+  const mine = levelsOf(bundle);
+  if (mine.size === 0) return undefined;
+  for (const node of graph.nodes) {
+    if (node.kind !== 'option') continue;
+    const theirs = levelsOf(node.interventions);
+    if (theirs.size !== mine.size) continue;
+    let same = true;
+    for (const [factorId, value] of mine) {
+      const other = theirs.get(factorId);
+      if (other === undefined || Math.abs(other - value) > SAME_LEVEL_EPSILON) { same = false; break; }
+    }
+    if (same) return { id: node.id, label: node.label ?? node.id };
+  }
+  return undefined;
 }
 
 /**
@@ -208,15 +276,22 @@ function deriveOptionId(label: string, graph: AddOptionGraphView): string {
 /**
  * A canonical structural edge (topology, not a causal belief): the shared
  * `STRUCTURAL_EDGE_DEFAULTS` (strength 1.0 / exists 1.0 / positive) plus a
- * truthful `user_specified` provenance. Full canonical value because the
- * confirm-side apply does not run `enforceStructuralEdgeDefaults`.
+ * truthful provenance — `user_specified` unless the link carries an Olumi
+ * level (`cee_hypothesis`, DL #70 5845538501). Never `defaulted`: that flag
+ * means a causal strength this system chose, and this edge has none. Full
+ * canonical value because the confirm-side apply does not run
+ * `enforceStructuralEdgeDefaults`.
  */
-function structuralEdgeValue(from: string, to: string): Record<string, unknown> {
+export function structuralEdgeValue(
+  from: string,
+  to: string,
+  source: 'user_specified' | 'cee_hypothesis' = 'user_specified',
+): Record<string, unknown> {
   return {
     from,
     to,
     ...STRUCTURAL_EDGE_DEFAULTS,
-    provenance: { source: 'user_specified' as const },
+    provenance: { source },
   };
 }
 
@@ -273,7 +348,7 @@ export function buildAddOptionTransaction(
   }
 
   // Canonical top-level InterventionV3 bundle (the spelling GraphV3 preserves
-  // and run_analysis reads). `source: 'user_specified'` and an exact-id
+  // and run_analysis reads). `source` (the user's unless the spec says Olumi's) and an exact-id
   // `target_match` mirror `normalise-option-interventions.freshInterventionV3`.
   const valued = interventions.filter(
     (iv): iv is typeof iv & { value: number } => iv.value !== null,
@@ -283,7 +358,7 @@ export function buildAddOptionTransaction(
   for (const iv of valued) {
     const entry: Record<string, unknown> = {
       value: iv.value,
-      source: 'user_specified',
+      source: iv.source ?? 'user_specified',
       target_match: {
         node_id: iv.factor_id,
         match_type: 'exact_id',
@@ -294,6 +369,8 @@ export function buildAddOptionTransaction(
     if (iv.raw_value !== undefined) entry.raw_value = iv.raw_value;
     interventionBundle[iv.factor_id] = entry;
   }
+  const sameAs = unvalued.length === 0 ? existingOptionWithSameLevels(interventionBundle, graph) : undefined;
+  if (sameAs !== undefined) return { matched: false, reason: 'same_levels_as_existing_option', sameAs };
 
   const operations: PatchOperation[] = [
     {
@@ -311,7 +388,8 @@ export function buildAddOptionTransaction(
       (iv): PatchOperation => ({
         op: 'add_edge',
         path: `${optionId}::${iv.factor_id}`,
-        value: structuralEdgeValue(optionId, iv.factor_id),
+        // The link says whose level it carries: an Olumi level's link is Olumi's.
+        value: structuralEdgeValue(optionId, iv.factor_id, iv.source ?? 'user_specified'),
       }),
     ),
   ];
@@ -327,4 +405,306 @@ export function buildAddOptionTransaction(
       linkedUnvaluedFactorIds: unvalued.map((iv) => iv.factor_id),
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// (A) — several options in ONE transaction (Canonical CONTRACT #70 5841241418)
+// ---------------------------------------------------------------------------
+
+/**
+ * `chip.parameters` for a multi-option add:
+ *
+ *   { parent_decision_id?, options: [ <the single-option spec above>, ... ] }
+ *
+ * A top-level `parent_decision_id` is the default for every entry that omits
+ * its own. Each entry is the SAME spec `buildAddOptionTransaction` validates —
+ * there is one definition of an option add, composed, never a second parser.
+ */
+const MultiOptionParamsSchema = z.object({
+  parent_decision_id: z.string().min(1).optional(),
+  options: z.array(z.record(z.string(), z.unknown())).min(1),
+});
+
+export type AddOptionsSkipReason =
+  | AddOptionSkipReason
+  | 'too_many_options'
+  // ONE HELD CHANGE ADDS THE MISSING FACTOR AND THE OPTION (ruling #70 5843972346 + 5843988693).
+  | 'new_factor_exists'
+  | 'factor_id_invalid'
+  | 'factor_id_collision'
+  | 'affects_target_invalid'
+  | 'new_factor_unreachable'
+  | 'new_factor_not_found'
+  | 'new_factor_unused';
+
+export type AddOptionsBuildResult =
+  | {
+      readonly matched: true;
+      /** One proposal per option, in request order. */
+      readonly proposals: readonly AddOptionProposal[];
+      /** Every option's ops, concatenated in order: ONE batch, ONE hold. */
+      readonly operations: PatchOperation[];
+      /** Factors this batch ADDS, so a caller names them by label (the pre-edit graph does not have them). */
+      readonly newFactors: ReadonlyArray<{ readonly id: string; readonly label: string }>;
+    }
+  | { readonly matched: false; readonly reason: AddOptionsSkipReason; readonly index?: number; readonly sameAs?: SameLevelsAs };
+
+// ---------------------------------------------------------------------------
+// ONE HELD CHANGE ADDS THE MISSING FACTOR AND THE OPTION
+// (DL #70 5843303596; contract 5843960061; Canonical ruling 5843972346 + correction 5843988693)
+// ---------------------------------------------------------------------------
+
+/**
+ * `chip.parameters.new_factors` — factors the model lacks, added in the SAME batch as the option(s) that set
+ * them, so ONE approval lands both. An option's intervention names a new factor by `factor_key` (its
+ * batch-local `key`), never by label or a guessed id; the id is given or derived HERE (`fac_<slug>`,
+ * collision-free). Wire pinned with Runtime: #70 5844014025.
+ *
+ * STRICT on purpose: the add-option spec is non-strict, so an unknown key there is dropped silently — the
+ * exact way a "unit" or "current value" would vanish. There is no carrier for a value on this path (R4
+ * screens `add_node` for `source`), so a factor's current value is set afterwards through the value path,
+ * which records who said it.
+ */
+const NewFactorSpecSchema = z
+  .object({
+    /** The batch-local handle an option's intervention names it by (`factor_key`). */
+    key: z.string().min(1),
+    factor_id: z.string().min(1).optional(),
+    label: z.string().min(1),
+    affects: z
+      .array(z.object({ node_id: z.string().min(1), effect_direction: z.enum(['positive', 'negative']) }).strict())
+      .min(1)
+      // ⛔ One link per target (review 5844092217 B1): a repeated `node_id` emitted two `add_edge`s to the
+      // same pair — HELD, then "Edge already exists" at apply, so the user's "yes" landed nothing.
+      .refine((a) => new Set(a.map((x) => x.node_id)).size === a.length, { message: 'duplicate affects target' }),
+  })
+  .strict();
+const NewFactorsSchema = z
+  .array(NewFactorSpecSchema)
+  .min(1)
+  .refine((specs) => new Set(specs.map((f) => f.key)).size === specs.length, { message: 'duplicate key' });
+
+/** What a new factor may point at: what served agent-lane graphs link a factor to (never an option/decision, never a lever). */
+function isAffectsTarget(node: { kind: string; category?: string } | undefined): boolean {
+  if (node === undefined) return false;
+  if (node.kind === 'goal' || node.kind === 'outcome' || node.kind === 'risk') return true;
+  return node.kind === 'factor' && (node.category === 'observable' || node.category === 'external');
+}
+
+/** Does a path from `start` reach a goal node over the view's directed edges? */
+function reachesGoal(graph: AddOptionGraphView, start: string): boolean {
+  const kindOf = new Map(graph.nodes.map((n) => [n.id, n.kind] as const));
+  const seen = new Set<string>([start]);
+  const queue = [start];
+  while (queue.length > 0) {
+    const at = queue.shift()!;
+    if (kindOf.get(at) === 'goal') return true;
+    for (const e of graph.edges) {
+      if (e.from === at && !seen.has(e.to)) {
+        seen.add(e.to);
+        queue.push(e.to);
+      }
+    }
+  }
+  return false;
+}
+
+const sameLabel = (a: string | undefined, b: string): boolean =>
+  (a ?? '').trim().toLowerCase().replace(/\s+/g, ' ') === b.trim().toLowerCase().replace(/\s+/g, ' ');
+
+/**
+ * Olumi's DEFAULT hypothesis for a new factor's link to what it affects: the drafter's own default-strength
+ * edge (`STRENGTH_DEFAULT_SIGNATURE`, `DEFAULT_EXISTS_PROBABILITY`), stamped `defaulted` + `cee_hypothesis`
+ * and signed by the USER's stated direction. Never `STRUCTURAL_EDGE_DEFAULTS`: strength 1.0 is topology, and
+ * on a causal link it would claim the factor fully drives what it touches.
+ */
+function hypothesisEdgeValue(from: string, to: string, direction: 'positive' | 'negative'): Record<string, unknown> {
+  return {
+    from,
+    to,
+    strength: {
+      mean: direction === 'negative' ? -STRENGTH_DEFAULT_SIGNATURE.mean : STRENGTH_DEFAULT_SIGNATURE.mean,
+      std: STRENGTH_DEFAULT_SIGNATURE.std,
+    },
+    exists_probability: DEFAULT_EXISTS_PROBABILITY,
+    effect_direction: direction,
+    defaulted: true,
+    provenance: { source: 'cee_hypothesis' as const },
+  };
+}
+
+type NewFactorPlan =
+  | {
+      readonly ok: true;
+      readonly factors: ReadonlyArray<{ readonly key: string; readonly id: string; readonly label: string }>;
+      readonly nodeOps: PatchOperation[];
+      readonly edgeOps: PatchOperation[];
+      readonly view: AddOptionGraphView;
+    }
+  | { readonly ok: false; readonly reason: AddOptionsSkipReason };
+
+function planNewFactors(raw: unknown, graph: AddOptionGraphView): NewFactorPlan {
+  const parsed = NewFactorsSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, reason: 'parameters_invalid' };
+  let view = graph;
+  const factors: { key: string; id: string; label: string }[] = [];
+  const nodeOps: PatchOperation[] = [];
+  const edgeOps: PatchOperation[] = [];
+  for (const spec of parsed.data) {
+    if (view.nodes.some((n) => sameLabel(n.label, spec.label))) return { ok: false, reason: 'new_factor_exists' };
+    let id: string;
+    if (spec.factor_id !== undefined) {
+      if (!CANONICAL_ID_RE.test(spec.factor_id)) return { ok: false, reason: 'factor_id_invalid' };
+      if (nodeIdExists(view, spec.factor_id)) return { ok: false, reason: 'factor_id_collision' };
+      id = spec.factor_id;
+    } else {
+      const base = `fac_${normaliseIdBase(spec.label)}`;
+      id = base;
+      for (let n = 2; nodeIdExists(view, id); n += 1) id = `${base}_${n}`;
+    }
+    for (const a of spec.affects) {
+      if (!isAffectsTarget(findNode(graph, a.node_id))) return { ok: false, reason: 'affects_target_invalid' };
+    }
+    if (!spec.affects.some((a) => reachesGoal(graph, a.node_id))) return { ok: false, reason: 'new_factor_unreachable' };
+    nodeOps.push({ op: 'add_node', path: id, value: { id, kind: 'factor', label: spec.label, category: 'controllable' } });
+    for (const a of spec.affects) {
+      edgeOps.push({ op: 'add_edge', path: `${id}::${a.node_id}`, value: hypothesisEdgeValue(id, a.node_id, a.effect_direction) });
+    }
+    factors.push({ key: spec.key, id, label: spec.label });
+    view = {
+      nodes: [...view.nodes, { id, kind: 'factor', label: spec.label, category: 'controllable' }],
+      edges: [...view.edges, ...spec.affects.map((a) => ({ from: id, to: a.node_id }))],
+    };
+  }
+  return { ok: true, factors, nodeOps, edgeOps, view };
+}
+
+/** Rewrite `{factor_key}` interventions to the batch's own ids; `null` when one names no new factor. */
+function resolveNewFactorRefs(
+  spec: Record<string, unknown>,
+  factors: ReadonlyArray<{ readonly key: string; readonly id: string }>,
+): Record<string, unknown> | null {
+  const ivs = spec.interventions;
+  if (!Array.isArray(ivs)) return spec;
+  const out: unknown[] = [];
+  for (const iv of ivs) {
+    if (iv !== null && typeof iv === 'object' && 'factor_key' in (iv as Record<string, unknown>)) {
+      const { factor_key: key, ...rest } = iv as Record<string, unknown>;
+      const hit = typeof key === 'string' ? factors.find((f) => f.key === key) : undefined;
+      if (hit === undefined) return null;
+      out.push({ ...rest, factor_id: hit.id });
+    } else {
+      out.push(iv);
+    }
+  }
+  return { ...spec, interventions: out };
+}
+
+/**
+ * Build ONE batch for one or several options.
+ *
+ * A bag WITHOUT `options` is the single-option spec, byte-identical to
+ * `buildAddOptionTransaction`. With `options`, each entry is built against the
+ * graph PLUS the options before it, so ids stay distinct and a later entry can
+ * never collide with an earlier one. ALL-OR-NOTHING: the first entry that fails
+ * fails the whole batch, with its reason and index — no partial proposal.
+ */
+export function buildAddOptionsTransaction(
+  parameters: unknown,
+  graph: AddOptionGraphView | null,
+): AddOptionsBuildResult {
+  const bag =
+    parameters !== null && typeof parameters === 'object' && !Array.isArray(parameters)
+      ? (parameters as Record<string, unknown>)
+      : null;
+  // No new factors: exactly the pre-existing path, byte for byte.
+  if (bag === null || !('new_factors' in bag)) return buildOptionsOnly(parameters, graph);
+  if (graph === null) return { matched: false, reason: 'no_graph' };
+
+  const plan = planNewFactors(bag.new_factors, graph);
+  if (!plan.ok) return { matched: false, reason: plan.reason };
+  const { new_factors: _newFactors, ...rest } = bag;
+  let resolved: Record<string, unknown>;
+  if (Array.isArray(rest.options)) {
+    const options: unknown[] = [];
+    for (const entry of rest.options) {
+      if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+        options.push(entry);
+        continue;
+      }
+      const r = resolveNewFactorRefs(entry as Record<string, unknown>, plan.factors);
+      if (r === null) return { matched: false, reason: 'new_factor_not_found' };
+      options.push(r);
+    }
+    resolved = { ...rest, options };
+  } else {
+    const r = resolveNewFactorRefs(rest, plan.factors);
+    if (r === null) return { matched: false, reason: 'new_factor_not_found' };
+    resolved = r;
+  }
+
+  // The options are built against the graph PLUS the new factors, by the one option builder.
+  const built = buildOptionsOnly(resolved, plan.view);
+  if (!built.matched) return built;
+  // A factor no option sets is not what this path is for: refuse rather than add a stray lever.
+  const used = new Set(built.proposals.flatMap((p) => [...p.configuredFactorIds, ...p.linkedUnvaluedFactorIds]));
+  if (!plan.factors.every((f) => used.has(f.id))) return { matched: false, reason: 'new_factor_unused' };
+
+  // ORDER (pinned with Runtime, #70 5844014025): the first option's add_node (the held change's handle) →
+  // every new factor node → decision→option → factor→affects → option→factor → any further options' ops.
+  // Every node precedes every edge that names it.
+  const firstLen = built.proposals[0]!.operations.length;
+  const firstOps = built.operations.slice(0, firstLen);
+  const laterOps = built.operations.slice(firstLen);
+  return {
+    matched: true,
+    proposals: built.proposals,
+    operations: [firstOps[0]!, ...plan.nodeOps, firstOps[1]!, ...plan.edgeOps, ...firstOps.slice(2), ...laterOps],
+    newFactors: plan.factors.map((f) => ({ id: f.id, label: f.label })),
+  };
+}
+
+function buildOptionsOnly(
+  parameters: unknown,
+  graph: AddOptionGraphView | null,
+): AddOptionsBuildResult {
+  const multi =
+    parameters !== null &&
+    typeof parameters === 'object' &&
+    !Array.isArray(parameters) &&
+    'options' in (parameters as Record<string, unknown>);
+  if (!multi) {
+    const single = buildAddOptionTransaction(parameters, graph);
+    return single.matched
+      ? { matched: true, proposals: [single.proposal], operations: [...single.proposal.operations], newFactors: [] }
+      : { matched: false, reason: single.reason, ...(single.sameAs !== undefined ? { sameAs: single.sameAs } : {}) };
+  }
+  if (graph === null) return { matched: false, reason: 'no_graph' };
+  const parsed = MultiOptionParamsSchema.safeParse(parameters);
+  if (!parsed.success) return { matched: false, reason: 'parameters_invalid' };
+  const { parent_decision_id, options } = parsed.data;
+  if (options.length > MAX_OPTIONS_PER_TRANSACTION) {
+    return { matched: false, reason: 'too_many_options' };
+  }
+
+  let view: AddOptionGraphView = graph;
+  const proposals: AddOptionProposal[] = [];
+  for (let index = 0; index < options.length; index += 1) {
+    const entry = options[index]!;
+    const spec =
+      parent_decision_id !== undefined && entry.parent_decision_id === undefined
+        ? { ...entry, parent_decision_id }
+        : entry;
+    const built = buildAddOptionTransaction(spec, view);
+    if (!built.matched) return { matched: false, reason: built.reason, index, ...(built.sameAs !== undefined ? { sameAs: built.sameAs } : {}) };
+    proposals.push(built.proposal);
+    const { optionId, optionLabel } = built.proposal;
+    // The new option's levels ride into the view, so a LATER option in the same batch cannot duplicate it either.
+    const addNode = built.proposal.operations[0]!.value as { interventions?: unknown };
+    view = {
+      nodes: [...view.nodes, { id: optionId, kind: 'option', label: optionLabel, interventions: addNode.interventions }],
+      edges: view.edges,
+    };
+  }
+  return { matched: true, proposals, operations: proposals.flatMap((p) => p.operations), newFactors: [] };
 }

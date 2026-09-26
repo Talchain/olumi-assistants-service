@@ -61,7 +61,7 @@ import {
   winnerOptionResultSource,
 } from '../../orchestrator/context/option-result-source.js';
 import { RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED } from '../compose/claim-safety-cage.js';
-import { readMayNameLeadingOptionVerdictForFact } from '../context/claim-safety-read.js';
+import { mayPresentComparedRunLeader, mayPresentComparedRunVerdicts } from './compared-run-leader.js';
 
 import { projectRunFact, selectTwoNewestRunAnalysisFacts } from './compare-runs.js';
 // ⭐ THE BAND LIVES IN ITS OWN MODULE NOW, AND IT HAS TWO READERS. The
@@ -99,7 +99,15 @@ export type RunDeltaRefusal =
    * one of the contract's own fabrication rules. Fail-closed and LOUD: the
    * caller must treat this as a producer defect, never as ordinary absence.
    */
-  | 'refused_by_contract';
+  | 'refused_by_contract'
+  /**
+   * One of the two runs was started by the server, not asked for by the user
+   * ({@link mayPresentComparedRunVerdicts}). Its leader, per-option scores and
+   * trust verdict are confined, and a comparison would re-ship them (review of
+   * #1857, B5) — so there is no honest `run_delta` for this pair. Ordinary absence,
+   * not a producer defect.
+   */
+  | 'unrequested_run_in_pair';
 
 export type BuildRunDeltaResult =
   | { readonly kind: 'ok'; readonly delta: RunDelta }
@@ -443,6 +451,12 @@ export function buildRunDelta(input: {
 }): BuildRunDeltaResult {
   const pair = selectTwoNewestRunAnalysisFacts(input.priorFacts);
   if (pair === null) return { kind: 'none', reason: 'insufficient_runs' };
+  // ⛔ A pair with a run nobody asked for has no honest delta: its scores and trust verdict are
+  // confined (review of #1857, B5), and withholding only its leader id still lets
+  // `win_probabilities` name it by arithmetic. Fail closed on the whole block.
+  if (!mayPresentComparedRunVerdicts(pair.prior) || !mayPresentComparedRunVerdicts(pair.current)) {
+    return { kind: 'none', reason: 'unrequested_run_in_pair' };
+  }
 
   const priorEchoes = readRunEchoes(pair.prior);
   const currentEchoes = readRunEchoes(pair.current);
@@ -473,12 +487,10 @@ export function buildRunDelta(input: {
   // entitle the claim. The contract's absence semantics are explicit: *"ABSENCE
   // of an id means 'no entitled leader claim on that side', never 'no leader
   // existed'; a consumer must not name one."*
-  const priorEntitled =
-    input.mayNameLeadingOption
-    && readMayNameLeadingOptionVerdictForFact(pair.prior).may_name_leading_option;
-  const currentEntitled =
-    input.mayNameLeadingOption
-    && readMayNameLeadingOptionVerdictForFact(pair.current).may_name_leading_option;
+  // ⛔ …and that run was ASKED FOR (`mayPresentComparedRunLeader`, the one per-run authority
+  // shared with the "What changed?" gate — review of #1857, B4).
+  const priorEntitled = mayPresentComparedRunLeader(input.mayNameLeadingOption, pair.prior);
+  const currentEntitled = mayPresentComparedRunLeader(input.mayNameLeadingOption, pair.current);
 
   const priorLeaderId = priorEntitled ? priorProjection.leader_option_id : null;
   const currentLeaderId = currentEntitled ? currentProjection.leader_option_id : null;

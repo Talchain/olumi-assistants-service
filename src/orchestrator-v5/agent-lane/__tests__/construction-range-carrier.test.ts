@@ -91,7 +91,8 @@ function product() {
       if (result.kind !== 'mutated') return { status: 422, json: {} };
       graph = structuredClone(result.graph) as unknown as Stored;
       rev += 1;
-      return { status: 200, json: {} };
+      // The real handler's own response: it carries this write's `graph_patch` block.
+      return { status: 200, json: result.response as unknown as Record<string, unknown> };
     }
     return { status: 200, json: { graph, graph_hash: `h${rev}` } };
   };

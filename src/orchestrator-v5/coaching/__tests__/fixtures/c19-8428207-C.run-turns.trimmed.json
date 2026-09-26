@@ -1,0 +1,164 @@
+{
+  "_provenance": {
+    "source_file": "output/paul-test-20260923/construction-witness/raw/c19-8428207-turns.jsonl",
+    "source_sha256": "971ef671efa96e995bf38bf5d2584b5018561231ef38465b26cf509970136abd",
+    "turns_kept": [
+      "A2r"
+    ],
+    "served_build": "CEE 8428207aa3e5524bb7c2ca482b9694af4b40f246 (staging)",
+    "route": "POST /agent/v1/turn (agent lane, served wire response)",
+    "captured": "2026-09-24T16:45:10.074Z by the OpenAI Runtime witness c19 (turns log line index 2, sc A, 'A2r run (typed Run)', request_id 1054ad70-06a4-4a01-ac74-9a1016d26e01)",
+    "trimmed": true,
+    "trim_note": "Only the Run turns are kept, and of each only: graph_hash, analysis_state (whole), analysis_ready {status, may_run, goal_node_id, freshness, freshness_reason, graph_hash_at_run, current_graph_hash, computed_at, options[{option_id,label}]}, the single analysis_result block {type, computed_against_hash, leading_option_id, summary, win_probabilities, enrichment {robustness, confidence_tier, option_comparison_status}}, and the turn's tools_called. Dropped: assistant_text, draft_graph, suggested_actions, diagnostics, provider calls, receipts and every other enrichment field. Values are byte-identical to the source for every kept field.",
+    "capture_note": "The source holds the ROUTE response only, not the internal /orchestrate/v2/turn run response the Runtime hands to captureAnalysis. Tests reconstruct that capture from the same turn's analysis_state + analysis_result (the same run: identical scenario, hash and computed_at).",
+    "why_this_fixture": "Near tie with one fragile edge (near_tie.is_tie true): the DSK-P-003 badge must be withheld while the card ships. scenario_id is the c19-8428207-A.json SID: the same scenario A (the log's A5/A7 lines trim byte-identical to fixture A's t5/t7)."
+  },
+  "scenario_id": "148205b9-e55e-4930-9342-9d69fd032fad",
+  "turns": {
+    "A2r": {
+      "tools_called": [
+        "run_analysis"
+      ],
+      "graph_hash": "63e812138d03cbb8",
+      "analysis_state": {
+        "run_state": {
+          "kind": "complete_current",
+          "computed_at": "2026-09-24T16:44:57.256Z"
+        },
+        "readiness": {
+          "status": "unknown",
+          "blockers": []
+        },
+        "leader_claim": {
+          "permitted": false,
+          "withheld_reason": "options_do_not_separate",
+          "separation": "near_tie"
+        },
+        "robustness": {
+          "aggregate_level": "very_low"
+        },
+        "usable_for_prose": true,
+        "usable_for_chips": true,
+        "usable_for_followup": true,
+        "requires_rerun": false,
+        "blocked_unusable": false,
+        "contradictions": []
+      },
+      "analysis_ready": {
+        "status": "ready",
+        "may_run": true,
+        "goal_node_id": "velocity",
+        "freshness": "fresh",
+        "freshness_reason": "agent_readback_run_state_current",
+        "graph_hash_at_run": "63e812138d03cbb8",
+        "current_graph_hash": "63e812138d03cbb8",
+        "computed_at": "2026-09-24T16:44:57.256Z",
+        "options": [
+          {
+            "option_id": "hire_a_tech_lead",
+            "label": "Hire a Tech Lead"
+          },
+          {
+            "option_id": "hire_two_developers",
+            "label": "Hire Two Developers"
+          },
+          {
+            "option_id": "maintain_current_team",
+            "label": "Maintain Current Team"
+          }
+        ]
+      },
+      "analysis_result": {
+        "type": "analysis_result",
+        "computed_against_hash": "63e812138d03cbb8",
+        "leading_option_id": "hire_two_developers",
+        "summary": "Hire Two Developers scored highest against your goal in 50% of runs of this model, but the analysis treats this as a close call. The result is not yet robust — small changes could flip it.",
+        "win_probabilities": {
+          "Hire a Tech Lead": 0.44543333333333346,
+          "Hire Two Developers": 0.49993333333333323,
+          "Maintain Current Team": 0.05463333333333327
+        },
+        "enrichment": {
+          "robustness": {
+            "level": "very_low",
+            "near_tie": {
+              "gap": 0.05449999999999977,
+              "is_tie": true,
+              "threshold": 0.1,
+              "top_option_id": "hire_two_developers",
+              "tied_option_ids": [
+                "hire_two_developers",
+                "hire_a_tech_lead"
+              ],
+              "second_option_id": "hire_a_tech_lead"
+            },
+            "is_robust": false,
+            "confidence": 0.49993333333333323,
+            "robust_edges": [
+              {
+                "to_id": "velocity",
+                "edge_id": "team_coordination_efficiency->velocity",
+                "from_id": "team_coordination_efficiency",
+                "to_label": "Velocity",
+                "from_label": "Team coordination efficiency",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "team_coordination_efficiency",
+                "edge_id": "tech_lead_capacity->team_coordination_efficiency",
+                "from_id": "tech_lead_capacity",
+                "to_label": "Team coordination efficiency",
+                "from_label": "Tech lead capacity",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "work_prioritisation_quality",
+                "edge_id": "tech_lead_capacity->work_prioritisation_quality",
+                "from_id": "tech_lead_capacity",
+                "to_label": "Work prioritisation quality",
+                "from_label": "Tech lead capacity",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              },
+              {
+                "to_id": "velocity",
+                "edge_id": "work_prioritisation_quality->velocity",
+                "from_id": "work_prioritisation_quality",
+                "to_label": "Velocity",
+                "from_label": "Work prioritisation quality",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              }
+            ],
+            "fragile_edges": [
+              {
+                "to_id": "velocity",
+                "edge_id": "developer_capacity->velocity",
+                "from_id": "developer_capacity",
+                "visible": true,
+                "severity": "error",
+                "to_label": "Velocity",
+                "from_label": "Developer capacity",
+                "switch_probability": 0.54,
+                "alternative_winner_id": "hire_a_tech_lead",
+                "alternative_winner_label": "Hire a Tech Lead",
+                "marginal_switch_probability": 0.4
+              }
+            ],
+            "display_verdict": "fragile",
+            "confidence_basis": "recommendation_stability_uncalibrated",
+            "recommended_option_id": "hire_two_developers",
+            "display_verdict_reason": "small changes to your assumptions could change which option is most likely to achieve your goal",
+            "recommended_option_label": "Hire Two Developers",
+            "recommended_option_compliance": "not_applicable",
+            "recommended_option_compliance_reason": "no limits were set for this decision"
+          },
+          "confidence_tier": "needs_work",
+          "option_comparison_status": "computed"
+        }
+      }
+    }
+  }
+}

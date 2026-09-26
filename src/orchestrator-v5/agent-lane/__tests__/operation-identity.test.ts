@@ -14,7 +14,9 @@ import { createAgentCapabilities, authorisationTurnId, type InternalDispatch } f
 import { ProposalStore } from '../proposal.js';
 
 const SCENARIO = '11111111-1111-1111-1111-111111111111';
-const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r' };
+// The band is the user's, typed this turn: a link is proposed only with it (#70 5845493088).
+const SAID = 'Competitor discounts strongly raise churn.';
+const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r', user_text: SAID, user_turn_text: SAID };
 
 const GRAPH = {
   nodes: [
@@ -46,7 +48,7 @@ async function authoriseOnce() {
   const caps = createAgentCapabilities(d, new ProposalStore());
   const proposal = await caps.proposeModelChange(ctx, {
     from_label: 'Competitive pricing', to_label: 'Monthly churn',
-    direction: 'negative', rationale: 'competitor discounts raise churn',
+    direction: 'negative', strength: 'strong', rationale: 'competitor discounts raise churn',
   });
   const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposal.proposal_id) });
   const write = posted.find((p) => p.kind === 'system_event');
@@ -73,7 +75,7 @@ describe('the operation identity carried into the write', () => {
     const caps = createAgentCapabilities(d, new ProposalStore());
     const p = await caps.proposeModelChange(ctx, {
       from_label: 'Competitive pricing', to_label: 'Monthly churn',
-      direction: 'positive', rationale: 'competitor discounts raise churn',
+      direction: 'positive', strength: 'strong', rationale: 'competitor discounts raise churn',
     });
     await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     const other = await authoriseOnce();

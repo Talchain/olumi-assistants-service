@@ -21,12 +21,21 @@ import {
   CEE_GOAL_THRESHOLD_FRAME,
   resolveGoalThresholdCapWithProvenance,
 } from '../../utils/goal-threshold-cap.js';
+import { admitGoalBaseline } from '../../cee/factor-extraction/goal-baseline-admissibility.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
+import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
 import type { InterventionV3T } from '../../schemas/cee-v3.js';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
+import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
+import { readIsBaseline } from '../../cee/baseline-identity.js';
+import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
+import { isPercentScaledUnit, unitPinnedScaleFrame } from '../../cee/draft/records/unit-scale-class.js';
+import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
+import { sizeLink, type LinkSizing, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
 import {
   admitCandidateConstraints,
+  canonicaliseLimitUnit,
   type CandidateConstraint,
   type AdmittedConstraint,
 } from './admit-constraint.js';
@@ -81,6 +90,22 @@ export interface CandidateModel {
      */
     target_stated?: boolean;
     value: number | null;
+    /**
+     * The goal metric's CURRENT level, when there is one. Optional because the
+     * banked contract has no such field: absent means no current level, which is
+     * exactly what an older candidate meant. `baseline_known: true` is a figure
+     * the brief gave; `false` with a finite value is Olumi's estimate.
+     * `baseline_provenance` defaults to the goal's own `provenance`.
+     */
+    baseline_known?: boolean;
+    baseline_value?: number | null;
+    baseline_provenance?: string;
+    /**
+     * Whether the goal metric is one part or the whole (C46: "£20k MRR" — Pro MRR or total
+     * MRR?). Optional because the banked contract has no such field: absent or `null` means
+     * the drafter saw no part-or-whole reading, exactly what an older candidate meant.
+     */
+    scope?: GoalScopeDeclaration | null;
   };
   readonly constraints: readonly CandidateConstraint[];
   readonly options: readonly {
@@ -112,11 +137,120 @@ export interface CandidateModel {
      * changes and stays silent on BY HOW MUCH.
      */
     changes?: readonly string[];
+    /**
+     * The drafter's declaration that this is the one option that keeps things as
+     * they are (strict output sends `null` otherwise). Read by `wireInertStatusQuo`
+     * BEFORE the label idioms, so a held status quo never depends on wording.
+     */
+    is_status_quo?: boolean | null;
   }[];
   readonly factors: readonly { label: string; role: 'controllable' | 'observable' | 'external'; baseline_known: boolean; baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null }[];
   readonly risks: readonly { label: string; provenance: string }[];
   readonly outcomes: readonly { label: string; provenance: string }[];
   readonly links: readonly CandidateLink[];
+  /**
+   * Quantities the drafter DECLARES to be other quantities multiplied together (C46). Never
+   * inferred from a label. Optional because the banked contract has no such field: absent
+   * means none was declared, exactly what an older candidate meant.
+   */
+  readonly identities?: readonly CandidateIdentity[];
+}
+
+/**
+ * The drafter's declaration of what the goal metric covers when it could be one part or the
+ * whole. `modelled` is the scope the model measures, `alternative` the other reading, and
+ * `stated_in_brief` is true only when the brief itself says which.
+ */
+export interface GoalScopeDeclaration {
+  readonly modelled: string;
+  readonly alternative: string;
+  readonly stated_in_brief: boolean;
+}
+
+/** "`outcome` is `factors` multiplied together" — a definition the drafter states, by exact label. */
+export interface CandidateIdentity {
+  readonly outcome: string;
+  readonly operation: string;
+  readonly factors: readonly string[];
+  readonly provenance: string;
+}
+
+/**
+ * ⛔ C46 — THE TYPED MARK FOR A PRODUCT THE ANALYSIS CAN ONLY ADD UP.
+ *
+ * The analyse path is a linear SCM (`node = intercept + Σ parent × strength`, #70 5841215337),
+ * so a declared product is always approximated. When an option can push two of its inputs in
+ * opposite directions, even the SIGN of the effect is not provable over the plausible range
+ * (£49 → £59: −1,360 at 100 subscribers, +640 at 300; the linear model says −960 at both), and
+ * the ruling (#70 5841314428) is that no leader or decision-grade claim may rest on it:
+ * `sign_not_provable`. When every option moves the inputs the same way, the direction holds
+ * over the non-negative range and only the size is approximate: `sign_stable_provisional`.
+ * Two options that move the inputs DIFFERENTLY can swap places within the plausible range even
+ * when each is stable alone, so they are `sign_not_provable` too (`comparisons_not_sign_stable`).
+ *
+ * ⭐ HOW IT REACHES THE LEADER CLAIM (C46 stage 1 (a)–(d), #70 5841833807). The mark itself is
+ * construction's report. What is PERSISTED is the checked DECLARATION, on the product's node
+ * (`cee-v3.ts` NodeV3 `nonlinear_identity`); `run_analysis` re-runs this same sign test on the
+ * graph it analysed (`nonlinearIdentityLeaderWithhold`) and withholds the leader it names when
+ * that leader is sign-unproven against another compared option.
+ */
+export type NonlinearIdentityVerdict = 'sign_not_provable' | 'sign_stable_provisional';
+export interface NonlinearIdentityMark {
+  readonly outcome_id: string;
+  readonly operation: 'product';
+  readonly factor_ids: readonly string[];
+  readonly verdict: NonlinearIdentityVerdict;
+  /**
+   * Every option the verdict rests on, by node id, in model order: one that can move the inputs
+   * apart on its own (against carrying on as now), one whose routes through and around the product
+   * move the goal in opposite directions (also against carrying on as now), or one in a comparison
+   * below. Empty when stable.
+   */
+  readonly options_not_sign_stable: readonly string[];
+  /**
+   * Pairs of options (model order) that move the product's inputs DIFFERENTLY — different inputs,
+   * different signs, different levers for two inputs, or one moving none of them — or of which one
+   * also reaches the goal AROUND the product, so which of the two does better can flip within the
+   * plausible range (independent verification of 6e33b95e, B1; re-verification of d2362e9d, B1).
+   */
+  readonly comparisons_not_sign_stable: readonly (readonly [string, string])[];
+}
+
+/** The persisted carrier on the product's node (`cee-v3.ts` NodeV3 `nonlinear_identity`). */
+export interface NonlinearIdentityCarrier {
+  readonly operation: 'product';
+  readonly factor_ids: readonly string[];
+  readonly stated_in_brief: boolean;
+}
+
+/** A declaration that held structurally and bears on the goal — what the carrier persists. */
+interface AcceptedProductIdentity {
+  readonly outcome_id: string;
+  readonly factor_ids: readonly string[];
+  readonly stated_in_brief: boolean;
+}
+
+/**
+ * The sign test's working, per marked product, for the Run-time leader check: which options
+ * cannot be signed against carrying on as now on their own (`unproven_alone`), which move any of
+ * the product's inputs or reach the goal (`moving`), and which pairs of those can swap places.
+ */
+interface ProductIdentityAnalysis {
+  readonly outcome_id: string;
+  readonly goal_id: string;
+  readonly factor_ids: readonly string[];
+  readonly stated_in_brief: boolean;
+  readonly verdict: NonlinearIdentityVerdict;
+  readonly unproven_alone: readonly string[];
+  readonly moving: readonly string[];
+  readonly pairs: readonly (readonly [string, string])[];
+}
+
+interface ProductIdentityFindings {
+  marks: NonlinearIdentityMark[];
+  loss: RepairEntry[];
+  accepted: AcceptedProductIdentity[];
+  analyses: ProductIdentityAnalysis[];
 }
 
 export interface WidenerAdditions {
@@ -174,7 +308,7 @@ export interface AdmittedNode {
    * type was the reason three test files failed the typecheck ratchet while
    * `tsconfig.build.json` — which excludes tests — reported clean.
    */
-  observed_state?: { value: number; unit?: string; source?: string; raw_value?: number; cap?: number; declared_scale?: string };
+  observed_state?: { value: number; unit?: string; source?: string; raw_value?: number; cap?: number; declared_scale?: string; baseline?: number };
   /**
    * `cee-v3.ts` `scale_frame`: the divisor this factor's levels are stated
    * on, for a factor with no baseline. The declared carrier; see the write site.
@@ -197,6 +331,15 @@ export interface AdmittedNode {
    * scenario returned 500 until this was fixed.
    */
   provenance?: 'from_brief' | 'ai_inferred' | 'user_set';
+  /**
+   * `cee-v3.ts` option field. Written ONLY on the option the drafter DECLARED as the
+   * status quo (`is_status_quo`) and that was wired as held — readiness's own first
+   * baseline signal, so a declared status quo is held whatever its label. The idiom
+   * fallback writes no stamp (readiness recognises the idiom itself).
+   */
+  is_baseline?: boolean;
+  /** C46: the checked product declaration on this quantity (`cee-v3.ts` NodeV3 `nonlinear_identity`). */
+  nonlinear_identity?: NonlinearIdentityCarrier;
   /** Normalised 0-1, per the contract. The stated number goes in `_raw`. */
   goal_threshold_raw?: number;
   goal_threshold_cap?: number;
@@ -210,9 +353,34 @@ export interface AdmittedModel {
   readonly edges: readonly AdmittedEdge[];
   readonly goal_constraints: readonly AdmittedConstraint[];
   readonly loss: readonly RepairEntry[];
-  readonly withheld: readonly { from: string; to: string; reason: string; detail: string }[];
+  /**
+   * `loop` is carried only on a `loop_closing_link` entry: the loop that link closed, in the
+   * drafter's own labels, in loop order — so the producer's repair issue names exactly the
+   * loop admission broke (`build-model.ts`, `loopIssues`). Never written to the wire.
+   */
+  readonly withheld: readonly { from: string; to: string; reason: string; detail: string; loop?: readonly string[] }[];
   /** Factors the model called controllable that no option changes — held as context (demoteUnreachedLevers). */
   readonly treated_as_context?: readonly string[];
+  /** Declared products that options move (`markProductIdentities`); each is also a `loss` entry. */
+  readonly nonlinear_identities?: readonly NonlinearIdentityMark[];
+  /**
+   * Options Olumi added that nothing the model holds tells apart from another option — withheld
+   * (`option_indistinct`, `admitCandidateModel`), each with the step said to the user. Not in `withheld`,
+   * which is a list of LINKS by contract; the ledger records each in `loss`.
+   */
+  readonly options_withheld?: readonly WithheldOption[];
+  /** USER-stated options that nothing the model holds tells apart: all kept, and asked about ONCE per group. */
+  readonly indistinct_stated_options?: readonly { readonly options: readonly string[]; readonly question: string }[];
+}
+
+export interface WithheldOption {
+  /** The option's full text, as drafted. */
+  readonly option: string;
+  /** The option it cannot be told from, as drafted. */
+  readonly like: string;
+  readonly reason: 'option_indistinct';
+  /** What the user is told, word for word. */
+  readonly sentence: string;
 }
 
 /** Shorten to the label budget at a word boundary, never mid-word. */
@@ -234,7 +402,7 @@ export function slugId(label: string): string {
 }
 
 /** Same words, ignoring case and spacing — the test for "the same thing". */
-const canonicalLabel = (label: string): string => label.trim().toLowerCase().replace(/\s+/g, ' ');
+export const canonicalLabel = (label: string): string => label.trim().toLowerCase().replace(/\s+/g, ' ');
 
 /**
  * Deterministic, collision-safe id assignment in a fixed traversal order.
@@ -371,6 +539,41 @@ function framedObservedState(f: {
 }
 
 /**
+ * ⛔ AN AI ESTIMATE IS OLUMI'S FIGURE — KEPT, AND NEVER PASSED OFF AS THE USER'S.
+ *
+ * A factor the builder ESTIMATED (`baseline_known: false`, a finite
+ * `baseline_value`) used to be dropped outright: the baseline branch below wrote
+ * `observed_state` only for a KNOWN baseline, so a freshly built model had
+ * nothing for a provisional first analysis to start from.
+ *
+ * ⭐ THE SHAPE IS CAPLESS, AND THAT IS BINDING. `{ value: raw / c, raw_value,
+ * unit?, source: 'cee_inference', extractionType: 'inferred' }` beside the node's `scale_frame: c` — exactly
+ * what `set_factor_value` writes when a user adopts a value on a framed factor
+ * (`construction-range-carrier.test.ts`). NO `observed_state.cap` and NO
+ * `declared_scale`: a capped shape would let Olumi's own guessed range refuse the
+ * user's later correction through the revise path (#1767).
+ *
+ * `source` is written LAST, after every spread, so an estimate can never inherit
+ * `brief_extraction` from a factor the user named. An estimate that cannot be
+ * framed (no usable range, negative, or above the range) stays MISSING — it is
+ * never written unframed, which would raise a blocking scale issue over a number
+ * the user never gave.
+ */
+function estimatedObservedState(
+  f: { baseline_known: boolean; baseline_value: number | null; unit: string | null },
+  c: number | null | undefined,
+): Record<string, unknown> | null {
+  if (f.baseline_known) return null;
+  const raw = f.baseline_value;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+  if (typeof c !== 'number' || !Number.isFinite(c) || c <= 1 || raw < 0 || raw > c) return null;
+  // `extractionType: 'inferred'` is the stamp the conventional builders write for a value the
+  // brief did not state; the canvas reads it to say "Olumi estimate" (served UI b017e3c2 showed
+  // "no source" without it). A value a person later sets withdraws it (`set-factor-value.ts`).
+  return { value: raw / c, raw_value: raw, ...(f.unit ? { unit: f.unit } : {}), source: 'cee_inference', extractionType: 'inferred' };
+}
+
+/**
  * ⭐ A DEFAULT FRAME, DERIVED FROM THE DATA AND DISCLOSED — the backstop.
  *
  * The builder is required to state a `plausible_max` for every factor, and a
@@ -440,10 +643,1358 @@ export function demoteUnreachedLevers<N extends { id: string; kind?: string; lab
   return { nodes: out, demoted };
 }
 
+/**
+ * ⛔ AN INERT STATUS QUO IS A HELD BASELINE, NOT A BROKEN OPTION (Paul's ruling;
+ * the conventional lane already does this in `status-quo-fix.ts`).
+ *
+ * "Maintain current staffing", given no `changes` and no `interventions`, got no
+ * option→factor edge, so readiness raised `OPTION_NO_FACTOR_EDGES` — a blocker
+ * that is not waivable by exclusion — and the WHOLE model was refused. It caused
+ * 4 of 9 hiring builds to fail in an earlier witness. Yet "carry on as now" needs
+ * no level: holding every factor at its starting value IS its specification.
+ *
+ * So the ONE option whose label reads as the status quo (`labelMatchesBaseline`,
+ * the readiness authority's own idiom list) is connected to the factors the
+ * OTHER options set levels on — falling back to the factors they connect to —
+ * with deterministic repair edges. Readiness excludes exactly those edges from
+ * its mapping count (`isRepairAuthoredOptionFactorEdge`), so the option is held,
+ * not asked for a level it cannot have. Pure: it only DECIDES; the caller mints.
+ *
+ * Returns null — the option stays inert, named, and refused — when no label or
+ * TWO labels match (ambiguity is not resolved by guessing), when the matching
+ * option already has any option→factor edge, or when the basis is empty.
+ */
+export function wireInertStatusQuo(
+  nodes: readonly { id: string; kind?: string; label?: string }[],
+  edges: readonly { from: string; to: string }[],
+  interventionsByOption: ReadonlyMap<string, Readonly<Record<string, unknown>>>,
+  declaredStatusQuoIds: ReadonlySet<string> = new Set(),
+): { optionId: string; factorIds: string[] } | null {
+  const options = nodes.filter((n) => n.kind === 'option');
+  const factorIds = new Set(nodes.filter((n) => n.kind === 'factor').map((n) => n.id));
+  /** The factors this option would be held against, or null if it cannot be held (it acts, or nothing to hold). */
+  const holdAgainst = (statusQuo: { id: string }): string[] | null => {
+    if (edges.some((e) => e.from === statusQuo.id && factorIds.has(e.to))) return null;
+    const others = options.filter((o) => o.id !== statusQuo.id);
+    const basis = new Set<string>();
+    for (const o of others) {
+      for (const fid of Object.keys(interventionsByOption.get(o.id) ?? {})) if (factorIds.has(fid)) basis.add(fid);
+    }
+    if (basis.size === 0) {
+      const otherIds = new Set(others.map((o) => o.id));
+      for (const e of edges) if (otherIds.has(e.from) && factorIds.has(e.to)) basis.add(e.to);
+    }
+    return basis.size === 0 ? null : [...basis];
+  };
+  // ⭐ THE DRAFTER'S DECLARATION FIRST (served c673223: "Continue Current Staffing"
+  // is not an idiom, and the turn blocked). Two declared → null: never guess.
+  // ⛔ ONE WRONG FLAG MUST NOT BLOCK WHAT BASE HELD (review 5825562938, B1): a single
+  // declared option that cannot be held (it acts, or there is nothing to hold it
+  // against) falls back to the idiom list, exactly as if nothing were declared. No
+  // idiom is added.
+  const declared = options.filter((o) => declaredStatusQuoIds.has(o.id));
+  if (declared.length > 1) return null;
+  if (declared.length === 1) {
+    const held = holdAgainst(declared[0]!);
+    if (held !== null) return { optionId: declared[0]!.id, factorIds: held };
+  }
+  const matches = options.filter((o) => labelMatchesBaseline(o.label ?? ''));
+  if (matches.length !== 1) return null;
+  const held = holdAgainst(matches[0]!);
+  return held === null ? null : { optionId: matches[0]!.id, factorIds: held };
+}
+
+/**
+ * The shortest mechanism from `from` to `to` over `edges`, or null — THE
+ * option→risk mechanism test (#1830), exported so the producer
+ * (`runtime/build-model.ts`) asks the same question admission answers rather
+ * than a second derivation of it. Pure breadth-first search in edge order; the
+ * caller decides which edges count (admission removes every machine-authored
+ * shortcut first, so no shortcut can be its own mechanism).
+ */
+export function findMechanismPath(
+  edges: readonly { from: string; to: string }[],
+  from: string,
+  to: string,
+): readonly string[] | null {
+  const adjacency = new Map<string, string[]>();
+  for (const e of edges) adjacency.set(e.from, [...(adjacency.get(e.from) ?? []), e.to]);
+  const queue: string[][] = [[from]];
+  const seen = new Set([from]);
+  while (queue.length > 0) {
+    const path = queue.shift()!;
+    const head = path[path.length - 1]!;
+    if (head === to) return path;
+    for (const next of adjacency.get(head) ?? []) {
+      if (seen.has(next)) continue;
+      seen.add(next);
+      queue.push([...path, next]);
+    }
+  }
+  return null;
+}
+
+/**
+ * ⛔ C46 — "£20k MRR" IS NEVER SILENTLY PRO MRR (#70 5841314428: "scope … must be clarified
+ * or explicitly named before analysis; never silently pick one"). MEASURED on Paul's captured
+ * brief: the goal came back as bare "MRR" while every path into it was Pro price and Pro
+ * subscribers, and the scope question lived only in prose.
+ *
+ * Returns the scope to NAME and ASK about, or null: no declaration, a scope the brief itself
+ * stated, or a declaration with nothing to name. Read only from the drafter's declaration —
+ * never from the metric's wording.
+ */
+function unstatedGoalScope(goal: CandidateModel['goal']): { modelled: string; alternative: string } | null {
+  const s = goal.scope;
+  if (s === null || s === undefined || typeof s !== 'object' || s.stated_in_brief !== false) return null;
+  const modelled = typeof s.modelled === 'string' ? s.modelled.trim() : '';
+  const alternative = typeof s.alternative === 'string' ? s.alternative.trim() : '';
+  if (modelled === '' || alternative === '') return null;
+  return metricNamesScope(String(goal.metric ?? ''), modelled, alternative) ? null : { modelled, alternative };
+}
+
+/** Words that never tell one scope from another. */
+const SCOPE_FILLER = new Set(['the', 'a', 'an', 'only', 'just', 'of', 'for', 'and', 'or', 'in', 'on', 'to', 'our', 'its', 'their']);
+const scopeWords = (text: string): Set<string> => new Set(text.toLowerCase().split(/[^a-z0-9]+/)
+  .filter((w) => w !== '' && !SCOPE_FILLER.has(w))
+  .map((w) => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w)));
+
+/**
+ * Words that turn a scope into its COMPLEMENT ("Non-Pro MRR", "MRR excluding Pro", "plans other
+ * than Pro"), after `scopeWords`' plural stripping. A metric carrying one names the part the model
+ * does NOT measure, however many of the modelled scope's words it also contains.
+ */
+const SCOPE_COMPLEMENT = new Set([
+  'non', 'not', 'no', 'ex', 'excl', 'exclude', 'excluding', 'excluded', 'exclusive', 'except', 'excepting', 'exception',
+  'without', 'other', 'beside', 'minus', 'outside', 'rest', 'remaining', 'remainder', 'apart', 'beyond',
+]);
+
+/**
+ * ⭐ N-a (independent verification of 6e33b95e): "Pro MRR" already SAYS which part it is. The
+ * scope counts as stated when the metric's own words contain every word that tells the modelled
+ * scope from the alternative ("pro" in "the Pro plan only" vs "all plans together") and none of
+ * the alternative's. Anything less — bare "MRR", or "Total MRR" while the model measures the Pro
+ * plan — is still named and asked. Plurals and filler words are ignored on both sides.
+ *
+ * ⛔ NEVER A COMPLEMENT (re-verification of d2362e9d, item a). "Non-Pro MRR", "MRR excluding Pro"
+ * and "MRR from plans other than Pro" all contain "pro" and none of "all plans together", and each
+ * names the OTHER part. A complement word counts against the metric unless the modelled scope uses
+ * it itself ("plans other than Pro" is stated by "MRR from plans other than Pro"). Asking is the
+ * safe side: a wrong "stated" silently picks the scope, a wrong "asked" costs one question.
+ */
+function metricNamesScope(metric: string, modelled: string, alternative: string): boolean {
+  const said = scopeWords(metric);
+  const mine = scopeWords(modelled);
+  const other = scopeWords(alternative);
+  if ([...said].some((w) => SCOPE_COMPLEMENT.has(w) && !mine.has(w))) return false;
+  const own = [...mine].filter((w) => !other.has(w));
+  const theirs = [...other].filter((w) => !mine.has(w));
+  return own.length > 0 && own.every((w) => said.has(w)) && !theirs.some((w) => said.has(w));
+}
+
+/** `"A"`, `"A" and "B"`, `"A", "B" and "C"` — words, never ids. */
+const quotedList = (items: readonly string[]): string => {
+  const q = items.map((s) => `"${s}"`);
+  return q.length <= 1 ? (q[0] ?? '') : `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}`;
+};
+
+/**
+ * ⛔ C46 STAGE 1 — CHECK A DECLARED PRODUCT, THEN ASK WHETHER ITS SIGN IS PROVABLE.
+ *
+ * DETECTION IS THE DRAFTER'S DECLARATION, CHECKED STRUCTURALLY, NEVER A LABEL READ. A
+ * declaration is used only when: the operation is `product`; the outcome and every factor
+ * resolve to quantities (goal / outcome / factor) in the admitted model; there are at least two
+ * distinct factors, none of them the outcome; and every factor FEEDS the outcome through the
+ * admitted links. Anything else is rejected and said (`nonlinear_identity_rejected`), and
+ * nothing about it is assumed. A product whose outcome does not reach the goal does not bear on
+ * the comparison and is not marked.
+ *
+ * THE LEVERS. An option's levers are the nodes it acts on: every edge out of it except a held
+ * status quo's repair edges, and — PER LEVER (N-b; re-verification of d2362e9d, item b) — except a
+ * lever whose level equals that factor's baseline. So an option at today's level on every lever
+ * moves nothing, and so does the declared status quo unless one of its levels differs from today
+ * (a flag contradicted by a level is not trusted).
+ *
+ * THE SIGN TEST, PER OPTION. The sign of every simple causal path from a lever to each input is
+ * taken over the admitted links (never through the outcome itself; a lever that IS an input
+ * moves it +). Then:
+ *  · one input moved (or none): the product moves with that input — stable;
+ *  · two or more inputs moved by ONE lever, every path sign equal: they move together, and on
+ *    non-negative quantities the product moves the same way — stable;
+ *  · otherwise — opposite signs or a mixed input (said as "can push … in opposite directions"), or
+ *    inputs moved one way through two or more separate levers whose relative size the structure
+ *    does not state (said as that, item b) — NOT provable (conservative);
+ *  · and, whatever the inputs do, an option that ALSO reaches the goal around the product (below) in
+ *    the OPPOSITE direction to its route through it — NOT provable, even against carrying on as now
+ *    (verification of 1047641f, findings 3 and 4; said as "can push … one way through … and the other
+ *    way by another route"). Routes around that agree in direction keep the sign.
+ *
+ * ⛔ THE COMPARISON ARM (independent verification of 6e33b95e, B1). Checking each option only
+ * against the status quo let two stable options be ranked by a sum of effects that cannot rank
+ * them: an add-on raising revenue per user gains ΔR·S, a referral scheme raising subscribers
+ * gains R·ΔS′, and which is larger depends on the levels R and S sit at. So every option that
+ * reaches the goal carries a SIGNATURE — the sign with which it moves each input (or not at all)
+ * and, when it moves two or more, the lever it moves them through — and any two options whose
+ * signatures differ are a comparison the model cannot sign. Options that move the same one
+ * input the same way, or move both through the same one lever, keep one ranking — unless one of
+ * them also reaches the goal AROUND the product (re-verification of d2362e9d, B1): a lever with a
+ * path to the goal that avoids the outcome, or one that reaches an addend of the outcome, gains
+ * R·ΔS + ΔN against R·ΔS′, so it is paired with every other moving option. The comparison sentence
+ * groups the options by how they move the inputs (item d), never one list read as "all differ".
+ *
+ * Any option or comparison not provable makes the verdict `sign_not_provable`; otherwise, if
+ * any option moves an input, `sign_stable_provisional`, whose sentence never claims that a
+ * result's or a comparison's direction holds. If no option moves an input, the comparison does
+ * not rest on the product and nothing is marked.
+ *
+ * WHOSE READING, AND OF WHAT (N-c). A declaration the brief states (`explicit`) is said as fact;
+ * any other is "Olumi reads …". A declaration on a quantity that has an ADDEND — a direct cause
+ * that is not a declared factor and is not the product's carrier (the one cause every factor's
+ * route runs through) — is only PART of that quantity, and is said so. A cause a factor drives is
+ * still an addend (item c), and so is a cause that drives a factor (finding 3 of 1047641f).
+ */
+function markProductIdentities(
+  declared: readonly CandidateIdentity[],
+  resolve: (label: string) => string | undefined,
+  nodes: readonly AdmittedNode[],
+  edges: readonly { from: string; to: string; effect_direction?: string; origin?: string }[],
+  goalId: string | undefined,
+  declaredStatusQuo: ReadonlySet<string> = new Set(),
+): ProductIdentityFindings {
+  const marks: NonlinearIdentityMark[] = [];
+  const loss: RepairEntry[] = [];
+  const accepted: AcceptedProductIdentity[] = [];
+  const analyses: ProductIdentityAnalysis[] = [];
+  if (declared.length === 0) return { marks, loss, accepted, analyses };
+  const kindOf = new Map(nodes.map((n) => [n.id, n.kind]));
+  const nodeOf = new Map(nodes.map((n) => [n.id, n]));
+  const labelOf = (id: string): string => nodeOf.get(id)?.label ?? id;
+  const QUANTITY = new Set<CandidateNodeKind>(['goal', 'outcome', 'factor']);
+  const INPUT = new Set<CandidateNodeKind>(['outcome', 'factor']);
+
+  // Causal links only: an option's edges are its LEVERS, the decision's are topology.
+  const causal = new Map<string, { to: string; sign: 1 | -1 }[]>();
+  for (const e of edges) {
+    const k = kindOf.get(e.from);
+    if (k === 'decision' || k === 'option') continue;
+    causal.set(e.from, [...(causal.get(e.from) ?? []), { to: e.to, sign: e.effect_direction === 'negative' ? -1 : 1 }]);
+  }
+  const reaches = (from: string, to: string): boolean => findMechanismPath(edges, from, to) !== null;
+  /** Signs of every simple causal path from → to, never passing through `avoid`. Over budget ⇒ both. */
+  const pathSigns = (from: string, to: string, avoid: string): Set<number> => {
+    if (from === to) return new Set([1]);
+    const signs = new Set<number>();
+    let budget = 20_000;
+    const seen = new Set([from]);
+    const walk = (at: string, sign: number): void => {
+      if (signs.size === 2 || --budget <= 0) return;
+      if (at === to) { signs.add(sign); return; }
+      for (const next of causal.get(at) ?? []) {
+        if (seen.has(next.to) || next.to === avoid) continue;
+        seen.add(next.to);
+        walk(next.to, sign * next.sign);
+        seen.delete(next.to);
+      }
+    };
+    walk(from, 1);
+    return budget <= 0 ? new Set([1, -1]) : signs;
+  };
+
+  // N-b: the levers each option really moves, PER LEVER (re-verification of d2362e9d, item b): a
+  // lever left at today's level moves nothing, whatever the option's other levers do. A declared
+  // status quo moves nothing unless it sets some lever off today's level (a flag contradicted by a
+  // level is not trusted).
+  const TODAY_EPSILON = 1e-9;
+  const todayOf = (factorId: string): number | undefined => {
+    const v = nodeOf.get(factorId)?.observed_state?.value;
+    return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+  };
+  const leversOf = (o: AdmittedNode): string[] => {
+    const levers = [...new Set(edges.filter((e) => e.from === o.id && e.origin !== REPAIR_AUTHORED_ORIGIN).map((e) => e.to))];
+    const levelOf = (t: string): number | undefined => o.interventions?.[t]?.value;
+    const atToday = (t: string): boolean => {
+      const level = levelOf(t);
+      const today = todayOf(t);
+      return level !== undefined && today !== undefined && Math.abs(level - today) <= TODAY_EPSILON;
+    };
+    const moved = levers.filter((t) => !atToday(t));
+    // The declared status quo's flag holds unless one of its own levels contradicts it.
+    if (declaredStatusQuo.has(o.id) && !moved.some((t) => levelOf(t) !== undefined)) return [];
+    return moved;
+  };
+
+  for (const d of declared) {
+    const outcomeId = resolve(d.outcome);
+    const factors = Array.isArray(d.factors) ? d.factors : [];
+    const reject = (why: string): void => {
+      loss.push({
+        field_path: `nodes[${outcomeId ?? slugId(String(d.outcome))}].nonlinear_identity_rejected`,
+        before: { outcome: d.outcome, operation: d.operation, factors: [...factors] },
+        after: null,
+        reason:
+          `Olumi read "${d.outcome}" as ${quotedList(factors)} multiplied together, but ${why}, so that ` +
+          'was not used and nothing about it is assumed.',
+        severity: 'warn',
+      } as RepairEntry);
+    };
+    if (d.operation !== 'product') { reject(`"${String(d.operation)}" is not a relationship Olumi can check`); continue; }
+    if (outcomeId === undefined) { reject(`"${d.outcome}" is not in the model`); continue; }
+    if (!QUANTITY.has(kindOf.get(outcomeId)!)) { reject(`"${d.outcome}" is not a quantity in the model`); continue; }
+    const factorIds: string[] = [];
+    let why: string | null = null;
+    for (const f of factors) {
+      const id = resolve(f);
+      if (id === undefined) { why = `"${f}" is not in the model`; break; }
+      if (!INPUT.has(kindOf.get(id)!)) { why = `"${f}" is not a quantity in the model`; break; }
+      if (id === outcomeId) { why = `"${f}" cannot be multiplied into itself`; break; }
+      if (!reaches(id, outcomeId)) { why = `"${f}" does not feed into "${d.outcome}" in the model`; break; }
+      if (!factorIds.includes(id)) factorIds.push(id);
+    }
+    if (why === null && factorIds.length < 2) why = 'a product needs at least two different quantities';
+    if (why !== null) { reject(why); continue; }
+    if (goalId === undefined || (outcomeId !== goalId && !reaches(outcomeId, goalId))) continue;
+    // The DECLARATION holds and bears on the goal: it is persisted as the node's carrier whatever the
+    // options do today, so a Run re-judges it on the graph it analyses (an option added later included).
+    accepted.push({ outcome_id: outcomeId, factor_ids: [...factorIds], stated_in_brief: d.provenance === 'explicit' });
+
+    /**
+     * N-c, re-verification of d2362e9d (item c): an ADDEND is a direct cause of the outcome that is not
+     * a declared factor and is not the product's CARRIER (the one cause every factor's route to the
+     * outcome runs through: price, subscribers -> Pro MRR -> MRR). A cause a factor DRIVES is still an
+     * addend (Pro subscribers -> Non-Pro MRR -> MRR): the old descendant arm ("a factor reaches it")
+     * counted it as part of the product and said "the whole of MRR".
+     * ⛔ AND SO IS A CAUSE THAT DRIVES A FACTOR (verification of 1047641f, finding 3 — the ancestor arm):
+     * "Annual discount" -> Pro subscribers AND -> MRR directly. Its direct link is a term the analysis
+     * ADDS to the product, whatever else it feeds; excluding it left a lever on it neither an addend nor
+     * around the product, so with MRR itself the product its − route was invisible and the discount was
+     * said to move MRR "only one way".
+     */
+    const addends = [...new Set(edges.filter((e) => e.to === outcomeId).map((e) => e.from))].filter((p) => {
+      const k = kindOf.get(p);
+      if (k === 'decision' || k === 'option' || factorIds.includes(p)) return false;
+      const carrier = factorIds.every((f) => pathSigns(f, outcomeId, p).size === 0);
+      return !carrier;
+    });
+    /**
+     * ⛔ AROUND THE PRODUCT (re-verification of d2362e9d, B1). A lever that reaches the goal by a path
+     * that avoids the outcome, or that reaches (or is) an addend of the outcome, changes the goal other
+     * than through the product: its gain is R·ΔS + ΔN while an option moving S alone gains R·ΔS′, and
+     * which is larger depends on the level R sits at. The addend arm is the same shape when the product
+     * is declared on the goal itself (no path can avoid it) or on an outcome with its own addend.
+     */
+    const around = (l: string): boolean =>
+      l === goalId || pathSigns(l, goalId, outcomeId).size > 0 || addends.some((p) => l === p || pathSigns(l, p, outcomeId).size > 0);
+    /**
+     * ⛔ THE DIRECTION OF EACH ROUTE ON THE GOAL (verification of 1047641f, findings 3 and 4). THROUGH the product:
+     * the sign a lever moves an input with (on non-negative quantities the product moves with it), carried to the
+     * goal by the outcome's own route. AROUND it: the `around` routes above, signed — a path to the goal avoiding
+     * the outcome, or a route into an addend, that addend's link into the outcome, then the outcome's route. When
+     * one option's routes disagree, its gain is R·ΔS against −ΔN: which is larger depends on the level R sits at,
+     * so its sign is not proven even against an option that moves nothing (`opposed` below). Routes that agree
+     * keep it.
+     */
+    const times = (a: ReadonlySet<number>, b: ReadonlySet<number>): Set<number> => new Set([...a].flatMap((x) => [...b].map((y) => x * y)));
+    const toGoal = outcomeId === goalId ? new Set([1]) : pathSigns(outcomeId, goalId, outcomeId);
+    const linkSigns = (from: string, to: string): Set<number> =>
+      new Set(edges.filter((e) => e.from === from && e.to === to).map((e) => (e.effect_direction === 'negative' ? -1 : 1)));
+    const throughSigns = (l: string): Set<number> => times(new Set(factorIds.flatMap((f) => [...pathSigns(l, f, outcomeId)])), toGoal);
+    const aroundSigns = (l: string): Set<number> => new Set([
+      ...(l === goalId ? [1] : []),
+      ...pathSigns(l, goalId, outcomeId),
+      ...addends.flatMap((p) => [...times(times(pathSigns(l, p, outcomeId), linkSigns(p, outcomeId)), toGoal)]),
+    ]);
+    const opposed = (levers: readonly string[]): boolean => {
+      const through = new Set(levers.flatMap((l) => [...throughSigns(l)]));
+      const aside = new Set(levers.flatMap((l) => [...aroundSigns(l)]));
+      return [...through].some((t) => [...aside].some((a) => a !== t));
+    };
+
+    const selfNotStable: { id: string; how: 'opposite' | 'separate' | 'around' }[] = [];
+    const moving: { id: string; signature: string; around: boolean; zero: boolean; bothWays: boolean }[] = [];
+    let movedAny = false;
+    for (const o of nodes) {
+      if (o.kind !== 'option') continue;
+      const levers = leversOf(o);
+      const reaching = levers
+        .map((l) => ({ lever: l, signs: factorIds.map((f) => pathSigns(l, f, outcomeId)) }))
+        .filter((r) => r.signs.some((s) => s.size > 0));
+      const goesAround = levers.some(around);
+      // An option that reaches the goal only around the product still takes part in the comparison.
+      if (reaching.length === 0 && !goesAround && !levers.some((l) => l === goalId || reaches(l, goalId))) continue;
+      const pattern = factorIds.map((_, i) => {
+        const u = new Set(reaching.flatMap((r) => [...r.signs[i]!]));
+        return u.size === 0 ? '0' : u.size === 2 ? '±' : u.has(1) ? '+' : '-';
+      });
+      const moved = pattern.filter((p) => p !== '0').length;
+      if (moved > 0) movedAny = true;
+      if (moved >= 2) {
+        const signs = new Set(reaching.flatMap((r) => r.signs.flatMap((s) => [...s])));
+        // Opposite signs anywhere: the option can push the inputs apart. One sign through two or more
+        // levers: every input moves the same way, but by amounts the structure does not relate (b).
+        if (!(reaching.length === 1 && signs.size === 1)) selfNotStable.push({ id: o.id, how: signs.size === 2 ? 'opposite' : 'separate' });
+      }
+      // Findings 3 and 4: one route through the product and another around it, in opposite directions.
+      if (moved > 0 && goesAround && !selfNotStable.some((x) => x.id === o.id) && opposed(levers)) selfNotStable.push({ id: o.id, how: 'around' });
+      const through = moved >= 2 ? `|${reaching.map((r) => r.lever).sort().join(',')}` : '';
+      moving.push({
+        id: o.id, signature: `${pattern.join(',')}${through}${goesAround ? '|around' : ''}`,
+        around: goesAround, zero: moved === 0, bothWays: pattern.includes('±'),
+      });
+    }
+    if (!movedAny) continue;
+
+    // Any two moving options whose signatures differ, or either of which goes around the product.
+    const pairs: [string, string][] = [];
+    for (let i = 0; i < moving.length; i++) {
+      for (let j = i + 1; j < moving.length; j++) {
+        const a = moving[i]!;
+        const b = moving[j]!;
+        if (a.signature !== b.signature || a.around || b.around) pairs.push([a.id, b.id]);
+      }
+    }
+    const paired = new Set(pairs.flat());
+    const named = new Set([...selfNotStable.map((x) => x.id), ...paired]);
+    const notStable = nodes.filter((n) => named.has(n.id)).map((n) => n.id);
+
+    const verdict: NonlinearIdentityVerdict = notStable.length > 0 ? 'sign_not_provable' : 'sign_stable_provisional';
+    const outcomeLabel = labelOf(outcomeId);
+    const inputs = quotedList(factorIds.map(labelOf));
+    const labels = (ids: readonly string[]): string => quotedList(ids.map(labelOf));
+    const RANKED_WRONG = 'depends on the levels those quantities are at — and adding the effects up can rank them the wrong way round.';
+
+    // (b) Each option that cannot be signed on its own, in its own words.
+    const opposite = selfNotStable.filter((x) => x.how === 'opposite').map((x) => x.id);
+    const separate = selfNotStable.filter((x) => x.how === 'separate').map((x) => x.id);
+    const oppositeSentence = opposite.length === 0 ? '' :
+      ` ${labels(opposite)} can push ${inputs} in opposite directions, so whether "${outcomeLabel}" rises or falls depends on ` +
+      'how large each change is — and adding the effects up can get even that direction wrong.';
+    const separateSentence = separate.length === 0 ? '' :
+      ` ${labels(separate)} ${separate.length === 1 ? 'moves' : 'move'} ${inputs} through separate levers whose relative size the ` +
+      `model does not state, so how much ${separate.length === 1 ? 'it changes' : 'each changes'} "${outcomeLabel}", and how ` +
+      `${separate.length === 1 ? 'it compares' : 'they compare'} with the other options, ${RANKED_WRONG}`;
+
+    const routesDisagree = selfNotStable.filter((x) => x.how === 'around').map((x) => x.id);
+    const routesDisagreeSentence = routesDisagree.length === 0 ? '' :
+      ` ${labels(routesDisagree)} can push "${labelOf(goalId)}" one way through ${inputs} multiplied together and the other way by ` +
+      `another route, so whether ${routesDisagree.length === 1 ? 'it raises or lowers' : 'each raises or lowers'} "${labelOf(goalId)}" ` +
+      'depends on the levels those quantities are at — and adding the effects up can get even that direction wrong.';
+
+    // (d) The comparisons, grouped by how the options move the inputs — never one list that reads as
+    // "all of these differ" when two of them move the inputs the same way.
+    const straight = moving.filter((m) => !m.around);
+    const groups: { ids: string[]; zero: boolean }[] = [];
+    for (const m of straight) {
+      const g = groups.find((x) => moving.find((y) => y.id === x.ids[0])!.signature === m.signature);
+      if (g !== undefined) g.ids.push(m.id); else groups.push({ ids: [m.id], zero: m.zero });
+    }
+    let differSentence = '';
+    if (groups.length >= 2 && groups.every((g) => g.ids.length === 1)) {
+      const ids = groups.map((g) => g.ids[0]!);
+      differSentence = ids.length === 2
+        ? ` ${labels(ids)} do not move ${inputs} the same way, so which of them does better ${RANKED_WRONG}`
+        : ` ${labels(ids)} each move ${inputs} a different way, so which of them does better ${RANKED_WRONG}`;
+    } else if (groups.length >= 2) {
+      const WAYS = ['one way', 'another', 'a third', 'a fourth', 'a fifth'];
+      let ways = 0;
+      const clauses = groups.map((g, i) => {
+        const verb = g.ids.length === 1 ? 'moves' : 'move';
+        const what = i === 0 ? inputs : 'them';
+        if (g.zero) return `${labels(g.ids)} ${verb} ${factorIds.length === 2 ? 'neither' : 'none'} of ${what}`;
+        return `${labels(g.ids)} ${verb} ${what} ${WAYS[ways++] ?? 'another'}`;
+      });
+      differSentence = ` ${clauses.join('; ')}, so which of those ways does better ${RANKED_WRONG}`;
+    }
+    // An option already said to push the goal both ways is not said again as merely "other than through".
+    const aroundIds = moving.filter((m) => m.around && paired.has(m.id) && !routesDisagree.includes(m.id)).map((m) => m.id);
+    const aroundSentence = aroundIds.length === 0 ? '' :
+      ` ${labels(aroundIds)} ${aroundIds.length === 1 ? 'changes' : 'change'} "${labelOf(goalId)}" other than through ${inputs} ` +
+      `multiplied together, so how ${aroundIds.length === 1 ? 'it compares' : 'they compare'} with the other options ${RANKED_WRONG}`;
+
+    // N-c: whose reading it is, and whether it is the whole of the quantity.
+    const partial = addends.length > 0;
+    const stated = d.provenance === 'explicit';
+    const head = stated
+      ? `${partial ? 'Part of ' : ''}"${outcomeLabel}" is ${inputs} multiplied together`
+      : `Olumi reads ${partial ? 'part of ' : ''}"${outcomeLabel}" as ${inputs} multiplied together`;
+    // (b) "only one way" only when it is true of every option that moves an input.
+    const oneWay = !moving.some((m) => m.bothWays);
+    marks.push({
+      outcome_id: outcomeId, operation: 'product', factor_ids: factorIds, verdict,
+      options_not_sign_stable: notStable, comparisons_not_sign_stable: pairs,
+    });
+    analyses.push({
+      outcome_id: outcomeId, goal_id: goalId, factor_ids: [...factorIds], stated_in_brief: stated, verdict,
+      unproven_alone: selfNotStable.map((x) => x.id),
+      moving: moving.map((m) => m.id),
+      pairs: pairs.map(([a, b]) => [a, b] as const),
+    });
+    loss.push({
+      field_path: `nodes[${outcomeId}].nonlinear_identity`,
+      before: { operation: 'product', factor_ids: factorIds },
+      after: { verdict, options_not_sign_stable: notStable, comparisons_not_sign_stable: pairs },
+      reason: verdict === 'sign_not_provable'
+        ? `${head}, but Olumi's analysis cannot yet multiply quantities: it adds up each effect separately.` +
+          oppositeSentence + separateSentence + routesDisagreeSentence + differSentence + aroundSentence +
+          ` So this model cannot yet show which option does better on "${labelOf(goalId)}": treat its figures as a ` +
+          'rough approximation, not a decision.'
+        : `${head}, and Olumi's analysis adds effects up rather than multiplying them, so its figures for ` +
+          `"${outcomeLabel}" are an approximation` +
+          (oneWay
+            ? `. Each option that changes them moves them only one way, so whether that option raises or lowers ` +
+              `"${outcomeLabel}" should hold; treat the size of every effect, and any gap between the options, as provisional.`
+            : '; treat the size of every effect, and any gap between the options, as provisional.'),
+      severity: verdict === 'sign_not_provable' ? 'warn' : 'info',
+    } as RepairEntry);
+  }
+  return { marks, loss, accepted, analyses };
+}
+
+/** `"a" times "b"`, `"a" times "b" times "c"` — labels, never ids. */
+const timesList = (labels: readonly string[]): string => labels.map((l) => `"${l}"`).join(' times ');
+
+/**
+ * What the product IS, in words: names the goal and every factor, states no direction, no
+ * figure and no option. Whose reading it is follows the declaration (`stated_in_brief`): the
+ * brief's own words are said as fact, anything else as Olumi's reading.
+ */
+function productIdentityClause(goal: string, outcome: string, factors: readonly string[], stated: boolean, sameNode: boolean): string {
+  const times = timesList(factors);
+  if (sameNode) return stated ? `"${goal}" depends on ${times}` : `Olumi reads "${goal}" as depending on ${times}`;
+  return stated
+    ? `"${goal}" depends on "${outcome}", which is ${times}`
+    : `"${goal}" depends on "${outcome}", which Olumi reads as ${times}`;
+}
+
+/**
+ * ⛔ C46 — THE QUESTION ASKED WHERE THE USER ALWAYS SEES IT (`open_questions`, appended to the reply
+ * by the server every time: `write-outcome.ts` `openQuestionsLine`). The typed mark's sentence reaches
+ * `not_represented`, which only the Agent's model reads — the gap staging #1939 closed for the
+ * deadline. One per product marked `sign_not_provable`; nothing for a stable or a linear model.
+ */
+export function productIdentityOpenQuestions(admitted: Pick<AdmittedModel, 'nodes' | 'nonlinear_identities'>): string[] {
+  const goal = admitted.nodes.find((n) => n.kind === 'goal');
+  if (goal === undefined) return [];
+  const labelOf = (id: string): string => admitted.nodes.find((n) => n.id === id)?.label ?? id;
+  return (admitted.nonlinear_identities ?? [])
+    .filter((m) => m.verdict === 'sign_not_provable')
+    .map((m) => {
+      const stated = admitted.nodes.find((n) => n.id === m.outcome_id)?.nonlinear_identity?.stated_in_brief === true;
+      const clause = productIdentityClause(goal.label, labelOf(m.outcome_id), m.factor_ids.map(labelOf), stated, m.outcome_id === goal.id);
+      return `Which option does better on "${goal.label}"? This model cannot answer that yet: ${clause}, and the model ` +
+        'adds those effects up rather than multiplying them.';
+    });
+}
+
+/** The Run-time check's finding: the named leader cannot be signed against `against`. */
+export interface NonlinearIdentityLeaderWithhold {
+  /** The leader judged, or `null` when no leader was named and EVERY compared option was judged. */
+  readonly leader_id: string | null;
+  readonly outcome_id: string;
+  readonly goal_id: string;
+  readonly factor_ids: readonly string[];
+  /** Compared options the leader's sign against is not proven, by id, in graph order. */
+  readonly against: readonly string[];
+  /** Plain English: names the goal and the factors; no direction, no figure, no option. */
+  readonly sentence: string;
+}
+
+type GraphNodeLike = { readonly id?: unknown; readonly kind?: unknown; readonly label?: unknown } & Record<string, unknown>;
+
+function readCarrier(n: GraphNodeLike): NonlinearIdentityCarrier | null {
+  const c = n.nonlinear_identity as { operation?: unknown; factor_ids?: unknown; stated_in_brief?: unknown } | undefined;
+  if (c === null || typeof c !== 'object' || c.operation !== 'product' || typeof c.stated_in_brief !== 'boolean') return null;
+  if (!Array.isArray(c.factor_ids) || c.factor_ids.length < 2 || !c.factor_ids.every((f) => typeof f === 'string' && f !== '')) return null;
+  return { operation: 'product', factor_ids: c.factor_ids as string[], stated_in_brief: c.stated_in_brief };
+}
+
+/** A persisted level as `{ value }` — the stored shape is either a number or an object carrying one. */
+function levelObject(v: unknown): ConstructedLevel | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return { value: v } as ConstructedLevel;
+  const inner = v !== null && typeof v === 'object' ? (v as { value?: unknown }).value : undefined;
+  return typeof inner === 'number' && Number.isFinite(inner) ? ({ value: inner } as ConstructedLevel) : undefined;
+}
+
+/**
+ * ⛔ C46 STAGE 1 (b) — MAY THIS RUN NAME ITS LEADER, GIVEN A PRODUCT IT CAN ONLY ADD UP?
+ *
+ * Reads the carrier (`cee-v3.ts` NodeV3 `nonlinear_identity`) on the graph the analysis ran on,
+ * and re-runs construction's OWN sign test (`markProductIdentities`) on that graph — so an option
+ * added after construction is judged, and nothing is re-derived a second way. Then, for the leader
+ * PLoT ranked first (by id), against the options it was compared with:
+ *  · the leader cannot be signed against carrying on as now on its own (`unproven_alone`) — not
+ *    proven against ANY other compared option;
+ *  · the leader and another compared option move the product's inputs differently (a pair) — not
+ *    proven against that option;
+ *  · the leader moves none of the product's inputs and reaches the goal no other way (carrying on
+ *    as now), while a compared option cannot be signed against it — not proven against that one.
+ * "Proven" is the structural sign test only — never the linear engine's own interval (AI Quality
+ * #70 5842580505). No carrier ⇒ `null`: every graph persisted before the carrier, and every
+ * linear brief, reads exactly as before. A leader that is not an option in this graph is not
+ * proven against any compared option (fail closed — the check cannot see it).
+ *
+ * `leaderId: null` asks the Agent-view question (the leader is withheld from every readback): is
+ * EVERY compared option unprovable as a leader? Only then is the sentence true of whichever led.
+ *
+ * Pure and total: a malformed graph or carrier is `null`, never a throw on a Run.
+ */
+export function nonlinearIdentityLeaderWithhold(
+  graph: unknown,
+  leaderId: string | null,
+  opts: { readonly comparedOptionIds?: readonly string[]; readonly goalId?: string } = {},
+): NonlinearIdentityLeaderWithhold | null {
+  const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  const rawEdges = (graph as { edges?: unknown } | null | undefined)?.edges;
+  if (!Array.isArray(rawNodes) || !Array.isArray(rawEdges)) return null;
+  const nodes = rawNodes.filter((n): n is GraphNodeLike => n !== null && typeof n === 'object' && typeof (n as GraphNodeLike).id === 'string' && typeof (n as GraphNodeLike).kind === 'string');
+  const carried = nodes.map((n) => ({ id: n.id as string, carrier: readCarrier(n) })).filter((c): c is { id: string; carrier: NonlinearIdentityCarrier } => c.carrier !== null);
+  if (carried.length === 0) return null;
+  const goals = nodes.filter((n) => n.kind === 'goal').map((n) => n.id as string);
+  const goalId = opts.goalId ?? (goals.length === 1 ? goals[0] : undefined);
+  if (goalId === undefined || !goals.includes(goalId)) return null;
+
+  const admittedLike: AdmittedNode[] = nodes.map((n) => {
+    const levels = n.interventions !== null && typeof n.interventions === 'object'
+      ? Object.fromEntries(Object.entries(n.interventions as Record<string, unknown>).flatMap(([k, v]) => {
+        const l = levelObject(v);
+        return l === undefined ? [] : [[k, l]];
+      }))
+      : undefined;
+    const today = (n.observed_state as { value?: unknown } | undefined)?.value;
+    return {
+      id: n.id as string, kind: n.kind as CandidateNodeKind, label: typeof n.label === 'string' ? n.label : (n.id as string),
+      ...(levels !== undefined ? { interventions: levels } : {}),
+      ...(typeof today === 'number' && Number.isFinite(today) ? { observed_state: { value: today } } : {}),
+    } as AdmittedNode;
+  });
+  const edges = rawEdges
+    .filter((e): e is { from: string; to: string; effect_direction?: unknown; origin?: unknown } =>
+      e !== null && typeof e === 'object' && typeof (e as { from?: unknown }).from === 'string' && typeof (e as { to?: unknown }).to === 'string')
+    .map((e) => ({
+      from: e.from, to: e.to,
+      ...(typeof e.effect_direction === 'string' ? { effect_direction: e.effect_direction } : {}),
+      ...(typeof e.origin === 'string' ? { origin: e.origin } : {}),
+    }));
+  const ids = new Set(admittedLike.map((n) => n.id));
+  const optionIds = admittedLike.filter((n) => n.kind === 'option').map((n) => n.id);
+  const statusQuo = new Set(nodes.filter((n) => n.kind === 'option' && readIsBaseline(n as never) === true).map((n) => n.id as string));
+  const { analyses } = markProductIdentities(
+    carried.map((c) => ({ outcome: c.id, operation: 'product', factors: [...c.carrier.factor_ids], provenance: c.carrier.stated_in_brief ? 'explicit' : 'inferred' })),
+    (id) => (typeof id === 'string' && ids.has(id) ? id : undefined),
+    admittedLike,
+    edges,
+    goalId,
+    statusQuo,
+  );
+  const compared = (opts.comparedOptionIds ?? optionIds).filter((id, i, all) => all.indexOf(id) === i);
+  const comparedSet = new Set(compared);
+  const labelOf = (id: string): string => admittedLike.find((n) => n.id === id)?.label ?? id;
+
+  for (const a of analyses) {
+    const unprovenAgainst = (leader: string): string[] => {
+      const others = compared.filter((x) => x !== leader);
+      if (!optionIds.includes(leader) || a.unproven_alone.includes(leader)) return others;
+      const against = new Set<string>();
+      for (const [x, y] of a.pairs) {
+        if (x === leader && comparedSet.has(y)) against.add(y);
+        if (y === leader && comparedSet.has(x)) against.add(x);
+      }
+      if (!a.moving.includes(leader)) for (const x of a.unproven_alone) if (x !== leader && comparedSet.has(x)) against.add(x);
+      return others.filter((x) => against.has(x));
+    };
+    let against: string[];
+    if (leaderId !== null) {
+      against = unprovenAgainst(leaderId);
+    } else {
+      if (compared.length < 2) continue;
+      const each = compared.map(unprovenAgainst);
+      if (each.some((x) => x.length === 0)) continue;
+      against = compared.filter((id) => each.some((x) => x.includes(id)));
+    }
+    if (against.length === 0) continue;
+    const goalLabel = labelOf(goalId);
+    const clause = productIdentityClause(goalLabel, labelOf(a.outcome_id), a.factor_ids.map(labelOf), a.stated_in_brief, a.outcome_id === goalId);
+    return {
+      leader_id: leaderId,
+      outcome_id: a.outcome_id,
+      goal_id: goalId,
+      factor_ids: a.factor_ids,
+      against,
+      sentence: `No option can be put forward on "${goalLabel}" yet: ${clause}, and this model adds those effects up ` +
+        'rather than multiplying them, so it cannot say which option does better.',
+    };
+  }
+  return null;
+}
+
+/**
+ * ⛔ C46 (d) — THE AGENT'S VIEW OF A PRODUCT THE ANALYSIS ADDS UP.
+ *
+ * Every readback nulls the leader on a withheld run, so the Agent's view cannot ask about ONE leader.
+ * It returns a finding when EITHER the persisted reason already names the product (`reasonNamesIt` —
+ * the Run's own finding, bound to its leader at the stamp; any option's finding supplies the words,
+ * which name no option) OR every option the graph compares is unprovable as a leader, so the sentence
+ * is true of whichever led. Otherwise `null`: a finding about some other pair is not said as the
+ * reason this leader was withheld.
+ */
+export function nonlinearIdentityForAgent(graph: unknown, reasonNamesIt: boolean): NonlinearIdentityLeaderWithhold | null {
+  const every = nonlinearIdentityLeaderWithhold(graph, null);
+  if (every !== null || !reasonNamesIt) return every;
+  const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  const options = Array.isArray(nodes)
+    ? nodes.filter((n) => (n as GraphNodeLike | null)?.kind === 'option' && typeof (n as GraphNodeLike).id === 'string').map((n) => (n as GraphNodeLike).id as string)
+    : [];
+  for (const id of options) {
+    const f = nonlinearIdentityLeaderWithhold(graph, id);
+    if (f !== null) return f;
+  }
+  return null;
+}
+
+/**
+ * ⛔ C46 STAGE 1 (b) — FOLD THE FINDING INTO THE PERSISTED LEADER PERMISSION.
+ *
+ * The `applyIntakeToLeaderPermission` precedent (`intake-option-reconciliation.ts`), applied at the
+ * same single stamp in `run_analysis`: a CONJUNCTION that can only REMOVE the permission — `null`
+ * (no finding) returns the verdict unchanged, byte for byte — and it never touches
+ * `constraint_verdict_state`, which is a statement about the constraint evidence that this axis has
+ * nothing true to say about. That untouched state is also how a reader tells, later, that the
+ * constraint verdict itself permitted (`nonlinearIdentityLeaderClaimCause`).
+ */
+export function applyNonlinearIdentityToLeaderPermission<P extends { readonly may_name_leading_option: boolean; readonly constraint_verdict_state: string }>(
+  persisted: P,
+  finding: NonlinearIdentityLeaderWithhold | null,
+): P {
+  if (finding === null) return persisted;
+  return { ...persisted, may_name_leading_option: false };
+}
+
+/** The PLoT results' option ids, in order — the options this run actually compared. */
+function comparedOptionIdsOf(enrichment: unknown): string[] | undefined {
+  const results = (enrichment as { results?: unknown } | null | undefined)?.results;
+  if (!Array.isArray(results)) return undefined;
+  const ids = results
+    .map((r) => (r !== null && typeof r === 'object' ? (r as { option_id?: unknown }).option_id : undefined))
+    .filter((id): id is string => typeof id === 'string' && id !== '');
+  return ids.length > 0 ? ids : undefined;
+}
+
+/**
+ * ⛔ C46 (c) — WHY A PERSISTED FACT'S LEADER WAS WITHHELD, when the reason is the product.
+ *
+ * For a caller of `composeAnalysisStateV1` that holds THE fact its leader permission was read from
+ * AND the graph (the scenario read route: one fact, `mayPresentLeaderClaimForFact(fact)`). NOT the
+ * V5 finaliser on its own: it never learns which fact a refusal came from, so its caller must state
+ * the cause (`FinaliserContext.leaderWithheldBecauseNonlinearIdentity`, #1876's rule).
+ * True only when ALL of these hold, each read, never re-derived:
+ *  · the graph IS the graph the run analysed — see `graphHash` below;
+ *  · the fact's persisted permission is `false` while its persisted constraint state PERMITS a
+ *    leader (`MAY_NAME_LEADING_OPTION`) — so the stamp that withheld it was not the constraint's;
+ *  · the Run-time check (`nonlinearIdentityLeaderWithhold`) finds the fact's leader, by id, not
+ *    proven against an option the run compared (the PLoT envelope's own `results`).
+ * Split by who asked (AI Quality #70 5841878117): an unrequested first pass keeps the unrequested
+ * code (policy), a requested run names the product. While the constraint verdict withholds, both are
+ * false and `constraint_verdict_withheld` stands (option (i), #70 5842615260).
+ */
+export function nonlinearIdentityLeaderClaimCause(input: {
+  readonly graph: unknown;
+  /**
+   * ⛔ THE GRAPH THE RUN ANALYSED DECIDES (OpenAI Runtime, #70 5843934816). `graph`'s analysis-affecting
+   * hash as the caller's OWN freshness authority computed it — the value it compares with the fact's
+   * `graph_hash_at_run` (the read route: `deriveDecisionContextGraphHash(params.graph)`).
+   *
+   * A persisted fact binds the graph it analysed by that hash ALONE: `RunAnalysisResultSchema`
+   * (@talchain/schemas 0.59.0) keeps `graph_hash_at_run` and no graph, and PLoT's envelope in
+   * `enrichment` echoes none. So `graph` decides only when the two are equal — it then agrees with the
+   * analysed graph on every field the analysis-affecting projection hashes (`context/graph-hash.ts`
+   * `projectNode` / `projectEdge`), which since H1a includes the carrier (`nonlinear_identity`).
+   * ⚠ NOT on every field THIS sign test reads: two of its inputs are outside that projection and so
+   * are NOT bound by the equality — an edge's `origin` (a repair-authored option link is not a lever)
+   * and an option's nested `data.is_baseline` (the node-level `is_baseline` IS hashed). Labels are not
+   * hashed either; they only word the sentence. Otherwise (edited since the run, a legacy fact with no
+   * hash, a graph that could not be hashed) the analysed graph is out of reach and NOTHING NEW is
+   * withheld: no cause, and the fact's own constraint token stands.
+   */
+  readonly graphHash: string | null;
+  readonly result: unknown;
+  readonly requested: boolean;
+}): { readonly withheldBecauseUnrequested: boolean; readonly withheldBecauseNonlinearIdentity: boolean } {
+  const none = { withheldBecauseUnrequested: false, withheldBecauseNonlinearIdentity: false } as const;
+  const result = input.result as { leading_option_id?: unknown; constraint_verdict?: unknown; enrichment?: unknown; graph_hash_at_run?: unknown } | null | undefined;
+  const analysedHash = result?.graph_hash_at_run;
+  if (typeof analysedHash !== 'string' || analysedHash === '' || input.graphHash !== analysedHash) return none;
+  const verdict = result?.constraint_verdict as { may_name_leading_option?: unknown; constraint_verdict_state?: unknown } | undefined;
+  if (verdict?.may_name_leading_option !== false) return none;
+  const state = verdict.constraint_verdict_state;
+  if (typeof state !== 'string' || !Object.prototype.hasOwnProperty.call(MAY_NAME_LEADING_OPTION, state)) return none;
+  if (MAY_NAME_LEADING_OPTION[state as keyof typeof MAY_NAME_LEADING_OPTION] !== true) return none;
+  const leader = result?.leading_option_id;
+  if (typeof leader !== 'string' || leader === '') return none;
+  const compared = comparedOptionIdsOf(result?.enrichment);
+  const finding = nonlinearIdentityLeaderWithhold(input.graph, leader, compared !== undefined ? { comparedOptionIds: compared } : {});
+  if (finding === null) return none;
+  return input.requested
+    ? { withheldBecauseUnrequested: false, withheldBecauseNonlinearIdentity: true }
+    : { withheldBecauseUnrequested: true, withheldBecauseNonlinearIdentity: false };
+}
+
+/**
+ * The first directed loop that runs through an edge `mayBreak` accepts, as its
+ * edges in order (that edge first), or null. Pure, deterministic in edge order:
+ * each accepted edge `u -> v` is tried in turn and the loop is closed by the
+ * shortest path `v ~> u`. A self-loop is a loop of one edge.
+ *
+ * Admission's own (`breakLoops`). The producer's repair issue reads admission's
+ * VERDICT (`withheld`, `loop_closing_link`), never a second derivation over the
+ * candidate's raw links (review of f504b8e0, (c)).
+ */
+function findBreakableLoop<E extends { from: string; to: string }>(
+  edges: readonly E[],
+  mayBreak: (e: E) => boolean,
+): E[] | null {
+  const out = new Map<string, E[]>();
+  for (const e of edges) out.set(e.from, [...(out.get(e.from) ?? []), e]);
+  for (const e of edges) {
+    if (!mayBreak(e)) continue;
+    if (e.to === e.from) return [e];
+    const via = new Map<string, E>();
+    const seen = new Set([e.to]);
+    const queue = [e.to];
+    while (queue.length > 0 && !via.has(e.from)) {
+      const at = queue.shift()!;
+      for (const next of out.get(at) ?? []) {
+        if (seen.has(next.to)) continue;
+        seen.add(next.to);
+        via.set(next.to, next);
+        if (next.to === e.from) break;
+        queue.push(next.to);
+      }
+    }
+    if (!via.has(e.from)) continue;
+    const back: E[] = [];
+    for (let at = e.from; at !== e.to;) {
+      const step = via.get(at)!;
+      back.unshift(step);
+      at = step.from;
+    }
+    return [e, ...back];
+  }
+  return null;
+}
+
+/** Where each kind sits on the option -> factor -> risk -> outcome -> goal flow. */
+const FLOW_RANK: Readonly<Record<string, number>> = { decision: 0, option: 1, factor: 2, constraint: 2, risk: 3, outcome: 4, goal: 5 };
+
+/** Nodes that reach `goalId`, with the length of their shortest path to it. */
+function distancesToGoal(edges: readonly { from: string; to: string }[], goalId: string | undefined): Map<string, number> {
+  const d = new Map<string, number>();
+  if (goalId === undefined) return d;
+  const into = new Map<string, string[]>();
+  for (const e of edges) into.set(e.to, [...(into.get(e.to) ?? []), e.from]);
+  d.set(goalId, 0);
+  const queue = [goalId];
+  while (queue.length > 0) {
+    const at = queue.shift()!;
+    for (const from of into.get(at) ?? []) {
+      if (d.has(from)) continue;
+      d.set(from, d.get(at)! + 1);
+      queue.push(from);
+    }
+  }
+  return d;
+}
+
+/**
+ * ⛔ A REGISTERED FIRST MODEL MUST BE A DAG — the one loop-breaking rule.
+ *
+ * SERVED (CEE bdd43f4a, Paul's pricing brief, acceptance run f-20260925T231546Z):
+ * the drafter stated `AI feature availability -> AI release delay` AND the
+ * reverse, both Olumi's hypotheses; both were registered, readiness refused the
+ * whole model on `CYCLE_DETECTED` (its only blocker), and nothing told Paul why.
+ * Readiness's check (`graph-structure-validator.ts` `checkCycles`) walks EVERY
+ * directed edge, so this runs over the whole admitted edge set.
+ *
+ * ⛔ ONE LINK IS ONE (from, to) PAIR, AND ANY USER-STATED INSTANCE MAKES IT THE
+ * USER'S (review of f504b8e0, BLOCKING-2). The drafter restates the user's links as
+ * its own; judged instance by instance, the restatement was "Olumi's link", so it was
+ * withheld and said as Olumi's — while the user's instance of the SAME link stayed in
+ * the graph and its projection entries were deleted with the restatement's. So a pair
+ * may be withheld only when EVERY instance of it may be, and withholding it removes
+ * every instance: the decision and the sentence are about the link, not a copy of it.
+ *
+ * ONE link per loop is withheld, chosen in this order:
+ *  1. never one `mayWithhold` refuses for any instance of its pair (the caller
+ *     refuses the user's own links and the structural option edges) — a loop made
+ *     only of those is KEPT and returned in `kept`, because choosing between the
+ *     user's links is theirs;
+ *  2. the link whose absence leaves every node that reached the goal still
+ *     reaching it — a loop must never be traded for a dead end when another
+ *     choice exists (on the served model the risk's threat to availability is its
+ *     ONLY route to MRR; withholding it would swap CYCLE_DETECTED for
+ *     NO_PATH_TO_GOAL);
+ *  3. the link pointing furthest AWAY from the goal (its target is further from
+ *     the goal than its source) — against the flow toward the goal;
+ *  4. the link pointing furthest back along option -> factor -> risk -> outcome
+ *     -> goal by kind;
+ *  5. the lower `from`/`to` id pair, so the choice never depends on luck.
+ *
+ * ⭐ RULING KEPT (builder's open ruling on f504b8e0): "strands no node" (2) and
+ * "points away from the goal" (3) outrank kind (4); kind is only a tie-break. On
+ * the served model the risk's threat to availability is its ONLY route to MRR —
+ * kind alone would withhold exactly that link.
+ *
+ * Pure: it decides; the caller records and says.
+ */
+export function breakLoops<E extends { from: string; to: string }>(
+  edges: readonly E[],
+  opts: { mayWithhold: (e: E) => boolean; goalId?: string; kindOf: (id: string) => string | undefined },
+): { edges: E[]; withheld: { edge: E; loop: E[] }[]; kept: E[][] } {
+  const pair = (e: { from: string; to: string }): string => `${e.from}\u0000${e.to}`;
+  const rank = (id: string): number => FLOW_RANK[opts.kindOf(id) ?? ''] ?? FLOW_RANK.factor!;
+  // A pair any instance of which may not be withheld is not withheld at all.
+  const protectedPairs = new Set(edges.filter((e) => !opts.mayWithhold(e)).map(pair));
+  const mayWithhold = (e: E): boolean => !protectedPairs.has(pair(e));
+  let current = [...edges];
+  const withheld: { edge: E; loop: E[] }[] = [];
+  for (;;) {
+    const loop = findBreakableLoop(current, mayWithhold);
+    if (loop === null) break;
+    const distance = distancesToGoal(current, opts.goalId);
+    const choices = loop.filter(mayWithhold).map((edge) => {
+      // The same link stated twice is one belief: withheld together.
+      const without = current.filter((x) => pair(x) !== pair(edge));
+      const from = distance.get(edge.from);
+      const to = distance.get(edge.to);
+      return {
+        edge,
+        without,
+        strands: distance.size - distancesToGoal(without, opts.goalId).size,
+        away: from === undefined || to === undefined ? 0 : to - from,
+        backByKind: rank(edge.from) - rank(edge.to),
+        key: pair(edge),
+      };
+    });
+    choices.sort((a, b) =>
+      a.strands - b.strands || b.away - a.away || b.backByKind - a.backByKind || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    const pick = choices[0]!;
+    withheld.push({ edge: pick.edge, loop });
+    current = pick.without;
+  }
+  // What is left can only be loops nobody may break: find each, name it, leave it.
+  const kept: E[][] = [];
+  let probe = current;
+  for (;;) {
+    const loop = findBreakableLoop(probe, () => true);
+    if (loop === null) break;
+    kept.push(loop);
+    const closing = pair(loop[0]!);
+    probe = probe.filter((x) => pair(x) !== closing);
+  }
+  return { edges: current, withheld, kept };
+}
+
+const quoted = (labels: readonly string[]): string =>
+  labels.length === 1 ? `"${labels[0]}"`
+    : `${labels.slice(0, -1).map((l) => `"${l}"`).join(', ')} and "${labels[labels.length - 1]}"`;
+const chain = (labels: readonly string[]): string => [...labels, labels[0]!].map((l) => `"${l}"`).join(' → ');
+
+/** What the user is told when one of Olumi's links was left out of a loop. */
+function sayWithheldLoopLink(from: string, to: string, loopLabels: readonly string[]): string {
+  const whose = "(it was Olumi's reading, not something you said)";
+  if (loopLabels.length === 1) {
+    return `"${from}" was linked to itself; a model cannot hold a loop, so that link was left out ${whose}.`;
+  }
+  if (loopLabels.length === 2) {
+    return `${quoted(loopLabels)} were linked both ways; a model cannot hold a loop, so the link from "${from}" to "${to}" `
+      + `was left out ${whose} — say which way it runs if both matter.`;
+  }
+  return `${quoted(loopLabels)} were linked in a loop (${chain(loopLabels)}); a model cannot hold a loop, so the link from `
+    + `"${from}" to "${to}" was left out ${whose} — say so if that link matters more than another in the loop.`;
+}
+
+/** One link of a kept loop: whether the user stated it, or it is how the model is built (`structural`). */
+interface KeptLoopLink { readonly from: string; readonly to: string; readonly yours: boolean; readonly fromDecision: boolean }
+
+/**
+ * What the user is told when a loop is made only of links that are not Olumi's to drop.
+ *
+ * ⛔ NEVER "YOU LINKED" OLUMI'S PART OF IT (review of f504b8e0, (d)). A kept loop can run
+ * through a STRUCTURAL edge — what an option sets (often Olumi's own `ai_proposed`
+ * level), the held status quo — which is not the user's statement. Only links the user
+ * stated are said to be theirs; a structural edge is named as what it is.
+ */
+function sayKeptLoop(loopLabels: readonly string[], links: readonly KeptLoopLink[]): string {
+  if (links.every((l) => l.yours)) {
+    if (loopLabels.length === 1) {
+      return `You linked "${loopLabels[0]}" to itself. A model cannot hold a loop, and that link is yours, so it was kept `
+        + `and the analysis cannot run yet — say what drives "${loopLabels[0]}" instead, or that the link should go.`;
+    }
+    const shape = loopLabels.length === 2 ? `${quoted(loopLabels)} both ways` : `${quoted(loopLabels)} in a loop`;
+    return `You linked ${shape} (${chain(loopLabels)}). A model cannot hold a loop, and none of these links is Olumi's `
+      + 'to drop, so all were kept and the analysis cannot run yet — say which way it runs, or which link should go.';
+  }
+  const shape = loopLabels.length === 2 ? 'are linked both ways' : 'are linked in a loop';
+  const yours = links.filter((l) => l.yours).map((l) => `"${l.from}" to "${l.to}"`);
+  const built = links.filter((l) => !l.yours).map((l) => l.fromDecision
+    ? `the link from "${l.from}" to "${l.to}" is how the decision holds that option`
+    : `the link from "${l.from}" to "${l.to}" is what that option sets`);
+  const yourPart = yours.length === 0 ? '' : ` You linked ${yours.join(' and ')};`;
+  return `${quoted(loopLabels)} ${shape} (${chain(loopLabels)}).${yourPart} ${built.join('; ')}. A model cannot hold a loop, `
+    + 'and none of these links is one Olumi can drop, so all were kept and the analysis cannot run yet — say which way it '
+    + 'runs, or which link should go.';
+}
+
+/**
+ * ⛔ A SIGNED PERCENTAGE CHANGE IS STATED AS THE LEVEL IT PRODUCES.
+ *
+ * Served CEE 06325c6 (#69 5835137365): "respond to the competitor's price cut" built
+ * "Cut List Price 15%" as `list_price_change = -15` beside a sibling's `0.1` on the same
+ * 0..100 factor, and `run_analysis` refused the comparison (`mixed_scale_unresolved`).
+ * Normalising the cut does not help: the analysis seam is sign-symmetric — a wire value
+ * below 0 rescales the whole request exactly as one above 1 does — so `-0.15` is refused too,
+ * and an all-raw `-15`/`10` is refused beside any ordinary estimated sibling. Measured through
+ * the real handler (`signed-change-one-value-space.test.ts`). The conventional drafter refuses
+ * negatives for the same reason (`records/projector.ts`).
+ *
+ * A percentage CHANGE whose value today is KNOWN to be 0 is the level of that quantity relative to
+ * today, less 100. So it is restated as that level — today 100, "cut 15%"
+ * 85, "raise 10%" 110 — on a frame of 0..200 (wider only when a level needs it). Nothing is
+ * invented: every level is the user's number plus 100, the sign survives as the side of today
+ * each option sits on, the link's direction is unchanged (the level rises with the change), and
+ * the restatement is said. Only when EVERY level on the factor can be restated; otherwise the
+ * factor is left alone and admission withholds the negative levels (below).
+ *
+ * ⛔ ONLY `baseline_known === true && baseline_value === 0` LICENSES IT (review 5835754404, B1).
+ * The gate used to admit an UNKNOWN today (`null`) as well, and the restated factor came out
+ * `baseline_known: true, 100` under the factor's own provenance — so on an `explicit` factor
+ * `framedObservedState` stamped `source: 'brief_extraction'` on a baseline the user never gave.
+ * An unknown today also says nothing about whether the factor is a change at all: a percent
+ * LEVEL (a margin at -5 vs 12) would have been misread as "5% below today". An unknown baseline,
+ * or an unknown 0, is left alone and its negative levels are withheld and said, as for any other
+ * level that cannot be restated. A known 0 the builder inferred keeps no `source`; a known 0 the
+ * user stated ("no change today") keeps `brief_extraction`, which it is.
+ *
+ * ⚠ KNOWN LIMITATION (independent verification of B1): admission cannot tell a percentage CHANGE
+ * from a percent LEVEL that happens to be KNOWN as 0 today (a margin of 0 with options at -5 and
+ * 12). That level is restated too, and read as "95 / 112 % of today". The transform is affine
+ * (level = 100 + the stated figure), so order, sign and link direction survive and it is said;
+ * only the "% of today" reading is wrong for that shape. Telling the two apart needs a
+ * change-versus-level classification whose corpus must come from served captures, not from
+ * this file's author, so it is not guessed here.
+ */
+const TODAY_LEVEL = 100;
+const TODAY_UNIT = '% of today';
+function restateSignedPercentChanges(model: CandidateModel): {
+  model: CandidateModel;
+  restated: { label: string; frame: number }[];
+} {
+  const restated: { label: string; frame: number }[] = [];
+  const restatedLabels = new Set<string>();
+  const factors = model.factors.map((f) => {
+    if (!isPercentScaledUnit(f.unit ?? undefined)) return f;
+    if (model.factors.filter((x) => x.label === f.label).length !== 1) return f;
+    const today = f.baseline_value;
+    // ⛔ ONLY A KNOWN ZERO TODAY (review 5835754404, B1). An unknown baseline is never restated.
+    if (f.baseline_known !== true || today !== 0) return f;
+    const levels = model.options.flatMap((o) =>
+      (o.interventions ?? []).filter((i) => i.factor_label === f.label).map((i) => i.value));
+    if (!levels.some((v) => v < 0)) return f;
+    if (levels.some((v) => !Number.isFinite(v) || TODAY_LEVEL + v < 0)) return f;
+    const top = Math.max(TODAY_LEVEL, ...levels.map((v) => TODAY_LEVEL + v));
+    const frame = top <= 2 * TODAY_LEVEL ? 2 * TODAY_LEVEL : defaultFrameFor(top);
+    restated.push({ label: f.label, frame });
+    restatedLabels.add(f.label);
+    return { ...f, baseline_known: true, baseline_value: TODAY_LEVEL, unit: TODAY_UNIT, plausible_max: frame };
+  });
+  if (restated.length === 0) return { model, restated };
+  const options = model.options.map((o) => o.interventions === undefined ? o : {
+    ...o,
+    interventions: o.interventions.map((i) => !restatedLabels.has(i.factor_label) ? i
+      : { ...i, value: TODAY_LEVEL + i.value, unit: TODAY_UNIT }),
+  });
+  return { model: { ...model, factors, options }, restated };
+}
+
+/**
+ * ⛔ CONSTRUCTION NEVER RETURNS OPTIONS THAT ARE IDENTICAL BY CONSTRUCTION (Delivery Lead, #70
+ * 5842361028 / 5842400604 — MG (b)).
+ *
+ * MEASURED on served CEE ef99a97 and cb1778b, Paul's pricing brief: the drafter added "Test £59 with AI
+ * release" — no level, acting on the same two factors as the user's £59 option. The starting point
+ * filled both from the same source, they came out identical, and the run refused `NOTHING_TO_COMPARE`
+ * with `may_run: false`. 2 of 29 served first passes in the DL corpus (scanned 26 Sep 03:11Z); the fill is reproduced exactly
+ * in `construction-no-identical-options.test.ts`.
+ *
+ * ⭐ "IDENTICAL" IS PLoT'S IDENTITY AFTER THAT FILL, because `NOTHING_TO_COMPARE` is PLoT's refusal: an
+ * option is its intervention map, `nodeId:value` pairs snapped to 1e-9 (`analysis-ready-core.ts`
+ * `comparisonSurvivesDedup`, mirroring PLoT `identical-options.ts`). One cell per option per factor,
+ * read off the ADMITTED graph (after levels are known):
+ *  · `set`  — the option sets a level (its `interventions`): a key with a value;
+ *  · `open` — it acts on the factor with no level yet (an option -> factor edge other than the held
+ *    status quo's repair edge, `REPAIR_AUTHORED_ORIGIN`): a key the fill will give a value;
+ *  · `held` — it does not act on the factor: no key.
+ *
+ * ⛔ WITHHELD ONLY WHEN ANOTHER OPTION COVERS IT — ONE WAY, NEVER "CANNOT BE TOLD APART" (independent review
+ * of b0a51c3e, 26 Sep). `b` COVERS `a` when they hold the same factors (a key one has and the other lacks is
+ * a difference no fill undoes) and every level `a` sets, `b` sets to the same level. `a` then sets nothing
+ * the model can hold that `b` does not — the DL's "differs only in something unmodelled" — and the same-source
+ * fill turns it into `b` (on the wire, it did). An open cell can equal at most ONE level, so it never makes
+ * two options with different set levels alike: the first rule's symmetric reading withheld an Olumi "£54"
+ * as a level-less test's twin, and made every priced Olumi option a twin of a user option with no price.
+ *  · An option with a level no other option sets to that level is never covered, so it is always kept.
+ *  · Covering is transitive, so the option a withheld one is named against is always one that stays.
+ *  · Two options that cover each other are identical as drafted: the user's stays, else the first drafted.
+ *
+ * ⛔ THE STATUS QUO IS NEVER A CANDIDATE, AND A LEVEL EQUAL TO TODAY IS STILL A COMPARATOR. Its map is EMPTY,
+ * never filled, and PLoT counts only valued maps (EXECUTED on all four served runs, first pass and approval).
+ * So it is neither withheld nor named, and an option acting like it is judged against the other options only
+ * — as a twin it withheld the served "£49 with AI release" once the status quo acted on factors. Measured: the
+ * served approved model with the test option removed refuses `NO_COMPARISON_NEXT_STEP`; with that option set
+ * to today's £49 alone it PROCEEDS — an Olumi option that only restates today's level is the valued stand-in
+ * the run needs (`construction-no-identical-options.test.ts`).
+ */
+const sameLevel = (a: number, b: number): boolean => Math.round(a / 1e-9) === Math.round(b / 1e-9);
+type Cell = { readonly kind: 'set'; readonly value: number } | { readonly kind: 'open' } | { readonly kind: 'held' };
+/** On one factor, `b` covers `a`: both hold it or neither does, and a level `a` sets is `b`'s level too. */
+function cellCovered(a: Cell, b: Cell): boolean {
+  if ((a.kind === 'held') !== (b.kind === 'held')) return false;
+  return a.kind !== 'set' || (b.kind === 'set' && sameLevel(a.value, b.value));
+}
+
+const fullLabelOf = (n: { label: string; description?: string }): string => n.description ?? n.label;
+
+/**
+ * Pure over an admitted model. Returns the Olumi-added options to withhold (each with a KEPT option that
+ * covers it) and the groups of USER-stated options to ask about once.
+ *
+ * Never withheld: a USER-stated option (`inferenceClassFor` → `brief_stated`, i.e. provenance
+ * `explicit`); the status quo (stamped `is_baseline`, held by repair edges, declared `is_status_quo`, or
+ * read as one by the readiness idioms, `labelMatchesBaseline`); and an option that acts on nothing —
+ * `option_changes_nothing` owns that shape and keeps it, named (`goal-reachability.test.ts`). The last two
+ * are never named either.
+ */
+function judgeOptionIdentity(
+  admitted: AdmittedModel,
+  declaredStatusQuoLabels: ReadonlySet<string>,
+): { withheld: { id: string; option: string; like: string }[]; statedGroups: string[][] } {
+  const factors = admitted.nodes.filter((n) => n.kind === 'factor');
+  const factorIds = new Set(factors.map((f) => f.id));
+  const options = admitted.nodes.filter((n) => n.kind === 'option');
+  const actsOn = new Map(options.map((o) => [o.id, new Set<string>()] as const));
+  const heldByRepair = new Set<string>();
+  for (const e of admitted.edges) {
+    if (!actsOn.has(e.from) || !factorIds.has(e.to)) continue;
+    if ((e as { origin?: unknown }).origin === REPAIR_AUTHORED_ORIGIN) { heldByRepair.add(e.from); continue; }
+    actsOn.get(e.from)!.add(e.to);
+  }
+  const cell = (o: AdmittedNode, f: string): Cell => {
+    const lv = o.interventions?.[f];
+    if (lv !== undefined && Number.isFinite(lv.value)) return { kind: 'set', value: lv.value };
+    if (actsOn.get(o.id)!.has(f)) return { kind: 'open' };
+    return { kind: 'held' };
+  };
+  const covers = (b: AdmittedNode, a: AdmittedNode): boolean => factors.every((f) => cellCovered(cell(a, f.id), cell(b, f.id)));
+  const isStatusQuo = (o: AdmittedNode): boolean =>
+    o.is_baseline === true || heldByRepair.has(o.id)
+    || declaredStatusQuoLabels.has(canonicalLabel(fullLabelOf(o))) || labelMatchesBaseline(fullLabelOf(o));
+  const actsOnNothing = (o: AdmittedNode): boolean => actsOn.get(o.id)!.size === 0 && Object.keys(o.interventions ?? {}).length === 0;
+  const userStated = (o: AdmittedNode): boolean => admitted.inference_classes[o.id] === 'brief_stated';
+  const order = new Map(options.map((o, i) => [o.id, i] as const));
+  /** Of two options identical as drafted, the one that stays: the user's, then the first drafted. */
+  const outranks = (p: AdmittedNode, o: AdmittedNode): boolean =>
+    (Number(userStated(p)) - Number(userStated(o)) || order.get(o.id)! - order.get(p.id)!) > 0;
+  /** A strict order: `p` covers `o`, and `o` does not cover `p` back unless `p` outranks it. */
+  const dominates = (p: AdmittedNode, o: AdmittedNode): boolean =>
+    p.id !== o.id && covers(p, o) && (!covers(o, p) || outranks(p, o));
+
+  const pool = options.filter((o) => !isStatusQuo(o) && !actsOnNothing(o));
+  const out = new Set(pool.filter((o) => !userStated(o) && pool.some((p) => dominates(p, o))).map((o) => o.id));
+  // Named against the first drafted option that covers it and STAYS — one always exists (a maximal cover).
+  const withheld = pool.filter((o) => out.has(o.id)).map((o) => {
+    const like = pool.find((p) => !out.has(p.id) && dominates(p, o))!;
+    return { id: o.id, option: fullLabelOf(o), like: fullLabelOf(like) };
+  });
+
+  // A USER option another user option covers: asked about once, with the first drafted user option that covers
+  // it and that none covers in turn. Every pair in a group is then alike on every level either sets.
+  const stated = pool.filter(userStated);
+  const groups = new Map<string, AdmittedNode[]>();
+  for (const o of stated) {
+    const head = stated.find((p) => dominates(p, o) && !stated.some((q) => dominates(q, p)));
+    if (head !== undefined) groups.set(head.id, [...(groups.get(head.id) ?? [head]), o]);
+  }
+  const statedGroups = [...groups.values()]
+    .map((g) => [...g].sort((a, b) => order.get(a.id)! - order.get(b.id)!).map(fullLabelOf));
+  return { withheld, statedGroups };
+}
+
+/**
+ * The step the user is told, in the words the server appends (`write-outcome.ts` `openQuestionsLine`). Domain
+ * neutral on purpose: the same shape was drafted for pricing ("Test £59 with AI release", served) and hiring
+ * ("Pilot Developer Hire", `fixtures/live-hiring-envelope-candidate-20260923.json`). "As drafted": Olumi's draft,
+ * never the user's words.
+ */
+const indistinctStep = (option: string, like: string): string =>
+  `I left out "${option}" as a separate option: as drafted it sets nothing the model can hold that "${like}" does not — `
+  + 'a test, pilot or staged rollout needs its own level on a factor the model holds. It stays open as a next step.';
+const statedIndistinctQuestion = (labels: readonly string[]): string => {
+  const quoted = labels.map((l) => `"${l}"`);
+  const which = quoted.length === 2
+    ? `${quoted[0]} different from ${quoted[1]}`
+    : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]} different from each other`;
+  return `What makes ${which}? As drafted, nothing the model holds tells them apart, so the analysis cannot compare them yet.`;
+};
+
+/**
+ * What an adopted retry must still say (never silently): a withheld option the retry does not carry at
+ * all. One the retry keeps, or withholds itself, is the retry's to report.
+ */
+export function carryWithheldOptions(first: AdmittedModel, retry: AdmittedModel): readonly WithheldOption[] {
+  const present = new Set([
+    ...retry.nodes.filter((n) => n.kind === 'option').map((n) => canonicalLabel(fullLabelOf(n))),
+    ...(retry.options_withheld ?? []).map((w) => canonicalLabel(w.option)),
+  ]);
+  return (first.options_withheld ?? []).filter((w) => !present.has(canonicalLabel(w.option)));
+}
+
+/** A stated current level of the goal: admitted (on the target's own cap) or withheld with the sentence to say. */
+export type StatedGoalLevelVerdict =
+  | { readonly admitted: true; readonly normalised: number }
+  | { readonly admitted: false; readonly reason: string };
+
+/**
+ * ⭐ MAY THIS STATED CURRENT LEVEL BE THE GOAL'S BASELINE? — ONE rule for BOTH routes that record one: the
+ * brief (construction, below) and the user's chat statement (`goal-current-level.ts`). Two copies of one
+ * rule drift and the drift reads as green (CLAUDE.md trap 12), so the chat path calls this, never a copy.
+ *
+ * ⛔ ONLY "AT LEAST" IS SCORED CORRECTLY TODAY. The operator has no GraphV3
+ * carrier (see the `goal_operator` loss below), and the level consumer scores
+ * P(level >= threshold) whatever the brief said (ISL
+ * `robustness_analyzer_v2.py`, `compared >= threshold`). So a baseline is
+ * written ONLY for `>=`:
+ *  · `<=` / `<` ("keep churn at or below 5%; 4% now") would be scored on the
+ *    WRONG tail;
+ *  · `>` ("grow MRR above £20k; £20k now") would count equality as met — a
+ *    held status quo would score 100% on a goal it has not reached.
+ * Withheld, and said with the shortest truthful repair, until the comparator
+ * is carried and honoured end to end. The target itself is kept as before.
+ *
+ * Then the shared scale/direction rule (`admitGoalBaseline`): a level above the target is a decrease the `>=`
+ * frame would invert; a level off the target's own cap is on another scale. Both withheld and said.
+ *
+ * It judges the PAIR only. Whose figure it is (the brief's `estimated` rule; the chat path's `user_stated`)
+ * and whether its unit is the target's are each caller's question, asked before this.
+ */
+export function admitStatedGoalLevel(args: {
+  readonly metric: string;
+  readonly operator: string;
+  readonly rawTarget: number;
+  readonly rawBaseline: number;
+  readonly cap: number;
+}): StatedGoalLevelVerdict {
+  const { metric, operator, rawTarget: raw, rawBaseline: baselineRaw, cap } = args;
+  if (operator === '>') {
+    return {
+      admitted: false,
+      reason:
+        `"${metric}" is a goal to get strictly above ${raw}, and the chance of meeting it ` +
+        `cannot be calculated exactly yet: reaching ${raw} itself would be counted as success. So its ` +
+        `current level (${baselineRaw}) was not used for that, and no chance of meeting the goal will be ` +
+        `shown. If reaching ${raw} is enough, say the goal is "at least ${raw}" and it can be shown.`,
+    };
+  }
+  if (operator !== '>=') {
+    return {
+      admitted: false,
+      reason:
+        `"${metric}" is a goal to stay ${operator === '<' ? 'below' : 'at or below'} ${raw}, and the chance of meeting a ` +
+        'goal of that kind cannot be calculated correctly yet, so its current level ' +
+        `(${baselineRaw}) was not used for that. The options can still be compared on everything ` +
+        'else; no chance of meeting the goal will be shown.',
+    };
+  }
+  const admission = admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap });
+  if (admission.admitted) return { admitted: true, normalised: admission.normalised };
+  if (admission.reason === 'baseline_off_cap_scale') {
+    return {
+      admitted: false,
+      reason:
+        `The current level of "${metric}" (${baselineRaw}) is outside the range the target of ${raw} ` +
+        `is measured on (0 to ${cap}), so the chance of reaching the target cannot be shown. The target ` +
+        'is kept. If either figure is wrong, say which and it can be corrected.',
+    };
+  }
+  return {
+    admitted: false,
+    reason:
+      `The current level of "${metric}" (${baselineRaw}) is already above the target ` +
+      `of ${raw}, so the chance of reaching the target cannot be shown: read that way the question ` +
+      'would be upside down. The target is kept. If the goal is to get back below a level, or if ' +
+      'either figure is wrong, say which and it can be corrected.',
+  };
+}
+
+/**
+ * Admission, with options identical by construction withheld (see `judgeOptionIdentity`).
+ *
+ * ⭐ WITHHELD BEFORE ANYTHING IS MEASURED OR REGISTERED. When an Olumi option is withheld, the candidate
+ * is admitted AGAIN without it (and without every link naming it), so ids, the held status quo, reach,
+ * levers and the size gate (`build-model.ts` measures `assessConstructionSize(admitted)`) all see
+ * exactly the graph that is registered — as if the drafter had never drafted it. It is said, never
+ * silent: `options_withheld` carries the step, and the ledger records it.
+ */
 export function admitCandidateModel(
-  model: CandidateModel,
+  candidateModel: CandidateModel,
   widened: WidenerAdditions = {},
 ): AdmittedModel {
+  const declared = new Set(candidateModel.options
+    .filter((o) => readIsBaseline({ ...(typeof o.is_status_quo === 'boolean' ? { is_baseline: o.is_status_quo } : {}) }) === true)
+    .map((o) => canonicalLabel(o.label)));
+  const first = admitOnce(candidateModel, widened);
+  const verdict = judgeOptionIdentity(first, declared);
+  // Never withhold a name another entity shares: removing its links would take that entity's with it.
+  const otherNames = new Set([
+    candidateModel.goal.metric, ...candidateModel.factors.map((f) => f.label), ...candidateModel.risks.map((r) => r.label),
+    ...candidateModel.outcomes.map((o) => o.label),
+  ].map(canonicalLabel));
+  const withheld = verdict.withheld.filter((w) => !otherNames.has(canonicalLabel(w.option)));
+  const questionsFor = (m: AdmittedModel, groups: string[][]) =>
+    groups.length === 0 ? m : { ...m, indistinct_stated_options: groups.map((g) => ({ options: g, question: statedIndistinctQuestion(g) })) };
+  if (withheld.length === 0) return questionsFor(first, verdict.statedGroups);
+
+  const gone = new Set(withheld.map((w) => canonicalLabel(w.option)));
+  const names = (l: { from: string; to: string }) => gone.has(canonicalLabel(l.from)) || gone.has(canonicalLabel(l.to));
+  const second = admitOnce(
+    { ...candidateModel, options: candidateModel.options.filter((o) => !gone.has(canonicalLabel(o.label))), links: candidateModel.links.filter((l) => !names(l)) },
+    {
+      ...widened,
+      ...(widened.proposed_options !== undefined ? { proposed_options: widened.proposed_options.filter((o) => !gone.has(canonicalLabel(o.label))) } : {}),
+      ...(widened.proposed_links !== undefined ? { proposed_links: widened.proposed_links.filter((l) => !names(l)) } : {}),
+    },
+  );
+  const options_withheld: WithheldOption[] = withheld.map((w) => ({
+    option: w.option, like: w.like, reason: 'option_indistinct', sentence: indistinctStep(w.option, w.like),
+  }));
+  return {
+    ...questionsFor(second, judgeOptionIdentity(second, declared).statedGroups),
+    loss: [
+      ...second.loss,
+      ...withheld.map((w, i) => ({
+        field_path: `nodes[${w.id}].option_indistinct`,
+        before: w.option,
+        after: null,
+        reason: options_withheld[i]!.sentence,
+        severity: 'warn',
+      } as RepairEntry)),
+    ],
+    options_withheld,
+  };
+}
+
+function admitOnce(
+  candidateModel: CandidateModel,
+  widened: WidenerAdditions,
+): AdmittedModel {
+  const { model, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
 
   /**
    * The scale frame for each factor, keyed by LABEL because it must be known
@@ -454,18 +2005,45 @@ export function admitCandidateModel(
    */
   const capByLabel = new Map<string, number>();
   const largestByLabel = new Map<string, number>();
-  const noteMagnitude = (label: string, v: unknown): void => {
+  /** Labels whose derived frame rests on at least one figure the USER stated. */
+  const userStatedFigureLabels = new Set<string>();
+  const noteMagnitude = (label: string, v: unknown, provenance: string): void => {
     if (typeof v !== 'number' || !Number.isFinite(v)) return;
     largestByLabel.set(label, Math.max(largestByLabel.get(label) ?? 0, Math.abs(v)));
+    if (provenance === 'explicit') userStatedFigureLabels.add(label);
   };
   for (const f of model.factors) {
     if (typeof f.plausible_max === 'number' && Number.isFinite(f.plausible_max) && f.plausible_max > 1) {
       capByLabel.set(f.label, f.plausible_max);
     }
-    if (f.baseline_known) noteMagnitude(f.label, f.baseline_value);
+    // ⛔ ONLY A KNOWN BASELINE. An AI estimate (`baseline_known: false`) must never
+    // derive its own frame: a guess that sets the scale it is then read against
+    // is a guess dressed as a measurement.
+    if (f.baseline_known) noteMagnitude(f.label, f.baseline_value, f.provenance);
   }
   for (const o of model.options) {
-    for (const iv of o.interventions ?? []) noteMagnitude(iv.factor_label, iv.value);
+    for (const iv of o.interventions ?? []) noteMagnitude(iv.factor_label, iv.value, iv.provenance);
+  }
+  /**
+   * ⛔ A LEVEL ABOVE THE STATED RANGE WIDENS THE RANGE; IT IS NEVER KEPT RAW BESIDE NORMALISED
+   * SIBLINGS. It used to be written as stated (`150`) while every other level on the factor was
+   * divided by the range (`0.05`): two value spaces on one factor, which `run_analysis` refuses
+   * outright (`mixed_scale_unresolved`, the same refusal as #69 5835137365). The range is a unit
+   * of measurement, so it is widened to the smallest power of ten above the level — derived,
+   * as a defaulted frame is, and said.
+   */
+  const widenedFrames: { label: string; stated: number; frame: number; option: string; value: number }[] = [];
+  for (const o of model.options) {
+    for (const iv of o.interventions ?? []) {
+      const stated = capByLabel.get(iv.factor_label);
+      if (stated === undefined || !Number.isFinite(iv.value) || iv.value <= stated) continue;
+      const frame = defaultFrameFor(iv.value);
+      const prior = widenedFrames.find((w) => w.label === iv.factor_label);
+      if (prior !== undefined && prior.frame >= frame) continue;
+      if (prior !== undefined) widenedFrames.splice(widenedFrames.indexOf(prior), 1);
+      widenedFrames.push({ label: iv.factor_label, stated: prior?.stated ?? stated, frame, option: o.label, value: iv.value });
+      capByLabel.set(iv.factor_label, frame);
+    }
   }
   const defaultedFrames: { label: string; frame: number }[] = [];
   for (const [label, largest] of largestByLabel) {
@@ -476,6 +2054,23 @@ export function admitCandidateModel(
   }
   const capFor = (label: string): number | undefined => capByLabel.get(label);
   const loss: RepairEntry[] = [];
+
+  /**
+   * ⭐ AN UNSTATED SCOPE IS SAID AS OLUMI'S ASSUMPTION (C46; `unstatedGoalScope`) — NEVER ON THE NODE.
+   *
+   * ⛔ NOT IN THE LABEL (independent verification of 6e33b95e, B2). The goal node carries the
+   * BRIEF's provenance (`from_brief`), so a label rewritten to "MRR (the Pro plan only)" showed
+   * Olumi's choice of scope as the user's own words.
+   *
+   * ⛔ NOT IN THE DESCRIPTION EITHER (re-verification of d2362e9d, item e). `get_canonical_state`
+   * shows a node's description to the Agent as its `full_label` (`projectEntity`,
+   * `agent-capabilities.ts`), so the goal read back as "Measured for the Pro plan only — Olumi's
+   * assumption; …" — Olumi's words presented as the user's metric. The node is left exactly as it
+   * is with no scope question; the assumption is the `goal_scope` ledger entry's `after`, which the
+   * build says first in `not_represented`, and its `reason` is the question it asks first in
+   * `open_questions` (`build-model.ts`).
+   */
+  const goalScope = unstatedGoalScope(model.goal);
 
   // Fixed traversal order => deterministic ids.
   const entities: { label: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
@@ -517,6 +2112,72 @@ export function admitCandidateModel(
         const resolved = resolveGoalThresholdCapWithProvenance(
           undefined, raw, model.goal.unit, undefined,
         );
+        /**
+         * ⛔ A LEVEL FRAME WITH NO BASELINE HAS NO GOAL FIT. ISL reads the level
+         * frame against `observed_state.baseline` and refuses without it
+         * (`missing_goal_baseline`, `GOAL_THRESHOLD_NOT_CONVERTIBLE`), so PLoT has
+         * no `probability_of_goal` to copy. The draft path carries a stated current
+         * level (`enricher.ts` `goal_baseline`); this writes the SAME shape its
+         * projection sends (`transforms/schema-v3.ts`, the goal limb):
+         * `{ value: B, baseline: B, unit?, source, raw_value, cap }`, B on the
+         * threshold's OWN cap. `value` repeats `baseline` because ISL requires it
+         * (see that limb). Admission is the shared rule (`admitGoalBaseline`),
+         * never restated: a level above the target is a decrease the `>=` frame
+         * would invert, and is withheld and said, not written.
+         *
+         * Stated in the brief → `brief_extraction`; anything else → Olumi's
+         * (`cee_inference`). No current level → nothing, and nothing is derived
+         * from the target.
+         */
+        const baselineRaw = model.goal.baseline_value;
+        let observed_state: AdmittedNode['observed_state'];
+        const withheld = (reason: string): void => {
+          loss.push({
+            field_path: `nodes[${slugId(model.goal.metric)}].observed_state.baseline`,
+            before: baselineRaw ?? null,
+            after: null,
+            reason,
+            severity: 'warn',
+          } as RepairEntry);
+        };
+        /**
+         * ⛔ AND ONLY A LEVEL THE BRIEF STATES (review 5824085993; RC ruling 5824518762,
+         * fix (a)). An estimate of the goal's current level would set the chance of
+         * reaching the user's target on Olumi's own guess, and nothing downstream says
+         * so for a goal (the inferred-value disclosure covers factors only). So an
+         * estimate is withheld from Goal fit and said, with the one step that makes it
+         * count. A target-only brief stays admissible: only the Goal-fit figure waits.
+         */
+        // ⛔ "Known" alone is not enough (verdict 5824647383): the strict schema cannot tie
+        // `baseline_known` to its provenance, so a level the model marks known but
+        // attributes to itself (`ai_proposed`/`inferred`) is Olumi's, and is withheld too.
+        const estimated = !(model.goal.baseline_known === true
+          && (model.goal.baseline_provenance ?? model.goal.provenance) === 'explicit');
+        if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw) && estimated) {
+          withheld(
+            `Olumi's own estimate of the current level of "${model.goal.metric}" (${baselineRaw}) was not used, ` +
+            `so no chance of reaching ${raw} is shown: that figure would rest on a guess, not on anything you ` +
+            `said. Tell me the current level of "${model.goal.metric}" and the chance of reaching it can be shown.`,
+          );
+        } else if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)) {
+          // ONE rule for a stated current level, shared with the chat path (`goal-current-level.ts`).
+          const verdict = admitStatedGoalLevel({
+            metric: model.goal.metric, operator: model.goal.operator, rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap,
+          });
+          if (verdict.admitted) {
+            // Only the user's stated level reaches here (see `estimated` above).
+            observed_state = {
+              value: verdict.normalised,
+              baseline: verdict.normalised,
+              ...(model.goal.unit ? { unit: model.goal.unit } : {}),
+              source: 'brief_extraction',
+              raw_value: baselineRaw,
+              cap: resolved.cap,
+            };
+          } else {
+            withheld(verdict.reason);
+          }
+        }
         return {
           ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
           goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
@@ -528,6 +2189,7 @@ export function admitCandidateModel(
                 goal_threshold: raw / resolved.cap,
               }
             : {}),
+          ...(observed_state !== undefined ? { observed_state } : {}),
         };
       })(),
     },
@@ -549,6 +2211,12 @@ export function admitCandidateModel(
         ...(f.baseline_known && typeof f.baseline_value === 'number'
           ? { observed_state: framedObservedState({ ...f, plausible_max: capFor(f.label) ?? f.plausible_max }) }
           : {}),
+        // An ESTIMATE is kept on the same frame `scale_frame` carries below, as
+        // Olumi's (`estimatedObservedState`). A known baseline never reaches it.
+        ...((): Record<string, unknown> => {
+          const os = estimatedObservedState(f, capFor(f.label) ?? f.plausible_max);
+          return os === null ? {} : { observed_state: os };
+        })(),
         // ⭐ THE FRAME TRAVELS WITH THE NODE, not only with the baseline. A
         // factor with no value today still needs its range, because the value
         // a user adopts LATER is normalised against it, and so is every level
@@ -653,8 +2321,9 @@ export function admitCandidateModel(
     if (seen.has(id)) continue;
     seen.add(id);
     inference_classes[id] = inferenceClassFor(e.provenance);
-    // A factor whose baseline is NOT known gets no observed_state at all —
-    // an absent value is the honest record; a zero would be a measurement.
+    // A factor with NO baseline value gets no observed_state at all — an absent
+    // value is the honest record; a zero would be a measurement. (An ESTIMATED
+    // value is kept, stamped as Olumi's: `estimatedObservedState`.)
     const label = shortLabel(e.label);
     if (label !== e.label) {
       loss.push({
@@ -678,6 +2347,65 @@ export function admitCandidateModel(
       provenance: displayProvenanceFor(e.provenance),
       ...(e.node ?? {}),
     });
+  }
+
+  // The scope choice, recorded with both readings: its `after` IS the assumption the build says, and
+  // its `reason` IS the question the build asks.
+  if (goalScope !== null) {
+    loss.push({
+      field_path: `nodes[${ids.get(model.goal.metric)!}].goal_scope`,
+      before: { metric: model.goal.metric, modelled: goalScope.modelled, alternative: goalScope.alternative },
+      after:
+        `The model measures your "${model.goal.metric}" goal for ${goalScope.modelled} \u2014 Olumi's assumption; the ` +
+        `brief does not say whether it covers ${goalScope.modelled} or ${goalScope.alternative}.`,
+      reason:
+        `The brief does not say whether your "${model.goal.metric}" goal covers ${goalScope.modelled} or ` +
+        `${goalScope.alternative}, so the model measures it for ${goalScope.modelled}. Which did you mean?`,
+      severity: 'warn',
+    } as RepairEntry);
+  }
+
+  /** The node a limit names: its exact label, else a case-insensitive label match; never a fuzzy guess. */
+  const nodeIdForMetric = (metric: string): string | undefined => {
+    const exact = ids.get(metric);
+    if (exact !== undefined) return exact;
+    const wanted = metric.trim().toLowerCase();
+    for (const [label, id] of ids) if (label.trim().toLowerCase() === wanted) return id;
+    return undefined;
+  };
+
+  /**
+   * ⛔ A LIMIT THE USER STATED ON A LEVEL NAMES A QUANTITY THAT CAN HOLD ONE (R&C 5842795947, DL 5842800634).
+   *
+   * SERVED (CEE 08f6f90, Paul's brief "…keeping monthly churn under 10%…"): in about 2 of 7 first passes the drafter
+   * made "Monthly churn" an OUTCOME. The limit attached, but Paul's "about 4% today, from our billing data" had nowhere
+   * to land — "Monthly churn is currently an outcome, not a factor that can hold a starting value" — because the value
+   * writer takes only a factor (`SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS`). Drafted as a factor, the same journey
+   * reached a proposal 5/5.
+   *
+   * So an OUTCOME named by a limit that (a) the user stated (the brief-stated class, `admit-constraint.ts`
+   * `isUserAuthored`'s rule) and (b) is a percentage LEVEL is admitted as an observable FACTOR: the same id, label,
+   * authorship and links, and exactly the served factor-kind shape. A level here is a unit that pins a frame on its own
+   * (`unitPinnedScaleFrame`) AND that the limit canonicaliser carries as a plain `"%"` on that frame — a percent head
+   * with at most a period ("% per month"), above 1 and up to 100. "percentage points" / "pp" (a change), "% change vs …", a money or
+   * count limit, a goal and a risk are left exactly as they were. The frame is the one the unit pins (a unit of
+   * measurement, which is what the served factor-kind node carries); no starting value is written — the slot stays
+   * empty for the user's own figure. An outcome carries no value or frame to keep (its entity has no `node` payload).
+   */
+  const limitedLevelFrames = new Map<string, number>();
+  for (const c of model.constraints) {
+    if (inferenceClassFor(c.provenance) !== 'brief_stated') continue;
+    const frame = unitPinnedScaleFrame(c.unit, c.value);
+    if (frame === undefined || canonicaliseLimitUnit(c.value, c.unit, { scale_frame: frame }).unit !== '%') continue;
+    const id = nodeIdForMetric(c.metric);
+    if (id !== undefined) limitedLevelFrames.set(id, frame);
+  }
+  for (const n of nodes) {
+    const frame = limitedLevelFrames.get(n.id);
+    if (frame === undefined || n.kind !== 'outcome') continue;
+    n.kind = 'factor';
+    n.category = 'observable';
+    n.scale_frame = frame;
   }
 
   const allLinks: CandidateLink[] = [...model.links, ...(widened.proposed_links ?? [])];
@@ -724,6 +2452,11 @@ export function admitCandidateModel(
     if (fid !== undefined && c !== undefined) capByFactorId.set(fid, c);
   }
   for (const d of defaultedFrames) {
+    // "Your own figures" only when a figure the user stated fed the frame; when
+    // every figure is Olumi's, saying so is the honest record.
+    const whose = userStatedFigureLabels.has(d.label)
+      ? 'your own figures are stored unchanged beside it.'
+      : "the figures it was taken from are Olumi's own estimates, not figures you gave, and are stored unchanged beside it.";
     loss.push({
       field_path: `nodes[${ids.get(d.label) ?? d.label}].observed_state.cap`,
       before: null,
@@ -732,7 +2465,36 @@ export function admitCandidateModel(
         `No range was stated for "${d.label}", and a number above 1 with no range cannot be analysed ` +
         `at all \u2014 nor can a range be added afterwards. A range of 0 to ${d.frame} has been used, taken ` +
         'from the largest figure the model already holds for it. That is a unit of measurement, not a ' +
-        'forecast or a limit, and your own figures are stored unchanged beside it.',
+        `forecast or a limit, and ${whose}`,
+      severity: 'warn',
+    } as RepairEntry);
+  }
+
+  for (const w of widenedFrames) {
+    loss.push({
+      field_path: `nodes[${ids.get(w.label) ?? w.label}].observed_state.frame_widened`,
+      before: w.stated,
+      after: w.frame,
+      reason:
+        `"${w.label}" was given a range of 0 to ${w.stated}, but "${w.option}" sets it to ${w.value}, so the range ` +
+        `is now 0 to ${w.frame} and every figure for it is read against that one range. A range is a unit of ` +
+        'measurement, not a forecast or a limit; no figure was changed.',
+      severity: 'warn',
+    } as RepairEntry);
+  }
+  for (const r of restatedChanges) {
+    const levels = candidateModel.options.flatMap((o) => (o.interventions ?? [])
+      .filter((i) => i.factor_label === r.label)
+      .map((i) => `"${o.label}" ${TODAY_LEVEL + i.value}`));
+    loss.push({
+      field_path: `nodes[${ids.get(r.label) ?? r.label}].observed_state.level_restated`,
+      before: 0,
+      after: TODAY_LEVEL,
+      reason:
+        `"${r.label}" is a change from today, and a change below zero cannot be analysed beside the others, so it ` +
+        `is measured as its level relative to today instead: today is ${TODAY_LEVEL}, and each option's change is ` +
+        `added to it (${levels.join(', ')}), on a range of 0 to ${r.frame}. The sign of every change is kept and ` +
+        'no figure you gave was altered.',
       severity: 'warn',
     } as RepairEntry);
   }
@@ -774,28 +2536,32 @@ export function admitCandidateModel(
         });
         continue;
       }
-      const cap = capByFactorId.get(factorId);
-      // Only when the level genuinely sits inside the declared range. A level
-      // outside it is left exactly as stated and the mismatch is recorded —
-      // silently clamping a user's number would be the worse failure.
-      if (cap !== undefined && iv.value >= 0 && iv.value <= cap) {
-        bundle[factorId] = { value: iv.value / cap, source: levelSourceFor(iv.provenance) };
-      } else {
-        if (cap !== undefined) {
-          loss.push({
-            field_path: `nodes[${optionId}].interventions.${factorId}`,
-            before: iv.value,
-            after: iv.value,
-            reason:
-              `"${o.label}" sets "${iv.factor_label}" to ${iv.value}, which is outside the range ` +
-              `0 to ${cap} the model states for that factor. It has been kept exactly as stated ` +
-              'rather than squeezed into the range — say so, and correct either the level or the range.',
-            severity: 'warn',
-          } as RepairEntry);
-        }
-        bundle[factorId] = { value: iv.value, source: levelSourceFor(iv.provenance) };
-      }
       actsOn.add(factorId);
+      /**
+       * ⛔ ONE VALUE SPACE PER FACTOR (#69 5835137365). A level below zero that could not be
+       * restated as a level relative to today (`restateSignedPercentChanges`) has no place in
+       * the factor's frame, and writing it raw beside normalised siblings is what made the
+       * served comparison refuse. It is WITHHELD — never squeezed, never registered in a second
+       * space — the option keeps acting on the factor with no level of its own, and it is said.
+       * Every other level sits inside its frame by construction (a stated range below a level
+       * is widened above), so it is divided by the same range as the factor's baseline.
+       */
+      if (iv.value < 0) {
+        loss.push({
+          field_path: `nodes[${optionId}].interventions.${factorId}.signed_level_withheld`,
+          before: iv.value,
+          after: null,
+          reason:
+            `"${o.label}" puts "${iv.factor_label}" at ${iv.value}${iv.unit ? ` ${iv.unit}` : ''}, and a level ` +
+            `below zero cannot be analysed beside the others, so no level was set: the option is kept as changing ` +
+            `"${iv.factor_label}", with no level of its own. Say what "${iv.factor_label}" would be after ` +
+            `"${o.label}" and it becomes a level.`,
+          severity: 'warn',
+        } as RepairEntry);
+        continue;
+      }
+      const cap = capByFactorId.get(factorId);
+      bundle[factorId] = { value: cap !== undefined ? iv.value / cap : iv.value, source: levelSourceFor(iv.provenance) };
     }
     if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);
   }
@@ -834,7 +2600,50 @@ export function admitCandidateModel(
     if (bundle !== undefined) n.interventions = bundle;
   }
 
-  const linkResult = admitCandidateLinks(resolvable);
+  /**
+   * ⭐ THE MAGNITUDE CONTRACT (`cee/magnitude/link-effect.ts`, design D1–D9). Each link's stated size is read on
+   * its target's own frame here, where both ends' frames and every option's level are already known — never a
+   * frame-blind 0.5 (served T3: releasing AI moved churn by about −50 points on its 0–100% frame).
+   *
+   * Only a link whose direction is stated and whose mean nobody supplied directly is sized. A link with no usable
+   * size and nothing to check it against keeps today's projection exactly.
+   */
+  const unitById = new Map<string, string>();
+  for (const f of model.factors) {
+    const id = ids.get(f.label);
+    if (id !== undefined && typeof f.unit === 'string') unitById.set(id, f.unit);
+  }
+  const optionLevelsById = new Map<string, number[]>();
+  for (const bundle of interventionsByOption.values()) {
+    for (const [factorId, level] of Object.entries(bundle)) optionLevelsById.set(factorId, [...(optionLevelsById.get(factorId) ?? []), level.value]);
+  }
+  const magnitudeNodeById = new Map<string, MagnitudeNode>(nodes.map((n) => [n.id, {
+    label: n.label,
+    kind: n.kind,
+    scale_frame: n.scale_frame,
+    observed_state: n.observed_state as MagnitudeNode['observed_state'],
+    goal_threshold_cap: n.goal_threshold_cap,
+    goal_threshold_unit: n.goal_threshold_unit,
+    unit: unitById.get(n.id) ?? null,
+    option_levels: optionLevelsById.get(n.id) ?? [],
+  }]));
+  const sizing = new Map<string, LinkSizing>();
+  for (const l of resolvable) {
+    if (l.direction === 'unknown' || typeof l.strength_mean === 'number') continue;
+    const source = magnitudeNodeById.get(l.from);
+    const target = magnitudeNodeById.get(l.to);
+    if (source === undefined || target === undefined) continue;
+    // D9: a user's own edit (`user_specified`) always wins; otherwise the size is the user's only when stated as theirs.
+    const user_stated = l.provenance_source === 'user_specified' || (l.effect_provenance ?? l.provenance) === 'explicit';
+    sizing.set(`${l.from}::${l.to}`, sizeLink({
+      direction: l.direction,
+      effect_amount: l.effect_amount,
+      effect_per_source_change: l.effect_per_source_change,
+      user_stated,
+    }, source, target));
+  }
+
+  const linkResult = admitCandidateLinks(resolvable, sizing);
 
   // decision -> option edges are TOPOLOGY, not causal belief. They use the
   // canonical structural constant and are deliberately NOT marked `defaulted`
@@ -863,14 +2672,17 @@ export function admitCandidateModel(
       [...(actsOnByOption.get(o.id) ?? [])].map((factorId) => topo(o.id, factorId)),
     ),
   ];
-  const constraintResult = admitCandidateConstraints(model.constraints, (metric) => {
-    const exact = ids.get(metric);
-    if (exact !== undefined) return exact;
-    // Fall back to a case-insensitive label match; never a fuzzy guess.
-    const wanted = metric.trim().toLowerCase();
-    for (const [label, id] of ids) if (label.trim().toLowerCase() === wanted) return id;
-    return undefined;
-  });
+  const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
+  const constraintResult = admitCandidateConstraints(
+    model.constraints,
+    nodeIdForMetric,
+    // A limit's unit is canonicalised against ITS node's scale — the one PLoT will normalise it against.
+    (nodeId) => {
+      const n = nodeById.get(nodeId);
+      if (n === undefined) return undefined;
+      return { ...(n.observed_state ?? {}), ...(n.scale_frame !== undefined ? { scale_frame: n.scale_frame } : {}) };
+    },
+  );
 
   /**
    * ⛔ ONE CONNECTION, ONE EDGE — an option's link to a factor it already acts on
@@ -979,27 +2791,8 @@ export function admitCandidateModel(
     && kindById.get(e.to) === 'risk'
     && !USER_AUTHORED_EDGE_SOURCES.has(String(e.provenance?.source ?? '')));
   const shortcutPairs = new Set(shortcutEdges.map((e) => `${e.from}\u0000${e.to}`));
-  const mechanismAdjacency = new Map<string, string[]>();
-  for (const e of [...topologyEdges, ...causalEdges]) {
-    if (shortcutPairs.has(`${e.from}\u0000${e.to}`)) continue;
-    mechanismAdjacency.set(e.from, [...(mechanismAdjacency.get(e.from) ?? []), e.to]);
-  }
-  /** The shortest mechanism from `from` to `to` using no shortcut, or null. */
-  const mechanismPath = (from: string, to: string): readonly string[] | null => {
-    const queue: string[][] = [[from]];
-    const seen = new Set([from]);
-    while (queue.length > 0) {
-      const path = queue.shift()!;
-      const head = path[path.length - 1]!;
-      if (head === to) return path;
-      for (const next of mechanismAdjacency.get(head) ?? []) {
-        if (seen.has(next)) continue;
-        seen.add(next);
-        queue.push([...path, next]);
-      }
-    }
-    return null;
-  };
+  const mechanismGraph = [...topologyEdges, ...causalEdges].filter((e) => !shortcutPairs.has(`${e.from}\u0000${e.to}`));
+  const mechanismPath = (from: string, to: string): readonly string[] | null => findMechanismPath(mechanismGraph, from, to);
   const foldedShortcutPairs = new Set<string>();
   for (const s of shortcutEdges) {
     const optionLabel = labelById.get(s.from) ?? s.from;
@@ -1087,7 +2880,58 @@ export function admitCandidateModel(
    * link travels in `withheld`, and the construction contract (`build-model.ts`)
    * is what makes the drafter state the link in the first place.
    */
-  const allEdges = [...topologyEdges, ...mechanismEdges];
+  /**
+   * ⭐ THE HELD STATUS QUO (`wireInertStatusQuo`). It shares the conventional
+   * lane's connectivity repair's `origin: 'repair'` and its "no effect value is
+   * implied" wording (`CONNECTIVITY_REPAIR_WIRING_REASON`), because `origin` is the
+   * one discriminator readiness reads to hold the option rather than ask for a
+   * level. The provenance SOURCE deliberately differs: that repair stamps
+   * `synthetic` (`status-quo-fix.ts:247`), while this lane stamps
+   * `cee_hypothesis`, the source every other machine-authored edge it admits
+   * carries. No level, no intervention, no `is_baseline` stamp and no user
+   * authority are written: the only claim made is the one disclosed below, and
+   * it is correctable.
+   */
+  // Read through the shared baseline-identity reader, so "is this the status quo?"
+  // has one truth table across the estate.
+  const declaredStatusQuoIds = new Set(
+    model.options
+      .filter((o) => readIsBaseline({ ...(typeof o.is_status_quo === 'boolean' ? { is_baseline: o.is_status_quo } : {}) }) === true)
+      .map((o) => ids.get(o.label))
+      .filter((id): id is string => id !== undefined),
+  );
+  const heldStatusQuo = wireInertStatusQuo(nodes, [...topologyEdges, ...mechanismEdges], interventionsByOption, declaredStatusQuoIds);
+  const heldStatusQuoEdges = (heldStatusQuo?.factorIds ?? []).map((factorId) => ({
+    ...topo(heldStatusQuo!.optionId, factorId),
+    origin: REPAIR_AUTHORED_ORIGIN,
+    provenance: { source: 'cee_hypothesis', reasoning: CONNECTIVITY_REPAIR_WIRING_REASON },
+  }));
+  if (heldStatusQuo !== null && declaredStatusQuoIds.has(heldStatusQuo.optionId)) {
+    const declaredNode = nodes.find((n) => n.id === heldStatusQuo.optionId);
+    if (declaredNode !== undefined) declaredNode.is_baseline = true;
+  }
+  if (heldStatusQuo !== null) {
+    const optionLabel = labelById.get(heldStatusQuo.optionId) ?? heldStatusQuo.optionId;
+    const names = heldStatusQuo.factorIds.map((id) => labelById.get(id) ?? id);
+    const factorList = names.length === 1 ? names[0]! : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+    // The option is no longer inert, so it is no longer reported as one.
+    for (let i = unresolved.length - 1; i >= 0; i--) {
+      const w = unresolved[i]!;
+      if (w.reason === 'option_changes_nothing' && ids.get(w.from) === heldStatusQuo.optionId) unresolved.splice(i, 1);
+    }
+    loss.push({
+      field_path: `nodes[${heldStatusQuo.optionId}].status_quo_held`,
+      before: null,
+      after: heldStatusQuo.factorIds,
+      reason:
+        `'${optionLabel}' reads as carrying on as now, so I connected it to ${factorList} with no level of its own; ` +
+        'the analysis holds each at its starting value, which may be an estimate rather than a figure you gave. ' +
+        'If carrying on as now would itself change any of them, say how.',
+      severity: 'info',
+    } as RepairEntry);
+  }
+
+  const allEdges = [...topologyEdges, ...heldStatusQuoEdges, ...mechanismEdges];
 
   /**
    * ⭐ A NODE THAT CANNOT REACH THE GOAL BLOCKS THE WHOLE ANALYSIS.
@@ -1126,15 +2970,89 @@ export function admitCandidateModel(
    * retained (every risk kept), structural blockers 5 -> 0.
    */
   const goalForReach = nodes.find((n) => n.kind === 'goal');
+
+  /**
+   * ⛔ NO LOOP IS REGISTERED THAT ONE OF OLUMI'S OWN LINKS CLOSES (`breakLoops`).
+   *
+   * Run over the edge set readiness checks — every edge admitted, the risk repairs
+   * below included — and BEFORE the reachability pass, so a node a withheld link
+   * leaves unconnected is named there like any other. The structural edges (the
+   * decision's options, what each option sets, the held status quo) and the user's
+   * own links are never withheld; a loop made only of those is kept and said.
+   * Everything withheld travels in `withheld` and is said in `not_represented`,
+   * and the projection entries for a withheld link go with it, as for a fold.
+   *
+   * ⛔ BROKEN FIRST, THEN THE RISK REPAIRS (review of f504b8e0, (a)). The repair list
+   * was read off the edges BEFORE a loop was broken, so a risk whose only link was the
+   * one withheld looked connected, got no repair, and readiness swapped CYCLE_DETECTED
+   * for NO_PATH_TO_GOAL. The repairs are now computed from the broken edge set; a
+   * second pass then breaks any loop a repair itself closes (a repair is Olumi's link).
+   */
+  const structuralEdges = new Set<object>([...topologyEdges, ...heldStatusQuoEdges]);
+  const loopWithheld: { from: string; to: string; reason: string; detail: string; loop: readonly string[] }[] = [];
+  const acyclic = <E extends AdmittedEdge>(edges: readonly E[], reportKept: boolean): E[] => {
+    const labelsOf = (loop: readonly { from: string }[]) => loop.map((e) => labelById.get(e.from) ?? e.from);
+    // The drafter's own words (a shortened label keeps its full text as `description`).
+    const drafterLabel = (id: string): string => {
+      const n = nodes.find((x) => x.id === id);
+      return String((n as { description?: unknown } | undefined)?.description ?? n?.label ?? id);
+    };
+    const isUsers = (e: E): boolean => USER_AUTHORED_EDGE_SOURCES.has(String(e.provenance?.source ?? ''));
+    const pairKey = (e: { from: string; to: string }): string => `${e.from}\u0000${e.to}`;
+    const userPairs = new Set(edges.filter(isUsers).map(pairKey));
+    const result = breakLoops(edges, {
+      mayWithhold: (e) => !structuralEdges.has(e) && !isUsers(e),
+      goalId: goalForReach?.id,
+      kindOf: (id) => kindById.get(id),
+    });
+    for (const { edge, loop } of result.withheld) {
+      const detail = sayWithheldLoopLink(labelById.get(edge.from) ?? edge.from, labelById.get(edge.to) ?? edge.to, labelsOf(loop));
+      for (let i = loss.length - 1; i >= 0; i--) {
+        const fp = String(loss[i]!.field_path ?? '');
+        if (fp.startsWith(`edges[${edge.from}::${edge.to}]`) || fp === `edges[${edge.from}->${edge.to}]`) loss.splice(i, 1);
+      }
+      loss.push({
+        code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
+        layer: 'cee',
+        field_path: `edges[${edge.from}::${edge.to}].loop_withheld`,
+        before: edge.effect_direction ?? null,
+        after: null,
+        reason: detail,
+        severity: 'warn',
+      });
+      loopWithheld.push({ from: edge.from, to: edge.to, reason: 'loop_closing_link', detail, loop: loop.map((e) => drafterLabel(e.from)) });
+    }
+    // A loop left after the second pass was already left (and said) by the first: a repair is breakable.
+    for (const loop of reportKept ? result.kept : []) {
+      loss.push({
+        code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
+        layer: 'cee',
+        field_path: `edges[${loop[0]!.from}::${loop[0]!.to}].loop_kept`,
+        before: null,
+        after: null,
+        reason: sayKeptLoop(labelsOf(loop), loop.map((e) => ({
+          from: labelById.get(e.from) ?? e.from,
+          to: labelById.get(e.to) ?? e.to,
+          yours: userPairs.has(pairKey(e)),
+          fromDecision: kindById.get(e.from) === 'decision',
+        }))),
+        severity: 'warn',
+      });
+    }
+    return result.edges;
+  };
+
   const riskRepairs: AdmittedEdge[] = [];
-  let finalEdges = allEdges;
+  const brokenEdges = acyclic(allEdges, true);
+  let finalEdges: AdmittedEdge[] = brokenEdges;
 
   if (goalForReach !== undefined) {
-    const hasOutgoingNow = new Set(allEdges.map((e) => e.from));
+    const hasOutgoingNow = new Set(brokenEdges.map((e) => e.from));
     // A risk whose own link was withheld as direction-unknown was answered
     // "I cannot say which way" — not left unconnected.
     const directionDeclined = new Set(linkResult.withheld.map((w) => w.from));
     for (const r of nodes.filter((n) => n.kind === 'risk' && !hasOutgoingNow.has(n.id) && !directionDeclined.has(n.id))) {
+      const lostToLoop = loopWithheld.filter((w) => w.from === r.id).map((w) => `"${labelById.get(w.to) ?? w.to}"`);
       riskRepairs.push({
         from: r.id,
         to: goalForReach.id,
@@ -1151,15 +3069,19 @@ export function admitCandidateModel(
         before: null,
         after: 'connected',
         reason:
-          `The risk "${r.label}" was named but never connected to anything, which stops the whole ` +
-          `model being analysed. It has been connected to "${goalForReach.label}" as a negative ` +
+          (lostToLoop.length > 0
+            ? `The risk "${r.label}" led only to ${lostToLoop.join(' and ')}, and ${lostToLoop.length === 1 ? 'that link was' : 'those links were'} left out to break a loop, ` +
+              'so it no longer led anywhere, which stops the whole model being analysed. '
+            : `The risk "${r.label}" was named but never connected to anything, which stops the whole ` +
+              'model being analysed. ') +
+          `It has been connected to "${goalForReach.label}" as a negative ` +
           'influence, with a placeholder strength — that link follows from it being a risk, not ' +
           'from anything you said, and neither it nor its strength is a measurement.',
         severity: 'warn',
       } as RepairEntry);
     }
 
-    const edgesNow = [...allEdges, ...riskRepairs];
+    const edgesNow = riskRepairs.length === 0 ? brokenEdges : acyclic([...brokenEdges, ...riskRepairs], false);
     /**
      * ⛔ REPORTED, NOT ENFORCED — and that is a deliberate reversal.
      *
@@ -1221,15 +3143,53 @@ export function admitCandidateModel(
     } as RepairEntry);
   }
 
+  // C46: declared products, checked against the FINAL admitted structure (`markProductIdentities`).
+  // An exact label first, then the same words ignoring case and spacing — never a fuzzy guess.
+  const resolveEntity = (label: string): string | undefined => {
+    if (typeof label !== 'string') return undefined;
+    const exact = ids.get(label);
+    if (exact !== undefined) return exact;
+    const wanted = canonicalLabel(label);
+    for (const [l, id] of ids) if (canonicalLabel(l) === wanted) return id;
+    return undefined;
+  };
+  const products = markProductIdentities(
+    Array.isArray(model.identities) ? model.identities : [],
+    resolveEntity,
+    levers.nodes,
+    finalEdges,
+    goalForReach?.id,
+    declaredStatusQuoIds,
+  );
+  loss.push(...products.loss);
+  /**
+   * ⛔ C46 (a) — THE CARRIER. Each checked declaration that bears on the goal is written on its
+   * product's node, so `run_analysis` can re-judge the leader it names on the graph it analysed.
+   * The DECLARATION only (which nodes multiply, and whose reading it is) — never the verdict, which
+   * depends on options a later edit can add. One per node: a second declaration on the same node is
+   * still marked and said above, but only the first is carried. A model with no declaration gains
+   * nothing, so a linear brief registers byte-identical.
+   */
+  const carriers = new Map<string, NonlinearIdentityCarrier>();
+  for (const a of products.accepted) {
+    if (!carriers.has(a.outcome_id)) {
+      carriers.set(a.outcome_id, { operation: 'product', factor_ids: [...a.factor_ids], stated_in_brief: a.stated_in_brief });
+    }
+  }
+  const admittedNodes = carriers.size === 0
+    ? levers.nodes
+    : levers.nodes.map((n) => (carriers.has(n.id) ? { ...n, nonlinear_identity: carriers.get(n.id)! } : n));
+
   return {
-    nodes: levers.nodes,
+    nodes: admittedNodes,
     inference_classes,
     edges: finalEdges,
     ...(levers.demoted.length > 0 ? { treated_as_context: levers.demoted } : {}),
+    ...(products.marks.length > 0 ? { nonlinear_identities: products.marks } : {}),
     goal_constraints: constraintResult.constraints,
     loss,
     // `withheld` is a list of LINKS by contract; a withheld NODE is reported
     // through `loss`, which is the channel the build result already surfaces.
-    withheld: [...unresolved, ...linkResult.withheld],
+    withheld: [...unresolved, ...linkResult.withheld, ...loopWithheld],
   };
 }
