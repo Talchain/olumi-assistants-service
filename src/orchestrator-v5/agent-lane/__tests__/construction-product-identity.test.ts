@@ -28,7 +28,10 @@
  *  5. THE COMPARISON ARM (independent verification of 6e33b95e, B1): two options that move
  *     the product's inputs DIFFERENTLY — different inputs, different signs, different levers
  *     for two inputs, or one moving none of them — can swap places within the plausible
- *     range, so the verdict is `sign_not_provable` even when each option alone is stable.
+ *     range, so the verdict is `sign_not_provable` even when each option alone is stable. So can
+ *     an option that also reaches the goal AROUND the product (a path avoiding the outcome, or an
+ *     addend of it) against one moving the same input alone (re-verification of d2362e9d, B1); and
+ *     the sentence groups options by how they move the inputs, never "all of these differ" (d).
  *  6. The rules the verification found unpinned (B3): the served two-lever option, an outcome
  *     that does not reach the goal, case/spacing, one or duplicated factors, a path through the
  *     outcome; and a status quo at today's level is never a lever (N-b), a product that is only
@@ -467,6 +470,107 @@ describe('rule 5 (B1): two options that move the inputs differently cannot be ra
     });
     expect(marks(wire).map((m) => [m.verdict, m.options_not_sign_stable, m.comparisons_not_sign_stable])).toEqual([['sign_stable_provisional', [], []]]);
   });
+
+  /**
+   * ⛔ B1, re-verification of d2362e9d: an option that moves an input AND reaches the goal AROUND the
+   * product had the same signature as one that moves only that input. The referral scheme gains
+   * R·ΔS_r + ΔN (subscribers, and Basic sign-ups straight into MRR); paid ads gain R·ΔS_a. Which is
+   * larger depends on the level R sits at, and a sum of separate effects fixes it at one value.
+   */
+  const aroundWire = (extra: [string, string, Dir][], factors: SmallFactor[] = [], outcomes?: string[], chain = REVENUE_CHAIN, identity = REV_X_SUBS) => small({
+    options: [CARRY_ON, { label: 'Referral scheme', changes: ['Referral volume'] }, { label: 'Paid ads', changes: ['Ad spend'] }],
+    factors: [
+      { label: 'Referral volume', role: 'controllable' }, { label: 'Ad spend', role: 'controllable' },
+      { label: 'Revenue per Pro user', baseline: 49 }, { label: 'Pro subscribers', baseline: 300 }, ...factors,
+    ],
+    links: [['Referral volume', 'Pro subscribers', 'positive'], ['Ad spend', 'Pro subscribers', 'positive'], ...extra, ...chain],
+    identities: [identity],
+    ...(outcomes === undefined ? {} : { outcomes }),
+  });
+
+  it('RED B1 (around): moving an input AND reaching the goal around the product is not ranked with moving that input alone', () => {
+    const wire = aroundWire([['Referral volume', 'Non-Pro MRR', 'positive'], ['Non-Pro MRR', 'MRR', 'positive']], [{ label: 'Non-Pro MRR', baseline: 5000, max: 50000 }]);
+    expect(marks(wire)).toEqual([{
+      outcome_id: 'pro_mrr', operation: 'product', factor_ids: ['revenue_per_pro_user', 'pro_subscribers'],
+      verdict: 'sign_not_provable',
+      options_not_sign_stable: ['referral_scheme', 'paid_ads'],
+      comparisons_not_sign_stable: [['referral_scheme', 'paid_ads']],
+    }]);
+    const [line] = markLine(wire);
+    expect(line).toContain(
+      '"Referral scheme" changes "MRR" other than through "Revenue per Pro user" and "Pro subscribers" multiplied together, ' +
+      'so how it compares with the other options depends on the levels those quantities are at');
+    // Both move the one input the same way: no "do not move the same way" claim.
+    expect(line).not.toContain('the same way');
+  });
+
+  it('RED B1 (around, addend): reaching a separate addend of the outcome is around the product too', () => {
+    // Pro MRR = revenue x subscribers + referral bonuses: the bonuses are not part of the product.
+    const wire = aroundWire([['Referral volume', 'Referral bonuses', 'positive'], ['Referral bonuses', 'Pro MRR', 'positive']], [{ label: 'Referral bonuses', baseline: 500, max: 50000 }]);
+    const [m] = marks(wire);
+    expect(m?.verdict).toBe('sign_not_provable');
+    expect(m?.comparisons_not_sign_stable).toEqual([['referral_scheme', 'paid_ads']]);
+    expect(markLine(wire)[0]?.startsWith('Olumi reads part of "Pro MRR" as')).toBe(true);
+  });
+
+  it('RED B1 (around, product on the goal): with MRR itself the product, reaching its other addend is around it', () => {
+    const onGoal: [string, string, Dir][] = [['Revenue per Pro user', 'MRR', 'positive'], ['Pro subscribers', 'MRR', 'positive']];
+    const wire = aroundWire(
+      [['Referral volume', 'Non-Pro MRR', 'positive'], ['Non-Pro MRR', 'MRR', 'positive']], [{ label: 'Non-Pro MRR', baseline: 5000, max: 50000 }],
+      [], onGoal, { ...REV_X_SUBS, outcome: 'MRR' },
+    );
+    const [m] = marks(wire);
+    expect(m?.outcome_id).toBe('mrr');
+    expect(m?.verdict).toBe('sign_not_provable');
+    expect(m?.comparisons_not_sign_stable).toEqual([['referral_scheme', 'paid_ads']]);
+    expect(markLine(wire)[0]).toContain('"Referral scheme" changes "MRR" other than through "Revenue per Pro user" and "Pro subscribers" multiplied together');
+  });
+
+  it('CONTROL B1: the same two options with no way around the product keep one ranking — provisional', () => {
+    expect(marks(aroundWire([])).map((m) => [m.verdict, m.comparisons_not_sign_stable])).toEqual([['sign_stable_provisional', []]]);
+  });
+
+  it('RED (d): with three options, two moving the inputs the same way are never said to differ — grouped by how they move them', () => {
+    const wire = small({
+      options: [CARRY_ON, { label: 'Paid add-on', changes: ['Add-on price'] }, { label: 'Referral scheme', changes: ['Referral volume'] }, { label: 'Paid ads', changes: ['Ad spend'] }],
+      factors: [
+        { label: 'Add-on price', role: 'controllable' }, { label: 'Referral volume', role: 'controllable' }, { label: 'Ad spend', role: 'controllable' },
+        { label: 'Revenue per Pro user', baseline: 49 }, { label: 'Pro subscribers', baseline: 300 },
+      ],
+      links: [
+        ['Add-on price', 'Revenue per Pro user', 'positive'], ['Referral volume', 'Pro subscribers', 'positive'], ['Ad spend', 'Pro subscribers', 'positive'],
+        ...REVENUE_CHAIN,
+      ],
+      identities: [REV_X_SUBS],
+    });
+    const [m] = marks(wire);
+    expect(m?.comparisons_not_sign_stable).toEqual([['paid_add_on', 'referral_scheme'], ['paid_add_on', 'paid_ads']]);
+    const [line] = markLine(wire);
+    expect(line).toContain(
+      '"Paid add-on" moves "Revenue per Pro user" and "Pro subscribers" one way; "Referral scheme" and "Paid ads" move them ' +
+      'another, so which of those ways does better depends on the levels those quantities are at');
+    expect(line).not.toContain('"Paid add-on", "Referral scheme" and "Paid ads" do not move');
+  });
+
+  it('RED (d): three options that each move the inputs differently are said to — never as one pair', () => {
+    const wire = small({
+      options: [CARRY_ON, { label: 'Paid add-on', changes: ['Add-on price'] }, { label: 'Referral scheme', changes: ['Referral volume'] }, { label: 'Premium bundle', changes: ['Bundle uptake'] }],
+      factors: [
+        { label: 'Add-on price', role: 'controllable' }, { label: 'Referral volume', role: 'controllable' }, { label: 'Bundle uptake', role: 'controllable' },
+        { label: 'Revenue per Pro user', baseline: 49 }, { label: 'Pro subscribers', baseline: 300 },
+      ],
+      links: [
+        ['Add-on price', 'Revenue per Pro user', 'positive'], ['Referral volume', 'Pro subscribers', 'positive'],
+        ['Bundle uptake', 'Revenue per Pro user', 'positive'], ['Bundle uptake', 'Pro subscribers', 'positive'],
+        ...REVENUE_CHAIN,
+      ],
+      identities: [REV_X_SUBS],
+    });
+    expect(marks(wire)[0]?.comparisons_not_sign_stable).toEqual([
+      ['paid_add_on', 'referral_scheme'], ['paid_add_on', 'premium_bundle'], ['referral_scheme', 'premium_bundle'],
+    ]);
+    expect(markLine(wire)[0]).toContain('"Paid add-on", "Referral scheme" and "Premium bundle" each move "Revenue per Pro user" and "Pro subscribers" a different way');
+  });
 });
 
 /**
@@ -559,6 +663,47 @@ describe('rule 6 (B3): the rules the verification found unpinned', () => {
     const [m] = marks(wire);
     expect(m?.verdict).toBe('sign_not_provable');
     expect(m?.options_not_sign_stable).toEqual(['raise_to_59', 'phased_54_price']);
+    // (b) Its own sentence: every path moves the inputs UP, so "opposite directions" would be false.
+    const [line] = markLine(wire);
+    expect(line).toContain(
+      '"Raise to £59" and "Phased £54 Price" move "Pro plan price" and "Pro subscribers" through separate levers whose ' +
+      'relative size the model does not state');
+    expect(line).not.toContain('opposite directions');
+  });
+
+  it('RED (b): a lever an option leaves at today\'s level is dropped per lever, not only when every lever is', () => {
+    // "Raise to £59" now leaves AI availability at today's 0: its one real lever is the price.
+    const wire = served({ without: ['Pro plan price', 'Price sensitivity'] }) as { options: { label: string; interventions: { factor_label: string; value: number }[] }[] };
+    const raise = wire.options.find((o) => o.label === 'Raise to £59')!;
+    raise.interventions = raise.interventions.map((i) => (i.factor_label === 'AI feature availability' ? { ...i, value: 0 } : i));
+    const [m] = marks(wire as unknown as Record<string, unknown>);
+    expect(m?.verdict).toBe('sign_not_provable');
+    // Raise moves the price alone; Phased moves both through two levers — so they are a comparison.
+    expect(m?.comparisons_not_sign_stable).toEqual([['raise_to_59', 'phased_54_price']]);
+    const [line] = markLine(wire as unknown as Record<string, unknown>);
+    expect(line).toContain('"Phased £54 Price" moves "Pro plan price" and "Pro subscribers" through separate levers');
+    expect(line).not.toContain('"Raise to £59" and "Phased £54 Price" move "Pro plan price" and "Pro subscribers" through separate levers');
+  });
+
+  it('RED (b): "only one way" is said only when no option moves an input both ways', () => {
+    // The referral scheme adds subscribers and, through support strain, loses some: one input, both ways.
+    const wire = small({
+      options: [CARRY_ON, { label: 'Referral scheme', changes: ['Referral volume'] }],
+      factors: [{ label: 'Referral volume', role: 'controllable' }, { label: 'Revenue per Pro user', baseline: 49 }, { label: 'Pro subscribers', baseline: 300 }],
+      risks: ['Support strain'],
+      links: [
+        ['Referral volume', 'Pro subscribers', 'positive'], ['Referral volume', 'Support strain', 'positive'], ['Support strain', 'Pro subscribers', 'negative'],
+        ...REVENUE_CHAIN,
+      ],
+      identities: [REV_X_SUBS],
+    });
+    expect(marks(wire).map((m) => m.verdict)).toEqual(['sign_stable_provisional']);
+    const [line] = markLine(wire);
+    expect(line).not.toContain('only one way');
+    expect(line).toBe(
+      'Olumi reads "Pro MRR" as "Revenue per Pro user" and "Pro subscribers" multiplied together, and Olumi\'s analysis ' +
+      'adds effects up rather than multiplying them, so its figures for "Pro MRR" are an approximation; treat the size of ' +
+      'every effect, and any gap between the options, as provisional.');
   });
 
   it('RED B3.2: a product whose outcome does not reach the goal bears on no comparison — no mark, no rejection', () => {
@@ -665,6 +810,15 @@ describe('N-c: whose reading it is, and whether it is the whole of the total', (
 
   it('RED: a product declared on a TOTAL that has another addend is said to be only PART of it', () => {
     const [line] = markLine(onTotal(true));
+    expect(line?.startsWith('Olumi reads part of "MRR" as "Pro plan price" and "Pro subscribers" multiplied together')).toBe(true);
+  });
+
+  it('RED (c): an addend DRIVEN by a factor (Pro subscribers -> Non-Pro MRR -> MRR) is still an addend — part of MRR', () => {
+    const wire = onTotal(true) as { links: { from: string; to: string }[] };
+    wire.links.push({ from: 'Pro subscribers', to: 'Non-Pro MRR', direction: 'positive', provenance: 'inferred' } as never);
+    const admitted = admit(wire as unknown as Record<string, unknown>);
+    expect(edgeKeys(admitted)).toContain('pro_subscribers>non_pro_mrr');
+    const [line] = markLine(wire as unknown as Record<string, unknown>);
     expect(line?.startsWith('Olumi reads part of "MRR" as "Pro plan price" and "Pro subscribers" multiplied together')).toBe(true);
   });
 

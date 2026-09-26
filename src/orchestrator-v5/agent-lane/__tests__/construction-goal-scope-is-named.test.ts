@@ -8,11 +8,12 @@
  * model measured Pro MRR and called it MRR. The scope question existed only as prose in
  * `open_questions`, and the first pass still ran on "MRR".
  *
- * The drafter DECLARES the scope (`goal.scope`); admission records the modelled scope on the goal
- * as OLUMI'S ASSUMPTION — in its description, never in its label: the label is the user's own
- * metric under the brief's provenance, so writing Olumi's choice into it would show that choice as
- * the brief's (independent verification of 6e33b95e, B2) — and the build asks the question once,
- * first, in the existing `open_questions` channel. A brief that states its scope ("total MRR"), or
+ * The drafter DECLARES the scope (`goal.scope`); the build SAYS the modelled scope as OLUMI'S
+ * ASSUMPTION, first in `not_represented`, and asks the question once, first, in the existing
+ * `open_questions` channel. Never on the node: not in its label (the user's own metric under the
+ * brief's provenance — independent verification of 6e33b95e, B2), and not in its description
+ * either, because `get_canonical_state` shows a node's description to the Agent as its
+ * `full_label` (re-verification of d2362e9d, item e). A brief that states its scope ("total MRR"), or
  * a metric whose own words already name the modelled part ("Pro MRR"), is not asked (N-a). Every candidate passes the REAL strict schema and is served
  * through `buildModelFromBrief` -> `/graph/register` -> `GraphV3.parse`. Bound by node id.
  */
@@ -20,7 +21,8 @@ import { describe, it, expect } from 'vitest';
 import { Ajv } from 'ajv';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { BUILD_INSTRUCTIONS, buildCandidateSchema, buildModelFromBrief, retrySchemaPinningGoal, type CallStructuredModel } from '../runtime/build-model.js';
-import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { ProposalStore } from '../proposal.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
@@ -77,22 +79,32 @@ async function build(wire: Record<string, unknown>) {
   };
   const out = await buildModelFromBrief('20202020-2020-4020-8020-202020202020', BRIEF, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out)).toBe(true);
-  return { graph: GraphV3.parse(registered) as unknown as Graph, out };
+  return { graph: GraphV3.parse(registered) as unknown as Graph, raw: registered, out };
+}
+
+/** What `get_canonical_state` shows the Agent for the registered graph — the product's own read path. */
+async function canonicalEntities(raw: unknown): Promise<Record<string, unknown>[]> {
+  const d: InternalDispatch = async () => ({ status: 200, json: { graph: raw, graph_hash: 'h1' } });
+  const caps = createAgentCapabilities(d, new ProposalStore());
+  const r = await caps.getCanonicalState({ scenario_id: '20202020-2020-4020-8020-202020202020', authenticated_user_id: 'u', request_id: 'r' });
+  expect(r.ok, JSON.stringify(r)).toBe(true);
+  return (r as unknown as { entities: Record<string, unknown>[] }).entities;
 }
 
 const goalOf = (g: Graph) => g.nodes.find((n) => n.kind === 'goal')!;
 const questions = (out: Record<string, unknown>) => (out.open_questions as string[] | undefined) ?? [];
+const notRepresented = (out: Record<string, unknown>) => (out.not_represented as string[] | undefined) ?? [];
 const scopeLoss = (m: ReturnType<typeof admitCandidateModel>) => m.loss.filter((l) => /\.goal_scope$/.test(l.field_path));
 const SCOPE_ASSUMPTION =
-  'Measured for the Pro plan only \u2014 Olumi\'s assumption; the brief does not say whether it covers the Pro plan only ' +
-  'or all plans together.';
+  'The model measures your "MRR" goal for the Pro plan only \u2014 Olumi\'s assumption; the brief does not say whether ' +
+  'it covers the Pro plan only or all plans together.';
 const SCOPE_QUESTION =
   'The brief does not say whether your "MRR" goal covers the Pro plan only or all plans together, so the model ' +
   'measures it for the Pro plan only. Which did you mean?';
 
 describe('an unstated scope is named in the goal and asked, never silently picked', () => {
-  it('RED (B2): bare "MRR" measured on the Pro plan: the user\'s label is kept, and the scope is recorded as OLUMI\'S assumption', async () => {
-    const { graph } = await build(pricing('MRR', AMBIGUOUS));
+  it('RED (B2): bare "MRR" measured on the Pro plan: the user\'s label is kept, and the scope is said as OLUMI\'S assumption', async () => {
+    const { graph, out } = await build(pricing('MRR', AMBIGUOUS));
     const plain = await build(pricing('MRR', null));
     const goal = graph.nodes.find((n) => n.id === 'mrr')!;
     const before = plain.graph.nodes.find((n) => n.id === 'mrr')!;
@@ -100,14 +112,36 @@ describe('an unstated scope is named in the goal and asked, never silently picke
     // The label is the user's metric, exactly as with no scope question at all.
     expect(goal.label).toBe('MRR');
     expect(goal.label).toBe(before.label);
-    // The modelled scope rides on the description, worded as Olumi's assumption.
-    expect(goal.description).toBe(SCOPE_ASSUMPTION);
+    // (e) Not on the node at all: the description is untouched, exactly as with no scope question.
+    expect(goal.description).toBeUndefined();
     expect(before.description).toBeUndefined();
+    // The modelled scope is SAID, first, worded as Olumi's assumption; the plain build says nothing of it.
+    expect(notRepresented(out)[0]).toBe(SCOPE_ASSUMPTION);
+    expect(notRepresented(plain.out).filter((l) => l.includes('assumption'))).toEqual([]);
     // The goal's provenance is untouched: the brief's metric stays the brief's.
     expect(goal.provenance).toBe('from_brief');
     expect(goal.provenance).toBe(before.provenance);
     // Every link still lands on the goal by id.
     expect(graph.edges.filter((e) => e.to === 'mrr').map((e) => e.from).sort()).toEqual(['pro_plan_price', 'pro_subscribers']);
+  });
+
+  it('RED (e): get_canonical_state shows the goal as the user\'s metric — its full_label is never Olumi\'s assumption', async () => {
+    const { raw } = await build(pricing('MRR', AMBIGUOUS));
+    const goal = (await canonicalEntities(raw)).find((e) => e.id === 'mrr')!;
+    expect(goal.kind).toBe('goal');
+    expect(goal.label).toBe('MRR');
+    expect(goal.full_label ?? goal.label).toBe('MRR');
+    expect(JSON.stringify(goal)).not.toContain('assumption');
+  });
+
+  it('RED (e) CONTROL: a goal whose label had to be shortened shows its full_label as the user\'s own full metric, and nothing else', async () => {
+    const metric = 'Monthly recurring revenue by the end of next year';
+    const { raw, out } = await build(pricing(metric, AMBIGUOUS));
+    const goal = (await canonicalEntities(raw)).find((e) => e.kind === 'goal')!;
+    // The probe sees `full_label` (it is present here), and it is exactly the user's words.
+    expect(goal.label).not.toBe(metric);
+    expect(goal.full_label).toBe(metric);
+    expect(questions(out)).toHaveLength(1);
   });
 
   it('RED: the question is asked ONCE, first, in the existing open_questions channel, beside the drafter’s own', async () => {
@@ -138,7 +172,7 @@ describe('an unstated scope is named in the goal and asked, never silently picke
   it('CONTROL (N-a): a metric naming the OTHER reading ("Total MRR") while the model measures the Pro plan is still asked', async () => {
     const { graph, out } = await build(pricing('Total MRR', AMBIGUOUS));
     expect(goalOf(graph).label).toBe('Total MRR');
-    expect(goalOf(graph).description).toContain('Olumi\'s assumption');
+    expect(notRepresented(out)[0]).toContain('Olumi\'s assumption');
     expect(questions(out)).toHaveLength(1);
     expect(questions(out)[0]).toContain('covers the Pro plan only or all plans together');
   });
@@ -151,6 +185,25 @@ describe('an unstated scope is named in the goal and asked, never silently picke
       expect(questions(out), metric).toHaveLength(1);
       expect(scopeLoss(admitCandidateModel(pricing(metric, scope) as unknown as CandidateModel)), metric).toHaveLength(1);
     }
+  });
+
+  it('RED (a): a COMPLEMENT metric — the part the model does NOT measure — never counts as the modelled scope stated', async () => {
+    for (const metric of ['Non-Pro MRR', 'MRR excluding Pro', 'MRR from plans other than Pro', 'MRR except Pro', 'MRR without Pro']) {
+      const { graph, out } = await build(pricing(metric, AMBIGUOUS));
+      expect(goalOf(graph).label, metric).toBe(metric);
+      expect(questions(out), metric).toHaveLength(1);
+      expect(questions(out)[0], metric).toContain('covers the Pro plan only or all plans together');
+      expect(scopeLoss(admitCandidateModel(pricing(metric, AMBIGUOUS) as unknown as CandidateModel)), metric).toHaveLength(1);
+    }
+  });
+
+  it('CONTROL (a): a complement word that is PART of the modelled scope still states it ("plans other than Pro")', async () => {
+    const others: Scope = { modelled: 'plans other than Pro', alternative: 'all plans together', stated_in_brief: false };
+    const { out } = await build(pricing('MRR from plans other than Pro', others));
+    expect(out).not.toHaveProperty('open_questions');
+    expect(scopeLoss(admitCandidateModel(pricing('MRR from plans other than Pro', others) as unknown as CandidateModel))).toEqual([]);
+    // …and a metric that names the complement of THAT scope ("Pro MRR") is asked.
+    expect(questions((await build(pricing('Pro MRR', others))).out)).toHaveLength(1);
   });
 
   it('RED (N-d): the drafter is no longer told to keep the scope question out of `unknowns` (nothing enforces it yet)', () => {
