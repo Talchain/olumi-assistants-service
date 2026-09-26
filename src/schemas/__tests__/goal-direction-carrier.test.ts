@@ -14,15 +14,24 @@
  *      stored graph still parses. A sense a UI or an old writer spelled differently
  *      must not make a user's whole model unloadable.
  *   3. NOT AI-AUTHORABLE — the edit path is deny-by-default (the root is absent from
- *      the shared contract's classed table), and the draft path rebuilds each node
- *      field by field. A model-written sense would otherwise be forwarded as the
- *      USER'S attested sense — the one thing it must never be.
+ *      the shared contract's classed table), the ADD path screens and strips it (it
+ *      is a CEE-owned root, `field-safety.ts` `CEE_ANALYSIS_OWNED_ROOTS`; review
+ *      5844286953 NB1), and the draft path rebuilds each node field by field. A
+ *      model-written sense would otherwise be forwarded as the USER'S attested sense
+ *      — the one thing it must never be.
  */
 import { describe, expect, it } from 'vitest';
 import { aiEditableFieldRoots } from '@talchain/schemas/orchestrator';
 
 import { NodeV3, GraphV3 } from '../cee-v3.js';
-import { ALLOWED_NODE_FIELD_ROOTS } from '../../orchestrator-v5/graph-management/field-safety.js';
+import {
+  ALLOWED_NODE_FIELD_ROOTS,
+  PIPELINE_OWNED_ROOTS,
+  stripPipelineOwnedFromAddOperations,
+} from '../../orchestrator-v5/graph-management/field-safety.js';
+import { refereeMutation } from '../../orchestrator-v5/graph-management/referee.js';
+import { PIPELINE_OWNED_FIELD, STRUCTURAL_APPLY_HELD } from '../../orchestrator-v5/graph-management/reason-codes.js';
+import { buildReadyGraph, frameFor, hashOf, makeEnvelope } from '../../orchestrator-v5/graph-management/__tests__/fixtures.js';
 import { transformNodeToV3 } from '../../cee/transforms/schema-v3.js';
 
 const goal = (extra: Record<string, unknown> = {}) => ({
@@ -83,6 +92,48 @@ describe('goal_direction is not AI-authorable — edit path', () => {
     for (const entity of ['node', 'edge'] as const) {
       expect(aiEditableFieldRoots(entity).has('goal_direction')).toBe(false);
     }
+  });
+});
+
+describe('goal_direction is not AI-authorable — ADD path (review 5844286953 NB1)', () => {
+  // The forwarder trusts the goal node's sense, so a model `add_node` must not be able
+  // to supply one. The add path screens values only against the CEE-owned set.
+  const G = buildReadyGraph();
+  const addWith = (screened: Record<string, unknown>) =>
+    refereeMutation(
+      makeEnvelope(
+        'add_node',
+        { node: { id: 'n-new-goal', kind: 'factor', label: 'Monthly churn rate' }, screened_value: screened },
+        { base_graph_hash: hashOf(G) },
+      ),
+      G,
+      frameFor(G),
+    );
+
+  it('is a CEE-owned root', () => {
+    expect(PIPELINE_OWNED_ROOTS.has('goal_direction')).toBe(true);
+  });
+
+  it('a model add_node whose value carries goal_direction is REFUSED at the referee', () => {
+    const v = addWith({ goal_direction: 'maximise', description: 'A new goal' });
+    expect(v.verdict).toBe('rejected');
+    expect(v.blocker?.code).toBe(PIPELINE_OWNED_FIELD);
+  });
+
+  it('CONTROL: the same add without it reaches its ordinary held verdict (the refusal is this key\'s)', () => {
+    const v = addWith({ description: 'A new goal' });
+    expect(v.verdict).toBe('held');
+    expect(v.blocker?.code).toBe(STRUCTURAL_APPLY_HELD);
+  });
+
+  it('the edit pipeline STRIPS it from a goal add, so the node lands without a sense the user never stated', () => {
+    const value = { id: 'g-new', kind: 'goal', label: 'Monthly churn rate', goal_direction: 'maximise', goal_threshold_raw: 10 };
+    const { operations, strippedKeyShapes } = stripPipelineOwnedFromAddOperations([{ op: 'add_node', value }]);
+    expect(strippedKeyShapes).toEqual(['goal_direction']);
+    expect(operations[0]!.value).toEqual({ id: 'g-new', kind: 'goal', label: 'Monthly churn rate', goal_threshold_raw: 10 });
+    // Discrimination: an add with nothing owned is returned by reference.
+    const clean = { op: 'add_node', value: { id: 'g-2', kind: 'goal', label: 'Pro MRR' } };
+    expect(stripPipelineOwnedFromAddOperations([clean]).operations[0]).toBe(clean);
   });
 });
 

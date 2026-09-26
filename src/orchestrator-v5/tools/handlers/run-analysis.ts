@@ -155,7 +155,7 @@ import {
 // headline ON them, and then discarded both — so this handler could only ever
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
-import { deriveEmittedGoalDirection } from '../../goal-target/goal-direction.js';
+import { resolveRequestGoalDirection } from '../../goal-target/goal-direction.js';
 
 // `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
 // module so the turn-executor (error-path reconstruction) can apply the
@@ -920,67 +920,42 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // crowns the WORST option (measured on isl-staging: the ranking flips
     // completely when 'minimise' is stamped).
     //
-    // TWO SOURCES, IN THIS ORDER:
+    // TWO SOURCES, IN THIS ORDER (`resolveRequestGoalDirection`, which owns the rule):
     //  1. ATTESTED — the goal node's `goal_direction`, CEE-minted at construction
     //     from the operator the USER stated (`admit-model.ts`; carried by NodeV3 in
-    //     `cee-v3.ts`). Forwarded in BOTH senses: `maximise` leaves the ranking
-    //     byte-identical to absent, but it is what the user said, and sending it
-    //     ends ISL's "unattested" disclosure for a goal whose sense WAS stated.
+    //     `cee-v3.ts`). Forwarded in BOTH senses while it stands.
     //  2. DERIVED — `deriveEmittedGoalDirection`, the goal-LABEL classifier,
     //     MINIMISE ONLY and unchanged, for every goal with no attested sense (an
     //     inferred goal, a drafted model, a graph built before the carrier). See
     //     that module's header for the one-sided-exposure argument.
     //
-    // ⛔ THE ATTESTED SENSE WINS A DISAGREEMENT. The label is Olumi's reading of
-    // the goal's WORDS; the operator is what the user stated. A disagreement is
-    // logged (`cee.goal_direction.label_disagrees`) with both senses, and the
-    // persisted goal node keeps the attested sense beside its label, so a
-    // disclosure surface can re-derive the pair from the stored graph alone.
-    const analysisNodes = (graphForAnalysis as { nodes?: unknown } | null)?.nodes;
-    const statedGoalNode = Array.isArray(analysisNodes)
-      ? analysisNodes.find(
-          (n: unknown): n is Record<string, unknown> =>
-            n !== null && typeof n === 'object'
-            && (n as Record<string, unknown>).id === snapshot.goal_node_id
-            && (n as Record<string, unknown>).kind === 'goal',
-        )
-      : undefined;
-    const attestedGoalDirection =
-      statedGoalNode?.goal_direction === 'maximise' || statedGoalNode?.goal_direction === 'minimise'
-        ? statedGoalNode.goal_direction
-        : undefined;
-    const emittedGoalDirection = deriveEmittedGoalDirection(
-      graphForAnalysis,
-      snapshot.goal_node_id,
-    );
-    if (attestedGoalDirection !== undefined) {
-      plotPayload.goal_direction = attestedGoalDirection;
+    // ⛔ THE STAMP IS SET ASIDE — AND SOURCE 2 RUNS EXACTLY AS BASE DID — WHEN THE
+    // GOAL'S LABEL READS THE OTHER WAY, OR A CURRENT goal_constraints ROW ON THE GOAL
+    // STATES THE OTHER SENSE (review 5844286953: blocker + NB2). A stamped `maximise`
+    // over a label that says REDUCE would invert the ranking and remove ISL's
+    // disclosure; a stamp older than the user's latest success-target edit is stale.
+    // Each set-aside is a `log.warn` naming both sides.
+    const requestGoalDirection = resolveRequestGoalDirection({
+      graph: graphForAnalysis,
+      goalNodeId: snapshot.goal_node_id,
+      goalConstraints: snapshot.goal_constraints,
+    });
+    if (requestGoalDirection.goal_direction !== undefined) {
+      plotPayload.goal_direction = requestGoalDirection.goal_direction;
+    }
+    if (requestGoalDirection.provenance === 'attested_from_goal_operator') {
       log.info(
         {
           event: 'cee.goal_direction.attested',
-          goal_direction: attestedGoalDirection,
+          goal_direction: requestGoalDirection.goal_direction,
           goal_node_id: snapshot.goal_node_id,
           provenance: 'attested_from_goal_operator',
-          label_derived: emittedGoalDirection ?? null,
+          label_derived: requestGoalDirection.label_derived ?? null,
           request_id: invocation.requestId,
         },
         "goal_direction attested by the user's stated goal operator and forwarded to PLoT",
       );
-      if (emittedGoalDirection !== undefined && emittedGoalDirection !== attestedGoalDirection) {
-        log.warn(
-          {
-            event: 'cee.goal_direction.label_disagrees',
-            goal_direction: attestedGoalDirection,
-            label_derived: emittedGoalDirection,
-            goal_node_id: snapshot.goal_node_id,
-            provenance: 'attested_from_goal_operator',
-            request_id: invocation.requestId,
-          },
-          "the goal label reads the other way from the user's stated goal operator — the stated sense was sent",
-        );
-      }
-    } else if (emittedGoalDirection !== undefined) {
-      plotPayload.goal_direction = emittedGoalDirection;
+    } else if (requestGoalDirection.provenance === 'derived_from_goal_label') {
       // ⚠ DISCLOSED AS DERIVED, NOT AS ATTESTED. PLoT's contract documents this
       // field as "the user's attested objective sense" and states that PLoT
       // never infers it from a node label — but CEE does exactly that, from the
@@ -992,12 +967,38 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       log.info(
         {
           event: 'cee.goal_direction.derived',
-          goal_direction: emittedGoalDirection,
+          goal_direction: requestGoalDirection.goal_direction,
           goal_node_id: snapshot.goal_node_id,
           provenance: 'derived_from_goal_label',
           request_id: invocation.requestId,
         },
         'goal_direction derived from the goal label and forwarded to PLoT',
+      );
+    }
+    if (requestGoalDirection.label_disagrees) {
+      log.warn(
+        {
+          event: 'cee.goal_direction.label_disagrees',
+          goal_direction: requestGoalDirection.goal_direction ?? null,
+          stamped: requestGoalDirection.stamped ?? null,
+          label_derived: requestGoalDirection.label_derived ?? null,
+          goal_node_id: snapshot.goal_node_id,
+          request_id: invocation.requestId,
+        },
+        "the goal label reads the other way from the goal's stamped sense — the stamp was not sent; the label's sense was",
+      );
+    }
+    if (requestGoalDirection.disagreeing_goal_row_operators.length > 0) {
+      log.warn(
+        {
+          event: 'cee.goal_direction.stamp_disagrees_with_goal_operator',
+          goal_direction: requestGoalDirection.goal_direction ?? null,
+          stamped: requestGoalDirection.stamped ?? null,
+          goal_row_operators: requestGoalDirection.disagreeing_goal_row_operators,
+          goal_node_id: snapshot.goal_node_id,
+          request_id: invocation.requestId,
+        },
+        "a current goal_constraints row on the goal states another sense than its stamp — the stale stamp was not sent",
       );
     }
     // Lane 28 — brief pipeline seam 3: flag-gated brief leg

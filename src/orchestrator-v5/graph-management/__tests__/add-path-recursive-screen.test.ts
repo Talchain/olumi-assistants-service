@@ -94,6 +94,8 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
     expect(SMUGGLE_NAMES).toEqual([
       'defaulted',
       'extractiontype',
+      // Added after the historical six: the goal's stated sense (review 5844286953 NB1).
+      'goal_direction',
       'origin',
       'provenance',
       'provenance_display',
@@ -108,9 +110,9 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
     expect(PIPELINE_OWNED_ROOTS.has('raw_value')).toBe(true);
   });
 
-  it('the J2 union adds five MORE names the same screen now kills (11 total, not 6)', () => {
+  it('the J2 union adds five MORE names the same screen now kills (12 total: the six, goal_direction, and these five)', () => {
     const all = [...PIPELINE_OWNED_ROOTS].filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k)).sort();
-    expect(all.length).toBe(11);
+    expect(all.length).toBe(12);
     expect(all.filter((k) => !SMUGGLE_NAMES.includes(k))).toEqual([
       'beliefexistssource',
       'directionsource',

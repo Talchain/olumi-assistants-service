@@ -21,8 +21,19 @@
  *   2. CARRIER — `cee-v3.ts` NodeV3 declares `goal_direction`, so the production
  *      loader's `GraphV3.safeParse` keeps it.
  *   3. FORWARDER — `run-analysis.ts` sends the goal node's attested sense ahead of the
- *      label classifier (provenance `attested_from_goal_operator`); the attested sense
- *      wins a disagreement, which is logged.
+ *      label classifier (provenance `attested_from_goal_operator`).
+ *
+ * ⛔ AND WHERE THE STAMP IS NOT THE USER'S SENSE, BASE BEHAVIOUR (review 5844286953).
+ * The operator is a required enum with no "not stated" value, and "reduce/cut X by
+ * at least N" read as `>=` is the known sign-inversion fingerprint (ROADMAP 1.52). A
+ * `maximise` there would replace base's correct label-derived `minimise`, invert the
+ * ranking and end ISL's `GOAL_DIRECTION_UNATTESTED` disclosure. So:
+ *   · STAMP SITE — an "at least" goal whose own label reads as a reduction is NOT
+ *     stamped (an attestation contradicted by the user's own words is not attested);
+ *   · FORWARDER — a stored stamp is set aside when the label reads the other way, or
+ *     when a CURRENT `goal_constraints` row on the goal states the other sense (a
+ *     later success-target edit; the persisted stamp is never re-derived), and the
+ *     base derivation runs. Each set-aside is a `log.warn`.
  *
  * Every assertion reads the payload PLoT RECEIVES, on the real path: strict schema
  * candidate → `buildModelFromBrief` → `/graph/register` body → the production
@@ -44,6 +55,8 @@ import type { HandlerInvocation } from '../../tools/registry.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { log } from '../../../utils/telemetry.js';
+import { applyGoalTargetEdit } from '../../system-events/goal-target-edit.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 
 const SCENARIO = '88888888-8888-4888-8888-888888888888';
 const REQUEST_ID = 'req-mg-goal-direction';
@@ -109,10 +122,19 @@ function makeInvocation(): HandlerInvocation {
 type Node = { id: string; kind: string; label?: string } & Record<string, unknown>;
 type DirectionEvent = { level: 'info' | 'warn' } & Record<string, unknown>;
 
-/** Candidate → register body → production loader → handler → the body PLoT receives. */
-async function plotBodyFor(model: CandidateModel): Promise<{
+/**
+ * Candidate → register body → production loader → handler → the body PLoT receives.
+ * `thenStored`, when given, is what happened to the stored graph between construction
+ * and the Run (a success-target edit through the real writer, a label edit); the Run
+ * then reads what it returns.
+ */
+async function plotBodyFor(
+  model: CandidateModel,
+  thenStored?: (registered: { nodes: Node[] }) => Promise<unknown> | unknown,
+): Promise<{
   body: Record<string, unknown>;
   registered: { nodes: Node[] };
+  stored: { nodes: Node[]; goal_constraints?: Record<string, unknown>[] };
   directionEvents: DirectionEvent[];
 }> {
   const wire = { ...model, unknowns: [] };
@@ -131,9 +153,12 @@ async function plotBodyFor(model: CandidateModel): Promise<{
 
   // The register route's ingress (`GraphStateIngressSchema`) and persistence
   // projection are passthrough, so the stored bytes are the register body.
+  const stored = thenStored === undefined
+    ? registered
+    : await thenStored(structuredClone(registered) as { nodes: Node[] });
   const store = {
-    loadGraph: async () => registered,
-    loadGraphAndBriefText: async () => ({ graph: registered, briefText: null }),
+    loadGraph: async () => stored,
+    loadGraphAndBriefText: async () => ({ graph: stored, briefText: null }),
   } as unknown as SessionStore;
   const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, REQUEST_ID, store);
 
@@ -165,11 +190,42 @@ async function plotBodyFor(model: CandidateModel): Promise<{
   // The body is bound at the moment PLoT is called; post-run processing of the
   // canned envelope is not under test. A refusal BEFORE PLoT fails here.
   expect(run, `PLoT was never called: ${String(thrown)}`).toHaveBeenCalledOnce();
-  return { body: captured as Record<string, unknown>, registered: registered as { nodes: Node[] }, directionEvents };
+  return {
+    body: captured as Record<string, unknown>,
+    registered: registered as { nodes: Node[] },
+    stored: stored as { nodes: Node[]; goal_constraints?: Record<string, unknown>[] },
+    directionEvents,
+  };
 }
 
 const goalIn = (graph: unknown, id: string): Node | undefined =>
   ((graph as { nodes: Node[] }).nodes).find((n) => n.id === id);
+
+/**
+ * A success-target edit through the REAL writer (`goal_target_edit` → the
+ * `add_constraint` handler → the persisted-base re-merge), on the stored graph.
+ * Returns the graph the commit would persist.
+ */
+const successTargetEdit = (goalId: string, constraint_type: 'at_least' | 'at_most', raw_value: number, unit: string) =>
+  async (graph: { nodes: Node[] }): Promise<unknown> => {
+    const event = {
+      kind: 'goal_target_edit' as const, goal_node_id: goalId, constraint_type, raw_value, unit,
+      base_graph_hash: computeAnalysisAffectingGraphHash(graph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]),
+    };
+    const result = await applyGoalTargetEdit({
+      payload: { kind: 'system_event', turn_id: 'turn-mg-goal-direction-0001', scenario_id: SCENARIO, stage: 'analyse', event } as never,
+      event: event as never,
+      requestId: `${REQUEST_ID}-edit`,
+      persistedGraph: graph,
+      priorFacts: [],
+    });
+    expect(result.kind, JSON.stringify(result)).toBe('mutated');
+    return (result as { mutatedGraph: unknown }).mutatedGraph;
+  };
+
+/** The goal's CURRENT rows, by the goal's id. */
+const goalRows = (graph: { goal_constraints?: Record<string, unknown>[] }, id: string): string[] =>
+  (graph.goal_constraints ?? []).filter((r) => r.node_id === id).map((r) => `${String(r.operator)} ${String(r.value)}`);
 
 describe('the stated goal direction reaches the PLoT /v2/run body', () => {
   // ── CONTROLS: the harness reaches PLoT on the real path ────────────────────
@@ -314,27 +370,124 @@ describe('the stated goal direction reaches the PLoT /v2/run body', () => {
     });
   }
 
-  // ── DISAGREEMENT: the user's stated sense wins, and the disagreement is recorded ─
-  it('a label that reads "reduce" with a stated ">=" sends maximise, and records the disagreement', async () => {
-    const { registered, body, directionEvents } = await plotBodyFor(
-      candidate({ metric: 'Reduce monthly churn', operator: '>=', value: 10, unit: '%' }),
-    );
-    expect(body.goal_node_id).toBe('reduce_monthly_churn');
-    expect(body.goal_direction).toBe('maximise');
+  // ── REVIEW 5844286953 — the reviewer's table, through the production path ───────
+  // A goal whose own label reads as a REDUCTION, stated "at least" / "more than", is
+  // the known sign-inversion fingerprint. It must get base's label-derived `minimise`,
+  // never a `maximise` stamp; and neither the "<=" path this PR exists for nor a goal
+  // whose label names no reduction may move.
+  type Row = {
+    metric: string; operator: '>=' | '>' | '<='; value: number; unit: string; id: string;
+    sent: 'maximise' | 'minimise'; stamped: 'maximise' | 'minimise' | null;
+    event: 'cee.goal_direction.attested' | 'cee.goal_direction.derived';
+  };
+  const TABLE: Row[] = [
+    // RED at 10fa86cf: each sent `maximise` (a stamp + a warn only).
+    { metric: 'Reduce monthly churn', operator: '>=', value: 2, unit: '%', id: 'reduce_monthly_churn', sent: 'minimise', stamped: null, event: 'cee.goal_direction.derived' },
+    { metric: 'Cut costs', operator: '>=', value: 10, unit: '%', id: 'cut_costs', sent: 'minimise', stamped: null, event: 'cee.goal_direction.derived' },
+    { metric: 'Lower churn', operator: '>', value: 3, unit: '%', id: 'lower_churn', sent: 'minimise', stamped: null, event: 'cee.goal_direction.derived' },
+    // CONTROLS: the reason for this PR, the served P-S2 maximise, and a label with no reduction word.
+    { metric: 'Monthly churn rate', operator: '<=', value: 10, unit: '%', id: 'monthly_churn_rate', sent: 'minimise', stamped: 'minimise', event: 'cee.goal_direction.attested' },
+    { metric: 'Pro MRR', operator: '>=', value: 20000, unit: 'GBP', id: 'pro_mrr', sent: 'maximise', stamped: 'maximise', event: 'cee.goal_direction.attested' },
+    { metric: 'Monthly churn rate', operator: '>=', value: 2, unit: '%', id: 'monthly_churn_rate', sent: 'maximise', stamped: 'maximise', event: 'cee.goal_direction.attested' },
+  ];
+  for (const row of TABLE) {
+    it(`TABLE: "${row.metric}" ${row.operator} ${row.value} ${row.unit} sends ${row.sent} (${row.stamped === null ? 'not stamped, label-derived' : `stamped ${row.stamped}`})`, async () => {
+      const { registered, body, directionEvents } = await plotBodyFor(
+        candidate({ metric: row.metric, operator: row.operator, value: row.value, unit: row.unit }),
+      );
+      expect(body.goal_node_id).toBe(row.id);
+      expect(body.goal_direction).toBe(row.sent);
+      // STAMP SITE, bound by the goal's id and its label.
+      const stored = goalIn(registered, row.id);
+      expect(stored).toMatchObject({ kind: 'goal', label: row.metric });
+      if (row.stamped === null) expect(stored).not.toHaveProperty('goal_direction');
+      else expect(stored?.goal_direction).toBe(row.stamped);
+      // One record, at info: nothing was set aside at the forwarder.
+      expect(directionEvents).toEqual([
+        expect.objectContaining({ level: 'info', event: row.event, goal_direction: row.sent, goal_node_id: row.id }),
+      ]);
+    });
+  }
+
+  // ── FORWARDER GUARD (defence in depth): a STORED maximise beside a label that reads
+  // as a reduction — a goal renamed after construction (a label is an editable
+  // field; `goal_direction` is not, so the stamp survives the rename). The stamp site
+  // cannot see this graph, so only the forwarder can keep base behaviour here.
+  it('FORWARDER GUARD: a stored maximise stamp on a goal whose label now reads as a reduction sends the label\'s minimise, and warns', async () => {
+    const { stored, body, directionEvents } = await plotBodyFor(maximise('>='), (g) => {
+      const goal = goalIn(g, 'pro_mrr');
+      if (goal === undefined) throw new Error('fixture: no pro_mrr goal');
+      goal.label = 'Cut Pro plan churn';
+      return g;
+    });
+    // Precondition, by identity: the stamp really is on the stored goal beside the new label.
+    expect(goalIn(stored, 'pro_mrr')).toMatchObject({ kind: 'goal', label: 'Cut Pro plan churn', goal_direction: 'maximise' });
+    expect(body.goal_node_id).toBe('pro_mrr');
+    expect(body.goal_direction).toBe('minimise');
     expect(directionEvents).toEqual([
       expect.objectContaining({
-        level: 'info', event: 'cee.goal_direction.attested', goal_direction: 'maximise',
-        provenance: 'attested_from_goal_operator', label_derived: 'minimise',
+        level: 'info', event: 'cee.goal_direction.derived', goal_direction: 'minimise',
+        goal_node_id: 'pro_mrr', provenance: 'derived_from_goal_label',
       }),
       expect.objectContaining({
-        level: 'warn', event: 'cee.goal_direction.label_disagrees', goal_direction: 'maximise',
-        label_derived: 'minimise', goal_node_id: 'reduce_monthly_churn',
+        level: 'warn', event: 'cee.goal_direction.label_disagrees', goal_direction: 'minimise',
+        stamped: 'maximise', label_derived: 'minimise', goal_node_id: 'pro_mrr',
       }),
     ]);
-    // Available to a disclosure surface from the stored graph alone: the stated
-    // sense sits beside the label that reads the other way.
-    expect(goalIn(registered, 'reduce_monthly_churn')).toMatchObject({
-      label: 'Reduce monthly churn', goal_direction: 'maximise',
-    });
   });
+
+  // ── NON-BLOCKING 2: the stamp is never re-derived after construction ───────────
+  // A later success-target edit rewrites the goal's threshold and writes a
+  // `goal_constraints` row with its own operator, and leaves `goal_direction` as it
+  // was. Probed at 10fa86cf (scratchpad nb2-probe-10fa86cf.txt): a stated "<= 10%"
+  // churn goal edited to "at least 5%" sent `minimise` beside a `>=` row. The stamp
+  // is forwarded only when it agrees with the goal's CURRENT rows, read at request
+  // time; otherwise base behaviour.
+  it('NB2: a "<=" churn goal edited to "at least 5 %" does not send the stale minimise (base: the label names no direction ⇒ no key), and warns', async () => {
+    const { stored, body, directionEvents } = await plotBodyFor(
+      minimise('<='), successTargetEdit('monthly_churn_rate', 'at_least', 5, '%'),
+    );
+    // Precondition: the persisted copy is stale — the stamp survived, the goal's row says `>=`.
+    expect(goalIn(stored, 'monthly_churn_rate')).toMatchObject({ goal_direction: 'minimise', goal_threshold_raw: 5 });
+    expect(goalRows(stored, 'monthly_churn_rate')).toEqual(['>= 5']);
+    expect(body.goal_node_id).toBe('monthly_churn_rate');
+    expect('goal_direction' in body).toBe(false);
+    expect(directionEvents).toEqual([
+      expect.objectContaining({
+        level: 'warn', event: 'cee.goal_direction.stamp_disagrees_with_goal_operator',
+        stamped: 'minimise', goal_row_operators: ['>='], goal_node_id: 'monthly_churn_rate',
+      }),
+    ]);
+  });
+
+  it('NB2 mirror: a ">=" Pro MRR goal given an "at most" row does not send the stale maximise (ISL\'s disclosure stays), and warns', async () => {
+    const { stored, body, directionEvents } = await plotBodyFor(
+      maximise('>='), successTargetEdit('pro_mrr', 'at_most', 30000, 'GBP'),
+    );
+    expect(goalIn(stored, 'pro_mrr')).toMatchObject({ goal_direction: 'maximise' });
+    expect(goalRows(stored, 'pro_mrr')).toEqual(['<= 30000']);
+    expect(body.goal_node_id).toBe('pro_mrr');
+    expect('goal_direction' in body).toBe(false);
+    expect(directionEvents).toEqual([
+      expect.objectContaining({
+        level: 'warn', event: 'cee.goal_direction.stamp_disagrees_with_goal_operator',
+        stamped: 'maximise', goal_row_operators: ['<='], goal_node_id: 'pro_mrr',
+      }),
+    ]);
+  });
+
+  for (const [label, model, edit, id, sense, rows] of [
+    ['"<=" churn goal edited to "at most 8 %"', minimise('<='), successTargetEdit('monthly_churn_rate', 'at_most', 8, '%'), 'monthly_churn_rate', 'minimise', ['<= 8']],
+    ['">=" Pro MRR goal edited to "at least 25000"', maximise('>='), successTargetEdit('pro_mrr', 'at_least', 25000, 'GBP'), 'pro_mrr', 'maximise', ['>= 25000']],
+  ] as const) {
+    it(`NB2 CONTROL: a ${label} keeps its attested ${sense} (an agreeing row is not a disagreement)`, async () => {
+      const { stored, body, directionEvents } = await plotBodyFor(model, edit);
+      expect(goalRows(stored, id)).toEqual([...rows]);
+      expect(body.goal_node_id).toBe(id);
+      expect(body.goal_direction).toBe(sense);
+      expect(directionEvents).toEqual([
+        expect.objectContaining({ level: 'info', event: 'cee.goal_direction.attested', goal_direction: sense, goal_node_id: id }),
+      ]);
+    });
+  }
 });

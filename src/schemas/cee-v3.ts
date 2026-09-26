@@ -250,7 +250,11 @@ export const NodeV3 = z.object({
    * construction (`agent-lane/admit-model.ts`: `>=`/`>` → `'maximise'`,
    * `<=`/`<` → `'minimise'`, and ONLY on a goal whose provenance is the user's).
    * `run_analysis` forwards it as PLoT's REQUEST-level `goal_direction`, ahead of
-   * the goal-label classifier; PLoT never reads a node-level sense.
+   * the goal-label classifier — unless the goal's label reads the other way or a
+   * current `goal_constraints` row on the goal states the other sense, when the
+   * label classifier runs exactly as before (`resolveRequestGoalDirection`). A goal
+   * whose own label reads as a reduction is never stamped `maximise`. PLoT never
+   * reads a node-level sense.
    *
    * ⚠ THIS DECLARATION IS LOAD-BEARING, NOT DOCUMENTATION — the same warning
    * `goal_threshold_frame` carries above. `NodeV3` is a plain `z.object`, so an
@@ -270,11 +274,10 @@ export const NodeV3 = z.object({
    *    so `field-safety.ts` refuses any `update_node` op naming it;
    *  · the draft path does not — its field-by-field `transformNodeToV3` does not
    *    copy it;
-   *  · ⚠ a model `add_node` COULD carry it. Add values are screened only against
-   *    `PIPELINE_OWNED_ROOTS`, and `CEE_ANALYSIS_OWNED_ROOTS` does not yet list
-   *    `goal_direction`, so a model-authored goal node could arrive with a sense
-   *    the user never stated, and `run_analysis` would forward it as attested.
-   *    Listing it there is a follow-up for the field-safety owner.
+   *  · a model `add_node` cannot — `goal_direction` is in `CEE_ANALYSIS_OWNED_ROOTS`
+   *    (`field-safety.ts`), so the add screen refuses it and the edit pipeline
+   *    strips it before the referee (review 5844286953 NB1), and a model-authored
+   *    goal node lands with no sense rather than one the user never stated.
    *
    * THE EVENTUAL CONTRACT OWNER is `@talchain/schemas` (schemas PR #48, ROADMAP
    * 2.1192). This local declaration is the carrier until that lands; it does not

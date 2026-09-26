@@ -84,6 +84,7 @@ const OWNED_NAMES_REACHABLE_IN_THIS_REPO = [
   // src/schemas/cee-v3.ts — NodeV3
   'provenance',
   'extractiontype',
+  'goal_direction',
   // src/schemas/cee-v3.ts — EdgeV3
   'provenance_display',
   'origin',
@@ -133,22 +134,29 @@ const SIX_SMUGGLE_NAMES = [
   'extractiontype',
 ] as const;
 
+/**
+ * Owned names added AFTER the historical six, spelled by hand for the same reason.
+ * `goal_direction` — the goal's stated sense (review 5844286953 NB1, #1971).
+ */
+const LATER_SMUGGLE_NAMES = ['goal_direction'] as const;
+const HAND_SMUGGLE_NAMES = [...SIX_SMUGGLE_NAMES, ...LATER_SMUGGLE_NAMES] as const;
+
 describe('corpus B — the six smuggle names, hand-written', () => {
   it('each is owned by CEE and is NOT an intervention contract key', () => {
-    for (const name of SIX_SMUGGLE_NAMES) {
+    for (const name of HAND_SMUGGLE_NAMES) {
       expect(PIPELINE_OWNED_ROOTS.has(name), `${name} owned`).toBe(true);
       expect(INTERVENTION_CONTRACT_KEYS.has(name), `${name} must not be a contract key`).toBe(false);
     }
   });
 
-  it('the hand list and the derived difference are the SAME SIX (a disagreement is the signal)', () => {
+  it('the hand list and the derived difference are the SAME names — the six plus later additions (a disagreement is the signal)', () => {
     const derived = [...CEE_ANALYSIS_OWNED_ROOTS_FOR_TEST]
       .filter((k) => !INTERVENTION_CONTRACT_KEYS.has(k))
       .sort();
-    expect(derived).toEqual([...SIX_SMUGGLE_NAMES].sort());
+    expect(derived).toEqual([...HAND_SMUGGLE_NAMES].sort());
   });
 
-  for (const name of SIX_SMUGGLE_NAMES) {
+  for (const name of HAND_SMUGGLE_NAMES) {
     it(`\`${name}\`: dies at the bare spelling, the nested spelling, and inside interventions`, () => {
       expect(nodeUpdate(name, 'x').blocker?.code, 'bare').toBe(PIPELINE_OWNED_FIELD);
       expect(nodeUpdate('prior', { [name]: 'x' }).blocker?.code, 'nested payload').toBe(

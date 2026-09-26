@@ -22,6 +22,7 @@ import {
   resolveGoalThresholdCapWithProvenance,
 } from '../../utils/goal-threshold-cap.js';
 import { admitGoalBaseline } from '../../cee/factor-extraction/goal-baseline-admissibility.js';
+import { deriveGoalDirectionFromLabel } from '../goal-target/goal-direction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import type { InterventionV3T } from '../../schemas/cee-v3.js';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
@@ -191,15 +192,26 @@ const levelSourceFor = (provenance: string): ConstructedLevelSource =>
  * counts differs, and that is not a sense. The strictness consequence (a goal fit
  * that would count equality as met) is handled where the goal fit is written —
  * see `scoredInSense` in `admitCandidateModel`.
+ *
+ * ⛔ AN "AT LEAST" CONTRADICTED BY THE GOAL'S OWN WORDS IS NOT ATTESTED (review
+ * 5844286953). The operator is a required enum with no "not stated" value, so a
+ * `>=` is sometimes the schema's reading and not the user's. "Reduce/cut X by at
+ * least N" read as `>=` is the repo's known sign-inversion fingerprint (ROADMAP
+ * 1.52; refused on the chat path, `add-constraint.ts`). When the goal label reads
+ * as a REDUCTION — by the SAME label reading `run_analysis` falls back to
+ * (`deriveGoalDirectionFromLabel`) — no sense is stamped, the operator loss is
+ * recorded, and the Run gets the label's `minimise`, exactly as before this
+ * carrier existed. The forwarder applies the same rule to a STORED stamp
+ * (`resolveRequestGoalDirection`), for a goal renamed after construction.
  */
 export function attestedGoalDirection(
-  goal: Pick<CandidateModel['goal'], 'operator' | 'provenance'>,
+  goal: Pick<CandidateModel['goal'], 'metric' | 'operator' | 'provenance'>,
 ): 'maximise' | 'minimise' | undefined {
   if (goal.provenance !== 'explicit') return undefined;
   switch (goal.operator) {
     case '>=':
     case '>':
-      return 'maximise';
+      return deriveGoalDirectionFromLabel(goal.metric) === 'minimise' ? undefined : 'maximise';
     case '<=':
     case '<':
       return 'minimise';
