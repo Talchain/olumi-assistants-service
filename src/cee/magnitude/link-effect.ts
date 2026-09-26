@@ -269,7 +269,8 @@ export interface LinkSizing {
 
 const fmt = (x: number): string => String(Number(x.toPrecision(6)));
 
-function isSwitch(node: MagnitudeNode, frame: number | undefined): boolean {
+/** A 0/1 switch: frame 1, and the level held and every option level are exactly 0 or 1. */
+export function isSwitch(node: MagnitudeNode, frame: number | undefined): boolean {
   if (frame !== 1) return false;
   const os = node.observed_state ?? {};
   const levels = [...(finite(os.value) ? [os.value] : []), ...node.option_levels.filter(finite)];
