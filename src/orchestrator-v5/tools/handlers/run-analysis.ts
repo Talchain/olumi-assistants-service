@@ -121,7 +121,7 @@ import {
   unprovablePercentFrameIds,
   withholdUnprovablePercentFrames,
 } from './level-limit-baseline.js';
-import { carryStatedLevelSpread, statedLevelNodeIds } from './stated-level-spread.js';
+import { carryStatedLevelSpread, carrySwitchLevelSpread, statedLevelNodeIds, switchLevelNodeIds } from './stated-level-spread.js';
 import {
   AnalysisNotReadyError,
   readinessQuestions,
@@ -942,8 +942,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
     // A level the USER stated is sent as stated, not at PLoT's default ±0.1 spread (`stated-level-spread.ts`).
-    const wireGraph = carryStatedLevelSpread(cappedGraph);
-    if (wireGraph !== cappedGraph) {
+    const statedGraph = carryStatedLevelSpread(cappedGraph);
+    if (statedGraph !== cappedGraph) {
       log.info(
         {
           event: 'run_analysis.stated_level_spread_carried',
@@ -952,6 +952,19 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           node_ids: [...statedLevelNodeIds(cappedGraph)],
         },
         'run_analysis sent user-stated factor levels at the minimum spread (wire copy only; no magnitudes)',
+      );
+    }
+    // A 0/1 switch an option sets is held at its state, never sampled as a partial state (`stated-level-spread.ts`).
+    const wireGraph = carrySwitchLevelSpread(statedGraph, finalWireOptions);
+    if (wireGraph !== statedGraph) {
+      log.info(
+        {
+          event: 'run_analysis.switch_level_spread_carried',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          node_ids: [...switchLevelNodeIds(statedGraph, finalWireOptions)],
+        },
+        'run_analysis sent option-set 0/1 switch levels at the minimum spread (wire copy only; no magnitudes)',
       );
     }
     const plotPayload: Record<string, unknown> = {
