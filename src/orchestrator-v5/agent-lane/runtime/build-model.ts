@@ -849,14 +849,19 @@ function keepsEveryUserNumber(firstRaw: CandidateModel, firstPrepared: Candidate
       const kept = retryRaw.factors.filter((g) => is(f.label)(g.label));
       return kept.length > 0 && kept.every((g) => g.baseline_known && g.provenance === 'explicit' && g.baseline_value === f.baseline_value);
     });
-  const levelsKept = firstRaw.options.every((o) => (o.interventions ?? [])
-    .filter((i) => i.provenance === 'explicit')
-    .every((i) => {
-      const prepared = (firstPrepared.options.find((x) => is(o.label)(x.label))?.interventions ?? []).filter((j) => is(i.factor_label)(j.factor_label));
-      const carriers = (retryRaw.options.find((x) => is(o.label)(x.label))?.interventions ?? []).filter((j) => is(i.factor_label)(j.factor_label));
-      if (carriers.length === 0) return prepared.length === 0;
-      return carriers.every((c) => same(c, i) || prepared.some((p) => same(c, p)));
-    }));
+  const levelsKept = firstRaw.options.every((o) => {
+    const retried = retryRaw.options.find((x) => is(o.label)(x.label));
+    // B1' (5845793528): an option the retry shed WHOLE is keepsEveryUserStatedIdentity's call, not a dropped number.
+    if (retried === undefined) return true;
+    return (o.interventions ?? [])
+      .filter((i) => i.provenance === 'explicit')
+      .every((i) => {
+        const prepared = (firstPrepared.options.find((x) => is(o.label)(x.label))?.interventions ?? []).filter((j) => is(i.factor_label)(j.factor_label));
+        const carriers = (retried.interventions ?? []).filter((j) => is(i.factor_label)(j.factor_label));
+        if (carriers.length === 0) return prepared.length === 0;
+        return carriers.every((c) => same(c, i) || prepared.some((p) => same(c, p)));
+      });
+  });
   return baselinesKept && levelsKept;
 }
 

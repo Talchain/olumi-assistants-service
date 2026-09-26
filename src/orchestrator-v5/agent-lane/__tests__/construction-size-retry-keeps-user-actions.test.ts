@@ -691,3 +691,154 @@ describe('(3) B1: the combined size+repair retry may shed an option or a risk Ol
     expect(retainsRiskHypotheses(inSize, prep(withRisk(covered(), [])), false)).toBe(true);
   });
 });
+
+/**
+ * ⛔ B1' (CHANGES_REQUIRED 5845793528): AN OPTION THE COMPACTION SHED WHOLE IS NOT A DROPPED USER NUMBER.
+ *
+ * `keepsEveryUserNumber` read every explicit level of every FIRST-draft option off the retry's option of that label —
+ * `undefined` for an option the compaction shed — so the user's "Developer headcount = 7", reused (stamped `explicit`)
+ * by Olumi's "Hire Both", counted as dropped when "Hire Both" was shed. An oversized first draft of that shape was
+ * refused `model_too_large` and nothing registered, on the size-only route AND the combined route, where staging
+ * 82137b6b adopted the same pair (8 nodes, readiness []). The user's 7 is not lost: it sits on the user's own
+ * "Grow to Seven Developers", which the retry keeps. Whether an option may go at all is `keepsEveryUserStatedIdentity`'s
+ * call (a user's option never may); every option the retry KEEPS keeps every carrier check.
+ * The reviewer's executed shape: first draft 19 nodes (two user options, Olumi's "Hire Both", a held status quo,
+ * 3 factors + 10 speculative); retry = the same minus "Hire Both" and the speculative factors, 8 nodes.
+ */
+describe('(4) B1\' (5845793528): a compaction may shed Olumi\'s option that reused the user\'s number — never the user\'s number on a kept option', () => {
+  const SEVEN = 'Grow to Seven Developers';
+  const HEADCOUNT = 'Developer headcount';
+  const SPECULATIVE_10 = Array.from({ length: 10 }, (_, i) => `Speculative factor ${i}`);
+  const COPY_RULE_TEXT = 'Return your previous model with only the items you ADDED beyond the brief removed. Copy every item you keep EXACTLY as it is in your previous model: the same label, wording, provenance and relationships. Do not rename, merge, reword or re-add anything.';
+  const ONLY_REPAIRS = 'The only other change allowed is the repair each listed construction issue asks for, made in place on the item it names.';
+  /** The user's own number: "Developer headcount = 7", stated in the brief, on a known baseline of 5. */
+  const userSeven = (value = 7): Iv => ({ factor_label: HEADCOUNT, value, value_kind: 'absolute', unit: 'developers', provenance: 'explicit' });
+  /** The user's 7 as `/graph/register` carries it: 7 / plausible_max 20, sourced from the brief. */
+  const USER_SEVEN_REGISTERED = { source: 'brief_extraction', value: 7 / 20 };
+  const optionIds = (g: Graph) => g.nodes.filter((n) => n.kind === 'option').map((n) => n.id).sort();
+  const levelOn = (g: Graph, option: string, factorId: string) =>
+    ((g.nodes.find((n) => n.id === option) as { interventions?: Record<string, unknown> }).interventions ?? {})[factorId];
+
+  /** The compact model the retry returns: the user's two options, the held status quo, three factors — 8 nodes. */
+  function compact(): Draft {
+    const d = c22();
+    d.options = [
+      { label: SEVEN, provenance: 'explicit', is_status_quo: null, changes: [], interventions: [userSeven(), est('Hiring cost', 140000, 'GBP')] },
+      { label: 'Hire a Tech Lead', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [est('Technical leadership capacity', 1.5, 'FTE'), est('Hiring cost', 110000, 'GBP')] },
+      { label: 'Continue Current Staffing', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [] },
+    ];
+    d.factors = [
+      { ...factor(HEADCOUNT, 5, 20, 'developers'), baseline_known: true, provenance: 'explicit' },
+      factor('Technical leadership capacity', 0.5, 5, 'FTE'),
+      factor('Hiring cost', 0, 500000, 'GBP'),
+    ];
+    d.links = [
+      { from: HEADCOUNT, to: GOAL, direction: 'positive', provenance: 'ai_proposed' },
+      { from: 'Technical leadership capacity', to: GOAL, direction: 'positive', provenance: 'ai_proposed' },
+      // Every factor reaches the goal, so the registered model's readiness is clean ([]), as on staging.
+      { from: 'Hiring cost', to: GOAL, direction: 'negative', provenance: 'ai_proposed' },
+    ];
+    return d;
+  }
+  /** Olumi's "Hire Both", reusing the user's 7 on "Developer headcount" at the provenance given. */
+  const hireBoth = (provenance: string, value = 7): Opt => ({
+    label: 'Hire Both', provenance: 'ai_proposed', is_status_quo: null, changes: [],
+    interventions: [{ ...userSeven(value), provenance }, est('Technical leadership capacity', 1.5, 'FTE'), est('Hiring cost', 250000, 'GBP')],
+  });
+  /** The oversized first draft (19 nodes): `compact()` plus Olumi's "Hire Both" and 10 speculative factors. */
+  function first(sevenOnHireBoth = 'explicit'): Draft {
+    const d = compact();
+    d.options.splice(2, 0, hireBoth(sevenOnHireBoth));
+    d.factors.push(...SPECULATIVE_10.map((l) => factor(l, 5, 10, 'score')));
+    d.links.push(...SPECULATIVE_10.map((l): Link => ({ from: l, to: GOAL, direction: 'positive', provenance: 'ai_proposed' })));
+    return d;
+  }
+  /** The same first draft with ONE level gap: "Hire a Tech Lead" names "Technical leadership capacity" in `changes` only. */
+  function firstWithOneGap(): Draft {
+    const d = first();
+    d.options[1] = { ...d.options[1]!, changes: ['Technical leadership capacity'], interventions: [est('Hiring cost', 110000, 'GBP')] };
+    return d;
+  }
+
+  /** The adopted outcome, bound by node id: the RETRY registered, 8 nodes, the user's 7 on the user's option, readiness clean. */
+  function expectCompactAdopted(out: Awaited<ReturnType<typeof construct>>) {
+    expect(out.reqs, 'the one bounded retry was spent').toHaveLength(2);
+    expect(out.result.ok, JSON.stringify(out.result)).toBe(true);
+    expect(out.result.size_retried).toBe(true);
+    expect(out.result.within_compact_limits).toBe(true);
+    expect(out.registered).toHaveLength(1);
+    expect(out.graph!.nodes).toHaveLength(8);
+    expect(optionIds(out.graph!)).toEqual(['continue_current_staffing', 'grow_to_seven_developers', 'hire_a_tech_lead']);
+    expect(out.graph!.nodes.some((n) => n.id === 'hire_both')).toBe(false);
+    // The user's 7 on the user's own option, as registered: normalised by plausible_max 20, sourced from the brief.
+    expect(levelOn(out.graph!, 'grow_to_seven_developers', 'developer_headcount'), 'the user\'s 7 is on the user\'s own option').toEqual(USER_SEVEN_REGISTERED);
+    expect(assessCanonicalAnalysisReadiness(out.graph!).blockingIssues).toEqual([]);
+    expect((out.result.left_out_to_stay_compact as { label: string }[]).map((x) => x.label)).toContain('Hire Both');
+  }
+
+  it('PRECONDITIONS: the first draft is 19 nodes and oversized, the retry 8; "Hire Both" is Olumi\'s and carries the user\'s 7 as explicit; the gap-free draft has no repair issue, the other exactly one level gap', () => {
+    const f = first();
+    expect(firstVerdict(f).nodes).toBe(19);
+    expect(firstVerdict(f).nodes).toBeGreaterThan(COMPACT_LIMITS.maxNodes);
+    expect(firstVerdict(compact()).nodes).toBe(8);
+    const both = f.options.find((o) => o.label === 'Hire Both')!;
+    expect(both.provenance).toBe('ai_proposed');
+    expect(both.interventions.find((i) => i.factor_label === HEADCOUNT)).toEqual(userSeven());
+    expect(firstVerdict(f).brief_stated_keys.nodes).toEqual(expect.arrayContaining(['option:grow to seven developers', 'option:hire a tech lead']));
+    expect(firstVerdict(f).brief_stated_keys.nodes).not.toContain('option:hire both');
+    const gapFree = prepareProvisionalCandidate(f as unknown as CandidateModel);
+    expect([...gapFree.mechanism_issues, ...gapFree.level_gaps, ...gapFree.baseline_gaps]).toEqual([]);
+    const oneGap = prepareProvisionalCandidate(firstWithOneGap() as unknown as CandidateModel);
+    expect(oneGap.mechanism_issues).toEqual([]);
+    expect(oneGap.level_gaps).toEqual([{ option: 'Hire a Tech Lead', factor: 'Technical leadership capacity' }]);
+    expect(oneGap.baseline_gaps).toEqual([]);
+  });
+
+  it('RED (B1\', size-only route): the gap-free oversized first draft whose Olumi "Hire Both" reused the user\'s explicit 7 — a retry that sheds "Hire Both" IS adopted, 8 nodes, readiness []', async () => {
+    const out = await construct(first(), compact());
+    // Size-only route, byte for byte: the budget and the copy-exactly rule, no repair rule.
+    expect(out.reqs[1]!.instructions).toBe(`${BUILD_INSTRUCTIONS} ${retryInstruction(firstVerdict(first()))} ${COPY_RULE_TEXT}`);
+    expectCompactAdopted(out);
+  });
+
+  it('RED (B1\', combined route): the same draft with ONE level gap — a retry that sheds "Hire Both" and levels the gap IS adopted, 8 nodes, readiness []', async () => {
+    const out = await construct(firstWithOneGap(), compact());
+    // Combined size+repair route, byte for byte: the budget, the copy-exactly rule, its one exception, the compaction's repair rule.
+    expect(out.reqs[1]!.instructions).toBe(`${BUILD_INSTRUCTIONS} ${retryInstruction(firstVerdict(firstWithOneGap()))} ${COPY_RULE_TEXT} ${ONLY_REPAIRS} ${COMPACTION_REPAIR_RULE}`);
+    expect(out.reqs[1]!.input).toContain('Hire a Tech Lead -> Technical leadership capacity: give the level');
+    expectCompactAdopted(out);
+    expect(levelOn(out.graph!, 'hire_a_tech_lead', 'technical_leadership_capacity'), 'the gap was levelled').toBeDefined();
+  });
+
+  it('CONTROL (keepsEveryUserStatedIdentity owns it): a retry that sheds the USER\'s "Grow to Seven Developers" whole is NOT adopted, on both routes', async () => {
+    const shedUser = compact();
+    shedUser.options = shedUser.options.filter((o) => o.label !== SEVEN);
+    for (const f of [first(), firstWithOneGap()]) {
+      expect(firstVerdict(f).brief_stated_keys.nodes, 'PRECONDITION: the option is the user\'s, by identity').toContain('option:grow to seven developers');
+      expectRefusedNotAdopted(await construct(f, shedUser));
+    }
+  });
+
+  it('CONTROL: when "Hire Both"\'s 7 is stamped ai_proposed, the same compaction IS adopted', async () => {
+    expectCompactAdopted(await construct(first('ai_proposed'), compact()));
+  });
+
+  it('CONTROL (every KEPT option keeps every carrier check): a retry that changes the user\'s 7 on the kept "Grow to Seven Developers" is NOT adopted; one that keeps "Hire Both" but changes its explicit 7 is NOT adopted; unchanged, both ARE', async () => {
+    const changedUser = compact();
+    changedUser.options[0] = { ...changedUser.options[0]!, interventions: [userSeven(6), est('Hiring cost', 140000, 'GBP')] };
+    expectRefusedNotAdopted(await construct(first(), changedUser));
+    const keptBoth = (value: number): Draft => {
+      const d = compact();
+      d.options.splice(2, 0, hireBoth('explicit', value));
+      return d;
+    };
+    expectRefusedNotAdopted(await construct(first(), keptBoth(6)));
+    // Contrast, same first draft: "Hire Both" kept with its 7 unchanged IS adopted, so the value alone refuses it
+    // (the first arm's contrast is the RED row above: the same retry with the user's 7 unchanged is adopted).
+    const kept = await construct(first(), keptBoth(7));
+    expect(kept.result.ok, JSON.stringify(kept.result)).toBe(true);
+    expect(optionIds(kept.graph!)).toEqual(['continue_current_staffing', 'grow_to_seven_developers', 'hire_a_tech_lead', 'hire_both']);
+    expect(levelOn(kept.graph!, 'hire_both', 'developer_headcount')).toEqual(USER_SEVEN_REGISTERED);
+    expect(levelOn(kept.graph!, 'grow_to_seven_developers', 'developer_headcount')).toEqual(USER_SEVEN_REGISTERED);
+  });
+});
