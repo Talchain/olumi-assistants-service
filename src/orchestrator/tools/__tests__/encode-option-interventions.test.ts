@@ -327,3 +327,22 @@ describe('encodeOptionInterventionsForEdit (P0-A configure-or-don\'t-persist for
     expect(out.unresolvedOptionIds).toEqual([]);
   });
 });
+
+describe('the range a figure was read against stays on its cell — only when it reproduces the level (DL #70 5848777655)', () => {
+  const withFigure = (figure: Dict) => ({
+    nodes: [goal(), uncappedFactor(), { id: 'opt_f', kind: 'option', label: 'F', data: { interventions: { fac_inhouse_capacity: figure } } }],
+    edges: [edge('opt_f', 'fac_inhouse_capacity')],
+  });
+
+  it('RED: value == raw_value / cap → the cell keeps cap (the factor declares no range of its own)', () => {
+    const { graph } = encodeOptionInterventionsForEdit(withFigure({ value: 0.1, raw_value: 10, cap: 100, unit: '£ per month' }));
+    expect(iv(optionOf(graph as { nodes: Dict[] }, 'opt_f'), 'fac_inhouse_capacity')).toMatchObject({ value: 0.1, raw_value: 10, cap: 100 });
+  });
+
+  it('a cap that does NOT reproduce the level is not stored — a cell holding cap always satisfies value == raw_value / cap', () => {
+    const { graph } = encodeOptionInterventionsForEdit(withFigure({ value: 0.2, raw_value: 10, cap: 100, unit: '£ per month' }));
+    const cell = iv(optionOf(graph as { nodes: Dict[] }, 'opt_f'), 'fac_inhouse_capacity');
+    expect(cell.value).toBe(0.2);
+    expect('cap' in cell, JSON.stringify(cell)).toBe(false);
+  });
+});

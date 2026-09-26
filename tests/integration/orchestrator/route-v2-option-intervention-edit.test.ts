@@ -395,7 +395,23 @@ describe('the Agent\'s in-process batch door — ONE user operation → ONE atom
     expect(r.status, JSON.stringify(r)).toBe('committed');
     expect(rows.size, 'ONE commit').toBe(1);
     const cell = graphNow().nodes.find(n => n.id === 'option')?.interventions?.new_factor as Record<string, unknown> | undefined;
-    expect(cell, JSON.stringify(cell)).toMatchObject({ value: 0.1, raw_value: 10, unit: '£ per month', source: 'user_specified' });
+    expect(cell, JSON.stringify(cell)).toMatchObject({ value: 0.1, raw_value: 10, unit: '£ per month', cap: 100, source: 'user_specified' });
+  });
+
+  it('RED (DL 5848777655): a £0 level keeps its range — the one case raw_value ÷ value cannot recover (0 ÷ 0)', async () => {
+    const r = await call([{ option_id: 'option', factor_id: 'new_factor', value: 0, author: 'user_specified', raw_value: 0, unit: '£ per month', cap: 100 } as Level], NEW_LINK);
+    expect(r.status, JSON.stringify(r)).toBe('committed');
+    const cell = graphNow().nodes.find(n => n.id === 'option')?.interventions?.new_factor as Record<string, unknown> | undefined;
+    expect(cell, JSON.stringify(cell)).toMatchObject({ value: 0, raw_value: 0, cap: 100, source: 'user_specified' });
+  });
+
+  it('a NEW number never inherits the old figure\'s range: a later level without a figure drops raw_value AND cap', async () => {
+    expect((await call([{ option_id: 'option', factor_id: 'new_factor', value: 0.1, author: 'user_specified', raw_value: 10, unit: '£ per month', cap: 100 } as Level], NEW_LINK)).status).toBe('committed');
+    const r = await call([{ option_id: 'option', factor_id: 'new_factor', value: 0.3, author: 'user_specified' }], [], 'dddddddd-dddd-4ddd-8ddd-dddddddddddd');
+    expect(r.status, JSON.stringify(r)).toBe('committed');
+    const cell = graphNow().nodes.find(n => n.id === 'option')?.interventions?.new_factor as Record<string, unknown> | undefined;
+    expect(cell?.value, JSON.stringify(cell)).toBe(0.3);
+    expect('cap' in (cell ?? {}) || 'raw_value' in (cell ?? {}), JSON.stringify(cell)).toBe(false);
   });
 
   it('a figure that does not normalise to the level it is sent with is refused whole — nothing written', async () => {

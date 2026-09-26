@@ -147,12 +147,13 @@ describe('the lost £10: the user\'s figure survives propose → ONE approval �
     const g = persisted as { nodes: { id: string; interventions?: Record<string, Record<string, unknown>> }[]; edges: { from: string; to: string }[] };
     const cell = g.nodes.find((n) => n.id === 'opt_add_on')!.interventions!.fac_add_on_price!;
     expect(cell, JSON.stringify(cell)).toMatchObject({ raw_value: 10, unit: '£ per month', source: 'user_specified' });
-    // The range the proposal disclosed ("range taken from your figure") is the one the cell's level is read on.
-    // ⚠ The persisted cell carries no `cap` member (the door sends it; persistence keeps raw_value + unit only — flagged
-    // to Canonical); the range is held as raw_value ÷ value, bound here to the proposal's own disclosed range.
+    // The range the proposal disclosed ("range taken from your figure") is the one the cell's level is read on, and the
+    // cell KEEPS it (DL 5848777655): `cap` persists beside `raw_value`, so value == raw_value / cap re-checks on readback.
     const range = ((proposed.interventions as { model_range?: unknown }[] | undefined)?.[0]?.model_range) as number;
     expect(range).toBeGreaterThan(10);
+    expect(cell.cap, JSON.stringify(cell)).toBe(range);
     expect(cell.value).toBe(10 / range);
+    expect(cell.value).toBe((cell.raw_value as number) / (cell.cap as number));
     expect(g.edges.filter((e) => e.from === 'opt_add_on' && e.to === 'fac_add_on_price')).toHaveLength(1);
 
     // The version receipt of that ONE commit.
