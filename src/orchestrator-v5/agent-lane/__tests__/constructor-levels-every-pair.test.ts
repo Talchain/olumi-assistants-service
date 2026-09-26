@@ -498,4 +498,64 @@ describe('the constructor gives every option × factor it acts on a level (c22)'
     expect(changes).not.toContain('when it states no level');
     expect(changes).toContain('no defensible level');
   });
+
+  /**
+   * ⛔ A RETRY NEVER TAKES AWAY THE STATUS QUO THE FIRST DRAFT HELD, AND A GAP IS ANSWERED ONLY BY WHAT REGISTERS
+   * (adversarial verify of e7052de7, blocking: SQ-H1..H3 on this brief). A status quo's pairs are never gaps, so a retry
+   * that declares "Hire Both" or "Hire Two Developers" reads 3 or 2 fewer gaps having levelled nothing. Two declared options
+   * means neither is held, and a declaration moved to an option that acts falls back to the idioms, which do not read
+   * "Continue Current Staffing". Either way it registers with no edges: readiness adds OPTION_NO_FACTOR_EDGES and
+   * OPTION_NEEDS_MAPPING, and every MISSING_OPTION_VALUE is still asked. Staging spends no retry here.
+   */
+  const declare = (d: ReturnType<typeof c22>, label: string, v: boolean | null): ReturnType<typeof c22> =>
+    ({ ...d, options: d.options.map((o) => (o.label === label ? { ...o, is_status_quo: v } : o)) });
+  const blockers = (g: Graph) => assessCanonicalAnalysisReadiness(g).blockingIssues.map((i) => `${i.code}: ${i.message}`);
+  const gapCountOf = (d: ReturnType<typeof c22>) => {
+    const p = prepareProvisionalCandidate(d as unknown as CandidateModel);
+    return p.level_gaps.length + p.baseline_gaps.length;
+  };
+  const HELD_AGAINST = ['engineering_delivery_capacity', 'hiring_cost', 'technical_leadership_capacity'];
+
+  it.each([
+    ['SQ-H1: declares Olumi\'s "Hire Both" beside it', (d: ReturnType<typeof c22>) => declare(d, 'Hire Both', true)],
+    ['SQ-H2: declares the user\'s "Hire Two Developers" beside it', (d: ReturnType<typeof c22>) => declare(d, 'Hire Two Developers', true)],
+    ['SQ-H3: moves the declaration to "Hire Both"', (d: ReturnType<typeof c22>) => declare(declare(d, 'Hire Both', true), 'Continue Current Staffing', null)],
+  ])('RED (%s): refused — "Continue Current Staffing" stays held, and readiness asks exactly what the first draft asks', async (_probe, edit) => {
+    const retry = edit(c22());
+    // Vacuity: by the drafter's words the retry covers strictly more, having levelled nothing.
+    expect(gapCountOf(retry)).toBeLessThan(gapCountOf(c22()));
+    const alone = await construct(c22());
+    expect(node(alone.graph, 'continue_current_staffing').is_baseline).toBe(true);
+    const { graph, inputs } = await construct(c22(), retry);
+    expect(inputs).toHaveLength(2);
+    expect(node(graph, 'continue_current_staffing').is_baseline).toBe(true);
+    expect(graph.edges.filter((e) => e.from === 'continue_current_staffing').map((e) => e.to).sort()).toEqual(HELD_AGAINST);
+    expect(blockers(graph)).toEqual(blockers(alone.graph));
+    expect(blockers(graph).filter((b) => b.startsWith('OPTION_NO_FACTOR_EDGES') || b.startsWith('OPTION_NEEDS_MAPPING'))).toEqual([]);
+  });
+
+  it('CONTROL: where the first draft held no status quo, a retry may declare one — adopted, held and stamped', async () => {
+    const first = declare(c22(), 'Continue Current Staffing', null);
+    const alone = await construct(first);
+    expect(blockers(alone.graph).some((b) => b.startsWith('OPTION_NO_FACTOR_EDGES'))).toBe(true);
+    const { graph } = await construct(first, covered());
+    expect(node(graph, 'continue_current_staffing').is_baseline).toBe(true);
+    expect(missingValues(graph)).toEqual([]);
+    expect(blockers(graph).filter((b) => b.startsWith('OPTION_NO_FACTOR_EDGES'))).toEqual([]);
+  });
+
+  it('RED: an ADDITION on a factor with no baseline answers neither its level nor that baseline — refused, and the +12 is never said', async () => {
+    const retry = c22();
+    retry.options[0] = { ...retry.options[0]!, changes: ['Hiring cost'], interventions: [{ factor_label: 'Engineering delivery capacity', value: 12, value_kind: 'additional', unit: 'story points', provenance: 'ai_proposed' }] };
+    // Vacuity: by the drafter's words both the pair and the baseline are gone from the count (7 < 9); preparation makes no total.
+    expect([gapCountOf(c22()), gapCountOf(retry)]).toEqual([9, 7]);
+    expect(prepareProvisionalCandidate(retry as unknown as CandidateModel).additions_without_total.map((a) => [a.option, a.factor, a.reason]))
+      .toEqual([['Hire Two Developers', 'Engineering delivery capacity', 'baseline_unknown']]);
+    const alone = await construct(c22());
+    const { graph, inputs, result } = await construct(c22(), retry);
+    expect(inputs).toHaveLength(2);
+    expect(result.additions_without_total).toBeUndefined();
+    expect(((result.not_represented ?? []) as string[]).filter((s) => s.includes('adds 12'))).toEqual([]);
+    expect(blockers(graph)).toEqual(blockers(alone.graph));
+  });
 });

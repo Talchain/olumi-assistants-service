@@ -964,6 +964,112 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
     expect(withheldOptions(out)).toEqual(ONLY_TEST_WITHHELD);
     expect(said(out)).toBe(1);
   });
+
+  /**
+   * ⛔ A GAP IS ANSWERED ONLY BY WHAT REGISTERS, AND A RETRY NEVER TAKES AWAY THE HELD STATUS QUO (adversarial verify of
+   * e7052de7, blocking: X3-SQ and SQ-H1..H3). `findCoverageGaps` reads the drafter's own words, so a pair missing from a
+   * retry's count is not thereby answered. A retry can declare £54 the status quo (a status quo's pairs are never gaps),
+   * give an addition preparation cannot make a total, or give a level below zero that admission withholds. Each one reads
+   * "fewer gaps" while readiness asks the same value question of what registers. And the declaration decides what
+   * admission holds: two declared options means neither is held, so "Keep current pricing" loses its edges. Un-declared,
+   * it is still held (its label reads as the status quo), but it loses the `is_baseline` stamp, and run admission reads
+   * that stamp to keep it as a comparator.
+   */
+  const KEEP = 'Keep current pricing';
+  const declare = <D extends ReturnType<typeof with54>>(d: D, label: string, v: boolean | null): D =>
+    ({ ...d, options: d.options.map((o) => (o.label === label ? { ...o, is_status_quo: v } : o)) }) as D;
+  const held = (g: SGraph) => g.nodes.filter((n) => n.kind === 'option' && n.is_baseline === true).map((n) => n.id);
+  const keepEdges = (g: SGraph) => g.edges.filter((e) => e.from === 'keep_current_pricing').map((e) => e.to).sort();
+  const AI_54 = (value: number, value_kind: 'absolute' | 'additional', unit: string) =>
+    ({ changes: [], interventions: [PRICE_54, { factor_label: 'AI feature availability', value, value_kind, unit, provenance: 'ai_proposed' }] }) as unknown as Partial<Opt>;
+  /** The first draft, registered as it stands: £54 at its price level, its AI availability the one value question, "Keep current pricing" held and declared. */
+  const expectFirstDraftRegistered = (out: Record<string, unknown>, graph: SGraph | null) => {
+    expect([out.ok, out.size_retried]).toEqual([true, false]);
+    expect(optionIds(graph!)).toEqual(['keep_current_pricing', '59_with_ai_release', '54_with_ai_release']);
+    expect(levelsById(graph!)['54_with_ai_release']).toEqual({ pro_plan_price: 0.27 });
+    expect(held(graph!)).toEqual(['keep_current_pricing']);
+    expect(keepEdges(graph!)).toEqual(['ai_feature_availability', 'pro_plan_price']);
+    expect(blocking(graph!)).toEqual(ASK_54_AI);
+    expect(out.additions_without_total).toBeUndefined();
+    expect(withheldOptions(out)).toEqual(ONLY_TEST_WITHHELD);
+  };
+
+  it('PRECONDITION (rows 3): the first draft declares "Keep current pricing"; its admission holds it, stamped', async () => {
+    expect(with54(true).options.find((o) => o.label === KEEP)).toMatchObject({ is_status_quo: true, changes: [], interventions: [] });
+    const { out, graph } = await construct(with54(true), with54(true));
+    expectFirstDraftRegistered(out, graph);
+  });
+
+  it('RED (row 3a, the verifier\'s X3-SQ): a retry that declares £54 the status quo and changes nothing else is refused', async () => {
+    const retry = declare(with54(true), '£54 with AI release', true);
+    // Vacuity: declared, £54's one gap is not counted (0 < 1), and nothing else about the retry differs.
+    expect(gapsOnRegistered(retry)).toEqual([]);
+    const { out, graph, reqs } = await construct(with54(true), retry);
+    expect(reqs).toHaveLength(2);
+    expect(issues(reqs[1]!.input)).toEqual([GAP_54]);
+    expectFirstDraftRegistered(out, graph);
+  });
+
+  it('RED (row 3b): a retry that levels £54 AND un-declares "Keep current pricing" is refused — the stamp is the comparator run admission keeps', async () => {
+    const retry = declare(with54(true, LEVELLED_54), KEEP, null);
+    const retryAdmitted = admitCandidateModel(prepareProvisionalCandidate(retry).candidate, {});
+    // Vacuity: still held (the label reads as the status quo), so only the stamp is lost; and £54 is genuinely levelled.
+    expect(labelMatchesBaseline(KEEP)).toBe(true);
+    expect(retryAdmitted.loss.some((e) => e.field_path === 'nodes[keep_current_pricing].status_quo_held')).toBe(true);
+    expect(retryAdmitted.nodes.find((n) => n.id === 'keep_current_pricing')?.is_baseline).toBeUndefined();
+    expect(gapsOnRegistered(retry)).toEqual([]);
+    const { out, graph } = await construct(with54(true), retry);
+    expectFirstDraftRegistered(out, graph);
+  });
+
+  it('RED (row 3c): a retry that levels £54 AND declares the user\'s £59 as well is refused — two declared, neither held', async () => {
+    const { out, graph } = await construct(with54(true), declare(with54(true, LEVELLED_54), '£59 with AI release', true));
+    expectFirstDraftRegistered(out, graph);
+  });
+
+  it('CONTROL (row 3c): the same levelled retry, declaring nothing new, is adopted — "Keep current pricing" held and stamped', async () => {
+    const { out, graph } = await construct(with54(true), with54(true, LEVELLED_54));
+    expect([out.ok, out.size_retried]).toEqual([true, false]);
+    expect(levelsById(graph!)['54_with_ai_release']).toEqual({ pro_plan_price: 0.27, ai_feature_availability: 0.5 });
+    expect(held(graph!)).toEqual(['keep_current_pricing']);
+    expect(blocking(graph!)).toEqual([]);
+  });
+
+  it('RED (row 3d): an ADDITION to AI availability that preparation cannot make a total covers nothing — refused, and never said', async () => {
+    const retry = with54(true, AI_54(0.5, 'additional', 'percentage points'));
+    // Vacuity: the drafter's words carry a level on the pair, so the count reads 0 < 1; preparation makes it no total.
+    expect(gapsOnRegistered(retry)).toEqual([]);
+    expect(prepareProvisionalCandidate(retry).additions_without_total.map((a) => [a.option, a.factor, a.value])).toEqual([['£54 with AI release', 'AI feature availability', 0.5]]);
+    const { out, graph } = await construct(with54(true), retry);
+    expectFirstDraftRegistered(out, graph);
+    expect(((out.not_represented ?? []) as string[]).filter((s) => s.includes('adds 0.5'))).toEqual([]);
+  });
+
+  it('RED (row 3e): a level below zero, which admission withholds, covers nothing — refused, and never said', async () => {
+    const retry = with54(true, AI_54(-0.5, 'absolute', ''));
+    expect(gapsOnRegistered(retry)).toEqual([]);
+    expect(admitCandidateModel(prepareProvisionalCandidate(retry).candidate, {}).loss.some((e) => e.field_path.endsWith('.signed_level_withheld'))).toBe(true);
+    const { out, graph } = await construct(with54(true), retry);
+    expectFirstDraftRegistered(out, graph);
+    expect(((out.not_represented ?? []) as string[]).filter((s) => s.includes('-0.5'))).toEqual([]);
+  });
+
+  it('RED (row 3f, the ≤ arm): a loop retry that "answers" £54 with that addition and opens £64\'s gap covers LESS of what registers — refused', async () => {
+    const base = with54(true, AI_54(0.5, 'additional', 'percentage points'));
+    const retry = { ...base, options: [...base.options, NEW_64_GAP] } as typeof base;
+    // Vacuity: by the drafter's words, one gap (£64) against the first draft's one: 1 ≤ 1, and strict-more is waived for the loop.
+    expect(gapsOnRegistered(retry)).toEqual([{ option: '£64 with AI release', factor: 'AI feature availability' }]);
+    const { out, graph, reqs } = await construct(withLoop(with54(true)), retry);
+    expect(issues(reqs[1]!.input)).toEqual([GAP_54, LOOP_ISSUE]);
+    expect(loopWithheld(out)).toEqual(['pro_plan_subscribers->monthly_churn']);
+    expectFirstDraftRegistered(out, graph);
+  });
+
+  it('RED (row 3g, the loop route): a retry that breaks the loop and un-declares "Keep current pricing" is refused — the held status quo is kept on every route within the limit', async () => {
+    const { out, graph } = await construct(withLoop(with54(true)), declare(with54(true), KEEP, null));
+    expect(loopWithheld(out)).toEqual(['pro_plan_subscribers->monthly_churn']);
+    expectFirstDraftRegistered(out, graph);
+  });
 });
 
 describe('the construction contract names the shape (one sentence)', () => {
