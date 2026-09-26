@@ -21,6 +21,9 @@
  *               withheld for the limit. Both served a fragile-link card.
  *   · hiring  — CEE `4809203`: NO limit problem; t1 automatic pass withheld only because nobody asked,
  *               t2 explicit near tie. Both served a fragile-link card (controls that must keep it).
+ *   · hiring_tie — CEE `3829c96` (R&C served check, 26 Sep 01:03Z): the same brief, t1 automatic first
+ *               pass, a NEAR TIE with ZERO fragile rows (9 robust). Served NO card
+ *               (`edge_sensitivity_not_evidenced`): the confinement drops `display_verdict`.
  */
 import { readFileSync } from 'node:fs';
 
@@ -52,7 +55,7 @@ export interface TrimmedRunTurnFixture {
   readonly turns: Readonly<Record<string, TrimmedRunTurn>>;
 }
 
-export type FixtureLetter = 'A' | 'B' | 'C' | 'c16' | 'c10' | 'c11' | 'paul' | 'pricing' | 'hiring';
+export type FixtureLetter = 'A' | 'B' | 'C' | 'c16' | 'c10' | 'c11' | 'paul' | 'pricing' | 'hiring' | 'hiring_tie';
 
 export const FIXTURE_FILES: Readonly<Record<FixtureLetter, string>> = {
   A: 'c19-8428207-A.run-turns.trimmed.json',
@@ -64,6 +67,7 @@ export const FIXTURE_FILES: Readonly<Record<FixtureLetter, string>> = {
   paul: 'cbd15f83-bdd43f4-paul.run-turns.trimmed.json',
   pricing: 'pricing-7212945c-06325c6.run-turns.trimmed.json',
   hiring: 'hiring-fc9312a3-4809203.run-turns.trimmed.json',
+  hiring_tie: 'hiring-be08d688-3829c96.run-turns.trimmed.json',
 };
 
 export const PAYLOAD_FILE = 'fragile-link-challenge.payload.json';

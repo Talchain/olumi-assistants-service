@@ -155,7 +155,13 @@ describe('run-turn no-flagged-link card', () => {
       // Control: the confinement kept the positive evidence and dropped the guards.
       expect(Object.keys(robustness).sort(), letter).toEqual(['fragile_edges', 'near_tie', 'robust_edges']);
       expect((robustness.robust_edges as unknown[]).length, letter).toBeGreaterThan(0);
-      expect(run(confined), `${letter} first pass`).toEqual(refused('edge_sensitivity_not_evidenced'));
+      // The no-flagged card is refused (its guards are not observable). Since R&C PR-6 a confined first pass
+      // that is a NEAR TIE carries the near-tie card instead (AI Quality 5841805590); any other carries none.
+      const out = run(confined);
+      const tie = (robustness.near_tie as { is_tie?: unknown } | undefined)?.is_tie === true;
+      expect(out.blocks.filter((b) => b.signal_id.startsWith('coach:no_flagged_link:')), `${letter} first pass`).toEqual([]);
+      expect(out.blocks.map((b) => b.signal_id.split(':').slice(0, 2).join(':')), `${letter} first pass`).toEqual(tie ? ['coach:near_tie'] : []);
+      if (!tie) expect(out, `${letter} first pass`).toEqual(refused('edge_sensitivity_not_evidenced'));
       // Contrast: the explicit Run of the same served run gets the card.
       expect(run(runTurnCase(letter, 't5', 'explicit_run')).eligibility, letter).toEqual({ eligible: true });
 
@@ -180,7 +186,9 @@ describe('run-turn no-flagged-link card', () => {
     const firstPass = firstPassCase('c10', 't5', (r) => { r.enrichment.robustness.normalization_errors = errors; });
     const robustness = (firstPass.final.analysisResult as Record<string, any>).enrichment.robustness as Record<string, unknown>;
     expect(Object.hasOwn(robustness, 'normalization_errors')).toBe(false);
-    expect(run(firstPass)).toEqual(refused('edge_sensitivity_not_evidenced'));
+    // No no-flagged card. (This c10 first pass is a near tie, so since R&C PR-6 it carries the near-tie card,
+    // whose claim reads `near_tie`, not the fragile list the normaliser may have thinned.)
+    expect(run(firstPass).blocks.filter((b) => b.signal_id.startsWith('coach:no_flagged_link:'))).toEqual([]);
     // Contrast: an EMPTY list is no error.
     expect(run(withResult(runTurnCase('c10', 't5', 'explicit_run'), (r) => { rob(r).normalization_errors = []; })).eligibility).toEqual({ eligible: true });
   });

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
+import { CoachingBlockSchema } from '@talchain/schemas/boundary';
 import { currentAnalysisCoaching, runTurnCoaching, type CapturedAnalysis, type RunTurnCoachingFinal } from '../analysis-coaching-pass-through.js';
 import { RUN_TURN_COACHING_REASONS } from '../../coaching/fragile-link-challenge.js';
 import { runTurnCase } from '../../coaching/__tests__/fragile-link-challenge-fixtures.js';
@@ -206,7 +207,7 @@ test('CONTROL: a summary with no limit sentence keeps the card (c10 no-flagged-l
 // Every input below is a SERVED wire turn (coaching/__tests__/fixtures/*.run-turns.trimmed.json).
 const LIMIT_CARD = 'coach:limit_unchecked:';
 const runTurnCards = <T extends {signal_id: string}>(blocks: readonly T[]): T[] =>
- blocks.filter((b) => /^coach:(fragile_link|no_flagged_link|limit_unchecked):/.test(b.signal_id));
+ blocks.filter((b) => /^coach:(fragile_link|no_flagged_link|limit_unchecked|near_tie):/.test(b.signal_id));
 const statelessCapture = (c: CapturedAnalysis): CapturedAnalysis => { const {analysis_state: _s, ...rest} = c; return rest; };
 const claimOf = (f: RunTurnCoachingFinal) => (f.analysisState as {leader_claim?: {withheld_reason?: string}}).leader_claim;
 
@@ -534,4 +535,84 @@ test('ASSUMED LINK — a graph that is NOT the run\'s (an extra link, hash diffe
  const cards=runTurnCards(runTurnCoaching(statelessCapture(c.captured),{...c.final,graph:g}).blocks);
  assert.equal(cards.length,1);
  assert.equal(cards[0]!.signal_id.endsWith(':assumed'),false);
+});
+
+// ── NEAR TIE (R&C PR-6; AI Quality 5841805590's five conditions) — the first pass's one move on a close call ──
+// Served 26 Sep (CEE 3829c96, hiring): automatic first pass, near_tie.is_tie with ZERO fragile rows → NO card.
+const TIE_CARD = 'coach:near_tie:';
+const tieCase = () => { const c=runTurnCase('hiring_tie','t1','auto_first_pass'); return {c, captured: statelessCapture(c.captured), final: c.final}; };
+const tieResult = (f: RunTurnCoachingFinal) => f.analysisResult as {computed_against_hash: string; enrichment: Record<string, any>};
+const retie = (mutate: (r: {computed_against_hash: string; enrichment: Record<string, any>}, state: Record<string, any>) => void, trigger: 'auto_first_pass'|'explicit_run' = 'auto_first_pass') => {
+ const {c}=tieCase();
+ const result=structuredClone(c.final.analysisResult) as {computed_against_hash: string; enrichment: Record<string, any>};
+ const state=structuredClone(c.final.analysisState) as Record<string, any>;
+ mutate(result,state);
+ const captured={...statelessCapture(c.captured),blocks:[result],trigger} as CapturedAnalysis;
+ return runTurnCoaching(captured,{...c.final,analysisResult:result,analysisState:state});
+};
+test('NEAR TIE — served hiring 3829c96 first pass (near tie, 0 fragile links, NO card served) → ONE card asking which difference matters most',()=>{
+ const {c,captured,final}=tieCase();
+ // Present controls, from the SAME served turn: the typed tie, zero fragile rows, a computed comparison, and no card served.
+ const rb=tieResult(final).enrichment.robustness;
+ assert.equal(rb.near_tie.is_tie,true); assert.deepEqual(rb.fragile_edges,[]); assert.ok(rb.robust_edges.length>0);
+ assert.equal(tieResult(final).enrichment.option_comparison_status,'computed');
+ assert.deepEqual((c.fixture as any).turns.t1.served_run_turn_cards,[]);
+ const out=runTurnCoaching(captured,final);
+ assert.deepEqual(out.eligibility,{eligible:true});
+ const cards=runTurnCards(out.blocks);
+ assert.equal(cards.length,1);
+ const card=cards[0]!;
+ assert.equal(CoachingBlockSchema.safeParse(card).success,true);
+ assert.equal(card.signal_id,`${TIE_CARD}${final.graphHash}:${(final.analysisState as any).run_state.computed_at}:auto_first_pass`);
+ assert.equal(card.coaching_kind,'widening');
+ assert.deepEqual(card.target_refs,[]);
+ // Condition 2: three options and a TOP-TWO gap → "the strongest options", never "the options"; no option named.
+ assert.equal(card.body,"On Olumi's estimates the strongest options come out close, so this first pass cannot separate them. Worth saying which difference between them matters most to you.");
+ assert.equal(card.action_label,'Say what matters most to me');
+ for (const text of [card.title,card.body,card.action_label??'',card.action_prompt??'']) {
+  for (const o of (c.turn.analysis_ready as any).options as {label: string}[]) assert.ok(!text.includes(o.label),o.label);
+  assert.doesNotMatch(text,/\d|%|equally|no difference|same|option in front|winner|recommend|best option|leading option/i);
+  // Condition 5: the ask is the user's criterion, never "add data and we'll separate them".
+  assert.doesNotMatch(text,/re-?run to|add (more )?data|we('|’)ll separate|will separate/i);
+ }
+ assert.match(card.action_prompt??'',/Ask me which difference between them matters most to me, and why\. Don't change the model or re-run anything yet\.$/);
+});
+test('NEAR TIE — conditions 1 and 4: no tie, a flagged link, a missing or partial comparison, or an unproven identity sign → no near-tie card',()=>{
+ const cases: [string,(r: any, s: any)=>void][] = [
+  ['not a tie',(r)=>{r.enrichment.robustness.near_tie.is_tie=false;}],
+  ['is_tie not a boolean',(r)=>{r.enrichment.robustness.near_tie.is_tie='true';}],
+  ['fragile rows unobservable',(r)=>{delete r.enrichment.robustness.fragile_edges;}],
+  ['comparison partial',(r)=>{r.enrichment.option_comparison_status='partial';}],
+  ['comparison absent',(r)=>{delete r.enrichment.option_comparison_status;}],
+  ['identity sign unproven (C46)',(_r,s)=>{s.leader_claim.withheld_reason='nonlinear_identity_sign_unproven';}],
+  ['a VISIBLE normaliser error (a fragile row may be missing)',(r)=>{r.enrichment.robustness.normalization_errors=[{edge_type:'fragile',error:'bad row'}];}],
+  ['normalization_errors not a list',(r)=>{r.enrichment.robustness.normalization_errors='bad';}],
+ ];
+ for (const [why,m] of cases) {
+  const out=retie(m);
+  assert.equal(runTurnCards(out.blocks).filter(b=>b.signal_id.startsWith(TIE_CARD)).length,0,why);
+  assert.equal(out.eligibility.eligible,false,why);
+ }
+ // Present control: the unmutated turn does fire (the loop above is not vacuous).
+ assert.equal(runTurnCards(retie(()=>{}).blocks).filter(b=>b.signal_id.startsWith(TIE_CARD)).length,1);
+});
+test('NEAR TIE — a flagged link on the same tie keeps the LINK card; a limit keeps the LIMIT card (the tie never outranks them)',()=>{
+ const {c}=tieCase();
+ const robust=tieResult(c.final).enrichment.robustness.robust_edges[0];
+ const withLink=retie((r)=>{r.enrichment.robustness.fragile_edges=[{...robust,alternative_winner_id:null,alternative_winner_label:null}];});
+ assert.equal(runTurnCards(withLink.blocks).filter(b=>b.signal_id.startsWith(TIE_CARD)).length,0);
+ const withLimit=retie((_r,s)=>{s.leader_claim={permitted:false,withheld_reason:'constraint_verdict_withheld'};});
+ const cards=runTurnCards(withLimit.blocks);
+ assert.equal(cards.length,1);
+ assert.ok(cards[0]!.signal_id.startsWith(LIMIT_CARD));
+});
+test('NEAR TIE — an EXPLICIT Run on the same tie gets no near-tie card (the permission covers the automatic first pass)',()=>{
+ const out=retie((r)=>{delete r.enrichment.run_provenance;},'explicit_run');
+ assert.equal(runTurnCards(out.blocks).filter(b=>b.signal_id.startsWith(TIE_CARD)).length,0);
+});
+test('NEAR TIE — with exactly two options the card says "the two options"',()=>{
+ const {c,final}=tieCase();
+ const ready=structuredClone(c.captured.analysis_ready) as any; ready.options=ready.options.slice(0,2);
+ const out=runTurnCoaching({...statelessCapture(c.captured),analysis_ready:ready},final);
+ assert.match(runTurnCards(out.blocks)[0]!.body,/^On Olumi's estimates the two options come out close/);
 });
