@@ -16,6 +16,8 @@
  *    that set no limit; the automatic first pass keeps `unrequested_analysis_withheld`. Today the reload
  *    publishes `constraint_verdict_withheld` for all three, which is why this PR must not merge ahead of the
  *    HANDOFF. When the caller line lands these fail loudly and must be flipped to `it`.
+ *  · A FOURTH TRIPWIRE (verification of 1047641f, blocking): the Delivery Lead's acceptance case — Paul's brief with
+ *    the churn limit scored and met. Today the reload tells him his churn limit "was not checked or not met".
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -50,6 +52,7 @@ import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { AUTO_RUN_POST_CONSTRUCTION_INITIATOR, RUN_PROVENANCE_ENRICHMENT_KEY } from '../../context/run-initiator.js';
 import { leaderWithheldForALimit } from '../../coaching/limit-unchecked-card.js';
 import {
+  WITHHELD_CONSTRAINT_VERDICT,
   WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
   WITHHELD_UNREQUESTED_ANALYSIS,
 } from '../../compose/analysis-state-v1.js';
@@ -83,6 +86,8 @@ const PRODUCT = {
   identities: [{ outcome: 'MRR', operation: 'product', factors: ['Pro plan price', 'Pro subscribers'], provenance: 'inferred' }],
   unknowns: [],
 };
+/** Paul's shape WITH his churn limit ("keeping monthly churn under 10%") — the Delivery Lead's acceptance brief. */
+const PRODUCT_WITH_CHURN_LIMIT = { ...PRODUCT, constraints: [{ metric: 'Monthly churn', operator: '<=', value: 10, unit: '%', provenance: 'explicit' }] };
 /** CONTROL: the additive goal — MRR = Pro MRR + Non-Pro MRR, no product declared. */
 const ADDITIVE = {
   ...PRODUCT, identities: [],
@@ -145,6 +150,18 @@ async function reload(graph: Graph, fact: RunAnalysisHandlerFact) {
   return readScenarioAnalysis({ scenarioId: SCENARIO, graph, requestId: REQUEST_ID });
 }
 
+/**
+ * ⚠ SYNTHESISED, ONE FIELD, LABELLED: the persisted verdict once the churn limit is SCORED AND MET. At this head churn
+ * cannot be scored (it is worked out from other parts; staging #1919), so the real handler writes `unevaluated`
+ * (asserted as the premise below). Once it is scored and met, the constraint verdict PERMITS
+ * (`evaluated_feasible`) and the C46 conjunct alone removes the permission, leaving the state untouched — exactly
+ * this pair (verification of 1047641f, P6; `applyNonlinearIdentityToLeaderPermission`).
+ */
+const churnScoredAndMet = (fact: RunAnalysisHandlerFact): RunAnalysisHandlerFact => ({
+  ...fact,
+  result: { ...fact.result, constraint_verdict: { may_name_leading_option: false, constraint_verdict_state: 'evaluated_feasible' } },
+});
+
 const autoInitiated = (fact: RunAnalysisHandlerFact): RunAnalysisHandlerFact => ({
   ...fact,
   result: { ...fact.result, enrichment: { ...(fact.result.enrichment ?? {}), [RUN_PROVENANCE_ENRICHMENT_KEY]: { initiated_by: AUTO_RUN_POST_CONSTRUCTION_INITIATOR } } },
@@ -193,5 +210,26 @@ describe('C46 on the production reload — the stamp reaches it; the REASON wait
     const graph = await build(PRODUCT);
     const read = await reload(graph, autoInitiated(await runOn(graph)));
     expect(read.analysis_state?.leader_claim.withheld_reason).toBe(WITHHELD_UNREQUESTED_ANALYSIS);
+  });
+
+  it('PREMISE (churn limit set, not yet scorable at this head): the real handler writes `unevaluated`, and the limit keeps its card', async () => {
+    const graph = await build(PRODUCT_WITH_CHURN_LIMIT);
+    const fact = await runOn(graph);
+    expect(fact.result.leading_option_id).toBe('raise_pro_to_59');
+    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'unevaluated' });
+    const read = await reload(graph, fact);
+    expect(read.analysis_state?.leader_claim.withheld_reason).toBe(WITHHELD_CONSTRAINT_VERDICT);
+    expect(leaderWithheldForALimit(read.analysis_state)).toBe(true);
+    // The scored case below still withholds the leader at this head — only its REASON is wrong.
+    const scored = await reload(graph, churnScoredAndMet(fact));
+    expect(scored.analysis_state?.leader_claim.permitted).toBe(false);
+    expect((scored.analysis_result as { leading_option_id?: unknown } | null)?.leading_option_id).toBeNull();
+  });
+
+  it.fails('HANDOFF TRIPWIRE (acceptance case): churn SCORED AND MET — the reload names the product, never "your churn limit was not met" (needs the caller line)', async () => {
+    const graph = await build(PRODUCT_WITH_CHURN_LIMIT);
+    const read = await reload(graph, churnScoredAndMet(await runOn(graph)));
+    expect(read.analysis_state?.leader_claim.withheld_reason).toBe(WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN);
+    expect(leaderWithheldForALimit(read.analysis_state)).toBe(false);
   });
 });
