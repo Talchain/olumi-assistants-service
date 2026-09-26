@@ -749,7 +749,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
        * it derived from, precisely so a caller needing both does not run the
        * assessor twice.
        */
-      if (analysisReady === undefined && after.json.graph !== undefined) {
+      // `!= null`: a scenario with no model yet reads back `graph: null`, which is not a failure.
+      if (analysisReady === undefined && after.json.graph != null) {
         try {
           const canonical = buildCanonicalAnalysisReadyFromGraph(after.json.graph);
           if (canonical !== undefined) analysisReady = canonical;
@@ -775,8 +776,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
        * complete, with HTTP 200. A shape error here does not degrade the
        * turn; it deletes it.
        */
-      const g = after.json.graph as GraphV3T | undefined;
-      if (g !== undefined && Array.isArray(g.nodes) && g.nodes.length > 0) {
+      const g = after.json.graph as GraphV3T | null | undefined;
+      if (g != null && Array.isArray(g.nodes) && g.nodes.length > 0) {
         /**
          * ⛔ AND IT CARRIES `goal_constraints`. Assembled by hand it did not, so a
          * constraint the model holds ("churn under 4%") was cleared from the canvas
