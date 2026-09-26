@@ -40,6 +40,8 @@ export interface CapturedAnalysis {
   blocks?: unknown[];
   /** How the run that produced this capture was started. Absent ⇒ no fragile-link card. */
   trigger?: RunTurnTrigger;
+  /** The run turn's own run-over-run consequence block, as its finaliser stamped it (absent on a turn that has none). */
+  run_delta?: unknown;
 }
 
 /** The route's final readback: the one authoritative state the reply carries. */
@@ -89,6 +91,44 @@ interface BoundRun {
    * the READBACK, so a stateless capture may authorise it (reviewer F2).
    */
   readonly fullIdentity: boolean;
+}
+
+/**
+ * ⭐ WHAT CHANGED SINCE THE LAST RUN, on the Agent route (DL #70 5849261529). The Agent's Run is the conventional run
+ * turn, whose finaliser builds `run_delta` from the post-dispatch fact window and states the producer's refusal as
+ * `analysis_ready.run_delta_absence_reason`. Both are that turn's own words, carried here and never re-derived — and
+ * ONLY when the run they describe IS the run the response shows, under the same leader claim the delta was built
+ * under (`bindCapturedRun`, full identity). A newer run, another graph, or any doubt carries neither.
+ */
+export function runDeltaBoundToReadback(
+  captured: CapturedAnalysis | undefined,
+  final: RunTurnCoachingFinal,
+): { run_delta?: unknown; run_delta_absence_reason?: string } {
+  if (captured === undefined || captured.status !== 200) return {};
+  if (bindCapturedRun(captured, final)?.fullIdentity !== true) return {};
+  const reason = record(captured.analysis_ready)?.run_delta_absence_reason;
+  return {
+    ...(record(captured.run_delta) !== undefined ? { run_delta: captured.run_delta } : {}),
+    ...(typeof reason === 'string' && reason !== '' ? { run_delta_absence_reason: reason } : {}),
+  };
+}
+
+/**
+ * The bound block onto the response, as the conventional finaliser puts it there: `run_delta` at the top level, and
+ * the refusal reason inside the response's OWN `analysis_ready` (the readback's, stamped), never a fabricated carrier.
+ */
+export function withRunDelta<T extends Record<string, unknown>>(
+  body: T,
+  bound: { run_delta?: unknown; run_delta_absence_reason?: string },
+): T {
+  const carrier = record(body.analysis_ready);
+  return {
+    ...body,
+    ...(bound.run_delta !== undefined ? { run_delta: bound.run_delta } : {}),
+    ...(bound.run_delta_absence_reason !== undefined && carrier !== undefined
+      ? { analysis_ready: { ...carrier, run_delta_absence_reason: bound.run_delta_absence_reason } }
+      : {}),
+  };
 }
 
 /**
