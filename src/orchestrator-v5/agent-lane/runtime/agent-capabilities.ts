@@ -714,6 +714,11 @@ const AMBIGUOUS_NOTE =
   'label, current value, what it is connected to), never by its id. Then propose again, passing that entity’s ' +
   '`id` exactly as given here in place of its label.';
 
+/** How many links and options ONE removal may name (the tool's own bound, `propose_removal`). */
+const MAX_REMOVAL_TARGETS = 8;
+/** How many candidates an unresolved removal target names back to the Agent. */
+const REMOVAL_CANDIDATES_SHOWN = 12;
+
 /** The approval-facing disclosure of a name left out as ambiguous (empty when none was). */
 function ambiguousClause(ambiguous: readonly AmbiguousTarget[]): string {
   if (ambiguous.length === 0) return '';
@@ -1015,6 +1020,93 @@ export function createAgentCapabilities(
    *      writes, or `partially_applied` naming exactly what landed.
    * The approved operations are applied verbatim. Nothing is regenerated.
    */
+  /**
+   * ⭐ AN APPROVED REMOVAL — ONE typed `structural_delete`, the product's own removal writer (the canvas delete's
+   * seam, `system-events/structural-delete.ts`), carrying the proposal's OWN base hash so the product's stale gate
+   * refuses a model the user did not see. Options go as node ids only: the adapter's `applyRemoveNode` owns the
+   * incident-edge cascade.
+   *
+   * ⛔ REMOVED ONLY WHEN THIS RESPONSE CLAIMS IT AND THE MODEL READ BACK AGREES. The product's own receipt check
+   * compares its projection of the bytes it handed the store, not a read-back (`dispatchStructuralDelete`), so a 200
+   * whose committed `draft_graph` lacks every target is still only a claim: when the model read back still holds a
+   * target (or cannot be read), the removal "could not be confirmed" — never "removed", and never "not saved".
+   * A 200 WITHOUT that claim is the product's committed refusal: its own sentence is relayed. A 409 means the model
+   * moved under the write and nothing was appended. Every other failure is "not removed" only when the read-back
+   * still holds every target exactly as before; otherwise it too could not be confirmed.
+   */
+  const applyRemoval = async (ctx: AgentToolContext, proposal: StructuredProposal, before: GraphRead): Promise<ToolResult> => {
+    const nodeIds = proposal.operations.filter((o) => o.op === 'remove_node').map((o) => o.path);
+    const edgePairs = proposal.operations.filter((o) => o.op === 'remove_edge').map((o) => o.path.split('::') as [string, string]);
+    const operationId = authorisationTurnId(proposal.proposal_id);
+    const res = await dispatch('/orchestrate/v2/turn', {
+      kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
+      event: {
+        kind: 'structural_delete',
+        removed_node_ids: nodeIds,
+        removed_edges: edgePairs.map(([from, to]) => ({ from, to })),
+        base_graph_hash: proposal.base_graph_identity_hash,
+      },
+    });
+    /** How many of the targets a graph still holds: a removed option, any link to or from one, or a removed link. */
+    const stillHeld = (g: { nodes?: unknown; edges?: unknown }): number => {
+      const nodes = Array.isArray(g.nodes) ? (g.nodes as ({ id?: unknown } | null)[]) : [];
+      const edges = Array.isArray(g.edges) ? (g.edges as ({ from?: unknown; to?: unknown } | null)[]) : [];
+      return nodeIds.filter((id) => nodes.some((n) => n?.id === id)).length
+        + edges.filter((e) => nodeIds.some((id) => e?.from === id || e?.to === id)).length
+        + edgePairs.filter(([f, t]) => edges.some((e) => e?.from === f && e?.to === t)).length;
+    };
+    const draft = res.json.draft_graph as { nodes?: unknown; edges?: unknown } | null | undefined;
+    const claimed = res.status === 200 && draft !== null && typeof draft === 'object'
+      && Array.isArray(draft.nodes) && Array.isArray(draft.edges) && stillHeld(draft) === 0;
+    const after = await readGraph(ctx.scenario_id);
+    const heldBefore = stillHeld(before);
+    const heldAfter = after === null ? null : stillHeld(after);
+    const ids = { proposal_id: proposal.proposal_id, operation_id: operationId };
+    const couldNotConfirm = (): ToolResult => ({
+      ok: false, mutated: true, applied: false, refusal: 'not_confirmed', ...ids,
+      detail: 'The removal was sent, but reading the model back, Olumi could not confirm that everything named is gone. Tell the user '
+        + 'plainly that it could not be confirmed — never that it was removed, and never that nothing was saved — and read the '
+        + 'model again before describing it.',
+    });
+    const notRemoved = (detail: string, extra: Record<string, unknown> = {}): ToolResult => ({
+      ok: false, mutated: false, applied: false, refusal: 'not_applied', ...ids, detail, ...extra,
+    });
+    if (claimed) {
+      if (heldAfter !== 0) return couldNotConfirm();
+      const receipt = receiptSummaryOf(res.json);
+      const receipts = receipt.summary !== null ? [receipt.summary] : [];
+      proposals.markApplied(proposal.proposal_id, receipts);
+      const labelOf = (id: string): string => before.nodes.find((n) => n.id === id)?.label ?? id;
+      const said = [
+        ...nodeIds.map((id) => {
+          const k = before.edges.filter((e) => e.from === id || e.to === id).length;
+          return `the option "${labelOf(id)}"${k > 0 ? ` and its ${k} link${k === 1 ? '' : 's'}` : ''}`;
+        }),
+        ...edgePairs.map(([f, t]) => `the link "${labelOf(f)}" → "${labelOf(t)}"`),
+      ];
+      return {
+        ok: true, mutated: true, applied: true, ...ids, receipts,
+        ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
+        follow_up: `Removed ${said.join('; ')}.`,
+      };
+    }
+    if (res.status === 200) {
+      // The product's committed refusal: a turn with no graph. Its own words, relayed — unless the model moved anyway.
+      if (heldAfter !== null && heldAfter !== heldBefore) return couldNotConfirm();
+      const sentence = String(res.json.assistant_text ?? '').trim() || 'Olumi did not remove it, so the model is as it was.';
+      return notRemoved(`Nothing was removed. Olumi said: "${sentence}" Tell the user plainly; nothing else changed.`, { follow_up: sentence });
+    }
+    if (res.status === 409) {
+      return {
+        ...notRemoved('The model changed, or another change was being saved at the same moment, so nothing was removed. Read the model '
+          + 'again and, if the user still wants it, prepare the removal afresh.'),
+        refusal: 'superseded',
+      };
+    }
+    if (heldAfter === null || heldAfter !== heldBefore) return couldNotConfirm();
+    return notRemoved('Something went wrong on Olumi’s side while saving the removal, so nothing was removed. Tell the user plainly and offer to try again.');
+  };
+
   const COMPOUND_ORDER = ['set_factor_value', 'set_option_intervention'] as const;
   const frameOf = (n: GraphRead['nodes'][number] | undefined): number | null => {
     const os = (n?.observed_state ?? {}) as { cap?: unknown };
@@ -1588,6 +1680,123 @@ export function createAgentCapabilities(
         base_revision: g.graph_hash,
         link: { from: from.label, to: to.label, direction: args.direction, band, strength: magnitude },
         note: `Nothing has changed. Tell the user the link will be recorded as ${band}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and ask them to approve it before calling authorise_change.`,
+      };
+    },
+
+    /**
+     * ⭐ THE USER ASKS TO REMOVE A LINK OR AN OPTION — ONE change they approve once, written on approval by the
+     * product's own typed removal writer (`applyRemoval` → `structural_delete`).
+     *
+     * Labels resolve through the SAME resolver the link tools use (`resolveNamed`, `describeAmbiguity`). Anything
+     * unresolved, ambiguous or out of scope refuses the WHOLE request, names the candidates, and prepares nothing.
+     * ⛔ Only an option or a link is removable here: a factor, the goal or the decision is refused and said; the
+     * decision → option link on its own is refused, because it would leave an option the decision no longer offers
+     * (to drop that option, remove the option). An option is sent as a node id only — a link its own removal takes
+     * is never listed (the adapter's `applyRemoveNode` owns the cascade).
+     */
+    async proposeRemoval(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const links = (Array.isArray(args?.links) ? args.links : [])
+        .filter((l): l is { from_label: string; to_label: string } => l !== null && typeof l === 'object');
+      const options = (Array.isArray(args?.options) ? args.options : []).map((o) => String(o ?? ''));
+      const total = links.length + options.length;
+      if (total === 0) {
+        return { ok: false, mutated: false, refusal: 'empty_proposal',
+          detail: 'Nothing was named to remove, so nothing was prepared. Ask the user which link or option they want removed.' };
+      }
+      if (total > MAX_REMOVAL_TARGETS) {
+        return { ok: false, mutated: false, refusal: 'too_many_targets',
+          detail: `At most ${MAX_REMOVAL_TARGETS} links and options can be removed in one change, and ${total} were named, so nothing was prepared. Ask the user which to remove first.` };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const labelOf = (id: string): string => g.nodes.find((n) => n.id === id)?.label ?? id;
+      const linkName = (from: string, to: string): string => `"${from}" → "${to}"`;
+      const ambiguous: AmbiguousTarget[] = [];
+      const unresolved: { requested: string; candidates: string[] }[] = [];
+      const unresolvedSaid: string[] = [];
+      const notRemovable: string[] = [];
+      const removedOptions = new Map<string, GraphRead['nodes'][number]>();
+      for (const requested of options) {
+        const res = resolveNamed(g, requested, (n) => n.kind === 'option');
+        if (res.kind === 'ambiguous') { ambiguous.push(describeAmbiguity(g, requested, res.candidates)); continue; }
+        if (res.kind === 'other') { notRemovable.push(`"${res.node.label}" is a ${res.node.kind}: only an option or a link can be removed here.`); continue; }
+        if (res.kind === 'none') {
+          const candidates = g.nodes.filter((n) => n.kind === 'option').map((n) => n.label).slice(0, REMOVAL_CANDIDATES_SHOWN);
+          unresolved.push({ requested, candidates });
+          unresolvedSaid.push(`No option is called "${requested}"${candidates.length > 0 ? ` (the options are: ${candidates.join('; ')})` : ''}.`);
+          continue;
+        }
+        removedOptions.set(res.node.id, res.node);
+      }
+      const removedLinks = new Map<string, { from: GraphRead['nodes'][number]; to: GraphRead['nodes'][number] }>();
+      for (const l of links) {
+        const fromLabel = String(l.from_label ?? '');
+        const toLabel = String(l.to_label ?? '');
+        const fromRes = resolveNamed(g, fromLabel, () => true);
+        const toRes = resolveNamed(g, toLabel, () => true);
+        if (fromRes.kind === 'ambiguous') ambiguous.push(describeAmbiguity(g, fromLabel, fromRes.candidates));
+        if (toRes.kind === 'ambiguous') ambiguous.push(describeAmbiguity(g, toLabel, toRes.candidates));
+        if (fromRes.kind === 'ambiguous' || toRes.kind === 'ambiguous') continue;
+        const from = fromRes.kind === 'one' ? fromRes.node : undefined;
+        const to = toRes.kind === 'one' ? toRes.node : undefined;
+        if (from === undefined || to === undefined || !g.edges.some((e) => e.from === from.id && e.to === to.id)) {
+          const ends = new Set([from?.id, to?.id].filter((x): x is string => x !== undefined));
+          const candidates = g.edges.filter((e) => ends.has(e.from) || ends.has(e.to))
+            .map((e) => linkName(labelOf(e.from), labelOf(e.to))).slice(0, REMOVAL_CANDIDATES_SHOWN);
+          unresolved.push({ requested: linkName(fromLabel, toLabel), candidates });
+          unresolvedSaid.push(`The model has no link ${linkName(fromLabel, toLabel)}${candidates.length > 0 ? ` (links it has between those: ${candidates.join('; ')})` : ''}.`);
+          continue;
+        }
+        if (from.kind === 'decision' && to.kind === 'option') {
+          notRemovable.push(`The link from the decision to "${to.label}" cannot be removed on its own: it would leave an option the decision `
+            + 'no longer offers. To drop that option, remove the option.');
+          continue;
+        }
+        removedLinks.set(`${from.id}::${to.id}`, { from, to });
+      }
+      if (ambiguous.length > 0 || unresolved.length > 0 || notRemovable.length > 0) {
+        return {
+          ok: false, mutated: false,
+          refusal: notRemovable.length > 0 ? 'not_removable' : ambiguous.length > 0 ? 'ambiguous_entity' : 'unresolved_entity',
+          ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
+          ...(unresolved.length > 0 ? { unresolved } : {}),
+          ...(notRemovable.length > 0 ? { not_removable: notRemovable } : {}),
+          detail: ['Nothing was prepared.', ...notRemovable, ...unresolvedSaid,
+            ...(ambiguous.length > 0 ? ['More than one entity carries a name in ambiguous_targets.'] : []),
+            'Tell the user plainly and ask which they meant; never guess.'].join(' '),
+        };
+      }
+      // A link the option's own removal takes (the adapter's cascade) is never listed.
+      const listedLinks = [...removedLinks.entries()].filter(([, x]) => !removedOptions.has(x.from.id) && !removedOptions.has(x.to.id));
+      const operations: ProposalOperation[] = [
+        ...[...removedOptions.keys()].map((id) => ({ op: 'remove_node' as const, path: id })),
+        ...listedLinks.map(([path]) => ({ op: 'remove_edge' as const, path })),
+      ];
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash,
+        operations,
+        provenance: { authored_by: 'model_proposed', basis: String(args.rationale ?? '') },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: [
+          ...[...removedOptions.values()].map((o) => `Remove the option "${o.label}"`),
+          ...listedLinks.map(([, x]) => `Remove the link ${linkName(x.from.label, x.to.label)}`),
+        ].join('; '),
+      });
+      proposals.put(proposal);
+      return {
+        ok: true, mutated: false,
+        proposal_id: proposal.proposal_id,
+        public_label: proposal.public_label,
+        base_revision: g.graph_hash,
+        removes: {
+          options: [...removedOptions.values()].map((o) => ({ option: o.label, links_removed_with_it: g.edges.filter((e) => e.from === o.id || e.to === o.id).length })),
+          links: listedLinks.map(([, x]) => ({ from: x.from.label, to: x.to.label })),
+        },
+        note: 'Nothing has changed yet. Tell the user exactly what will be removed — for an option, that its links go with it — never '
+          + 'the id, and call authorise_change with this proposal_id once they agree.',
       };
     },
 
@@ -2324,6 +2533,12 @@ export function createAgentCapabilities(
           follow_up: `${decision.proposal.public_label.replace(/^Record /, 'Recorded ')}.`,
           note: 'Recorded as the user’s own estimate. Offer to run the analysis again so they can see what it changes.',
         };
+      }
+
+      // A removal of links and options — ONE typed `structural_delete` (`applyRemoval`). Before the compound
+      // dispatch: an option and a link removed together are one removal, never a mix of kinds.
+      if (ops.length > 0 && ops.every((o) => o.op === 'remove_node' || o.op === 'remove_edge')) {
+        return applyRemoval(ctx, decision.proposal, before);
       }
 
       // A starting point mixes kinds; each single-kind path below handles one.

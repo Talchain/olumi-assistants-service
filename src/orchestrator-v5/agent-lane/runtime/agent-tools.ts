@@ -220,6 +220,36 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function',
+    name: 'propose_removal',
+    description:
+      'Remove a link or an option the user has asked to remove. This does NOT change anything: it prepares ONE change and '
+      + 'returns its id, which you keep for authorise_change: show the user exactly what will be removed, never the id, before they '
+      + 'approve. Name each link by where it starts and ends, and each option by its label, exactly as get_canonical_state gives them '
+      + '(or an entity’s `id` when two share a name). Up to 8 in ONE call: they are removed together or not at all. Removing an '
+      + 'option also removes every link to and from it, so never list those links. Only an option or a link can be removed here: '
+      + 'not a factor, the goal or the decision, and never the link from the decision to an option on its own — to drop that '
+      + 'option, remove the option. A refusal prepared nothing: say what it says and ask the user which they meant.',
+    parameters: obj({
+      links: {
+        type: 'array',
+        maxItems: 8,
+        description: 'Links to remove, each by the labels of its two ends.',
+        items: obj({
+          from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
+          to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
+        }, ['from_label', 'to_label']),
+      },
+      options: {
+        type: 'array',
+        maxItems: 8,
+        description: 'Options to remove, each by its label exactly as get_canonical_state gives it.',
+        items: { type: 'string' },
+      },
+      rationale: { type: 'string', description: 'What the user asked for, in their words.' },
+    }, ['rationale']),
+  },
+  {
+    type: 'function',
     name: 'propose_option_interventions',
     description:
       'Propose the level an option sets a factor to \u2014 what the option actually DOES. An option ' +
@@ -333,7 +363,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_link_strength', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_link_strength', 'propose_removal', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -371,6 +401,10 @@ export interface AgentCapabilities {
   proposeLinkStrength?(ctx: AgentToolContext, args: {
     from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong';
     direction?: 'positive' | 'negative'; rationale: string;
+  }): Promise<ToolResult>;
+  /** Optional, like `proposeLinkStrength`: a capability set without it refuses the tool plainly (`dispatchTool`). */
+  proposeRemoval?(ctx: AgentToolContext, args: {
+    links?: readonly { from_label: string; to_label: string }[]; options?: readonly string[]; rationale: string;
   }): Promise<ToolResult>;
   runAnalysis(ctx: AgentToolContext, args: { reason: string }): Promise<ToolResult>;
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
@@ -437,6 +471,10 @@ export async function dispatchTool(
       return caps.proposeLinkStrength !== undefined
         ? caps.proposeLinkStrength(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'Link strengths cannot be recorded here. Nothing was changed.' };
+    case 'propose_removal':
+      return caps.proposeRemoval !== undefined
+        ? caps.proposeRemoval(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'Nothing can be removed here. Nothing was changed.' };
     case 'propose_option_interventions':
       return caps.proposeOptionInterventions(ctx, args as never);
     case 'propose_starting_point':
