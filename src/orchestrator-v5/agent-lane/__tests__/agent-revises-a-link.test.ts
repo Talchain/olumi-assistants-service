@@ -20,13 +20,15 @@ import { describe, it, expect } from 'vitest';
 import { OrchestratorTurnPayloadSchema } from '@talchain/schemas/boundary';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
-import { bandTheUserWrote } from '../stated-by-user.js';
+import { bandTheUserWrote, userWordsOf } from '../stated-by-user.js';
+import { readFileSync } from 'node:fs';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440077';
 // The user's own words, verbatim from served (F) row F8 — the band is recorded as theirs only when they named it.
 const F8 = 'I am confident about one link: Pro plan price \u2192 MRR. Its effect is strong. Please record that link as strong, as my own estimate.';
-const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_text: F8 };
-const ctxWeak = { ...ctx, user_text: 'Price barely affects MRR, and it pushes the other way.' };
+const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_text: F8, user_turn_text: F8 };
+const WEAK = 'Price barely affects MRR, and it pushes the other way.';
+const ctxWeak = { ...ctx, user_text: WEAK, user_turn_text: WEAK };
 
 type Edge = { from: string; to: string; strength: { mean: number; std: number }; exists_probability: number; effect_direction: 'positive' | 'negative'; provenance?: { source: string }; defaulted?: boolean };
 const graphWith = (mean: number, dir: 'positive' | 'negative' = 'positive') => ({
@@ -187,7 +189,7 @@ describe('⛔ a band is recorded as the user\'s only when the user named it (AI 
   it('RED: the Agent passes "strong" and the user said only "Yes." → refused, nothing prepared, nothing sent', async () => {
     const w = world(graphWith(0.5));
     const store = new ProposalStore();
-    const p = await createAgentCapabilities(w.d, store).proposeLinkStrength!({ ...ctx, user_text: 'Yes.' }, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'x' });
+    const p = await createAgentCapabilities(w.d, store).proposeLinkStrength!({ ...ctx, user_text: 'Yes.', user_turn_text: 'Yes.' }, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'x' });
     expect(p).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'strength_not_stated' }));
     expect(String(p.detail)).toMatch(/Ask them how strong they think it is/);
     expect(p).not.toHaveProperty('proposal_id');
@@ -197,9 +199,44 @@ describe('⛔ a band is recorded as the user\'s only when the user named it (AI 
 
   it('RED: no words bound at all → refused (no text proves nothing)', async () => {
     const w = world(graphWith(0.5));
-    const { user_text: _omit, ...bare } = ctx;
+    const { user_text: _omit, user_turn_text: _omit2, ...bare } = ctx;
     const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeLinkStrength!(bare, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'x' });
     expect(p.refusal).toBe('strength_not_stated');
+  });
+
+  it('RED (#1984 review B1): a band word in the BRIEF or an earlier turn, then "Yes." → refused (only this turn\'s words name a band)', async () => {
+    for (const brief of ['We are a B2B SaaS with strong retention and a moderate marketing budget.', 'Demand is weak this quarter.', F8]) {
+      for (const band of ['strong', 'weak', 'moderate'] as const) {
+        const w = world(graphWith(0.5));
+        // Exactly as the route binds them: the whole typed conversation, and this turn's own typed message.
+        const turnCtx = { ...ctx, user_text: userWordsOf([brief], 'Yes.'), user_turn_text: 'Yes.' };
+        const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeLinkStrength!(turnCtx, { from_label: 'Pro plan price', to_label: 'MRR', strength: band, rationale: 'x' });
+        expect(p.refusal, `${band} after "${brief}"`).toBe('strength_not_stated');
+        expect(w.sent).toEqual([]);
+      }
+    }
+  });
+
+  it('the route binds this turn\'s typed message as user_turn_text (a chip click binds nothing)', () => {
+    const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
+    expect(route).toContain("user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };");
+  });
+
+  it('RED (#1984 review B2): a denial anywhere earlier in the clause, or a question, names no band', () => {
+    for (const text of [
+      'Price doesn\'t have a strong effect on churn.',
+      'It is not as strong as you think.',
+      'Price isn\'t a strong driver of churn.',
+      'Is it strong or weak?',
+      'I would never call that link strong.',
+    ]) {
+      expect(bandTheUserWrote('strong', text), text).toBe(false);
+    }
+    expect(bandTheUserWrote('weak', 'Is it strong or weak?')).toBe(false);
+    // Contrasts: an affirmation after a denial of something else, and after "No," as an answer.
+    expect(bandTheUserWrote('strong', 'That is not a guess, it is strong.')).toBe(true);
+    expect(bandTheUserWrote('strong', 'No, it is strong.')).toBe(true);
+    expect(bandTheUserWrote('strong', 'Price strongly affects churn.')).toBe(true);
   });
 
   it('band-exact on the served wording and its near misses', () => {

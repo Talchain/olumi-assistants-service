@@ -1369,9 +1369,9 @@ export function createAgentCapabilities(
       }
       const band = args.strength;
       // ⛔ Recorded as the user's only when the user named the band (`bandTheUserWrote`); the writer stamps it as theirs.
-      if (!bandTheUserWrote(band, ctx.user_text)) {
+      if (!bandTheUserWrote(band, ctx.user_turn_text)) {
         return { ok: false, mutated: false, refusal: 'strength_not_stated',
-          detail: `The user has not called this link ${band} in their own words, so nothing was prepared: it would be recorded as their estimate. `
+          detail: `The user has not called this link ${band} in this message, in their own words, so nothing was prepared: it would be recorded as their estimate. `
             + 'Ask them how strong they think it is \u2014 weak, moderate, strong or very strong \u2014 and never offer a band as theirs.' };
       }
       const g = await readGraph(ctx.scenario_id);

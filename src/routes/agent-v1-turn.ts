@@ -1445,7 +1445,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
     /** Every tool runs as THIS request: its scenario, its user, and the user's own words (`stated-by-user.ts`). */
     const typedNow = typedByUser(body) ? message : null;
-    const toolCtx: AgentToolContext = { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
+    const toolCtx: AgentToolContext = { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
 
     /**

@@ -57,13 +57,18 @@ export function contradictsItsName(value: number, unit: unknown, name: string): 
 }
 
 /**
- * The same rule for a link's strength band: the user's own words must NAME the band before it is recorded as theirs
- * (AI Quality on #1978, 5844682410). The link writer stamps every approved strength as the user's, so a band the
- * Agent picked and the user only approved would read as the user's estimate.
+ * The same rule for a link's strength band: the user must NAME the band, in THIS turn's own typed words, before it is
+ * recorded as theirs (AI Quality on #1978, 5844682410; #1984 review 5844756344). The link writer stamps every approved
+ * strength as the user's, so a band the Agent picked and the user only approved would read as the user's estimate.
  *
- * Band-exact, on word boundaries: "stronger" is not "strong", "very strong" never grounds "strong", and a negated band
- * ("not strong", "isn't very strong") grounds nothing. "barely" is weak, the prompt's own example ("price barely affects
- * churn"). Any other paraphrase is a miss, and a miss makes the Agent ask which band — never a band recorded as theirs.
+ * - THIS TURN ONLY (review B1): "strong", "weak" and "moderate" are ordinary words in a brief ("strong retention"), so
+ *   the whole conversation cannot ground a band; the caller passes the current typed message (`user_turn_text`).
+ * - Band-exact, on word boundaries: "stronger" is not "strong"; "very strong" never grounds "strong"; "barely" is weak,
+ *   the prompt's own example ("price barely affects churn").
+ * - NOT A DENIAL OR A QUESTION (review B2): a band in a question ("Is it strong or weak?"), or with a negator anywhere
+ *   earlier in its clause ("doesn't have a strong effect", "not as strong as you think"), grounds nothing.
+ * - KNOWN LIMIT: the word is not tied to the link. One message naming a band for a DIFFERENT link ("Marketing strongly
+ *   drives signups; the price link looks wrong") still grounds it. Every miss makes the Agent ask which band.
  */
 const BAND_WORDS: Record<string, RegExp> = {
   'very strong': /\bvery\s+strong(?:ly)?\b/gi,
@@ -71,16 +76,22 @@ const BAND_WORDS: Record<string, RegExp> = {
   moderate: /\bmoderate(?:ly)?\b/gi,
   weak: /\b(?:weak(?:ly)?|barely)\b/gi,
 };
-const NEGATED_BEFORE = /(?:^|[^\w'\u2019])(?:not|never|no|hardly|\w+n['\u2019]t)\s+(?:very\s+|that\s+|so\s+)?$/i;
+const NEGATOR = /(?:^|[^\w'\u2019])(?:not|never|no|nor|neither|hardly|\w+n['\u2019]t)(?![\w'\u2019])/i;
 
-/** Whether `band` is named in `userText`, un-negated. No text (or none bound) proves nothing: false. */
-export function bandTheUserWrote(band: string, userText: string | null | undefined): boolean {
+/** Whether `band` is named in `turnText`, neither denied nor asked about. No text (or none bound) proves nothing: false. */
+export function bandTheUserWrote(band: string, turnText: string | null | undefined): boolean {
   const re = BAND_WORDS[band];
-  if (re === undefined || typeof userText !== 'string') return false;
-  for (const m of userText.matchAll(re)) {
-    const before = userText.slice(Math.max(0, m.index - 24), m.index);
-    if (NEGATED_BEFORE.test(before)) continue;
-    if (band === 'strong' && /\bvery\s+$/i.test(before)) continue;
+  if (re === undefined || typeof turnText !== 'string') return false;
+  for (const m of turnText.matchAll(re)) {
+    // The sentence the word sits in, and the part of its clause before it (a clause restarts after , ; : a dash, or "but").
+    const start = Math.max(turnText.lastIndexOf('.', m.index), turnText.lastIndexOf('!', m.index), turnText.lastIndexOf('?', m.index), turnText.lastIndexOf('\n', m.index)) + 1;
+    const endAt = turnText.slice(m.index).search(/[.!?\n]/);
+    const sentenceEnd = endAt < 0 ? '' : turnText.charAt(m.index + endAt);
+    if (sentenceEnd === '?') continue;
+    const sentenceBefore = turnText.slice(start, m.index);
+    const clauseBefore = sentenceBefore.split(/[,;:\u2013\u2014]|\s-\s|\bbut\b/i).pop() ?? '';
+    if (NEGATOR.test(clauseBefore)) continue;
+    if (band === 'strong' && /\bvery\s+$/i.test(clauseBefore)) continue;
     return true;
   }
   return false;
