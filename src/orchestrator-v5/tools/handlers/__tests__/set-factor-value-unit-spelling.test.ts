@@ -93,7 +93,7 @@ describe('a spelling-only unit proposal', () => {
     // the guard is about whether a unit was DECLARED, not about how it is spelt.
     await expect(
       handler(buildHandlerInvocation({ proposal: proposal('f-quality', 5, 'Widgets'), graph: buildD1Fixture() })),
-    ).rejects.toThrow(/without a unit/i);
+    ).rejects.toThrow(/no unit recorded/i);
   });
 
   it('OPPOSITE-DIRECTION TWIN: a spelling-only proposal with a DIFFERENT value still applies', async () => {
