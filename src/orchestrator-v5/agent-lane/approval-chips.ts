@@ -116,6 +116,8 @@ export const APPROVAL_LABEL_MAX = 40;
 const FIGURE_OPS: ReadonlySet<string> = new Set(['set_factor_value', 'set_option_intervention']);
 const CURRENCY_UNIT = /^(?:gbp|usd|eur|£|\$|€)$/i;
 const MIN_ENTITY_CHARS = 6;
+/** A replacement whose figures cannot be shown exactly still says it replaces, never "starting option levels". */
+const REPLACE_FALLBACK = 'Replace the current level';
 
 const entriesOf = (x: unknown): Record<string, unknown>[] =>
   (Array.isArray(x) ? x.filter((e): e is Record<string, unknown> => e !== null && typeof e === 'object') : []);
@@ -151,15 +153,32 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
   if (proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return fallback;
   const ops = proposal.operations;
   if (ops.length === 0 || ops.some((o) => !FIGURE_OPS.has(o.op))) return fallback;
+  /**
+   * ⛔ A LEVEL THAT REPLACES ONE ALREADY STORED NEVER READS AS A NEW FIGURE (`proposeOptionInterventions`: the
+   * old level travels in the stored op as `replaces`). "Save £65/month for …" or "Use these 3 starting figures"
+   * over a level the option already sets hid, on the button itself, that a figure was being replaced.
+   */
+  const replacing = ops.filter((o) => o.op === 'set_option_intervention' && typeof (o.value as { replaces?: unknown } | undefined)?.replaces === 'number').length;
+  if (ops.length > 1 && replacing > 0) return `Save ${ops.length} figures, replacing ${replacing} level${replacing === 1 ? '' : 's'}`;
   if (ops.length > 1) {
     // A revision the user asked for replaces figures already there: it is not a set of starting figures.
     const revises = ops.some((o) => o.op === 'set_factor_value' && (o.value as { authored_by?: unknown } | undefined)?.authored_by === 'user_stated');
     return revises ? fallback : `Use these ${ops.length} starting figures`;
   }
   const op = ops[0]!;
-  const stored = (op.value ?? {}) as { raw?: unknown; value?: unknown; unit?: unknown };
+  const stored = (op.value ?? {}) as { raw?: unknown; value?: unknown; unit?: unknown; replaces?: unknown };
   const levels = [...entriesOf(result.interventions), ...entriesOf(result.option_levels)];
   const values = entriesOf(result.assumptions);
+  if (op.op === 'set_option_intervention' && replacing > 0) {
+    // Both figures, from the stored op, agreeing with the proposer's own result; else a label that still says it replaces.
+    const shown = levels.length === 1 && values.length === 0 ? levels[0]! : undefined;
+    if (shown === undefined || typeof stored.raw !== 'number' || shown.value !== stored.raw || shown.replaces !== stored.replaces) return REPLACE_FALLBACK;
+    const figure = figureInUserUnits(stored.raw, shown.unit);
+    const old = figureInUserUnits(stored.replaces, shown.unit);
+    if (figure === null || old === null) return REPLACE_FALLBACK;
+    const bare = `Replace ${old} with ${figure}`;
+    return fitted(`${bare} for `, shown.option, '') ?? (bare.length <= APPROVAL_LABEL_MAX ? bare : REPLACE_FALLBACK);
+  }
   if (op.op === 'set_option_intervention') {
     const shown = levels.length === 1 && values.length === 0 ? levels[0]! : undefined;
     if (shown === undefined || typeof stored.raw !== 'number' || shown.value !== stored.raw) return fallback;

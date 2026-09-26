@@ -51,6 +51,11 @@ const NOT_THE_USERS_FIGURE_NOTE =
   'The user did not write these figures, so they are proposed as Olumi\u2019s estimates, not as the user\u2019s own. '
   + 'Say so plainly; never call a figure the user\u2019s unless they wrote it.';
 
+/** What the Agent says before approval when a proposed level REPLACES one already stored (`proposeOptionInterventions`). */
+const LEVEL_REPLACES_NOTE =
+  ' Some of these REPLACE a level the option already sets (`replaces`, in the user\u2019s units): before asking for approval, '
+  + 'say plainly which, and the figure each one replaces.';
+
 /** Why a level the user never wrote is left unset (`stated-by-user.ts`). */
 const notWrittenReason = (value: number, factor: string): string =>
   `${value} is not a figure the user gave for ${factor}, so this change leaves that level unset. Say plainly it has no level yet, `
@@ -1845,7 +1850,9 @@ export function createAgentCapabilities(
         note:
           'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +
           'assumptions to adopt or correct, NOT measurements, and that ONE approval applies all of them. Then call ' +
-          'authorise_change with this proposal_id once they agree.' + stillBlockedNote(ifApproved),
+          'authorise_change with this proposal_id once they agree.' +
+          ((Array.isArray(b?.interventions) ? b?.interventions as { replaces?: unknown }[] : []).some((x) => typeof x?.replaces === 'number') ? LEVEL_REPLACES_NOTE : '') +
+          stillBlockedNote(ifApproved),
       };
     },
 
@@ -1888,6 +1895,8 @@ export function createAgentCapabilities(
         derivedFrame: number | null;
         /** The user GAVE this level (`user_stated`); otherwise it is Olumi's proposal. */
         userStated: boolean;
+        /** The level this REPLACES, in the user's units, and who set it — said before approval, never silently. */
+        replaces?: { level: number; setBy: unknown };
       }[] = [];
 
       for (const i of input) {
@@ -2058,14 +2067,46 @@ export function createAgentCapabilities(
           unchanged.push(`${option.label} already sets ${factor.label} to ${String(currentValue)}`);
           continue;
         }
+        /**
+         * ⛔ A LEVEL ALREADY STORED IS NEVER SILENTLY REPLACED — the value proposer's rule (`proposeAssumptions`
+         * will not overwrite a value unless the user named the change, and its label says what it replaces),
+         * applied to levels. VERIFIED GAP (CODE-READ at `af719a1`, adversarially re-checked): this proposer skipped
+         * a pair only when the stored level was IDENTICAL, so any other stored level — the user's own
+         * (`user_specified`) included — became a replacement op labelled "<option> sets <factor> to <n>" with no
+         * prior figure, and one click could replace the user's £60 with Olumi's £55 with nothing said.
+         * `propose_starting_point` sends its levels through here, so it holds the same rule.
+         *   (a) A level the USER set is replaced only by a figure the user wrote and gave as theirs (`userWrote`:
+         *       `user_stated` AND `figureTheUserWrote`, the #1978 grounding). Anything else leaves that pair as it
+         *       is, and the reason travels in `levels_not_accepted` for the Agent to say.
+         *   (b) Any replacement that goes ahead carries the old level — in the user's units, by the writer's own
+         *       range (`levelFrameOf`, as `projectOptionLevels` reads it back) — into the operation, the result and
+         *       the label, and says whose it was.
+         */
+        const unit = typeof os.unit === 'string' ? os.unit : '';
+        const replaces = typeof currentValue === 'number' && Number.isFinite(currentValue)
+          ? {
+            level: quotable(cap !== null ? currentValue * cap : currentValue),
+            setBy: current !== null && typeof current === 'object' ? (current as { source?: unknown }).source : undefined,
+          }
+          : undefined;
+        if (replaces !== undefined && replaces.setBy === 'user_specified' && !userWrote) {
+          notAccepted.push({
+            option: option.label, factor: factor.label, value: i?.value,
+            reason: `${option.label} already sets ${factor.label} to ${replaces.level}${unit !== '' ? ' ' + unit : ''}, a level the user set, `
+              + `and ${String(i?.value)} is not a figure the user wrote, so their level is left as it is. Say so plainly. Propose a `
+              + 'different level for it only when the user asks for the change and gives the figure: then send it with user_stated: true.',
+          });
+          continue;
+        }
         const key = `${option.id}::${factor.id}`;
         if (seen.has(key)) continue;
         seen.add(key);
         set.push({
           option: { id: option.id, label: option.label },
           factor: { id: factor.id, label: factor.label },
-          raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' ? os.unit : '',
+          raw, normalised, cap: cap ?? derivedFrame, unit,
           basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote,
+          ...(replaces !== undefined ? { replaces } : {}),
         });
       }
 
@@ -2092,8 +2133,14 @@ export function createAgentCapabilities(
           normalised: i.normalised, raw: i.raw, cap: i.cap, basis: i.basis, derived_frame: i.derivedFrame,
           // Per level, like `valueOpAuthor`: whose level this is travels to the writer (`levelOpAuthor`).
           authored_by: i.userStated ? 'user_stated' : 'model_proposed',
+          // The level it replaces, inside the proposal's integrity hash: what the user approves names it (the chip reads it).
+          ...(i.replaces !== undefined ? { replaces: i.replaces.level } : {}),
         },
       }));
+      const withUnit = (n: number, unit: string): string => `${n}${unit !== '' ? ' ' + unit : ''}`;
+      // Whose level is replaced, in the words the user reads (`set_by` in `projectOptionLevels`).
+      const replacedClause = (r: { level: number; setBy: unknown }, unit: string): string =>
+        ` (replaces ${r.setBy === 'user_specified' ? 'your ' : r.setBy === 'cee_hypothesis' ? 'Olumi\u2019s estimate of ' : ''}${withUnit(r.level, unit)})`;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -2102,7 +2149,7 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'model_proposed', basis: 'what each option does, for the user to confirm or correct' },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label:
-          ordered.map((i) => `${i.option.label} sets ${i.factor.label} to ${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`).join('; ') +
+          ordered.map((i) => `${i.option.label} sets ${i.factor.label} to ${withUnit(i.raw, i.unit)}${i.replaces !== undefined ? replacedClause(i.replaces, i.unit) : ''}`).join('; ') +
           ambiguousClause(ambiguous),
       });
       proposals.put(proposal);
@@ -2119,6 +2166,10 @@ export function createAgentCapabilities(
           model_range: i.cap,
           ...(i.derivedFrame !== null ? { range_taken_from_your_figure: i.derivedFrame } : {}),
           basis: i.basis,
+          ...(i.replaces !== undefined ? {
+            replaces: i.replaces.level,
+            ...(typeof i.replaces.setBy === 'string' && i.replaces.setBy !== '' ? { replaces_set_by: i.replaces.setBy } : {}),
+          } : {}),
         })),
         ...(unresolved.length > 0 ? { unresolved } : {}),
         ...(notLinked.length > 0 ? {
@@ -2132,7 +2183,7 @@ export function createAgentCapabilities(
         ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
         note:
           'Nothing has changed. Show the user the value in THEIR units and what it rests on, then call ' +
-          'authorise_change with this proposal_id once they agree.',
+          'authorise_change with this proposal_id once they agree.' + (ordered.some((i) => i.replaces !== undefined) ? LEVEL_REPLACES_NOTE : ''),
       };
     },
 
