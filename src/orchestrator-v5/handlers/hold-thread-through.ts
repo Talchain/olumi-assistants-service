@@ -75,6 +75,7 @@ import {
   parseEdgeTargetPath,
   type EditPatchOperationLike,
 } from '../graph-management/adapters/edit-graph-producer.js';
+import { quoteLabel } from '../compose/quote-label.js';
 
 export interface HoldThreadThroughInput {
   /** The prior turn's pendings (`most_recent_pending_actions`, unfiltered). */
@@ -382,7 +383,10 @@ export function threadHoldsThroughMutatingCommit(
 export function buildHoldMutationLapseNotice(pa: PendingAction): string {
   const a = pa.action;
   if (a.kind === 'proposed_concept') {
-    return `The suggestion to add '${a.concept}' has lapsed because the model changed, say the word if you still want it.`;
+    // Same nesting hazard as `buildHeldLapseNotice`: a concept carrying its own
+    // delimiting quote would nest here too. An interior apostrophe
+    // ("the user's plan") is NOT a delimiter and keeps its outer pair.
+    return `The suggestion to add ${quoteLabel(a.concept)} has lapsed because the model changed, say the word if you still want it.`;
   }
   const label =
     a.kind === 'apply_proposed_change' &&
