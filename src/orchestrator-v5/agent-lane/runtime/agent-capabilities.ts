@@ -135,6 +135,7 @@ import { registrationTurnId } from '../../graph-registration/registration-identi
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
+import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
 
 /**
  * Whose figure: the labels it is FOR, and every other QUANTITY's label (`figureTheUserWroteFor`). Options and the
@@ -1268,6 +1269,7 @@ export function createAgentCapabilities(
     let levelsRecorded = 0;
     let levelStop: string | null = null;
     const linksAdded: string[] = [];
+    let linksResized: ResizedLinksGroup[] = [];
     const labelOf = (id: string): string => approvedRead.nodes.find((n) => n.id === id)?.label ?? id;
     const pairWords = (p: { option_id: string; factor_id: string }): string => `${labelOf(p.option_id)} \u2192 ${labelOf(p.factor_id)}`;
     if (levelInputs.length + linkOps.length + values.length + frames.length > 0) {
@@ -1315,6 +1317,9 @@ export function createAgentCapabilities(
         levelsRecorded = levels.length;
         linksAdded.push(...links.map(pairWords));
         valuesLanded = values.length > 0;
+        // ⭐ P1-a: Olumi's own links the commit re-sized to fit a new level, read from the door's result (never a graph
+        // diff) and grouped by the same function the door's receipt uses — so the server can say it (`state_facts`).
+        linksResized = groupResizedLinks(res.links_resized ?? [], [...new Set([...values.map((v) => v.factor_id), ...frameCaps.keys()])], labelOf);
       }
     }
 
@@ -1335,6 +1340,7 @@ export function createAgentCapabilities(
       revision_before: parent.base_graph_identity_hash,
       revision_after: carried,
       ...(framed.length > 0 ? { ranges_added_for_analysis: framed } : {}),
+      ...(all && linksResized.length > 0 ? { links_resized: linksResized } : {}),
       ...(all
         ? {
             not_represented:

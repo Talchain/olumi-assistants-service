@@ -40,6 +40,8 @@
  * every node label), so this is no new exposure.
  */
 
+import type { ResizedLinksGroup } from '../../cee/magnitude/frame-defaulted-links.js';
+
 /**
  * One approved value that was stored differently.
  *
@@ -78,6 +80,11 @@ export interface RangeNotAttached {
 
 export interface TurnStateFacts {
   readonly rescaled: readonly RescaledValue[];
+  /**
+   * ⭐ P1-a: Olumi's own placeholder links a committed level re-sized (labels, grouped per valued factor by the SAME
+   * function the door's receipt uses). Omitted when there are none, so existing readers see no new key.
+   */
+  readonly links_resized?: readonly ResizedLinksGroup[];
   readonly ranges_added: readonly RangeAddedForAnalysis[];
   /**
    * Ranges the producer has VERIFIED, by a post-refusal readback, are still
@@ -130,6 +137,8 @@ export function collectTurnStateFacts(toolResults: readonly unknown[] | undefine
   const seenRescaled = new Set<string>();
   const seenRange = new Set<string>();
   const seenNotAttached = new Set<string>();
+  const linksResized: ResizedLinksGroup[] = [];
+  const seenResized = new Set<string>();
   let unknown = false;
 
   for (const result of toolResults) {
@@ -185,6 +194,18 @@ export function collectTurnStateFacts(toolResults: readonly unknown[] | undefine
      */
     if (r.current_state_unknown === true) unknown = true;
 
+    // Only a group that can be said in full: a named factor, a direction, and every link named.
+    for (const entry of Array.isArray(r.links_resized) ? r.links_resized : []) {
+      const e = asRecord(entry);
+      if (e === null || typeof e.factor !== 'string' || e.factor === '' || (e.direction !== 'into' && e.direction !== 'on')) continue;
+      const links = Array.isArray(e.links) ? e.links : [];
+      if (links.length === 0 || !links.every((l): l is string => typeof l === 'string' && l !== '')) continue;
+      const key = `${e.direction}\u0000${e.factor}`;
+      if (seenResized.has(key)) continue;
+      seenResized.add(key);
+      linksResized.push({ factor: e.factor, direction: e.direction, links: [...links] });
+    }
+
     for (const entry of Array.isArray(r.ranges_not_attached) ? r.ranges_not_attached : []) {
       const e = asRecord(entry);
       if (e === null) continue;
@@ -198,5 +219,6 @@ export function collectTurnStateFacts(toolResults: readonly unknown[] | undefine
     }
   }
 
-  return { rescaled, ranges_added: ranges, ranges_not_attached: notAttached, current_state_unknown: unknown };
+  return { rescaled, ranges_added: ranges, ranges_not_attached: notAttached, current_state_unknown: unknown,
+    ...(linksResized.length > 0 ? { links_resized: linksResized } : {}) };
 }

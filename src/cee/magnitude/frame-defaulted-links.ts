@@ -132,3 +132,34 @@ export function frameDefaultedLinks<G>(graph: G, factorId: string): FramedLinks<
   });
   return sized.length > 0 ? { graph: { ...graph, edges } as G, sized } : { graph, sized };
 }
+
+/**
+ * ⭐ ONE AUTHOR OF THE WORDS (P1-a, DL #70 5850069309; shape AI Quality 5850079041): the links a new level re-sized, said
+ * the same way by the door's own receipt and by the Agent's server-stated disclosure. Each link is grouped once — under
+ * the valued factor it points INTO, else the valued factor it leaves — with the labels the caller supplies.
+ */
+export interface ResizedLinksGroup {
+  readonly factor: string;
+  readonly direction: 'into' | 'on';
+  readonly links: readonly string[];
+}
+
+export function groupResizedLinks(
+  pairs: readonly { readonly from: string; readonly to: string }[],
+  valuedIds: readonly string[],
+  labelOf: (id: string) => string,
+): ResizedLinksGroup[] {
+  const valued = new Set(valuedIds);
+  const home = (l: { from: string; to: string }) => (valued.has(l.to) ? l.to : l.from);
+  return [...valued].flatMap((id) => {
+    const mine = pairs.filter(l => home(l) === id);
+    if (mine.length === 0) return [];
+    return [{ factor: labelOf(id), direction: mine.every(l => l.to === id) ? 'into' as const : 'on' as const,
+      links: mine.map(l => labelOf(l.from === id ? l.to : l.from)) }];
+  });
+}
+
+export function resizedLinksSentence(g: ResizedLinksGroup): string {
+  return `Olumi also re-sized its own placeholder links ${g.direction} "${g.factor}" so they fit the new level `
+    + `(${g.links.map(l => `"${l}"`).join(', ')}). They are Olumi's placeholders, not measurements.`;
+}
