@@ -117,7 +117,7 @@ import { bandFromMagnitude, INFLUENCE_BAND_THRESHOLDS, type InfluenceBand } from
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
-import { contradictsItsName, figureTheUserWrote } from '../stated-by-user.js';
+import { contradictsItsName, figureTheUserWrote, unitToGroundIn } from '../stated-by-user.js';
 import { defaultFrameFor, nonlinearIdentityForAgent } from '../admit-model.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
@@ -1631,7 +1631,8 @@ export function createAgentCapabilities(
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
           ...(typeof existing === 'number' ? { replaces: existing } : {}),
           // ⛔ A revision is the user's only when they WROTE the figure (`stated-by-user.ts`); else it is Olumi's.
-          userWrote: figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text),
+          // A blank Agent unit is read as the factor's, never as "no unit" (round-2 review, caller gap).
+          userWrote: figureTheUserWrote(Number(a.value), unitToGroundIn(a?.unit, nodeUnit), ctx.user_text),
         });
       }
 
@@ -3604,12 +3605,12 @@ export function createAgentCapabilities(
            * was stored as the user's 0% churn). Otherwise it is Olumi's ESTIMATE only when the Agent said so, with a
            * basis, and it is recorded and shown as that (`cee_hypothesis`, C2). Anything else is left unset and said.
            */
-          const byUser = figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, ctx.user_text);
+          const byUser = figureTheUserWrote(lvl.value, unitToGroundIn(lvl.unit, factorUnit), ctx.user_text);
           if (!byUser && lvl.estimate === undefined) {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: notWrittenReason(lvl.value, f.label) });
             return { factor_id: f.id, value: null };
           }
-          if (!byUser && contradictsItsName(lvl.value, lvl.unit ?? factorUnit, plan.label)) {
+          if (!byUser && contradictsItsName(lvl.value, unitToGroundIn(lvl.unit, factorUnit), plan.label)) {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
               reason: `Olumi's estimate of ${lvl.value} for ${f.label} does not match the figure in the option's own name ("${plan.label}"), so that level is left unset. Use the figure in the name, or name the option for the figure you mean.` });
             return { factor_id: f.id, value: null };

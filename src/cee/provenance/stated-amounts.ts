@@ -436,18 +436,37 @@ function magnitudeAppearsInBrief(
   if (!Number.isFinite(target)) return false;
 
   for (const amount of amounts) {
-    if (reading.kind === "currency") {
-      if (amount.kind !== "currency") continue;
-      if (amount.currencyCode !== reading.currencyCode) continue;
-    } else if (reading.kind === "percent") {
-      if (amount.kind !== "percent") continue;
-    } else if (amount.kind === "currency") {
-      // Unread unit vs an explicitly denominated amount — see the note above.
-      continue;
-    }
+    if (!amountFitsUnit(amount, reading)) continue;
     if (magnitudesMatch(amount.magnitude, target)) return true;
   }
   return false;
+}
+
+/**
+ * THE KIND RULE FOR ONE WRITTEN AMOUNT AGAINST ONE UNIT READING — the rule
+ * documented on {@link isAmountStatedInBrief}, stated once:
+ *   - a currency unit takes only a currency amount in the SAME code;
+ *   - a percent unit takes only a percentage;
+ *   - any other unit takes anything EXCEPT a currency amount (an explicitly
+ *     denominated amount never matches a unit this module could not read).
+ *
+ * EXPORTED (round-2 review of the Agent lane's currency fix, #70 5845579390
+ * item 1) so `orchestrator-v5/agent-lane/stated-by-user.ts` decides currency
+ * identity with THIS rule rather than a second one. That module finds more
+ * denominated amounts in conversational text than the scanner does ("12,000
+ * USD"), and hands each one to this predicate. Behaviour here is unchanged:
+ * the loop above applied exactly these three branches inline.
+ */
+export function amountFitsUnit(
+  amount: Pick<StatedAmount, "kind" | "currencyCode">,
+  reading: Pick<UnitReading, "kind" | "currencyCode">,
+): boolean {
+  if (reading.kind === "currency") {
+    return amount.kind === "currency" && amount.currencyCode === reading.currencyCode;
+  }
+  if (reading.kind === "percent") return amount.kind === "percent";
+  // Unread unit vs an explicitly denominated amount — see the note above.
+  return amount.kind !== "currency";
 }
 
 /**
