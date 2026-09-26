@@ -70,6 +70,7 @@ import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-g
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnCoaching, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
+import { breakEvenFor, breakEvenLine } from '../orchestrator-v5/agent-lane/break-even.js';
 import {
   bindRunBlocksToReadback,
   firstAnalysisDeadline,
@@ -2000,6 +2001,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
     }
     /**
+     * ⭐ AX1 — WHEN THE ANALYSIS CANNOT RANK A PRICE × VOLUME GOAL, THE ARITHMETIC STILL ANSWERS (DL #70 5850280205;
+     * `break-even.ts`). Served (DL's joined run F8): every Run led with "No option can be put forward…" and gave the user
+     * nothing they could act on, though the model holds every figure the answer needs. AFTER the leader gate on purpose:
+     * this is conditional arithmetic on the model's own figures, never a ranking, and the gate drops any sentence that
+     * compares options. Only on a turn that RAN an analysis (the Run, the Agent's own run, the first pass — never every
+     * later turn whose readback still carries the result) and whose readback withholds the leader, and only when C46's
+     * own product finding holds (`breakEvenFor` returns null otherwise).
+     */
+    const ranAnalysisThisTurn = fastPath === 'run' || fa !== undefined || result.tool_calls.some((c) => c.name === 'run_analysis');
+    const breakEven = ranAnalysisThisTurn
+      && (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
+      ? breakEvenFor(readbackGraph) : null;
+    if (breakEven !== null && typeof wireBody.assistant_text === 'string') {
+      wireBody = { ...wireBody, assistant_text: `${wireBody.assistant_text}\n\n${breakEvenLine(breakEven)}` };
+    }
+    /**
      * ⭐ HEADLINE FIRST ON AN ANALYSIS REPLY — see `withAnalysisAnswerShape`. HERE, and nowhere earlier:
      * this is after the last rewrite of `assistant_text` on this route (write-claim removal, disclosures,
      * proposal-id scrub, the leader gate above), so the shape is built from the prose the user receives,
@@ -2169,6 +2186,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           || stateFacts.current_state_unknown === true
           ? { state_facts: stateFacts }
           : {}),
+        // ⭐ AX1 (DL #70 5850280205: "a typed `break_even` state fact"): the arithmetic the paragraph above says, as
+        // data — every figure, whose it is, and the target line — so a surface or a rewording never re-derives it.
+        ...(breakEven !== null ? { break_even: breakEven } : {}),
       },
       /**
        * ⭐ EVERY GENERATIVE ATTEMPT THIS TURN MADE, off the provider policy's ledger
