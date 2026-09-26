@@ -295,6 +295,10 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // derives its freshness against the reread SNAPSHOT's hash through the same
     // helper, `deriveWriteReplyFreshness`, so it adds no reference. (Its banked
     // form added a call over the 20-row window with no restore marker.)
+    // 2026-09-25 goal_target_edit writer (#1859, rebased): +0 — it derives its
+    // post-commit reply freshness through the same `deriveWriteReplyFreshness`
+    // helper (durable set + restore marker), so it adds no reference. Its
+    // pre-rebase form added a ninth call over the 20-row window alone.
     'src/orchestrator-v5/system-events/dispatch.ts': 5,
     // 2026-09-24 MG&Q: +1 (one call) — `dispatchFactorValueEdit` now derives the
     // wire freshness for a factor-value edit, exactly as the edge_strength_edit
