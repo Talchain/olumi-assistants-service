@@ -42,7 +42,7 @@ import { log } from '../utils/telemetry.js';
 import { asVerdictState } from '../orchestrator/context/constraint-feasibility.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
-import { runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
+import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { readinessSentence, readinessViewOf } from '../orchestrator-v5/agent-lane/readiness-view.js';
@@ -233,7 +233,7 @@ const sessions = new SessionBindingRegistry();
 const MUTATION_INSTRUCTION =
   config.proxy.agentLanePreview === true
     ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
-    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link (with the strength band the user named; if they named none, ask how strong first), propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
+    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link (with the strength band the user named; if they named none, ask how strong first), propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once, propose_goal_target for the goal\u2019s success target the user has just stated (their figure, and whether they said at least or at most) \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
 
 /** Marks a board edit in the Agent's history — defined beside `needsDurableSeed`, which must recognise it. */
 export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.js';
@@ -625,6 +625,26 @@ export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown
   return `The analysis didn’t run this time${why}. Nothing in the model was changed — ask me what it still needs.`;
 }
 
+/**
+ * ⛔ WHAT THE USER READS WHEN THE MODEL'S FINAL ANSWER WAS CUT SHORT (AIX-001; R&C #2009 B1/B2): composed from the
+ * turn's own outcome, never from the partial text (which is not shown and not kept, so nothing can "continue").
+ * After a run: the run's own sentence. A turn that changed the model says so. Otherwise: shorter questions.
+ */
+export function unfinishedAnswerText(result: {
+  readonly tool_calls: readonly { readonly name: string }[];
+  readonly tool_results: readonly unknown[];
+  readonly mutated: boolean;
+}): string {
+  for (let i = result.tool_calls.length - 1; i >= 0; i -= 1) {
+    if (result.tool_calls[i]!.name === 'run_analysis') {
+      return interpretationUnavailableText((result.tool_results[i] ?? {}) as Record<string, unknown>);
+    }
+  }
+  return result.mutated
+    ? 'Your model was updated, but my reply ran too long and was cut short, so I have not shown it. Ask me what changed.'
+    : 'My answer ran too long and was cut short, so I have not shown it. Try asking about one part at a time.';
+}
+
 export function typedRunOf(body: Record<string, unknown>): boolean {
   const chip = body['chip'] as { action_type?: unknown; id?: unknown } | null | undefined;
   // The Agent's own Run offer is recognised by its id too, in case a client echoes only the id.
@@ -952,12 +972,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const text = await r.text();
       throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
     }
-    const j = (await r.json()) as { output: Record<string, unknown>[]; usage?: unknown };
+    const j = (await r.json()) as { output: Record<string, unknown>[]; usage?: unknown; status?: unknown; incomplete_details?: { reason?: unknown } | null };
     // Never throws, and records nothing for a malformed payload, so a successful call
     // cannot be turned into a failed one by the measurement of it.
     recordProviderUsage(usageHandle, j.usage);
-    // The usage sidecar is read above and is not part of the transport contract.
-    return { output: j.output };
+    // The usage sidecar is read above and is not part of the transport contract. Completion status IS (AIX-001):
+    // an `incomplete` 200 can carry a partial answer.
+    return {
+      output: j.output,
+      ...(typeof j.status === 'string' ? { status: j.status } : {}),
+      ...(typeof j.incomplete_details?.reason === 'string' ? { incomplete_reason: j.incomplete_details.reason } : {}),
+    };
   });
 
   /**
@@ -1588,7 +1613,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⛔ THE REASONING ITEM TRAVELS WITH ITS MESSAGE (served `f828a61`, witness c9: every turn after a
         // Run was refused "Item 'msg_…' of type 'message' was provided without its required 'reasoning'
         // item", HTTP 502). Kept in output order, exactly as the Agent loop keeps its whole output.
-        if (answer.trim().length > 0) interpreted = { answer, messages: out.filter((o) => o.type === 'reasoning' || o.type === 'message') as Record<string, unknown>[] };
+        if (answerIsIncomplete(resp as never)) log.warn({ scenario_id: scenarioId, incomplete_reason: (resp as { incomplete_reason?: unknown }).incomplete_reason ?? null }, 'agent-lane: fast-path interpretation incomplete — answering from the run itself');
+        else if (answer.trim().length > 0) interpreted = { answer, messages: out.filter((o) => o.type === 'reasoning' || o.type === 'message') as Record<string, unknown>[] };
         else log.warn({ scenario_id: scenarioId }, 'agent-lane: fast-path interpretation was empty — answering from the run itself');
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: fast-path interpretation failed — answering from the run itself');
@@ -1641,9 +1667,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     histories.set(sessionId, [...result.items]);
 
     // A hop limit is never returned as an empty answer.
-    const text = result.stopped_reason === 'hop_limit' && result.assistant_text.length === 0
-      ? 'I was not able to finish that within this turn. Ask me again and I will continue.'
-      : result.assistant_text;
+    const text = result.stopped_reason === 'incomplete'
+      ? unfinishedAnswerText(result)
+      : result.stopped_reason === 'hop_limit' && result.assistant_text.length === 0
+        ? 'I was not able to finish that within this turn. Ask me again and I will continue.'
+        : result.assistant_text;
 
     // ⭐ `answerKind` is REQUIRED and load-bearing: route egress synthesises
     // `_answer_shape` only for 'substantive'. An Agent's conversational reply

@@ -75,7 +75,11 @@ const BAND_WORDS: Record<string, RegExp> = {
   'very strong': /\bvery\s+strong(?:ly)?\b/gi,
   strong: /\bstrong(?:ly)?\b/gi,
   moderate: /\bmoderate(?:ly)?\b/gi,
-  weak: /\b(?:weak(?:ly)?|barely)\b/gi,
+  // "slight" is the canvas pill's own word for this band (#2003 follow-up), counted ONLY in the band position:
+  // ending its clause, or before a link noun. "slightly" is dropped: degree adverbs mostly modify a relative CHANGE
+  // ("lower it slightly", "slightly too strong"), and a closed list cannot bound that (R&C #2008 B1). A miss only
+  // makes the Agent ask which band; a false hit would stamp a band the user never named as theirs.
+  weak: /\b(?:weak(?:ly)?|barely|slight(?=\s*(?:$|[.,;:!?)])|\s+(?:effect|link|influence|impact|relationship|connection)\b))\b/gi,
 };
 const NEGATOR = new RegExp(
   "(?:^|[^\\w'\\u2019])(?:not|never|no|nor|neither|hardly|cannot|without|doubts?|doubtful|\\w+n['\\u2019]t"
@@ -92,24 +96,66 @@ const AUXILIARY_FIRST = /^\s*(?:is|are|was|were|am|do|does|did|can|could|would|s
  */
 const REQUEST_FORM = /^\s*(?:please\s+)?(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:record|set|make|mark|change|put|update|use|save|keep|treat)\b/i;
 
+/**
+ * How the words at `index` are said: ASKED about (a question, or a sentence opened by an auxiliary, unless it is a
+ * request to act), DENIED (a negator earlier in their clause), or AFFIRMED \u2014 with the part of their clause before them.
+ * The one reading both `bandTheUserWrote` and `comparatorTheUserWrote` apply, so the two cannot drift.
+ */
+type Reading = { readonly said: 'asked' } | { readonly said: 'denied' } | { readonly said: 'affirmed'; readonly clauseBefore: string };
+function readingAt(turnText: string, index: number): Reading {
+  // The sentence the words sit in, and the part of their clause before them (a clause restarts after , ; : a dash, or "but").
+  const start = Math.max(turnText.lastIndexOf('.', index), turnText.lastIndexOf('!', index), turnText.lastIndexOf('?', index), turnText.lastIndexOf('\n', index)) + 1;
+  const endAt = turnText.slice(index).search(/[.!?\n]/);
+  const sentenceEnd = endAt < 0 ? '' : turnText.charAt(index + endAt);
+  const sentenceBefore = turnText.slice(start, index);
+  if ((sentenceEnd === '?' || AUXILIARY_FIRST.test(sentenceBefore)) && !REQUEST_FORM.test(sentenceBefore)) return { said: 'asked' };
+  // "anything but strong" denies it: read as a negator, never as a clause break.
+  const clauseBefore = sentenceBefore.replace(/\banything\s+but\b/gi, 'not').split(/[,;:\u2013\u2014]|\s-\s|\bbut\b/i).pop() ?? '';
+  if (NEGATOR.test(clauseBefore)) return { said: 'denied' };
+  return { said: 'affirmed', clauseBefore };
+}
+
 /** Whether `band` is named in `turnText`, neither denied nor asked about. No text (or none bound) proves nothing: false. */
 export function bandTheUserWrote(band: string, turnText: string | null | undefined): boolean {
   const re = BAND_WORDS[band];
   if (re === undefined || typeof turnText !== 'string') return false;
   for (const m of turnText.matchAll(re)) {
-    // The sentence the word sits in, and the part of its clause before it (a clause restarts after , ; : a dash, or "but").
-    const start = Math.max(turnText.lastIndexOf('.', m.index), turnText.lastIndexOf('!', m.index), turnText.lastIndexOf('?', m.index), turnText.lastIndexOf('\n', m.index)) + 1;
-    const endAt = turnText.slice(m.index).search(/[.!?\n]/);
-    const sentenceEnd = endAt < 0 ? '' : turnText.charAt(m.index + endAt);
-    const sentenceBefore = turnText.slice(start, m.index);
-    if ((sentenceEnd === '?' || AUXILIARY_FIRST.test(sentenceBefore)) && !REQUEST_FORM.test(sentenceBefore)) continue;
-    // "anything but strong" denies it: read as a negator, never as a clause break.
-    const clauseBefore = sentenceBefore.replace(/\banything\s+but\b/gi, 'not').split(/[,;:\u2013\u2014]|\s-\s|\bbut\b/i).pop() ?? '';
-    if (NEGATOR.test(clauseBefore)) continue;
-    if (band === 'strong' && /\bvery\s+$/i.test(clauseBefore)) continue;
+    const reading = readingAt(turnText, m.index);
+    if (reading.said !== 'affirmed') continue;
+    if (band === 'strong' && /\bvery\s+$/i.test(reading.clauseBefore)) continue;
     return true;
   }
   return false;
+}
+
+/**
+ * The same rule for a goal's success target: WHICH WAY it binds \u2014 at least, or at most \u2014 is recorded as the user's
+ * only when the user SAID it, in THIS turn's own typed words (`user_turn_text`). The goal-target writer stamps the
+ * target as the user's (`threshold_source: 'user'`), so a direction the Agent picked and the user only approved would
+ * read as the user's own.
+ *
+ * - The phrases, whole words only: "at least", "minimum", "no less than", "more than", "over", "above" \u2192 at least;
+ *   "at most", "no more than", "under", "below", "less than", "maximum", "cap" \u2192 at most. "no less than" and
+ *   "no more than" are read whole, never as a negated "less than" / "more than".
+ * - ASKED ("Is at least \u00a360k realistic?") says nothing; DENIED anywhere in the turn ("not at least", "must not fall
+ *   below") or BOTH directions in one turn \u2192 null. Every miss makes the Agent ask which the user means.
+ * - KNOWN LIMIT, as for bands: the words are not tied to the figure. "At least \u00a360k, over the next year" reads once as
+ *   at least; "under" beside "over" reads as both, and the Agent asks.
+ */
+const COMPARATOR_WORDS = /\b(no\s+less\s+than|no\s+more\s+than|at\s+least|at\s+most|more\s+than|less\s+than|minimum|maximum|over|above|under|below|cap)\b/gi;
+const AT_MOST_WORDS: ReadonlySet<string> = new Set(['no more than', 'at most', 'less than', 'maximum', 'under', 'below', 'cap']);
+
+/** At least / at most, as the user said it in `turnText`; null when not said, asked, denied, or said both ways. */
+export function comparatorTheUserWrote(turnText: string | null | undefined): 'at_least' | 'at_most' | null {
+  if (typeof turnText !== 'string') return null;
+  const said = new Set<'at_least' | 'at_most'>();
+  for (const m of turnText.matchAll(COMPARATOR_WORDS)) {
+    const reading = readingAt(turnText, m.index);
+    if (reading.said === 'asked') continue;
+    if (reading.said === 'denied') return null;
+    said.add(AT_MOST_WORDS.has(m[1]!.toLowerCase().replace(/\s+/g, ' ')) ? 'at_most' : 'at_least');
+  }
+  return said.size === 1 ? [...said][0]! : null;
 }
 
 /**
