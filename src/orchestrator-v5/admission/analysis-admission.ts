@@ -767,6 +767,34 @@ export function comparisonSubstrate(graph: unknown): {
 }
 
 /**
+ * ⭐ Does a MATERIAL node's OWN baseline reach the ordering a leader claim rests on?
+ *
+ * The goal's does not. Being the comparison's sink puts the goal in the material set
+ * (every path ends there), but its current level never changes WHICH option leads:
+ * ISL takes a non-root node's base only from a parameter uncertainty, and PLoT sends
+ * none for a goal — its factor PUs are `kind === 'factor'` only
+ * (`src/integrations/isl/translator-v3.ts:821`) and its constraint PUs skip the goal
+ * (`constraint-pu-injection.ts:65`), both a STATIC READ at plot-lite-service
+ * `b09c0f2e`. Measured on the served request shape (every node carrying PLoT's
+ * `epsilon_std`, every observed factor its PU): the goal's level at 0.48 left win-%
+ * and outcome means byte-identical, while the CONTRAST — a non-root FACTOR's level,
+ * churn 0.04 → 0.90 — moved carry-on's win 0.066 → 0.182 (#70 5845401108). So this
+ * excludes the goal, and deliberately not every non-root.
+ *
+ * Counting it let one chat sentence ("our MRR is £12,000") license a named winner
+ * (Model Generation, #70 5845326220). The goal's level still bears on the goal-TARGET
+ * claim, which `goal_target_stated` gates, and it stays in the whole-model census.
+ * Edges INTO the goal are untouched: their strengths do move the ordering.
+ *
+ * ⚠ STOPPED AT THE EVIDENCE: an unconstrained non-root `outcome` / `risk` baseline
+ * looks alike (no PU reaches it either), but that is UNVERIFIED on the wire and is not
+ * ruled here.
+ */
+function baselineReachesTheOrdering(node: Record<string, unknown>): boolean {
+  return node.kind !== 'goal';
+}
+
+/**
  * Does this graph carry a target the user can be said to have SET?
  *
  * Delegates to `pickGoalThresholdTrio` — the estate's ONE goal-target rule — so
@@ -873,7 +901,7 @@ export function censusConfidenceParameters(graph: unknown): SemanticQualitySigna
     const provenance = structureProvenance(node, graph);
     tally(provenance);
     const id = typeof node.id === 'string' ? node.id : undefined;
-    if (id !== undefined && materialNodeIds.has(id)) {
+    if (id !== undefined && materialNodeIds.has(id) && baselineReachesTheOrdering(node)) {
       tallyMaterial(provenance);
       // ⚠ NEGATED rather than `=== 'machine_authored'`: `StructureProvenance`
       // has members beyond the two obvious ones, and a parameter nobody can
