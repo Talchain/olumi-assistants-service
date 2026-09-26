@@ -18,7 +18,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Ajv } from 'ajv';
-import { buildCandidateSchema, buildModelFromBrief, BUILD_INSTRUCTIONS, type CallStructuredModel } from '../runtime/build-model.js';
+import { buildCandidateSchema, buildModelFromBrief, BUILD_INSTRUCTIONS, prepareProvisionalCandidate, type CallStructuredModel } from '../runtime/build-model.js';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { narrateWriteOutcome } from '../write-outcome.js';
@@ -531,17 +531,40 @@ describe('a second real draft, another domain — the banked LIVE hiring candida
 });
 
 // ── ordering: the size gate, and an adopted retry ─────────────────────────────
+/**
+ * The served shape-1 draft, padded with `n` Olumi factors so the size gate is the question.
+ *
+ * ⚠ RE-PINNED FOR #1891 (merge of staging into #1891): #1891 makes every option × factor it acts on with no level,
+ * and every acted-on factor with no baseline, a repair issue for the one retry. The served draft carries one of each
+ * on the USER's kept option ("£59 with AI release" acts on "AI feature availability", which has no level and no
+ * baseline), so #1891 legitimately spends its retry on them — a different question from the one these rows ask
+ * (does the size gate measure what is registered?). So by default the kept option is given a level (1, ai_proposed)
+ * and the factor a baseline (0, not known) — exactly as `451b4a19c` made #1904's limit fixture gap-free — and the
+ * rows keep their assertions unchanged. Olumi's "Test £59 with AI release" is left AS SERVED (no level): it is the
+ * option admission withholds, so its pairs must never count as gaps. `servedGaps: true` keeps the served draft's
+ * gaps, for the combined rows below.
+ */
+const padded = (n: number, withTest: boolean, { servedGaps = false }: { servedGaps?: boolean } = {}) => {
+  const base = candidateFromServed(SHAPE_1.brief.draft_graph, { olumi: 'ai_proposed', unknowns: [] });
+  const extra = Array.from({ length: n }, (_, i) => `Market signal ${i + 1}`);
+  type Opt = (typeof base.options)[number];
+  const gapFree = (o: Opt): Opt => (servedGaps || o.label !== '£59 with AI release' ? o : {
+    ...o,
+    changes: (o.changes ?? []).filter((f) => f !== 'AI feature availability'),
+    interventions: [...(o.interventions ?? []), { factor_label: 'AI feature availability', value: 1, value_kind: 'absolute', unit: '', provenance: 'ai_proposed' }],
+  } as Opt);
+  return {
+    ...base,
+    options: (withTest ? base.options : base.options.filter((o) => o.label !== 'Test £59 with AI release')).map(gapFree),
+    factors: [
+      ...base.factors.map((f) => (servedGaps || f.label !== 'AI feature availability' ? f : { ...f, baseline_known: false, baseline_value: 0 })),
+      ...extra.map((label) => ({ label, role: 'observable' as const, baseline_known: false, baseline_value: null, unit: null, provenance: 'ai_proposed', plausible_max: 100 })),
+    ],
+    links: [...base.links, ...extra.map((from) => ({ from, to: 'MRR', direction: 'positive', provenance: 'ai_proposed' }))],
+  } as unknown as typeof base;
+};
+
 describe('ordering — the rule runs inside admission, so the size gate measures what is registered', () => {
-  const padded = (n: number, withTest: boolean) => {
-    const base = candidateFromServed(SHAPE_1.brief.draft_graph, { olumi: 'ai_proposed', unknowns: [] });
-    const extra = Array.from({ length: n }, (_, i) => `Market signal ${i + 1}`);
-    return {
-      ...base,
-      options: withTest ? base.options : base.options.filter((o) => o.label !== 'Test £59 with AI release'),
-      factors: [...base.factors, ...extra.map((label) => ({ label, role: 'observable' as const, baseline_known: false, baseline_value: null, unit: null, provenance: 'ai_proposed', plausible_max: 100 }))],
-      links: [...base.links, ...extra.map((from) => ({ from, to: 'MRR', direction: 'positive', provenance: 'ai_proposed' }))],
-    } as unknown as typeof base;
-  };
 
   it('RED: a draft oversized ONLY by its indistinct option is registered on the first pass — no retry is spent', async () => {
     const draft = padded(7, true);
@@ -563,6 +586,97 @@ describe('ordering — the rule runs inside admission, so the size gate measures
     expect(questions(out)).toContain(STEP_1);
     const leftOut = ((out.left_out_to_stay_compact ?? []) as { label: string }[]).map((x) => x.label);
     expect(leftOut).not.toContain('Test £59 with AI release');
+  });
+});
+
+/**
+ * ⛔ COMBINED (merge of staging into #1891): an oversized draft carrying Olumi's indistinct option AND coverage gaps.
+ * #1967 withholds the option inside admission and says it; #1891 asks the gaps of the one retry, as a compaction. Both
+ * at once: the size gate and the gaps both read the model that is REGISTERED — so the withheld option's own pairs are
+ * never asked — the compliant retry is adopted, and the withheld option is said exactly once whichever draft is kept.
+ */
+describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate option and coverage gaps', () => {
+  const USER_GAP = '£59 with AI release -> AI feature availability: give the level this option sets in interventions (the user\'s number if stated, '
+    + 'otherwise an ai_proposed estimate in the factor\'s unit and plausible_max frame); keep it only in changes if no defensible level exists';
+  const BASELINE_GAP = 'AI feature availability: give a baseline_value (a provisional estimate with baseline_known:false) \u2014 an option acts on it';
+  type Req = { instructions: string; input: string };
+  /** The real construction, drafter faked (`drafts[i]` answers call i, the last repeats); a refusal is returned, not thrown. */
+  async function construct(...drafts: (CandidateModel & { unknowns: string[] })[]) {
+    for (const d of drafts) expect(strict(d), JSON.stringify(strict.errors)).toBe(true);
+    let body: { graph: unknown } | null = null;
+    const reqs: Req[] = [];
+    const call = (async (req: Req) => {
+      reqs.push({ instructions: req.instructions, input: req.input });
+      return { text: JSON.stringify(drafts[Math.min(reqs.length - 1, drafts.length - 1)]) };
+    }) as unknown as CallStructuredModel;
+    const d: InternalDispatch = async (path, b) => {
+      if (path.endsWith('/graph/register')) { body = structuredClone(b as { graph: unknown }); return { status: 200, json: { model_version: { version_number: 1 } } }; }
+      return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
+    };
+    const out = await buildModelFromBrief('55555555-5555-4555-8555-555555555555', BRIEF, d, call) as Record<string, unknown>;
+    const graph = body === null ? null : GraphV3.parse((body as { graph: unknown }).graph) as unknown as SGraph;
+    return { out, graph, reqs };
+  }
+  const issues = (input: string): string[] => JSON.parse(/Construction issues: (\[.*\])\n/.exec(input)![1]!) as string[];
+  const withheldOptions = (out: Record<string, unknown>) => out.options_withheld;
+  const said = (out: Record<string, unknown>) => questions(out).filter((q) => q === STEP_1).length;
+  const first = () => padded(8, true, { servedGaps: true });
+
+  it('PRECONDITION: the served gaps sit on the user\'s kept option AND on the option admission withholds; oversized after withholding', () => {
+    const prep = prepareProvisionalCandidate(first());
+    expect(prep.level_gaps).toEqual([
+      { option: '£59 with AI release', factor: 'AI feature availability' },
+      { option: 'Test £59 with AI release', factor: 'Pro plan price' },
+      { option: 'Test £59 with AI release', factor: 'AI feature availability' },
+    ]);
+    expect(prep.baseline_gaps).toEqual([{ factor: 'AI feature availability' }]);
+    const admitted = admitCandidateModel(prep.candidate, {});
+    expect((admitted.options_withheld ?? []).map((w) => [w.option, w.like])).toEqual([['Test £59 with AI release', '£59 with AI release']]);
+    expect(assessConstructionSize(admitted).within).toBe(false);
+  });
+
+  it('RED (row 2): the compaction is asked the gaps on what is REGISTERED — never the withheld option\'s own pairs', async () => {
+    const { out, reqs } = await construct(first(), padded(0, false));
+    expect(reqs).toHaveLength(2);
+    expect(out.size_retried).toBe(true);
+    expect(issues(reqs[1]!.input)).toEqual([USER_GAP, BASELINE_GAP]);
+    expect(reqs[1]!.input).not.toContain('Test £59 with AI release -> ');
+    expect(reqs[1]!.input).toContain(`Candidate to repair (your previous model, to shrink): ${JSON.stringify(first())}`);
+    expect(reqs[1]!.instructions).toContain('Keep every option the brief states, and every other option in your previous model unless you ADDED it beyond the brief');
+    expect(reqs[1]!.instructions).not.toContain('Preserve every option');
+  });
+
+  it('RED (row 2a): a compliant retry that sheds the duplicate and levels the user\'s option is adopted — the duplicate is still withheld and said, once', async () => {
+    const { out, graph } = await construct(first(), padded(0, false));
+    expect([out.ok, out.size_retried, out.within_compact_limits]).toEqual([true, true, true]);
+    expect(optionIds(graph!)).toEqual(['keep_current_pricing', '59_with_ai_release']);
+    expect(Object.keys(graph!.nodes.find((n) => n.id === '59_with_ai_release')!.interventions ?? {}).sort()).toEqual(['ai_feature_availability', 'pro_plan_price']);
+    expect(withheldOptions(out)).toEqual([{ option: 'Test £59 with AI release', like: '£59 with AI release', reason: 'option_indistinct' }]);
+    expect(said(out)).toBe(1);
+    const leftOut = ((out.left_out_to_stay_compact ?? []) as { label: string }[]).map((x) => x.label);
+    expect(leftOut).not.toContain('Test £59 with AI release');
+    expect(leftOut).toContain('Market signal 1');
+  });
+
+  it('RED (row 2b): a compliant retry that COPIES the duplicate as drafted is adopted — its own admission withholds it, and it is said once, not twice', async () => {
+    const { out, graph } = await construct(first(), padded(0, true));
+    expect([out.ok, out.size_retried, out.within_compact_limits]).toEqual([true, true, true]);
+    expect(optionIds(graph!)).toEqual(['keep_current_pricing', '59_with_ai_release']);
+    expect(graph!.nodes.some((n) => n.id === TEST_ID)).toBe(false);
+    expect(withheldOptions(out)).toEqual([{ option: 'Test £59 with AI release', like: '£59 with AI release', reason: 'option_indistinct' }]);
+    expect(said(out)).toBe(1);
+  });
+
+  it('CONTROL (row 2c): a retry that takes the user\'s option\'s action away is refused — the oversized first draft is refused out loud', async () => {
+    const lossy = padded(0, false);
+    const o = lossy.options.find((x) => x.label === '£59 with AI release')!;
+    (o as { interventions?: unknown[] }).interventions = (o.interventions ?? []).filter((i) => i.factor_label !== 'AI feature availability');
+    (o as { changes?: string[] }).changes = [];
+    (lossy as { links: { from: string; to: string }[] }).links = lossy.links.filter((l) => !(l.from === '£59 with AI release' && l.to === 'AI feature availability'));
+    const { out, graph, reqs } = await construct(first(), lossy);
+    expect(reqs).toHaveLength(2);
+    expect([out.ok, out.refusal, out.retried]).toEqual([false, 'model_too_large', true]);
+    expect(graph).toBeNull();
   });
 });
 

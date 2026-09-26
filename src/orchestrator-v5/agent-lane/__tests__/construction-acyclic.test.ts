@@ -562,3 +562,93 @@ describe('(d) a kept loop never says Olumi’s part of it was the user’s', () 
     expect(lines[0]).toMatch(/which way/i);
   });
 });
+
+/**
+ * ⛔ COMBINED (merge of staging into #1891): #1891 made a coverage gap a repair issue and made the oversized
+ * route a compaction (`COMPACTION_REPAIR_RULE`); #1956 never asks a loop on the size route. Both hold at once:
+ * an oversized draft with a gap AND a loop is asked the gap — never the loop — as a compaction, and the loop is
+ * left to admission's backstop, which withholds and says it. Within the limit, a loop is asked beside the gap,
+ * and — being a reason for the retry of its own — waives #1891's "coverage is the only reason: cover strictly
+ * more" clause, exactly as a mechanism issue does.
+ */
+describe('COMBINED (#1891 × #1956): coverage gaps and a loop in one draft', () => {
+  /** #1891's coverage gap on the served candidate: Olumi's "Phased £54 Price" acts on "AI feature availability" with no level. */
+  const withGap = (c: CandidateModel): CandidateModel => {
+    const x = structuredClone(c) as unknown as { options: { label: string; changes?: string[]; interventions?: { factor_label: string }[] }[] };
+    const o = x.options.find((p) => p.label === 'Phased £54 Price')!;
+    o.interventions = (o.interventions ?? []).filter((i) => i.factor_label !== 'AI feature availability');
+    o.changes = ['AI feature availability'];
+    return x as unknown as CandidateModel;
+  };
+  const GAP_ISSUE = 'Phased £54 Price -> AI feature availability: give the level this option sets in interventions (the user\'s number if stated, '
+    + 'otherwise an ai_proposed estimate in the factor\'s unit and plausible_max frame); keep it only in changes if no defensible level exists';
+  const issues = (input: string): string[] => JSON.parse(/Construction issues: (\[.*\])\n/.exec(input)![1]!) as string[];
+  const phasedLevels = (g: Graph) => Object.keys((g.nodes.find((n) => n.id === 'phased_54_price') as { interventions?: Record<string, unknown> } | undefined)?.interventions ?? {});
+
+  it('PRECONDITION: the gap is #1891\'s, and the served loop is admission\'s to break', () => {
+    const gapped = prepareProvisionalCandidate(withGap(servedCandidate()));
+    expect(gapped.level_gaps).toEqual([{ option: 'Phased £54 Price', factor: 'AI feature availability' }]);
+    expect(gapped.baseline_gaps).toEqual([]);
+    expect(prepareProvisionalCandidate(servedCandidate()).level_gaps).toEqual([]);
+  });
+
+  it('RED (row 1): OVERSIZED + gap + loop — the gap is asked, the loop is not, as a compaction; the compliant retry is adopted and the loop is broken by admission and said', async () => {
+    const first = extended(withGap(servedCandidate()), speculative('factors', 5));
+    const { out, graph, calls, inputs, instructions } = await build(first, servedCandidate());
+    expect(out.size_retried, 'PRECONDITION: the first draft was oversized').toBe(true);
+    expect(calls).toBe(2);
+    // Asked: the gap, by identity — and nothing else. The loop is never asked on the size route (#1956).
+    expect(issues(inputs[1]!)).toEqual([GAP_ISSUE]);
+    expect(inputs[1]).not.toContain(SERVED_LOOP_ISSUE);
+    // …as a compaction (#1891): the draft to edit, the copy rule, and the compaction's repair rule.
+    expect(inputs[1]).toContain(`Candidate to repair (your previous model, to shrink): ${JSON.stringify(first)}`);
+    expect(instructions[1]).toMatch(/Copy every item you keep EXACTLY/);
+    expect(instructions[1]).toContain('Keep every option the brief states, and every other option in your previous model unless you ADDED it beyond the brief');
+    expect(instructions[1]).not.toContain('Preserve every option');
+    // Adopted: the speculative factors are gone and Olumi's option now sets the level it lacked.
+    expect(out.within_compact_limits).toBe(true);
+    expect(graph.nodes.some((n) => n.label.startsWith('Speculative'))).toBe(false);
+    expect(phasedLevels(graph)).toContain(AVAILABILITY);
+    // The loop the retry kept is broken by admission, and said once, in the drafter's labels.
+    expect(loopWithheld(out)).toEqual([`${AVAILABILITY}->${DELAY}`]);
+    expect(cycleFree(graph)).toBe(true);
+    const lines = saidAbout(out, 'AI feature availability', 'AI release delay');
+    expect(lines, JSON.stringify(out.not_represented)).toHaveLength(1);
+    expect(lines[0]).toContain('the link from "AI feature availability" to "AI release delay" was left out');
+  });
+
+  it('CONTRAST (row 1): the same oversized loop with NO gap takes #1898\'s size-only retry — nothing is asked', async () => {
+    const { out, calls, inputs } = await build(extended(servedCandidate(), speculative('factors', 5)), servedCandidate());
+    expect([out.size_retried, calls]).toEqual([true, 2]);
+    expect(inputs[1]).toContain('Your previous model, to shrink:');
+    expect(inputs[1]).not.toContain('Construction issues');
+  });
+
+  it('RED (row 1b): WITHIN the limit + gap + loop — both are asked; a retry that breaks the loop but leaves the gap is adopted (a loop asked is a reason of its own)', async () => {
+    const first = withGap(servedCandidate());
+    const loopBroken = withGap(withLinks((ls) => [...ls.filter((l) => l !== DELAY_TO_AVAIL), L('AI release delay', 'New Pro conversions', 'negative')]));
+    const { out, graph, calls, inputs, instructions } = await build(first, loopBroken);
+    expect(out.size_retried).toBe(false);
+    expect(calls).toBe(2);
+    expect(issues(inputs[1]!)).toEqual([GAP_ISSUE, SERVED_LOOP_ISSUE]);
+    expect(inputs[1]).toContain(`Candidate to repair: ${JSON.stringify(first)}`);
+    expect(instructions[1]).toContain('Preserve every option and risk hypothesis');
+    // Adopted by identity: the risk now routes on to what it threatens, and nothing is withheld for a loop.
+    expect(has(graph, DELAY, NEW_CONVERSIONS)).toBe(true);
+    expect(has(graph, DELAY, AVAILABILITY)).toBe(false);
+    expect(loopWithheld(out)).toEqual([]);
+    expect(phasedLevels(graph)).not.toContain(AVAILABILITY);
+  });
+
+  it('CONTROL (row 1b): with NO loop, a gap-only retry that leaves the gap is NOT adopted (#1891: coverage alone must cover strictly more)', async () => {
+    // By from/to, not object identity: `withGap` clones the links.
+    const acyclic = (c: CandidateModel) => ({ ...c, links: (c.links as Link[]).filter((l) => !(l.from === DELAY_TO_AVAIL.from && l.to === DELAY_TO_AVAIL.to)) }) as unknown as CandidateModel;
+    const first = acyclic(withGap(servedCandidate()));
+    const echo = acyclic(withGap(withLinks((ls) => [...ls, L('AI release delay', 'New Pro conversions', 'negative')])));
+    const { graph, calls, inputs } = await build(first, echo);
+    expect(calls).toBe(2);
+    expect(issues(inputs[1]!)).toEqual([GAP_ISSUE]);
+    // Refused: the first draft is what registered — the retry's extra link is not there.
+    expect(has(graph, DELAY, NEW_CONVERSIONS)).toBe(false);
+  });
+});
