@@ -1737,13 +1737,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     //
     // Pinned by `__tests__/run-analysis-derived-constraint-target.test.ts`,
     // which executes this handler and reads the verdict off the persisted fact.
-    // ⛔ The leader's result on a limit whose target it SETS at Olumi's own estimate is that estimate restated, not a
-    // check (AI Quality, #70 5844226031): read off the graph this run analysed, and passed as the FIFTH argument —
-    // the fourth stays deliberately omitted (see above).
+    // ⛔ The leader's result on a limit whose target it SETS at a level that is not the user's own is that level
+    // restated, not a check (AI Quality, #70 5844226031): read off the options PLoT received, and passed as the FIFTH
+    // argument — the fourth stays deliberately omitted (see above).
+    // WIRE, not graph (review 5844327116): a status quo the gate HELD sets the target on the wire only.
     const leaderEstimatedTargetIds = collectLeaderEstimatedTargetIds(
       graphForAnalysis,
       ratifiedConstraints,
       leadingOptionId ?? null,
+      { options: submittedOptions, held: gate.held },
     );
     if (leaderEstimatedTargetIds.size > 0) {
       log.info(

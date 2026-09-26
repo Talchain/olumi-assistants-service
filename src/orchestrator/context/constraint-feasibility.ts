@@ -35,6 +35,7 @@ import type { ConstraintVerdict as ContractConstraintVerdict } from "@talchain/s
 import { EnrichmentScaleProvenanceSchema } from "@talchain/schemas/boundary";
 
 import { readOptionResultSources } from "./option-result-source.js";
+import { classifyValueSource, earnsAuthorshipCredit } from "../../cee/graph-readiness/obligation-provenance.js";
 
 export interface WinnerConstraintFeasibility {
   /** True when the WINNING option violates a hard constraint. */
@@ -609,39 +610,69 @@ const nodeCarriesNoQuantity = constraintTargetCarriesNoQuantity;
 /**
  * ⛔ THE LIMITS WHOSE LEADER RESULT IS OLUMI'S OWN ESTIMATE, NOT A CHECK (AI Quality, #70 5844226031).
  *
- * An option that SETS a limit's target (its `interventions[<target>]`) is compared at the level it sets once ISL
- * scores such rows (ISL #179): every draw carries that level, so its result is a flat 1 or 0. When that level is the
- * USER's (`user_specified`, or `brief_extraction` — the same `user_stated` class in `obligation-provenance.ts`), the
- * result is a real check of what they told us. When it is anything else — `cee_hypothesis` (a starting-point fill, an
- * approved Olumi estimate) or an entry with no stated source — the "check" only restates Olumi's guess, and a
- * `decision_grade` scale marker cannot tell the two apart: it certifies the RANGE, not whose level produced the score.
+ * An option that SETS a limit's target is compared at the level it sets once ISL scores such rows (ISL #179): every
+ * draw carries that level, so its result is a flat 1 or 0. When that level is the USER's own figure, the result is a
+ * real check of what they told us. When it is not — Olumi's estimate (`cee_hypothesis`, a `cee_inference` observed
+ * level), a ratified-only estimate (`user_confirmed`), or a level with no readable owner — the "check" only restates
+ * the guess, and a `decision_grade` scale marker cannot tell the two apart: it certifies the RANGE, not whose level
+ * produced the score.
  *
- * Returns the ratified constraint ids whose target the LEADING option sets with a non-user level. Only the leader
- * matters: the verdict is the leader's. Pure; reads the graph the run ANALYSED (the one whose options went to PLoT).
- * Empty on anything malformed or absent — the caller then gets today's verdict exactly.
+ * WHOSE LEVEL, from ONE authority: `earnsAuthorshipCredit(classifyValueSource(stamp))` (`obligation-provenance.ts`),
+ * the predicate that file names for exactly this question ("must NOT be used to unlock comparative_leader … That is
+ * the authorship question"). No second list of sources lives here.
+ *
+ * WHICH LEVEL, from what PLoT RECEIVED (review of 3f2f6714, 5844327116): the leader's WIRE option (`gate.options`)
+ * decides whether it sets the target, because a status quo the gate HELD sets it on the wire only. For a factor the
+ * gate held on the leader (`gate.held`), the level IS that factor's own observed level, so its owner is the factor's
+ * `observed_state.source`; otherwise it is the intervention entry's own `source` (the wire entry, then the graph's).
+ * Without `wire`, the graph's option node is read (the pre-review behaviour, kept for direct callers).
+ *
+ * Returns the ratified constraint ids whose target the LEADING option sets with a level that is not the user's own.
+ * Only the leader matters: the verdict is the leader's. Pure; empty on anything malformed or absent.
  */
-const USER_LEVEL_SOURCES: ReadonlySet<string> = new Set(['user_specified', 'brief_extraction']);
+export interface LeaderWireOptions {
+  /** The options PLoT received, pre-projection objects (`run-analysis.ts` `gate.options`). */
+  readonly options: ReadonlyArray<Record<string, unknown>>;
+  /** The gate's hold record: which factor ids CEE supplied on which option (`gate.held`). */
+  readonly held: ReadonlyArray<{ readonly option_id: string; readonly factor_ids: readonly string[] }>;
+}
+
+const sourceOf = (entry: unknown): unknown =>
+  entry !== null && typeof entry === 'object' ? (entry as { source?: unknown }).source : undefined;
 
 export function collectLeaderEstimatedTargetIds(
   graph: unknown,
   ratified: readonly RatifiedConstraint[],
   leadingOptionId: string | null | undefined,
+  wire?: LeaderWireOptions,
 ): Set<string> {
   const out = new Set<string>();
   if (typeof leadingOptionId !== 'string' || leadingOptionId.length === 0) return out;
-  const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
-  if (!Array.isArray(nodes)) return out;
-  const leader = nodes.find(
-    (n): n is Record<string, unknown> => n !== null && typeof n === 'object' && (n as { id?: unknown }).id === leadingOptionId,
-  );
-  const interventions = leader?.interventions;
-  if (interventions === null || typeof interventions !== 'object') return out;
+  const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  const nodes: Record<string, unknown>[] = Array.isArray(rawNodes)
+    ? rawNodes.filter((n): n is Record<string, unknown> => n !== null && typeof n === 'object')
+    : [];
+  const nodeById = (id: string) => nodes.find((n) => n.id === id);
+  const asObject = (v: unknown): Record<string, unknown> | undefined =>
+    v !== null && typeof v === 'object' ? (v as Record<string, unknown>) : undefined;
+  const graphInterventions = asObject(nodeById(leadingOptionId)?.interventions);
+  let setBy: Record<string, unknown> | undefined;
+  let heldFactors: ReadonlySet<string> = new Set();
+  if (wire !== undefined) {
+    const option = wire.options.find((o) => o.id === leadingOptionId || o.option_id === leadingOptionId);
+    setBy = asObject(option?.interventions);
+    heldFactors = new Set(wire.held.filter((h) => h.option_id === leadingOptionId).flatMap((h) => h.factor_ids));
+  } else {
+    setBy = graphInterventions;
+  }
+  if (setBy === undefined) return out;
   for (const c of ratified) {
     if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
-    if (!Object.prototype.hasOwnProperty.call(interventions, c.node_id)) continue;
-    const entry = (interventions as Record<string, unknown>)[c.node_id];
-    const source = entry !== null && typeof entry === 'object' ? (entry as { source?: unknown }).source : undefined;
-    if (typeof source === 'string' && USER_LEVEL_SOURCES.has(source)) continue;
+    if (!Object.prototype.hasOwnProperty.call(setBy, c.node_id)) continue;
+    const stamp = heldFactors.has(c.node_id)
+      ? sourceOf(asObject(nodeById(c.node_id))?.observed_state)
+      : (sourceOf(setBy[c.node_id]) ?? sourceOf(graphInterventions?.[c.node_id]));
+    if (earnsAuthorshipCredit(classifyValueSource(stamp))) continue;
     out.add(c.constraint_id);
   }
   return out;

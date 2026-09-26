@@ -113,3 +113,67 @@ describe('deriveConstraintVerdict — rule 3 (d)', () => {
     expect(deriveConstraintVerdict(U2(), [LIMIT], LEADER, undefined, ids).state).toBe('evaluated_feasible');
   });
 });
+
+describe('the WIRE path — what PLoT received decides (review of 3f2f6714, 5844327116)', () => {
+  /** A status quo the gate HELD: no persisted interventions; the wire carries the factors' own observed levels. */
+  const heldGraph = (churnSource: string | undefined) => ({
+    nodes: [
+      { id: 'goal', kind: 'goal', label: 'MRR' },
+      { id: 'fac_price', kind: 'factor', label: 'Price', observed_state: { value: 0.49, raw_value: 49, source: 'brief_extraction' } },
+      {
+        id: 'fac_churn', kind: 'factor', label: 'Monthly churn',
+        observed_state: { value: 0.04, raw_value: 4, cap: 100, ...(churnSource === undefined ? {} : { source: churnSource }) },
+      },
+      { id: 'opt_raise', kind: 'option', label: 'Keep things as they are', is_baseline: true },
+    ],
+    edges: [],
+  });
+  const wire = (heldFactors: string[]) => ({
+    options: [
+      {
+        id: LEADER,
+        option_id: LEADER,
+        interventions: Object.fromEntries(heldFactors.map((f) => [f, f === 'fac_churn' ? { value: 0.04, raw_value: 4 } : { value: 0.49, raw_value: 49 }])),
+      },
+    ],
+    held: [{ option_id: LEADER, factor_ids: heldFactors }],
+  });
+
+  it.each([
+    ["Olumi's inferred level (cee_inference)", 'cee_inference'],
+    ['an estimate the user only CONFIRMED (user_confirmed: ratified, not authored)', 'user_confirmed'],
+    ['a level with no readable owner', undefined],
+  ])('RED: a held status quo sets the target at %s → listed', (_n, src) => {
+    expect([...collectLeaderEstimatedTargetIds(heldGraph(src), [LIMIT], LEADER, wire(['fac_price', 'fac_churn']))]).toEqual(['gc_u2']);
+  });
+
+  it.each([
+    ["the user's brief (brief_extraction)", 'brief_extraction'],
+    ["the user's own chat edit (user_override)", 'user_override'],
+  ])('CONTROL: a held status quo whose held level is %s → not listed', (_n, src) => {
+    expect([...collectLeaderEstimatedTargetIds(heldGraph(src), [LIMIT], LEADER, wire(['fac_price', 'fac_churn']))]).toEqual([]);
+  });
+
+  it('CONTROL: a held status quo whose held factors do NOT include the target → not listed', () => {
+    expect([...collectLeaderEstimatedTargetIds(heldGraph('cee_inference'), [LIMIT], LEADER, wire(['fac_price']))]).toEqual([]);
+  });
+
+  it('CONTROL: the graph alone cannot see the held level — without `wire` the same case lists nothing (the reviewed gap)', () => {
+    expect([...collectLeaderEstimatedTargetIds(heldGraph('cee_inference'), [LIMIT], LEADER)]).toEqual([]);
+  });
+});
+
+describe('the WIRE path — a persisted (not held) level carries its own source', () => {
+  const g = graph(undefined); // the graph node sets no churn; only the wire does
+  const wireWith = (entry: unknown) => ({ options: [{ id: LEADER, interventions: { fac_price: { value: 0.59, source: 'user_specified' }, fac_churn: entry } }], held: [] });
+
+  it("RED: the wire entry is Olumi's estimate (cee_hypothesis) → listed", () => {
+    expect([...collectLeaderEstimatedTargetIds(g, [LIMIT], LEADER, wireWith({ value: 0.03, source: 'cee_hypothesis' }))]).toEqual(['gc_u2']);
+  });
+  it("CONTROL: the wire entry is the user's (user_specified) → not listed", () => {
+    expect([...collectLeaderEstimatedTargetIds(g, [LIMIT], LEADER, wireWith({ value: 0.03, source: 'user_specified' }))]).toEqual([]);
+  });
+  it('RED: a bare-number wire entry with no graph entry to name its owner → listed (unattributed)', () => {
+    expect([...collectLeaderEstimatedTargetIds(g, [LIMIT], LEADER, wireWith(0.03))]).toEqual(['gc_u2']);
+  });
+});

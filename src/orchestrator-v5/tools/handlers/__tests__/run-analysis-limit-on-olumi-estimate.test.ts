@@ -76,7 +76,11 @@ async function persistedVerdict(leaderChurn: Rec | undefined): Promise<{ state: 
     graph,
     options: [
       { id: 'opt_hold', option_id: 'opt_hold', label: 'Keep £49', interventions: { fac_price: 0.49 } },
-      { id: 'opt_raise', option_id: 'opt_raise', label: '£59 with win-back', interventions: { fac_price: 0.59 } },
+      {
+        id: 'opt_raise', option_id: 'opt_raise', label: '£59 with win-back',
+        // Mirrors the graph node, as the loader does: the options PLoT receives carry the same levels.
+        interventions: { fac_price: 0.59, ...(leaderChurn === undefined ? {} : { fac_churn: leaderChurn.value as number }) },
+      },
     ],
     goal_node_id: 'goal',
     goal_constraints: [LIMIT],
@@ -113,3 +117,64 @@ describe('WIRE: the persisted verdict when the leader sets the limited quantity'
     });
   });
 });
+
+// ── A status quo the gate HELD (review of 3f2f6714, 5844327116): the leader sets the target on the WIRE only ─────────
+function heldGraph(churnSource: string): Rec {
+  return {
+    nodes: [
+      { id: 'goal', kind: 'goal', label: 'MRR' },
+      { id: 'fac_price', kind: 'factor', label: 'Pro plan price', observed_state: { value: 0.49, raw_value: 49, cap: 100, source: 'brief_extraction' } },
+      { id: 'fac_churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.04, raw_value: 4, cap: 100, unit: '%', source: churnSource } },
+      { id: 'opt_hold', kind: 'option', label: 'Win-back at 3%', interventions: {
+        fac_price: { value: 0.49, source: 'user_specified' }, fac_churn: { value: 0.03, raw_value: 3, source: 'user_specified' } } },
+      { id: 'opt_raise', kind: 'option', label: 'Keep things as they are', is_baseline: true },
+    ],
+    edges: [
+      { from: 'fac_price', to: 'goal', strength: { mean: 0.6, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+      { from: 'fac_churn', to: 'goal', strength: { mean: -0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'negative' },
+    ],
+    goal_constraints: [LIMIT],
+  };
+}
+
+async function heldVerdict(churnSource: string): Promise<{ state: unknown; mayName: unknown; leaderWire: unknown }> {
+  const graph = heldGraph(churnSource);
+  const snapshot = {
+    graph,
+    options: [
+      { id: 'opt_hold', option_id: 'opt_hold', label: 'Win-back at 3%', interventions: { fac_price: 0.49, fac_churn: 0.03 } },
+      { id: 'opt_raise', option_id: 'opt_raise', label: 'Keep things as they are', is_baseline: true, interventions: {} },
+    ],
+    goal_node_id: 'goal',
+    goal_constraints: [LIMIT],
+    rawPersistedGraph: graph,
+  } as unknown as RunAnalysisScenarioSnapshot;
+  const scenarioReader: ScenarioReader = vi.fn(() => Promise.resolve(snapshot));
+  let sent: Rec | undefined;
+  const run = vi.fn((payload: Rec) => { sent = payload; return Promise.resolve(JSON.parse(U2) as V2RunResponseEnvelope); });
+  const plotClient = { run, validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient;
+  const outcome = await createRunAnalysisHandler({ plotClient, scenarioReader })(invocation());
+  const fact = outcome.handler_facts[0]!;
+  if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+  const v = fact.result.constraint_verdict as { constraint_verdict_state?: unknown; may_name_leading_option?: unknown };
+  const leaderWire = ((sent?.options as Rec[] | undefined) ?? []).find((o) => o.id === 'opt_raise' || o.option_id === 'opt_raise')?.interventions;
+  return { state: v.constraint_verdict_state, mayName: v.may_name_leading_option, leaderWire };
+}
+
+describe('WIRE: a HELD status quo leads (the verbatim U2 leader is opt_raise)', () => {
+  it("PREMISE: the gate held churn on the leader's wire — the graph node carries no interventions", async () => {
+    const { leaderWire } = await heldVerdict('cee_inference');
+    expect(Object.keys((leaderWire ?? {}) as Rec).sort()).toEqual(['fac_churn', 'fac_price']);
+  });
+
+  it("RED: the held churn is Olumi's inferred level → NOT checked (unevaluated), the leader is withheld", async () => {
+    const { state, mayName } = await heldVerdict('cee_inference');
+    expect({ state, mayName }).toEqual({ state: 'unevaluated', mayName: false });
+  });
+
+  it("CONTROL: the held churn is the user's own figure from the brief → still a check", async () => {
+    const { state, mayName } = await heldVerdict('brief_extraction');
+    expect({ state, mayName }).toEqual({ state: 'evaluated_feasible', mayName: true });
+  });
+});
+
