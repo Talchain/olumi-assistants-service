@@ -48,6 +48,7 @@ import {
   REPAIR_CODES,
   type RepairEntry,
 } from '@talchain/schemas';
+import type { LinkSizing, MagnitudeAuthor } from '../../cee/magnitude/link-effect.js';
 
 /**
  * A magnitude the model did not author, expressed as a projection default.
@@ -85,6 +86,15 @@ export interface CandidateLink {
    * the coarse mapping below applies, which is what the banked contract needs.
    */
   readonly provenance_source?: string;
+  /**
+   * The magnitude contract (D1): the change in the TARGET's own unit (points for a percentage), caused by
+   * `effect_per_source_change` of the SOURCE in its own unit (1 = switching a yes/no on). `null` means the
+   * drafter could not say. Absent on a candidate from before the field, which means the same.
+   */
+  readonly effect_amount?: number | null;
+  readonly effect_per_source_change?: number | null;
+  /** Who stated the size. `null`/absent falls back to the link's own `provenance`. */
+  readonly effect_provenance?: string | null;
 }
 
 export interface AdmittedEdge {
@@ -93,7 +103,8 @@ export interface AdmittedEdge {
   strength: { mean: number; std: number };
   exists_probability: number;
   effect_direction?: 'positive' | 'negative' | 'unknown';
-  provenance?: { source: string; reasoning?: string };
+  /** `magnitude` (D9): who sized it. Absent on an edge that keeps today's projection unchanged. */
+  provenance?: { source: string; reasoning?: string; magnitude?: MagnitudeAuthor };
   /** CIL flag — true when the magnitude is a projection default, not authored. */
   defaulted?: boolean;
 }
@@ -146,12 +157,55 @@ function provenanceSourceFor(candidateProvenance: string): string {
 }
 
 /**
+ * What the ledger says beside a sized link, whatever the edge carries: the question the user is asked
+ * (`.magnitude_question`, routed to `open_questions` by `build-model.ts`), or — when a stated size could not be used
+ * and nothing is asked — why (`.magnitude_unconvertible`, said in `not_represented`).
+ */
+function magnitudeNotes(fieldPath: string, link: CandidateLink, sized: LinkSizing): RepairEntry[] {
+  const notes: RepairEntry[] = [];
+  if (sized.question !== undefined) {
+    notes.push({
+      code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE,
+      layer: 'cee',
+      field_path: `${fieldPath}.magnitude_question`,
+      before: sized.stated_strength ?? null,
+      after: sized.mean,
+      reason: sized.question,
+      severity: 'warn',
+    });
+  } else if (sized.problem === 'unconvertible' || sized.problem === 'sign_conflict') {
+    notes.push({
+      code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE,
+      layer: 'cee',
+      field_path: `${fieldPath}.magnitude_unconvertible`,
+      before: { effect_amount: link.effect_amount ?? null, effect_per_source_change: link.effect_per_source_change ?? null },
+      after: null,
+      reason:
+        `The size stated for this link (${sized.statement ?? 'as given'}) ` +
+        (sized.problem === 'unconvertible'
+          ? 'could not be read on the ranges the two are measured on'
+          : "runs the other way from the link's own direction") +
+        ', so the standard placeholder strength is used instead. It is not a measurement.',
+      severity: 'warn',
+    });
+  }
+  return notes;
+}
+
+/**
  * Admit candidate links as canonical edges.
  *
  * Total: never throws on a well-formed link, never silently drops one — an
  * un-admittable link appears in `withheld` with its reason.
+ *
+ * `sizing` (the magnitude contract, `cee/magnitude/link-effect.ts`) is keyed `from::to` and decided by the caller,
+ * which alone knows both ends' frames and the options' levels. A link it does not size, or sizes `unchanged`, is
+ * admitted exactly as before.
  */
-export function admitCandidateLinks(links: readonly CandidateLink[]): AdmissionResult {
+export function admitCandidateLinks(
+  links: readonly CandidateLink[],
+  sizing: ReadonlyMap<string, LinkSizing> = new Map(),
+): AdmissionResult {
   const edges: AdmittedEdge[] = [];
   const loss: RepairEntry[] = [];
   const withheld: WithheldLink[] = [];
@@ -160,6 +214,7 @@ export function admitCandidateLinks(links: readonly CandidateLink[]): AdmissionR
 
   for (const link of links) {
     const fieldPath = `edges[${link.from}::${link.to}]`;
+    const sized = typeof link.strength_mean === 'number' ? undefined : sizing.get(`${link.from}::${link.to}`);
 
     if (link.direction === 'unknown') {
       withheld.push({
@@ -171,6 +226,85 @@ export function admitCandidateLinks(links: readonly CandidateLink[]): AdmissionR
           'the sign and a zero mean would assert no effect. Withheld from the canonical ' +
           'graph rather than fabricated.',
       });
+      continue;
+    }
+
+    if (sized !== undefined && sized.outcome !== 'unchanged') {
+      // ⭐ THE MAGNITUDE CONTRACT. The mean is the stated size read on the two frames (an estimate, or the user's
+      // own, D7), or Olumi's frame-aware placeholder (D5/D6). Every number that is ours is marked and ledgered
+      // field by field, exactly as below, and the edge says who sized it (D9).
+      const meanOurs = sized.outcome === 'placeholder';
+      const stdAuthored = typeof link.strength_std === 'number';
+      const existenceStated = typeof link.existence_probability === 'number';
+      const projected = [
+        ...(meanOurs ? ['strength.mean'] : []),
+        ...(stdAuthored ? [] : ['strength.std']),
+        ...(existenceStated ? [] : ['exists_probability']),
+      ];
+      const std = stdAuthored ? (link.strength_std as number) : sized.std;
+      const key = `${link.from}::${link.to}`;
+      const edge: AdmittedEdge = {
+        from: link.from,
+        to: link.to,
+        strength: { mean: sized.mean, std },
+        exists_probability: existenceStated ? (link.existence_probability as number) : DEFAULT_EXISTS_PROBABILITY,
+        effect_direction: link.direction,
+        provenance: { source: link.provenance_source ?? provenanceSourceFor(link.provenance), magnitude: sized.magnitude! },
+      };
+      projected_fields[key] = projected;
+      if (projected.length > 0) edge.defaulted = true;
+      if (!meanOurs) authored_magnitudes.push(key);
+      if (!stdAuthored) {
+        loss.push({
+          code: REPAIR_CODES.CLAMP_STD_MINIMUM,
+          layer: 'cee',
+          field_path: `${fieldPath}.strength.std`,
+          before: null,
+          after: std,
+          reason:
+            'Nobody stated how uncertain this strength is. Olumi uses half its size as the spread. ' +
+            'It is not a measurement of anyone\'s confidence.',
+          severity: 'info',
+        });
+      }
+      loss.push(meanOurs
+        ? {
+            code: REPAIR_CODES.APPLY_SIGN_FROM_DIRECTION,
+            layer: 'cee',
+            field_path: `${fieldPath}.strength.mean`,
+            before: sized.stated_strength ?? null,
+            after: sized.mean,
+            reason:
+              'Direction was authored but no size Olumi could use. Applied Olumi\'s placeholder, sized to keep the ' +
+              'target within its range across the options, as an ANALYSIS PROJECTION, marked `defaulted`. This is not ' +
+              'a measurement and must never be presented as user- or evidence-authored.',
+            severity: 'warn',
+          }
+        : {
+            code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE,
+            layer: 'cee',
+            field_path: `${fieldPath}.strength.mean`,
+            before: { effect_amount: link.effect_amount ?? null, effect_per_source_change: link.effect_per_source_change ?? null },
+            after: sized.mean,
+            reason:
+              `${sized.outcome === 'user_stated' ? 'Stated by the user' : 'Olumi\'s estimate'}: ${sized.statement ?? 'as given'}. ` +
+              'Read on the ranges the two are measured on, that is the strength shown.',
+            severity: 'info',
+          });
+      if (!existenceStated) loss.push({
+        code: REPAIR_CODES.DEFAULT_EXISTS_PROBABILITY,
+        layer: 'cee',
+        field_path: `${fieldPath}.exists_probability`,
+        before: null,
+        after: DEFAULT_EXISTS_PROBABILITY,
+        reason:
+          'Nobody stated how likely this link is to exist. Applied the canonical default. ' +
+          'A defaulted value and an elicited value are the same number, so the ledger is the ' +
+          'only place the difference survives.',
+        severity: 'info',
+      });
+      loss.push(...magnitudeNotes(fieldPath, link, sized));
+      edges.push(edge);
       continue;
     }
 
@@ -253,6 +387,9 @@ export function admitCandidateLinks(links: readonly CandidateLink[]): AdmissionR
         'only place the difference survives.',
       severity: 'info',
     });
+
+    // Today's projection, unchanged. A stated size it could not use, or a question it raises, is still said.
+    if (sized !== undefined) loss.push(...magnitudeNotes(fieldPath, link, sized));
 
     edges.push(edge);
   }
