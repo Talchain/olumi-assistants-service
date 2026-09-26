@@ -361,6 +361,13 @@ describe('Run 1 wording: churn as "% of Pro subscribers per month" is a percenta
     expect(e.provenance?.magnitude).toBeUndefined();
   });
 
+  it('ONE RULE (R&C #2034 B1): a 0.5 "% per month" level limit is NOT a percentage level (`percentLevelFrame`) — ±0.5 kept', async () => {
+    const c = run1();
+    c.constraints = [{ ...c.constraints[0]!, value: 0.5, unit: '% per month' }];
+    const { graph } = await register(c);
+    expect(edge(graph, 'price_sensitivity', CHURN).strength).toMatchObject({ mean: 0.5, std: 0.125 });
+  });
+
   it('CONTRAST: a DELTA limit in % on churn ("no more than 10% higher") does not make it a level — ±0.5 kept', async () => {
     const c = run1();
     c.constraints = [{ ...c.constraints[0]!, frame: 'delta' }];

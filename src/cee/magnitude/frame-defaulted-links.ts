@@ -17,7 +17,7 @@
  */
 import { STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 
-import { isPercentWithPeriod } from '../../orchestrator-v5/agent-lane/admit-constraint.js';
+import { percentLevelFrame } from '../../orchestrator-v5/agent-lane/admit-constraint.js';
 import { sizeLink, type MagnitudeNode } from './link-effect.js';
 
 type Rec = Record<string, unknown>;
@@ -47,7 +47,7 @@ function sizedByOlumi(edge: Rec): boolean {
  * ⚠ THE DOMAIN THE ENGINE JUDGES A LIMITED LEVEL ON. A percentage level spelled with a population ("% of Pro subscribers
  * per month", the served starting point) is not a period-only percent, so on its words alone `levelDomain` gives it no
  * domain. That is deliberate for open language ("% change …" is no level). A LEVEL limit on the node, admitted in the
- * canonical percent unit, is the structured field that says it is one: `MagnitudeNode.percent_level`, the ONE rule
+ * canonical percent unit (`percentLevelFrame`, the ONE rule admission also asks), is the structured field that says it is one: `MagnitudeNode.percent_level`, the ONE rule
  * `levelDomain` applies for admission and here alike (with its typed guard: no option level below zero).
  */
 function percentLevelIds(graph: Rec): Set<string> {
@@ -55,7 +55,7 @@ function percentLevelIds(graph: Rec): Set<string> {
   const limits = Array.isArray(graph.goal_constraints) ? graph.goal_constraints : [];
   for (const c of limits) {
     if (!isRec(c) || c.value_frame !== 'level' || typeof c.node_id !== 'string' || typeof c.unit !== 'string') continue;
-    if (isPercentWithPeriod(c.unit)) out.add(c.node_id);
+    if (typeof c.value === 'number' && percentLevelFrame(c.value, c.unit) !== undefined) out.add(c.node_id);
   }
   return out;
 }

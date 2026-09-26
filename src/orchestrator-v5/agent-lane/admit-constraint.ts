@@ -29,7 +29,7 @@
  */
 
 import { REPAIR_CODES, type RepairEntry } from '@talchain/schemas';
-import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS } from '../../cee/draft/records/unit-scale-class.js';
+import { classifyUnitScaleClass, UNIT_SCALE_CLASS_TOKENS, unitPinnedScaleFrame } from '../../cee/draft/records/unit-scale-class.js';
 import { isCurrencyUnit, sameUnit } from '../../utils/currency-alphabet.js';
 
 export type CandidateOperator = '>=' | '<=' | '>' | '<';
@@ -221,6 +221,19 @@ export function canonicaliseLimitUnit(value: number, unit: string | undefined, t
   }
 
   return verbatim;
+}
+
+/**
+ * ⭐ THE ONE "IS THIS LIMIT A PERCENTAGE LEVEL?" RULE (R&C #2034 B1). A limit is one when its unit pins a frame on its own
+ * (`unitPinnedScaleFrame`) AND the canonicaliser carries it as a plain `"%"` on that frame: a percent head with at most a
+ * period, above 1 and up to 100. Returns that frame, else `undefined`. Admission (both of `admit-model`'s blocks) and a
+ * later value edit (`frame-defaulted-links`) all ask THIS, so a limit is never a level on one path and not on another
+ * ("0.5 % per month" is admitted verbatim and is NOT one: the percent arm needs |v| ≥ 1).
+ */
+export function percentLevelFrame(value: number, unit: string | undefined): number | undefined {
+  const frame = unitPinnedScaleFrame(unit, value);
+  if (frame === undefined) return undefined;
+  return canonicaliseLimitUnit(value, unit, { scale_frame: frame }).unit === '%' ? frame : undefined;
 }
 
 export interface ConstraintAdmissionResult {

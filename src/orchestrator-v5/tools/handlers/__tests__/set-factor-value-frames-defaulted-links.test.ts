@@ -105,6 +105,22 @@ describe('set_factor_value: a level that arrives after construction sizes Olumi\
     for (const e of links(result, 'price_sensitivity', 'monthly_churn')) expect(e.strength).toEqual({ mean: 0.5, std: 0.125 });
   });
 
+  it('RED (ONE RULE, R&C #2034 B1): a 0.5 "% per month" level limit is NOT a percentage level on this path either (admission agrees) → default kept', async () => {
+    const graph = served('run1_step01');
+    const limit = (graph.goal_constraints as Array<Record<string, unknown>>).find((c) => c.node_id === 'monthly_churn')!;
+    Object.assign(limit, { value: 0.5, unit: '% per month' });
+    const result = await setLevel(graph, 'monthly_churn', 5, CHURN_UNIT);
+    for (const e of links(result, 'ai_feature_availability', 'monthly_churn')) expect(e.strength).toEqual({ mean: -0.5, std: 0.125 });
+  });
+
+  it('ONE RULE: a 10 "% change" level limit pins a 0–100 frame but the canonicaliser keeps it a change → NOT a level, default kept', async () => {
+    const graph = served('run1_step01');
+    const limit = (graph.goal_constraints as Array<Record<string, unknown>>).find((c) => c.node_id === 'monthly_churn')!;
+    Object.assign(limit, { value: 10, unit: '% change' });
+    const result = await setLevel(graph, 'monthly_churn', 5, CHURN_UNIT);
+    for (const e of links(result, 'ai_feature_availability', 'monthly_churn')) expect(e.strength).toEqual({ mean: -0.5, std: 0.125 });
+  });
+
   it('CONTROL: a size the USER gave (user_specified) on the same link is never touched', async () => {
     const graph = served('run1_step01');
     const userLink = graph.edges.find((e) => e.from === 'ai_feature_availability' && e.to === 'monthly_churn')!;
