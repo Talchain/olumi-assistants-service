@@ -289,7 +289,9 @@ export interface AgentCapabilities {
     assumptions: readonly { factor_label: string; value: number; unit: string; basis: string; revise?: boolean }[];
   }): Promise<ToolResult>;
   proposeNewOption(ctx: AgentToolContext, args: {
-    label: string; acts_on: { factor_label: string; direction: 'positive' | 'negative' }[]; rationale: string;
+    label?: string; acts_on?: { factor_label: string; direction: 'positive' | 'negative' }[]; rationale: string;
+    /** Several options as ONE change (F4): each `{label, acts_on}`, up to 4. */
+    options?: { label: string; acts_on: { factor_label: string; direction: 'positive' | 'negative' }[] }[];
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
     interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
