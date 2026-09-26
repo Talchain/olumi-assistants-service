@@ -1,5 +1,5 @@
 /**
- * ⛔ THE STATED GOAL DIRECTION NEVER REACHES THE ENGINE FROM THE AGENT LANE.
+ * ⭐ THE STATED GOAL DIRECTION REACHES THE ENGINE FROM THE AGENT LANE.
  *
  * Served on CEE 20fe36f5 (25 Sep 23:45Z, OpenAI witness P-S2): "We want Pro MRR to
  * reach at least £20,000" built goal `pro_mrr` with its level-framed threshold, yet
@@ -10,31 +10,25 @@
  *
  * PLoT (b09c0f2e) reads the sense ONLY as a REQUEST-level `goal_direction`
  * (`'maximise' | 'minimise' | 'target'`, `routes/v2/run.ts` gate enum,
- * `parseGoalDirection(body.goal_direction)`), never from a node. CEE's run_analysis
- * handler writes that key only from `deriveEmittedGoalDirection` — a classifier over
- * the goal LABEL that emits `'minimise'` and nothing else. The candidate's stated
- * `goal.operator` has no GraphV3 carrier (admit-model records it as the
- * `goal_operator` loss), so the stated direction cannot reach the handler at all.
+ * `parseGoalDirection(body.goal_direction)`), never from a node. Before this change
+ * CEE's run_analysis handler wrote that key only from `deriveEmittedGoalDirection` — a
+ * classifier over the goal LABEL that emits `'minimise'` and nothing else — and the
+ * candidate's stated `goal.operator` had no GraphV3 carrier.
+ *
+ * THE FIX, three seams, each proven load-bearing by a mutant:
+ *   1. ADMISSION STAMP — `admit-model.ts` `attestedGoalDirection`: on the USER'S goal
+ *      (`provenance: 'explicit'`) `>=`/`>` → `maximise`, `<=`/`<` → `minimise`.
+ *   2. CARRIER — `cee-v3.ts` NodeV3 declares `goal_direction`, so the production
+ *      loader's `GraphV3.safeParse` keeps it.
+ *   3. FORWARDER — `run-analysis.ts` sends the goal node's attested sense ahead of the
+ *      label classifier (provenance `attested_from_goal_operator`); the attested sense
+ *      wins a disagreement, which is logged.
  *
  * Every assertion reads the payload PLoT RECEIVES, on the real path: strict schema
  * candidate → `buildModelFromBrief` → `/graph/register` body → the production
  * snapshot loader (`loadScenarioSnapshotForRunAnalysis`, which runs
  * `GraphV3.safeParse`) → `createRunAnalysisHandler` with PLoT faked. The goal is
  * bound by its node id.
- *
- * `it.fails` marks the SPEC this lane cannot meet inside its lease. It needs, outside
- * MG's files (measured at 20fe36f5 by a reverted prototype, all four arms GREEN):
- *   1. CARRIER — `src/schemas/cee-v3.ts` NodeV3, beside `goal_threshold_frame`
- *      (:246): declare `goal_direction`. NodeV3 strips undeclared keys, and the
- *      production loader's `GraphV3.safeParse` drops it before the handler.
- *   2. FORWARDER — `src/orchestrator-v5/tools/handlers/run-analysis.ts` (:924-929):
- *      forward the goal node's attested `goal_direction` ahead of the label-derived
- *      `deriveEmittedGoalDirection`, including `'maximise'`, and log the provenance as
- *      attested, not `derived_from_goal_label`.
- * Then admit-model stamps `>=`/`>` → maximise and `<=`/`<` → minimise on the goal node,
- * each `it.fails` becomes a plain `it`, and the "gap is real" control is inverted.
- * The CONTROLS share the same harness, so a broken harness turns a control RED rather
- * than hiding inside an expected failure.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -49,6 +43,7 @@ import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
+import { log } from '../../../utils/telemetry.js';
 
 const SCENARIO = '88888888-8888-4888-8888-888888888888';
 const REQUEST_ID = 'req-mg-goal-direction';
@@ -84,8 +79,8 @@ function candidate(goal: Partial<CandidateModel['goal']>): CandidateModel {
 /** A goal to MAXIMISE, as the served P-S2 brief stated it. */
 const maximise = (operator: '>=' | '>') => candidate({ operator });
 /** A goal to MINIMISE: same model, a quantity the user wants to keep down. */
-const minimise = (operator: '<=' | '<', metric = 'Monthly churn rate') =>
-  candidate({ metric, operator, value: 10, unit: '%' });
+const minimise = (operator: '<=' | '<', metric = 'Monthly churn rate', provenance = 'explicit') =>
+  candidate({ metric, operator, value: 10, unit: '%', provenance });
 
 function makeInvocation(): HandlerInvocation {
   return {
@@ -112,9 +107,14 @@ function makeInvocation(): HandlerInvocation {
 }
 
 type Node = { id: string; kind: string; label?: string } & Record<string, unknown>;
+type DirectionEvent = { level: 'info' | 'warn' } & Record<string, unknown>;
 
 /** Candidate → register body → production loader → handler → the body PLoT receives. */
-async function plotBodyFor(model: CandidateModel): Promise<{ body: Record<string, unknown>; registered: { nodes: Node[] } }> {
+async function plotBodyFor(model: CandidateModel): Promise<{
+  body: Record<string, unknown>;
+  registered: { nodes: Node[] };
+  directionEvents: DirectionEvent[];
+}> {
   const wire = { ...model, unknowns: [] };
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let registered: unknown = null;
@@ -143,16 +143,29 @@ async function plotBodyFor(model: CandidateModel): Promise<{ body: Record<string
     return Promise.resolve(structuredClone(happyFixture));
   });
   const plotClient = { run, validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient;
+  // The handler's own goal_direction records, read at the logger (the forwarder's
+  // only disclosure channel), filtered by event name so no other log line is bound.
+  const infoSpy = vi.spyOn(log, 'info');
+  const warnSpy = vi.spyOn(log, 'warn');
   let thrown: unknown;
   try {
     await createRunAnalysisHandler({ plotClient, scenarioReader: async () => snapshot })(makeInvocation());
   } catch (err) {
     thrown = err;
   }
+  const directionEvents: DirectionEvent[] = [];
+  for (const [level, spy] of [['info', infoSpy], ['warn', warnSpy]] as const) {
+    for (const [first] of spy.mock.calls as unknown[][]) {
+      const rec = first as Record<string, unknown> | undefined;
+      if (typeof rec?.event === 'string' && rec.event.startsWith('cee.goal_direction.')) directionEvents.push({ level, ...rec });
+    }
+  }
+  infoSpy.mockRestore();
+  warnSpy.mockRestore();
   // The body is bound at the moment PLoT is called; post-run processing of the
   // canned envelope is not under test. A refusal BEFORE PLoT fails here.
   expect(run, `PLoT was never called: ${String(thrown)}`).toHaveBeenCalledOnce();
-  return { body: captured as Record<string, unknown>, registered: registered as { nodes: Node[] } };
+  return { body: captured as Record<string, unknown>, registered: registered as { nodes: Node[] }, directionEvents };
 }
 
 const goalIn = (graph: unknown, id: string): Node | undefined =>
@@ -175,18 +188,22 @@ describe('the stated goal direction reaches the PLoT /v2/run body', () => {
   });
 
   it('POSITIVE CONTROL (the probe can see the key): a goal LABEL naming a reduction reaches PLoT as minimise', async () => {
-    // The only producer today: the run_analysis label classifier. Proves this
-    // probe observes `goal_direction` on this exact path when anything sends it.
+    // The label classifier is still live, and this probe observes `goal_direction`
+    // on this exact path whatever sends it. The stated `<=` agrees with the label.
     const { body } = await plotBodyFor(minimise('<=', 'Reduce monthly churn'));
     expect(body.goal_node_id).toBe('reduce_monthly_churn');
     expect(body.goal_direction).toBe('minimise');
   });
 
-  it('CONTROL (the gap is real; inverts when the carrier lands): the stated operator is not carried on the goal node', async () => {
-    const { registered } = await plotBodyFor(minimise('<='));
-    const goal = goalIn(registered, 'monthly_churn_rate');
-    expect(goal).toBeDefined();
-    expect(Object.keys(goal ?? {}).filter((k) => /direction|operator|sense/.test(k))).toEqual([]);
+  it('CARRIER: the stated SENSE is on the goal node from registration to the PLoT graph; the raw operator is not', async () => {
+    const { registered, body } = await plotBodyFor(minimise('<='));
+    const stored = goalIn(registered, 'monthly_churn_rate');
+    expect(stored).toBeDefined();
+    // Bound by identity: the goal node, the one sense key, the stated value.
+    expect(Object.keys(stored ?? {}).filter((k) => /direction|operator|sense/.test(k))).toEqual(['goal_direction']);
+    expect(stored?.goal_direction).toBe('minimise');
+    // …and it survives the production loader's GraphV3.safeParse into the graph PLoT gets.
+    expect(goalIn(body.graph, 'monthly_churn_rate')?.goal_direction).toBe('minimise');
   });
 
   it('CONTROL (inexpressible today): the strict schema cannot say "no direction was stated"', () => {
@@ -195,20 +212,82 @@ describe('the stated goal direction reaches the PLoT /v2/run body', () => {
     expect(strict({ ...maximise('>='), goal: { ...goalWithout, operator: null }, unknowns: [] })).toBe(false);
   });
 
-  // ── SPEC (RED at 20fe36f5; needs the cross-lane carrier + forwarder) ───────
+  // ── SPEC: the user's stated operator becomes PLoT's request-level sense ────
   for (const operator of ['<=', '<'] as const) {
-    it.fails(`SPEC: a goal to stay ${operator} a level sends goal_direction=minimise (goal monthly_churn_rate)`, async () => {
-      const { body } = await plotBodyFor(minimise(operator));
+    it(`SPEC: a goal to stay ${operator} a level sends goal_direction=minimise (goal monthly_churn_rate)`, async () => {
+      const { body, directionEvents } = await plotBodyFor(minimise(operator));
       expect(body.goal_node_id).toBe('monthly_churn_rate');
       expect(body.goal_direction).toBe('minimise');
+      // Recorded as ATTESTED, not as derived from the label (the label names no direction).
+      expect(directionEvents).toEqual([
+        expect.objectContaining({
+          level: 'info', event: 'cee.goal_direction.attested', goal_direction: 'minimise',
+          goal_node_id: 'monthly_churn_rate', provenance: 'attested_from_goal_operator', label_derived: null,
+        }),
+      ]);
     });
   }
 
   for (const operator of ['>=', '>'] as const) {
-    it.fails(`SPEC: a goal to reach ${operator} a level sends goal_direction=maximise (goal pro_mrr)`, async () => {
-      const { body } = await plotBodyFor(maximise(operator));
+    it(`SPEC: a goal to reach ${operator} a level sends goal_direction=maximise (goal pro_mrr)`, async () => {
+      const { body, directionEvents } = await plotBodyFor(maximise(operator));
       expect(body.goal_node_id).toBe('pro_mrr');
       expect(body.goal_direction).toBe('maximise');
+      expect(directionEvents).toEqual([
+        expect.objectContaining({
+          level: 'info', event: 'cee.goal_direction.attested', goal_direction: 'maximise',
+          goal_node_id: 'pro_mrr', provenance: 'attested_from_goal_operator',
+        }),
+      ]);
     });
   }
+
+  // ── AN INFERRED GOAL IS NOT THE USER'S: nothing attested, label fallback only ─
+  for (const provenance of ['inferred', 'ai_proposed'] as const) {
+    it(`an ${provenance} goal is not stamped and sends nothing attested (label names no direction ⇒ no key)`, async () => {
+      const { registered, body, directionEvents } = await plotBodyFor(minimise('<=', 'Monthly churn rate', provenance));
+      expect(body.goal_node_id).toBe('monthly_churn_rate');
+      expect(goalIn(registered, 'monthly_churn_rate')).not.toHaveProperty('goal_direction');
+      expect('goal_direction' in body).toBe(false);
+      expect(directionEvents).toEqual([]);
+    });
+
+    it(`an ${provenance} goal whose LABEL names a reduction still gets the label's minimise, recorded as derived`, async () => {
+      // The discriminating twin: the fallback is live on an unattested goal, so the
+      // "no key" above is the stamp being withheld, not the forwarder being dead.
+      const { registered, body, directionEvents } = await plotBodyFor(minimise('<=', 'Reduce monthly churn', provenance));
+      expect(goalIn(registered, 'reduce_monthly_churn')).not.toHaveProperty('goal_direction');
+      expect(body.goal_direction).toBe('minimise');
+      expect(directionEvents).toEqual([
+        expect.objectContaining({
+          level: 'info', event: 'cee.goal_direction.derived', goal_direction: 'minimise',
+          goal_node_id: 'reduce_monthly_churn', provenance: 'derived_from_goal_label',
+        }),
+      ]);
+    });
+  }
+
+  // ── DISAGREEMENT: the user's stated sense wins, and the disagreement is recorded ─
+  it('a label that reads "reduce" with a stated ">=" sends maximise, and records the disagreement', async () => {
+    const { registered, body, directionEvents } = await plotBodyFor(
+      candidate({ metric: 'Reduce monthly churn', operator: '>=', value: 10, unit: '%' }),
+    );
+    expect(body.goal_node_id).toBe('reduce_monthly_churn');
+    expect(body.goal_direction).toBe('maximise');
+    expect(directionEvents).toEqual([
+      expect.objectContaining({
+        level: 'info', event: 'cee.goal_direction.attested', goal_direction: 'maximise',
+        provenance: 'attested_from_goal_operator', label_derived: 'minimise',
+      }),
+      expect.objectContaining({
+        level: 'warn', event: 'cee.goal_direction.label_disagrees', goal_direction: 'maximise',
+        label_derived: 'minimise', goal_node_id: 'reduce_monthly_churn',
+      }),
+    ]);
+    // Available to a disclosure surface from the stored graph alone: the stated
+    // sense sits beside the label that reads the other way.
+    expect(goalIn(registered, 'reduce_monthly_churn')).toMatchObject({
+      label: 'Reduce monthly churn', goal_direction: 'maximise',
+    });
+  });
 });

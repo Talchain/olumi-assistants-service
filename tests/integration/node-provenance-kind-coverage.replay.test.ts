@@ -592,6 +592,14 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
    *   · `threshold_source` is NOT value-bearing: it names WHO stated the target, a provenance, the same
    *     case as `goal_threshold_cap_provenance` above. It asserts no magnitude and must not join.
    */
+  /*
+   * ── DECISION RECORDED, 26 Sep: `goal_direction` (MG, goal direction reaches the engine) ──
+   * The SENSE the user stated for their goal (`'maximise' | 'minimise'`), CEE-minted from the stated
+   * operator and forwarded to PLoT as the request-level `goal_direction`.
+   *   · NOT value-bearing: it is an enum naming which way the goal points, never a quantity about the
+   *     world — the sibling case of `goal_threshold_frame`. It asserts no magnitude, so it must NOT
+   *     join `carriesValue`; the goal's magnitude is still `goal_threshold_raw` beside it.
+   */
   it("the NodeV3 key set is unchanged — a new field forces a value-bearing decision", () => {
     expect(Object.keys(NodeV3.shape).sort()).toEqual([
       // COLLAB Track A, 18 Sep. THE VALUE-BEARING DECISION THIS GUARD DEMANDS,
@@ -609,6 +617,7 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "encoding_map",
       "extractionType",
       "factor_type",
+      "goal_direction",
       "goal_threshold",
       "goal_threshold_cap",
       "goal_threshold_cap_provenance",

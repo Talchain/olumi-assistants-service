@@ -29,6 +29,7 @@ import {
 } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { GraphV3, type GraphV3T } from '../../../../schemas/cee-v3.js';
+import { log } from '../../../../utils/telemetry.js';
 
 const happyFixture = JSON.parse(
   readFileSync('tests/fixtures/plot/v2-run-golden-happy.json', 'utf-8'),
@@ -37,13 +38,26 @@ const happyFixture = JSON.parse(
 const TEST_SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TEST_REQUEST_ID = 'req-goal-direction-wire';
 
-function graphWithGoalLabel(label: string): GraphV3T {
-  return GraphV3.parse({
+function graphWithGoalLabel(
+  label: string,
+  goalExtra: Record<string, unknown> = {},
+  factorExtra: Record<string, unknown> = {},
+): GraphV3T {
+  return GraphV3.parse(rawGraphWithGoalLabel(label, goalExtra, factorExtra));
+}
+
+/** The same graph WITHOUT the NodeV3 parse — what a stored graph looks like before the loader. */
+function rawGraphWithGoalLabel(
+  label: string,
+  goalExtra: Record<string, unknown> = {},
+  factorExtra: Record<string, unknown> = {},
+): { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] } {
+  return {
     nodes: [
-      { id: 'goal_metric', kind: 'goal', label },
+      { id: 'goal_metric', kind: 'goal', label, ...goalExtra },
       { id: 'opt_a', kind: 'option', label: 'Option A', interventions: { fac_lever: 0.8 } },
       { id: 'opt_b', kind: 'option', label: 'Option B', interventions: { fac_lever: 0.2 } },
-      { id: 'fac_lever', kind: 'factor', label: 'Lever' },
+      { id: 'fac_lever', kind: 'factor', label: 'Lever', ...factorExtra },
     ],
     edges: [
       {
@@ -54,7 +68,7 @@ function graphWithGoalLabel(label: string): GraphV3T {
         effect_direction: 'positive',
       },
     ],
-  });
+  };
 }
 
 function makeInvocation(): HandlerInvocation {
@@ -86,7 +100,10 @@ function makeInvocation(): HandlerInvocation {
 
 /** Drive the real handler and return the payload PLoT received. */
 async function payloadForGoalLabel(label: string): Promise<Record<string, unknown>> {
-  const graph = graphWithGoalLabel(label);
+  return payloadForGraph(graphWithGoalLabel(label));
+}
+
+async function payloadForGraph(graph: unknown): Promise<Record<string, unknown>> {
   const snapshot: RunAnalysisScenarioSnapshot = {
     graph,
     options: [
@@ -165,4 +182,90 @@ describe('goal_direction reaches the PLoT payload', () => {
       expect('goal_direction' in payload).toBe(false);
     });
   }
+});
+
+/**
+ * THE ATTESTED SENSE — the goal node's `goal_direction` (CEE-minted from the user's
+ * stated goal operator at construction; NodeV3 carries it) is forwarded AHEAD of the
+ * label classifier, in both senses. Bound at the payload PLoT receives and at the
+ * handler's own `cee.goal_direction.*` records.
+ */
+describe('an attested goal_direction on the goal node reaches the PLoT payload', () => {
+  async function withDirectionLog(graph: unknown): Promise<{
+    payload: Record<string, unknown>;
+    events: Array<{ level: 'info' | 'warn' } & Record<string, unknown>>;
+  }> {
+    const infoSpy = vi.spyOn(log, 'info');
+    const warnSpy = vi.spyOn(log, 'warn');
+    try {
+      const payload = await payloadForGraph(graph);
+      const events: Array<{ level: 'info' | 'warn' } & Record<string, unknown>> = [];
+      for (const [level, spy] of [['info', infoSpy], ['warn', warnSpy]] as const) {
+        for (const [first] of spy.mock.calls as unknown[][]) {
+          const rec = first as Record<string, unknown> | undefined;
+          if (typeof rec?.event === 'string' && rec.event.startsWith('cee.goal_direction.')) events.push({ level, ...rec });
+        }
+      }
+      return { payload, events };
+    } finally {
+      infoSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  }
+
+  it('an attested maximise on a label that names no direction is SENT (not byte-identical to absent at the wire)', async () => {
+    const { payload, events } = await withDirectionLog(graphWithGoalLabel('Revenue', { goal_direction: 'maximise' }));
+    expect(payload.goal_direction).toBe('maximise');
+    expect(events).toEqual([
+      expect.objectContaining({
+        level: 'info', event: 'cee.goal_direction.attested', goal_direction: 'maximise',
+        goal_node_id: 'goal_metric', provenance: 'attested_from_goal_operator', label_derived: null,
+      }),
+    ]);
+  });
+
+  it('an attested minimise on a label that names no direction is sent as minimise', async () => {
+    const { payload, events } = await withDirectionLog(graphWithGoalLabel('Revenue', { goal_direction: 'minimise' }));
+    expect(payload.goal_direction).toBe('minimise');
+    expect(events.map((e) => e.event)).toEqual(['cee.goal_direction.attested']);
+  });
+
+  it('the attested sense WINS against a label that reads the other way, and the disagreement is recorded', async () => {
+    const { payload, events } = await withDirectionLog(
+      graphWithGoalLabel('Minimise monthly churn', { goal_direction: 'maximise' }),
+    );
+    expect(payload.goal_direction).toBe('maximise');
+    expect(events).toEqual([
+      expect.objectContaining({ level: 'info', event: 'cee.goal_direction.attested', label_derived: 'minimise' }),
+      expect.objectContaining({
+        level: 'warn', event: 'cee.goal_direction.label_disagrees', goal_direction: 'maximise',
+        label_derived: 'minimise', goal_node_id: 'goal_metric', provenance: 'attested_from_goal_operator',
+      }),
+    ]);
+  });
+
+  it('an attested sense that AGREES with the label records no disagreement', async () => {
+    const { payload, events } = await withDirectionLog(
+      graphWithGoalLabel('Minimise monthly churn', { goal_direction: 'minimise' }),
+    );
+    expect(payload.goal_direction).toBe('minimise');
+    expect(events.map((e) => e.event)).toEqual(['cee.goal_direction.attested']);
+  });
+
+  it('a sense on a NON-goal node is not the goal\'s sense: nothing attested, the label decides', async () => {
+    const { payload, events } = await withDirectionLog(
+      graphWithGoalLabel('Revenue', {}, { goal_direction: 'minimise' }),
+    );
+    expect('goal_direction' in payload).toBe(false);
+    expect(events).toEqual([]);
+  });
+
+  it('an unrecognised sense on the goal node is never forwarded; the label fallback still runs', async () => {
+    // Raw (unparsed) on purpose: this pins the forwarder's own guard, not NodeV3's.
+    const { payload, events } = await withDirectionLog(
+      rawGraphWithGoalLabel('Minimise monthly churn', { goal_direction: 'target' }),
+    );
+    expect(payload.goal_direction).toBe('minimise');
+    expect(events.map((e) => [e.event, e.provenance])).toEqual([['cee.goal_direction.derived', 'derived_from_goal_label']]);
+  });
 });

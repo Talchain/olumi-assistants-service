@@ -173,6 +173,40 @@ export interface ConstructedLevel { value: number; source: ConstructedLevelSourc
 const levelSourceFor = (provenance: string): ConstructedLevelSource =>
   provenance === 'explicit' ? 'brief_extraction' : 'cee_hypothesis';
 
+/**
+ * ⭐ THE SENSE THE USER STATED FOR THEIR GOAL, as the engine names it — or nothing.
+ *
+ * PLoT reads the objective sense ONLY as a request-level `goal_direction`, and
+ * `run_analysis` forwards it from the goal node's `goal_direction` (NodeV3,
+ * `cee-v3.ts`). Without this stamp a stated "keep churn at or below 10%" ran ISL's
+ * unattested maximiser and crowned the option that RAISES churn.
+ *
+ * ⛔ ONLY THE USER'S GOAL IS ATTESTED. An `explicit` goal is the one the user
+ * stated; any other provenance is Olumi's reading, and stamping it would forward
+ * Olumi's guess as the user's sense. That goal stays unattested (`undefined`) and
+ * `run_analysis` falls back to the goal-label classifier, exactly as before.
+ *
+ * `>` and `>=` are both "maximise": the sense is the same, only whether equality
+ * counts differs, and that is not a sense. The strictness consequence (a goal fit
+ * that would count equality as met) is handled where the goal fit is written —
+ * see `scoresTheRightTail` in `admitCandidateModel`.
+ */
+export function attestedGoalDirection(
+  goal: Pick<CandidateModel['goal'], 'operator' | 'provenance'>,
+): 'maximise' | 'minimise' | undefined {
+  if (goal.provenance !== 'explicit') return undefined;
+  switch (goal.operator) {
+    case '>=':
+    case '>':
+      return 'maximise';
+    case '<=':
+    case '<':
+      return 'minimise';
+    default:
+      return undefined;
+  }
+}
+
 export interface AdmittedNode {
   /** The full text, when the label had to be shortened to stay editable. */
   description?: string;
@@ -210,6 +244,11 @@ export interface AdmittedNode {
    * probability when this is absent, so omitting it silently disables the goal.
    */
   goal_threshold_frame?: 'level' | 'delta';
+  /**
+   * `cee-v3.ts` NodeV3 `goal_direction`: the sense the USER stated for their goal
+   * (`attestedGoalDirection`). Absent means unattested — never defaulted.
+   */
+  goal_direction?: 'maximise' | 'minimise';
   /**
    * ⛔ A NODE'S `provenance` IS A DISPLAY ENUM, NOT THE EDGE OBJECT
    * (`cee-v3.ts:363` — `from_brief | ai_inferred | user_set`). Edges carry the
@@ -730,6 +769,10 @@ export function admitCandidateModel(
   }
   const capFor = (label: string): number | undefined => capByLabel.get(label);
   const loss: RepairEntry[] = [];
+  // The user's stated sense, on the goal node whether or not a target number was stated
+  // ("keep churn down" has a sense and no number). Nothing for a goal that is not theirs.
+  const statedGoalDirection = attestedGoalDirection(model.goal);
+  const goalSense: Partial<AdmittedNode> = statedGoalDirection !== undefined ? { goal_direction: statedGoalDirection } : {};
 
   // Fixed traversal order => deterministic ids.
   const entities: { label: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
@@ -766,6 +809,7 @@ export function admitCandidateModel(
           return {
             ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
             goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
+            ...goalSense,
           };
         }
         const resolved = resolveGoalThresholdCapWithProvenance(
@@ -800,11 +844,13 @@ export function admitCandidateModel(
           } as RepairEntry);
         };
         /**
-         * ⛔ ONLY "AT LEAST" IS SCORED CORRECTLY TODAY. The operator has no GraphV3
-         * carrier (see the `goal_operator` loss below), and the level consumer scores
-         * P(level >= threshold) whatever the brief said (ISL
+         * ⛔ ONLY "AT LEAST" IS SCORED CORRECTLY TODAY. The user's SENSE is now carried
+         * (`goal_direction`, stamped on this node for the user's own goal, and sent as
+         * PLoT's request-level `goal_direction`), but the level consumer's goal fit is
+         * not shown to honour it for `minimise`, and strictness is not carried at all:
+         * it scores P(level >= threshold) whatever the brief said (ISL
          * `robustness_analyzer_v2.py`, `compared >= threshold`). So a baseline is
-         * written ONLY for `>=`:
+         * written ONLY for `>=`, unchanged by the sense stamp:
          *  · `<=` / `<` ("keep churn at or below 5%; 4% now") would be scored on the
          *    WRONG tail;
          *  · `>` ("grow MRR above £20k; £20k now") would count equality as met — a
@@ -887,6 +933,7 @@ export function admitCandidateModel(
               }
             : {}),
           ...(observed_state !== undefined ? { observed_state } : {}),
+          ...goalSense,
         };
       })(),
     },
@@ -968,8 +1015,9 @@ export function admitCandidateModel(
     ...(widened.proposed_outcomes ?? []).map((o) => ({ label: o.label, kind: 'outcome' as const, provenance: 'ai_proposed' })),
   ];
 
-  // The goal's operator and horizon have NO GraphV3 home. Recording them is the
-  // only way they survive the projection at all.
+  // The goal's horizon has NO GraphV3 home, and neither has its operator unless the
+  // goal is the user's (then its SENSE is carried as `goal_direction`, above).
+  // Recording what is not carried is the only way it survives the projection at all.
   //
   // ⚠ `REPAIR_CODES` has no member meaning "a representation was dropped" —
   // the closest is RESOLVE_BELIEF_PRECEDENCE. That is a gap in the shared
@@ -990,7 +1038,12 @@ export function admitCandidateModel(
       severity: 'warn',
     });
   }
-  if (typeof model.goal.operator === 'string' && model.goal.operator.length > 0) {
+  // ⛔ SAID ONLY WHEN IT IS TRUE. When the sense is stamped, "a consumer cannot tell a
+  // floor from a ceiling" is false — `goal_direction` tells it — so the loss is not
+  // recorded. What the stamp still does not carry is strictness (`>` vs `>=`), and its
+  // only computed consequence, a goal fit that counts equality as met, is already
+  // withheld and said at the goal's baseline (`scoresTheRightTail` above).
+  if (typeof model.goal.operator === 'string' && model.goal.operator.length > 0 && statedGoalDirection === undefined) {
     loss.push({
       code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
       layer: 'cee',

@@ -58,10 +58,24 @@ describe('goal fidelity', () => {
     expect(horizon!.severity).toBe('warn');
   });
 
-  it('records the goal operator it cannot represent', () => {
-    const op = admitted().loss.find((l) => l.field_path.includes('goal') && l.field_path.includes('operator'));
+  // The operator is never dropped silently: the USER'S goal carries its sense on the
+  // node (`goal_direction`, forwarded to PLoT), and a goal that is not theirs, which is
+  // not stamped, still records the operator as a loss. Both halves, one fixture.
+  it('carries the sense of the user\'s goal operator on the goal node, and records no loss for it', () => {
+    const m = admitted();
+    const goal = m.nodes.find((n) => n.kind === 'goal');
+    expect(faithful.goal.provenance, 'control: the fixture goal is the user\'s').toBe('explicit');
+    expect(goal?.goal_direction).toBe('maximise');
+    expect(m.loss.find((l) => l.field_path.includes('goal') && l.field_path.includes('operator'))).toBeUndefined();
+  });
+
+  it('records the goal operator it cannot represent when the goal is not the user\'s', () => {
+    const inferred = { ...faithful, goal: { ...faithful.goal, provenance: 'inferred' } } as CandidateModel;
+    const m = admitCandidateModel(inferred, widened);
+    const op = m.loss.find((l) => l.field_path.includes('goal') && l.field_path.includes('operator'));
     expect(op, 'a goal with no operator is not a goal').toBeDefined();
     expect(op!.before).toBe('>=');
+    expect(m.nodes.find((n) => n.kind === 'goal')).not.toHaveProperty('goal_direction');
   });
 });
 

@@ -23,6 +23,12 @@
  * `build-model.ts:501` already declares the channel and the intent: 'What the
  * projection could not carry — the Agent is expected to say this.' These losses simply
  * were not in the list.
+ *
+ * ⭐ THE DIRECTION OF THE USER'S OWN GOAL IS NOW CARRIED (`goal_direction`, stamped by
+ * `admit-model.ts` `attestedGoalDirection` and forwarded to PLoT), so for an `explicit`
+ * goal "a consumer cannot tell a floor from a ceiling" would be FALSE and is no longer
+ * said. A goal that is not the user's is not stamped, and its direction is still said
+ * to be not carried — both halves are pinned below.
  */
 import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -124,25 +130,40 @@ async function build(payload: Record<string, unknown>) {
 }
 
 describe('a construction says WHICH goal facts the model could not carry', () => {
-  it('names the dropped deadline and the dropped direction, not just how many fields were lost', async () => {
+  it('names the dropped deadline, and does NOT call the user\'s carried direction dropped', async () => {
     const r = await build(WITH_DEADLINE);
     // The count already travelled before this change; it is the sentence that was missing.
     expect(r.projected_field_count, 'the losses are recorded').toBeGreaterThan(0);
     const said = (r.not_represented ?? []).join(' · ');
     // Bound by IDENTITY: the horizon the fixture states, not merely the word "horizon".
     expect(said, `not_represented was: ${JSON.stringify(r.not_represented)}`).toMatch(/18-month horizon/);
-    // The operator's own distinctive phrase, which no other loss reason uses.
-    expect(said, `not_represented was: ${JSON.stringify(r.not_represented)}`).toMatch(/floor from a ceiling/);
+    // The operator's own distinctive phrase, which no other loss reason uses: the
+    // user's goal carries its sense, so saying it cannot be told apart would be false.
+    expect(said, `not_represented was: ${JSON.stringify(r.not_represented)}`).not.toMatch(/floor from a ceiling/);
   });
 
   /**
    * The discriminating half of the pair. If the sentences were constants rather than
    * the recorded losses, this would keep asserting a deadline the goal never stated.
    */
-  it('says nothing about a deadline when the goal states none, while still naming the direction', async () => {
+  it('says nothing about a deadline when the goal states none', async () => {
     const r = await build(NO_DEADLINE);
     const said = (r.not_represented ?? []).join(' · ');
     expect(said, `not_represented was: ${JSON.stringify(r.not_represented)}`).not.toMatch(/horizon/i);
-    expect(said, `not_represented was: ${JSON.stringify(r.not_represented)}`).toMatch(/floor from a ceiling/);
+    expect(said, `not_represented was: ${JSON.stringify(r.not_represented)}`).not.toMatch(/floor from a ceiling/);
   });
+
+  /**
+   * The discriminating twin for the direction: the loss line is withheld only because
+   * the sense is carried. A goal Olumi inferred is not stamped, so its direction is
+   * still not carried and is still said — the sentence is not simply gone.
+   */
+  for (const provenance of ['inferred', 'ai_proposed'] as const) {
+    it(`still names the direction as not carried for an ${provenance} goal`, async () => {
+      const r = await build(GTM({ ...(NO_DEADLINE.goal as Record<string, unknown>), provenance }));
+      const said = (r.not_represented ?? []).join(' · ');
+      expect(said, `not_represented was: ${JSON.stringify(r.not_represented)}`).toMatch(/floor from a ceiling/);
+      expect(said, `not_represented was: ${JSON.stringify(r.not_represented)}`).not.toMatch(/horizon/i);
+    });
+  }
 });

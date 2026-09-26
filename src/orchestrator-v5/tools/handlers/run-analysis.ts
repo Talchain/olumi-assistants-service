@@ -913,29 +913,82 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (snapshot.goal_constraints !== undefined) {
       plotPayload.goal_constraints = snapshot.goal_constraints;
     }
-    // ROADMAP 2.920 — the user's ATTESTED objective sense, MINIMISE ONLY.
+    // ROADMAP 2.920 — the objective sense, which PLoT reads ONLY at REQUEST level.
     //
-    // Absent ⇒ ISL runs the maximiser unattested, which for a goal that is a
-    // quantity to REDUCE crowns the WORST option (measured on isl-staging: the
-    // ranking flips completely when 'minimise' is stamped). `maximise` is
-    // byte-identical to sending nothing, so emitting it is pure downside and
-    // `deriveEmittedGoalDirection` never returns it — see that module's header
-    // for the one-sided-exposure argument.
+    // Absent ⇒ ISL runs the maximiser unattested (and says so,
+    // `GOAL_DIRECTION_UNATTESTED`), which for a goal that is a quantity to REDUCE
+    // crowns the WORST option (measured on isl-staging: the ranking flips
+    // completely when 'minimise' is stamped).
+    //
+    // TWO SOURCES, IN THIS ORDER:
+    //  1. ATTESTED — the goal node's `goal_direction`, CEE-minted at construction
+    //     from the operator the USER stated (`admit-model.ts`; carried by NodeV3 in
+    //     `cee-v3.ts`). Forwarded in BOTH senses: `maximise` leaves the ranking
+    //     byte-identical to absent, but it is what the user said, and sending it
+    //     ends ISL's "unattested" disclosure for a goal whose sense WAS stated.
+    //  2. DERIVED — `deriveEmittedGoalDirection`, the goal-LABEL classifier,
+    //     MINIMISE ONLY and unchanged, for every goal with no attested sense (an
+    //     inferred goal, a drafted model, a graph built before the carrier). See
+    //     that module's header for the one-sided-exposure argument.
+    //
+    // ⛔ THE ATTESTED SENSE WINS A DISAGREEMENT. The label is Olumi's reading of
+    // the goal's WORDS; the operator is what the user stated. A disagreement is
+    // logged (`cee.goal_direction.label_disagrees`) with both senses, and the
+    // persisted goal node keeps the attested sense beside its label, so a
+    // disclosure surface can re-derive the pair from the stored graph alone.
+    const analysisNodes = (graphForAnalysis as { nodes?: unknown } | null)?.nodes;
+    const statedGoalNode = Array.isArray(analysisNodes)
+      ? analysisNodes.find(
+          (n: unknown): n is Record<string, unknown> =>
+            n !== null && typeof n === 'object'
+            && (n as Record<string, unknown>).id === snapshot.goal_node_id
+            && (n as Record<string, unknown>).kind === 'goal',
+        )
+      : undefined;
+    const attestedGoalDirection =
+      statedGoalNode?.goal_direction === 'maximise' || statedGoalNode?.goal_direction === 'minimise'
+        ? statedGoalNode.goal_direction
+        : undefined;
     const emittedGoalDirection = deriveEmittedGoalDirection(
       graphForAnalysis,
       snapshot.goal_node_id,
     );
-    if (emittedGoalDirection !== undefined) {
+    if (attestedGoalDirection !== undefined) {
+      plotPayload.goal_direction = attestedGoalDirection;
+      log.info(
+        {
+          event: 'cee.goal_direction.attested',
+          goal_direction: attestedGoalDirection,
+          goal_node_id: snapshot.goal_node_id,
+          provenance: 'attested_from_goal_operator',
+          label_derived: emittedGoalDirection ?? null,
+          request_id: invocation.requestId,
+        },
+        "goal_direction attested by the user's stated goal operator and forwarded to PLoT",
+      );
+      if (emittedGoalDirection !== undefined && emittedGoalDirection !== attestedGoalDirection) {
+        log.warn(
+          {
+            event: 'cee.goal_direction.label_disagrees',
+            goal_direction: attestedGoalDirection,
+            label_derived: emittedGoalDirection,
+            goal_node_id: snapshot.goal_node_id,
+            provenance: 'attested_from_goal_operator',
+            request_id: invocation.requestId,
+          },
+          "the goal label reads the other way from the user's stated goal operator — the stated sense was sent",
+        );
+      }
+    } else if (emittedGoalDirection !== undefined) {
       plotPayload.goal_direction = emittedGoalDirection;
       // ⚠ DISCLOSED AS DERIVED, NOT AS ATTESTED. PLoT's contract documents this
       // field as "the user's attested objective sense" and states that PLoT
       // never infers it from a node label — but CEE does exactly that, from the
-      // goal label, because no user-settable direction exists anywhere in this
-      // repo (`rg 'objective_sense|goalDirection|goal_sense' src` non-test: 0).
-      // Until a user-settable sense exists, the honest record is that CEE
-      // derived it, so a deploy can be wire-witnessed and the claim audited
-      // rather than taken on trust. The contract-wording mismatch is raised
-      // separately; it is NOT resolved by this log line.
+      // goal label, for a goal that carries no attested sense (source 1 above).
+      // The honest record is that CEE derived it, so a deploy can be
+      // wire-witnessed and the claim audited rather than taken on trust. The
+      // contract-wording mismatch is raised separately; it is NOT resolved by
+      // this log line.
       log.info(
         {
           event: 'cee.goal_direction.derived',
