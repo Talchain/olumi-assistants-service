@@ -43,7 +43,7 @@ import { asVerdictState } from '../orchestrator/context/constraint-feasibility.j
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
-import type { AgentLaneMode } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { readinessSentence, readinessViewOf } from '../orchestrator-v5/agent-lane/readiness-view.js';
 import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
@@ -53,6 +53,7 @@ import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/anal
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { narrateWriteOutcome, notAdoptedLine, staleResultLine, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
@@ -1442,6 +1443,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     const history = histories.get(sessionId);
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
+    /** Every tool runs as THIS request: its scenario, its user, and the user's own words (`stated-by-user.ts`). */
+    const typedNow = typedByUser(body) ? message : null;
+    const toolCtx: AgentToolContext = { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
+    if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
 
     /**
      * ⭐ FAST PATH 2 — A TYPED APPROVAL IS APPLIED, NOT INTERPRETED (RC #63 5803960423 /
@@ -1461,7 +1466,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const fastStartedAt = Date.now();
       const applied = await dispatchTool(
         'authorise_change', JSON.stringify({ proposal_id: approvedProposal }),
-        { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }, capabilities, mode,
+        toolCtx, capabilities, mode,
       );
       /**
        * ⛔ THE TYPED IDENTITY STAYS AUTHORITATIVE, EVEN WHEN THE PROPOSAL IS GONE
@@ -1518,7 +1523,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (result === undefined && approvedProposal === undefined && typedRunOf(body)) {
       const fastStartedAt = Date.now();
       const ran = await dispatchTool('run_analysis', JSON.stringify({ reason: 'the user pressed Run' }),
-        { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }, capabilities, mode);
+        toolCtx, capabilities, mode);
       /**
        * ⛔ THE INTERPRETER IS GIVEN THE CLAIM PERMISSIONS, NOT LEFT TO INFER THEM. v0.2 says
        * "use only supplied … currentness and claim permissions", and the run's own tool result
@@ -1592,7 +1597,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (result === undefined) try {
       result = await runAgentTurn(
         {
-          ctx: { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id },
+          ctx: toolCtx,
           history,
           message,
           instructions: AGENT_INSTRUCTIONS,
