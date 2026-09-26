@@ -18,6 +18,7 @@ import { nonlinearIdentityForAgent } from './admit-model.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
+import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 
 type Node = {
   id: string; kind?: string; label?: string;
@@ -138,12 +139,22 @@ export function breakEvenFor(graph: unknown): BreakEven | null {
   };
 }
 
-const CURRENCY: Record<string, string> = { gbp: '£', usd: '$', eur: '€' };
+/**
+ * The symbol for an ISO code, DERIVED from the one currency vocabulary (`utils/currency-alphabet.ts`, ROADMAP 2.972) —
+ * never a second list here (`currency-vocabulary.union.test.ts` forbids the mirror). The first symbol the map gives the
+ * code wins; a code the map does not know is written as the unit itself.
+ */
+const symbolForCode = (code: string): string | undefined =>
+  Object.entries(CURRENCY_SYMBOL_TO_CODE).find(([, c]) => c === code.toUpperCase())?.[0];
+
 /** A money figure in the price's unit ("GBP/month" → "£14,700/month"); otherwise the number and the unit. */
 function money(n: number, unit: string): string {
-  const m = /^(gbp|usd|eur)\s*(?:\/\s*(.+))?$/i.exec(unit);
+  const m = /^([A-Za-z]{3})\s*(?:\/\s*(.+))?$/.exec(unit);
   const digits = n.toLocaleString('en-GB', { maximumFractionDigits: 2 });
-  return m === null ? `${digits} ${unit}` : `${CURRENCY[m[1]!.toLowerCase()]}${digits}${m[2] !== undefined ? `/${m[2]}` : ''}`;
+  const symbol = m === null ? undefined : symbolForCode(m[1]!);
+  if (m === null || symbol === undefined) return `${digits} ${unit}`;
+  // A lettered symbol reads with a space before the figure; a sign does not.
+  return `${symbol}${/^[A-Za-z]+$/.test(symbol) ? ' ' : ''}${digits}${m[2] !== undefined ? `/${m[2]}` : ''}`;
 }
 const whose = (by: FigureBy): string => (by === 'user' ? '' : by === 'approved' ? ' (an assumption you approved)' : ' (Olumi’s estimate)');
 const count = (n: number): string => n.toLocaleString('en-GB');
