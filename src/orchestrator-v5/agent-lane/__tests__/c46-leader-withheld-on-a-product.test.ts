@@ -17,9 +17,10 @@
  *      verdict permitted and the run was requested (AI Quality option (i), #70 5842615260; 5841878117).
  *  (d) AGENT VIEW — `claim_permissions` carries the product cause and its sentence, beside any other reason.
  *
- * ⚠ (c) IS COMPOSED HERE WITH THE INPUTS THE TWO PRODUCTION CALLERS MUST PASS (the scenario read route and
- * the V5 finaliser), via `nonlinearIdentityLeaderClaimCause`. Those two call sites are outside this lane's
- * lease and are a named HANDOFF; this file proves the producer and the helper they call.
+ * ⚠ (c) IS COMPOSED HERE WITH THE INPUTS THE SCENARIO READ ROUTE PASSES (H1, `c46-reload-reason-handoff.test.ts`),
+ * via `nonlinearIdentityLeaderClaimCause`, judged on the graph the run analysed. The V5 finaliser takes the cause
+ * from the caller that refused (H2, `c46-finaliser-cause-is-stated.test.ts`); that turn caller is handoff H2b.
+ * This file proves the producer and the helper they call.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
