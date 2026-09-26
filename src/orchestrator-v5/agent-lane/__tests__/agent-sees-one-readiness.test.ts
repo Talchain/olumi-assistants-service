@@ -75,6 +75,16 @@ describe('(B) get_canonical_state carries the ONE readiness verdict, in plain wo
     expect(r.limits).toEqual([expect.objectContaining({ on: 'Monthly churn', operator: '<=', value: 10, unit: 'percent per month' })]);
   });
 
+  it('a limit is named by the node it sits on (joined by id), as the run-turn limit card names it — the row\'s own label only when that node is absent', async () => {
+    const g = JSON.parse(JSON.stringify(paulGraph)) as { nodes: { id: string; label: string }[]; goal_constraints: { label: string }[] };
+    g.nodes = g.nodes.map((n) => (n.id === 'monthly_churn' ? { ...n, label: 'Churn rate' } : n));
+    const r = await capsOver(g).getCanonicalState(ctx) as { limits?: { on?: string }[] };
+    expect(r.limits?.[0]?.on).toBe('Churn rate');
+    g.nodes = g.nodes.filter((n) => n.id !== 'monthly_churn');
+    const r2 = await capsOver(g).getCanonicalState(ctx) as { limits?: { on?: string }[] };
+    expect(r2.limits?.[0]?.on).toBe('Monthly churn');
+  });
+
   it('RED (C33): each link carries whose it is and how strong — so a challenge can say "an assumption Olumi made"', async () => {
     const r = await capsOver(paulGraph).getCanonicalState(ctx) as { links?: { from: string; to: string; source?: string; strength?: { mean?: number } }[] };
     const first = r.links?.find((l) => l.from === 'decision_mrr' && l.to === 'keep_49_price');
