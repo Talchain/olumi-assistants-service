@@ -141,7 +141,11 @@ export function buildCandidateSchema(): Record<string, unknown> {
     }, ['label', 'provenance', 'changes', 'interventions', 'is_status_quo']) },
     factors: { type: 'array', items: obj({
       label: { type: 'string' }, role: { type: 'string', enum: ['controllable', 'observable', 'external'] },
-      baseline_known: { type: 'boolean', description: 'True only for a baseline supplied by the user or evidence. A provisional AI estimate keeps this false.' },
+      // ⭐ A CHANGE FROM TODAY is 0 today BY DEFINITION, not by estimate (served AI Quality B3, CEE 1f8327c: "cut our list
+      // price 15%" registered with no level because "% from current list price" was marked unknown). Known-zero is what
+      // lets admission restate a signed change as "% of today" (restateSignedPercentChanges, rows 4a/4b); the restated
+      // factor carries no source, so no authority is claimed for the zero.
+      baseline_known: { type: 'boolean', description: 'True only for a baseline supplied by the user or evidence. A provisional AI estimate keeps this false. EXCEPTION: a factor measured as a CHANGE FROM TODAY (e.g. "% change from the current price", "extra hires") is 0 today by definition: baseline_known true, baseline_value 0.' },
       baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }], description: 'A stated baseline or a clearly provisional AI modelling estimate. Provide a reasonable estimate for a first calculation when possible; use null only when no defensible estimate is available.' },
       unit: { anyOf: [{ type: 'string' }, { type: 'null' }] }, provenance,
       plausible_max: { type: 'number',
