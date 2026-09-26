@@ -24,7 +24,7 @@ import {
 } from '../coaching/fragile-link-challenge.js';
 import { buildNoFlaggedLinkCard } from '../coaching/no-flagged-link-card.js';
 import { buildLimitUncheckedCard, leaderWithheldForALimit } from '../coaching/limit-unchecked-card.js';
-import { graphBoundToHash, soleLimitNodeLabel } from '../coaching/bound-graph.js';
+import { graphBoundToHash, limitNodeLabels } from '../coaching/bound-graph.js';
 import { edgeAuthorshipIn } from '../coaching/edge-strength-authorship.js';
 import { WITHHELD_NEAR_TIE } from '../compose/analysis-state-v1.js';
 import { summaryAsksUserToRepairALimit } from '../coaching/constraint-gap-disclosure.js';
@@ -247,8 +247,8 @@ export function runTurnCoaching(
   // confinement.ts), so the prose gate above is blind there. A refused limit card
   // fails CLOSED (no card), never back to a link card.
   if (leaderWithheldForALimit(final.analysisState)) {
-    const limitLabel = boundGraph !== null ? soleLimitNodeLabel(boundGraph) ?? undefined : undefined;
-    const limit = buildLimitUncheckedCard(input, limitLabel);
+    const limitLabels = boundGraph !== null ? limitNodeLabels(boundGraph) ?? undefined : undefined;
+    const limit = buildLimitUncheckedCard(input, limitLabels);
     if (limit.block === null) return { blocks: upstream, eligibility: { eligible: false, reason: limit.reason } };
     return { blocks: dedupeByBlockId([...upstream, limit.block]), eligibility: { eligible: true } };
   }

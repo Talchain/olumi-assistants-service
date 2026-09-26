@@ -26,14 +26,23 @@
  * (`MAY_NAME_LEADING_OPTION`, orchestrator/context/constraint-feasibility.ts;
  * `not_applicable`, the state with no ratified limit, permits). So "at least
  * one limit was not checked or not met" is true in every state it fires on.
- * Olumi's own words name no threshold or number. They name THE limit only when the
+ * Olumi's own words name no threshold or number of their own. Beside a named limit
+ * they say back the USER'S stated threshold ("10% per month") only when
+ * `coaching/bound-graph.ts` `statedThreshold` proves it is the user's own (an
+ * explicit row, a level frame, a scale the row itself proves — never inferred
+ * from magnitude — and the node's only row); a form the copy gates refuse
+ * drops the threshold and keeps the name. They name the limits only when the
  * caller proved the graph is the run's own (`coaching/bound-graph.ts`: hash
- * bound) and the model's limits sit on exactly one node, joined by
- * `goal_constraints[].node_id` → that node's label; otherwise the generic
- * words ship. The label is the user's own, quoted verbatim: when the user's
- * label carries a figure the copy gates pass ("Churn ≤ 4%"), the card quotes
- * that figure inside the quotes and adds none of its own. A named card carries `:named` in its signal_id, so one block_id
- * never names two bodies.
+ * bound), joined by `goal_constraints[].node_id` → each node's label: one node
+ * reads "your limit on “A”", two or three read "your limits on “A” and “B”"
+ * (`limitNodeLabels`; more than three, a missing or duplicated node, or two
+ * nodes sharing a label → the generic words). Naming every limit keeps "at least
+ * one was not checked or not met" true without claiming WHICH one: no typed
+ * per-limit verdict reaches this card. The labels are the user's own, quoted
+ * verbatim: when a label carries a figure the copy gates pass ("Churn ≤ 4%"),
+ * the card quotes that figure inside the quotes and adds none of its own. A
+ * named card carries `:named` in its signal_id, so one block_id never names two
+ * bodies (the bound graph fixes the labels for one run).
  *
  * The prose summary is NOT an input. The automatic first pass replaces it
  * wholesale (compose/unrequested-analysis-confinement.ts), which is why the
@@ -54,6 +63,7 @@
 import { CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/boundary';
 
 import { deterministicBlockId } from '../compose/block-id.js';
+import type { NamedLimit } from './bound-graph.js';
 import { WITHHELD_CONSTRAINT_VERDICT } from '../compose/analysis-state-v1.js';
 import {
   FIRST_PASS_PREFIX,
@@ -94,19 +104,47 @@ export function leaderWithheldForALimit(analysisState: unknown): boolean {
  * carries one body). `limitLabel` is the one limit node's label from a hash-bound graph, or
  * absent for the generic words.
  */
-export function composeLimitUncheckedCard(firstPass: boolean, limitLabel?: string): FragileLinkChallengeCopy {
-  if (limitLabel !== undefined) {
-    const finding = `could not confirm that the options stay within your limit on “${limitLabel}”: it was not `
+export function composeLimitUncheckedCard(
+  firstPass: boolean,
+  limits?: string | readonly (string | NamedLimit)[],
+): FragileLinkChallengeCopy {
+  const named: NamedLimit[] = limits === undefined ? [] : (typeof limits === 'string' ? [limits] : [...limits])
+    .map((l) => (typeof l === 'string' ? { label: l, stated: null } : l));
+  const { action_prompt_max: promptMax } = RUN_TURN_COACHING_CONTRACT.limits;
+  // The body carries "one reason"; a prompt that would not fit with it drops that clause, never the no-write ask.
+  const promptOf = (forms: readonly string[]) => forms.find((p) => p.length <= promptMax) ?? forms[forms.length - 1]!;
+  const ASK = 'Explain what that means for how far I can rely on this analysis. Don\'t change the model or re-run anything yet.';
+  if (named.length >= 2) {
+    const quoted = named.map((l) => `“${l.label}”${l.stated !== null ? ` (${l.stated})` : ''}`);
+    const list = `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
+    const finding = `could not confirm that the options stay within your limits on ${list}: at least one was not `
+      + 'checked or not met. That is one reason no option is put forward yet.';
+    return {
+      title: 'Check your limits before relying on this',
+      body: firstPass ? `${FIRST_PASS_PREFIX}it ${finding}` : `This analysis ${finding}`,
+      action_label: 'What this means for my limits',
+      action_prompt: promptOf([
+        `Olumi could not confirm the options stay within my limits on ${list}: at least one was not checked or was `
+          + `not met, which is one reason no option is put forward yet. ${ASK}`,
+        `Olumi could not confirm the options stay within my limits on ${list}: at least one was not checked or was `
+          + `not met. ${ASK}`,
+      ]),
+    };
+  }
+  const one = named[0];
+  if (one !== undefined) {
+    const limit = `“${one.label}”${one.stated !== null ? ` (${one.stated})` : ''}`;
+    const finding = `could not confirm that the options stay within your limit on ${limit}: it was not `
       + 'checked or not met. That is one reason no option is put forward yet.';
     return {
       title: 'Check your limit before relying on this',
       body: firstPass ? `${FIRST_PASS_PREFIX}it ${finding}` : `This analysis ${finding}`,
       action_label: 'What this means for my limit',
-      action_prompt:
-        `Olumi could not confirm the options stay within my limit on “${limitLabel}”: it was not checked or was not `
-        + 'met, which is one reason no option is put forward yet. Explain what that means for how far I can rely on '
-        + 'this analysis. '
-        + 'Don\'t change the model or re-run anything yet.',
+      action_prompt: promptOf([
+        `Olumi could not confirm the options stay within my limit on ${limit}: it was not checked or was not `
+          + `met, which is one reason no option is put forward yet. ${ASK}`,
+        `Olumi could not confirm the options stay within my limit on ${limit}: it was not checked or was not met. ${ASK}`,
+      ]),
     };
   }
   const finding = 'could not confirm that the options stay within the limits on the model: at least one was not '
@@ -117,9 +155,7 @@ export function composeLimitUncheckedCard(firstPass: boolean, limitLabel?: strin
     action_label: 'What this means for my limits',
     action_prompt:
       'Olumi could not confirm the options stay within the limits on my model: at least one was not checked or was '
-      + 'not met, which is one reason no option is put forward yet. Explain what that means for how far I can rely '
-      + 'on this analysis. '
-      + 'Don\'t change the model or re-run anything yet.',
+      + `not met, which is one reason no option is put forward yet. ${ASK}`,
   };
 }
 
@@ -134,8 +170,8 @@ export type LimitUncheckedCardDecision =
  */
 export function buildLimitUncheckedCard(
   input: FragileLinkChallengeInput,
-  /** The one limit node's label from a HASH-BOUND graph (`coaching/bound-graph.ts`); absent → generic words. */
-  limitLabel?: string,
+  /** The limits from a HASH-BOUND graph (`coaching/bound-graph.ts` `limitNodeLabels`); absent → generic words. */
+  limitLabel?: string | readonly (string | NamedLimit)[],
 ): LimitUncheckedCardDecision {
   // (0) identity, repeated so the builder is total on its own.
   const result = readRecord(input.analysisResult);
@@ -150,9 +186,15 @@ export function buildLimitUncheckedCard(
   // A label the copy gates refuse (a raw decimal, an id-shaped token, leader words, too long) is dropped for
   // the generic words — the card still ships; it never falls back to a link card. The gates pass a whole
   // number or percentage in the user's own label ("Churn ≤ 4%"): the user's figure, quoted, never Olumi's.
-  const named = limitLabel !== undefined ? composeLimitUncheckedCard(effectiveTrigger === 'auto_first_pass', limitLabel) : null;
-  const useNamed = named !== null && copyPasses(named);
-  const copy = useNamed ? named : composeLimitUncheckedCard(effectiveTrigger === 'auto_first_pass');
+  // Cascade: names with the user's stated thresholds → names only → the generic words.
+  const firstPass = effectiveTrigger === 'auto_first_pass';
+  const namedLimits: NamedLimit[] | null = limitLabel === undefined ? null
+    : (typeof limitLabel === 'string' ? [limitLabel] : [...limitLabel]).map((l) => (typeof l === 'string' ? { label: l, stated: null } : l));
+  const candidates = namedLimits === null ? []
+    : [namedLimits, namedLimits.map((l) => ({ label: l.label, stated: null }))].map((ls) => composeLimitUncheckedCard(firstPass, ls));
+  const named = candidates.find((c) => copyPasses(c)) ?? null;
+  const useNamed = named !== null;
+  const copy = named ?? composeLimitUncheckedCard(firstPass);
   if (!copyPasses(copy)) return { block: null, reason: 'copy_gate' };
 
   const signalId = `${LIMIT_UNCHECKED_SIGNAL_ID_PREFIX}${input.graphHash}:${input.computedAt}:${effectiveTrigger}${useNamed ? ':named' : ''}`;

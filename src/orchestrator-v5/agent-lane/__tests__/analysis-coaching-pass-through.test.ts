@@ -7,6 +7,9 @@ import { buildConstraintDisclosureFromState } from '../../coaching/constraint-ga
 import { readFileSync } from 'node:fs';
 import { fixtureUrl } from '../../coaching/__tests__/fragile-link-challenge-fixtures.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { statedThreshold } from '../../coaching/bound-graph.js';
+import { extractCompoundGoals, normaliseConstraintUnits, toGoalConstraints } from '../../../cee/compound-goal/extractor.js';
+import { GoalConstraintSchema } from '../../../schemas/assist.js';
 const hash = '0123456789abcdef';
 const time = '2026-09-24T10:00:00.000Z';
 const state = {run_state: {kind: 'complete_current', computed_at: time}, leader_claim: {permitted: false, withheld_reason: 'constraint_verdict_withheld'}};
@@ -290,9 +293,11 @@ test('NAMED LIMIT — Paul 1a298d6d: with its own hash-bound graph the one card 
  const cards=runTurnCards(out.blocks);
  assert.equal(cards.length,1);
  assert.equal(cards[0]!.signal_id,`${LIMIT_CARD}449b882e043ae3e3:2026-09-25T17:27:54.315Z:auto_first_pass:named`);
- assert.match(cards[0]!.body,/your limit on “Monthly churn”/);
- assert.match(cards[0]!.action_prompt??'',/my limit on “Monthly churn”/);
- assert.doesNotMatch(cards[0]!.body+(cards[0]!.action_prompt??''),/\d/);
+ // The user's own stated threshold (row: explicit, <=, 10, 'percent per month'), joined by node_id, said back.
+ assert.match(cards[0]!.body,/your limit on “Monthly churn” \(10 percent per month\): it was not checked or not met\./);
+ assert.match(cards[0]!.action_prompt??'',/my limit on “Monthly churn” \(10 percent per month\)/);
+ // Olumi adds no figure of its own: the only digits are the user's stated threshold.
+ assert.doesNotMatch((cards[0]!.body+(cards[0]!.action_prompt??'')).split('(10 percent per month)').join(''),/\d/);
 });
 test('NAMED LIMIT — the second brief (pricing explicit Run, served 06325c6) names its limit too',()=>{
  const c=runTurnCase('pricing','t2','explicit_run');
@@ -312,7 +317,7 @@ test('NAMED LIMIT — no graph, ANOTHER turn\'s graph, or an unbindable graph �
   assert.equal(cards[0]!.body,generic.body,why);
  }
 });
-test('NAMED LIMIT — two different limit nodes → the generic words (one next action names at most one limit)',()=>{
+test('NAMED LIMITS — two limit nodes → the card names BOTH, never one of them (no typed per-limit verdict says which)',()=>{
  const c=runTurnCase('paul','t1','auto_first_pass');
  const two=structuredClone(PAUL_GRAPH) as Record<string, any>;
  // A DERIVED mutation of the served graph (labelled): a second limit on another node. The hash no longer
@@ -322,8 +327,12 @@ test('NAMED LIMIT — two different limit nodes → the generic words (one next 
  const result={...(c.final.analysisResult as object),computed_against_hash:hash};
  const cards=runTurnCards(runTurnCoaching({...statelessCapture(c.captured),blocks:[result]},{...c.final,graphHash:hash,analysisResult:result,graph:two}).blocks);
  assert.equal(cards.length,1);
- assert.ok(cards[0]!.signal_id.endsWith(':auto_first_pass'));
- assert.doesNotMatch(cards[0]!.body,/“/);
+ assert.ok(cards[0]!.signal_id.endsWith(':auto_first_pass:named'));
+ assert.equal(cards[0]!.title,'Check your limits before relying on this');
+ // Both rows are the agent lane's own (explicit, user units), so each name carries the user's stated figure.
+ assert.match(cards[0]!.body,/your limits on “Monthly churn” \(10 percent per month\) and “MRR” \(10 percent per month\): at least one was not checked or not met\./);
+ assert.match(cards[0]!.action_prompt??'',/my limits on “Monthly churn” \(10 percent per month\) and “MRR” \(10 percent per month\): at least one was not checked or was not met/);
+ assert.equal(cards[0]!.action_label,'What this means for my limits');
 });
 // DERIVED mutations of the served graph (labelled), re-hashed through the real hash function so the bind holds.
 const rebind = (c: ReturnType<typeof runTurnCase>, graph: Record<string, unknown>) => {
@@ -331,6 +340,91 @@ const rebind = (c: ReturnType<typeof runTurnCase>, graph: Record<string, unknown
  const result={...(c.final.analysisResult as object),computed_against_hash:hash};
  return {captured:{...statelessCapture(c.captured),blocks:[result]} as CapturedAnalysis, final:{...c.final,graphHash:hash,analysisResult:result,graph}};
 };
+// ── STATED THRESHOLD (Delivery Lead 5841804719: F3 deterministic) — the user's own limit, said back by identity ──
+test('STATED THRESHOLD — said back only when the user stated it, in a level frame, at a scale the ROW proves',()=>{
+ // A user-units writer's row (the agent lane mints `agent-lane:…`, add_constraint `gc-…`).
+ const row={constraint_id:'agent-lane:n:<=',node_id:'n',operator:'<=',value:10,unit:'% per month',provenance:'explicit'};
+ assert.equal(statedThreshold(row),'10% per month');
+ assert.equal(statedThreshold({...row,constraint_id:'gc-1f2e',unit:'%',value:5}),'5%');
+ assert.equal(statedThreshold({...row,operator:'>=',value:400000,unit:'£'}),'£400,000');
+ // Prefix symbols come from the canonical currency map: '¥' and 'A$' prefix too; the all-letter 'CHF' follows.
+ assert.equal(statedThreshold({...row,operator:'>=',value:500,unit:'¥'}),'¥500');
+ assert.equal(statedThreshold({...row,operator:'>=',value:5,unit:'A$'}),'A$5');
+ assert.equal(statedThreshold({...row,operator:'>=',value:500,unit:'CHF'}),'500 CHF');
+ assert.equal(statedThreshold({...row,unit:'hours'}),'10 hours');
+ assert.equal(statedThreshold({...row,unit:undefined}),'10');
+ assert.equal(statedThreshold({...row,value_frame:'level'}),'10% per month');
+ // An audit trail naming the user's original proves the scale, whoever wrote the row.
+ assert.equal(statedThreshold({...row,constraint_id:'constraint_n_max',value:0.1,unit:'fraction',provenance_unit_normalised:{rule:'percent_to_fraction',original_value:10,original_unit:'%'}}),'10%');
+ // Non-percent units are unambiguous from any writer.
+ assert.equal(statedThreshold({...row,constraint_id:'constraint_n_min',operator:'>=',value:400000,unit:'£'}),'£400,000');
+ // Refused: not the user's statement, a change frame, a bare fraction, a bad operator/value, and a PERCENT whose
+ // scale the row does not prove (the compound-goal extractor stores 200% as `2` under '%': never say "2%").
+ for (const [why,bad] of [['inferred',{...row,provenance:'inferred'}],['proxy',{...row,provenance:'proxy'}],['no provenance',{...row,provenance:undefined}],['delta frame',{...row,value_frame:'delta'}],['bare fraction',{...row,value:0.1,unit:'fraction'}],['operator',{...row,operator:'=='}],['NaN',{...row,value:Number.NaN}],['string value',{...row,value:'10'}],['extractor percent',{...row,constraint_id:'constraint_n_min',operator:'>=',value:2,unit:'%'}],['percent, no id',{...row,constraint_id:undefined}],['percent word',{...row,constraint_id:'constraint_n_max',unit:'percent per month'}],['basis points',{...row,constraint_id:'constraint_n_max',unit:'bps'}]] as [string,Record<string,unknown>][]) assert.equal(statedThreshold(bad),null,why);
+});
+test('STATED THRESHOLD — fed from the PRODUCTION compound-goal extractor: "at least 200%" is never said back as "2%" (#1948 review)',()=>{
+ for (const [brief,forbidden] of [['Revenue growth must be at least 200%.',/\b2%/],['Utilisation must stay under 100%.',/\b1%/],['ROI must be at least 150%. Keep monthly churn under 10%.',/\b1\.5%/]] as [string,RegExp][]) {
+  const rows=toGoalConstraints(normaliseConstraintUnits(extractCompoundGoals(brief).constraints)).map((r)=>GoalConstraintSchema.parse(r));
+  // Present control: the extractor DID produce a percent-scale row (otherwise the check below is vacuous).
+  assert.ok(rows.some((r)=>typeof r.unit==='string'&&/%|fraction/.test(r.unit)),brief);
+  for (const r of rows) {
+   const said=statedThreshold(r as unknown as Record<string, unknown>);
+   assert.ok(said===null||!forbidden.test(said),`${brief} → ${said}`);
+   if (r.unit==='%'||r.unit==='fraction') assert.equal(said,null,`${brief}: an extractor percent row proves no scale`);
+  }
+ }
+});
+test('STATED THRESHOLD — two rows on one node: the node is named, no threshold said (which one would it be?)',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ g.goal_constraints=[g.goal_constraints[0],{...g.goal_constraints[0],constraint_id:'agent-lane:monthly_churn:>=',operator:'>=',value:1}];
+ const {captured,final}=rebind(c,g);
+ const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ assert.match(card.body,/your limit on “Monthly churn”: it was not checked or not met\./);
+ assert.doesNotMatch(card.body,/\d/);
+});
+test('STATED THRESHOLD — a threshold the copy gates refuse (a raw decimal) falls back to the NAME, never to the generic words',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ g.goal_constraints=[{...g.goal_constraints[0],value:0.5,unit:''}];
+ const {captured,final}=rebind(c,g);
+ const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ // Present control: the stated form exists and is refused by the gates.
+ assert.equal(statedThreshold(g.goal_constraints[0]),'0.5');
+ assert.ok(card.signal_id.endsWith(':named'));
+ assert.match(card.body,/your limit on “Monthly churn”: it was not checked or not met\./);
+});
+const withLimitsOn = (nodeIds: string[]) => {
+ const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ const row=g.goal_constraints[0];
+ g.goal_constraints=nodeIds.map((id,i)=>({...row,constraint_id:`agent-lane:${id}:${i}`,node_id:id}));
+ return g;
+};
+test('NAMED LIMITS — three limit nodes are all named, in the rows\' order; four → the generic words',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const three=runTurnCards(runTurnCoaching(rebind(c,withLimitsOn(['monthly_churn','pro_subscribers','mrr'])).captured,rebind(c,withLimitsOn(['monthly_churn','pro_subscribers','mrr'])).final).blocks)[0]!;
+ assert.match(three.body,/your limits on “Monthly churn”, “Pro subscribers” and “MRR”: at least one was not checked or not met\. That is one reason/);
+ // The long prompt would exceed the 300-char bound here, so the short form ships: every name, and the no-write ask.
+ assert.match(three.action_prompt??'',/my limits on “Monthly churn”, “Pro subscribers” and “MRR”: at least one was not checked or was not met\. Explain/);
+ assert.match(three.action_prompt??'',/Don't change the model or re-run anything yet\.$/);
+ assert.ok(three.signal_id.endsWith(':named'));
+ const four=rebind(c,withLimitsOn(['monthly_churn','pro_subscribers','mrr','pro_plan_price']));
+ const generic=runTurnCards(runTurnCoaching(four.captured,four.final).blocks)[0]!;
+ assert.ok(generic.signal_id.endsWith(':auto_first_pass'));
+ assert.doesNotMatch(generic.body,/“/);
+});
+test('NAMED LIMITS — two rows on ONE node name it once (singular); two nodes sharing a label → the generic words',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const same=rebind(c,withLimitsOn(['monthly_churn','monthly_churn']));
+ const one=runTurnCards(runTurnCoaching(same.captured,same.final).blocks)[0]!;
+ assert.match(one.body,/your limit on “Monthly churn”: it was not checked or not met\./);
+ const g=withLimitsOn(['monthly_churn','pro_subscribers']);
+ (g.nodes as {id: string; label: string}[]).find(n=>n.id==='pro_subscribers')!.label='Monthly churn';
+ const dup=rebind(c,g);
+ const card=runTurnCards(runTurnCoaching(dup.captured,dup.final).blocks)[0]!;
+ assert.ok(card.signal_id.endsWith(':auto_first_pass'));
+ assert.doesNotMatch(card.body,/“/);
+});
 test('NAMED LIMIT — the name is the NODE\'s label (joined by node_id), never the limit row\'s free text',()=>{
  const c=runTurnCase('paul','t1','auto_first_pass');
  const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
@@ -348,9 +442,9 @@ test('NAMED LIMIT — a user\'s own figure in the label ("Churn ≤ 4%") is quot
  const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
  assert.ok(card.signal_id.endsWith(':auto_first_pass:named'));
  for (const words of [card.body, card.action_prompt??'']) {
-  assert.match(words,/“Churn ≤ 4%”/);
-  // Every digit sits inside the user's quoted label.
-  assert.doesNotMatch(words.split('“Churn ≤ 4%”').join(''),/\d/);
+  assert.match(words,/“Churn ≤ 4%” \(10 percent per month\)/);
+  // Every digit sits inside the user's quoted label or the user's own stated threshold.
+  assert.doesNotMatch(words.split('“Churn ≤ 4%” (10 percent per month)').join(''),/\d/);
  }
 });
 test('NAMED LIMIT — a node label the copy gates refuse (a raw decimal) ships the generic words, still ONE limit card',()=>{
