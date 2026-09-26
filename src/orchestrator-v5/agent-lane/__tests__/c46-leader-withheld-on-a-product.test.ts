@@ -35,7 +35,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { narrateWriteOutcome } from '../write-outcome.js';
 import type { ToolResult } from '../runtime/agent-tools.js';
-import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
+import { deriveDecisionContextGraphHash, loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import type { SessionStore } from '../../session/store.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
@@ -242,7 +242,7 @@ const CANONICAL_FRESH = {
  */
 function stateFor(fact: RunAnalysisHandlerFact, graph: unknown) {
   const block = buildAnalysisResultBlock(fact);
-  const cause = nonlinearIdentityLeaderClaimCause({ graph, result: fact.result, requested: wasAnalysisRequestedByUser(fact) });
+  const cause = nonlinearIdentityLeaderClaimCause({ graph, graphHash: deriveDecisionContextGraphHash(graph), result: fact.result, requested: wasAnalysisRequestedByUser(fact) });
   const state = composeAnalysisStateV1({
     canonical: CANONICAL_FRESH,
     mayNameLeadingOption: mayPresentLeaderClaimForFact(fact),
@@ -543,7 +543,7 @@ describe('(c) precedence: the limit keeps its code and card; the unrequested fir
     const { registered } = await build(paul());
     const fact = await runOn(registered, [RAISE, KEEP]);
     const withState = (may: boolean, state: string) =>
-      nonlinearIdentityLeaderClaimCause({ graph: registered, result: { ...fact.result, constraint_verdict: { may_name_leading_option: may, constraint_verdict_state: state } }, requested: true });
+      nonlinearIdentityLeaderClaimCause({ graph: registered, graphHash: deriveDecisionContextGraphHash(registered), result: { ...fact.result, constraint_verdict: { may_name_leading_option: may, constraint_verdict_state: state } }, requested: true });
     const PRODUCT = { withheldBecauseUnrequested: false, withheldBecauseNonlinearIdentity: true };
     const NONE = { withheldBecauseUnrequested: false, withheldBecauseNonlinearIdentity: false };
     // A checked-and-met limit, or none set: the constraint verdict permitted, so the product is the reason.
@@ -555,10 +555,91 @@ describe('(c) precedence: the limit keeps its code and card; the unrequested fir
     }
     // A permitted leader has no withheld cause at all.
     expect(withState(true, 'evaluated_feasible')).toEqual(NONE);
-    // The same fact on a graph with no carrier: no cause.
+    // The same fact on a graph with no carrier: no cause. (The carrier is not an analysis-affecting field, so this
+    // graph hashes as the run's own; the cause is refused by the missing carrier, not by the hash.)
     const old = structuredClone(registered);
     for (const n of old.nodes) delete n.nonlinear_identity;
-    expect(nonlinearIdentityLeaderClaimCause({ graph: old, result: fact.result, requested: true })).toEqual(NONE);
+    expect(deriveDecisionContextGraphHash(old)).toBe(fact.result.graph_hash_at_run);
+    expect(nonlinearIdentityLeaderClaimCause({ graph: old, graphHash: deriveDecisionContextGraphHash(old), result: fact.result, requested: true })).toEqual(NONE);
+  });
+
+  /**
+   * ⛔ THE GRAPH THE RUN ANALYSED DECIDES (OpenAI Runtime #70 5843934816, the H2 review point).
+   *
+   * A persisted fact binds the graph it analysed by `graph_hash_at_run` ALONE: `RunAnalysisResultSchema`
+   * (@talchain/schemas 0.59.0) keeps no graph, and PLoT's envelope echoes none. So a caller's graph decides the
+   * cause only when its own freshness hash equals the run's; after any analysis-affecting edit the analysed graph
+   * is out of reach and nothing new is withheld. Runtime's row: a run on the product graph (MRR = price ×
+   * subscribers), then an edit that removes the product.
+   */
+  describe('the graph the run analysed decides the cause — never a graph edited since the run', () => {
+    const PRODUCT = { withheldBecauseUnrequested: false, withheldBecauseNonlinearIdentity: true };
+    const NONE = { withheldBecauseUnrequested: false, withheldBecauseNonlinearIdentity: false };
+    const cause = (graph: Graph, result: RunAnalysisHandlerFact['result']) =>
+      nonlinearIdentityLeaderClaimCause({ graph, graphHash: deriveDecisionContextGraphHash(graph), result, requested: true });
+    /** The user deletes "Pro subscribers": its node, every link touching it, and the product it made MRR. */
+    const withoutTheProduct = (g: Graph): Graph => {
+      const out = structuredClone(g);
+      out.nodes = out.nodes.filter((n) => n.id !== 'pro_subscribers');
+      out.edges = out.edges.filter((e) => e.from !== 'pro_subscribers' && e.to !== 'pro_subscribers');
+      for (const n of out.nodes) delete n.nonlinear_identity;
+      return out;
+    };
+    /**
+     * An edit that KEEPS the product: Pro subscribers' starting level, 300 → 400 of a plausible 2,000 (stored
+     * normalised, 0.15 → 0.2) — an analysis-affecting field.
+     */
+    const subscribersAt400 = (g: Graph): Graph => {
+      const out = structuredClone(g);
+      const n = out.nodes.find((x) => x.id === 'pro_subscribers')!;
+      const os = n.observed_state as { value?: unknown };
+      expect(os.value, 'premise: the stored starting level, 300 of 2,000').toBe(0.15);
+      n.observed_state = { ...os, value: 0.2 };
+      return out;
+    };
+
+    it('PREMISE: the run bound the graph it analysed by the SAME hash the read route derives from that graph', async () => {
+      const { registered } = await build(paul());
+      const fact = await runOn(registered, [RAISE, KEEP]);
+      expect(fact.result.graph_hash_at_run).toMatch(/^[0-9a-f]{16}$/);
+      expect(deriveDecisionContextGraphHash(registered)).toBe(fact.result.graph_hash_at_run);
+      expect(cause(registered, fact.result), 'the analysed graph decides: the product').toEqual(PRODUCT);
+    });
+
+    it('RED (Runtime\'s row): run on the product graph, then an edit REMOVES the product — the edited graph never decides; no cause', async () => {
+      const { registered } = await build(paul());
+      const fact = await runOn(registered, [RAISE, KEEP]);
+      const edited = withoutTheProduct(registered);
+      expect(deriveDecisionContextGraphHash(edited), 'premise: the edit changed what the analysis reads').not.toBe(fact.result.graph_hash_at_run);
+      expect(cause(edited, fact.result)).toEqual(NONE);
+    });
+
+    it('RED (discriminating): an edit that KEEPS the product is still a graph the run never analysed — no cause, although its own sign test would find one', async () => {
+      const { registered } = await build(paul());
+      const fact = await runOn(registered, [RAISE, KEEP]);
+      const edited = subscribersAt400(registered);
+      expect(deriveDecisionContextGraphHash(edited), 'premise: the edit changed what the analysis reads').not.toBe(fact.result.graph_hash_at_run);
+      // What judging THIS graph would say — the rule Runtime rejected: the product, by the leader's id.
+      expect(nonlinearIdentityLeaderWithhold(edited, 'raise_pro_to_59', { comparedOptionIds: ['raise_pro_to_59', 'keep_pro_at_49'] })).not.toBeNull();
+      expect(cause(edited, fact.result)).toEqual(NONE);
+    });
+
+    it('RED: a fact that bound no graph (legacy, no `graph_hash_at_run`) or a graph the caller could not hash decides nothing', async () => {
+      const { registered } = await build(paul());
+      const fact = await runOn(registered, [RAISE, KEEP]);
+      const { graph_hash_at_run: _dropped, ...legacy } = fact.result;
+      expect(nonlinearIdentityLeaderClaimCause({ graph: registered, graphHash: deriveDecisionContextGraphHash(registered), result: legacy, requested: true })).toEqual(NONE);
+      expect(nonlinearIdentityLeaderClaimCause({ graph: registered, graphHash: null, result: fact.result, requested: true })).toEqual(NONE);
+    });
+
+    it('CONTROL: an edit the analysis does not read (the goal\'s label) leaves the analysed graph in reach — the product stands', async () => {
+      const { registered } = await build(paul());
+      const fact = await runOn(registered, [RAISE, KEEP]);
+      const relabelled = structuredClone(registered);
+      relabelled.nodes.find((n) => n.id === 'mrr')!.label = 'Monthly recurring revenue';
+      expect(deriveDecisionContextGraphHash(relabelled)).toBe(fact.result.graph_hash_at_run);
+      expect(cause(relabelled, fact.result)).toEqual(PRODUCT);
+    });
   });
 
   it('the composer\'s own order: the unrequested first pass (policy) outranks the product; a permitted verdict takes no cause', async () => {

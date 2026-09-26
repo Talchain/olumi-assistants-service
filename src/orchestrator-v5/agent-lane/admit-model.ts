@@ -1380,8 +1380,12 @@ function comparedOptionIdsOf(enrichment: unknown): string[] | undefined {
 /**
  * ⛔ C46 (c) — WHY A PERSISTED FACT'S LEADER WAS WITHHELD, when the reason is the product.
  *
- * For the callers of `composeAnalysisStateV1` that hold the fact AND the graph (the scenario read
- * route and the V5 finaliser). True only when ALL of these hold, each read, never re-derived:
+ * For a caller of `composeAnalysisStateV1` that holds THE fact its leader permission was read from
+ * AND the graph (the scenario read route: one fact, `mayPresentLeaderClaimForFact(fact)`). NOT the
+ * V5 finaliser on its own: it never learns which fact a refusal came from, so its caller must state
+ * the cause (`FinaliserContext.leaderWithheldBecauseNonlinearIdentity`, #1876's rule).
+ * True only when ALL of these hold, each read, never re-derived:
+ *  · the graph IS the graph the run analysed — see `graphHash` below;
  *  · the fact's persisted permission is `false` while its persisted constraint state PERMITS a
  *    leader (`MAY_NAME_LEADING_OPTION`) — so the stamp that withheld it was not the constraint's;
  *  · the Run-time check (`nonlinearIdentityLeaderWithhold`) finds the fact's leader, by id, not
@@ -1392,11 +1396,26 @@ function comparedOptionIdsOf(enrichment: unknown): string[] | undefined {
  */
 export function nonlinearIdentityLeaderClaimCause(input: {
   readonly graph: unknown;
+  /**
+   * ⛔ THE GRAPH THE RUN ANALYSED DECIDES (OpenAI Runtime, #70 5843934816). `graph`'s analysis-affecting
+   * hash as the caller's OWN freshness authority computed it — the value it compares with the fact's
+   * `graph_hash_at_run` (the read route: `deriveDecisionContextGraphHash(params.graph)`).
+   *
+   * A persisted fact binds the graph it analysed by that hash ALONE: `RunAnalysisResultSchema`
+   * (@talchain/schemas 0.59.0) keeps `graph_hash_at_run` and no graph, and PLoT's envelope in
+   * `enrichment` echoes none. So `graph` decides only when the two are equal — it then IS the analysed
+   * graph on every field the analysis reads. Otherwise (edited since the run, a legacy fact with no
+   * hash, a graph that could not be hashed) the analysed graph is out of reach and NOTHING NEW is
+   * withheld: no cause, and the fact's own constraint token stands.
+   */
+  readonly graphHash: string | null;
   readonly result: unknown;
   readonly requested: boolean;
 }): { readonly withheldBecauseUnrequested: boolean; readonly withheldBecauseNonlinearIdentity: boolean } {
   const none = { withheldBecauseUnrequested: false, withheldBecauseNonlinearIdentity: false } as const;
-  const result = input.result as { leading_option_id?: unknown; constraint_verdict?: unknown; enrichment?: unknown } | null | undefined;
+  const result = input.result as { leading_option_id?: unknown; constraint_verdict?: unknown; enrichment?: unknown; graph_hash_at_run?: unknown } | null | undefined;
+  const analysedHash = result?.graph_hash_at_run;
+  if (typeof analysedHash !== 'string' || analysedHash === '' || input.graphHash !== analysedHash) return none;
   const verdict = result?.constraint_verdict as { may_name_leading_option?: unknown; constraint_verdict_state?: unknown } | undefined;
   if (verdict?.may_name_leading_option !== false) return none;
   const state = verdict.constraint_verdict_state;
