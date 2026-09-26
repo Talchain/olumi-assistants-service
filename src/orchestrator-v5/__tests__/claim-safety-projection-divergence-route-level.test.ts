@@ -494,7 +494,9 @@ describe('F1 — the DIVERGENCE state at the boundary', () => {
   it('RED-FIRST: the DETERMINISTIC advice gate stops naming the withheld leader', async () => {
     // ⭐ THE STRONGEST ARM, because it is prose ON THE WIRE and no model is
     // involved. `tryPostAnalysisAdviceGate` is a PRE-ROUTE that composes, in
-    // code, "the analysis currently favours X" from `contextPack.analysis` —
+    // code, the result-standing sentence from `contextPack.analysis` (until
+    // Paul's 21 Sep ruling it opened "the analysis currently favours X"; it now
+    // reads "Across the futures we sampled, X came out highest on your goal") —
     // which is A's projection. Input-gating the model cannot touch it; the site
     // consumes `mayNameLeadingOptionForRun` directly, and in the divergence
     // state that boolean was read off B.

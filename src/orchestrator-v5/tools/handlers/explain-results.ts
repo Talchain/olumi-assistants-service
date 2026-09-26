@@ -206,6 +206,12 @@ export function createExplainResultsHandler(): HandlerFn {
         invocation.rawRobustness ?? null,
         // Same fact, same same-run guard as `rawRobustness` above.
         invocation.defaultedAssumptions ?? null,
+        // ⭐ THE GOAL THE WIN PROBABILITY IS ABOUT (Paul's ruling, 21 Sep 2026).
+        // `goal_label` lives on the STRUCTURE projection, not the analysis one —
+        // two different objects, which is why the sentence has never named it.
+        // Absent ⇒ the composer says "your goal"; it never substitutes another
+        // label, because a wrong goal is worse than a generic one.
+        invocation.structureProjection?.goal_label ?? null,
       );
     }
 

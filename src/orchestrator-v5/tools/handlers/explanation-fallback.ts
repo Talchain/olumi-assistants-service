@@ -17,7 +17,28 @@
  * Copy rules:
  *  - Sentence case, British English.
  *  - No em dashes (use commas or full stops).
- *  - No tone words like winner or recommended; say leading option, performs best.
+ *  - ⭐ PAUL'S RULING, 21 Sep 2026, VERBATIM: "It's not a leading option. It's
+ *    the option from the causal analysis that either is most likely to happen
+ *    or, if we can provide this, is most likely to achieve the user's goal. We
+ *    are a reasoning enhancement tool, not a causal analysis tool. We are
+ *    giving them information to improve their critical and creative thinking,
+ *    not recommending options."
+ *    This supersedes the previous rule here ("no tone words like winner or
+ *    recommended; say leading option, performs best"). That rule was right that
+ *    winner/recommended are wrong and WRONG that "leading option" is the safe
+ *    substitute: it is still a league-table noun, and "performs best" is a
+ *    superlative with NO STATED REFERENT — best at what?
+ *    ⛔ So: never `winner`, `recommended`, `leading option`, `performs best`,
+ *    `sits in second place`, or any clause adjudicating whether a lead is
+ *    "meaningful". State the MEASUREMENT and let the reader judge it.
+ *    ⭐ The referent is DERIVED, not chosen. At the producer — ISL
+ *    `robustness_analyzer_v2.py:1078-1092` with the field description at
+ *    `robustness_v2.py:851` ("P(this option is best)") — `win_probability` is
+ *    the fraction of Monte Carlo draws in which that option produced the
+ *    HIGHEST VALUE AT THE USER'S OWN GOAL NODE (`request.goal_node_id`), ties
+ *    split equally. So it is goal-referenced, and naming the goal is the whole
+ *    point: "came out highest on {goal}" is a measurement the reader can argue
+ *    with; "performs best" is a verdict they can only accept or reject.
  *  - No internal vocabulary; never reference graph internals or pipeline stages.
  *  - One next-step nudge at the end so the response is actionable.
  */
@@ -38,6 +59,11 @@ import type {
 // any more. This module composed the last two deterministic sentences that
 // rendered the runner-up gap as a magnitude; with those retired, the only
 // percentage this file may speak is an option's OWN win share.
+import {
+  composeResultStandingSentence,
+  composeRunnerUpStandingSentence,
+  RESULT_STANDING_QUESTION,
+} from '../../compose/goal-referenced-result-phrasing.js';
 import { formatProbability } from '../../format/format-analysis-value.js';
 import { bandFromMagnitude } from '../../format/influence-bands.js';
 import {
@@ -374,18 +400,18 @@ export function composeRobustnessVerdict(
     if (marginCat === 'near_tie') {
       margin_clause =
         mode === 'explain'
-          ? `${quoteLabel(leading.label)} and ${quoteLabel(runner.label)} are effectively tied, so the lead is too close to call without firming up the key assumptions.`
+          ? `${quoteLabel(leading.label)} and ${quoteLabel(runner.label)} are effectively tied, so ${RESULT_STANDING_QUESTION} is too close to call without firming up the key assumptions.`
           : `${quoteLabel(leading.label)} and ${quoteLabel(runner.label)} are effectively tied.`;
     } else if (marginCat === 'clear' && finiteMargin !== null) {
       margin_clause =
         mode === 'explain'
-          ? `${quoteLabel(runner.label)} sits in second place${runnerPFragment}, so the lead is meaningful rather than marginal.`
+          ? composeRunnerUpStandingSentence(quoteLabel(runner.label), runnerPFragment)
           : `${quoteLabel(runner.label)} is the most likely contender to overtake it${runnerPFragment}.`;
     } else {
       // indeterminate: no finite margin and not a near-tie.
       margin_clause =
         mode === 'explain'
-          ? `${quoteLabel(runner.label)} sits in second place${runnerPFragment}.`
+          ? composeRunnerUpStandingSentence(quoteLabel(runner.label), runnerPFragment)
           : `${quoteLabel(runner.label)} is the most likely contender to overtake it.`;
     }
   }
@@ -523,13 +549,22 @@ export function composeExplainResultsFallback(
   validationBeatText?: string | null,
   rawRobustness?: RawRobustnessSignals | null,
   defaultedAssumptions?: DefaultedAssumptionsSignal | null,
+  /**
+   * ⭐ THE GOAL THE PROBABILITY IS ABOUT. Threaded from
+   * `StructureProjectionSummary.goal_label` (a DIFFERENT object from the
+   * analysis projection, which carries no goal). Optional: absent ⇒ the
+   * sentence says "your goal" rather than inventing a referent. Never
+   * default it to a label from elsewhere — a wrong goal is worse than a
+   * generic one, because the reader cannot tell it is wrong.
+   */
+  goalLabel?: string | null,
 ): string {
   if (!projection || !projection.leading_option) {
     // Defensive — the handler should not reach this branch without a
     // projection because the precondition bypass already guards the
     // no-analysis case. If the assembler produced no leading option even
     // with an analysis fact present, fall through to a generic line.
-    return 'The analysis has finished, but the leading option could not be summarised from the available data. Would you like to explore what would change this result?';
+    return 'The analysis has finished, but it could not be summarised from the available data. Would you like to explore what would change this result?';
   }
 
   const leading = projection.leading_option;
@@ -556,8 +591,17 @@ export function composeExplainResultsFallback(
   // the caveat sentence avoids duplication when prefix + composer both
   // ran, and keeps prose ordering decisions in one place.
 
+  // ⭐ ONE OWNER FOR THE PHRASE — `compose/goal-referenced-result-phrasing.ts`.
+  // The composer resolves the referent itself, so the `goalLabel ?? 'your goal'`
+  // branch no longer lives in two places, and the verb it interpolates is the
+  // same constant `LEADER_CLAIM_PATTERNS` derives its matcher from. That is
+  // what keeps the withheld-history redactor able to see this sentence.
   sentences.push(
-    `${leading.label} performs best, with a probability of ${formatProbability(leading.probability)}.`,
+    composeResultStandingSentence(
+      leading.label,
+      goalLabel,
+      ` with a probability of ${formatProbability(leading.probability)}`,
+    ),
   );
 
   if (verdict.margin_clause !== null) {
@@ -645,6 +689,15 @@ export function composeWhatWouldFlipFallback(
   rawRobustness?: RawRobustnessSignals | null,
   flipSummary?: FlipSummary | null,
   defaultedAssumptions?: DefaultedAssumptionsSignal | null,
+  /**
+   * ⭐ THE GOAL THE PROBABILITY IS ABOUT — same contract as
+   * `composeExplainResultsFallback` above, because these two composers answer
+   * the same question in two voices and must not diverge on what the number
+   * MEANS. Absent ⇒ the sentence says "your goal" rather than inventing a
+   * referent; never defaulted from another label, since a wrong goal is worse
+   * than a generic one because the reader cannot tell it is wrong.
+   */
+  goalLabel?: string | null,
 ): string {
   if (!projection || !projection.leading_option) {
     return 'The analysis has finished, but the sensitivity picture could not be summarised from the available data. Would you like to run the analysis again?';
@@ -666,7 +719,19 @@ export function composeWhatWouldFlipFallback(
   // is set on the projection.
 
   sentences.push(
-    `${quoteLabel(leading.label)} currently leads, with a probability of ${formatProbability(leading.probability)}.`,
+    // ⭐ ROUTED THROUGH THE SHARED COMPOSER. This opener asserted a
+    // league-table standing in the retired verb — the exact claim the ruling
+    // retires, on a LIVE user-facing path reached by the routed
+    // `what_would_flip` handler. It now reports the same Monte Carlo result as
+    // a measurement against the user's goal, in one voice with its sibling.
+    //
+    // ⚠ The label keeps this file's existing quoting. The ruling is about the
+    // VERB; re-rendering the label would be an unasked-for copy change.
+    composeResultStandingSentence(
+      quoteLabel(leading.label),
+      goalLabel,
+      ` with a probability of ${formatProbability(leading.probability)}`,
+    ),
   );
 
   // Margin sentence (near-tie "effectively tied" / clear "would need to close"
@@ -858,7 +923,9 @@ export const ATTESTED_NO_FLIP_SENTENCE_LEADER_FREE = ((): string => {
  * the pattern list. The opener (`performs_best` / `leads`), the flip-evidence
  * sentences (`which_option_leads`), the attested-no-flip constant
  * (`which_option_leads`) and even {@link formatSensitivityDirection}'s output
- * (`the_lead` — it renders "…strengthens **the lead**") are all caught. That is
+ * (`came_out_highest` — it renders "…strengthens **the option that came out
+ * highest**"; it rendered "…strengthens **the lead**" and tripped `the_lead`
+ * until Paul's 21 Sep ruling retired that noun) are all caught. That is
  * why this is a separate VOICE rather than a filter over the existing one:
  * there is no subset of those sentences that survives.
  * ═══════════════════════════════════════════════════════════════════════════
@@ -916,7 +983,7 @@ export function composeWithheldSensitivityBody(
   // Same ladder as the permitted voice, minus every clause that names or ranks
   // an option. `'none'` and absent both yield nothing: no flip thresholds means
   // no flip verdict to report, and the robustness-band heuristic the permitted
-  // voice falls back to speaks in terms of the lead.
+  // voice falls back to speaks in terms of which option came out highest.
   const flip =
     flipSummary !== null && flipSummary !== undefined && flipSummary.overall_status !== 'none'
       ? flipSummary

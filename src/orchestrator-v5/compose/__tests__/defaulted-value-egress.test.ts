@@ -605,13 +605,13 @@ describe('defaulted-value disclosure — placement and number agreement', () => 
   const ONE: DefaultedAssumptionsSignal = { count: 1, factorCount: 1, named: [] };
 
   const ENDS_ON_QUESTION =
-    'The analysis currently favours Option A, with a probability of 82%.\n\n'
+    'Across the futures we sampled, Option A came out highest on your goal, with a probability of 82%.\n\n'
     + 'Two of your own decision-quality prompts point the same direction.\n\n'
     + 'Which of these three failure modes worries you most, the conversion assumption, '
     + 'the runway timing, or the competitive window?';
 
   const ENDS_ON_STATEMENT =
-    'The analysis currently favours Option A, with a probability of 82%.\n\n'
+    'Across the futures we sampled, Option A came out highest on your goal, with a probability of 82%.\n\n'
     + 'Two of your own decision-quality prompts point the same direction.';
 
   it('PRECONDITION — both fixtures really do differ in how they end', () => {

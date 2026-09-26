@@ -12,6 +12,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { RESULT_STANDING_VERB } from '../../../compose/goal-referenced-result-phrasing.js';
+
+// Interpolated, never re-typed — see the note in post-analysis-advice-gate.test.ts.
+import { RESULT_STANDING_SUBJECT } from '../../../compose/goal-referenced-result-phrasing.js';
 
 import type {
   AnalysisProjectionSummary,
@@ -89,19 +93,20 @@ describe('composeExplainResultsFallback', () => {
     // carries is its OWN win share, so the reader gets 62% and 27% rather than
     // their subtraction.
     expect(text).toContain('Hire Two Mid-Level');
-    expect(text).toContain("'Hire Two Mid-Level' sits in second place, with a probability of 27%");
+    expect(text).toContain("'Hire Two Mid-Level' came out highest less often, with a probability of 27%");
     expect(text).not.toMatch(/percentage points?/i);
     // Driver labels surfaced; sensitivity values rendered as bucketed
     // lead-framing prose (formatSensitivityDirection composes adverb
-    // + verb so the sentence reads "Cost moderately weakens the lead").
+    // + verb so the sentence reads "Cost moderately weakens the option that
+    // came out highest").
     // Thresholds delegate to bandFromMagnitude — the canonical helper
     // — so the fallback bands and the upstream display-safe projection
     // cannot drift. Raw decimals (0.65 / -0.42) must never reach the
     // user-facing wire.
     expect(text).toContain('Engineering Capacity');
     expect(text).toContain('Hiring Cost');
-    expect(text).toMatch(/strengthens the lead/); // 0.65 → strengthens
-    expect(text).toMatch(/weakens the lead/);     // -0.42 → weakens
+    expect(text).toContain(`strengthens ${RESULT_STANDING_SUBJECT}`); // 0.65 → strengthens
+    expect(text).toContain(`weakens ${RESULT_STANDING_SUBJECT}`); // -0.42 → weakens
     // No raw decimals in user-facing prose.
     expect(text).not.toMatch(/-?\d+\.\d/);
     // Humanised stability sentence — plain language, no "robustness" jargon.
@@ -140,7 +145,7 @@ describe('composeExplainResultsFallback', () => {
     });
     expectNaturalProse(text);
     expect(text).toContain('effectively tied');
-    expect(text).not.toContain('meaningful rather than marginal');
+    expect(text).not.toContain('came out highest less often');
     // The awkward "0 percentage points" non sequitur must not be cited.
     expect(text).not.toContain('0 percentage points');
     // Both option labels are named in the closeness sentence.
@@ -155,7 +160,7 @@ describe('composeExplainResultsFallback', () => {
       robustness_band: 'fragile',
     });
     expect(text).toContain('effectively tied');
-    expect(text).not.toContain('meaningful rather than marginal');
+    expect(text).not.toContain('came out highest less often');
   });
 
   it('keeps the "meaningful rather than marginal" framing for a decisive margin (12pp), WITHOUT stating the gap', () => {
@@ -169,7 +174,7 @@ describe('composeExplainResultsFallback', () => {
     // This pin previously required '12 percentage points'; asserting its
     // ABSENCE here is what stops the fix being quietly reverted on the one arm
     // whose whole purpose is the decisive case.
-    expect(text).toContain('meaningful rather than marginal');
+    expect(text).toContain('came out highest less often');
     expect(text).not.toContain('12 percentage points');
     expect(text).not.toMatch(/percentage points?/i);
     expect(text).not.toContain('effectively tied');
@@ -237,7 +242,7 @@ describe('explain/flip near-tie agreement at the SSOT threshold boundary', () =>
     const explain = composeExplainResultsFallback(atBoundary);
     const flip = composeWhatWouldFlipFallback(atBoundary);
     expect(explain).toContain('effectively tied');
-    expect(explain).not.toContain('meaningful rather than marginal');
+    expect(explain).not.toContain('came out highest less often');
     expect(flip).toContain('effectively tied');
   });
 
@@ -250,7 +255,7 @@ describe('explain/flip near-tie agreement at the SSOT threshold boundary', () =>
     const explain = composeExplainResultsFallback(justAbove);
     const flip = composeWhatWouldFlipFallback(justAbove);
     expect(explain).not.toContain('effectively tied');
-    expect(explain).toContain('meaningful rather than marginal');
+    expect(explain).toContain('came out highest less often');
     expect(flip).not.toContain('effectively tied');
   });
 });
@@ -286,7 +291,7 @@ describe('explain/flip near-tie agreement on the raw near_tie override path', ()
     expect(flip).toContain('effectively tied');
     expect(explain).toContain('effectively tied');
     // The exact overclaim the divergence produced must be gone.
-    expect(explain).not.toContain('meaningful rather than marginal');
+    expect(explain).not.toContain('came out highest less often');
   });
 
   it('WITHOUT the raw override, the same wide margin is NOT a near-tie in either composer', () => {
@@ -295,7 +300,7 @@ describe('explain/flip near-tie agreement on the raw near_tie override path', ()
     const explain = composeExplainResultsFallback(WIDE_OVERRIDE, null, null);
     const flip = composeWhatWouldFlipFallback(WIDE_OVERRIDE, null);
     expect(explain).not.toContain('effectively tied');
-    expect(explain).toContain('meaningful rather than marginal');
+    expect(explain).toContain('came out highest less often');
     expect(flip).not.toContain('effectively tied');
   });
 
@@ -320,7 +325,7 @@ describe('explain/flip near-tie agreement on the raw near_tie override path', ()
     // request/routed paths (which pass no raw signal) are unchanged.
     const legacy = composeExplainResultsFallback(WIDE_OVERRIDE, null);
     expect(legacy).not.toContain('effectively tied');
-    expect(legacy).toContain('meaningful rather than marginal');
+    expect(legacy).toContain('came out highest less often');
     expect(composeExplainResultsFallback(WIDE_OVERRIDE, null, undefined)).toBe(legacy);
     expect(composeExplainResultsFallback(WIDE_OVERRIDE, null, null)).toBe(legacy);
   });
@@ -344,8 +349,8 @@ describe('composeWhatWouldFlipFallback', () => {
     // Driver labels surfaced; sensitivities as bucketed lead-framing
     // prose. Thresholds align to bandFromMagnitude. No raw decimals.
     expect(text).toContain('Engineering Capacity');
-    expect(text).toMatch(/strengthens the lead/);
-    expect(text).toMatch(/weakens the lead/);
+    expect(text).toContain(`strengthens ${RESULT_STANDING_SUBJECT}`);
+    expect(text).toContain(`weakens ${RESULT_STANDING_SUBJECT}`);
     expect(text).not.toMatch(/-?\d+\.\d/);
     expect(text).not.toMatch(/\bproposing to\b/i);
     expect(text).not.toMatch(/\bI'll\s+\b/i);
@@ -1065,7 +1070,10 @@ describe('composeWhatWouldFlipFallback — label-quoting + hedge-consolidation p
     const text = composeWhatWouldFlipFallback(ANALYSIS);
     expect(text).not.toMatch(/performing best/i);
     expect(text).not.toMatch(/\bbest\b/i);
-    expect(text).toMatch(/currently leads/);
+    // The positive control for this absence pin. Bound to the shared constant
+    // rather than a retyped sentence, so it cannot drift into a fourth copy of
+    // the opener while the composer moves.
+    expect(text).toContain(RESULT_STANDING_VERB);
   });
 
   it('near-tie + fragile: the lead drops its trailing "could shift" hedge (one caveat only)', () => {

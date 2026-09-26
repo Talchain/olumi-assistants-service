@@ -190,6 +190,11 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
               // recitation inherits the analyse turn's defaulted-value
               // disclosure instead of asserting stability over it.
               invocation.defaultedAssumptions ?? null,
+              // ⭐ THE GOAL THE PROBABILITY IS ABOUT — read from the SAME
+              // source as `explain-results.ts`, so the two voices cannot name
+              // different goals for one analysis. Absent ⇒ the composer says
+              // "your goal"; it is never defaulted from another label.
+              invocation.structureProjection?.goal_label ?? null,
             );
 
     // ⚠⚠ THIS COMMENT PREVIOUSLY SAID THE OPPOSITE AND IS NOW FALSE AS WRITTEN.
