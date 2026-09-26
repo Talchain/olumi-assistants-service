@@ -119,6 +119,7 @@ import { edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from '../../format/edg
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
+import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, figureTheUserWrote } from '../stated-by-user.js';
 import { figureInUserUnits } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -4199,7 +4200,8 @@ export function createAgentCapabilities(
         what_is_missing: String(r.json.assistant_text ?? ''),
         blockers: ready.blockers ?? [],
         options: ready.options ?? [],
-        ...(result !== undefined ? { result } : {}),
+        // ⛔ The Agent reads decision sensitivity from EVPPI only, never PLoT's structural ranking (`../decision-sensitivity.ts`).
+        ...(result !== undefined ? { result: analysisResultForAgent(result) } : {}),
         // The typed leader permission for THIS run, read from its own wire verdict — so the Agent names a
         // leader only when `leader_may_be_named` (see the route's reporting instruction). `requested`: every
         // run_analysis dispatch is one the user asked for (the Agent's own call, or the Run chip's fast path);
