@@ -265,6 +265,38 @@ describe('(A) all-or-nothing, and a batch the hold cannot carry is refused at pr
     expect(out.reason).toBe('payload_too_large');
   });
 
+  it('more changes than the typed cap (4 options × 7 factors = 36) → refused with a sentence, never the edit lane', () => {
+    const factorIds = Array.from({ length: 7 }, (_, i) => `fac_x${i + 1}`);
+    const wide = {
+      ...GRAPH,
+      nodes: [...GRAPH.nodes, ...factorIds.map((id) => ({ id, kind: 'factor', label: `Factor ${id}`, observed_state: { value: 0.2 } }))],
+      edges: [...GRAPH.edges, ...factorIds.map((id) => ({ from: id, to: 'g_profit', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' }))],
+    };
+    const wideOption = (label: string) => ({ label, interventions: factorIds.map((factor_id) => ({ factor_id, value: 0.5 })) });
+    const out = dispatchAddOptionTransaction({
+      ...base,
+      currentGraph: wide,
+      currentGraphHash: hashOf(wide),
+      parameters: { parent_decision_id: 'dec_choice', options: ['A', 'B', 'C', 'D'].map(wideOption) },
+    });
+    expect(out.kind).toBe('refused');
+    if (out.kind !== 'refused') return;
+    expect(out.reason).toBe('too_many_changes');
+    expect(out.response.assistant_text).toContain('fewer effects per option');
+  });
+
+  it('a SINGLE option past the payload cap is refused in single-option words (not "groups")', () => {
+    const out = dispatchAddOptionTransaction({
+      ...base,
+      parameters: { parent_decision_id: 'dec_choice', label: `One ${'very long description '.repeat(900)}`, interventions: [{ factor_id: 'fac_effort', value: 0.5 }] },
+    });
+    expect(out.kind).toBe('refused');
+    if (out.kind !== 'refused') return;
+    expect(out.reason).toBe('payload_too_large');
+    expect(out.response.assistant_text).toContain('That option carries');
+    expect(out.response.assistant_text).not.toContain('groups');
+  });
+
   it('a recorded cap is BOUNDED: a persisted value above the typed ceiling reads as the ceiling, below the default as absent', () => {
     const out = dispatchAddOptionTransaction({ ...base, parameters: THREE });
     if (out.kind !== 'held') throw new Error(`expected held, got ${out.kind}`);
