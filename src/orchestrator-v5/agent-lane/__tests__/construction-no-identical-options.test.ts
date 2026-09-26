@@ -906,7 +906,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   const LOOP_BACK = { from: 'Pro plan subscribers', to: 'Monthly churn', direction: 'positive', provenance: 'inferred' };
   const LOOP_ISSUE = '"Monthly churn" -> "Pro plan subscribers" -> "Monthly churn" is a loop: a model cannot hold one. Keep the direction that carries the '
     + 'cause toward the goal metric, remove the link that points back, and keep every option and risk connected to the goal through links whose direction you state.';
-  const withLoop = <D extends { links: unknown[] }>(d: D): D => ({ ...d, links: [...d.links, LOOP_BACK] }) as D;
+  const withLoop = (d: ReturnType<typeof with54>) => ({ ...d, links: [...d.links, LOOP_BACK] }) as unknown as ReturnType<typeof with54>;
   /** `out.withheld`'s loop entries: the first draft's loop link is withheld by admission; a retry that broke the loop has none. */
   const loopWithheld = (out: Record<string, unknown>) => ((out.withheld ?? []) as { from: string; to: string; reason: string }[])
     .filter((w) => w.reason === 'loop_closing_link').map((w) => `${w.from}->${w.to}`);
