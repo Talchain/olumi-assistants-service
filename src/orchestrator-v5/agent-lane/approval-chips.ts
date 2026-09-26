@@ -28,6 +28,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_model_change: { label: 'Make this change', message: 'Yes, make that change.' },
   // #1788's add-option proposal: the same typed, zero-call approval as every other proposal.
   propose_new_option: { label: 'Add this option', message: 'Yes, add that option.' },
+  // A link's strength recorded as the user's own (challenge → authorised revision): one button, carried like the rest.
+  propose_link_strength: { label: 'Record this link', message: 'Yes, record that.' },
 };
 
 export const AMEND_CHIP: SuggestedAction = {
