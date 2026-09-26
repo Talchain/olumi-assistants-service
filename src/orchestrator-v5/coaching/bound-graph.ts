@@ -10,6 +10,7 @@
  *
  * Pure: no clock, no LLM, no telemetry.
  */
+import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { readRecord } from './fragile-link-challenge.js';
 
@@ -46,6 +47,14 @@ export interface NamedLimit {
  * keeps `unit: '%'` for 100% and over, so "at least 200%" is stored as `2` (#1948 review 5841979260).
  */
 const USER_UNIT_WRITER_ID = /^(?:agent-lane:|gc-)/;
+/**
+ * Currency symbols written BEFORE the figure ("£400,000", "A$5"), derived from THE canonical map
+ * (`utils/currency-alphabet.ts`), never restated: every key but the all-letter ones ("CHF", "kr"),
+ * which read after it ("500 CHF"). A hand-written `£$€` class failed the currency-vocabulary guard.
+ */
+const PREFIX_CURRENCY_SYMBOLS: ReadonlySet<string> = new Set(
+  Object.keys(CURRENCY_SYMBOL_TO_CODE).filter((symbol) => !/^[a-z]+$/i.test(symbol)),
+);
 /** Units whose scale is ambiguous on the wire (percent vs fraction; points; basis points). */
 const PERCENT_LIKE_UNIT = /%|\bpercent\b|\bpp\b|\bbps\b|basis point/i;
 
@@ -75,7 +84,7 @@ export function statedThreshold(row: Record<string, unknown>): string | null {
   const n = value.toLocaleString('en-GB', { maximumFractionDigits: 2 });
   if (unit === '') return n;
   if (unit.startsWith('%')) return `${n}${unit}`;
-  if (/^[£$€]$/.test(unit)) return `${unit}${n}`;
+  if (PREFIX_CURRENCY_SYMBOLS.has(unit)) return `${unit}${n}`;
   return `${n} ${unit}`;
 }
 
