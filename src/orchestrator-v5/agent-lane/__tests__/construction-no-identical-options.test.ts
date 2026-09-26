@@ -26,6 +26,7 @@ import { assessConstructionSize, COMPACT_LIMITS } from '../construction-size-gat
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { labelMatchesBaseline } from '../../../cee/transforms/analysis-ready.js';
+import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 
 // ── the served corpus ────────────────────────────────────────────────────────
 type Level = { value: number; source?: string };
@@ -711,6 +712,9 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
   };
   const LEVELLED_54 = { changes: [], interventions: [PRICE_54, { factor_label: 'AI feature availability', value: 0.5, value_kind: 'absolute', unit: '', provenance: 'ai_proposed' }] } as unknown as Partial<Opt>;
   const ONLY_TEST_WITHHELD = [{ option: 'Test £59 with AI release', like: '£59 with AI release', reason: 'option_indistinct' }];
+  /** Readiness on the registered graph. A kept £54 whose AI availability stays open is one honest value question, never a withheld option. */
+  const blocking = (g: SGraph) => assessCanonicalAnalysisReadiness(g).blockingIssues.map((i) => [i.code, i.message]);
+  const ASK_54_AI = [['MISSING_OPTION_VALUE', 'Factor "AI feature availability" needs a numeric value for option "£54 with AI release"']];
 
   it('PRECONDITION (row 2e): within the limit, "£54 with AI release" is registered and distinct, and the one gap asked is £54\'s', async () => {
     for (const withTest of [true, false]) {
@@ -730,6 +734,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
     expect([out.ok, out.size_retried]).toEqual([true, false]);
     expect(optionIds(graph!)).toEqual(['keep_current_pricing', '59_with_ai_release', '54_with_ai_release']);
     expect(levelsById(graph!)['54_with_ai_release']).toEqual({ pro_plan_price: 0.27 });
+    expect(blocking(graph!)).toEqual(ASK_54_AI);
     expect(withheldOptions(out)).toEqual(ONLY_TEST_WITHHELD);
   });
 
@@ -740,6 +745,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
     expect([out.ok, out.size_retried]).toEqual([true, false]);
     expect(optionIds(graph!)).toEqual(['keep_current_pricing', '59_with_ai_release', '54_with_ai_release']);
     expect(levelsById(graph!)['54_with_ai_release']).toEqual({ pro_plan_price: 0.27, ai_feature_availability: 0.5 });
+    expect(blocking(graph!)).toEqual([]);
     expect(withheldOptions(out) ?? []).toEqual([]);
   });
 
@@ -752,6 +758,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
     expect([out.ok, out.size_retried]).toEqual([true, false]);
     expect(optionIds(graph!)).toEqual(['keep_current_pricing', '59_with_ai_release', '54_with_ai_release']);
     expect(levelsById(graph!)['54_with_ai_release']).toEqual({ pro_plan_price: 0.27, ai_feature_availability: 0.5 });
+    expect(blocking(graph!)).toEqual([]);
     expect(graph!.nodes.some((n) => n.id === TEST_ID)).toBe(false);
     expect(withheldOptions(out)).toEqual(ONLY_TEST_WITHHELD);
     expect(said(out)).toBe(1);
@@ -772,6 +779,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
     expect([out.ok, out.size_retried]).toEqual([true, false]);
     expect(optionIds(graph!)).toEqual(['keep_current_pricing', '59_with_ai_release', '54_with_ai_release']);
     expect(levelsById(graph!)['54_with_ai_release']).toEqual({ pro_plan_price: 0.27 });
+    expect(blocking(graph!)).toEqual(ASK_54_AI);
     expect(withheldOptions(out)).toEqual(ONLY_TEST_WITHHELD);
     expect(questions(out).filter((q) => q.startsWith('I left out "£54 with AI release"'))).toEqual([]);
     expect(said(out)).toBe(1);
