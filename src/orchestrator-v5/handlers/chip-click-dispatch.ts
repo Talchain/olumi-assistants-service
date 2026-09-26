@@ -82,6 +82,8 @@ import {
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
+  // "Did THIS turn complete a run?" — the executor's own run_delta gate, CALLED, never re-implemented.
+  isSuccessfulRunAnalysisFact,
   type FreshnessDerivation,
 } from '../context/freshness.js';
 import {
@@ -468,6 +470,17 @@ export type DispatchChipClickRunAnalysisResult =
       readonly outcome: 'ok';
       readonly response: OlumiResponse;
       readonly commitPerformed: true;
+      /**
+       * ⭐ D1 — THE COMPLETED RUN'S FACT WINDOW, for the run-over-run block (`run_delta`). The SAME contract as
+       * `TurnExecutorRunResult.priorFacts`: the post-dispatch window `[...enrichedFacts, ...context.prior_facts]`
+       * that `freshness` is derived over, present ONLY when this turn produced a successful run.
+       *
+       * Served `a327556` (Canonical #70 5850113962, scenario `a87c883b`): every Run the user asks for — the Run
+       * chip, the Agent's Run fast path, the Agent's `run_analysis` tool — reaches THIS exit, not the executor's,
+       * so a rerun after an authorised revision shipped no `run_delta` and no absence reason
+       * (`prior_facts_absent` on every finaliser call). Absence stays the fail-closed state: never `?? []`.
+       */
+      readonly priorFacts?: readonly HandlerFact[];
       readonly analysisReady?: AnalysisReadyPayload;
       /** Snapshot graph for label resolution by central egress sanitiser. */
       readonly graph: GraphV3T | null;
@@ -2301,6 +2314,8 @@ export async function dispatchChipClickRunAnalysis(
         analysisReady,
         graph: snapshotGraph,
         freshness,
+        // D1 — the window `freshness` was derived over, gated exactly as the executor's exit gates it.
+        ...(enrichedFacts.some(isSuccessfulRunAnalysisFact) ? { priorFacts: postDispatchFacts } : {}),
         // Fix C: present only when the decision_review LLM call returned
         // under an enabled timings/trace gate (never fabricated).
         ...(chipTurnTimings !== undefined ? { turnTimings: chipTurnTimings } : {}),
