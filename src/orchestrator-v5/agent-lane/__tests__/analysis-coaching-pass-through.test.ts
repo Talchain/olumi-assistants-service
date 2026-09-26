@@ -373,7 +373,8 @@ test('NAMED LIMIT — a node label the copy gates refuse (a raw decimal) ships t
 // assumptions" and asks what the user believes, instead of pressure-testing "the estimate" as if it were theirs.
 // Any other or unknown source keeps the neutral card: unknown provenance never becomes an asserted origin.
 const HIRING_GRAPH = graphFixture('hiring-fc9312a3-4809203.draft-graph.json');
-const ASSUMED = /Olumi's starting assumptions/;
+// Only the assumed card's words (body: "some of its numbers are [Olumi's ]starting assumptions"; prompt names Olumi).
+const ASSUMED = /starting assumptions/;
 for (const [turn, trigger] of [['t1','auto_first_pass'],['t2','explicit_run']] as const) test(`ASSUMED LINK — hiring (served 4809203), ${trigger}: the link card on an Olumi-assumed link says so, with no science badge`,()=>{
  const c=runTurnCase('hiring',turn,trigger);
  // Present control from the SAME graph: the grounded link is defaulted and Olumi-proposed.

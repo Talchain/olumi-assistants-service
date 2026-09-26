@@ -194,13 +194,13 @@ export function composeFragileLinkChallenge(
  * only. "some of its numbers", never "its strength": a projected spread alone sets the flag.
  */
 export function assumedLinkBodyForms(fromLabel: string, toLabel: string, firstPass: boolean): readonly string[] {
-  const flagged = `the robustness check flagged the link from ${fromLabel} to ${toLabel} as sensitive, `
-    + 'and some of its numbers are Olumi\'s starting assumptions';
-  const findings = [
-    `${flagged}, not figures you gave — worth saying what you believe about it.`,
-    `${flagged} — worth saying what you believe about it.`,
-  ];
-  return findings.map((finding) => (firstPass ? `${FIRST_PASS_PREFIX}${finding}` : `T${finding.slice(1)}`));
+  // A first pass's prefix already says the estimates are Olumi's, so its finding does not name Olumi again.
+  // No "not figures you gave": on a `brief_extraction` link the brief may have given the mean while only the
+  // spread was projected, and the words must stay true there too.
+  const whose = firstPass ? 'starting assumptions' : 'Olumi\'s starting assumptions';
+  const finding = `the robustness check flagged the link from ${fromLabel} to ${toLabel} as sensitive, `
+    + `and some of its numbers are ${whose} — worth saying what you believe about it.`;
+  return [firstPass ? `${FIRST_PASS_PREFIX}${finding}` : `T${finding.slice(1)}`];
 }
 
 /** The assumed-link card's words; the first body and prompt forms within the contract's bounds. */
