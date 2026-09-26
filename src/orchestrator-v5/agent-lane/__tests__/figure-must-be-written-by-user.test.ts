@@ -156,12 +156,29 @@ describe('propose_option_interventions: `user_stated` stands only on a figure th
   const authorOf = (store: ProposalStore, id: unknown) =>
     ((store.get(String(id))?.operations[0]?.value ?? {}) as { authored_by?: unknown }).authored_by;
 
-  it('RED: the Agent marks £62 as the user\'s, but the user wrote £59 → recorded as Olumi\'s, and said', async () => {
+  /**
+   * ⚠ RETARGETED (round-2 review of `level-never-silently-replaced`): this row used to run on "Raise to £59 at Release",
+   * whose stored level is the £59 the user typed in the brief (`brief_extraction`). It passed only because Olumi's £62
+   * could REPLACE the user's own level — the defect that review closed. The rule it pins is unchanged, so it now runs on
+   * Olumi's own stored £54 (`cee_hypothesis`), which a level can still replace; the £59 case is the row below.
+   */
+  it('RED: the Agent marks £62 as the user\'s, but the user wrote £54 → recorded as Olumi\'s, and said', async () => {
     const { caps, store } = setup();
-    const r = await caps.proposeOptionInterventions(ctxSaying('Raise to £59 at release.'), level(62) as never, undefined) as { ok?: boolean; proposal_id?: unknown; not_the_users_figure?: unknown[] };
+    const onOlumis = { interventions: [{ option_label: 'Raise to £54 at Release', factor_label: 'Pro plan price', value: 62, basis: 'x', user_stated: true }] };
+    const r = await caps.proposeOptionInterventions(ctxSaying('Raise to £54 at release.'), onOlumis as never, undefined) as { ok?: boolean; proposal_id?: unknown; not_the_users_figure?: unknown[] };
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(authorOf(store, r.proposal_id)).toBe('model_proposed');
+    expect(r.not_the_users_figure).toEqual([{ option: 'Raise to £54 at Release', factor: 'Pro plan price', value: 62 }]);
+  });
+
+  it('the same claim over the £59 the user gave in their brief → not recorded at all: their level is left as it is, and said', async () => {
+    const { caps, store } = setup();
+    const r = await caps.proposeOptionInterventions(ctxSaying('Raise to £59 at release.'), level(62) as never, undefined) as { ok?: boolean; proposal_id?: unknown; not_the_users_figure?: unknown[]; levels_not_accepted?: { option: string; reason: string }[] };
+    expect(r.ok, JSON.stringify(r)).toBe(false);
+    expect(store.outstanding('550e8400-e29b-41d4-a716-4466554400c7', null)).toEqual([]);
     expect(r.not_the_users_figure).toEqual([{ option: 'Raise to £59 at Release', factor: 'Pro plan price', value: 62 }]);
+    expect(r.levels_not_accepted?.map((x) => x.option)).toEqual(['Raise to £59 at Release']);
+    expect(r.levels_not_accepted?.[0]?.reason).toContain('a level the user gave in their brief, and 62 is not a figure the user wrote, so their level is left as it is');
   });
 
   it('RED (B2): "Yes, let\'s make that one £62, it\'s what we\'ll charge." → the user\'s', async () => {

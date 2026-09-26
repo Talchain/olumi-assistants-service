@@ -51,10 +51,40 @@ const NOT_THE_USERS_FIGURE_NOTE =
   'The user did not write these figures, so they are proposed as Olumi\u2019s estimates, not as the user\u2019s own. '
   + 'Say so plainly; never call a figure the user\u2019s unless they wrote it.';
 
-/** What the Agent says before approval when a proposed level REPLACES one already stored (`proposeOptionInterventions`). */
-const LEVEL_REPLACES_NOTE =
-  ' Some of these REPLACE a level the option already sets (`replaces`, in the user\u2019s units): before asking for approval, '
-  + 'say plainly which, and the figure each one replaces.';
+/**
+ * \u26d4 WHOSE A STORED OPTION LEVEL IS \u2014 decided by the estate's ONE authorship authority, never a second list in this lane.
+ * Round-2 review of 7bc7a835: only `user_specified` was protected, so on Paul's stored graph the \u00a359 the user typed in the
+ * brief (`{value: 0.295, source: 'brief_extraction'}`) was replaced by Olumi's \u00a355, labelled "(replaces 59 GBP per month)".
+ * `brief_extraction` IS the user's figure (`admit-candidate.ts`: "'explicit' MEANS 'THE USER STATED IT IN THE BRIEF'"):
+ * `classifyValueSource` classes it, `user_specified` and every other user-typed stamp `user_stated`, and
+ * `earnsAuthorshipCredit` is the threshold. `edgeProvenanceDisplay` \u2014 the display vocabulary of this three-member source
+ * enum \u2014 says which of the user's came from the brief (`from_brief`).
+ */
+function storedLevelOwner(setBy: unknown): { users: boolean; fromBrief: boolean; olumis: boolean } {
+  const cls = classifyValueSource(setBy);
+  return { users: earnsAuthorshipCredit(cls), fromBrief: edgeProvenanceDisplay(setBy) === 'from_brief', olumis: cls === 'ai_drafted' };
+}
+
+const levelWithUnit = (n: number, unit: string): string => `${n}${unit !== '' ? ' ' + unit : ''}`;
+
+/** A replaced level, in the words the user reads: "your 59 GBP per month from the brief", "Olumi\u2019s estimate of 54 GBP per month". */
+function replacedLevelInWords(level: number, setBy: unknown, unit: string): string {
+  const owner = storedLevelOwner(setBy);
+  if (owner.users) return `your ${levelWithUnit(level, unit)}${owner.fromBrief ? ' from the brief' : ''}`;
+  return owner.olumis ? `Olumi\u2019s estimate of ${levelWithUnit(level, unit)}` : levelWithUnit(level, unit);
+}
+
+/**
+ * What the Agent says before approval when proposed levels REPLACE ones already stored (`proposeOptionInterventions`):
+ * which, the figure each replaces, and WHOSE it was \u2014 in the words each result entry carries (`replaces_in_words`).
+ */
+function levelReplacesNote(levels: readonly { option?: unknown; replaces_in_words?: unknown }[]): string {
+  const replacing = levels.filter((x) => typeof x?.replaces_in_words === 'string' && x.replaces_in_words !== '');
+  if (replacing.length === 0) return '';
+  return ' Some of these REPLACE a level the option already sets (`replaces`, in the user\u2019s units): before asking for approval, '
+    + 'say plainly which, the figure each one replaces and whose it was, in these words: '
+    + replacing.map((x) => `${String(x.option)}: replaces ${String(x.replaces_in_words)}.`).join(' ');
+}
 
 /** Why a level the user never wrote is left unset (`stated-by-user.ts`). */
 const notWrittenReason = (value: number, factor: string): string =>
@@ -132,6 +162,8 @@ import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
+import { classifyValueSource, earnsAuthorshipCredit } from '../../../cee/graph-readiness/obligation-provenance.js';
+import { edgeProvenanceDisplay } from '../../../cee/transforms/provenance-display.js';
 
 /**
  * ⛔ C46 (d) — THE AGENT IS TOLD WHEN THE LEADER RESTS ON A PRODUCT THE ANALYSIS ONLY ADDS UP.
@@ -1851,7 +1883,7 @@ export function createAgentCapabilities(
           'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +
           'assumptions to adopt or correct, NOT measurements, and that ONE approval applies all of them. Then call ' +
           'authorise_change with this proposal_id once they agree.' +
-          ((Array.isArray(b?.interventions) ? b?.interventions as { replaces?: unknown }[] : []).some((x) => typeof x?.replaces === 'number') ? LEVEL_REPLACES_NOTE : '') +
+          levelReplacesNote(Array.isArray(b?.interventions) ? b?.interventions as { option?: unknown; replaces_in_words?: unknown }[] : []) +
           stillBlockedNote(ifApproved),
       };
     },
@@ -1889,6 +1921,8 @@ export function createAgentCapabilities(
       /** Levels the Agent marked `user_stated` that the user never wrote: recorded as Olumi's, never as theirs. */
       const notWrittenByUser: { option: string; factor: string; value: unknown }[] = [];
       const seen = new Set<string>();
+      /** Refusals that say the user's level "is left as it is", by pair — withdrawn if the user's own figure replaces it in this call. */
+      const leftAsItIs = new Map<object, string>();
       const set: {
         option: { id: string; label: string }; factor: { id: string; label: string };
         raw: number; normalised: number; cap: number | null; unit: string; basis: string;
@@ -2075,12 +2109,15 @@ export function createAgentCapabilities(
          * (`user_specified`) included — became a replacement op labelled "<option> sets <factor> to <n>" with no
          * prior figure, and one click could replace the user's £60 with Olumi's £55 with nothing said.
          * `propose_starting_point` sends its levels through here, so it holds the same rule.
-         *   (a) A level the USER set is replaced only by a figure the user wrote and gave as theirs (`userWrote`:
-         *       `user_stated` AND `figureTheUserWrote`, the #1978 grounding). Anything else leaves that pair as it
-         *       is, and the reason travels in `levels_not_accepted` for the Agent to say.
+         *   (a) A level the USER authored is replaced only by a figure the user wrote and gave as theirs (`userWrote`:
+         *       `user_stated` AND `figureTheUserWrote`, the #1978 grounding). "The user authored" is the estate's ONE
+         *       authority (`storedLevelOwner`: `classifyValueSource` → `earnsAuthorshipCredit`), so the brief's own
+         *       figure (`brief_extraction`) is protected exactly as `user_specified` is — round-2 review of 7bc7a835:
+         *       only `user_specified` was, and on Paul's stored graph Olumi's £55 replaced the brief's £59. Anything
+         *       else leaves that pair as it is, and the reason travels in `levels_not_accepted` for the Agent to say.
          *   (b) Any replacement that goes ahead carries the old level — in the user's units, by the writer's own
          *       range (`levelFrameOf`, as `projectOptionLevels` reads it back) — into the operation, the result and
-         *       the label, and says whose it was.
+         *       the label, and says whose it was ("your 59 GBP per month from the brief", `replacedLevelInWords`).
          */
         const unit = typeof os.unit === 'string' ? os.unit : '';
         const replaces = typeof currentValue === 'number' && Number.isFinite(currentValue)
@@ -2089,16 +2126,20 @@ export function createAgentCapabilities(
             setBy: current !== null && typeof current === 'object' ? (current as { source?: unknown }).source : undefined,
           }
           : undefined;
-        if (replaces !== undefined && replaces.setBy === 'user_specified' && !userWrote) {
-          notAccepted.push({
+        const key = `${option.id}::${factor.id}`;
+        const owner = replaces !== undefined ? storedLevelOwner(replaces.setBy) : undefined;
+        if (replaces !== undefined && owner?.users === true && !userWrote) {
+          const kept = {
             option: option.label, factor: factor.label, value: i?.value,
-            reason: `${option.label} already sets ${factor.label} to ${replaces.level}${unit !== '' ? ' ' + unit : ''}, a level the user set, `
-              + `and ${String(i?.value)} is not a figure the user wrote, so their level is left as it is. Say so plainly. Propose a `
-              + 'different level for it only when the user asks for the change and gives the figure: then send it with user_stated: true.',
-          });
+            reason: `${option.label} already sets ${factor.label} to ${levelWithUnit(replaces.level, unit)}, a level the user `
+              + `${owner.fromBrief ? 'gave in their brief' : 'set'}, and ${String(i?.value)} is not a figure the user wrote, so their `
+              + 'level is left as it is. Say so plainly. Propose a different level for it only when the user asks for the change and '
+              + 'gives the figure: then send it with user_stated: true.',
+          };
+          notAccepted.push(kept);
+          leftAsItIs.set(kept, key);
           continue;
         }
-        const key = `${option.id}::${factor.id}`;
         if (seen.has(key)) continue;
         seen.add(key);
         set.push({
@@ -2108,6 +2149,17 @@ export function createAgentCapabilities(
           basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote,
           ...(replaces !== undefined ? { replaces } : {}),
         });
+      }
+
+      /**
+       * ⛔ ONE PAIR GIVEN TWICE NEVER READS AS BOTH REPLACED AND LEFT AS IT IS (round-2 review of 7bc7a835, non-blocking 1):
+       * the user's own typed figure and Olumi's for the same pair, in either order, made a proposal that replaced the
+       * user's level while `levels_not_accepted` told the Agent "their level is left as it is". The pair IS replaced —
+       * by the user's own figure, and the label says what it replaces — so that refusal is withdrawn.
+       */
+      for (let k = notAccepted.length - 1; k >= 0; k--) {
+        const pair = leftAsItIs.get(notAccepted[k]!);
+        if (pair !== undefined && seen.has(pair)) notAccepted.splice(k, 1);
       }
 
       if (set.length === 0) {
@@ -2137,10 +2189,9 @@ export function createAgentCapabilities(
           ...(i.replaces !== undefined ? { replaces: i.replaces.level } : {}),
         },
       }));
-      const withUnit = (n: number, unit: string): string => `${n}${unit !== '' ? ' ' + unit : ''}`;
-      // Whose level is replaced, in the words the user reads (`set_by` in `projectOptionLevels`).
+      // Whose level is replaced, in the words the user reads — by the estate's authorship authority (`replacedLevelInWords`).
       const replacedClause = (r: { level: number; setBy: unknown }, unit: string): string =>
-        ` (replaces ${r.setBy === 'user_specified' ? 'your ' : r.setBy === 'cee_hypothesis' ? 'Olumi\u2019s estimate of ' : ''}${withUnit(r.level, unit)})`;
+        ` (replaces ${replacedLevelInWords(r.level, r.setBy, unit)})`;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -2149,28 +2200,31 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'model_proposed', basis: 'what each option does, for the user to confirm or correct' },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label:
-          ordered.map((i) => `${i.option.label} sets ${i.factor.label} to ${withUnit(i.raw, i.unit)}${i.replaces !== undefined ? replacedClause(i.replaces, i.unit) : ''}`).join('; ') +
+          ordered.map((i) => `${i.option.label} sets ${i.factor.label} to ${levelWithUnit(i.raw, i.unit)}${i.replaces !== undefined ? replacedClause(i.replaces, i.unit) : ''}`).join('; ') +
           ambiguousClause(ambiguous),
       });
       proposals.put(proposal);
+      const interventions = ordered.map((i) => ({
+        option: i.option.label, factor: i.factor.label,
+        value: i.raw, unit: i.unit,
+        // Both numbers, always. The user approves the one they said.
+        recorded_on_model_scale: i.normalised,
+        model_range: i.cap,
+        ...(i.derivedFrame !== null ? { range_taken_from_your_figure: i.derivedFrame } : {}),
+        basis: i.basis,
+        ...(i.replaces !== undefined ? {
+          replaces: i.replaces.level,
+          ...(typeof i.replaces.setBy === 'string' && i.replaces.setBy !== '' ? { replaces_set_by: i.replaces.setBy } : {}),
+          // Whose it was, in the words to say before approval (`levelReplacesNote` reads it).
+          replaces_in_words: replacedLevelInWords(i.replaces.level, i.replaces.setBy, i.unit),
+        } : {}),
+      }));
       return {
         ok: true, mutated: false,
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        interventions: ordered.map((i) => ({
-          option: i.option.label, factor: i.factor.label,
-          value: i.raw, unit: i.unit,
-          // Both numbers, always. The user approves the one they said.
-          recorded_on_model_scale: i.normalised,
-          model_range: i.cap,
-          ...(i.derivedFrame !== null ? { range_taken_from_your_figure: i.derivedFrame } : {}),
-          basis: i.basis,
-          ...(i.replaces !== undefined ? {
-            replaces: i.replaces.level,
-            ...(typeof i.replaces.setBy === 'string' && i.replaces.setBy !== '' ? { replaces_set_by: i.replaces.setBy } : {}),
-          } : {}),
-        })),
+        interventions,
         ...(unresolved.length > 0 ? { unresolved } : {}),
         ...(notLinked.length > 0 ? {
           not_linked: notLinked,
@@ -2183,7 +2237,7 @@ export function createAgentCapabilities(
         ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
         note:
           'Nothing has changed. Show the user the value in THEIR units and what it rests on, then call ' +
-          'authorise_change with this proposal_id once they agree.' + (ordered.some((i) => i.replaces !== undefined) ? LEVEL_REPLACES_NOTE : ''),
+          'authorise_change with this proposal_id once they agree.' + levelReplacesNote(interventions),
       };
     },
 
