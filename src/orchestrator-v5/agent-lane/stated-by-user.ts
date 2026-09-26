@@ -43,6 +43,93 @@ export function figureTheUserWrote(value: number, unit: unknown, userText: strin
 }
 
 /**
+ * The labels a figure is FOR (its factor, and the option carrying it) and every other QUANTITY in the model (factor,
+ * goal, outcome, risk). Other options are not listed: a figure measures a quantity, and option names reuse the
+ * factors' nouns ("Hire Two Developers" vs "Developers hired"), so they would make the target's own word ambiguous.
+ */
+export interface EntityScope {
+  readonly target: readonly string[];
+  readonly others: readonly string[];
+}
+
+/** A label's words, lower-cased, three characters or more ("Pro plan price" → pro, plan, price; "MRR" → mrr). */
+const wordsOf = (label: string): string[] => label.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3);
+
+/** One word's plain stem: "developers" → developer, "hires"/"hired"/"hire" → hir, "pricing"/"price" → pric. */
+const stemOf = (w: string): string => {
+  let x = w;
+  for (const s of ['ing', 'ed', 'es', 's']) if (x.endsWith(s) && x.length - s.length >= 3) { x = x.slice(0, -s.length); break; }
+  return x.endsWith('e') && x.length >= 4 ? x.slice(0, -1) : x;
+};
+/** Two words name the same thing: equal stems, or one stem (four letters or more) begins the other ("month"/"monthly"). */
+const sameWord = (a: string, b: string): boolean => {
+  const x = stemOf(a);
+  const y = stemOf(b);
+  if (x === y) return true;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  return short.length >= 4 && long.startsWith(short);
+};
+
+/**
+ * ⛔ A FIGURE IS THE USER'S FOR AN ENTITY ONLY WHERE THEY WROTE IT ABOUT THAT ENTITY (ChatGPT #70 5845853364: numeric
+ * grounding binds figure + entity + unit + source context, not the same numeral anywhere in the conversation).
+ * "Our MRR is £12,000." grounds £12,000 for MRR, never for the Pro plan price; `figureTheUserWrote` alone accepted it
+ * for either.
+ *
+ * THE RULE, read with the model's OWN labels — no word list. Within the clause the figure was written in (a clause
+ * ends at . ! ? ; , : a dash or a new line; same unit rules as `figureTheUserWrote`), the figure is ABOUT the entity it
+ * sits beside:
+ *   1. a label word in the two words right after it ("1 developer", "0 tech leads", "a 5% price rise");
+ *   2. else the nearest label word before it ("our MRR is £12,000", "price from £49 to £59");
+ *   3. else the nearest label word after it ("£59 for the Pro plan");
+ *   4. no label word in the clause at all ("Test £54 vs £59") — the figure is about what the user is asking for: theirs.
+ * It is the user's for the target when that word is the target's. A word shared by the target's and another entity's
+ * labels ("monthly" in churn and MRR) names neither and is passed over. Every miss fails toward under-claiming: the
+ * figure is left unset or recorded as Olumi's, and said.
+ */
+export function figureTheUserWroteFor(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): boolean {
+  if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return false;
+  const family = unitPhraseFamily(unit);
+  const targetWords = [...new Set(scope.target.flatMap(wordsOf))];
+  const otherWords = [...new Set(scope.others.flatMap(wordsOf))];
+  const decisiveTarget = targetWords.filter((t) => !otherWords.some((o) => sameWord(t, o)));
+  const decisiveOther = otherWords.filter((o) => !targetWords.some((t) => sameWord(t, o)));
+  const mentionOf = (w: string): 'target' | 'other' | null => {
+    if (w.length < 3) return null;
+    const t = decisiveTarget.some((x) => sameWord(x, w));
+    const o = decisiveOther.some((x) => sameWord(x, w));
+    return t && !o ? 'target' : o && !t ? 'other' : null;
+  };
+  return findStatedAmounts(userText).some((a) => {
+    const matches = a.kind === 'currency'
+      ? (family === null || family === 'currency') && same(a.magnitude, value)
+      : a.kind === 'percent'
+        ? (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value))
+        : same(a.magnitude, value);
+    if (!matches) return false;
+    const amountEnd = a.index + a.matchedText.length;
+    const before = userText.slice(0, a.index);
+    const after = userText.slice(amountEnd);
+    const clauseStart = Math.max(...['.', '!', '?', ';', ',', ':', '\n', '\u2013', '\u2014'].map((c) => before.lastIndexOf(c))) + 1;
+    const endAt = after.search(/[.!?;,:\n\u2013\u2014]/);
+    const clauseEnd = endAt < 0 ? userText.length : amountEnd + endAt;
+    const left: string[] = [];
+    const right: string[] = [];
+    for (const m of userText.slice(clauseStart, clauseEnd).matchAll(/[\p{L}\p{N}]+/gu)) {
+      const at = clauseStart + (m.index ?? 0);
+      if (at + m[0].length <= a.index) left.push(m[0].toLowerCase());
+      else if (at >= amountEnd) right.push(m[0].toLowerCase());
+    }
+    const firstMention = (ws: readonly string[]): 'target' | 'other' | null => {
+      for (const w of ws) { const k = mentionOf(w); if (k !== null) return k; }
+      return null;
+    };
+    const about = firstMention(right.slice(0, 2)) ?? firstMention([...left].reverse()) ?? firstMention(right.slice(2));
+    return about === null || about === 'target';
+  });
+}
+
+/**
  * Whether Olumi's own figure contradicts the option's NAME ("Test £54 at release" carrying an estimate of 64; #1982
  * review N2). Only money and percentages count: a bare number in a name ("Hire 2 developers") is usually about
  * something else. The name must state at least one figure of that kind, and the estimate must match none of them.

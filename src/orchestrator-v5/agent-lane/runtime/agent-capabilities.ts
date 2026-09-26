@@ -117,7 +117,8 @@ import { bandFromMagnitude, INFLUENCE_BAND_THRESHOLDS, type InfluenceBand } from
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
-import { bandTheUserWrote, contradictsItsName, figureTheUserWrote } from '../stated-by-user.js';
+import { bandTheUserWrote, contradictsItsName, figureTheUserWroteFor, type EntityScope } from '../stated-by-user.js';
+
 import { defaultFrameFor, nonlinearIdentityForAgent } from '../admit-model.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
@@ -128,6 +129,18 @@ import { registrationTurnId } from '../../graph-registration/registration-identi
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
+
+/**
+ * Whose figure: the labels it is FOR, and every other QUANTITY's label (`figureTheUserWroteFor`). Options and the
+ * decision are not quantities a figure measures, and their names reuse the factors' nouns.
+ */
+function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; readonly kind?: unknown }[] }, ...target: string[]): EntityScope {
+  const others = g.nodes
+    .filter((n) => n.kind !== 'option' && n.kind !== 'decision')
+    .map((n) => (typeof n.label === 'string' ? n.label : ''))
+    .filter((l) => l !== '' && !target.includes(l));
+  return { target, others };
+}
 
 /**
  * ⛔ C46 (d) — THE AGENT IS TOLD WHEN THE LEADER RESTS ON A PRODUCT THE ANALYSIS ONLY ADDS UP.
@@ -1731,7 +1744,7 @@ export function createAgentCapabilities(
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
           ...(typeof existing === 'number' ? { replaces: existing } : {}),
           // ⛔ A revision is the user's only when they WROTE the figure (`stated-by-user.ts`); else it is Olumi's.
-          userWrote: figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text),
+          userWrote: figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, scopeIn(g, node.label)),
         });
       }
 
@@ -2063,7 +2076,7 @@ export function createAgentCapabilities(
          * Unwritten, the level is Olumi's estimate (recorded as such, and said), and on a held pair it is not a level.
          */
         const claimedByUser = i?.user_stated === true;
-        const userWrote = claimedByUser && figureTheUserWrote(Number(i?.value), factorUnitOf(g.raw, factor), ctx.user_text);
+        const userWrote = claimedByUser && figureTheUserWroteFor(Number(i?.value), factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label));
         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
         if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
           notAccepted.push({
@@ -3772,7 +3785,7 @@ export function createAgentCapabilities(
            * was stored as the user's 0% churn). Otherwise it is Olumi's ESTIMATE only when the Agent said so, with a
            * basis, and it is recorded and shown as that (`cee_hypothesis`, C2). Anything else is left unset and said.
            */
-          const byUser = figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, ctx.user_text);
+          const byUser = figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
           if (!byUser && lvl.estimate === undefined) {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: notWrittenReason(lvl.value, f.label) });
             return { factor_id: f.id, value: null };
