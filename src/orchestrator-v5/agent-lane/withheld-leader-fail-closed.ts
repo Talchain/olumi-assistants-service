@@ -77,6 +77,7 @@ import {
   WITHHELD_CONSTRAINT_VERDICT,
   WITHHELD_NEAR_TIE,
   WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
+  WITHHELD_RUN_OUT_OF_DATE,
   WITHHELD_RUN_IDENTITY_CONFLICT,
   WITHHELD_RUN_IDENTITY_UNCONFIRMED,
   WITHHELD_SEPARATION_UNAVAILABLE,
@@ -960,6 +961,9 @@ const BY_WITHHELD_REASON: Readonly<Record<string, string>> = {
     'because this result could not be confirmed as an analysis of the model as it stands; run the analysis again',
   [WITHHELD_RUN_IDENTITY_CONFLICT]:
     'because this result could not be confirmed as an analysis of the model as it stands; run the analysis again',
+  // P1-d: the run predates the user's latest change; a rerun is exactly what helps, and no limit is implicated.
+  [WITHHELD_RUN_OUT_OF_DATE]:
+    'because this result was worked out before your latest change to the model; run the analysis again to see where the options stand now',
   // C46 (H7): the goal and factors are named by the Agent's `claim_permissions.nonlinear_identity.say`; this
   // deterministic clause names the missing capability without them, and never asks for a re-run that cannot help.
   // ⛔ WHOSE READING (C46 N-c, `admit-model.ts` `productIdentityClause`): this map has no graph, so it cannot see
