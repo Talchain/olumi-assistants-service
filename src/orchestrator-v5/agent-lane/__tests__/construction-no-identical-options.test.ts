@@ -27,6 +27,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { labelMatchesBaseline } from '../../../cee/transforms/analysis-ready.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
+import { subtractMagnitudeDelta } from './magnitude-delta.js';
 
 // ── the served corpus ────────────────────────────────────────────────────────
 type Level = { value: number; source?: string };
@@ -183,6 +184,8 @@ const baseGraph = (key: string): SGraph => JSON.parse(BASE!.graphs[key]!) as SGr
  * after `provenance` (`admit-constraint.ts`). Every served limit here is a level, so what registers is
  * base's bytes plus exactly that one key per limit — nothing else may move.
  */
+/** PR1b's known delta subtracted (magnitude-delta.ts): the served captures pre-date bounded-target sizing. */
+const unsized = (g: SGraph): SGraph => ({ ...g, edges: subtractMagnitudeDelta(g.edges).edges });
 const framedBase = (g: SGraph): SGraph => ({
   ...g,
   ...(g.goal_constraints === undefined ? {} : {
@@ -239,7 +242,8 @@ describe.each([
   });
 
   it('FIDELITY: the reconstruction registers the served graph exactly, apart from the Olumi-added test option', async () => {
-    const { graph } = await build(draft());
+    const { graph: sizedGraph } = await build(draft());
+    const graph = unsized(sizedGraph);
     const served = run.brief.draft_graph;
     expect(withoutOption(graph, TEST_ID).nodes).toEqual(withoutOption(served, TEST_ID).nodes);
     expect(withoutOption(graph, TEST_ID).edges).toEqual(withoutOption(served, TEST_ID).edges);
@@ -250,7 +254,7 @@ describe.each([
     const { graph } = await build(draft());
     const base = baseGraph(key);
     expect(optionIds(base)).toContain(TEST_ID);
-    expect(JSON.stringify(graph)).toBe(JSON.stringify(framedBase(withoutOption(base, TEST_ID))));
+    expect(JSON.stringify(unsized(graph))).toBe(JSON.stringify(framedBase(withoutOption(base, TEST_ID))));
   });
 
   it('RED: the Olumi-added test option is not registered — no node, no edge', async () => {
@@ -322,8 +326,8 @@ describe('controls — what the rule must never touch', () => {
     const { graph, out } = await build(candidateFromServed(run.brief.draft_graph, { olumi: 'ai_proposed', horizon: null }));
     expect(optionIds(graph)).toContain(olumiId);
     expect(graph.nodes).toEqual(run.brief.draft_graph.nodes);
-    expect(graph.edges).toEqual(run.brief.draft_graph.edges);
-    expect(JSON.stringify(graph)).toBe(JSON.stringify(framedBase(baseGraph(key))));
+    expect(unsized(graph).edges).toEqual(run.brief.draft_graph.edges);
+    expect(JSON.stringify(unsized(graph))).toBe(JSON.stringify(framedBase(baseGraph(key))));
     expect(out).not.toHaveProperty('options_withheld');
     expect(questions(out).filter((q) => q.startsWith('I left out ') || q.startsWith('What makes '))).toEqual([]);
   });
