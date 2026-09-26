@@ -43,6 +43,36 @@ export function figureTheUserWrote(value: number, unit: unknown, userText: strin
 }
 
 /**
+ * The same rule for a link's strength band: the user's own words must NAME the band before it is recorded as theirs
+ * (AI Quality on #1978, 5844682410). The link writer stamps every approved strength as the user's, so a band the
+ * Agent picked and the user only approved would read as the user's estimate.
+ *
+ * Band-exact, on word boundaries: "stronger" is not "strong", "very strong" never grounds "strong", and a negated band
+ * ("not strong", "isn't very strong") grounds nothing. "barely" is weak, the prompt's own example ("price barely affects
+ * churn"). Any other paraphrase is a miss, and a miss makes the Agent ask which band — never a band recorded as theirs.
+ */
+const BAND_WORDS: Record<string, RegExp> = {
+  'very strong': /\bvery\s+strong(?:ly)?\b/gi,
+  strong: /\bstrong(?:ly)?\b/gi,
+  moderate: /\bmoderate(?:ly)?\b/gi,
+  weak: /\b(?:weak(?:ly)?|barely)\b/gi,
+};
+const NEGATED_BEFORE = /(?:^|[^\w'\u2019])(?:not|never|no|hardly|\w+n['\u2019]t)\s+(?:very\s+|that\s+|so\s+)?$/i;
+
+/** Whether `band` is named in `userText`, un-negated. No text (or none bound) proves nothing: false. */
+export function bandTheUserWrote(band: string, userText: string | null | undefined): boolean {
+  const re = BAND_WORDS[band];
+  if (re === undefined || typeof userText !== 'string') return false;
+  for (const m of userText.matchAll(re)) {
+    const before = userText.slice(Math.max(0, m.index - 24), m.index);
+    if (NEGATED_BEFORE.test(before)) continue;
+    if (band === 'strong' && /\bvery\s+$/i.test(before)) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
  * Whether this request is something the user TYPED: a composer message. A chip click is not — every chip's text is
  * Olumi's (an approval replaying the Agent's own labels, a suggestion, a coaching prompt) — and neither is a system
  * event such as a board edit.
