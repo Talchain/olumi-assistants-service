@@ -36,6 +36,8 @@ export interface ReadinessView {
   readonly olumi_can_offer: readonly ReadinessItem[];
   /** Options a run would leave out until they are complete, by label. */
   readonly will_run_without: readonly string[];
+  /** Why a run is refused when no demand explains it: the refusal's own words. Present only then. */
+  readonly reason?: string;
 }
 
 const UNCHECKED: ReadinessView = { checked: false, needs_from_user: [], olumi_can_offer: [], will_run_without: [] };
@@ -73,22 +75,29 @@ export function readinessViewOf(rawGraph: unknown): ReadinessView {
   }
   /**
    * ⛔ A BLOCK WITH NO DEMAND STILL HAS A REASON (served f-20260926T020217Z, CEE ef99a97): two options set identical
-   * levels, so the verdict is `may_run: false` — and its reason rides only as a critique
-   * (`IDENTICAL_OPTION_INTERVENTIONS`), not a readiness issue. Reading issues alone handed the Agent "can't run" with
-   * no why. When the verdict blocks and names no demand, its own critiques are the reason, in its own words.
+   * levels, strict readiness passes, and the run's comparison floor refuses — `may_run: false` with no demand. The
+   * view read issues alone, so the Agent was handed "can't run" with no why. The reason is the REFUSAL'S OWN
+   * `blocker_reason` (Canonical 5842490587: the run path's `blockedNextStep`), never a second check such as the
+   * critiques, which answer a different question (#1955 review 5842389608).
    */
-  if (verdict.may_run === false && needs.length === 0) {
-    for (const c of (verdict as { critiques?: readonly { message?: unknown }[] }).critiques ?? []) {
-      const item = itemOf({ message: String(c?.message ?? '') });
-      if (item !== undefined) needs.push(item);
-    }
-  }
+  const blockerReason = typeof verdict.blocker_reason === 'string' ? verdict.blocker_reason.trim() : '';
+  const reason =
+    verdict.may_run === false && needs.length === 0 && blockerReason !== '' && !CODE_LIKE.test(blockerReason)
+      ? blockerReason
+      : undefined;
   const labelOf = new Map<string, string>();
   for (const n of ((rawGraph as { nodes?: unknown }).nodes as { id?: unknown; label?: unknown }[] | undefined) ?? []) {
     if (typeof n?.id === 'string') labelOf.set(n.id, typeof n.label === 'string' && n.label !== '' ? n.label : n.id);
   }
   const excluded = (verdict.scaffold_plan.excluded_option_ids ?? []).map((id) => labelOf.get(id) ?? id);
-  return { checked: true, may_run: verdict.may_run, needs_from_user: dedupe(needs), olumi_can_offer: dedupe(offers), will_run_without: excluded };
+  return {
+    checked: true,
+    may_run: verdict.may_run,
+    needs_from_user: dedupe(needs),
+    olumi_can_offer: dedupe(offers),
+    will_run_without: excluded,
+    ...(reason !== undefined ? { reason } : {}),
+  };
 }
 
 function dedupe(items: readonly ReadinessItem[]): ReadinessItem[] {
@@ -111,5 +120,8 @@ export function readinessSentence(view: ReadinessView): string {
     return `The analysis can run now; it will leave out ${one ? `"${view.will_run_without[0]}"` : listOf(view.will_run_without)} until ${one ? 'its levels are' : 'their levels are'} set.`;
   }
   const why = view.needs_from_user.slice(0, 2).map((i) => i.message.replace(/\s+$/, '')).join(' ');
-  return why !== '' ? `The analysis can't run yet. ${why}` : "The analysis can't run yet.";
+  if (why !== '') return `The analysis can't run yet. ${why}`;
+  // The refusal's own words may open by saying so already; never "can't … can't".
+  const reason = (view.reason ?? '').replace(/^This model can(?:'|\u2019)t be analysed yet\.\s*/i, '');
+  return reason !== '' ? `The analysis can't run yet. ${reason}` : "The analysis can't run yet.";
 }
