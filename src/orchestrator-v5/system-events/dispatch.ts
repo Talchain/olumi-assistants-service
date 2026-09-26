@@ -36,6 +36,8 @@ import { HandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestra
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { config } from '../../config/index.js';
 import { log } from '../../utils/telemetry.js';
+import { threadHoldsThroughMutatingCommit } from '../handlers/hold-thread-through.js';
+import type { PendingAction } from '../session/pending-action.js';
 import {
   GraphStaleWriteError,
   loadMostRecentPendingActionsIntegrityStrict,
@@ -1270,6 +1272,85 @@ export async function dispatchSystemEvent(
 }
 
 /**
+ * ⭐⭐ EVERY MUTATING SYSTEM EVENT THREADS LIVE HOLDS THROUGH ITS MUTATION.
+ *
+ * The commit carry-forward's hash rule drops a hold pinned to the pre-edit hash
+ * WITHOUT a notice, by design: `commit.ts` assumes the mutating dispatchers have
+ * already run `threadHoldsThroughMutatingCommit`, which re-pins a hold that is
+ * still valid on the new graph and lapses one that is not WITH a notice. Only
+ * `option_intervention_edit` did. So a proposal the user had not yet approved
+ * vanished the moment they touched the canvas, and their "yes" was told the
+ * offer was gone. `factor_value_edit` and `goal_target_edit` passed no priors at
+ * all, which is a total wipe.
+ *
+ * `priorPendingActions` undefined (the read failed, or the writer has none)
+ * keeps the key omitted, exactly as before; this never invents a thread.
+ */
+function threadHoldsThroughSystemEventMutation(input: {
+  readonly priorPendingActions: readonly PendingAction[] | undefined;
+  readonly mutatedGraph: unknown;
+  readonly scenarioId: string;
+  readonly turnId: string;
+  readonly requestId: string;
+}): { readonly threaded: readonly PendingAction[] | undefined; readonly notice: string | null } {
+  if (input.priorPendingActions === undefined || input.priorPendingActions.length === 0) {
+    return { threaded: input.priorPendingActions, notice: null };
+  }
+  let hashAfter: string | null = null;
+  try {
+    hashAfter = computeAnalysisAffectingGraphHash(
+      input.mutatedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+    );
+  } catch {
+    hashAfter = null;
+  }
+  const result = threadHoldsThroughMutatingCommit({
+    priorPendingActions: input.priorPendingActions,
+    graphAfterCommit: input.mutatedGraph,
+    graphHashAfterCommit: hashAfter,
+    nowMs: Date.now(),
+    scenarioId: input.scenarioId,
+    turnId: input.turnId,
+    requestId: input.requestId,
+  });
+  return { threaded: result.threaded, notice: result.notice };
+}
+
+/** The lapse notice rides on the committed reply, so the stored copy is the wire copy. */
+function withHoldNotice(response: OlumiResponse, notice: string | null): OlumiResponse {
+  return notice === null
+    ? response
+    : { ...response, assistant_text: `${response.assistant_text}\n\n${notice}` };
+}
+
+/**
+ * The prior row's pendings for a writer that did not read them. A failed read
+ * commits as before (key omitted) — never a new refusal on the commonest canvas
+ * edit — and is LOGGED as a wipe risk, the chip-click success-commit precedent.
+ */
+async function readPriorPendingsForMutation(
+  scenarioId: string,
+  requestId: string,
+  eventKind: string,
+): Promise<readonly PendingAction[] | undefined> {
+  try {
+    return await loadMostRecentPendingActionsIntegrityStrict(scenarioId, requestId);
+  } catch (err) {
+    log.warn(
+      {
+        event: 'v5.system_event.pending_wipe_risk_on_mutation_commit',
+        request_id: requestId,
+        scenario_id: scenarioId,
+        event_kind: eventKind,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'system event — prior pending read failed; the mutation commits without threading holds',
+    );
+    return undefined;
+  }
+}
+
+/**
  * `edge_strength_edit` — strict persisted-edge writer with atomic CAS.
  *
  * The 0.42 event is only intent. Authority stays server-side: read the graph
@@ -1458,7 +1539,14 @@ async function dispatchEdgeStrengthEdit(
     // append_turn_atomic_v4/v3 checks the identity under the DB row lock when
     // the deployed CAS RPC is enforcing, closing the read→write race.
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
-    const commitResult = await commitDirectAnswer(result.response, {
+    const holds = threadHoldsThroughSystemEventMutation({
+      priorPendingActions,
+      mutatedGraph: result.mutatedGraph,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+    });
+    const commitResult = await commitDirectAnswer(withHoldNotice(result.response, holds.notice), {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
       turn_class: 'handler',
@@ -1470,7 +1558,7 @@ async function dispatchEdgeStrengthEdit(
       graph: result.mutatedGraph,
       baseGraphForInvariants: result.baseGraph,
       pending_actions: [],
-      priorPendingActions: priorPendingActions,
+      ...(holds.threaded !== undefined ? { priorPendingActions: holds.threaded } : {}),
       contentGraph: result.mutatedGraph,
       // ⚠⚠ SPREAD, NEVER CONDITIONALLY OMITTED (C8-A review defect 1 follow-up,
       // 2026-08-25). This was
@@ -1901,7 +1989,14 @@ async function dispatchStructuralDelete(
     // under the row lock when enforcing, closing the read→write race) and
     // analysis for the cosmetic-vs-substantive downgrade.
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
-    const commitResult = await commitDirectAnswer(result.response, {
+    const holds = threadHoldsThroughSystemEventMutation({
+      priorPendingActions,
+      mutatedGraph: result.mutatedGraph,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+    });
+    const commitResult = await commitDirectAnswer(withHoldNotice(result.response, holds.notice), {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
       // ⚠ `direct_answer` + `handler_id: null` IS the estate's ruling for an
@@ -1928,7 +2023,7 @@ async function dispatchStructuralDelete(
       graph: result.mutatedGraph,
       baseGraphForInvariants: result.baseGraph,
       pending_actions: [],
-      priorPendingActions,
+      ...(holds.threaded !== undefined ? { priorPendingActions: holds.threaded } : {}),
       contentGraph: result.mutatedGraph,
       // ⚠⚠ SPREAD, NEVER CONDITIONALLY OMITTED (C8-A review defect 1 follow-up,
       // 2026-08-25). This was
@@ -2281,7 +2376,15 @@ async function dispatchFactorValueEdit(
   let committedResponse: OlumiResponse = result.response;
   try {
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
-    const commitResult = await commitDirectAnswer(result.response, {
+    const mutationPriorPendings = await readPriorPendingsForMutation(payload.scenario_id, requestId, event.kind);
+    const holds = threadHoldsThroughSystemEventMutation({
+      priorPendingActions: mutationPriorPendings,
+      mutatedGraph: result.mutatedGraph,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+    });
+    const commitResult = await commitDirectAnswer(withHoldNotice(result.response, holds.notice), {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
       // A handler ran and produced facts. Claiming `direct_answer` with a
@@ -2316,6 +2419,7 @@ async function dispatchFactorValueEdit(
       // same reason. Both metadata fields are typed `string | null | undefined`,
       // so null is carried, not coerced away.
       ...cas,
+      ...(holds.threaded !== undefined ? { priorPendingActions: holds.threaded } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
@@ -3011,7 +3115,14 @@ async function dispatchStructuralRename(
   let committedResponse: OlumiResponse = result.response;
   try {
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
-    const commitResult = await commitDirectAnswer(result.response, {
+    const holds = threadHoldsThroughSystemEventMutation({
+      priorPendingActions,
+      mutatedGraph: result.mutatedGraph,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+    });
+    const commitResult = await commitDirectAnswer(withHoldNotice(result.response, holds.notice), {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
       // `direct_answer` + `handler_id: null` — the estate's ruling for an
@@ -3032,7 +3143,7 @@ async function dispatchStructuralRename(
       graph: result.mutatedGraph,
       baseGraphForInvariants: result.baseGraph,
       pending_actions: [],
-      priorPendingActions,
+      ...(holds.threaded !== undefined ? { priorPendingActions: holds.threaded } : {}),
       contentGraph: result.mutatedGraph,
       // SPREAD, never conditionally omitted: `supabase-store.ts` derives
       // `p_expected_base_known` from key PRESENCE, so omitting a null hash turns
@@ -3379,7 +3490,14 @@ async function dispatchStructuralAdd(
   let committedResponse: OlumiResponse = result.response;
   try {
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
-    const commitResult = await commitDirectAnswer(result.response, {
+    const holds = threadHoldsThroughSystemEventMutation({
+      priorPendingActions,
+      mutatedGraph: result.mutatedGraph,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+    });
+    const commitResult = await commitDirectAnswer(withHoldNotice(result.response, holds.notice), {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
       // `direct_answer` + `handler_id: null` — the estate's ruling for an
@@ -3397,7 +3515,7 @@ async function dispatchStructuralAdd(
       graph: result.mutatedGraph,
       baseGraphForInvariants: result.baseGraph,
       pending_actions: [],
-      priorPendingActions,
+      ...(holds.threaded !== undefined ? { priorPendingActions: holds.threaded } : {}),
       contentGraph: result.mutatedGraph,
       // SPREAD, never conditionally omitted: `supabase-store.ts` derives
       // `p_expected_base_known` from key PRESENCE, so omitting a null hash turns
@@ -3738,7 +3856,14 @@ async function dispatchStructuralAddEdge(
   let committedResponse: OlumiResponse = result.response;
   try {
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
-    const commitResult = await commitDirectAnswer(result.response, {
+    const holds = threadHoldsThroughSystemEventMutation({
+      priorPendingActions,
+      mutatedGraph: result.mutatedGraph,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+    });
+    const commitResult = await commitDirectAnswer(withHoldNotice(result.response, holds.notice), {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
       turn_class: 'direct_answer',
@@ -3752,7 +3877,7 @@ async function dispatchStructuralAddEdge(
       graph: result.mutatedGraph,
       baseGraphForInvariants: result.baseGraph,
       pending_actions: [],
-      priorPendingActions,
+      ...(holds.threaded !== undefined ? { priorPendingActions: holds.threaded } : {}),
       contentGraph: result.mutatedGraph,
       // SPREAD, never conditionally omitted — `supabase-store.ts` derives
       // `p_expected_base_known` from key PRESENCE.
@@ -4032,7 +4157,15 @@ async function dispatchGoalTargetEdit(
   let committedResponse: OlumiResponse = result.response;
   try {
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
-    const commitResult = await commitDirectAnswer(result.response, {
+    const mutationPriorPendings = await readPriorPendingsForMutation(payload.scenario_id, requestId, event.kind);
+    const holds = threadHoldsThroughSystemEventMutation({
+      priorPendingActions: mutationPriorPendings,
+      mutatedGraph: result.mutatedGraph,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+    });
+    const commitResult = await commitDirectAnswer(withHoldNotice(result.response, holds.notice), {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
       // A handler ran and produced facts — the same turn shape the typed-chip
@@ -4048,6 +4181,7 @@ async function dispatchGoalTargetEdit(
       // SPREAD, never conditionally omitted — see the fve writer's note: the
       // store derives the known-base CAS guard from key PRESENCE.
       ...cas,
+      ...(holds.threaded !== undefined ? { priorPendingActions: holds.threaded } : {}),
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
