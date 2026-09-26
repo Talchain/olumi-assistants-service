@@ -441,6 +441,20 @@ describe('(3) B1: the combined size+repair retry may shed an option or a risk Ol
     expect((result.left_out_to_stay_compact as { label: string }[]).map((x) => x.label)).toContain('Hire Both');
   });
 
+  it('CONTROL (adversarial verify of e7052de7, the count on what registers): a shed option\'s gaps go with it — a compaction that sheds "Hire Both" and levels nothing IS adopted, 7 gaps left against 9', async () => {
+    const retry = without(c22(), 'Hire Both');
+    retry.options = retry.options.map((o) => (o.label === 'Hire Two Developers' ? { ...o, changes: [...o.changes, 'Onboarding load'] } : o));
+    // Vacuity: the retry's own count is 7 (5 level gaps, 2 baselines) against the first draft's 9; "Hire Both"'s 3 counted open would be 10.
+    const prep = prepareProvisionalCandidate(retry as unknown as CandidateModel);
+    expect([prep.level_gaps.length, prep.baseline_gaps.length]).toEqual([5, 2]);
+    const { result, graph } = await construct(oversized(c22()), retry);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect([result.size_retried, result.within_compact_limits]).toEqual([true, true]);
+    expect(optionIds(graph!)).toEqual(['continue_current_staffing', 'hire_a_tech_lead', 'hire_two_developers']);
+    expect(actsOn(graph!, 'hire_two_developers')).toEqual(['engineering_delivery_capacity', 'hiring_cost', 'onboarding_load']);
+    expect((result.left_out_to_stay_compact as { label: string }[]).map((x) => x.label)).toContain('Hire Both');
+  });
+
   it('RED (B1, same class, the risk position): "Hire Both" reached an Olumi risk through a factor — shedding it whole is still adopted, and the risk stays on its path', async () => {
     const first = withRisk(oversized(c22()), ['Hire Both']);
     expect(prepareProvisionalCandidate(first as unknown as CandidateModel).mechanism_issues, 'PRECONDITION: a mechanism, not a repair issue').toEqual([]);
