@@ -340,6 +340,20 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(t2.assistant_text, t2.assistant_text).not.toMatch(/\bAdded\b|Partly saved/);
   }, 120_000);
 
+  it('[c3b] the confirm lands, then another writer moves the model before the Agent reads it back → saved, but NOT reported as "Added" (what it holds is unconfirmed)', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const approve = approveChipOf(await proposeOptionC(54))!;
+    const hold = (await heldOnLatestRow())[0]!;
+    onInnerSent = (b) => {
+      if ((b['chip'] as { id?: string } | undefined)?.id !== hold.chip_id) return;
+      const g = graphNow();
+      graphOf.set(SCENARIO, { ...g, nodes: g.nodes.map((x) => (x.id === 'opt_b' ? { ...x, interventions: { fac_price: { value: 0.3, raw_value: 60, unit: 'GBP' } } } : x)) });
+    };
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._agent.tool_calls[0], JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: false, mutated: true, refusal: 'not_verified' }));
+    expect(t2.assistant_text, t2.assistant_text).not.toMatch(/\bAdded\b/);
+  }, 120_000);
+
   it('two options asked for in one turn → the FIRST is held and offered (one button), the second is refused in plain words — never zero buttons', async () => {
     graphOf.set(SCENARIO, seedGraph());
     script = [
