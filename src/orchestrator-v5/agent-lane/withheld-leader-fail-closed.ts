@@ -1395,7 +1395,16 @@ type WireField = (typeof WIRE_ENFORCED_PROSE_FIELDS)[number];
  */
 export function enforceAgentLaneLeaderClaimsAtWire(
   response: OlumiResponse,
-  opts: WireLeaderClaimEnforcementOpts,
+  opts: WireLeaderClaimEnforcementOpts & {
+    /**
+     * ⭐ AX2 (DL #70 5850471417): whether the dropped ranking is replaced by the sentence saying WHY no option is put
+     * forward. `false` only on the build turn, whose automatic first pass nobody asked to rank: served
+     * (`f-20260926T201724Z/01`), that sentence was 46 of the 315 words and gave a second, different cause beside the
+     * model's own. The ranking is still dropped; only the explanation of an absence nobody asked about is not added.
+     * A reply the drop would leave EMPTY still gets it — never a silent turn. Omitted ⇒ `true` (every other caller).
+     */
+    readonly sayWhyWithheld?: boolean;
+  },
 ): WireLeaderClaimEnforcementResult {
   let next = response;
   let droppedSentences = 0;
@@ -1409,7 +1418,7 @@ export function enforceAgentLaneLeaderClaimsAtWire(
           ?? opts.leaderClaimWithheldReason;
         const closing = agentNoLeaderSentence(withheldReason, opts.analysisReady, limitCauseCodesOf((response as { blocks?: unknown }).blocks));
         const body = projected.text.trimEnd();
-        next = { ...response, assistant_text: body.length === 0 ? closing : `${body}\n\n${closing}` } as OlumiResponse;
+        next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false ? body : `${body}\n\n${closing}` } as OlumiResponse;
         log.info(
           {
             event: 'agent_lane.withheld_leader_ranking_dropped',

@@ -235,14 +235,29 @@ function contextFactorsLine(r: ToolResult): string {
   return ` No option changes ${labels.join(' or ')}, so I held ${labels.length === 1 ? 'it' : 'them'} as fixed context rather than ${labels.length === 1 ? 'a lever' : 'levers'} \u2014 tell me if one of the options should change ${labels.length === 1 ? 'it' : 'them'}.`;
 }
 
+/**
+ * ⭐ AX2 (DL #70 5850471417; measured on the served first reply, `f-20260926T201724Z/01`): 144 of its 315 words were
+ * this line, five whole questions, and the model had written 104. The reply now carries the TWO priority slots the
+ * producers fill on purpose — the goal-scope question first (`construction-goal-scope-is-named`), the withheld-option
+ * step after the deadline question (`construction-no-identical-options`) — and offers the rest. None is lost: the
+ * whole list stays on the tool result the Agent answers from, and on the wire as `_agent.open_questions`.
+ */
+const OPEN_QUESTIONS_SHOWN = 2;
+
 /** The questions the build parked instead of modelling — what to examine next, not answers. */
 function openQuestionsLine(r: ToolResult): string {
-  const qs = Array.isArray(r.open_questions) ? (r.open_questions as unknown[]).map((q) => String(q).trim()).filter((q) => q !== '') : [];
+  const qs = openQuestionsOf(r);
   if (qs.length === 0) return '';
   // Each question kept whole, so it still reads as a question the team can take up.
-  const shown = qs.slice(0, LEFT_OUT_SHOWN).map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
-  const more = qs.length > LEFT_OUT_SHOWN ? ` (and ${qs.length - LEFT_OUT_SHOWN} more)` : '';
+  const shown = qs.slice(0, OPEN_QUESTIONS_SHOWN).map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
+  const rest = qs.length - OPEN_QUESTIONS_SHOWN;
+  const more = rest > 0 ? ` Ask me for the other ${rest === 1 ? 'one' : rest}.` : '';
   return ` Questions this model does not answer yet: ${shown}${more}`;
+}
+
+/** Every question a build parked, in the producer's order — the complete list, for the wire. */
+export function openQuestionsOf(r: ToolResult | undefined): string[] {
+  return Array.isArray(r?.open_questions) ? (r.open_questions as unknown[]).map((q) => String(q).trim()).filter((q) => q !== '') : [];
 }
 
 /**

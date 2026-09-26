@@ -53,7 +53,7 @@ import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
-import { narrateWriteOutcome, notAdoptedLine, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { narrateWriteOutcome, notAdoptedLine, openQuestionsOf, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
@@ -1988,6 +1988,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(typeof claim?.withheld_reason === 'string' ? { leaderClaimWithheldReason: claim.withheld_reason } : {}),
         graph: readbackGraph ?? null,
         analysisReady,
+        // AX2: the build turn's automatic first pass was not asked to rank anything — drop a ranking, add no "why".
+        sayWhyWithheld: !(fa !== undefined && fastPath !== 'run' && !result.tool_calls.some((c) => c.name === 'run_analysis')),
       });
       if (enforced.changed) {
         leaderClaimEnforced = true;
@@ -2143,6 +2145,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * empty list is reported honestly rather than filled in.
          */
         receipts: collectTurnReceipts(result.tool_results),
+        // ⭐ AX2: the reply shows two of the build's open questions; the whole list, in the producer's order, is here.
+        ...(() => {
+          const at = result.tool_calls.findIndex((c) => c.name === 'build_model_from_brief');
+          const qs = at >= 0 ? openQuestionsOf(result.tool_results[at] as Parameters<typeof openQuestionsOf>[0]) : [];
+          return qs.length > 0 ? { open_questions: qs } : {};
+        })(),
         /**
          * The structured twin of the prose disclosure above. Prose is readable;
          * structure is reliable. Omitted entirely when nothing changed, so its
