@@ -127,7 +127,12 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
       for (const w of ws) { const k = mentionOf(w); if (k !== null) return k; }
       return null;
     };
-    const about = firstMention(right.slice(0, 2)) ?? firstMention([...left].reverse()) ?? firstMention(right.slice(2));
+    // The figure's own RATE names no entity either (AI Conversation #70 5848429576): "£10 per month" on a factor with
+    // no declared unit read "month" as "Monthly churn rate". A "per X", "/X", "a X", "each X" or "every X" written right
+    // after the figure is its denominator, so it is passed over whatever unit the factor declares.
+    const rate = /^\s*(?:(?:per|an?|each|every)\s+|\/\s*)[\p{L}\p{N}]+/iu.exec(after);
+    const afterRate = right.slice(rate === null ? 0 : [...rate[0].matchAll(/[\p{L}\p{N}]+/gu)].length);
+    const about = firstMention(afterRate.slice(0, 2)) ?? firstMention([...left].reverse()) ?? firstMention(afterRate.slice(2));
     return about === null || about === 'target';
   });
 }

@@ -277,6 +277,13 @@ function committedThenMoved(
   return reported !== '' && approvedRevision !== '' && reported !== approvedRevision && after.graph_hash !== '' && after.graph_hash !== reported;
 }
 
+/**
+ * A link band as the user reads it: the canvas's lowest pill says "Slight", never the enum's `weak`. Served joined run
+ * (Canvas #70, UI cd6a82e4 + CEE 5f941f2): the receipt the user read was "Recorded … as weak (0.1 …)" beside a Slight pill.
+ * Every preview, public label (and so the "Recorded" receipt) and note that names a link's band uses this word.
+ */
+const linkBandWord = (band: InfluenceBand): string => (band === 'weak' ? 'slight' : band);
+
 /** Marks a compound starting point, so a newer one can replace it before approval. */
 const STARTING_POINT_BASIS = 'a starting point \u2014 values and what each option sets \u2014 for the user to adopt or correct in one approval';
 
@@ -314,6 +321,20 @@ function valueOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'mo
  */
 function levelOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'model_proposed' | 'user_stated' {
   return valueOpAuthor(op, proposal);
+}
+
+/**
+ * ⭐ THE FIGURE A LEVEL WAS READ FROM, KEPT ON ITS CELL (AI Conversation #70 5848429576; the door, #2024). A level on a
+ * NEW factor with no range was stored as a bare 0.1: the user's "£10 per month" and the range it was read against were
+ * gone. The proposal already holds both, so the writer is handed them to keep on the cell in the same commit. Only when
+ * they reproduce the stored level exactly: an op whose `normalised` is not `raw / cap` passes no figure (the writer would
+ * refuse the whole batch as `level_frame_mismatch`).
+ */
+function levelFigureOf(op: ProposalOperation): { raw_value: number; cap: number; unit?: string } | Record<string, never> {
+  const v = (op.value ?? {}) as { normalised?: unknown; raw?: unknown; cap?: unknown; unit?: unknown };
+  if (typeof v.normalised !== 'number' || typeof v.raw !== 'number' || !Number.isFinite(v.raw) || typeof v.cap !== 'number' || !(v.cap > 0)) return {};
+  if (Math.abs(v.raw / v.cap - v.normalised) > 1e-9) return {};
+  return { raw_value: v.raw, cap: v.cap, ...(typeof v.unit === 'string' && v.unit.trim() !== '' ? { unit: v.unit.trim() } : {}) };
 }
 
 /**
@@ -1079,6 +1100,7 @@ export function createAgentCapabilities(
       ...pairOf(o.path),
       value: ((o.value ?? {}) as { normalised?: unknown }).normalised,
       author: levelOpAuthor(o, parent) === 'user_stated' ? 'user_specified' as const : 'model_proposed' as const,
+      ...levelFigureOf(o),
     }));
     // ⛔ THE LINKS AND LEVELS ARE ONE COMMIT OR NONE — so what would stop them is checked BEFORE anything is written.
     if (levelOps.length + linkOps.length > 0) {
@@ -1500,7 +1522,7 @@ export function createAgentCapabilities(
       // ⛔ Recorded as the user's only when the user named the band (`bandTheUserWrote`); the writer stamps it as theirs.
       if (!bandTheUserWrote(band, ctx.user_turn_text)) {
         return { ok: false, mutated: false, refusal: 'strength_not_stated',
-          detail: `The user has not called this link ${band} in this message, in their own words, so nothing was prepared: it would be recorded as their estimate. `
+          detail: `The user has not called this link ${linkBandWord(band)} in this message, in their own words, so nothing was prepared: it would be recorded as their estimate. `
             + 'Ask them how strong they think it is \u2014 slight, moderate, strong or very strong \u2014 and never offer a band as theirs.' };
       }
       const g = await readGraph(ctx.scenario_id);
@@ -1552,8 +1574,8 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: confirm
-          ? `Record "${from.label}" \u2192 "${to.label}" as ${band}, as your own estimate (strength kept at ${Math.abs(mean)})`
-          : `Record "${from.label}" \u2192 "${to.label}" as ${band} (${magnitude} on Olumi's 0\u20131 scale), as your own estimate${wanted !== current ? `, pushing ${wanted === 'positive' ? 'up' : 'down'}` : ''}`,
+          ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}, as your own estimate (strength kept at ${Math.abs(mean)})`
+          : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)} (${magnitude} on Olumi's 0\u20131 scale), as your own estimate${wanted !== current ? `, pushing ${wanted === 'positive' ? 'up' : 'down'}` : ''}`,
       });
       proposals.put(proposal);
       return {
@@ -1561,11 +1583,11 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        link: { from: from.label, to: to.label, was: { band: currentBand, strength: Math.abs(mean), direction: current },
-          becomes: { band, strength: magnitude, direction: wanted }, keeps_current_strength: confirm },
+        link: { from: from.label, to: to.label, was: { band: linkBandWord(currentBand), strength: Math.abs(mean), direction: current },
+          becomes: { band: linkBandWord(band), strength: magnitude, direction: wanted }, keeps_current_strength: confirm },
         note: confirm
           ? 'Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree.'
-          : `Nothing has changed yet. Tell the user it will be recorded as ${band}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree.`,
+          : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree.`,
       };
     },
 
@@ -1698,7 +1720,7 @@ export function createAgentCapabilities(
           detail: band === undefined
             ? `${args?.strength === undefined ? 'No strength was given' : 'The strength given is not one of weak (the canvas\u2019s Slight), moderate, strong or very strong'}, so nothing was prepared. `
               + `If the user named one of those bands for this link in this message, call again with it as strength; otherwise ${ask}`
-            : `The user has not called the link from "${from.label}" to "${to.label}" ${band} in this message, in their own words, so nothing was prepared: `
+            : `The user has not called the link from "${from.label}" to "${to.label}" ${linkBandWord(band)} in this message, in their own words, so nothing was prepared: `
               + `it would be recorded as their estimate. Instead, ${ask}` };
       }
       const magnitude = bandMidpoint(band);
@@ -1712,7 +1734,7 @@ export function createAgentCapabilities(
         operations,
         provenance: { authored_by: 'model_proposed', basis: args.rationale },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Connect "${from.label}" to "${to.label}" (${args.direction}) as ${band}, your own estimate`,
+        public_label: `Connect "${from.label}" to "${to.label}" (${args.direction}) as ${linkBandWord(band)}, your own estimate`,
       });
       proposals.put(proposal);
       return {
@@ -1721,7 +1743,7 @@ export function createAgentCapabilities(
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
         link: { from: from.label, to: to.label, direction: args.direction, band, strength: magnitude },
-        note: `Nothing has changed. Tell the user the link will be recorded as ${band}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and ask them to approve it before calling authorise_change.`,
+        note: `Nothing has changed. Tell the user the link will be recorded as ${linkBandWord(band)}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and ask them to approve it before calling authorise_change.`,
       };
     },
 
@@ -2165,6 +2187,10 @@ export function createAgentCapabilities(
          * Unwritten, the level is Olumi's estimate (recorded as such, and said), and on a held pair it is not a level.
          */
         const claimedByUser = i?.user_stated === true;
+        // The unit the user wrote the figure in (a NEW factor declares none) is STORED with the level, never used to
+        // ground it: a model-supplied unit ("% monthly churn rate") would name away the entity the guard reads
+        // (Canonical #2025 B1). Grounding reads only the factor's DECLARED unit; the rate after the figure is skipped anyway.
+        const statedUnit = typeof i?.unit === 'string' && i.unit.trim() !== '' ? i.unit.trim() : undefined;
         const userWrote = claimedByUser && figureTheUserWroteFor(Number(i?.value), factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label));
         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
         if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
@@ -2273,7 +2299,7 @@ export function createAgentCapabilities(
         set.push({
           option: { id: option.id, label: option.label },
           factor: { id: factor.id, label: factor.label },
-          raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' ? os.unit : '',
+          raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' && os.unit !== '' ? os.unit : (statedUnit ?? ''),
           basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote, needsLink,
         });
       }
@@ -2301,6 +2327,7 @@ export function createAgentCapabilities(
         path: `${i.option.id}::${i.factor.id}`,
         value: {
           normalised: i.normalised, raw: i.raw, cap: i.cap, basis: i.basis, derived_frame: i.derivedFrame,
+          ...(i.unit !== '' ? { unit: i.unit } : {}),
           // Per level, like `valueOpAuthor`: whose level this is travels to the writer (`levelOpAuthor`).
           authored_by: i.userStated ? 'user_stated' : 'model_proposed',
         },
@@ -2537,6 +2564,7 @@ export function createAgentCapabilities(
             path: o.path, option_id: option_id ?? '', factor_id: factor_id ?? '',
             value: ((o.value ?? {}) as { normalised?: unknown }).normalised,
             author: levelOpAuthor(o, decision.proposal) === 'user_stated' ? 'user_specified' as const : 'model_proposed' as const,
+            figure: levelFigureOf(o),
           };
         });
         if (opts.commitOptionLevels === undefined || levelInputs.some((l) => typeof l.value !== 'number')) {
@@ -2714,7 +2742,7 @@ export function createAgentCapabilities(
           base_graph_hash: baseHash,
           turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#levels`),
           links: [],
-          levels: levelInputs.map((l) => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value as number, author: l.author })),
+          levels: levelInputs.map((l) => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value as number, author: l.author, ...l.figure })),
         });
         if (res.status === 'unconfirmed') {
           return {

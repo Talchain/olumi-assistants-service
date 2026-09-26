@@ -173,6 +173,18 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
   const result = source?.result;
   if (proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return fallback;
   const ops = proposal.operations;
+  /**
+   * ⛔ LEVELS THE USER GAVE ARE RECORDED, NOT "STARTING" ONES (AI Conversation #70 5848452740): beside "the levels are
+   * your stated figures" the chip read "Use as starting option levels" — the per-tool fallback, since the links the
+   * levels need are not figures. Option levels, only the links they need, and every level the user's: it says so.
+   */
+  const levelOps = ops.filter((o) => o.op === 'set_option_intervention');
+  const levelLink = (o: (typeof ops)[number]): boolean => o.op === 'add_edge' && (o.value as { link_for_level?: unknown } | undefined)?.link_for_level === true;
+  // One level alone keeps its "Save £X for …" label below.
+  if (ops.length > 1 && levelOps.length > 0 && ops.every((o) => o.op === 'set_option_intervention' || levelLink(o))
+    && levelOps.every((o) => (o.value as { authored_by?: unknown } | undefined)?.authored_by === 'user_stated')) {
+    return levelOps.length === 1 ? 'Record this level' : `Record these ${levelOps.length} levels`;
+  }
   if (ops.length === 0 || ops.some((o) => !FIGURE_OPS.has(o.op))) return fallback;
   if (ops.length > 1) {
     // A revision the user asked for replaces figures already there: it is not a set of starting figures.
