@@ -3682,12 +3682,22 @@ export function createAgentCapabilities(
       const built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
       if (!built.matched || JSON.stringify(built.operations).length > GM_HELD_OPERATIONS_MAX_JSON_CHARS) {
         const reason = !built.matched ? String(built.reason) : '';
+        /**
+         * ⛔ A TWIN IS NAMED (#1990 review, Runtime follow-up). The product refuses an option whose levels equal an
+         * existing option's — the engine cannot tell them apart and the run drops one silently ("Not analysed").
+         * The Agent says WHICH option it would repeat, so the user can change a level, never a bare "could not".
+         */
+        const twin = !built.matched && built.sameAs !== undefined ? built.sameAs.label : undefined;
         const why = reason === 'new_factor_unreachable'
           ? ' Nothing the new factor changes leads to the goal, so it could not affect the comparison: ask the user what it changes.'
           : reason === 'new_factor_exists'
             ? ' The model already has a factor by that name: name it in acts_on instead of adding it.'
-            : '';
+            : reason === 'same_levels_as_existing_option'
+              ? ` It would set exactly the same levels as "${twin ?? 'an option already in the model'}", so the analysis could not tell the two apart: `
+                + 'say so, and ask the user which level this option should change.'
+              : '';
         return { ok: false, mutated: false, refusal: 'not_prepared', ...(!built.matched ? { reason: built.reason } : {}),
+          ...(twin !== undefined ? { same_levels_as: twin } : {}),
           detail: `That could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
       }
       const labels = plans.map((x) => x.plan.label);
@@ -3720,8 +3730,12 @@ export function createAgentCapabilities(
         }
       }
       if (!heldBatchOk) {
+        // A change the product REFUSED with its own sentence (no hold offered) — say that sentence, never a bare "could not".
+        const said = heldChip === undefined && r.status === 200 && typeof r.json.assistant_text === 'string' ? r.json.assistant_text.trim() : '';
         return { ok: false, mutated: false, refusal: 'not_prepared',
-          detail: 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
+          detail: said !== ''
+            ? `Olumi did not prepare that change, so nothing was added. Olumi said: "${said}" Tell the user plainly; do not retry it in other words.`
+            : 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
       }
       heldOptionThisRequest = labels.map((l) => `"${l}"`).join(' and ');
       const described = entries.map(({ plan, set }) => ({

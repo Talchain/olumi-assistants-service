@@ -517,6 +517,25 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect((newOption()?.interventions ?? {})['fac_price']).toBeUndefined();
   }, 120_000);
 
+  it('[q4] RED (#1990 follow-up): an option with the same level as "Raise to £59" → the Agent is told WHICH option it repeats; nothing is sent', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    let toolOutput: { refusal?: string; same_levels_as?: string; detail?: string } = {};
+    script = [
+      () => fnCall('propose_new_option', { label: 'Test £59 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 59, unit: 'GBP' } }], rationale: 'The user asked for it.' }),
+      (body) => {
+        const out = (body['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
+        toolOutput = JSON.parse(String(out?.output ?? '{}')) as typeof toolOutput;
+        return say('That would repeat "Raise to £59". Which level should it change?');
+      },
+    ];
+    const t1 = await turn({ message: 'Add an option: test £59 at release.' });
+    expect(toolOutput.refusal, JSON.stringify(toolOutput)).toBe('not_prepared');
+    expect(toolOutput.same_levels_as).toBe('Raise to £59');
+    expect(toolOutput.detail).toContain('It would set exactly the same levels as "Raise to £59"');
+    expect(inner.filter((b) => (b['chip'] as { intent?: string } | undefined)?.intent === 'add_option'), 'nothing sent').toEqual([]);
+    expect(approveChipOf(t1)).toBeUndefined();
+  }, 120_000);
+
   it('[p3] RED: a factor with no range at all — the user\'s £54 cannot be stored on one, so the level is left UNSET (never a bare 54) and the Agent is told why', async () => {
     graphOf.set(SCENARIO, seedGraph(1, 1, 'none'));
     let proposed = '';
