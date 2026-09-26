@@ -3,17 +3,18 @@
  * click on the control that shows the exact query runs ONE native web search, and the reply — the finding with its
  * sources — is what the answer row keeps, so a reload shows the same sources.
  *
- * ⚠ The provider response is SYNTHETIC (documented `web_search_call` + `url_citation` shape); it re-binds to AI
- * Conversation's native NE-02 capture when that exists.
+ * The provider answers with the NATIVE research response AI Conversation captured under NE-20260926-02 (#70 5849971004).
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { researchChipFor } from '../runtime/public-research.js';
+import { readFileSync } from 'node:fs';
+
+const NE02 = (JSON.parse(readFileSync(new URL('./fixtures/native-research-ne02.json', import.meta.url), 'utf8')) as { response: unknown }).response;
 
 const SCENARIO = '8b3e4d5c-6f7a-4b8c-9d0e-1f2a3b4c5d6f';
 const Q = 'typical churn after a SaaS price rise of about 20%';
-const FINDING = 'Price rises of around 20% usually raise monthly churn by one to three points.';
-const SRC = 'https://example.org/saas-pricing-study';
+const SRC = 'https://sandhill.com/wp-content/uploads/2023/10/Allied-Advisers-report.pdf';
 const appended: Record<string, unknown>[] = [];
 /** Rows by turn id, read back as the route's turn claim and answer row expect. */
 const rows = new Map<string, Record<string, unknown>>();
@@ -43,14 +44,7 @@ describe('public research: the Agent offers, the user\'s click searches once, th
       bodies.push(body);
       if (JSON.stringify(body['tools'] ?? []).includes('web_search')) {
         if (research === 'fail') return new Response(JSON.stringify({ error: { message: 'boom' } }), { status: 500 });
-        return new Response(JSON.stringify({
-          id: 'resp_synthetic', status: 'completed', error: null, incomplete_details: null, usage: { input_tokens: 5, output_tokens: 20 },
-          output: [
-            { type: 'web_search_call', status: 'completed', action: { type: 'search', query: Q, sources: [{ type: 'url', url: SRC }] } },
-            { type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: FINDING,
-              annotations: [{ type: 'url_citation', url: SRC, title: 'SaaS pricing study', start_index: 0, end_index: FINDING.length }] }] },
-          ],
-        }), { status: 200 });
+        return new Response(JSON.stringify(NE02), { status: 200 });
       }
       // The Agent: first it offers the search, then it says so.
       const agentCalls = bodies.filter((b) => !JSON.stringify(b['tools'] ?? []).includes('web_search')).length;
@@ -97,11 +91,11 @@ describe('public research: the Agent offers, the user\'s click searches once, th
     expect(bodies, 'exactly one provider call, and it is the search').toHaveLength(1);
     expect(bodies[0]!['input']).toEqual([{ role: 'user', content: [{ type: 'input_text', text: Q }] }]);
     expect(bodies[0]).toMatchObject({ tools: [{ type: 'web_search' }], tool_choice: 'required', max_tool_calls: 3 });
-    expect(b.assistant_text).toContain(`${FINDING} [1]`);
-    expect(b.assistant_text).toContain(`1. [SaaS pricing study](${SRC})`);
+    expect(b.assistant_text).toContain('less than 1% for enterprise SaaS. [1]');
+    expect(b.assistant_text).toContain(`1. [sandhill.com](${SRC})`);
     expect(b._agent?.mutated).toBe(false);
     // What a reload reads: the answer row keeps the same finding and sources.
-    expect(appended.map((w) => String(w.assistantMessage ?? '')).some((m) => m.includes(`1. [SaaS pricing study](${SRC})`))).toBe(true);
+    expect(appended.map((w) => String(w.assistantMessage ?? '')).some((m) => m.includes(`1. [sandhill.com](${SRC})`))).toBe(true);
   });
 
   it('CONTRAST: the same words TYPED (no control) never search — they go to the Agent', async () => {

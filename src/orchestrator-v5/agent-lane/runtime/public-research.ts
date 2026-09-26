@@ -28,6 +28,8 @@ export const RESEARCH_INSTRUCTIONS = [
   'You research one public question for a decision-maker. Search the web, then answer in a few short sentences.',
   'Cite every factual claim with the web sources you used. Say where sources disagree.',
   'If you cannot find a reliable source, say so plainly instead of answering from memory.',
+  // The chat renders no tables (NE-02, AI Conversation 5849971004: a table arrived as raw pipes in a 319px panel).
+  'Never use a table; use short bullet points.',
   'You know nothing about the user or their model beyond the question itself.',
 ].join(' ');
 
@@ -99,8 +101,10 @@ function sourceUrl(value: unknown): string | null {
 }
 
 /**
- * Read the native response (the handoff's `completeEvidenceRequest`, research branch). Each citation marker is placed
- * where the provider's own annotation ends, numbered by first appearance; the same URL keeps one number.
+ * Read the native response (the handoff's `completeEvidenceRequest`, research branch). On the wire (NE-02, `gpt-5.6-terra`)
+ * each `url_citation` spans the model's own inline link, "([sandhill.com](https://…))": that span is REPLACED by its number,
+ * numbered by first appearance, the same URL keeping one number, so a source is shown once. Any markdown link the provider
+ * did not annotate is reduced to its words, so every clickable link in the reply is one the search consulted.
  */
 export function readResearchResponse(response: unknown): ResearchOutcome {
   const r = record(response);
@@ -133,7 +137,7 @@ export function readResearchResponse(response: unknown): ResearchOutcome {
       if (part?.type !== 'output_text' || typeof part.text !== 'string') return { status: 'response_unreadable' };
       const text = part.text;
       if (part.annotations !== undefined && !Array.isArray(part.annotations)) return { status: 'citation_unreadable' };
-      const marks: { at: number; n: number }[] = [];
+      const marks: { start: number; end: number; n: number }[] = [];
       for (const a of (part.annotations as unknown[] | undefined) ?? []) {
         const ann = record(a);
         if (ann?.type !== 'url_citation') continue;
@@ -151,12 +155,14 @@ export function readResearchResponse(response: unknown): ResearchOutcome {
           const title = typeof ann.title === 'string' && ann.title.trim() !== '' ? ann.title.trim() : new URL(u).hostname;
           sources.push({ url: u, title });
         }
-        marks.push({ at: end as number, n });
+        marks.push({ start: start as number, end: end as number, n });
       }
-      // Insert from the end so every earlier index still addresses the original text.
+      // Replace from the end so every earlier index still addresses the original text; overlapping spans are unreadable.
+      const ordered = [...marks].sort((x, y) => y.start - x.start);
+      if (ordered.some((m, i) => i > 0 && m.end > ordered[i - 1]!.start)) return { status: 'citation_unreadable' };
       let out = text;
-      for (const m of [...marks].sort((x, y) => y.at - x.at || y.n - x.n)) out = `${out.slice(0, m.at)} [${m.n}]${out.slice(m.at)}`;
-      texts.push(out);
+      for (const m of ordered) out = `${out.slice(0, m.start)}[${m.n}]${out.slice(m.end)}`;
+      texts.push(out.replace(/\[([^\]\n]*)\]\((?:https?:)?\/\/[^)\s]*\)/gu, '$1'));
     }
   }
   const text = texts.join('\n\n').trim();
