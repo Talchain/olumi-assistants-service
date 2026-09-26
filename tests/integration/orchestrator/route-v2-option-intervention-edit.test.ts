@@ -321,7 +321,7 @@ describe('the Agent\'s in-process batch door — ONE user operation → ONE atom
     persisted = buildPersistedGraph();
     rows.clear();
   });
-  type Level = { option_id: string; factor_id: string; value: number; author: 'user_specified' | 'model_proposed' };
+  type Level = { option_id: string; factor_id: string; value: number; author: 'user_specified' | 'model_proposed'; raw_value?: number; unit?: string; cap?: number };
   const call = (levels: Level[], links: { option_id: string; factor_id: string }[], turnId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee') =>
     commitOptionLevelsInProcess({ scenario_id: SCENARIO_ID, turn_id: turnId, base_graph_hash: currentHash(), links, levels }, 'req-batch');
   const graphNow = () => persisted as { edges: { from: string; to: string; provenance?: { source?: string } }[];
@@ -388,6 +388,20 @@ describe('the Agent\'s in-process batch door — ONE user operation → ONE atom
     } finally {
       receiptFor = undefined;
     }
+  });
+
+  it('RED (AI Conversation 5848429576): a level carries the user\'s FIGURE — raw value, unit, range — onto the cell in the SAME commit', async () => {
+    const r = await call([{ option_id: 'option', factor_id: 'new_factor', value: 0.1, author: 'user_specified', raw_value: 10, unit: '£ per month', cap: 100 } as Level], NEW_LINK);
+    expect(r.status, JSON.stringify(r)).toBe('committed');
+    expect(rows.size, 'ONE commit').toBe(1);
+    const cell = graphNow().nodes.find(n => n.id === 'option')?.interventions?.new_factor as Record<string, unknown> | undefined;
+    expect(cell, JSON.stringify(cell)).toMatchObject({ value: 0.1, raw_value: 10, unit: '£ per month', source: 'user_specified' });
+  });
+
+  it('a figure that does not normalise to the level it is sent with is refused whole — nothing written', async () => {
+    const r = await call([{ option_id: 'option', factor_id: 'new_factor', value: 0.2, author: 'user_specified', raw_value: 10, unit: '£ per month', cap: 100 } as Level], NEW_LINK);
+    expect(r).toMatchObject({ status: 'refused', reason: 'level_frame_mismatch' });
+    expect(rows.size).toBe(0);
   });
 
   it('a stale base → stale, nothing written', async () => {

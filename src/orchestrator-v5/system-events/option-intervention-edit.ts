@@ -90,6 +90,12 @@ export interface OptionInterventionEditInput {
    * stamp. Never from a wire field: `executeOptionInterventionEdit` derives it server-side.
    */
   readonly source?: typeof APPROVED_LEVEL_ADOPTION_SOURCE;
+  /**
+   * ⭐ THE USER'S FIGURE, KEPT ON THE CELL (AI Conversation #70 5848429576): the level as they gave it and the range it
+   * was normalised on. Without it a level on a factor with no range of its own (a NEW, value-less factor) is stored as a
+   * bare model number and the figure is unrecoverable. It must normalise to `modelValue` exactly, or nothing is written.
+   */
+  readonly figure?: { readonly raw_value: number; readonly unit?: string; readonly cap: number };
 }
 
 /** Internal server invocation only: no member is added to the .50 wire union. */
@@ -116,7 +122,7 @@ function isEditableGraph(value: unknown): value is EditableGraph {
 }
 
 /** One (option, factor) level this commit writes, with the cell's stamp when it is not the user's own. */
-export type OptionLevelTarget = Pick<OptionInterventionEditInput, 'optionId' | 'factorId' | 'modelValue' | 'source'>;
+export type OptionLevelTarget = Pick<OptionInterventionEditInput, 'optionId' | 'factorId' | 'modelValue' | 'source' | 'figure'>;
 
 /**
  * Compare to the original persisted bytes, not two independently normalised
@@ -249,7 +255,8 @@ export function applyOptionInterventionBatch(input: OptionInterventionBatchTrans
     const target = input.targets[i]!;
     const prepared = prepareOptionInterventionEdit({ persistedGraph: input.persistedGraph,
       optionId: target.optionId, factorId: target.factorId, modelValue: target.modelValue,
-      expectedGraphHash: input.expectedGraphHash, ...(target.source !== undefined ? { source: target.source } : {}) });
+      expectedGraphHash: input.expectedGraphHash, ...(target.source !== undefined ? { source: target.source } : {}),
+      ...(target.figure !== undefined ? { figure: target.figure } : {}) });
     if (prepared.kind === 'refused') return refuse(prepared.reason, i);
     if (prepared.kind === 'unchanged') continue;
     written.push(target);
@@ -337,7 +344,7 @@ export async function executeOptionInterventionEdit(input: OptionInterventionExe
 /** The whole approved batch; each cell's stamp is derived server-side, never taken from the caller. */
 export type OptionInterventionBatchExecutionInput =
   Omit<OptionInterventionExecutionInput, 'optionId' | 'factorId' | 'modelValue'> & {
-    readonly targets: readonly Pick<OptionLevelTarget, 'optionId' | 'factorId' | 'modelValue'>[];
+    readonly targets: readonly Pick<OptionLevelTarget, 'optionId' | 'factorId' | 'modelValue' | 'figure'>[];
     /**
      * The links the APPROVED proposal declared (`from::to`). When given, the links this commit would add must be
      * exactly these, or nothing is written (`links_mismatch`): what was approved is what is written.
@@ -371,7 +378,8 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   // Set LAST and unconditionally: a `source` a caller slipped onto the input is overwritten, never kept.
   const targets: OptionLevelTarget[] = input.targets.map(t => {
     const source = approvedLevelSourceFor(input.scenarioId, t.optionId, t.factorId, t.modelValue);
-    return { optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue, ...(source !== undefined ? { source } : {}) };
+    return { optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue, ...(source !== undefined ? { source } : {}),
+      ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
   const { targets: _callerTargets, expectedLinks, ...common } = input;
   const candidate = applyOptionInterventionBatch({ ...common, persistedGraph: before, targets });
@@ -457,6 +465,12 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
   }
   if (!CANONICAL_ID_REGEX.test(input.optionId) || !CANONICAL_ID_REGEX.test(input.factorId)) {
     return refuse('invalid_identity');
+  }
+  const figure = input.figure;
+  if (figure !== undefined && (!Number.isFinite(figure.raw_value) || !Number.isFinite(figure.cap) || !(figure.cap > 0)
+    || (figure.unit !== undefined && (typeof figure.unit !== 'string' || figure.unit.trim() === ''))
+    || Math.abs(figure.raw_value / figure.cap - input.modelValue) > 1e-9)) {
+    return refuse('level_frame_mismatch');
   }
 
   // Validate the persisted ingress representation without repairing it. Strict
@@ -565,10 +579,13 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     // must not turn the old AI estimate into a new user-authored measurement.
     if (entry.data.value === input.modelValue) return { kind: 'unchanged' };
   }
-  const operation = buildOptionEffectRawOperation({
+  const built = buildOptionEffectRawOperation({
     optionId: option.id, optionLabel: option.label,
     factorId: factor.id, factorLabel: factor.label, value: input.modelValue,
   });
+  // The user's figure rides on the SAME cell write: the encoder carries `raw_value` / `unit` / `cap` onto the cell.
+  const operation = figure === undefined ? built : { ...built, value: { ...(built.value as Record<string, unknown>),
+    raw_value: figure.raw_value, cap: figure.cap, ...(figure.unit !== undefined ? { unit: figure.unit.trim() } : {}) } };
   if (input.source === undefined) return { kind: 'prepared', operation, ...withLink };
   // An adopted Olumi level: the encoder PRESERVES this member (`PRESERVED_INTERVENTION_SOURCES`)
   // instead of defaulting the cell to `user_specified`, and the rationale says whose it is.
