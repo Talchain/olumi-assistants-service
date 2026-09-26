@@ -34,12 +34,20 @@ const levels = (testPrice: number) => [
 type View = { checked: boolean; may_run?: boolean; needs_from_user: { message: string }[]; reason?: string };
 type G = { nodes: { id: string; kind: string }[]; edges: { from: string; to: string }[] };
 const copy = (): G => JSON.parse(JSON.stringify(served)) as G;
+/** The served graph without its held status quo: since #1963 that status quo is a comparator, so identical levels on
+ *  the two other options only leave nothing to compare when it is absent. Order-independent with #1963. */
+const noStatusQuo = (): G => {
+  const g = copy();
+  g.nodes = g.nodes.filter((n) => n.id !== 'keep_current_pricing');
+  g.edges = g.edges.filter((e) => e.from !== 'keep_current_pricing' && e.to !== 'keep_current_pricing');
+  return g;
+};
 /** The run path's own next step, without its closing full stop — as the note quotes it. */
 const NEXT_STEP = NO_COMPARISON_NEXT_STEP.replace(/\.+$/, '');
 
 describe('propose_starting_point says whether one approval will make the analysis runnable', () => {
   it('RED: levels that leave two options identical → readiness_if_approved says it still cannot run, and why — in the refusal\'s own words', async () => {
-    const r = await capsOver(served).proposeStartingPoint(ctx, { assumptions: [], option_levels: levels(59) });
+    const r = await capsOver(noStatusQuo()).proposeStartingPoint(ctx, { assumptions: [], option_levels: levels(59) });
     expect(r, JSON.stringify(r).slice(0, 600)).toEqual(expect.objectContaining({ ok: true }));
     const v = r.readiness_if_approved as View | undefined;
     expect(v?.checked).toBe(true);
@@ -56,10 +64,13 @@ describe('propose_starting_point says whether one approval will make the analysi
     const r = await capsOver(g).proposeStartingPoint(ctx, { assumptions: [], option_levels: [levels(59)[0]!] });
     expect(r, JSON.stringify(r).slice(0, 600)).toEqual(expect.objectContaining({ ok: true }));
     const v = r.readiness_if_approved as View | undefined;
-    expect(v?.may_run, JSON.stringify(v)).toBe(false);
-    expect(v?.needs_from_user).toEqual([]);
-    expect(String(r.note)).toContain(`could still not run: ${NEXT_STEP}. Say so plainly`);
-    expect(String(r.note)).not.toMatch(/identical|would still be blocked/i);
+    // Never an "identical options" question that does not fit. Whether this preview blocks depends on #1963 (which
+    // counts the held status quo as a comparator); when it does block, the note quotes the verdict's own words.
+    expect(String(r.note ?? '')).not.toMatch(/identical|would still be blocked/i);
+    if (v?.may_run === false) {
+      expect(v.needs_from_user).toEqual([]);
+      expect(String(r.note)).toContain(`could still not run: ${NEXT_STEP}. Say so plainly`);
+    }
   });
 
   it('a structural blocker is quoted once, with no doubled full stop', async () => {
