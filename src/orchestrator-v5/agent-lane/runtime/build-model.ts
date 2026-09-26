@@ -620,6 +620,25 @@ export function findCoverageGaps(
   return { level_gaps, baseline_gaps };
 }
 
+/**
+ * ⛔ A COVERAGE GAP IS A VALUE QUESTION ON THE MODEL THAT IS REGISTERED (merge of staging's #1967 into #1891).
+ * Admission withholds an option Olumi added that another option covers (`options_withheld`, `admit-model.ts`) and
+ * re-admits the draft "as if the drafter had never drafted it", so readiness never asks a value question about it:
+ * its option × factor pairs, and a baseline only it acts on, are no gap. Re-read off the drafter's own candidate
+ * without it — for the first draft and for the retry alike. Counted, the served dead start's own "Test £59 with AI
+ * release" (level-less: the very shape #1967 withholds) spent the one retry, and was listed to it as issues, to level
+ * an option the user never sees (`construction-no-identical-options.test.ts`: "no retry is spent", and COMBINED row 2).
+ */
+function gapsOnRegisteredOptions<P extends ReturnType<typeof prepareProvisionalCandidate>>(
+  p: P,
+  raw: CandidateModel,
+  admitted: Pick<AdmittedModel, 'options_withheld'>,
+): P {
+  const gone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
+  if (gone.size === 0) return p;
+  return { ...p, ...findCoverageGaps({ ...raw, options: raw.options.filter((o) => !gone.has(canonicalLabel(o.label))) }, p.additions_without_total) };
+}
+
 /** The retry's wording for each gap, naming the option and factor exactly. */
 function sayCoverageGaps(p: { level_gaps: readonly LevelGap[]; baseline_gaps: readonly BaselineGap[] }): string[] {
   return [
@@ -869,6 +888,7 @@ export async function buildModelFromBrief(
   let preparation = prepareProvisionalCandidate(candidate);
   candidate = preparation.candidate;
   let admitted = admitCandidateModel(candidate, {});
+  preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
    * ⭐ THE COMPACT FIRST-MODEL GATE — one bounded retry, then an honest refusal.
@@ -971,9 +991,10 @@ export async function buildModelFromBrief(
       });
       if (retry.text.length > 0) {
         const retryRaw = JSON.parse(retry.text) as CandidateModel;
-        const retryPreparation = prepareProvisionalCandidate(retryRaw);
-        const retryCandidate = retryPreparation.candidate;
+        const retryPrepared = prepareProvisionalCandidate(retryRaw);
+        const retryCandidate = retryPrepared.candidate;
         const retryAdmitted = admitCandidateModel(retryCandidate, {});
+        const retryPreparation = gapsOnRegisteredOptions(retryPrepared, retryRaw, retryAdmitted);
         const retrySize = assessConstructionSize(retryAdmitted);
         // ⚠ ADOPT ONLY WHAT IS ACTUALLY SMALLER, on BOTH dimensions. A retry that
         // trades 4 nodes for 11 links is not a compaction, and taking it on faith
