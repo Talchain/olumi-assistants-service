@@ -42,7 +42,7 @@ const ACTS_ON = {
       description: 'Whether this option pushes the factor up or down. State it; never guess it for the user.',
     },
     level: obj({
-      value: { type: 'number', description: 'The figure the user stated, in the factor\u2019s own units (e.g. 54 for \u00a354).' },
+      value: { type: 'number', description: 'The figure the user stated FOR THIS FACTOR, in the factor\u2019s own units (e.g. 54 for \u00a354 on a price). A figure given for something else (a price, when this factor is a churn rate) is never this factor\u2019s level: leave level out.' },
       unit: { type: 'string', description: 'The unit the user stated, if any.' },
     }, ['value']),
   }, ['factor_label', 'direction']),
@@ -144,7 +144,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'get_canonical_state returned. Give a level ONLY for a figure the user stated, in their own units; never invent one. '
       + 'A factor with no stated level is added with no level, and you say plainly what is still needed. '
       + 'When the user asks for SEVERAL options (up to 4), put them ALL in `options` in ONE call: they become ONE change the '
-      + 'user approves once, and it lands whole or not at all. Never call this twice in one reply.',
+      + 'user approves once, and it lands whole or not at all. Once a call has prepared a change, never call it again in the '
+      + 'same reply. A call that was REFUSED prepared nothing: you may call it once more in the same reply, corrected as the '
+      + 'refusal says.',
     parameters: obj({
       label: { type: 'string', description: 'ONE option in the user\u2019s own words. For several, use `options` instead.' },
       acts_on: ACTS_ON,
