@@ -388,6 +388,24 @@ export function factorValuesPostimageIsScoped(before: unknown, after: unknown, f
 }
 
 /**
+ * ⭐ WHICH OF OLUMI'S LINKS THIS COMMIT RE-SIZED (P1-a, DL #70 5850069309; shape AI Quality 5850079041): exactly the
+ * links that changed AND equal the magnitude contract's own re-derivation (`frameDefaultedLinks`) over the declared
+ * factors — the same comparison the scope guard admits, never a bare graph diff, so a user's link can never appear.
+ */
+export function linksResizedByContract(before: unknown, after: unknown, factorIds: readonly string[]): { from: string; to: string }[] {
+  if (!isEditableGraph(before) || !isEditableGraph(after) || before.edges.length !== after.edges.length) return [];
+  let rederived: unknown = { ...structuredClone(after), edges: structuredClone(before.edges) };
+  for (const id of factorIds) rederived = frameDefaultedLinks(rederived, id).graph;
+  const resized = (rederived as EditableGraph).edges;
+  const out: { from: string; to: string }[] = [];
+  for (let i = 0; i < after.edges.length; i += 1) {
+    const now = after.edges[i]!;
+    if (!isDeepStrictEqual(now, before.edges[i]) && isDeepStrictEqual(now, resized[i])) out.push({ from: now.from, to: now.to });
+  }
+  return out;
+}
+
+/**
  * The approved values, applied IN MEMORY through the canonical value writer against ONE base, in order — the values
  * half of a compound approval, so that it commits in the SAME append as the levels. All or nothing: the first value
  * refused refuses the whole approval (`valueIndex` names it). No I/O beyond the writer's own (it writes nothing).
@@ -398,7 +416,8 @@ async function applyApprovedFactorValues(
   frames: readonly ApprovedFactorFrame[],
   ctx: { readonly scenarioId: string; readonly turnId: string; readonly requestId: string; readonly stage: OlumiResponse['stage_indicator'] },
 ): Promise<
-  | { readonly kind: 'applied'; readonly graph: EditableGraph; readonly handlerFacts: readonly ValueHandlerFact[]; readonly confirmations: readonly string[] }
+  | { readonly kind: 'applied'; readonly graph: EditableGraph; readonly handlerFacts: readonly ValueHandlerFact[]; readonly confirmations: readonly string[];
+      readonly linksResized: readonly { from: string; to: string }[] }
   | { readonly kind: 'refused'; readonly reason: string; readonly valueIndex?: number; readonly frameIndex?: number }
 > {
   const refuse = (reason: string, valueIndex: number) => ({ kind: 'refused' as const, reason, valueIndex });
@@ -460,7 +479,7 @@ async function applyApprovedFactorValues(
   if (!isEditableGraph(graph) || !factorValuesPostimageIsScoped(before, graph, touched)) {
     return refuse('value_scope_mismatch', Math.max(0, values.length - 1));
   }
-  return { kind: 'applied', graph, handlerFacts, confirmations };
+  return { kind: 'applied', graph, handlerFacts, confirmations, linksResized: linksResizedByContract(before, graph, touched) };
 }
 
 export type OptionInterventionExecutionInput = Omit<OptionInterventionTransactionInput, 'persistedGraph' | 'source'> & {
@@ -512,7 +531,9 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   | { readonly kind: 'committed'; readonly response: OlumiResponse; readonly graph: unknown;
       readonly analysisGraphHash: string; readonly persistedRowId: string;
       /** The commit's own version receipt, verified to describe THIS turn and postimage (null: guest / no version). */
-      readonly modelVersionReceipt?: Awaited<ReturnType<typeof commitDirectAnswer>>['modelVersionReceipt'] }
+      readonly modelVersionReceipt?: Awaited<ReturnType<typeof commitDirectAnswer>>['modelVersionReceipt'];
+      /** Olumi's own links this commit re-sized to fit a new level (P1-a); empty when none. */
+      readonly linksResized?: readonly { from: string; to: string }[] }
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly reason: string; readonly index?: number; readonly valueIndex?: number; readonly frameIndex?: number }
   | { readonly kind: 'unverified'; readonly reason: string; readonly commitAttempted: boolean }
@@ -543,6 +564,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   let levelBaseHash = input.expectedGraphHash;
   let valueFacts: readonly ValueHandlerFact[] = [];
   let valueConfirmations: readonly string[] = [];
+  let linksResized: readonly { from: string; to: string }[] = [];
   if (values.length + frames.length > 0) {
     if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), before)) {
       return { kind: 'refused', reason: 'canonical_graph_unavailable' };
@@ -561,6 +583,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     levelBaseHash = appliedHash;
     valueFacts = applied.handlerFacts;
     valueConfirmations = applied.confirmations;
+    linksResized = applied.linksResized;
   }
   const valuesChanged = values.length + frames.length > 0 && !isDeepStrictEqual(levelBase, before);
   // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
@@ -587,7 +610,22 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     appliedOperations: plan.operations, nowMs: Date.now(),
     scenarioId: input.scenarioId, turnId: input.turnId, requestId: input.requestId });
   const linked = new Set(plan.operations.filter(o => o.op === 'add_edge').map(o => o.path));
-  const acknowledgment = [...valueConfirmations, ...plan.targetsWritten.map(t => formatOptionEffectWriteAck({ optionLabel: labelOf(t.optionId),
+  // P1-a: one line naming Olumi's own links this commit re-sized, labels read from the committed graph.
+  const resizedLine = (() => {
+    if (linksResized.length === 0) return [];
+    const valued = new Set([...values.map(v => v.factorId), ...frames.map(f => f.factorId)]);
+    // Each link once: under the valued factor it points INTO, else the valued factor it leaves.
+    const home = (l: { from: string; to: string }) => (valued.has(l.to) ? l.to : l.from);
+    return [...valued].flatMap((id) => {
+      const mine = linksResized.filter(l => home(l) === id);
+      if (mine.length === 0) return [];
+      const others = mine.map(l => `"${labelOf(l.from === id ? l.to : l.from)}"`).join(', ');
+      const into = mine.every(l => l.to === id);
+      return [`Olumi also re-sized its own placeholder links ${into ? 'into' : 'on'} "${labelOf(id)}" so they fit the new level (${others}). `
+        + 'They are Olumi\'s placeholders, not measurements.'];
+    });
+  })();
+  const acknowledgment = [...valueConfirmations, ...resizedLine, ...plan.targetsWritten.map(t => formatOptionEffectWriteAck({ optionLabel: labelOf(t.optionId),
     factorLabel: labelOf(t.factorId), committedValue: t.modelValue })
     + (linked.has(`${t.optionId}::${t.factorId}`) ? ` ${labelOf(t.optionId)} is now linked to ${labelOf(t.factorId)}, in the same change.` : ''))]
     .join(' ');
@@ -652,7 +690,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     }
     return { kind: 'committed', response: committed.response, graph: reloaded,
       analysisGraphHash: plan.analysisGraphHash, persistedRowId: committed.persisted_row_id,
-      modelVersionReceipt: receipt };
+      modelVersionReceipt: receipt, linksResized };
   } catch {
     return { kind: 'unverified', reason: 'canonical_readback_failed', commitAttempted: true };
   }

@@ -235,6 +235,8 @@ export interface DispatchSystemEventResult {
   readonly refusal?: { readonly reason: string; readonly index?: number; readonly valueIndex?: number; readonly frameIndex?: number };
   /** A committed option-level write: the commit's own verified version receipt (null: guest / no version). */
   readonly committedVersion?: { readonly version: number; readonly version_id: string; readonly mutation_id: string; readonly source_turn_id: string | null } | null;
+  /** Olumi's own links a committed value/range re-sized to fit the new level (P1-a): ids only, never a graph diff. */
+  readonly linksResized?: readonly { readonly from: string; readonly to: string }[];
   /**
    * V5 finaliser contract — system event readiness, by event kind:
    *
@@ -2926,6 +2928,8 @@ export async function dispatchOptionLevelsBatch(
       ...(outcome.modelVersionReceipt !== undefined ? { committedVersion: outcome.modelVersionReceipt === null ? null : {
         version: outcome.modelVersionReceipt.version_number, version_id: outcome.modelVersionReceipt.version_id,
         mutation_id: outcome.modelVersionReceipt.mutation_id, source_turn_id: outcome.modelVersionReceipt.source_turn_id } } : {}),
+      ...('linksResized' in outcome && outcome.linksResized !== undefined && outcome.linksResized.length > 0
+        ? { linksResized: outcome.linksResized } : {}),
       // Readiness from the bytes that LANDED. `undefined` only when the
       // committed graph did not parse — an honest absence, not a guess.
       ...(graphForReadiness !== null ? { analysisReady: canonicalReady } : {}),
@@ -3073,7 +3077,13 @@ export type CommitOptionLevelsResult =
        * Each level exactly as the model holds it after this call: the writer's read-back verified every cell against
        * the persisted bytes (a commit), or the model already held each one exactly (a verified no-op).
        */
-      readonly committed_levels: readonly { readonly option_id: string; readonly factor_id: string; readonly value: number }[] }
+      readonly committed_levels: readonly { readonly option_id: string; readonly factor_id: string; readonly value: number }[];
+      /**
+       * ⭐ P1-a: Olumi's own placeholder links this commit re-sized to fit a new level (ids only; empty on a no-op). The
+       * receipt already names them; a consumer quoting its own receipt reads them here, never from a graph diff. The
+       * door always sets it; optional only so a port's existing fakes still type-check.
+       */
+      readonly links_resized?: readonly { readonly from: string; readonly to: string }[] }
   | { readonly status: 'stale' }
   | { readonly status: 'refused'; readonly reason: string; readonly pair?: { readonly option_id: string; readonly factor_id: string };
       /** The approved value, or range, that was refused (the whole approval is refused with it). */
@@ -3119,13 +3129,15 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
   }
   const committedLevels = input.levels.map(l => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value }));
   if (r.commitSkippedReason === 'verified_no_op') {
-    return { status: 'committed', graph_hash: input.base_graph_hash, receipt: null, already_applied: true, committed_levels: committedLevels };
+    return { status: 'committed', graph_hash: input.base_graph_hash, receipt: null, already_applied: true, committed_levels: committedLevels,
+      links_resized: [] };
   }
   const graphHash = (r.response as { graph_hash?: unknown }).graph_hash;
   if (!r.commitPerformed || typeof graphHash !== 'string' || graphHash.length === 0) return { status: 'unconfirmed' };
   // The commit's own receipt, already verified by the writer against this turn and postimage (no second parser).
   const receipt = r.committedVersion ?? null;
-  return { status: 'committed', graph_hash: graphHash, receipt, already_applied: false, committed_levels: committedLevels };
+  return { status: 'committed', graph_hash: graphHash, receipt, already_applied: false, committed_levels: committedLevels,
+    links_resized: (r.linksResized ?? []).map(l => ({ from: l.from, to: l.to })) };
 }
 
 async function dispatchStructuralRename(
