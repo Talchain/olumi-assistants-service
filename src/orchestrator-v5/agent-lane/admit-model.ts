@@ -1341,14 +1341,24 @@ export function admitCandidateModel(
       [...(actsOnByOption.get(o.id) ?? [])].map((factorId) => topo(o.id, factorId)),
     ),
   ];
-  const constraintResult = admitCandidateConstraints(model.constraints, (metric) => {
-    const exact = ids.get(metric);
-    if (exact !== undefined) return exact;
-    // Fall back to a case-insensitive label match; never a fuzzy guess.
-    const wanted = metric.trim().toLowerCase();
-    for (const [label, id] of ids) if (label.trim().toLowerCase() === wanted) return id;
-    return undefined;
-  });
+  const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
+  const constraintResult = admitCandidateConstraints(
+    model.constraints,
+    (metric) => {
+      const exact = ids.get(metric);
+      if (exact !== undefined) return exact;
+      // Fall back to a case-insensitive label match; never a fuzzy guess.
+      const wanted = metric.trim().toLowerCase();
+      for (const [label, id] of ids) if (label.trim().toLowerCase() === wanted) return id;
+      return undefined;
+    },
+    // A limit's unit is canonicalised against ITS node's scale — the one PLoT will normalise it against.
+    (nodeId) => {
+      const n = nodeById.get(nodeId);
+      if (n === undefined) return undefined;
+      return { ...(n.observed_state ?? {}), ...(n.scale_frame !== undefined ? { scale_frame: n.scale_frame } : {}) };
+    },
+  );
 
   /**
    * ⛔ ONE CONNECTION, ONE EDGE — an option's link to a factor it already acts on

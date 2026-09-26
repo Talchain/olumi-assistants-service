@@ -96,6 +96,8 @@ import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSumm
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
+import { readinessViewOf } from '../readiness-view.js';
+import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { defaultFrameFor } from '../admit-model.js';
@@ -302,7 +304,17 @@ interface GraphRead {
     data?: unknown;
   }[];
   /** `origin` is read only to recognise a repair-authored edge (`isRepairAuthoredOptionFactorEdge`). */
-  readonly edges: { from: string; to: string; origin?: unknown }[];
+  readonly edges: {
+    from: string;
+    to: string;
+    origin?: unknown;
+    /** Read only by `projectLinks` — whose link it is, and how strong (C33). */
+    provenance?: unknown;
+    strength?: unknown;
+    exists_probability?: unknown;
+    effect_direction?: unknown;
+    defaulted?: unknown;
+  }[];
   readonly analysis_state: unknown;
   /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
   readonly raw: Record<string, unknown>;
@@ -464,6 +476,85 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
             ...(n.provenance === undefined ? {} : { provenance: n.provenance }),
           };
         }
+
+/**
+ * ⭐ (B) WHAT THE AGENT NEEDS TO EXPLAIN THE MODEL HONESTLY — the goal as the user stated it, the limits they
+ * set, whose each link is, and the ONE readiness verdict (C33 5838970895; ChatGPT 5839692762 B).
+ *
+ * Every value is a stored carrier passed through, never re-derived: the goal target through the ONE trio
+ * reader (`pickGoalThresholdTrio`, raw figure only — never the normalised `goal_threshold`, which is the
+ * constant 0.8 on every headroom-derived cap), limits from `goal_constraints` as stored, link strength and
+ * provenance as stored. Readiness is `readinessViewOf` — the route's own admission verdict, in plain words.
+ */
+function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'analysis_state'>): Record<string, unknown> {
+  const str = (v: unknown): v is string => typeof v === 'string' && v !== '';
+  const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+  const labelOf = new Map(g.nodes.map((n) => [n.id, n.label] as const));
+  const goals = g.nodes.filter((n) => n.kind === 'goal').map((n) => {
+    const trio = pickGoalThresholdTrio(n as never) as { goal_threshold_raw?: number; goal_threshold_unit?: string };
+    const frame = (n as { goal_threshold_frame?: unknown }).goal_threshold_frame;
+    return {
+      id: n.id,
+      label: n.label,
+      ...(trio.goal_threshold_raw === undefined ? {} : {
+        target: {
+          value: trio.goal_threshold_raw,
+          ...(trio.goal_threshold_unit === undefined ? {} : { unit: trio.goal_threshold_unit }),
+          ...(str(frame) ? { frame } : {}),
+        },
+      }),
+    };
+  });
+  const limits = (Array.isArray(g.raw.goal_constraints) ? g.raw.goal_constraints : [])
+    .filter((c): c is Record<string, unknown> => c !== null && typeof c === 'object')
+    .filter((c) => str(c.operator) && num(c.value))
+    .map((c) => ({
+      // Named as the run-turn limit card names it (#1935): the node the limit sits on, joined by id; the row's
+      // own label only when that node is absent — so the card and the Agent say the same words for one limit.
+      on: (str(c.node_id) ? labelOf.get(c.node_id) : undefined) ?? (str(c.label) ? c.label : 'the goal'),
+      operator: c.operator,
+      value: c.value,
+      ...(str(c.unit) ? { unit: c.unit } : {}),
+      ...(str(c.provenance) ? { stated_by: c.provenance } : {}),
+    }));
+  const links = g.edges.map((e) => {
+    const source = (e.provenance !== null && typeof e.provenance === 'object') ? (e.provenance as { source?: unknown }).source : e.provenance;
+    const st = (e.strength !== null && typeof e.strength === 'object') ? e.strength as { mean?: unknown; std?: unknown } : undefined;
+    return {
+      from: e.from,
+      to: e.to,
+      ...(str(source) ? { source } : {}),
+      ...(str(e.effect_direction) ? { direction: e.effect_direction } : {}),
+      ...(st !== undefined && num(st.mean) ? { strength: { mean: st.mean, ...(num(st.std) ? { std: st.std } : {}) } } : {}),
+      ...(num(e.exists_probability) ? { exists_probability: e.exists_probability } : {}),
+      ...(e.defaulted === true ? { defaulted: true } : {}),
+      ...(str(e.origin) ? { origin: e.origin } : {}),
+    };
+  });
+  return {
+    ...(goals.length === 1 ? { goal: goals[0] } : goals.length > 1 ? { goals } : {}),
+    ...(limits.length > 0 ? { limits } : {}),
+    links,
+    readiness: readinessViewOf(g.raw),
+    ...(earlierAnalysisOf(g.analysis_state) ?? {}),
+  };
+}
+
+const pickKeys = (o: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> =>
+  Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
+
+/**
+ * ⛔ AN EARLIER ANALYSIS IS NOT PERMISSION TO RUN. The read route's `analysis_state.readiness` is a
+ * PLACEHOLDER (`{status:'unknown', blockers:[]}`; an empty list the composer treats as "nothing blocking"),
+ * so it is dropped here: whether a run may happen now is `readiness`, only. What the stored RESULT is — an
+ * earlier run, current or stale — stays, named `earlier_analysis` so it is never read as admission.
+ */
+function earlierAnalysisOf(state: unknown): { analysis: Record<string, unknown> } | undefined {
+  if (state === null || typeof state !== 'object') return undefined;
+  const { readiness: _placeholder, ...rest } = state as Record<string, unknown>;
+  const kind = (rest.run_state as { kind?: unknown } | undefined)?.kind;
+  return { analysis: { ...(typeof kind === 'string' ? { earlier_analysis: kind } : {}), ...rest } };
+}
 
 /**
  * ⛔ A NAME SHARED BY TWO ACCEPTABLE TARGETS NAMES NEITHER.
@@ -691,6 +782,18 @@ export function createAgentCapabilities(
     const ops = (hold.action as { inline_patch?: { operations?: unknown } }).inline_patch?.operations;
     return Array.isArray(ops) ? ops.filter((o): o is { op: string; path: string; value?: unknown } =>
       o !== null && typeof o === 'object' && typeof (o as { op?: unknown }).op === 'string' && typeof (o as { path?: unknown }).path === 'string') : [];
+  };
+  /** Every live held add-option, as the approval it awaits. A failed read lists none — never a guess. */
+  const liveHeldAwaiting = async (scenarioId: string): Promise<{ proposal_id: string; public_label: string }[]> => {
+    if (opts.readPendingActions === undefined) return [];
+    let pendings: readonly PendingAction[];
+    try { pendings = await opts.readPendingActions(scenarioId); } catch { return []; }
+    return pendings
+      .filter((p) => typeof p.chip_id === 'string' && /^gmh_[0-9a-f]{12}$/.test(p.chip_id)
+        && p.action.kind === 'apply_proposed_change'
+        && (p.action as { inline_patch?: { handler_id?: unknown } }).inline_patch?.handler_id === GM_HELD_HANDLER_ID
+        && !isPendingActionExpired(p, Date.now()))
+      .map((p) => ({ proposal_id: p.chip_id as string, public_label: resolveProposalRenderCopy(p.action as { kind: string; public_label?: string }).label }));
   };
   /** A level is set when the option's intervention for that factor carries a number (either stored shape). */
   const hasLevel = (node: { interventions?: unknown } | undefined, factorId: string): boolean => {
@@ -1151,11 +1254,13 @@ export function createAgentCapabilities(
         // has to infer topology from an edge list, and measurably does it worse
         // than the product it is being compared against.
         structure: structuralFacts(g.nodes, g.edges),
-        analysis: g.analysis_state,
+        // (B) goal target, limits, links, the ONE readiness verdict, and the earlier analysis kept apart from it.
+        ...projectModelContext(g),
         // Every proposal this user has been shown and not yet approved, newest
-        // first. An approval with nothing to bind to is an approval that
+        // first — including a held add-option, which lives in the session store,
+        // not in memory. An approval with nothing to bind to is an approval that
         // silently does nothing.
-        awaiting_your_approval: proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id),
+        awaiting_your_approval: [...await liveHeldAwaiting(ctx.scenario_id), ...proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)],
       };
     },
 
@@ -3069,6 +3174,9 @@ export function createAgentCapabilities(
         // The SAME projection get_canonical_state uses — see projectEntity.
         entities: after.nodes.map(projectEntity),
         structure: structuralFacts(after.nodes, after.edges),
+        // (B) The goal as stated, the limits, and the ONE readiness verdict — the same projection as
+        // get_canonical_state, so the first reply never contradicts the Run control.
+        ...pickKeys(projectModelContext(after), ['goal', 'goals', 'limits', 'readiness']),
         ...(firstAnalysis !== undefined ? { first_analysis: firstAnalysis } : {}),
       };
     },
@@ -3269,6 +3377,21 @@ export function createAgentCapabilities(
         message: args.reason,
         chip: { id: AGENT_RUN_ANALYSIS_CHIP_ID, action_type: 'run_analysis' },
       });
+      /**
+       * ⛔ A RUN THAT FAILED IS NOT A RUN THAT WAS REFUSED (served 319dde1, 01:42Z). The run turn answered 500
+       * (the saved model could not be read), and the Agent explained it from the stale analysis state as "the saved
+       * graph has changed" — a cause that was false. Olumi cannot know the reason from here, so the Agent is told
+       * exactly what is true: it did not run, nothing changed, try again — and to give no other reason.
+       */
+      if (r.status !== 200) {
+        onAnalysis?.({ scenario_id: ctx.scenario_id, status: r.status, blocks: [] });
+        return {
+          ok: false, mutated: false, ran: false, refusal: 'run_failed', http: r.status,
+          detail: 'The analysis could not be run: something went wrong on Olumi\u2019s side while starting it, so nothing ran and nothing in the '
+            + 'model changed. Tell the user exactly that and suggest trying again in a moment; do not give any other reason, and do not '
+            + 'describe an earlier result as the current one.',
+        };
+      }
       const ready = (r.json.analysis_ready ?? {}) as Record<string, unknown>;
       const blocks = (r.json.blocks as { type: string }[] | undefined) ?? [];
       const result = blocks.find((b) => b.type === 'analysis_result');
@@ -3296,7 +3419,14 @@ export function createAgentCapabilities(
     // The approval guard's writer: every return path of `authoriseChange`, one place.
     async authoriseChange(ctx, args): Promise<ToolResult> {
       const r = await caps.authoriseChange(ctx, args);
-      if (r.applied === true || r.mutated === true) approvalAppliedThisRequest = true;
+      if (r.applied === true || r.mutated === true) {
+        approvalAppliedThisRequest = true;
+        // ⭐ (B) WHAT THE MODEL NEEDS NOW, from the graph as stored after the write — one place for every
+        // apply path (the in-turn tool and the typed-approve fast path). A failed read says "not checked".
+        let after: GraphRead | null = null;
+        try { after = await readGraph(ctx.scenario_id); } catch { after = null; }
+        return { ...r, readiness_after: readinessViewOf(after?.raw) };
+      }
       return r;
     },
   };
