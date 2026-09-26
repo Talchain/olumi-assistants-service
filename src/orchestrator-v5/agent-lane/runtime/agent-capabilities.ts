@@ -3269,6 +3269,21 @@ export function createAgentCapabilities(
         message: args.reason,
         chip: { id: AGENT_RUN_ANALYSIS_CHIP_ID, action_type: 'run_analysis' },
       });
+      /**
+       * ⛔ A RUN THAT FAILED IS NOT A RUN THAT WAS REFUSED (served 319dde1, 01:42Z). The run turn answered 500
+       * (the saved model could not be read), and the Agent explained it from the stale analysis state as "the saved
+       * graph has changed" — a cause that was false. Olumi cannot know the reason from here, so the Agent is told
+       * exactly what is true: it did not run, nothing changed, try again — and to give no other reason.
+       */
+      if (r.status !== 200) {
+        onAnalysis?.({ scenario_id: ctx.scenario_id, status: r.status, blocks: [] });
+        return {
+          ok: false, mutated: false, ran: false, refusal: 'run_failed', http: r.status,
+          detail: 'The analysis could not be run: something went wrong on Olumi\u2019s side while starting it, so nothing ran and nothing in the '
+            + 'model changed. Tell the user exactly that and suggest trying again in a moment; do not give any other reason, and do not '
+            + 'describe an earlier result as the current one.',
+        };
+      }
       const ready = (r.json.analysis_ready ?? {}) as Record<string, unknown>;
       const blocks = (r.json.blocks as { type: string }[] | undefined) ?? [];
       const result = blocks.find((b) => b.type === 'analysis_result');

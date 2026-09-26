@@ -574,10 +574,15 @@ export const INTERPRETER_V02_BANKED: string = "Explain the current **model-relat
  * No visibility claim is made about results the reply does not carry. Copy: Experience Design
  * (#63 5806021014).
  */
+/** A Run whose own turn failed: nothing ran, nothing changed, and Olumi does not claim to know why. */
+export const RUN_FAILED_TEXT = 'I couldn\u2019t run the analysis: something went wrong on Olumi\u2019s side while starting it. Nothing in your model changed, so please try again in a moment.';
+
 export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown; refusal?: unknown; status?: unknown; what_is_missing?: unknown }): string {
   if (ran.ran === true) {
     return 'The analysis finished, but I couldn’t explain it this time. You can ask me to explain the result.';
   }
+  // The run itself failed (not refused): say only what is true (served 319dde1, 01:42Z — never an invented cause).
+  if (ran.refusal === 'run_failed') return RUN_FAILED_TEXT;
   const missing = typeof ran.what_is_missing === 'string' ? ran.what_is_missing.trim() : '';
   if (missing !== '') return `The analysis didn’t run. ${missing}`;
   const code = typeof ran.refusal === 'string' && ran.refusal !== ''
@@ -1409,6 +1414,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * calls, no implicit analysis. Words alone never take this path.
      */
     let fastPath: 'approve' | 'run' | undefined;
+    /** Whether the Run fast path made its one interpreting model call (a failed run makes none). */
+    let runInterpreted = false;
     let result: AgentTurnResult | undefined;
     if (approvedProposal !== undefined) {
       const fastStartedAt = Date.now();
@@ -1502,7 +1509,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        */
       const providerStartedAt = Date.now();
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
-      try {
+      // ⛔ A FAILED run is not explained by a model: there is no result to interpret, and the readback's stale state
+      // invited an invented cause ("the saved graph has changed"). The user gets one true sentence (RUN_FAILED_TEXT).
+      runInterpreted = ran.refusal !== 'run_failed';
+      if (runInterpreted) try {
         const resp = await callModel({
           instructions: `${AGENT_INSTRUCTIONS}\n\n${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
           input: priorAndRun,
@@ -1536,7 +1546,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         mutated: false,
         hops: 1,
         stopped_reason: 'answered',
-        timing: { total_ms: ms, provider_ms: providerMs, tool_ms: Math.max(0, ms - providerMs), overhead_ms: 0, tool_provider_ms: 0, provider_calls: 1, tool_calls: 1, hops: 1 },
+        timing: { total_ms: ms, provider_ms: runInterpreted ? providerMs : 0, tool_ms: Math.max(0, ms - (runInterpreted ? providerMs : 0)), overhead_ms: 0, tool_provider_ms: 0, provider_calls: runInterpreted ? 1 : 0, tool_calls: 1, hops: 1 },
       };
     }
     if (result === undefined) try {
@@ -1919,7 +1929,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           handler_id: null,
           request_hash: requestHash,
           response_emitted: true,
-          llm_calls_used: fastPath === 'approve' ? 0 : fastPath === 'run' ? 1 : result.hops + 1,
+          llm_calls_used: fastPath === 'approve' ? 0 : fastPath === 'run' ? (runInterpreted ? 1 : 0) : result.hops + 1,
           duration_ms: Date.now() - startedAt,
           handler_facts: [],
           userMessage: message,
