@@ -144,7 +144,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'get_canonical_state returned. Give a level ONLY for a figure the user stated, in their own units; never invent one. '
       + 'A factor with no stated level is added with no level, and you say plainly what is still needed. '
       + 'When the user asks for SEVERAL options (up to 4), put them ALL in `options` in ONE call: they become ONE change the '
-      + 'user approves once, and it lands whole or not at all. Never call this twice in one reply.',
+      + 'user approves once, and it lands whole or not at all. Once a call has prepared a change, never call it again in the '
+      + 'same reply. A call that was REFUSED prepared nothing: you may call it once more in the same reply, corrected as the '
+      + 'refusal says.',
     parameters: obj({
       label: { type: 'string', description: 'ONE option in the user\u2019s own words. For several, use `options` instead.' },
       acts_on: ACTS_ON,

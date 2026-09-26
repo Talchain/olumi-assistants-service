@@ -113,7 +113,8 @@ export function planNewOption(
       refusal: 'no_factors_named',
       detail:
         'An option that is linked to nothing cannot be compared, and it blocks the comparison for every other option too. '
-        + 'Name the factors this option would change.',
+        + 'Name the factors this option would change. If the model has no factor it acts on, never link it to an unrelated one: '
+        + 'tell the user the model does not represent what it changes yet, and offer to add that factor first.',
     };
   }
 
@@ -130,6 +131,20 @@ export function planNewOption(
   // ⛔ PARTIAL RESOLUTION IS A REFUSAL, NOT A BEST EFFORT. Adding an option wired
   // to some of what the user asked for, silently, is the "approved a set that
   // could never be written" failure in a new costume.
+  if (unresolved.length > 0 && actsOn.length === 0) {
+    // Nothing it names exists: "retry without the missing ones" would leave it linked to nothing, and the only way
+    // to add it then is a link it does not have (#1953 review). Say so, and offer the factor instead.
+    return {
+      ok: false,
+      refusal: 'no_such_factor',
+      detail:
+        `The model has no factor called ${unresolved.map((u) => `"${u}"`).join(' or ')}, and nothing else this option acts on. `
+        + 'Nothing was prepared. If you used a different name for a factor the model has, use its label from get_canonical_state. '
+        + 'Otherwise do not add it, and never link it to an unrelated factor: tell the user plainly that the model does not '
+        + 'represent what this option changes yet, and offer to add that factor first.',
+      unresolved_labels: unresolved,
+    };
+  }
   if (unresolved.length > 0) {
     return {
       ok: false,
