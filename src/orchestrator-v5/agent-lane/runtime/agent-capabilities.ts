@@ -700,8 +700,14 @@ export function createAgentCapabilities(
   /**
    * Confirm a held add-option exactly as the UI would: the hold's own chip id and its own public message,
    * verbatim, on the non-composer chip path (the route gate matches the exact copy; a paraphrase or a bare
-   * "yes" would reach the edit model instead). Applied ONLY when the store shows it: the model moved, the
-   * hold is consumed, and every option the hold adds is now in the model.
+   * "yes" would reach the edit model instead). Applied ONLY when THIS confirm's own response shows it AND the
+   * store agrees: the response carries the applied model (`draft_graph`, which a refused hold omits) holding
+   * every option the hold adds with its decision link, the model now stored is that one, the hold is consumed,
+   * and the options are in the model with their decision links.
+   *
+   * ⛔ BOUND TO THIS RESPONSE, NOT TO WHAT THE MODEL NOW HOLDS (Canonical, #70 5841421182, condition 3). A writer
+   * racing the confirm can land an option with the same deterministic id while route-v2 refuses the stale hold:
+   * the model moved, the hold is gone and the id is present — and none of it is this write.
    */
   const confirmHeld = async (ctx: AgentToolContext, ref: string): Promise<ToolResult> => {
     let hold: PendingAction | undefined;
@@ -725,14 +731,28 @@ export function createAgentCapabilities(
     const after = await readGraph(ctx.scenario_id);
     let stillHeld = true;
     try { stillHeld = (await liveHeldHold(ctx.scenario_id, ref)) !== undefined; } catch { stillHeld = true; }
-    const optionIds = heldOpsOf(hold).filter((o) => o.op === 'add_node').map((o) => o.path);
-    const landed = after !== null && optionIds.length > 0 && optionIds.every((id) => after.nodes.some((x) => x.id === id));
-    const moved = after !== null && after.graph_hash !== before.graph_hash;
-    if (!(r.status === 200 && moved && !stillHeld && landed)) {
-      return { ok: false, mutated: moved, refusal: 'not_applied', proposal_id: ref,
-        detail: moved
-          ? 'The model changed, but not as that approval described, so it is not reported as added. Read the model again before saying what it holds.'
-          : 'The change was not saved, so the model is as it was. Tell the user plainly; do not describe it as added.' };
+    const heldOps = heldOpsOf(hold);
+    const optionIds = heldOps.filter((o) => o.op === 'add_node').map((o) => o.path);
+    // The decision link of each option, from the held batch itself (`decision::option`).
+    const decisionLinks = heldOps.filter((o) => o.op === 'add_edge' && optionIds.some((id) => o.path.endsWith(`::${id}`)))
+      .map((o) => o.path.split('::') as [string, string]);
+    const holdsAll = (g: { nodes?: unknown; edges?: unknown } | null | undefined): boolean => {
+      const nodes = Array.isArray(g?.nodes) ? g.nodes as { id?: unknown }[] : [];
+      const edges = Array.isArray(g?.edges) ? g.edges as { from?: unknown; to?: unknown }[] : [];
+      return optionIds.length > 0 && decisionLinks.length >= optionIds.length
+        && optionIds.every((id) => nodes.some((x) => x?.id === id))
+        && decisionLinks.every(([from, to]) => edges.some((e) => e?.from === from && e?.to === to));
+    };
+    const applied = r.status === 200 && r.json.draft_graph !== null && typeof r.json.draft_graph === 'object'
+      && holdsAll(r.json.draft_graph as { nodes?: unknown; edges?: unknown });
+    const verified = applied && after !== null && typeof r.json.graph_hash === 'string' && r.json.graph_hash === after.graph_hash
+      && after.graph_hash !== before.graph_hash && !stillHeld && holdsAll(after);
+    if (!verified) {
+      return applied
+        ? { ok: false, mutated: true, refusal: 'not_verified', proposal_id: ref,
+          detail: 'The change was saved, but the model changed again straight afterwards, so what it now holds could not be confirmed. Read the model again before saying what it holds.' }
+        : { ok: false, mutated: false, refusal: 'not_applied', proposal_id: ref,
+          detail: 'The change was not saved (the model may have changed since it was offered). Tell the user plainly; do not describe it as added, and offer to prepare it again.' };
     }
     approvalAppliedThisRequest = true;
     const { summary, unreadable } = receiptSummaryOf(r.json);

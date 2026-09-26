@@ -138,6 +138,10 @@ const fnCall = (name: string, args: Record<string, unknown>) => ({ output: [{ ty
 const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
 /** The inner requests the Agent sent to route-v2, in order. */
 let inner: Record<string, unknown>[] = [];
+/** Runs inside the inner request's preHandler — BEFORE route-v2 reads the store (a writer racing the confirm). */
+let onInner: ((body: Record<string, unknown>) => void) | undefined;
+/** Runs as route-v2's answer to an inner request is sent — AFTER it has decided. */
+let onInnerSent: ((body: Record<string, unknown>) => void) | undefined;
 
 describe('(A0) the Agent adds an option through the typed add-option seam — linked from the decision, one approval, one commit', () => {
   async function buildApp(): Promise<FastifyInstance> {
@@ -146,7 +150,8 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
     const a = Fastify({ logger: false });
-    a.addHook('preHandler', async (req) => { if (req.url === '/orchestrate/v2/turn') inner.push(req.body as Record<string, unknown>); });
+    a.addHook('preHandler', async (req) => { if (req.url === '/orchestrate/v2/turn') { inner.push(req.body as Record<string, unknown>); onInner?.(req.body as Record<string, unknown>); } });
+    a.addHook('onSend', async (req, _reply, payload) => { if (req.url === '/orchestrate/v2/turn') onInnerSent?.(req.body as Record<string, unknown>); return payload; });
     a.post('/assist/v1/scenarios/:id/graph', async (req) => {
       const g = graphOf.get((req.params as { id: string }).id) ?? null;
       return { graph: g, graph_hash: g === null ? null : computeAnalysisAffectingGraphHash(g as never) };
@@ -170,7 +175,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     app = await buildApp();
   }, 600_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; inner = []; routerCalls.length = 0; });
+  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; });
 
   const turn = async (payload: Record<string, unknown>): Promise<Body> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...payload } });
@@ -185,7 +190,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
   };
   /** The hold the Agent's LATEST answer row carries — what the next turn (and route-v2's confirm) will read. */
   const heldOnLatestRow = async () => {
-    const pendings = (await store.readMostRecentPendingActions(SCENARIO)) as { chip_id: string; action: { kind: string; inline_patch?: { handler_id?: string; operations?: { op: string; path: string }[] } } }[];
+    const pendings = (await store.readMostRecentPendingActions(SCENARIO)) as { chip_id: string; expires_at_turn_count: number; action: { kind: string; inline_patch?: { handler_id?: string; operations?: { op: string; path: string }[] } } }[];
     return pendings.filter((p) => p.action.kind === 'apply_proposed_change' && p.action.inline_patch?.handler_id === 'graph_management_held_v1');
   };
   const proposeOptionC = (level: number | undefined) => {
@@ -268,8 +273,11 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     graphOf.set(SCENARIO, seedGraph());
     const approve = approveChipOf(await proposeOptionC(54))!;
     script = [() => say('It would test the lower price before rollout.')];
+    const ttlOffered = (await heldOnLatestRow())[0]!.expires_at_turn_count;
     await turn({ message: 'What would that change?' });
     expect((await heldOnLatestRow()).map((p) => p.chip_id), 'the question turn\'s answer row carries the hold').toEqual([approve.id.slice('agent-approve-proposal:'.length)]);
+    // Canonical #1933 condition 2: carried by the product's own survival rule, so the turn count runs down.
+    expect((await heldOnLatestRow())[0]!.expires_at_turn_count, 'one carried turn spends one turn of the hold').toBe(ttlOffered - 1);
     const t3 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
     expect(t3._agent.tool_calls[0]).toEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
     expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id)).toBe(true);
@@ -297,6 +305,39 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(t2._agent.tool_calls[0], JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: false }));
     expect(newOption(), 'nothing was added').toBeUndefined();
     expect(t2.assistant_text).not.toMatch(/^Added\b/);
+  }, 120_000);
+
+  it('[c2] the model moves after the offer → the next answer row does NOT carry the stale hold (it could only be refused)', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    await proposeOptionC(54);
+    expect(await heldOnLatestRow()).toHaveLength(1);
+    const g = graphNow();
+    graphOf.set(SCENARIO, { ...g, nodes: g.nodes.map((x) => (x.id === 'opt_b' ? { ...x, interventions: { fac_price: { value: 0.3, raw_value: 60, unit: 'GBP' } } } : x)) });
+    script = [() => say('It would test the lower price before rollout.')];
+    await turn({ message: 'What would that change?' });
+    expect(await heldOnLatestRow(), 'a hold pinned to a model that has since moved is not carried forward').toEqual([]);
+  }, 120_000);
+
+  it('[c3] another writer lands the SAME option id, linked from the decision, while the confirm is in flight → the product refuses the stale hold (200), the hold is retired, and the Agent does NOT claim it', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const approve = approveChipOf(await proposeOptionC(54))!;
+    const hold = (await heldOnLatestRow())[0]!;
+    const optId = hold.action.inline_patch!.operations!.find((o) => o.op === 'add_node')!.path;
+    const isConfirm = (b: Record<string, unknown>) => (b['chip'] as { id?: string } | undefined)?.id === hold.chip_id;
+    // Before route-v2 reads the store: the racing writer's model, holding an option with THIS id, linked from the decision.
+    onInner = (b) => {
+      if (!isConfirm(b)) return;
+      const g = graphNow();
+      const e = (from: string, to: string) => ({ from, to, strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const });
+      graphOf.set(SCENARIO, { ...g,
+        nodes: [...g.nodes, { id: optId, kind: 'option', label: 'Test £54 at release', interventions: { fac_price: { value: 0.3, raw_value: 60, unit: 'GBP' } } }],
+        edges: [...g.edges, e('dec_x', optId), e(optId, 'fac_price')] });
+    };
+    // After route-v2 has refused the stale hold: the hold is retired (the product drops a hold whose pin moved).
+    onInnerSent = (b) => { if (isConfirm(b)) void store.append({ scenario_id: SCENARIO, turn_id: `racing-writer-${randomUUID()}`, request_hash: 'racing', pending_actions: [] }); };
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._agent.tool_calls[0], JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: false, mutated: false }));
+    expect(t2.assistant_text, t2.assistant_text).not.toMatch(/\bAdded\b|Partly saved/);
   }, 120_000);
 
   it('two options asked for in one turn → the FIRST is held and offered (one button), the second is refused in plain words — never zero buttons', async () => {

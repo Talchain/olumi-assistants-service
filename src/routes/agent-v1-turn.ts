@@ -59,6 +59,7 @@ import { CarriedProposals, carrierForAnswerRow, offeredApproveChipOnRow, rehydra
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
 import { isPendingActionExpired, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
+import { computeSurvivingPriorPendingsDetailed } from '../orchestrator-v5/commit.js';
 import { GM_HELD_HANDLER_ID } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
 import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
@@ -1737,21 +1738,33 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * inner write: a hold this turn confirmed is already consumed and is not carried. Holds go first; the row
      * holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK). A failed read carries none, loudly.
      */
-    let liveHolds: PendingAction[] = [];
+    let liveHolds: readonly PendingAction[] = [];
     if (typeof store.readMostRecentPendingActions === 'function') {
       try {
-        liveHolds = (await store.readMostRecentPendingActions(scenarioId)).filter((pa) => pa.action.kind === 'apply_proposed_change'
-          && (pa.action as { inline_patch?: { handler_id?: unknown } }).inline_patch?.handler_id === GM_HELD_HANDLER_ID
-          && !isPendingActionExpired(pa, Date.now()));
+        const held = (await store.readMostRecentPendingActions(scenarioId)).filter((pa) => pa.action.kind === 'apply_proposed_change'
+          && (pa.action as { inline_patch?: { handler_id?: unknown } }).inline_patch?.handler_id === GM_HELD_HANDLER_ID);
+        /*
+         * ⛔ CARRIED BY THE PRODUCT'S OWN SURVIVAL RULE, never copied verbatim (Canonical, #70 5841421182,
+         * condition 2): a hold whose pinned model has moved (this turn's write, or anyone's) could only be refused,
+         * so it is not carried to be offered as a dead button; the turn count runs down once per answer row; the
+         * wall clock bounds it. Same function, same order, as every route-v2 commit (`commit.ts`).
+         */
+        liveHolds = computeSurvivingPriorPendingsDetailed(held, [], [], graphHash, Date.now()).survivors;
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: live held proposals could not be read — this answer row carries none');
       }
     }
-    const durablePending = [
+    const pendingCandidates = [
       ...liveHolds,
       ...(approvalCarrier !== undefined ? [approvalCarrier] : []),
       ...(offerRun ? derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: emittedAtIso, ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) : []),
-    ].slice(0, PENDING_ACTIONS_PER_TURN_CAP);
+    ];
+    // The row holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK). Holds go first; what does not fit is said, never silent.
+    if (pendingCandidates.length > PENDING_ACTIONS_PER_TURN_CAP) {
+      log.warn({ scenario_id: scenarioId, dropped: pendingCandidates.slice(PENDING_ACTIONS_PER_TURN_CAP).map((pa) => pa.action.kind) },
+        'agent-lane: pending actions over the per-row cap — the lowest-priority items are not carried');
+    }
+    const durablePending = pendingCandidates.slice(0, PENDING_ACTIONS_PER_TURN_CAP);
 
     const lastRunBlocks = Array.isArray(lastRun?.blocks) ? lastRun.blocks : [];
     const runBound = bindRunBlocksToReadback(lastRunBlocks, { graphHash, analysisState, analysisResult });
