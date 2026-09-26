@@ -106,7 +106,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
   }
 }
 
-import { planNewOption } from '../propose-new-option.js';
+import { planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
@@ -852,7 +852,10 @@ export function createAgentCapabilities(
     let stillHeld = true;
     try { stillHeld = (await liveHeldHold(ctx.scenario_id, ref)) !== undefined; } catch { stillHeld = true; }
     const heldOps = heldOpsOf(hold);
-    const optionIds = heldOps.filter((o) => o.op === 'add_node').map((o) => o.path);
+    // ⛔ A held batch may also ADD a factor (`new_factors`): only an option node is an option.
+    const isFactorAdd = (o: { op: string; value?: unknown }): boolean => o.op === 'add_node' && (o.value as { kind?: unknown } | undefined)?.kind === 'factor';
+    const optionIds = heldOps.filter((o) => o.op === 'add_node' && !isFactorAdd(o)).map((o) => o.path);
+    const addedFactorIds = heldOps.filter(isFactorAdd).map((o) => o.path);
     // The decision link of each option, from the held batch itself (`decision::option`).
     const decisionLinks = heldOps.filter((o) => o.op === 'add_edge' && optionIds.some((id) => o.path.endsWith(`::${id}`)))
       .map((o) => o.path.split('::') as [string, string]);
@@ -885,6 +888,13 @@ export function createAgentCapabilities(
       return `Added "${String(node?.label ?? id)}", linked from the decision and acting on ${factorIds.map(labelOf).join(', ')}.`
         + (unlevelled.length > 0 ? ` It does not yet set a level for ${unlevelled.join(', ')}; tell me the figure for each and I'll set it.` : '');
     });
+    for (const fid of addedFactorIds) {
+      const f = after!.nodes.find((x) => x.id === fid);
+      if (f === undefined) continue;
+      const changes = after!.edges.filter((e) => e.from === fid).map((e) => String(after!.nodes.find((x) => x.id === e.to)?.label ?? e.to));
+      sentences.push(`Also added the factor "${String(f.label ?? fid)}", which changes ${changes.join(', ')}; how strongly is Olumi's estimate. `
+        + 'Its current value is not set yet; tell me what it is today and I\'ll record it.');
+    }
     return {
       ok: true, mutated: true, applied: true, outcome: 'applied', proposal_id: ref,
       receipts: summary !== null ? [summary] : [],
@@ -3325,6 +3335,10 @@ export function createAgentCapabilities(
         };
       }
       const decision = decisions[0]!;
+      // ⭐ A factor the model lacks is added IN THIS SAME CHANGE (`planNewFactors`; Canonical 5843972346/5843988693).
+      const planned = planNewFactors(g.nodes as never, Array.isArray(args?.new_factors) ? args.new_factors as readonly NewFactorRequest[] : []);
+      if (!planned.ok) return { ok: false, mutated: false, refusal: planned.refusal, detail: planned.detail };
+      const newFactors = planned.factors;
       // Each option is planned against the model PLUS the options before it: distinct ids, and no two options by one name.
       const plans: { spec: (typeof specs)[number]; plan: Extract<ReturnType<typeof planNewOption>, { ok: true }> }[] = [];
       for (const spec of specs) {
@@ -3333,6 +3347,7 @@ export function createAgentCapabilities(
           label: spec.label,
           acts_on: spec.acts_on.map((a) => ({ factor_label: String(a.factor_label ?? ''), direction: a.direction === 'negative' ? 'negative' as const : 'positive' as const })),
           rationale: String(args?.rationale ?? ''),
+          newFactors,
         });
         if (!plan.ok) {
           return { ok: false, mutated: false, refusal: plan.refusal,
@@ -3341,13 +3356,21 @@ export function createAgentCapabilities(
         }
         plans.push({ spec, plan });
       }
+      // A factor added for no option changes nothing the comparison can use: refused, never added on its own.
+      const unused = newFactors.filter((f) => !plans.some((x) => x.plan.newActsOn.some((a) => a.key === f.key)));
+      if (unused.length > 0) {
+        return { ok: false, mutated: false, refusal: 'new_factor_unused',
+          detail: `No option acts on ${unused.map((f) => `"${f.label}"`).join(', ')}. Nothing was prepared. Add a factor only for an option that changes it, and name it in that option\u2019s acts_on.` };
+      }
       /**
        * ⛔ ONE CHANGE HAS A SIZE LIMIT, checked BEFORE anything is sent. A typed transaction CEE builds holds at
        * most TYPED_TRANSACTION_ENVELOPE_CAP changes; each option costs one, its decision link one, and one per
        * factor it acts on. Over the limit the product would refuse the batch — so it is refused here, in plain
        * words, with nothing sent.
        */
-      const envelopes = plans.reduce((n, x) => n + 2 + x.plan.actsOn.length, 0);
+      // Each new factor costs one change for itself and one per thing it affects; the option's link to it is its acts_on.
+      const envelopes = plans.reduce((n, x) => n + 2 + x.plan.actsOn.length + x.plan.newActsOn.length, 0)
+        + newFactors.reduce((n, f) => n + 1 + f.affects.length, 0);
       if (envelopes > TYPED_TRANSACTION_ENVELOPE_CAP) {
         return {
           ok: false, mutated: false, refusal: 'too_many_links',
@@ -3412,7 +3435,19 @@ export function createAgentCapabilities(
               + `Once the option is added, propose that level with propose_option_interventions, which records a range for ${f.label}.` });
           return { factor_id: f.id, value: null };
         });
-        return { plan, set, entry: { label: plan.label, option_id: plan.optionId, interventions } };
+        /**
+         * A new factor starts with no level on this option: it has no range yet to read a figure against, and its
+         * current value is set after it exists (Canonical's OPEN ruling). A level the user gave for it is said, not lost.
+         */
+        for (const a of plan.newActsOn) {
+          const asked = spec.acts_on.find((x) => norm(x.factor_label) === norm(a.label))?.level?.value;
+          if (typeof asked === 'number' && Number.isFinite(asked)) {
+            levelsNotSet.push({ option: plan.label, factor: a.label, value: asked,
+              reason: `"${a.label}" is new in this change and has no range yet, so its level is not set here. Once it is added, propose that level with propose_option_interventions.` });
+          }
+        }
+        const added = plan.newActsOn.map((a) => ({ factor_key: a.key, value: null }));
+        return { plan, set, entry: { label: plan.label, option_id: plan.optionId, interventions: [...interventions, ...added] } };
       });
       if (unitMismatch.length > 0) {
         const m = unitMismatch[0]!;
@@ -3431,14 +3466,24 @@ export function createAgentCapabilities(
             + 'Ask the user for a figure within that range, in the same units, or whether that range itself is wrong.',
         };
       }
+      const nfWire = newFactors.length === 0 ? {} : { new_factors: newFactors.map((f) => ({
+        key: f.key, label: f.label,
+        affects: f.affects.map((a) => ({ node_id: a.node_id, effect_direction: a.effect_direction })),
+      })) };
       const parameters = entries.length === 1
-        ? { parent_decision_id: decision.id, ...entries[0]!.entry }
-        : { parent_decision_id: decision.id, options: entries.map((e) => e.entry) };
+        ? { parent_decision_id: decision.id, ...entries[0]!.entry, ...nfWire }
+        : { parent_decision_id: decision.id, options: entries.map((e) => e.entry), ...nfWire };
       // The product's own transaction, run here purely: a spec it would not build is never sent.
       const built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
       if (!built.matched || JSON.stringify(built.operations).length > GM_HELD_OPERATIONS_MAX_JSON_CHARS) {
-        return { ok: false, mutated: false, refusal: 'not_prepared',
-          detail: 'That could not be prepared as one change, so nothing was sent or changed. Tell the user plainly.' };
+        const reason = !built.matched ? String(built.reason) : '';
+        const why = reason === 'new_factor_unreachable'
+          ? ' Nothing the new factor changes leads to the goal, so it could not affect the comparison: ask the user what it changes.'
+          : reason === 'new_factor_exists'
+            ? ' The model already has a factor by that name: name it in acts_on instead of adding it.'
+            : '';
+        return { ok: false, mutated: false, refusal: 'not_prepared', ...(!built.matched ? { reason: built.reason } : {}),
+          detail: `That could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
       }
       const labels = plans.map((x) => x.plan.label);
       const r = await dispatch('/orchestrate/v2/turn', {
@@ -3460,7 +3505,11 @@ export function createAgentCapabilities(
           const hold = await liveHeldHold(ctx.scenario_id, ref);
           const ops = hold !== undefined ? heldOpsOf(hold) : [];
           heldBatchOk = plans.every(({ plan }) => ops.some((o) => o.op === 'add_node' && o.path === plan.optionId)
-            && ops.some((o) => o.op === 'add_edge' && o.path === `${decision.id}::${plan.optionId}`));
+            && ops.some((o) => o.op === 'add_edge' && o.path === `${decision.id}::${plan.optionId}`))
+            // Every factor this change adds is in the held batch too, as a factor.
+            && newFactors.every((f) => ops.some((o) => o.op === 'add_node'
+              && (o.value as { kind?: unknown } | undefined)?.kind === 'factor'
+              && norm((o.value as { label?: unknown } | undefined)?.label) === norm(f.label)));
         } catch {
           heldBatchOk = false;
         }
@@ -3473,7 +3522,7 @@ export function createAgentCapabilities(
       const described = entries.map(({ plan, set }) => ({
         label: plan.label,
         linked_from: String(decision.label ?? ''),
-        acts_on: plan.actsOn.map((a) => a.label),
+        acts_on: [...plan.actsOn.map((a) => a.label), ...plan.newActsOn.map((a) => a.label)],
         levels: plan.actsOn.map((f) => {
           const lvl = set.get(f.id);
           return lvl !== undefined
@@ -3491,6 +3540,16 @@ export function createAgentCapabilities(
           ? { option: { label: described[0]!.label, linked_from: described[0]!.linked_from, acts_on: described[0]!.acts_on }, levels: described[0]!.levels }
           : { options: described }),
         ...(levelsNotSet.length > 0 ? { levels_not_set: levelsNotSet } : {}),
+        ...(newFactors.length > 0 ? {
+          new_factors: newFactors.map((f) => ({
+            label: f.label,
+            changes: f.affects.map((a) => `${a.label} (${a.effect_direction === 'positive' ? 'raises it' : 'lowers it'})`),
+            how_strongly: 'Olumi\u2019s estimate, for the user to correct',
+            current_value: null,
+          })),
+          new_factors_note: 'This change also ADDS these factors. Say so: what each changes and which way, that how strongly is Olumi\u2019s '
+            + 'estimate, and that its current value is not set yet \u2014 the analysis will ask for it.',
+        } : {}),
         note:
           `Nothing has changed yet. Show the user ${described.length === 1 ? 'the option' : `all ${described.length} options, as ONE change they approve once`}, `
           + 'that each is linked from the decision, what it acts on and each level — saying plainly which have no level yet — never the id, '
