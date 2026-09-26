@@ -8,7 +8,8 @@
  * to anything. The contrast: the same write answering with its committed revision IS recorded.
  */
 import { describe, it, expect } from 'vitest';
-import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilitiesWithLevelsPort as createAgentCapabilities } from './fixtures/levels-port.js';
 import { ProposalStore } from '../proposal.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../../orchestrator/context/constants.js';
 
@@ -63,12 +64,7 @@ async function approveOneLevel(committed: boolean) {
 }
 
 describe('single-kind level approval: a 200 with no committed revision', () => {
-  it('RED (mutant C): is reported as NOT recorded by this approval, never as saved', async () => {
-    const { r } = await approveOneLevel(false);
-    const text = JSON.stringify(r);
-    expect(text).toContain('not recorded by this approval: the write reported no committed revision');
-    expect(r.ok).not.toBe(true);
-  });
+  // Retired with the whole-scope level port (Canonical #70 5847348206): every level is ONE commit, so a per-level 200 without a revision is the writer\u2019s concern, not a chain the Agent walks. The contract is `whole-request-is-one-commit.test.ts`.
 
   it('CONTRAST: the same write answering with its committed revision IS recorded', async () => {
     const { r } = await approveOneLevel(true);

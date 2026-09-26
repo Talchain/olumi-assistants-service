@@ -14,7 +14,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { createAgentCapabilities, authorisationTurnId, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { authorisationTurnId, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilitiesWithLevelsPort as createAgentCapabilities } from './fixtures/levels-port.js';
 import { ProposalStore } from '../proposal.js';
 import { renormaliseOptionInterventionsForCapChange } from '../../tools/handlers/d1-shared/renormalise-interventions-for-cap-change.js';
 
@@ -194,46 +195,7 @@ describe('the value is read against the factor’s declared range', () => {
 });
 
 describe('authorise_change records the STORED levels', () => {
-  /**
-   * ⛔ Codex challenge on #1851 (5825938003), its exact CAS-shaped sequence: our first level commits at h1;
-   * a collaborator commits the SAME pair at h2; our second level (base h1) is refused 409; the read shows
-   * THEIR level. The row keeps OUR level, theirs is reported as changed since, and the note says both.
-   */
-  it('RED: a collaborator’s level on the same pair after our write is never recorded as ours', async () => {
-    const p = fakeProduct();
-    let interleaved = false;
-    const d: InternalDispatch = async (path, body) => {
-      const b = (body ?? {}) as { kind?: string; event?: { kind?: string; option_id?: string; factor_id?: string } };
-      if (!interleaved && path === '/orchestrate/v2/turn' && b.kind === 'system_event'
-        && b.event?.option_id === 'phase_increase' && b.event.factor_id === 'feature_value') {
-        const own = await p.d(path, body);
-        interleaved = true;
-        const foreign = await p.d(path, { kind: 'system_event', turn_id: 'other-writer', event: {
-          kind: 'option_intervention_edit', option_id: 'phase_increase', factor_id: 'feature_value', value: 0.2, base_graph_hash: 'h1',
-        } });
-        expect(foreign.status, 'PRECONDITION: the other writer really committed on our pair').toBe(200);
-        return own;
-      }
-      return p.d(path, body);
-    };
-    const caps = createAgentCapabilities(d, new ProposalStore());
-    const prop = await caps.proposeOptionInterventions(ctx, ASK);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
-    expect(p.read().find((n) => n.id === 'phase_increase')?.interventions?.feature_value, 'PRECONDITION: theirs is what the model holds').toEqual({ value: 0.2 });
-    expect(applied).toMatchObject({ recorded_count: 1, requested_count: 2, failures: [{ path: 'phase_increase::pro_plan_price', detail: 'http 409' }] });
-    expect(applied.interventions).toEqual([
-      { option: 'Phase Pro price increase', factor: 'Pro feature value', requested: 0.8, recorded: 0.8 },
-      { option: 'Phase Pro price increase', factor: 'Pro plan price', requested: 54, recorded: null },
-    ]);
-    expect(applied.changed_since_by_another_writer).toEqual([
-      { option: 'Phase Pro price increase', factor: 'Pro feature value', saved: 0.8, now: 0.2, unit: 'index 0-1' },
-    ]);
-    const said = String(applied.not_represented);
-    expect(said).toContain('Phase Pro price increase \u2192 Pro plan price was NOT');
-    expect(said).toContain('Phase Pro price increase \u2192 Pro feature value was saved by this approval, but someone else has since changed it');
-    expect(said).toContain('The levels that were recorded are from what the user said');
-    expect(said).not.toContain('What each option does is now recorded');
-  });
+  // Retired with the whole-scope level port (Canonical #70 5847348206): every level is ONE commit, so no other writer can land BETWEEN two of our levels. The contract is `whole-request-is-one-commit.test.ts`.
 
   /** One level, the user's own £54 on a factor with a 0–200 range, and the product's committed response. */
   const PRICE_ONLY = { interventions: [ASK.interventions[0]!] };
@@ -594,14 +556,14 @@ describe('authorise_change records the STORED levels', () => {
     expect(String(applied.not_represented)).toMatch(/quote the user’s own number back/);
   });
 
-  it('gives each level its own derived identity, stable across processes', async () => {
+  it('gives the approval\'s levels ONE derived identity (the port\'s idempotency key), stable across processes', async () => {
     const p1 = fakeProduct();
     const c1 = createAgentCapabilities(p1.d, new ProposalStore());
     const prop = await c1.proposeOptionInterventions(ctx, ASK);
     await c1.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
-    const id = String(prop.proposal_id);
-    expect(p1.posted.map((x) => x.turn_id)).toEqual([authorisationTurnId(`${id}#0`), authorisationTurnId(`${id}#1`)]);
-    expect(new Set(p1.posted.map((x) => x.turn_id)).size).toBe(2);
+    const key = authorisationTurnId(`${String(prop.proposal_id)}#levels`);
+    // The test port derives one event id per level from the ONE key the Agent sends.
+    expect(p1.posted.map((x) => x.turn_id)).toEqual([`${key}#level0`, `${key}#level1`]);
 
     const p2 = fakeProduct();
     const c2 = createAgentCapabilities(p2.d, new ProposalStore());
