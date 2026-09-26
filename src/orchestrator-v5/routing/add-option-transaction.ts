@@ -81,6 +81,7 @@
  */
 import { z } from 'zod';
 
+import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { normaliseIdBase } from '../../cee/utils/id-normalizer.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
@@ -95,6 +96,8 @@ export interface AddOptionGraphView {
     readonly id: string;
     readonly kind: string;
     readonly label?: string;
+    /** A factor's category — which factors a NEW factor may point at depends on it. */
+    readonly category?: string;
   }>;
   readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string }>;
 }
@@ -353,7 +356,17 @@ const MultiOptionParamsSchema = z.object({
   options: z.array(z.record(z.string(), z.unknown())).min(1),
 });
 
-export type AddOptionsSkipReason = AddOptionSkipReason | 'too_many_options';
+export type AddOptionsSkipReason =
+  | AddOptionSkipReason
+  | 'too_many_options'
+  // ONE HELD CHANGE ADDS THE MISSING FACTOR AND THE OPTION (ruling #70 5843972346 + 5843988693).
+  | 'new_factor_exists'
+  | 'factor_id_invalid'
+  | 'factor_id_collision'
+  | 'affects_target_invalid'
+  | 'new_factor_unreachable'
+  | 'new_factor_not_found'
+  | 'new_factor_unused';
 
 export type AddOptionsBuildResult =
   | {
@@ -362,8 +375,161 @@ export type AddOptionsBuildResult =
       readonly proposals: readonly AddOptionProposal[];
       /** Every option's ops, concatenated in order: ONE batch, ONE hold. */
       readonly operations: PatchOperation[];
+      /** Factors this batch ADDS, so a caller names them by label (the pre-edit graph does not have them). */
+      readonly newFactors: ReadonlyArray<{ readonly id: string; readonly label: string }>;
     }
   | { readonly matched: false; readonly reason: AddOptionsSkipReason; readonly index?: number };
+
+// ---------------------------------------------------------------------------
+// ONE HELD CHANGE ADDS THE MISSING FACTOR AND THE OPTION
+// (DL #70 5843303596; contract 5843960061; Canonical ruling 5843972346 + correction 5843988693)
+// ---------------------------------------------------------------------------
+
+/**
+ * `chip.parameters.new_factors` — factors the model lacks, added in the SAME batch as the option(s) that set
+ * them, so ONE approval lands both. An option's intervention names a new factor by `factor_key` (its
+ * batch-local `key`), never by label or a guessed id; the id is given or derived HERE (`fac_<slug>`,
+ * collision-free). Wire pinned with Runtime: #70 5844014025.
+ *
+ * STRICT on purpose: the add-option spec is non-strict, so an unknown key there is dropped silently — the
+ * exact way a "unit" or "current value" would vanish. There is no carrier for a value on this path (R4
+ * screens `add_node` for `source`), so a factor's current value is set afterwards through the value path,
+ * which records who said it.
+ */
+const NewFactorSpecSchema = z
+  .object({
+    /** The batch-local handle an option's intervention names it by (`factor_key`). */
+    key: z.string().min(1),
+    factor_id: z.string().min(1).optional(),
+    label: z.string().min(1),
+    affects: z
+      .array(z.object({ node_id: z.string().min(1), effect_direction: z.enum(['positive', 'negative']) }).strict())
+      .min(1)
+      // ⛔ One link per target (review 5844092217 B1): a repeated `node_id` emitted two `add_edge`s to the
+      // same pair — HELD, then "Edge already exists" at apply, so the user's "yes" landed nothing.
+      .refine((a) => new Set(a.map((x) => x.node_id)).size === a.length, { message: 'duplicate affects target' }),
+  })
+  .strict();
+const NewFactorsSchema = z
+  .array(NewFactorSpecSchema)
+  .min(1)
+  .refine((specs) => new Set(specs.map((f) => f.key)).size === specs.length, { message: 'duplicate key' });
+
+/** What a new factor may point at: what served agent-lane graphs link a factor to (never an option/decision, never a lever). */
+function isAffectsTarget(node: { kind: string; category?: string } | undefined): boolean {
+  if (node === undefined) return false;
+  if (node.kind === 'goal' || node.kind === 'outcome' || node.kind === 'risk') return true;
+  return node.kind === 'factor' && (node.category === 'observable' || node.category === 'external');
+}
+
+/** Does a path from `start` reach a goal node over the view's directed edges? */
+function reachesGoal(graph: AddOptionGraphView, start: string): boolean {
+  const kindOf = new Map(graph.nodes.map((n) => [n.id, n.kind] as const));
+  const seen = new Set<string>([start]);
+  const queue = [start];
+  while (queue.length > 0) {
+    const at = queue.shift()!;
+    if (kindOf.get(at) === 'goal') return true;
+    for (const e of graph.edges) {
+      if (e.from === at && !seen.has(e.to)) {
+        seen.add(e.to);
+        queue.push(e.to);
+      }
+    }
+  }
+  return false;
+}
+
+const sameLabel = (a: string | undefined, b: string): boolean =>
+  (a ?? '').trim().toLowerCase().replace(/\s+/g, ' ') === b.trim().toLowerCase().replace(/\s+/g, ' ');
+
+/**
+ * Olumi's DEFAULT hypothesis for a new factor's link to what it affects: the drafter's own default-strength
+ * edge (`STRENGTH_DEFAULT_SIGNATURE`, `DEFAULT_EXISTS_PROBABILITY`), stamped `defaulted` + `cee_hypothesis`
+ * and signed by the USER's stated direction. Never `STRUCTURAL_EDGE_DEFAULTS`: strength 1.0 is topology, and
+ * on a causal link it would claim the factor fully drives what it touches.
+ */
+function hypothesisEdgeValue(from: string, to: string, direction: 'positive' | 'negative'): Record<string, unknown> {
+  return {
+    from,
+    to,
+    strength: {
+      mean: direction === 'negative' ? -STRENGTH_DEFAULT_SIGNATURE.mean : STRENGTH_DEFAULT_SIGNATURE.mean,
+      std: STRENGTH_DEFAULT_SIGNATURE.std,
+    },
+    exists_probability: DEFAULT_EXISTS_PROBABILITY,
+    effect_direction: direction,
+    defaulted: true,
+    provenance: { source: 'cee_hypothesis' as const },
+  };
+}
+
+type NewFactorPlan =
+  | {
+      readonly ok: true;
+      readonly factors: ReadonlyArray<{ readonly key: string; readonly id: string; readonly label: string }>;
+      readonly nodeOps: PatchOperation[];
+      readonly edgeOps: PatchOperation[];
+      readonly view: AddOptionGraphView;
+    }
+  | { readonly ok: false; readonly reason: AddOptionsSkipReason };
+
+function planNewFactors(raw: unknown, graph: AddOptionGraphView): NewFactorPlan {
+  const parsed = NewFactorsSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, reason: 'parameters_invalid' };
+  let view = graph;
+  const factors: { key: string; id: string; label: string }[] = [];
+  const nodeOps: PatchOperation[] = [];
+  const edgeOps: PatchOperation[] = [];
+  for (const spec of parsed.data) {
+    if (view.nodes.some((n) => sameLabel(n.label, spec.label))) return { ok: false, reason: 'new_factor_exists' };
+    let id: string;
+    if (spec.factor_id !== undefined) {
+      if (!CANONICAL_ID_RE.test(spec.factor_id)) return { ok: false, reason: 'factor_id_invalid' };
+      if (nodeIdExists(view, spec.factor_id)) return { ok: false, reason: 'factor_id_collision' };
+      id = spec.factor_id;
+    } else {
+      const base = `fac_${normaliseIdBase(spec.label)}`;
+      id = base;
+      for (let n = 2; nodeIdExists(view, id); n += 1) id = `${base}_${n}`;
+    }
+    for (const a of spec.affects) {
+      if (!isAffectsTarget(findNode(graph, a.node_id))) return { ok: false, reason: 'affects_target_invalid' };
+    }
+    if (!spec.affects.some((a) => reachesGoal(graph, a.node_id))) return { ok: false, reason: 'new_factor_unreachable' };
+    nodeOps.push({ op: 'add_node', path: id, value: { id, kind: 'factor', label: spec.label, category: 'controllable' } });
+    for (const a of spec.affects) {
+      edgeOps.push({ op: 'add_edge', path: `${id}::${a.node_id}`, value: hypothesisEdgeValue(id, a.node_id, a.effect_direction) });
+    }
+    factors.push({ key: spec.key, id, label: spec.label });
+    view = {
+      nodes: [...view.nodes, { id, kind: 'factor', label: spec.label, category: 'controllable' }],
+      edges: [...view.edges, ...spec.affects.map((a) => ({ from: id, to: a.node_id }))],
+    };
+  }
+  return { ok: true, factors, nodeOps, edgeOps, view };
+}
+
+/** Rewrite `{factor_key}` interventions to the batch's own ids; `null` when one names no new factor. */
+function resolveNewFactorRefs(
+  spec: Record<string, unknown>,
+  factors: ReadonlyArray<{ readonly key: string; readonly id: string }>,
+): Record<string, unknown> | null {
+  const ivs = spec.interventions;
+  if (!Array.isArray(ivs)) return spec;
+  const out: unknown[] = [];
+  for (const iv of ivs) {
+    if (iv !== null && typeof iv === 'object' && 'factor_key' in (iv as Record<string, unknown>)) {
+      const { factor_key: key, ...rest } = iv as Record<string, unknown>;
+      const hit = typeof key === 'string' ? factors.find((f) => f.key === key) : undefined;
+      if (hit === undefined) return null;
+      out.push({ ...rest, factor_id: hit.id });
+    } else {
+      out.push(iv);
+    }
+  }
+  return { ...spec, interventions: out };
+}
 
 /**
  * Build ONE batch for one or several options.
@@ -378,6 +544,61 @@ export function buildAddOptionsTransaction(
   parameters: unknown,
   graph: AddOptionGraphView | null,
 ): AddOptionsBuildResult {
+  const bag =
+    parameters !== null && typeof parameters === 'object' && !Array.isArray(parameters)
+      ? (parameters as Record<string, unknown>)
+      : null;
+  // No new factors: exactly the pre-existing path, byte for byte.
+  if (bag === null || !('new_factors' in bag)) return buildOptionsOnly(parameters, graph);
+  if (graph === null) return { matched: false, reason: 'no_graph' };
+
+  const plan = planNewFactors(bag.new_factors, graph);
+  if (!plan.ok) return { matched: false, reason: plan.reason };
+  const { new_factors: _newFactors, ...rest } = bag;
+  let resolved: Record<string, unknown>;
+  if (Array.isArray(rest.options)) {
+    const options: unknown[] = [];
+    for (const entry of rest.options) {
+      if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+        options.push(entry);
+        continue;
+      }
+      const r = resolveNewFactorRefs(entry as Record<string, unknown>, plan.factors);
+      if (r === null) return { matched: false, reason: 'new_factor_not_found' };
+      options.push(r);
+    }
+    resolved = { ...rest, options };
+  } else {
+    const r = resolveNewFactorRefs(rest, plan.factors);
+    if (r === null) return { matched: false, reason: 'new_factor_not_found' };
+    resolved = r;
+  }
+
+  // The options are built against the graph PLUS the new factors, by the one option builder.
+  const built = buildOptionsOnly(resolved, plan.view);
+  if (!built.matched) return built;
+  // A factor no option sets is not what this path is for: refuse rather than add a stray lever.
+  const used = new Set(built.proposals.flatMap((p) => [...p.configuredFactorIds, ...p.linkedUnvaluedFactorIds]));
+  if (!plan.factors.every((f) => used.has(f.id))) return { matched: false, reason: 'new_factor_unused' };
+
+  // ORDER (pinned with Runtime, #70 5844014025): the first option's add_node (the held change's handle) →
+  // every new factor node → decision→option → factor→affects → option→factor → any further options' ops.
+  // Every node precedes every edge that names it.
+  const firstLen = built.proposals[0]!.operations.length;
+  const firstOps = built.operations.slice(0, firstLen);
+  const laterOps = built.operations.slice(firstLen);
+  return {
+    matched: true,
+    proposals: built.proposals,
+    operations: [firstOps[0]!, ...plan.nodeOps, firstOps[1]!, ...plan.edgeOps, ...firstOps.slice(2), ...laterOps],
+    newFactors: plan.factors.map((f) => ({ id: f.id, label: f.label })),
+  };
+}
+
+function buildOptionsOnly(
+  parameters: unknown,
+  graph: AddOptionGraphView | null,
+): AddOptionsBuildResult {
   const multi =
     parameters !== null &&
     typeof parameters === 'object' &&
@@ -386,7 +607,7 @@ export function buildAddOptionsTransaction(
   if (!multi) {
     const single = buildAddOptionTransaction(parameters, graph);
     return single.matched
-      ? { matched: true, proposals: [single.proposal], operations: [...single.proposal.operations] }
+      ? { matched: true, proposals: [single.proposal], operations: [...single.proposal.operations], newFactors: [] }
       : { matched: false, reason: single.reason };
   }
   if (graph === null) return { matched: false, reason: 'no_graph' };
@@ -414,5 +635,5 @@ export function buildAddOptionsTransaction(
       edges: view.edges,
     };
   }
-  return { matched: true, proposals, operations: proposals.flatMap((p) => p.operations) };
+  return { matched: true, proposals, operations: proposals.flatMap((p) => p.operations), newFactors: [] };
 }
