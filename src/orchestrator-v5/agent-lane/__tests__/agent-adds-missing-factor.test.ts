@@ -86,6 +86,25 @@ describe('propose_new_option sends ONE change carrying the option AND the factor
     expect(params!['interventions']).toEqual([{ factor_key: 'ai_add_on_price', value: null }]);
   });
 
+  it('the size limit counts each new factor and what it affects — refused before anything is sent (#1974 review N2)', async () => {
+    const { caps, sent } = setup();
+    // 4 options × (option + decision link + 3 factors) = 20; 4 new factors × (node + 3 targets) = 16; 36 > 32.
+    const targets = [{ label: 'Monthly recurring revenue (MRR)', direction: 'positive' }, { label: 'Active Pro subscribers', direction: 'positive' }, { label: 'Monthly churn', direction: 'negative' }];
+    const nf = [1, 2, 3, 4].map((i) => ({ label: `Add-on ${i} price`, affects: targets }));
+    const options = [1, 2, 3, 4].map((i) => ({ label: `Add-on ${i}`, acts_on: [
+      { factor_label: 'Pro plan price', direction: 'positive' }, { factor_label: 'AI feature adoption rate', direction: 'positive' }, { factor_label: `Add-on ${i} price`, direction: 'positive' },
+    ] }));
+    const r = await caps.proposeNewOption(ctx, { options, new_factors: nf, rationale: 'x' } as never) as { refusal?: string; detail?: string };
+    expect(r.refusal, JSON.stringify(r)).toBe('too_many_links');
+    expect(sent, 'without the new factors the count would be 20 and it would have been sent').toEqual([]);
+  });
+
+  it('the preview asks for the new factor\'s value today, and never says the analysis will (#1974 review N1)', async () => {
+    const src = readFileSync(new URL('../runtime/agent-capabilities.ts', import.meta.url), 'utf8');
+    expect(src).toContain('Ask the user what it is today');
+    expect(src, 'the old claim: readiness raises nothing once a level is set').not.toContain('not set yet \\u2014 the analysis will ask for it');
+  });
+
   it('a factor declared for no option is refused before anything is sent', async () => {
     const { caps, sent } = setup();
     const r = await caps.proposeNewOption(ctx, { ...call, acts_on: [{ factor_label: 'Pro plan price', direction: 'positive' }] } as never) as { refusal?: string };

@@ -3688,7 +3688,8 @@ export function createAgentCapabilities(
             current_value: null,
           })),
           new_factors_note: 'This change also ADDS these factors. Say so: what each changes and which way, that how strongly is Olumi\u2019s '
-            + 'estimate, and that its current value is not set yet \u2014 the analysis will ask for it.',
+            + 'estimate, and that its current value is not set yet. Ask the user what it is today (for example, whether it is '
+            + 'offered at all yet) \u2014 nothing else will ask, and the comparison needs it; never say the analysis will ask for it.',
         } : {}),
         note:
           `Nothing has changed yet. Show the user ${described.length === 1 ? 'the option' : `all ${described.length} options, as ONE change they approve once`}, `
