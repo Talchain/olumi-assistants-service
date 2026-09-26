@@ -43,6 +43,20 @@ export function figureTheUserWrote(value: number, unit: unknown, userText: strin
 }
 
 /**
+ * Whether Olumi's own figure contradicts the option's NAME ("Test £54 at release" carrying an estimate of 64; #1982
+ * review N2). Only money and percentages count: a bare number in a name ("Hire 2 developers") is usually about
+ * something else. The name must state at least one figure of that kind, and the estimate must match none of them.
+ */
+export function contradictsItsName(value: number, unit: unknown, name: string): boolean {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+  const family = unitPhraseFamily(unit);
+  const typed = findStatedAmounts(name).filter((a) =>
+    (a.kind === 'currency' && (family === null || family === 'currency')) || (a.kind === 'percent' && (family === null || family === 'percent')));
+  if (typed.length === 0) return false;
+  return !typed.some((a) => same(a.magnitude, value) || (a.kind === 'percent' && same(a.magnitude / 100, value)));
+}
+
+/**
  * Whether this request is something the user TYPED: a composer message. A chip click is not — every chip's text is
  * Olumi's (an approval replaying the Agent's own labels, a suggestion, a coaching prompt) — and neither is a system
  * event such as a board edit.
