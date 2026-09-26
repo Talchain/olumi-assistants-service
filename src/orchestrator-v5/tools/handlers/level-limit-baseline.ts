@@ -32,6 +32,7 @@
 import { valuesMatch } from '../../../utils/reduction-framing.js';
 import { deriveInferredValues } from '../../coaching/inferred-value-disclosure.js';
 import { percentLimitFrameProvable, type LimitTargetScale } from '../../agent-lane/admit-constraint.js';
+import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
 
 type Rec = Record<string, unknown>;
 
@@ -103,6 +104,62 @@ export function carryLevelLimitBaselines<G>(graph: G, goalConstraints: unknown, 
       isRec(n) && typeof n.id === 'string' && ids.has(n.id) && isRec(n.observed_state)
         ? { ...n, observed_state: { ...n.observed_state, baseline: n.observed_state.value } }
         : n,
+    ),
+  } as G;
+}
+
+/**
+ * ⛔ A LIMIT ON A FACTOR IS READ ON THAT FACTOR'S OWN SCALE (option-set limit; DL #70 5848250258, seam 5848242345).
+ *
+ * SERVED (R&C `w1983-price-10fbbdf`, #70 5847390325): "keep the Pro plan price under £60", options £49 / £59 / £55. The
+ * price is a factor every option sets, and CEE sends its levels normalised (0.49 / 0.59 on a cap of 100). PLoT's threshold
+ * ladder then reads the RAW limit (60) on the identity [0, 1] intervention scale BEFORE the node's own cap, so the range
+ * is `default` → `threshold_normalisation_defaulted` → `CONSTRAINT_TARGET_UNRELIABLE`, and the reply asked for a rerun
+ * that could never help. PLoT reads a node's `goal_threshold_cap` first (`nodeCap`, plot-lite-service
+ * `intervention-normaliser.ts` threshold ladder): engine-direct on served PLoT `1f6ad52` / ISL `8a5e973`, the same limit with
+ * `goal_threshold_cap: 100` on the price node is decision-grade, each option compared at the level it sets —
+ * "≤ £55": keep £49 → 1, raise to £59 → 0 (`option-set-limit-20260926/RESULTS.md`).
+ *
+ * So the factor's own cap is carried as `goal_threshold_cap` on the WIRE copy, never persisted, only where it is proven
+ * to be the limit's scale:
+ *   · the limit is framed `level` (unframed keeps failing closed at the frame hop; a delta needs no scale);
+ *   · the target is a FACTOR, with no `goal_threshold_cap` of its own (fill-only);
+ *   · its scale is declared: `observed_state.cap`, else the admission estimate's `scale_frame`, above 1;
+ *   · the limit is spelled in the factor's OWN unit (trimmed, case-folded equality). A limit in another unit — "£/year"
+ *     on a "£/month" price — would be scored against the wrong number, so it keeps its honest refusal;
+ *   · the unit is not a percentage of any class: the percent rung owns those (`withholdUnprovablePercentFrames`);
+ *   · 1 < value ≤ cap: a value above 1 takes PLoT's scaled rung in every batch (the B1 lesson above), and a value
+ *     within the cap stays inside the factor's own frame.
+ */
+export function limitTargetCaps(graph: unknown, goalConstraints: unknown): Map<string, number> {
+  const out = new Map<string, number>();
+  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(goalConstraints)) return out;
+  const nodes = graph.nodes.filter(isRec);
+  const fold = (u: unknown): string | undefined => (typeof u === 'string' && u.trim() !== '' ? u.trim().toLowerCase() : undefined);
+  const aboveOne = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 1;
+  for (const c of goalConstraints) {
+    if (!isRec(c) || c.value_frame !== 'level' || typeof c.node_id !== 'string') continue;
+    const node = nodes.find((n) => n.id === c.node_id);
+    if (node === undefined || node.kind !== 'factor' || node.goal_threshold_cap !== undefined) continue;
+    const os = isRec(node.observed_state) ? node.observed_state : {};
+    const cap = aboveOne(os.cap) ? os.cap : aboveOne(node.scale_frame) ? node.scale_frame : undefined;
+    if (cap === undefined) continue;
+    const unit = fold(c.unit);
+    if (unit === undefined || unit !== fold(os.unit) || classifyUnitScaleClass(unit) !== 'unknown') continue;
+    if (!aboveOne(c.value) || c.value > cap) continue;
+    out.set(node.id as string, cap);
+  }
+  return out;
+}
+
+/** The wire graph with each such factor's own cap carried as `goal_threshold_cap`. Returns `graph` itself when none. */
+export function carryLimitTargetCaps<G>(graph: G, goalConstraints: unknown): G {
+  const caps = limitTargetCaps(graph, goalConstraints);
+  if (caps.size === 0 || !isRec(graph) || !Array.isArray(graph.nodes)) return graph;
+  return {
+    ...graph,
+    nodes: graph.nodes.map((n: unknown) =>
+      isRec(n) && typeof n.id === 'string' && caps.has(n.id) ? { ...n, goal_threshold_cap: caps.get(n.id) } : n,
     ),
   } as G;
 }
