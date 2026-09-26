@@ -797,10 +797,12 @@ export function createAgentCapabilities(
    * Every id a proposer MINTS is recorded here against the request that minted it: each `prop_` at the one point it
    * enters the store (`holdForApproval`, building blocks included), and each `gmh_` as soon as its add-option turn is
    * sent (the product may hold it even when this capability then reports `not_prepared`, and `get_canonical_state`
-   * would list it). `authoriseChange` refuses any of them in that request as `awaiting_your_approval`, nothing
-   * written. Keyed by the request's own `request_id` (bound by the route, never model output) inside a capability
-   * set the route creates per request, so nothing outlives the request: the NEXT one — the approve chip, or a typed
-   * "yes" — applies it exactly as before (`agent-cannot-approve-its-own-proposal.test.ts`).
+   * would list it) — its own handle AND every hold that turn's response offers. `authoriseChange` refuses any of them
+   * in that request as `awaiting_your_approval`, nothing written. Keyed by the request's own `request_id` (bound by
+   * the route, never model output) inside a capability set the route creates per request, so nothing outlives the
+   * request: the NEXT one — the approve chip, or a typed "yes" — applies it exactly as before
+   * (`agent-cannot-approve-its-own-proposal.test.ts`; one same-request row per proposer, driven from `MUTATION_TOOLS`,
+   * in `every-proposer-waits-for-the-users-approval.test.ts`).
    *
    * ⚠ Known cost, priced: an Agent that RE-proposes an identical change on the user's "yes" turn and then approves
    * the re-minted id is refused too, and the chip is offered again (one more click). A same-request re-mint is not
@@ -3738,6 +3740,11 @@ export function createAgentCapabilities(
       // Minted by the turn just sent, whatever this capability reports next: never approvable in this request.
       markPrepared(ctx, ref);
       const offered = Array.isArray(r.json.suggested_actions) ? r.json.suggested_actions as { id?: unknown; label?: unknown; message?: unknown }[] : [];
+      // ⛔ So is EVERY hold this turn's own response offers, whatever its handle: when route-v2's add-option
+      // transaction falls through to the free-text edit lane, that lane holds the change under its own target's
+      // `gmh_`, the capability reports `not_prepared`, and `get_canonical_state` still lists the hold as awaiting
+      // approval (independent review of 8566fc35, round 2, non-blocking 1).
+      for (const c of offered) if (typeof c?.id === 'string' && /^gmh_[0-9a-f]{12}$/.test(c.id)) markPrepared(ctx, c.id);
       const heldChip = r.status === 200 ? offered.find((c) => c?.id === ref) : undefined;
       let heldBatchOk = heldChip !== undefined;
       if (heldBatchOk && opts.readPendingActions !== undefined) {
