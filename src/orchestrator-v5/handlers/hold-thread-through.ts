@@ -315,6 +315,7 @@ export function threadHoldsThroughMutatingCommit(
         // GM hold with an executable batch: VALIDATE against the new graph.
         const assessment = assessHeldBatchAgainstGraph({
           operations: read.operations,
+          ...(read.envelopeCap !== undefined ? { envelopeCap: read.envelopeCap } : {}),
           currentGraph: input.graphAfterCommit,
           currentGraphHash: newHash,
           scenarioId: input.scenarioId,
