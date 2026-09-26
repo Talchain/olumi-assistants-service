@@ -81,6 +81,14 @@ export function statedThreshold(row: Record<string, unknown>): string | null {
   if (/^fraction$/i.test(unit)) return null;
   if (PERCENT_LIKE_UNIT.test(unit) && audit === null
     && !(typeof row.constraint_id === 'string' && USER_UNIT_WRITER_ID.test(row.constraint_id))) return null;
+  return sayLevel(value, unit);
+}
+
+/**
+ * A level in its own units, the one way every coaching card says it: "10% per month", "£400,000",
+ * "500 CHF", "10 hours"; a bare number when there is no unit. `unit` is trimmed by the caller.
+ */
+export function sayLevel(value: number, unit: string): string {
   const n = value.toLocaleString('en-GB', { maximumFractionDigits: 2 });
   if (unit === '') return n;
   if (unit.startsWith('%')) return `${n}${unit}`;

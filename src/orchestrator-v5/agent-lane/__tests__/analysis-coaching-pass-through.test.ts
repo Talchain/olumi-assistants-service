@@ -8,7 +8,8 @@ import { buildConstraintDisclosureFromState } from '../../coaching/constraint-ga
 import { readFileSync } from 'node:fs';
 import { fixtureUrl } from '../../coaching/__tests__/fragile-link-challenge-fixtures.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { statedThreshold } from '../../coaching/bound-graph.js';
+import { sayLevel, statedThreshold } from '../../coaching/bound-graph.js';
+import { CURRENCY_SYMBOL_TO_CODE } from '../../../utils/currency-alphabet.js';
 import { extractCompoundGoals, normaliseConstraintUnits, toGoalConstraints } from '../../../cee/compound-goal/extractor.js';
 import { GoalConstraintSchema } from '../../../schemas/assist.js';
 const hash = '0123456789abcdef';
@@ -685,4 +686,17 @@ test('ESTIMATED LIMIT — the level must be Olumi\'s, from ONE limit node, on th
  // The verdict is read from the carried field ONLY: the same value inside analysis_state speaks nothing.
  const inState={...(c.final.analysisState as Record<string, unknown>),leader_claim:{permitted:false,withheld_reason:'unrequested_analysis_withheld'},constraint_verdict_state:'evaluated_feasible'};
  assert.equal(estCards(runTurnCoaching(statelessCapture(c.captured),{...c.final,graph:PAUL_GRAPH,analysisState:inState})).length,0);
+});
+test('sayLevel — EVERY key of the canonical currency map: an all-letter key follows the figure, every other key prefixes it (#1948 AI Quality nit 5842591105)',()=>{
+ const keys=Object.keys(CURRENCY_SYMBOL_TO_CODE);
+ assert.ok(keys.length>=10,'control: the canonical map is the one read');
+ for (const k of keys) assert.equal(sayLevel(500,k),/^[a-z]+$/i.test(k)?`500 ${k}`:`${k}500`,k);
+ assert.equal(sayLevel(500,'GBP'),'500 GBP','a code spelling is not a key: it follows');
+});
+test('ESTIMATED LIMIT — the level is said by the ONE shared formatter (bound-graph sayLevel): a currency estimate reads "£5,000"',()=>{
+ const x=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ Object.assign(x.nodes.find((n: any)=>n.id==='monthly_churn').observed_state,{raw_value:5000,unit:'£'});
+ const est=estCards(estCase('evaluated_feasible',undefined,x)) as any[];
+ assert.equal(est.length,1);
+ assert.match(est[0].body,/Olumi's estimate that it is about £5,000 today/);
 });

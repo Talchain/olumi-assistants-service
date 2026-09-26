@@ -28,6 +28,7 @@
 import { CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/boundary';
 
 import { deterministicBlockId } from '../compose/block-id.js';
+import { sayLevel } from './bound-graph.js';
 import {
   RUN_TURN_COACHING_CONTRACT,
   copyPasses,
@@ -61,10 +62,7 @@ function levelOf(observed: Record<string, unknown> | null): string | null {
   const raw = observed.raw_value;
   const unit = typeof observed.unit === 'string' ? observed.unit.trim() : '';
   if (typeof raw !== 'number' || !Number.isFinite(raw) || unit === '') return null;
-  const n = raw.toLocaleString('en-GB', { maximumFractionDigits: 2 });
-  if (unit.startsWith('%')) return `${n}${unit}`;
-  if (/^[£$€]$/.test(unit)) return `${unit}${n}`;
-  return `${n} ${unit}`;
+  return sayLevel(raw, unit);
 }
 
 /**
