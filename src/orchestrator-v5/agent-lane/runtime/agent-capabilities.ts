@@ -324,6 +324,20 @@ function levelOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'mo
 }
 
 /**
+ * ⭐ THE FIGURE A LEVEL WAS READ FROM, KEPT ON ITS CELL (AI Conversation #70 5848429576; the door, #2024). A level on a
+ * NEW factor with no range was stored as a bare 0.1: the user's "£10 per month" and the range it was read against were
+ * gone. The proposal already holds both, so the writer is handed them to keep on the cell in the same commit. Only when
+ * they reproduce the stored level exactly: an op whose `normalised` is not `raw / cap` passes no figure (the writer would
+ * refuse the whole batch as `level_frame_mismatch`).
+ */
+function levelFigureOf(op: ProposalOperation): { raw_value: number; cap: number; unit?: string } | Record<string, never> {
+  const v = (op.value ?? {}) as { normalised?: unknown; raw?: unknown; cap?: unknown; unit?: unknown };
+  if (typeof v.normalised !== 'number' || typeof v.raw !== 'number' || !Number.isFinite(v.raw) || typeof v.cap !== 'number' || !(v.cap > 0)) return {};
+  if (Math.abs(v.raw / v.cap - v.normalised) > 1e-9) return {};
+  return { raw_value: v.raw, cap: v.cap, ...(typeof v.unit === 'string' && v.unit.trim() !== '' ? { unit: v.unit.trim() } : {}) };
+}
+
+/**
  * ⛔ WHAT THE APPROVAL STORED, SAID PER VALUE (Codex pre-review of #1851, 5825446207): the explanation
  * the Agent repeats must match the stamps `valueOpAuthor` decided. A mixed approval stores the user's
  * revision as theirs and Olumi's figure as the user's assumption; one sentence calling every value
@@ -1086,6 +1100,7 @@ export function createAgentCapabilities(
       ...pairOf(o.path),
       value: ((o.value ?? {}) as { normalised?: unknown }).normalised,
       author: levelOpAuthor(o, parent) === 'user_stated' ? 'user_specified' as const : 'model_proposed' as const,
+      ...levelFigureOf(o),
     }));
     // ⛔ THE LINKS AND LEVELS ARE ONE COMMIT OR NONE — so what would stop them is checked BEFORE anything is written.
     if (levelOps.length + linkOps.length > 0) {
@@ -2172,6 +2187,10 @@ export function createAgentCapabilities(
          * Unwritten, the level is Olumi's estimate (recorded as such, and said), and on a held pair it is not a level.
          */
         const claimedByUser = i?.user_stated === true;
+        // The unit the user wrote the figure in (a NEW factor declares none) is STORED with the level, never used to
+        // ground it: a model-supplied unit ("% monthly churn rate") would name away the entity the guard reads
+        // (Canonical #2025 B1). Grounding reads only the factor's DECLARED unit; the rate after the figure is skipped anyway.
+        const statedUnit = typeof i?.unit === 'string' && i.unit.trim() !== '' ? i.unit.trim() : undefined;
         const userWrote = claimedByUser && figureTheUserWroteFor(Number(i?.value), factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label));
         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
         if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
@@ -2280,7 +2299,7 @@ export function createAgentCapabilities(
         set.push({
           option: { id: option.id, label: option.label },
           factor: { id: factor.id, label: factor.label },
-          raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' ? os.unit : '',
+          raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' && os.unit !== '' ? os.unit : (statedUnit ?? ''),
           basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote, needsLink,
         });
       }
@@ -2308,6 +2327,7 @@ export function createAgentCapabilities(
         path: `${i.option.id}::${i.factor.id}`,
         value: {
           normalised: i.normalised, raw: i.raw, cap: i.cap, basis: i.basis, derived_frame: i.derivedFrame,
+          ...(i.unit !== '' ? { unit: i.unit } : {}),
           // Per level, like `valueOpAuthor`: whose level this is travels to the writer (`levelOpAuthor`).
           authored_by: i.userStated ? 'user_stated' : 'model_proposed',
         },
@@ -2544,6 +2564,7 @@ export function createAgentCapabilities(
             path: o.path, option_id: option_id ?? '', factor_id: factor_id ?? '',
             value: ((o.value ?? {}) as { normalised?: unknown }).normalised,
             author: levelOpAuthor(o, decision.proposal) === 'user_stated' ? 'user_specified' as const : 'model_proposed' as const,
+            figure: levelFigureOf(o),
           };
         });
         if (opts.commitOptionLevels === undefined || levelInputs.some((l) => typeof l.value !== 'number')) {
@@ -2721,7 +2742,7 @@ export function createAgentCapabilities(
           base_graph_hash: baseHash,
           turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#levels`),
           links: [],
-          levels: levelInputs.map((l) => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value as number, author: l.author })),
+          levels: levelInputs.map((l) => ({ option_id: l.option_id, factor_id: l.factor_id, value: l.value as number, author: l.author, ...l.figure })),
         });
         if (res.status === 'unconfirmed') {
           return {
