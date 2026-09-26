@@ -34,7 +34,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { admitCandidateModel, findMechanismPath, type CandidateModel } from '../admit-model.js';
+import { admitCandidateModel, findMechanismPath, productIdentityOpenQuestions, type CandidateModel } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -785,6 +785,10 @@ export async function buildModelFromBrief(
    */
   const parked = (candidate as { unknowns?: unknown }).unknowns;
   const openQuestions = Array.isArray(parked) ? parked.filter((q): q is string => typeof q === 'string' && q.trim() !== '') : [];
+  // ⛔ C46: a declared product whose sign this model cannot prove is ASKED where the user always sees it,
+  // not only said in `not_represented` (which only the Agent's model reads). After the scope and deadline
+  // questions, ahead of the drafter's own; nothing for a stable product or a linear model.
+  openQuestions.unshift(...productIdentityOpenQuestions(admitted));
   /**
    * ⛔ A DEADLINE THE MODEL CANNOT HOLD IS ASKED WHERE THE USER ALWAYS SEES IT. GraphV3 has no carrier for
    * `horizon_months`, so admission records the loss in `not_represented` — but only the Agent's model reads
@@ -953,8 +957,9 @@ export async function buildModelFromBrief(
     ...(preparation.additions_without_total.length > 0 ? { additions_without_total: preparation.additions_without_total } : {}),
     ...(preparation.provenance_demoted.length > 0 ? { provenance_demoted: preparation.provenance_demoted } : {}),
     // ⛔ C46, machine-readable beside its sentence below. `sign_not_provable` means no leader or
-    // decision-grade claim may rest on this model (#70 5841314428); it reaches this turn only —
-    // the leader permission itself is `run-analysis.ts`'s, a named handoff.
+    // decision-grade claim may rest on this model (#70 5841314428). This is construction's report; the
+    // leader permission is stamped by `run_analysis` from the node's persisted declaration
+    // (`nonlinearIdentityLeaderWithhold`), re-judged on the graph each Run analyses.
     ...(admitted.nonlinear_identities !== undefined ? { nonlinear_identities: admitted.nonlinear_identities } : {}),
     not_represented: [
       // ⛔ C46: the goal's unstated scope, as Olumi's assumption (the `goal_scope` entry's `after`), FIRST.

@@ -23,6 +23,7 @@ import {
 } from '../../utils/goal-threshold-cap.js';
 import { admitGoalBaseline } from '../../cee/factor-extraction/goal-baseline-admissibility.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
+import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
 import type { InterventionV3T } from '../../schemas/cee-v3.js';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
@@ -185,9 +186,11 @@ export interface CandidateIdentity {
  * Two options that move the inputs DIFFERENTLY can swap places within the plausible range even
  * when each is stable alone, so they are `sign_not_provable` too (`comparisons_not_sign_stable`).
  *
- * ⚠ CARRIED IN CONSTRUCTION ONLY. NodeV3 declares no field for it and the leader permission
- * is written only in `run-analysis.ts`, so this mark cannot yet reach
- * `analysis_state.leader_claim` — a named handoff, not an omission.
+ * ⭐ HOW IT REACHES THE LEADER CLAIM (C46 stage 1 (a)–(d), #70 5841833807). The mark itself is
+ * construction's report. What is PERSISTED is the checked DECLARATION, on the product's node
+ * (`cee-v3.ts` NodeV3 `nonlinear_identity`); `run_analysis` re-runs this same sign test on the
+ * graph it analysed (`nonlinearIdentityLeaderWithhold`) and withholds the leader it names when
+ * that leader is sign-unproven against another compared option.
  */
 export type NonlinearIdentityVerdict = 'sign_not_provable' | 'sign_stable_provisional';
 export interface NonlinearIdentityMark {
@@ -207,6 +210,43 @@ export interface NonlinearIdentityMark {
    * plausible range (independent verification of 6e33b95e, B1; re-verification of d2362e9d, B1).
    */
   readonly comparisons_not_sign_stable: readonly (readonly [string, string])[];
+}
+
+/** The persisted carrier on the product's node (`cee-v3.ts` NodeV3 `nonlinear_identity`). */
+export interface NonlinearIdentityCarrier {
+  readonly operation: 'product';
+  readonly factor_ids: readonly string[];
+  readonly stated_in_brief: boolean;
+}
+
+/** A declaration that held structurally and bears on the goal — what the carrier persists. */
+interface AcceptedProductIdentity {
+  readonly outcome_id: string;
+  readonly factor_ids: readonly string[];
+  readonly stated_in_brief: boolean;
+}
+
+/**
+ * The sign test's working, per marked product, for the Run-time leader check: which options
+ * cannot be signed against carrying on as now on their own (`unproven_alone`), which move any of
+ * the product's inputs or reach the goal (`moving`), and which pairs of those can swap places.
+ */
+interface ProductIdentityAnalysis {
+  readonly outcome_id: string;
+  readonly goal_id: string;
+  readonly factor_ids: readonly string[];
+  readonly stated_in_brief: boolean;
+  readonly verdict: NonlinearIdentityVerdict;
+  readonly unproven_alone: readonly string[];
+  readonly moving: readonly string[];
+  readonly pairs: readonly (readonly [string, string])[];
+}
+
+interface ProductIdentityFindings {
+  marks: NonlinearIdentityMark[];
+  loss: RepairEntry[];
+  accepted: AcceptedProductIdentity[];
+  analyses: ProductIdentityAnalysis[];
 }
 
 export interface WidenerAdditions {
@@ -294,6 +334,8 @@ export interface AdmittedNode {
    * fallback writes no stamp (readiness recognises the idiom itself).
    */
   is_baseline?: boolean;
+  /** C46: the checked product declaration on this quantity (`cee-v3.ts` NodeV3 `nonlinear_identity`). */
+  nonlinear_identity?: NonlinearIdentityCarrier;
   /** Normalised 0-1, per the contract. The stated number goes in `_raw`. */
   goal_threshold_raw?: number;
   goal_threshold_cap?: number;
@@ -787,10 +829,12 @@ function markProductIdentities(
   edges: readonly { from: string; to: string; effect_direction?: string; origin?: string }[],
   goalId: string | undefined,
   declaredStatusQuo: ReadonlySet<string> = new Set(),
-): { marks: NonlinearIdentityMark[]; loss: RepairEntry[] } {
+): ProductIdentityFindings {
   const marks: NonlinearIdentityMark[] = [];
   const loss: RepairEntry[] = [];
-  if (declared.length === 0) return { marks, loss };
+  const accepted: AcceptedProductIdentity[] = [];
+  const analyses: ProductIdentityAnalysis[] = [];
+  if (declared.length === 0) return { marks, loss, accepted, analyses };
   const kindOf = new Map(nodes.map((n) => [n.id, n.kind]));
   const nodeOf = new Map(nodes.map((n) => [n.id, n]));
   const labelOf = (id: string): string => nodeOf.get(id)?.label ?? id;
@@ -878,6 +922,9 @@ function markProductIdentities(
     if (why === null && factorIds.length < 2) why = 'a product needs at least two different quantities';
     if (why !== null) { reject(why); continue; }
     if (goalId === undefined || (outcomeId !== goalId && !reaches(outcomeId, goalId))) continue;
+    // The DECLARATION holds and bears on the goal: it is persisted as the node's carrier whatever the
+    // options do today, so a Run re-judges it on the graph it analyses (an option added later included).
+    accepted.push({ outcome_id: outcomeId, factor_ids: [...factorIds], stated_in_brief: d.provenance === 'explicit' });
 
     /**
      * N-c, re-verification of d2362e9d (item c): an ADDEND is a direct cause of the outcome that is not
@@ -1007,6 +1054,12 @@ function markProductIdentities(
       outcome_id: outcomeId, operation: 'product', factor_ids: factorIds, verdict,
       options_not_sign_stable: notStable, comparisons_not_sign_stable: pairs,
     });
+    analyses.push({
+      outcome_id: outcomeId, goal_id: goalId, factor_ids: [...factorIds], stated_in_brief: stated, verdict,
+      unproven_alone: selfNotStable.map((x) => x.id),
+      moving: moving.map((m) => m.id),
+      pairs: pairs.map(([a, b]) => [a, b] as const),
+    });
     loss.push({
       field_path: `nodes[${outcomeId}].nonlinear_identity`,
       before: { operation: 'product', factor_ids: factorIds },
@@ -1025,7 +1078,271 @@ function markProductIdentities(
       severity: verdict === 'sign_not_provable' ? 'warn' : 'info',
     } as RepairEntry);
   }
-  return { marks, loss };
+  return { marks, loss, accepted, analyses };
+}
+
+/** `"a" times "b"`, `"a" times "b" times "c"` — labels, never ids. */
+const timesList = (labels: readonly string[]): string => labels.map((l) => `"${l}"`).join(' times ');
+
+/**
+ * What the product IS, in words: names the goal and every factor, states no direction, no
+ * figure and no option. Whose reading it is follows the declaration (`stated_in_brief`): the
+ * brief's own words are said as fact, anything else as Olumi's reading.
+ */
+function productIdentityClause(goal: string, outcome: string, factors: readonly string[], stated: boolean, sameNode: boolean): string {
+  const times = timesList(factors);
+  if (sameNode) return stated ? `"${goal}" depends on ${times}` : `Olumi reads "${goal}" as depending on ${times}`;
+  return stated
+    ? `"${goal}" depends on "${outcome}", which is ${times}`
+    : `"${goal}" depends on "${outcome}", which Olumi reads as ${times}`;
+}
+
+/**
+ * ⛔ C46 — THE QUESTION ASKED WHERE THE USER ALWAYS SEES IT (`open_questions`, appended to the reply
+ * by the server every time: `write-outcome.ts` `openQuestionsLine`). The typed mark's sentence reaches
+ * `not_represented`, which only the Agent's model reads — the gap staging #1939 closed for the
+ * deadline. One per product marked `sign_not_provable`; nothing for a stable or a linear model.
+ */
+export function productIdentityOpenQuestions(admitted: Pick<AdmittedModel, 'nodes' | 'nonlinear_identities'>): string[] {
+  const goal = admitted.nodes.find((n) => n.kind === 'goal');
+  if (goal === undefined) return [];
+  const labelOf = (id: string): string => admitted.nodes.find((n) => n.id === id)?.label ?? id;
+  return (admitted.nonlinear_identities ?? [])
+    .filter((m) => m.verdict === 'sign_not_provable')
+    .map((m) => {
+      const stated = admitted.nodes.find((n) => n.id === m.outcome_id)?.nonlinear_identity?.stated_in_brief === true;
+      const clause = productIdentityClause(goal.label, labelOf(m.outcome_id), m.factor_ids.map(labelOf), stated, m.outcome_id === goal.id);
+      return `Which option does better on "${goal.label}"? This model cannot answer that yet: ${clause}, and the model ` +
+        'adds those effects up rather than multiplying them.';
+    });
+}
+
+/** The Run-time check's finding: the named leader cannot be signed against `against`. */
+export interface NonlinearIdentityLeaderWithhold {
+  /** The leader judged, or `null` when no leader was named and EVERY compared option was judged. */
+  readonly leader_id: string | null;
+  readonly outcome_id: string;
+  readonly goal_id: string;
+  readonly factor_ids: readonly string[];
+  /** Compared options the leader's sign against is not proven, by id, in graph order. */
+  readonly against: readonly string[];
+  /** Plain English: names the goal and the factors; no direction, no figure, no option. */
+  readonly sentence: string;
+}
+
+type GraphNodeLike = { readonly id?: unknown; readonly kind?: unknown; readonly label?: unknown } & Record<string, unknown>;
+
+function readCarrier(n: GraphNodeLike): NonlinearIdentityCarrier | null {
+  const c = n.nonlinear_identity as { operation?: unknown; factor_ids?: unknown; stated_in_brief?: unknown } | undefined;
+  if (c === null || typeof c !== 'object' || c.operation !== 'product' || typeof c.stated_in_brief !== 'boolean') return null;
+  if (!Array.isArray(c.factor_ids) || c.factor_ids.length < 2 || !c.factor_ids.every((f) => typeof f === 'string' && f !== '')) return null;
+  return { operation: 'product', factor_ids: c.factor_ids as string[], stated_in_brief: c.stated_in_brief };
+}
+
+/** A persisted level as `{ value }` — the stored shape is either a number or an object carrying one. */
+function levelObject(v: unknown): ConstructedLevel | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return { value: v } as ConstructedLevel;
+  const inner = v !== null && typeof v === 'object' ? (v as { value?: unknown }).value : undefined;
+  return typeof inner === 'number' && Number.isFinite(inner) ? ({ value: inner } as ConstructedLevel) : undefined;
+}
+
+/**
+ * ⛔ C46 STAGE 1 (b) — MAY THIS RUN NAME ITS LEADER, GIVEN A PRODUCT IT CAN ONLY ADD UP?
+ *
+ * Reads the carrier (`cee-v3.ts` NodeV3 `nonlinear_identity`) on the graph the analysis ran on,
+ * and re-runs construction's OWN sign test (`markProductIdentities`) on that graph — so an option
+ * added after construction is judged, and nothing is re-derived a second way. Then, for the leader
+ * PLoT ranked first (by id), against the options it was compared with:
+ *  · the leader cannot be signed against carrying on as now on its own (`unproven_alone`) — not
+ *    proven against ANY other compared option;
+ *  · the leader and another compared option move the product's inputs differently (a pair) — not
+ *    proven against that option;
+ *  · the leader moves none of the product's inputs and reaches the goal no other way (carrying on
+ *    as now), while a compared option cannot be signed against it — not proven against that one.
+ * "Proven" is the structural sign test only — never the linear engine's own interval (AI Quality
+ * #70 5842580505). No carrier ⇒ `null`: every graph persisted before the carrier, and every
+ * linear brief, reads exactly as before. A leader that is not an option in this graph is not
+ * proven against any compared option (fail closed — the check cannot see it).
+ *
+ * `leaderId: null` asks the Agent-view question (the leader is withheld from every readback): is
+ * EVERY compared option unprovable as a leader? Only then is the sentence true of whichever led.
+ *
+ * Pure and total: a malformed graph or carrier is `null`, never a throw on a Run.
+ */
+export function nonlinearIdentityLeaderWithhold(
+  graph: unknown,
+  leaderId: string | null,
+  opts: { readonly comparedOptionIds?: readonly string[]; readonly goalId?: string } = {},
+): NonlinearIdentityLeaderWithhold | null {
+  const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  const rawEdges = (graph as { edges?: unknown } | null | undefined)?.edges;
+  if (!Array.isArray(rawNodes) || !Array.isArray(rawEdges)) return null;
+  const nodes = rawNodes.filter((n): n is GraphNodeLike => n !== null && typeof n === 'object' && typeof (n as GraphNodeLike).id === 'string' && typeof (n as GraphNodeLike).kind === 'string');
+  const carried = nodes.map((n) => ({ id: n.id as string, carrier: readCarrier(n) })).filter((c): c is { id: string; carrier: NonlinearIdentityCarrier } => c.carrier !== null);
+  if (carried.length === 0) return null;
+  const goals = nodes.filter((n) => n.kind === 'goal').map((n) => n.id as string);
+  const goalId = opts.goalId ?? (goals.length === 1 ? goals[0] : undefined);
+  if (goalId === undefined || !goals.includes(goalId)) return null;
+
+  const admittedLike: AdmittedNode[] = nodes.map((n) => {
+    const levels = n.interventions !== null && typeof n.interventions === 'object'
+      ? Object.fromEntries(Object.entries(n.interventions as Record<string, unknown>).flatMap(([k, v]) => {
+        const l = levelObject(v);
+        return l === undefined ? [] : [[k, l]];
+      }))
+      : undefined;
+    const today = (n.observed_state as { value?: unknown } | undefined)?.value;
+    return {
+      id: n.id as string, kind: n.kind as CandidateNodeKind, label: typeof n.label === 'string' ? n.label : (n.id as string),
+      ...(levels !== undefined ? { interventions: levels } : {}),
+      ...(typeof today === 'number' && Number.isFinite(today) ? { observed_state: { value: today } } : {}),
+    } as AdmittedNode;
+  });
+  const edges = rawEdges
+    .filter((e): e is { from: string; to: string; effect_direction?: unknown; origin?: unknown } =>
+      e !== null && typeof e === 'object' && typeof (e as { from?: unknown }).from === 'string' && typeof (e as { to?: unknown }).to === 'string')
+    .map((e) => ({
+      from: e.from, to: e.to,
+      ...(typeof e.effect_direction === 'string' ? { effect_direction: e.effect_direction } : {}),
+      ...(typeof e.origin === 'string' ? { origin: e.origin } : {}),
+    }));
+  const ids = new Set(admittedLike.map((n) => n.id));
+  const optionIds = admittedLike.filter((n) => n.kind === 'option').map((n) => n.id);
+  const statusQuo = new Set(nodes.filter((n) => n.kind === 'option' && readIsBaseline(n as never) === true).map((n) => n.id as string));
+  const { analyses } = markProductIdentities(
+    carried.map((c) => ({ outcome: c.id, operation: 'product', factors: [...c.carrier.factor_ids], provenance: c.carrier.stated_in_brief ? 'explicit' : 'inferred' })),
+    (id) => (typeof id === 'string' && ids.has(id) ? id : undefined),
+    admittedLike,
+    edges,
+    goalId,
+    statusQuo,
+  );
+  const compared = (opts.comparedOptionIds ?? optionIds).filter((id, i, all) => all.indexOf(id) === i);
+  const comparedSet = new Set(compared);
+  const labelOf = (id: string): string => admittedLike.find((n) => n.id === id)?.label ?? id;
+
+  for (const a of analyses) {
+    const unprovenAgainst = (leader: string): string[] => {
+      const others = compared.filter((x) => x !== leader);
+      if (!optionIds.includes(leader) || a.unproven_alone.includes(leader)) return others;
+      const against = new Set<string>();
+      for (const [x, y] of a.pairs) {
+        if (x === leader && comparedSet.has(y)) against.add(y);
+        if (y === leader && comparedSet.has(x)) against.add(x);
+      }
+      if (!a.moving.includes(leader)) for (const x of a.unproven_alone) if (x !== leader && comparedSet.has(x)) against.add(x);
+      return others.filter((x) => against.has(x));
+    };
+    let against: string[];
+    if (leaderId !== null) {
+      against = unprovenAgainst(leaderId);
+    } else {
+      if (compared.length < 2) continue;
+      const each = compared.map(unprovenAgainst);
+      if (each.some((x) => x.length === 0)) continue;
+      against = compared.filter((id) => each.some((x) => x.includes(id)));
+    }
+    if (against.length === 0) continue;
+    const goalLabel = labelOf(goalId);
+    const clause = productIdentityClause(goalLabel, labelOf(a.outcome_id), a.factor_ids.map(labelOf), a.stated_in_brief, a.outcome_id === goalId);
+    return {
+      leader_id: leaderId,
+      outcome_id: a.outcome_id,
+      goal_id: goalId,
+      factor_ids: a.factor_ids,
+      against,
+      sentence: `No option can be put forward on "${goalLabel}" yet: ${clause}, and this model adds those effects up ` +
+        'rather than multiplying them, so it cannot say which option does better.',
+    };
+  }
+  return null;
+}
+
+/**
+ * ⛔ C46 (d) — THE AGENT'S VIEW OF A PRODUCT THE ANALYSIS ADDS UP.
+ *
+ * Every readback nulls the leader on a withheld run, so the Agent's view cannot ask about ONE leader.
+ * It returns a finding when EITHER the persisted reason already names the product (`reasonNamesIt` —
+ * the Run's own finding, bound to its leader at the stamp; any option's finding supplies the words,
+ * which name no option) OR every option the graph compares is unprovable as a leader, so the sentence
+ * is true of whichever led. Otherwise `null`: a finding about some other pair is not said as the
+ * reason this leader was withheld.
+ */
+export function nonlinearIdentityForAgent(graph: unknown, reasonNamesIt: boolean): NonlinearIdentityLeaderWithhold | null {
+  const every = nonlinearIdentityLeaderWithhold(graph, null);
+  if (every !== null || !reasonNamesIt) return every;
+  const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  const options = Array.isArray(nodes)
+    ? nodes.filter((n) => (n as GraphNodeLike | null)?.kind === 'option' && typeof (n as GraphNodeLike).id === 'string').map((n) => (n as GraphNodeLike).id as string)
+    : [];
+  for (const id of options) {
+    const f = nonlinearIdentityLeaderWithhold(graph, id);
+    if (f !== null) return f;
+  }
+  return null;
+}
+
+/**
+ * ⛔ C46 STAGE 1 (b) — FOLD THE FINDING INTO THE PERSISTED LEADER PERMISSION.
+ *
+ * The `applyIntakeToLeaderPermission` precedent (`intake-option-reconciliation.ts`), applied at the
+ * same single stamp in `run_analysis`: a CONJUNCTION that can only REMOVE the permission — `null`
+ * (no finding) returns the verdict unchanged, byte for byte — and it never touches
+ * `constraint_verdict_state`, which is a statement about the constraint evidence that this axis has
+ * nothing true to say about. That untouched state is also how a reader tells, later, that the
+ * constraint verdict itself permitted (`nonlinearIdentityLeaderClaimCause`).
+ */
+export function applyNonlinearIdentityToLeaderPermission<P extends { readonly may_name_leading_option: boolean; readonly constraint_verdict_state: string }>(
+  persisted: P,
+  finding: NonlinearIdentityLeaderWithhold | null,
+): P {
+  if (finding === null) return persisted;
+  return { ...persisted, may_name_leading_option: false };
+}
+
+/** The PLoT results' option ids, in order — the options this run actually compared. */
+function comparedOptionIdsOf(enrichment: unknown): string[] | undefined {
+  const results = (enrichment as { results?: unknown } | null | undefined)?.results;
+  if (!Array.isArray(results)) return undefined;
+  const ids = results
+    .map((r) => (r !== null && typeof r === 'object' ? (r as { option_id?: unknown }).option_id : undefined))
+    .filter((id): id is string => typeof id === 'string' && id !== '');
+  return ids.length > 0 ? ids : undefined;
+}
+
+/**
+ * ⛔ C46 (c) — WHY A PERSISTED FACT'S LEADER WAS WITHHELD, when the reason is the product.
+ *
+ * For the callers of `composeAnalysisStateV1` that hold the fact AND the graph (the scenario read
+ * route and the V5 finaliser). True only when ALL of these hold, each read, never re-derived:
+ *  · the fact's persisted permission is `false` while its persisted constraint state PERMITS a
+ *    leader (`MAY_NAME_LEADING_OPTION`) — so the stamp that withheld it was not the constraint's;
+ *  · the Run-time check (`nonlinearIdentityLeaderWithhold`) finds the fact's leader, by id, not
+ *    proven against an option the run compared (the PLoT envelope's own `results`).
+ * Split by who asked (AI Quality #70 5841878117): an unrequested first pass keeps the unrequested
+ * code (policy), a requested run names the product. While the constraint verdict withholds, both are
+ * false and `constraint_verdict_withheld` stands (option (i), #70 5842615260).
+ */
+export function nonlinearIdentityLeaderClaimCause(input: {
+  readonly graph: unknown;
+  readonly result: unknown;
+  readonly requested: boolean;
+}): { readonly withheldBecauseUnrequested: boolean; readonly withheldBecauseNonlinearIdentity: boolean } {
+  const none = { withheldBecauseUnrequested: false, withheldBecauseNonlinearIdentity: false } as const;
+  const result = input.result as { leading_option_id?: unknown; constraint_verdict?: unknown; enrichment?: unknown } | null | undefined;
+  const verdict = result?.constraint_verdict as { may_name_leading_option?: unknown; constraint_verdict_state?: unknown } | undefined;
+  if (verdict?.may_name_leading_option !== false) return none;
+  const state = verdict.constraint_verdict_state;
+  if (typeof state !== 'string' || !Object.prototype.hasOwnProperty.call(MAY_NAME_LEADING_OPTION, state)) return none;
+  if (MAY_NAME_LEADING_OPTION[state as keyof typeof MAY_NAME_LEADING_OPTION] !== true) return none;
+  const leader = result?.leading_option_id;
+  if (typeof leader !== 'string' || leader === '') return none;
+  const compared = comparedOptionIdsOf(result?.enrichment);
+  const finding = nonlinearIdentityLeaderWithhold(input.graph, leader, compared !== undefined ? { comparedOptionIds: compared } : {});
+  if (finding === null) return none;
+  return input.requested
+    ? { withheldBecauseUnrequested: false, withheldBecauseNonlinearIdentity: true }
+    : { withheldBecauseUnrequested: true, withheldBecauseNonlinearIdentity: false };
 }
 
 /**
@@ -2152,9 +2469,26 @@ export function admitCandidateModel(
     declaredStatusQuoIds,
   );
   loss.push(...products.loss);
+  /**
+   * ⛔ C46 (a) — THE CARRIER. Each checked declaration that bears on the goal is written on its
+   * product's node, so `run_analysis` can re-judge the leader it names on the graph it analysed.
+   * The DECLARATION only (which nodes multiply, and whose reading it is) — never the verdict, which
+   * depends on options a later edit can add. One per node: a second declaration on the same node is
+   * still marked and said above, but only the first is carried. A model with no declaration gains
+   * nothing, so a linear brief registers byte-identical.
+   */
+  const carriers = new Map<string, NonlinearIdentityCarrier>();
+  for (const a of products.accepted) {
+    if (!carriers.has(a.outcome_id)) {
+      carriers.set(a.outcome_id, { operation: 'product', factor_ids: [...a.factor_ids], stated_in_brief: a.stated_in_brief });
+    }
+  }
+  const admittedNodes = carriers.size === 0
+    ? levers.nodes
+    : levers.nodes.map((n) => (carriers.has(n.id) ? { ...n, nonlinear_identity: carriers.get(n.id)! } : n));
 
   return {
-    nodes: levers.nodes,
+    nodes: admittedNodes,
     inference_classes,
     edges: finalEdges,
     ...(levers.demoted.length > 0 ? { treated_as_context: levers.demoted } : {}),
