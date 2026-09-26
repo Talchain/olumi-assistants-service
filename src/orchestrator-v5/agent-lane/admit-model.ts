@@ -702,38 +702,45 @@ function restateSignedPercentChanges(model: CandidateModel): {
  *  · `open` — it acts on the factor with no level yet (an option -> factor edge other than the held
  *    status quo's repair edge, `REPAIR_AUTHORED_ORIGIN`): a key the fill will give a value;
  *  · `held` — it does not act on the factor: no key.
- * Two options are TOLD APART when some factor's cells differ in a way no same-source fill can undo:
- * two different set levels, or a key one has and the other lacks. An open cell never tells an option
- * apart from a set or open one — the fill can land on the same level, and on the wire it did.
  *
- * ⛔ A LEVEL EQUAL TO TODAY IS STILL A COMPARATOR, SO THE STATUS QUO IS NOT "TODAY'S VALUE" HERE. The
- * status quo's map is EMPTY and PLoT does not count it (measured: the served approved model with the
- * test option removed refuses `NO_COMPARISON_NEXT_STEP`; with that option set to today's £49 alone it
- * PROCEEDS). An Olumi option that only restates today's level is therefore the valued stand-in the run
- * needs, and withholding it would CREATE the dead start (`construction-no-identical-options.test.ts`).
+ * ⛔ WITHHELD ONLY WHEN ANOTHER OPTION COVERS IT — ONE WAY, NEVER "CANNOT BE TOLD APART" (independent review
+ * of b0a51c3e, 26 Sep). `b` COVERS `a` when they hold the same factors (a key one has and the other lacks is
+ * a difference no fill undoes) and every level `a` sets, `b` sets to the same level. `a` then sets nothing
+ * the model can hold that `b` does not — the DL's "differs only in something unmodelled" — and the same-source
+ * fill turns it into `b` (on the wire, it did). An open cell can equal at most ONE level, so it never makes
+ * two options with different set levels alike: the first rule's symmetric reading withheld an Olumi "£54"
+ * as a level-less test's twin, and made every priced Olumi option a twin of a user option with no price.
+ *  · An option with a level no other option sets to that level is never covered, so it is always kept.
+ *  · Covering is transitive, so the option a withheld one is named against is always one that stays.
+ *  · Two options that cover each other are identical as drafted: the user's stays, else the first drafted.
  *
- * ⛔ PAIRWISE, NOT "ONE FACTOR THAT BEATS EVERY OTHER OPTION". The single-factor reading would withhold
- * "£49 with AI release" (its price is today's; its AI level is £59's) — a distinct option that ran on
- * served cb1778b; 14 of those 29 served first passes carry an Olumi option of that kind.
+ * ⛔ THE STATUS QUO IS NEVER A CANDIDATE, AND A LEVEL EQUAL TO TODAY IS STILL A COMPARATOR. Its map is EMPTY,
+ * never filled, and PLoT counts only valued maps (EXECUTED on all four served runs, first pass and approval).
+ * So it is neither withheld nor named, and an option acting like it is judged against the other options only
+ * — as a twin it withheld the served "£49 with AI release" once the status quo acted on factors. Measured: the
+ * served approved model with the test option removed refuses `NO_COMPARISON_NEXT_STEP`; with that option set
+ * to today's £49 alone it PROCEEDS — an Olumi option that only restates today's level is the valued stand-in
+ * the run needs (`construction-no-identical-options.test.ts`).
  */
 const sameLevel = (a: number, b: number): boolean => Math.round(a / 1e-9) === Math.round(b / 1e-9);
 type Cell = { readonly kind: 'set'; readonly value: number } | { readonly kind: 'open' } | { readonly kind: 'held' };
-function cellsTellApart(a: Cell, b: Cell): boolean {
-  if ((a.kind === 'held') !== (b.kind === 'held')) return true;
-  return a.kind === 'set' && b.kind === 'set' && !sameLevel(a.value, b.value);
+/** On one factor, `b` covers `a`: both hold it or neither does, and a level `a` sets is `b`'s level too. */
+function cellCovered(a: Cell, b: Cell): boolean {
+  if ((a.kind === 'held') !== (b.kind === 'held')) return false;
+  return a.kind !== 'set' || (b.kind === 'set' && sameLevel(a.value, b.value));
 }
 
 const fullLabelOf = (n: { label: string; description?: string }): string => n.description ?? n.label;
 
 /**
- * Pure over an admitted model. Returns the Olumi-added options to withhold (each with the option it
- * cannot be told from) and the groups of USER-stated options that nothing tells apart.
+ * Pure over an admitted model. Returns the Olumi-added options to withhold (each with a KEPT option that
+ * covers it) and the groups of USER-stated options to ask about once.
  *
  * Never withheld: a USER-stated option (`inferenceClassFor` → `brief_stated`, i.e. provenance
  * `explicit`); the status quo (stamped `is_baseline`, held by repair edges, declared `is_status_quo`, or
  * read as one by the readiness idioms, `labelMatchesBaseline`); and an option that acts on nothing —
- * `option_changes_nothing` owns that shape and keeps it, named (`goal-reachability.test.ts`).
- * Walked last-drafted first, so of two Olumi options identical to each other the first drafted stays.
+ * `option_changes_nothing` owns that shape and keeps it, named (`goal-reachability.test.ts`). The last two
+ * are never named either.
  */
 function judgeOptionIdentity(
   admitted: AdmittedModel,
@@ -755,36 +762,39 @@ function judgeOptionIdentity(
     if (actsOn.get(o.id)!.has(f)) return { kind: 'open' };
     return { kind: 'held' };
   };
-  const tellApart = (a: AdmittedNode, b: AdmittedNode): boolean => factors.some((f) => cellsTellApart(cell(a, f.id), cell(b, f.id)));
+  const covers = (b: AdmittedNode, a: AdmittedNode): boolean => factors.every((f) => cellCovered(cell(a, f.id), cell(b, f.id)));
   const isStatusQuo = (o: AdmittedNode): boolean =>
     o.is_baseline === true || heldByRepair.has(o.id)
     || declaredStatusQuoLabels.has(canonicalLabel(fullLabelOf(o))) || labelMatchesBaseline(fullLabelOf(o));
   const actsOnNothing = (o: AdmittedNode): boolean => actsOn.get(o.id)!.size === 0 && Object.keys(o.interventions ?? {}).length === 0;
   const userStated = (o: AdmittedNode): boolean => admitted.inference_classes[o.id] === 'brief_stated';
   const order = new Map(options.map((o, i) => [o.id, i] as const));
+  /** Of two options identical as drafted, the one that stays: the user's, then the first drafted. */
+  const outranks = (p: AdmittedNode, o: AdmittedNode): boolean =>
+    (Number(userStated(p)) - Number(userStated(o)) || order.get(o.id)! - order.get(p.id)!) > 0;
+  /** A strict order: `p` covers `o`, and `o` does not cover `p` back unless `p` outranks it. */
+  const dominates = (p: AdmittedNode, o: AdmittedNode): boolean =>
+    p.id !== o.id && covers(p, o) && (!covers(o, p) || outranks(p, o));
 
-  const kept = new Set(options.map((o) => o.id));
-  const withheld: { id: string; option: string; like: string }[] = [];
-  for (const o of [...options].reverse()) {
-    if (userStated(o) || isStatusQuo(o) || actsOnNothing(o)) continue;
-    const twins = options.filter((p) => p.id !== o.id && kept.has(p.id) && !tellApart(o, p));
-    if (twins.length === 0) continue;
-    kept.delete(o.id);
-    // Name the option it most resembles: an alternative before the status quo, then the most shared factors.
-    const shared = (p: AdmittedNode) => [...actsOn.get(p.id)!, ...Object.keys(p.interventions ?? {})]
-      .filter((f) => actsOn.get(o.id)!.has(f) || o.interventions?.[f] !== undefined).length;
-    const like = [...twins].sort((a, b) =>
-      Number(isStatusQuo(a)) - Number(isStatusQuo(b)) || shared(b) - shared(a) || order.get(a.id)! - order.get(b.id)!)[0]!;
-    withheld.unshift({ id: o.id, option: fullLabelOf(o), like: fullLabelOf(like) });
-  }
+  const pool = options.filter((o) => !isStatusQuo(o) && !actsOnNothing(o));
+  const out = new Set(pool.filter((o) => !userStated(o) && pool.some((p) => dominates(p, o))).map((o) => o.id));
+  // Named against the first drafted option that covers it and STAYS — one always exists (a maximal cover).
+  const withheld = pool.filter((o) => out.has(o.id)).map((o) => {
+    const like = pool.find((p) => !out.has(p.id) && dominates(p, o))!;
+    return { id: o.id, option: fullLabelOf(o), like: fullLabelOf(like) };
+  });
 
-  const stated = options.filter((o) => userStated(o) && !isStatusQuo(o) && !actsOnNothing(o));
-  const groups: AdmittedNode[][] = [];
+  // A USER option another user option covers: asked about once, with the first drafted user option that covers
+  // it and that none covers in turn. Every pair in a group is then alike on every level either sets.
+  const stated = pool.filter(userStated);
+  const groups = new Map<string, AdmittedNode[]>();
   for (const o of stated) {
-    const group = groups.find((g) => !tellApart(g[0]!, o));
-    if (group !== undefined) group.push(o); else groups.push([o]);
+    const head = stated.find((p) => dominates(p, o) && !stated.some((q) => dominates(q, p)));
+    if (head !== undefined) groups.set(head.id, [...(groups.get(head.id) ?? [head]), o]);
   }
-  return { withheld, statedGroups: groups.filter((g) => g.length > 1).map((g) => g.map(fullLabelOf)) };
+  const statedGroups = [...groups.values()]
+    .map((g) => [...g].sort((a, b) => order.get(a.id)! - order.get(b.id)!).map(fullLabelOf));
+  return { withheld, statedGroups };
 }
 
 /**

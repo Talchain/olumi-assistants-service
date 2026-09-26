@@ -389,6 +389,131 @@ describe('controls — what the rule must never touch', () => {
 
 });
 
+/**
+ * ⛔ AN OPEN CELL CAN EQUAL AT MOST ONE LEVEL (independent review of b0a51c3e, 26 Sep). The first rule was a
+ * SYMMETRIC "cannot be told apart", walked last-drafted first. An option with no level on a factor matched EVERY
+ * level on it, so an Olumi "£54" drafted after a level-less test was withheld as the test's twin, then the test
+ * too: a false sentence ("sets nothing … that \"Test £59 …\" does not") naming an option that was itself gone, and
+ * a runnable model turned into a dead start. The status quo, acting on factors, was a twin too.
+ *
+ * The rule these rows hold is the DL's own clause ("differs only in something unmodelled"): an option is withheld
+ * only when ANOTHER option already COVERS it — the same factors, and every level it sets set to the same level
+ * there. That relation is transitive, so the option it names is always one that stays. The status quo is never a
+ * candidate (its map is empty and PLoT counts only valued maps — EXECUTED on all four served runs).
+ *
+ * Each draft below is a SERVED draft with one option added or changed in the shape the review composed; the
+ * served approval graph carries the outcome row. None of these shapes was seen on the wire.
+ */
+describe('fix round — an open cell can equal at most one level; the status quo is never a twin', () => {
+  const OPT = (label: string, provenance: 'explicit' | 'ai_proposed' | 'inferred', changes: string[], level?: { factor: string; value: number }) => ({
+    label, provenance, changes, is_status_quo: null,
+    interventions: level === undefined ? [] : [{ factor_label: level.factor, value: level.value, value_kind: 'absolute', unit: '£ per month', provenance: 'ai_proposed' }],
+  });
+  const levelOf = (g: SGraph, id: string) => g.nodes.find((n) => n.id === id)?.interventions ?? null;
+  const registeredLabels = (g: SGraph) => g.nodes.filter((n) => n.kind === 'option').map((n) => n.description ?? n.label);
+  const withheldOf = (out: Record<string, unknown>) => (out.options_withheld ?? []) as { option: string; like: string; reason: string }[];
+  /** Served shape 1 with Olumi's "£54 with AI release" drafted AFTER the level-less test option. */
+  const shape1With54 = () => {
+    const base = candidateFromServed(SHAPE_1.brief.draft_graph, { olumi: 'ai_proposed', unknowns: [] });
+    return { ...base, options: [...base.options, OPT('£54 with AI release', 'ai_proposed', ['AI feature availability'], { factor: 'Pro plan price', value: 54 })] } as typeof base;
+  };
+
+  it('RED (review 1, served shape 1): Olumi "£54 with AI release" drafted AFTER the level-less test option is registered at £54; only the test option is withheld, named against the user\'s option', async () => {
+    const draft = shape1With54();
+    expect(draft.options.map((o) => o.label)).toEqual(['Keep current pricing', '£59 with AI release', 'Test £59 with AI release', '£54 with AI release']);
+    const { graph, out } = await build(draft);
+    expect(optionIds(graph)).toEqual(['keep_current_pricing', '59_with_ai_release', '54_with_ai_release']);
+    expect(levelOf(graph, '54_with_ai_release')).toEqual({ pro_plan_price: { value: 0.27, source: 'cee_hypothesis' } });
+    expect(withheldOf(out)).toEqual([{ option: 'Test £59 with AI release', like: '£59 with AI release', reason: 'option_indistinct' }]);
+    expect(questions(out).filter((q) => q.startsWith('I left out '))).toEqual([STEP_1]);
+  });
+
+  it('RED (review 1, the outcome): on the served APPROVED model plus that £54 option, what the rule registers still runs', async () => {
+    const { graph } = await build(shape1With54());
+    const approved = structuredClone(SHAPE_1.approve.draft_graph);
+    const test = approved.nodes.find((n) => n.id === TEST_ID)!;
+    approved.nodes.push({ ...structuredClone(test), id: '54_with_ai_release', label: '£54 with AI release', interventions: { ...test.interventions!, pro_plan_price: { value: 0.27, source: 'cee_hypothesis' } } });
+    approved.edges.push(
+      ...approved.edges.filter((e) => e.from === TEST_ID).map((e) => ({ ...e, from: '54_with_ai_release' })),
+      ...approved.edges.filter((e) => e.to === TEST_ID).map((e) => ({ ...e, to: '54_with_ai_release' })),
+    );
+    // Vacuity: every option kept runs; the test and £54 both removed is the dead start.
+    expect(resolveRunAdmission(approved).willProceed).toBe(true);
+    expect(resolveRunAdmission(withoutOption(withoutOption(approved, TEST_ID), '54_with_ai_release')).blockedNextStep).toBe(NO_COMPARISON_NEXT_STEP);
+    const registered = new Set(optionIds(graph));
+    const notRegistered = optionIds(approved).filter((id) => !registered.has(id));
+    const admission = resolveRunAdmission(notRegistered.reduce(withoutOption, approved));
+    expect([notRegistered, admission.willProceed, admission.blockedNextStep]).toEqual([[TEST_ID], true, null]);
+  });
+
+  it('RED (review 1, served shape 2): Olumi "Raise Pro Price to £54" (inferred) drafted after the test option is registered at £54', async () => {
+    const base = candidateFromServed(SHAPE_2.brief.draft_graph, { olumi: 'inferred', unknowns: [] });
+    const draft = { ...base, options: [...base.options, OPT('Raise Pro Price to £54', 'inferred', ['AI Feature Value'], { factor: 'Pro Plan Price', value: 54 })] } as typeof base;
+    const { graph, out } = await build(draft);
+    expect(optionIds(graph)).toEqual(['keep_pro_price_at_49', 'raise_pro_price_to_59', 'raise_pro_price_to_54']);
+    expect(levelOf(graph, 'raise_pro_price_to_54')).toEqual({ pro_plan_price: { value: 0.27, source: 'cee_hypothesis' } });
+    expect(withheldOf(out)).toEqual([{ option: 'Test £59 With AI Release', like: 'Raise Pro Price to £59', reason: 'option_indistinct' }]);
+    expect(questions(out).filter((q) => q.startsWith('I left out '))).toEqual([STEP_2]);
+  });
+
+  it('RED (review 2): a USER option with no level never makes Olumi\'s £54 and £64 its twins — all four are registered, nothing is said withheld', async () => {
+    const base = candidateFromServed(SHAPE_1.brief.draft_graph, { olumi: 'ai_proposed', unknowns: [] });
+    const draft = { ...base, options: [base.options[0]!,
+      OPT('Raise the Pro price with the AI release', 'explicit', ['Pro plan price', 'AI feature availability']),
+      OPT('£54 with AI release', 'ai_proposed', ['AI feature availability'], { factor: 'Pro plan price', value: 54 }),
+      OPT('£64 with AI release', 'ai_proposed', ['AI feature availability'], { factor: 'Pro plan price', value: 64 }),
+    ] } as typeof base;
+    const { graph, out } = await build(draft);
+    expect(optionIds(graph)).toEqual(['keep_current_pricing', 'raise_the_pro_price_with_the_ai_release', '54_with_ai_release', '64_with_ai_release']);
+    expect([levelOf(graph, '54_with_ai_release'), levelOf(graph, '64_with_ai_release')]).toEqual([
+      { pro_plan_price: { value: 0.27, source: 'cee_hypothesis' } }, { pro_plan_price: { value: 0.32, source: 'cee_hypothesis' } }]);
+    expect(out).not.toHaveProperty('options_withheld');
+    expect(questions(out).filter((q) => q.startsWith('I left out ') || q.startsWith('What makes '))).toEqual([]);
+  });
+
+  it('RED (review 2, the same class in the question): three USER options — a level-less one, £54 and £64 — get ONE question, and it never says £54 and £64 cannot be told apart', async () => {
+    const base = candidateFromServed(SHAPE_1.brief.draft_graph, { olumi: 'ai_proposed', unknowns: [] });
+    const draft = { ...base, options: [base.options[0]!,
+      OPT('Raise the Pro price with the AI release', 'explicit', ['Pro plan price', 'AI feature availability']),
+      OPT('£54 with AI release', 'explicit', ['AI feature availability'], { factor: 'Pro plan price', value: 54 }),
+      OPT('£64 with AI release', 'explicit', ['AI feature availability'], { factor: 'Pro plan price', value: 64 }),
+    ] } as typeof base;
+    const { graph, out } = await build(draft);
+    expect(optionIds(graph)).toEqual(['keep_current_pricing', 'raise_the_pro_price_with_the_ai_release', '54_with_ai_release', '64_with_ai_release']);
+    expect(questions(out).filter((q) => q.startsWith('What makes '))).toEqual([
+      'What makes "Raise the Pro price with the AI release" different from "£54 with AI release"? As drafted, nothing the model holds tells them apart, so the analysis cannot compare them yet.',
+    ]);
+  });
+
+  it('RED (review 3): a declared status quo that ACTS on both factors (served "£49 with AI release" draft) is never a twin — "£49 with AI release" is registered at its served levels', async () => {
+    const base = candidateFromServed(AT_49.brief.draft_graph, { olumi: 'ai_proposed', horizon: null });
+    const draft = { ...base, options: base.options.map((o) => (o.is_status_quo === true ? { ...o, changes: ['Pro plan price', 'AI feature availability'] } : o)) } as typeof base;
+    // Vacuity: the status quo acts on both factors with no level, as the review's P8 drafted it.
+    expect(draft.options.map((o) => [o.label, o.provenance, o.is_status_quo, o.changes, o.interventions.length])).toEqual([
+      ['Current setup', 'ai_proposed', true, ['Pro plan price', 'AI feature availability'], 0],
+      ['£59 with AI release', 'explicit', null, [], 2],
+      ['£49 with AI release', 'ai_proposed', null, [], 2],
+    ]);
+    const { graph, out } = await build(draft);
+    expect(optionIds(graph)).toEqual(['current_setup', '59_with_ai_release', '49_with_ai_release']);
+    expect(levelOf(graph, '49_with_ai_release')).toEqual(AT_49.brief.draft_graph.nodes.find((n) => n.id === '49_with_ai_release')!.interventions);
+    expect(out).not.toHaveProperty('options_withheld');
+  });
+
+  it('RED (review 1, "like"): never names a withheld option — an Olumi restatement of the user\'s £59 drafted FIRST is withheld, and the test option is named against the user\'s option', async () => {
+    const base = candidateFromServed(SHAPE_1.brief.draft_graph, { olumi: 'ai_proposed', unknowns: [] });
+    const [sq, user, test] = base.options;
+    const draft = { ...base, options: [sq!, OPT('Launch Pro at £59 with AI release', 'ai_proposed', ['AI feature availability'], { factor: 'Pro plan price', value: 59 }), user!, test!] } as typeof base;
+    const { graph, out } = await build(draft);
+    expect(optionIds(graph)).toEqual(['keep_current_pricing', '59_with_ai_release']);
+    expect(withheldOf(out)).toEqual([
+      { option: 'Launch Pro at £59 with AI release', like: '£59 with AI release', reason: 'option_indistinct' },
+      { option: 'Test £59 with AI release', like: '£59 with AI release', reason: 'option_indistinct' },
+    ]);
+    for (const w of withheldOf(out)) expect(registeredLabels(graph)).toContain(w.like);
+  });
+});
+
 describe('a second real draft, another domain — the banked LIVE hiring candidate (gpt-5.6-terra, 23 Sep)', () => {
   it('RED: Olumi\'s "Pilot Developer Hire" (no level, the same factors as "Hire Two Developers") is withheld, and the step reads true for hiring', () => {
     const live = (JSON.parse(readFileSync(new URL('./fixtures/live-hiring-envelope-candidate-20260923.json', import.meta.url), 'utf8')) as { candidate: CandidateModel }).candidate;
