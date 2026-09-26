@@ -159,15 +159,21 @@ function levelIsPercentOver100(target: LimitTargetScale): boolean {
 }
 
 /**
- * ⛔ A LEVEL LIMIT MAY BE CHECKED AGAINST ITS NODE'S OWN LEVEL ONLY WHERE PLoT READS BOTH ON ONE SCALE (#70 5841905430).
- *
- * The one decision-grade mismatch: a `"%"`-token limit takes PLoT's unit_percent rung (`[0,100]`, the node's cap
- * ignored), so on a node whose level is NOT the percentage ÷ 100 (`{%, scale_frame 20}`: level = raw/20) the check would
- * be certified on the wrong scale — "≤ 10%" scored as "≤ 2%". Every other shape either reconciles (explicit_cap, same
- * spelling) or is heuristic, which PLoT marks not decision-grade and CEE withholds (#1943).
+ * ⛔ A LEVEL LIMIT MAY BE CHECKED AGAINST ITS NODE'S OWN LEVEL ONLY WHERE PLoT READS BOTH ON ONE SCALE, DECISION-GRADE
+ * (#70 5841905430; #1919 review 5842183627 B1). One shape is proven end to end, and it is the only one that carries:
+ *   · the limit is spelled exactly `"%"` with 1 < value ≤ 100. PLoT normalises constraints only when some value leaves
+ *     [0,1] (`constraintsNeedNormalisation`); value > 1 guarantees THIS row takes the unit_percent rung (`[0,100]`,
+ *     decision-grade) in every batch. A `"%"` row ≤ 1 is forwarded raw OR read as a fraction depending on its batch-mates
+ *     — "0.5%" certified as 50% beside a £ budget — so it never carries (`add-constraint.ts` refuses the same row for the
+ *     same reason). ≤ 100 keeps it unclamped;
+ *   · the node's level IS that percentage ÷ 100 (`levelIsPercentOver100`). On `{%, scale_frame 20}` (level = raw/20)
+ *     the check would be certified on the wrong scale — "≤ 10%" scored as "≤ 2%".
+ * Every other shape — unitless, currency, a percent phrasing PLoT does not read as `"%"` — carries nothing and fails
+ * closed at ISL's `missing_target_baseline`: an honest "could not be checked", never a guessed frame.
  */
-export function limitReadsOnNodeScale(unit: string | undefined, target: LimitTargetScale): boolean {
-  if (unit === undefined || !PERCENT_HEADS.includes(norm(unit))) return true;
+export function levelLimitReadsOnNodeLevel(value: number, unit: string | undefined, target: LimitTargetScale): boolean {
+  if (unit === undefined || unit.trim() !== '%') return false;
+  if (!(Number.isFinite(value) && value > 1 && value <= 100)) return false;
   return levelIsPercentOver100(target);
 }
 

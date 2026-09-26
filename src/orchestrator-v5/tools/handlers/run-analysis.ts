@@ -107,6 +107,7 @@ import { findFirstInvalidNumeric } from './numeric-integrity.js';
 import { validateEnrichmentShadow } from './enrichment-validation.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
 import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
+import { carryLevelLimitBaselines, levelLimitBaselineNodeIds } from './level-limit-baseline.js';
 import {
   AnalysisNotReadyError,
   readinessQuestions,
@@ -897,8 +898,23 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       ...opt,
       interventions: requestProjection.perOption[index] ?? {},
     }));
+    // A level limit on a node the options move is checked against that node's CURRENT level: carried on this wire
+    // copy only, never persisted, so a later edit of the level can never leave a stale copy behind
+    // (`level-limit-baseline.ts`).
+    const wireGraph = carryLevelLimitBaselines(graphForAnalysis, snapshot.goal_constraints, snapshot.goal_node_id);
+    if (wireGraph !== graphForAnalysis) {
+      log.info(
+        {
+          event: 'run_analysis.level_limit_baseline_carried',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          node_ids: [...levelLimitBaselineNodeIds(graphForAnalysis, snapshot.goal_constraints, snapshot.goal_node_id)],
+        },
+        'run_analysis carried the current level of a level-limited node as its baseline (wire copy only; no magnitudes)',
+      );
+    }
     const plotPayload: Record<string, unknown> = {
-      graph: graphForAnalysis,
+      graph: wireGraph,
       // No-rank ruling (2026-08-14): the GATED submission set — identical to
       // snapshot.options unless the gate held the status quo at its observed
       // position, or EXCLUDED an option with no values set (disclosed below).

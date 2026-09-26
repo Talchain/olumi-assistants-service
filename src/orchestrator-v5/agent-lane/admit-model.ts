@@ -33,7 +33,6 @@ import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/st
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import {
   admitCandidateConstraints,
-  limitReadsOnNodeScale,
   type CandidateConstraint,
   type AdmittedConstraint,
 } from './admit-constraint.js';
@@ -243,48 +242,6 @@ export interface AdmittedModel {
   readonly withheld: readonly { from: string; to: string; reason: string; detail: string }[];
   /** Factors the model called controllable that no option changes — held as context (demoteUnreachedLevers). */
   readonly treated_as_context?: readonly string[];
-}
-
-/**
- * ⭐ A LEVEL LIMIT ON A NODE THE OPTIONS MOVE CARRIES THAT NODE'S CURRENT LEVEL (#70 5841905430 / 5841918509).
- *
- * ISL checks a level limit on a NON-ROOT target as `baseline + (option − status quo)` per draw and refuses without
- * `observed_state.baseline` (`missing_target_baseline`), so Paul's churn limit read "could not be checked". The node's
- * current level is already on it — `observed_state.value`, in the node's own frame — so the carrier is THAT value, never
- * a new number. Conditions, each a RED row in `construction-limit-baseline.test.ts`:
- *   · the limit is framed `level` (a delta needs no baseline; an unframed limit keeps failing closed at the frame hop);
- *   · the target is not the goal (#1840 owns the goal's baseline and its attestation rule);
- *   · the target is NON-ROOT on the model PLoT scores (an in-edge from a node that is not an option or the decision —
- *     PLoT strips those): ISL reads a root at its own level, so a baseline there buys nothing;
- *   · FILL-ONLY: an existing baseline, whoever wrote it, is never overwritten;
- *   · PLoT reads the limit on the node's scale (`limitReadsOnNodeScale`): never a `"%"` limit on a node framed off 100.
- * Where the level is Olumi's estimate, the run says so (`inferred-value-disclosure.ts`: "I supplied the value behind this").
- */
-function levelLimitBaselineTargets(
-  constraints: readonly AdmittedConstraint[],
-  nodes: readonly AdmittedNode[],
-  edges: readonly AdmittedEdge[],
-): Set<string> {
-  const kindById = new Map(nodes.map((n) => [n.id, n.kind] as const));
-  const scoredTargets = new Set(
-    edges
-      .filter((e) => {
-        const k = kindById.get(e.from);
-        return k !== undefined && k !== 'option' && k !== 'decision';
-      })
-      .map((e) => e.to),
-  );
-  const out = new Set<string>();
-  for (const c of constraints) {
-    if (c.value_frame !== 'level') continue;
-    const node = nodes.find((n) => n.id === c.node_id);
-    if (node === undefined || node.kind === 'goal' || !scoredTargets.has(node.id)) continue;
-    const os = node.observed_state;
-    if (os === undefined || !Number.isFinite(os.value) || os.baseline !== undefined) continue;
-    if (!limitReadsOnNodeScale(c.unit, { ...os, ...(node.scale_frame !== undefined ? { scale_frame: node.scale_frame } : {}) })) continue;
-    out.add(node.id);
-  }
-  return out;
 }
 
 /** Shorten to the label budget at a word boundary, never mid-word. */
@@ -1710,16 +1667,8 @@ export function admitCandidateModel(
     } as RepairEntry);
   }
 
-  const baselineTargets = levelLimitBaselineTargets(constraintResult.constraints, levers.nodes, finalEdges);
   return {
-    nodes:
-      baselineTargets.size === 0
-        ? levers.nodes
-        : levers.nodes.map((n) =>
-            baselineTargets.has(n.id) && n.observed_state !== undefined
-              ? { ...n, observed_state: { ...n.observed_state, baseline: n.observed_state.value } }
-              : n,
-          ),
+    nodes: levers.nodes,
     inference_classes,
     edges: finalEdges,
     ...(levers.demoted.length > 0 ? { treated_as_context: levers.demoted } : {}),
