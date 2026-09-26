@@ -118,6 +118,7 @@ import { applyCoachingSignal } from '../coaching/coaching-signal-application.js'
 import { applyDefaultedValueEgress } from '../compose/defaulted-value-egress.js';
 import { readDefaultedAssumptionsFromEnrichment } from '../coaching/pick-defaulted-assumptions.js';
 import { enrichRunAnalysisWithDecisionReview } from '../coaching/decision-review-enricher.js';
+import { permittedAnalysisModeFromAnalysisReady } from '../admission/analysis-admission.js';
 import type { V5TurnTimings } from '../telemetry/turn-timings.js';
 import { generateChips } from '../compose/chip-generator.js';
 import {
@@ -1629,6 +1630,14 @@ export async function dispatchChipClickRunAnalysis(
         // twice in this dispatcher (:1662, :1765) — this is the third reader of
         // the same fact, not a new channel.
         runGraph: cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
+        // The admission's claim cap, read with the WIRE GATE'S OWN reader so the
+        // prompt hint and the deterministic caveat can never drift into two
+        // derivations of one question (CLAUDE.md trap 21). One conjunct only —
+        // separation is payload-scoped and is not knowable here. Same threading
+        // as the turn-executor decision-review block. See `figuresProvisional`
+        // on `EnrichDecisionReviewInput`.
+        figuresProvisional:
+          permittedAnalysisModeFromAnalysisReady(analysisReady) === 'quantified_provisional',
         ...(timingsEnabled ? { callTelemetrySink } : {}),
         // D-ask-1 (2.11 P0-1) — P1-2: same scaffolded-placeholder
         // disclosure threading as the turn-executor decision-review block —

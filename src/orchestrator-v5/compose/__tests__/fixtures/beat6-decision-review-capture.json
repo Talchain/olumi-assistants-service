@@ -1,0 +1,953 @@
+{
+  "__provenance": {
+    "capture": "output/journey-witness-20260921/beat6-analyse.json",
+    "served_build": "d536aae",
+    "scenario_id": "914266c1-261c-4bf1-bb18-dd494772fb85",
+    "beat": "beat6-analyse",
+    "sent_utc": "2026-09-21T01:13:04Z",
+    "state_class": "SEEDED (continuation of an existing scenario_id)",
+    "auth_state": "GUEST — no Authorization header sent",
+    "note": "APPEND-ONLY RECORD of bytes the deployed product actually served. Never edit to keep current (CLAUDE.md trap 14b)."
+  },
+  "assistant_text": "I'll run the analysis. Given the recent conversation, there was a prior run already, and now a fresh run is being requested.\n\nMove Upmarket Into Enterprise scored highest against your goal in 66% of runs of this model, but treat this as provisional: the link between Sales Cycle Length and ARR Growth is fragile. The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.\n\nYour first analysis is ready. Explore the comparison and the assumptions shaping it before acting on the result.\n\nThese figures are provisional: every estimate behind them is machine-authored and unconfirmed. Treat each percentage as how often that option fitted your goal better than the alternatives across the simulated runs, not as the chance the goal is achieved.",
+  "analysis_admission": {
+    "structurally_analysable": true,
+    "missing_important_inputs": [],
+    "semantic_quality_sufficient": false,
+    "permitted_analysis_mode": "quantified_provisional",
+    "reasons": [
+      {
+        "field": "structurally_analysable",
+        "code": "READY_TO_COMPARE",
+        "message": "Analysis can run on this model as it stands."
+      },
+      {
+        "field": "semantic_quality_sufficient",
+        "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+        "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures can be shown as provisional, but no option can be called the leader and no result can be called stable or robust until you have set at least one of them."
+      },
+      {
+        "field": "permitted_analysis_mode",
+        "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+        "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures can be shown as provisional, but no option can be called the leader and no result can be called stable or robust until you have set at least one of them."
+      }
+    ],
+    "graph_hash": "7cc03cf877d3f2217a27a8a64514deca9e17e8e31c9bdd9140f667f58b88d164",
+    "semantic_signals": {
+      "confidence_parameters_total": 20,
+      "confidence_parameters_user_stated": 0,
+      "confidence_parameters_machine_authored": 14,
+      "confidence_parameters_unattributed": 6,
+      "material_parameters_total": 18,
+      "material_parameters_user_stated": 0,
+      "intervened_factor_baselines_total": 3,
+      "intervened_factor_baselines_user_stated": 0,
+      "material_parameters_awaiting_user_node_ids": [
+        "35a64cfe",
+        "3e7de6bc",
+        "77f0950d",
+        "7f4dd76b",
+        "83439580",
+        "8608f816",
+        "bc936d4c",
+        "d9de63b8"
+      ],
+      "goal_target_stated": false
+    }
+  },
+  "analysis_state_leader_claim": {
+    "permitted": true,
+    "separation": "separated"
+  },
+  "analysis_result_block": {
+    "type": "analysis_result",
+    "summary": "Move Upmarket Into Enterprise scored highest against your goal in 66% of runs of this model, but treat this as provisional: the link between Sales Cycle Length and ARR Growth is fragile. The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.\n\nThese figures are provisional: every estimate behind them is machine-authored and unconfirmed. Treat each percentage as how often that option fitted your goal better than the alternatives across the simulated runs, not as the chance the goal is achieved.",
+    "leading_option_id": "e797842a",
+    "win_probabilities": {
+      "Status Quo (Hold Strategy)": 0.006,
+      "Pilot Enterprise (1-2 AEs)": 0.01945,
+      "Double Down on Self-Serve SMB": 0.3176,
+      "Move Upmarket Into Enterprise": 0.65695
+    },
+    "enrichment": {
+      "option_comparison": [
+        {
+          "option_id": "024dc74a",
+          "option_label": "Status Quo (Hold Strategy)",
+          "id": "024dc74a",
+          "label": "Status Quo (Hold Strategy)",
+          "outcome": {
+            "mean": 0.08839101719787314,
+            "std": 0.07035180333163998,
+            "p10": 0,
+            "p50": 0.08232643858342341,
+            "p90": 0.18368614515799744,
+            "n_samples": 10000,
+            "n_valid_samples": 10000,
+            "validity_ratio": 1,
+            "percentiles_source": "samples"
+          },
+          "status": "computed",
+          "win_probability": 0.006,
+          "downside": {
+            "cvar_10": -0.010179559000014075,
+            "p05": 0,
+            "expected_regret": 0.4910864962728896
+          }
+        },
+        {
+          "option_id": "36ab03a2",
+          "option_label": "Pilot Enterprise (1-2 AEs)",
+          "id": "36ab03a2",
+          "label": "Pilot Enterprise (1-2 AEs)",
+          "outcome": {
+            "mean": 0.3313133798556894,
+            "std": 0.28779342505951533,
+            "p10": -0.02078022393531944,
+            "p50": 0.32976161010303373,
+            "p90": 0.695048434094236,
+            "n_samples": 10000,
+            "n_valid_samples": 10000,
+            "validity_ratio": 1,
+            "percentiles_source": "samples"
+          },
+          "status": "computed",
+          "win_probability": 0.01945,
+          "downside": {
+            "cvar_10": -0.16065409952907062,
+            "p05": -0.12681115717133828,
+            "expected_regret": 0.2481641336150733
+          }
+        },
+        {
+          "option_id": "3f02dabe",
+          "option_label": "Double Down on Self-Serve SMB",
+          "id": "3f02dabe",
+          "label": "Double Down on Self-Serve SMB",
+          "outcome": {
+            "mean": 0.3414286582931236,
+            "std": 0.18435135239264736,
+            "p10": 0.08822499507642614,
+            "p50": 0.33993870986430563,
+            "p90": 0.5873645385659537,
+            "n_samples": 10000,
+            "n_valid_samples": 10000,
+            "validity_ratio": 1,
+            "percentiles_source": "samples"
+          },
+          "status": "computed",
+          "win_probability": 0.3176,
+          "downside": {
+            "cvar_10": 0.031263643726287337,
+            "p05": 0.03343931749491432,
+            "expected_regret": 0.23804885517763916
+          }
+        },
+        {
+          "option_id": "e797842a",
+          "option_label": "Move Upmarket Into Enterprise",
+          "id": "e797842a",
+          "label": "Move Upmarket Into Enterprise",
+          "outcome": {
+            "mean": 0.5019756109527217,
+            "std": 0.3532048991871135,
+            "p10": 0.028248868677298887,
+            "p50": 0.5028668899920282,
+            "p90": 0.9595280030825651,
+            "n_samples": 10000,
+            "n_valid_samples": 10000,
+            "validity_ratio": 1,
+            "percentiles_source": "samples"
+          },
+          "status": "computed",
+          "win_probability": 0.65695,
+          "downside": {
+            "cvar_10": -0.09264846858679508,
+            "p05": -0.054908014971115984,
+            "expected_regret": 0.0775019025180411
+          }
+        }
+      ],
+      "factor_sensitivity": [
+        {
+          "factor_id": "13d88bbb",
+          "factor_label": "Net Revenue Retention",
+          "influence_score": 0.3723127035830619,
+          "influence_rank": 3,
+          "sensitivity_score": 0.2565,
+          "elasticity": 0.3723127035830619,
+          "direction": "positive",
+          "importance_rank": 1,
+          "value_of_information": 0,
+          "confidence": 0.44665,
+          "confidence_source": "plot_unified_from_isl_bootstrap",
+          "confidence_provenance": {
+            "computation_source": "plot_unified_from_isl_bootstrap",
+            "formula_version": "plot_unified_v3",
+            "is_provisional": true,
+            "calibration_status": "provisional_pending_pilot_calibration",
+            "input_quality": "standard"
+          },
+          "confidence_components": {
+            "structural_certainty": 0.5,
+            "sampling_stability": 0.25
+          },
+          "source": "graph",
+          "flip_risk_category": "negligible",
+          "attribution_stability": "low",
+          "rank_flip_rate": 0.3,
+          "importance_basis": "graph_structural",
+          "driver_label": "biggest",
+          "evpi_percentage_points": 0,
+          "evpi_method": "heuristic",
+          "evidence_hint": false,
+          "range_derivation_source": "default"
+        },
+        {
+          "factor_id": "d9de63b8",
+          "factor_label": "Enterprise AE Headcount Cost",
+          "influence_score": 1,
+          "influence_rank": 1,
+          "sensitivity_score": 0,
+          "elasticity": 0,
+          "direction": "positive",
+          "importance_rank": 2,
+          "value_of_information": 0,
+          "confidence": 0.3,
+          "confidence_source": "plot_unified_from_isl_bootstrap",
+          "confidence_provenance": {
+            "computation_source": "plot_unified_from_isl_bootstrap",
+            "formula_version": "plot_unified_v3",
+            "is_provisional": true,
+            "calibration_status": "provisional_pending_pilot_calibration",
+            "input_quality": "standard"
+          },
+          "confidence_components": {
+            "structural_certainty": 0.5,
+            "sampling_stability": 0
+          },
+          "zero_reason": "intervention_override",
+          "source": "graph",
+          "flip_risk_category": "negligible",
+          "attribution_stability": "negligible",
+          "rank_flip_rate": 0,
+          "value_source": "cee_inference",
+          "value_extraction_type": "inferred",
+          "importance_basis": "graph_structural",
+          "driver_label": "strong",
+          "range_derivation_source": "inferred_spread"
+        },
+        {
+          "factor_id": "35a64cfe",
+          "factor_label": "SMB Self-Serve Investment",
+          "influence_score": 0.7453511629235957,
+          "influence_rank": 2,
+          "sensitivity_score": 0,
+          "elasticity": 0,
+          "direction": "positive",
+          "importance_rank": 3,
+          "value_of_information": 0,
+          "confidence": 0.3,
+          "confidence_source": "plot_unified_from_isl_bootstrap",
+          "confidence_provenance": {
+            "computation_source": "plot_unified_from_isl_bootstrap",
+            "formula_version": "plot_unified_v3",
+            "is_provisional": true,
+            "calibration_status": "provisional_pending_pilot_calibration",
+            "input_quality": "standard"
+          },
+          "confidence_components": {
+            "structural_certainty": 0.5,
+            "sampling_stability": 0
+          },
+          "zero_reason": "intervention_override",
+          "source": "graph",
+          "flip_risk_category": "negligible",
+          "attribution_stability": "negligible",
+          "rank_flip_rate": 0,
+          "value_source": "cee_inference",
+          "value_extraction_type": "inferred",
+          "importance_basis": "graph_structural",
+          "driver_label": "strong",
+          "range_derivation_source": "inferred_spread"
+        },
+        {
+          "factor_id": "bc936d4c",
+          "factor_label": "Sales Cycle Length",
+          "influence_score": 0.15395165438025027,
+          "influence_rank": 4,
+          "sensitivity_score": 0,
+          "elasticity": 0,
+          "direction": "positive",
+          "importance_rank": 4,
+          "value_of_information": 0,
+          "confidence": 0.3,
+          "confidence_source": "plot_unified_from_isl_bootstrap",
+          "confidence_provenance": {
+            "computation_source": "plot_unified_from_isl_bootstrap",
+            "formula_version": "plot_unified_v3",
+            "is_provisional": true,
+            "calibration_status": "provisional_pending_pilot_calibration",
+            "input_quality": "standard"
+          },
+          "confidence_components": {
+            "structural_certainty": 0.5,
+            "sampling_stability": 0
+          },
+          "zero_reason": "intervention_override",
+          "source": "graph",
+          "flip_risk_category": "isolated",
+          "attribution_stability": "negligible",
+          "rank_flip_rate": 0,
+          "value_source": "cee_inference",
+          "value_extraction_type": "inferred",
+          "importance_basis": "graph_structural",
+          "driver_label": "minor",
+          "range_derivation_source": "inferred_spread"
+        }
+      ],
+      "robustness": {
+        "fragile_edges": [
+          {
+            "edge_id": "bc936d4c->8608f816",
+            "from_id": "bc936d4c",
+            "to_id": "8608f816",
+            "switch_probability": 0.4012,
+            "marginal_switch_probability": 0.06,
+            "alternative_winner_id": "3f02dabe",
+            "from_label": "Sales Cycle Length",
+            "to_label": "ARR Growth",
+            "severity": "warning",
+            "visible": true,
+            "alternative_winner_label": "Double Down on Self-Serve SMB"
+          },
+          {
+            "edge_id": "bc936d4c->3e7de6bc",
+            "from_id": "bc936d4c",
+            "to_id": "3e7de6bc",
+            "switch_probability": 0.2512,
+            "marginal_switch_probability": 0,
+            "alternative_winner_id": "3f02dabe",
+            "from_label": "Sales Cycle Length",
+            "to_label": "Cash Runway Erosion Risk",
+            "severity": "warning",
+            "visible": true,
+            "alternative_winner_label": "Double Down on Self-Serve SMB"
+          },
+          {
+            "edge_id": "8608f816->83439580",
+            "from_id": "8608f816",
+            "to_id": "83439580",
+            "switch_probability": 0.2272,
+            "marginal_switch_probability": 0,
+            "alternative_winner_id": "3f02dabe",
+            "from_label": "ARR Growth",
+            "to_label": "move upmarket into enterprise or double down on self-serve SMB over the next 12 months",
+            "severity": "warning",
+            "visible": true,
+            "alternative_winner_label": "Double Down on Self-Serve SMB"
+          },
+          {
+            "edge_id": "3e7de6bc->83439580",
+            "from_id": "3e7de6bc",
+            "to_id": "83439580",
+            "switch_probability": 0.1516,
+            "marginal_switch_probability": 0.22,
+            "alternative_winner_id": "3f02dabe",
+            "from_label": "Cash Runway Erosion Risk",
+            "to_label": "move upmarket into enterprise or double down on self-serve SMB over the next 12 months",
+            "severity": "warning",
+            "visible": true,
+            "alternative_winner_label": "Double Down on Self-Serve SMB"
+          }
+        ],
+        "robust_edges": [
+          {
+            "edge_id": "13d88bbb->8608f816",
+            "from_id": "13d88bbb",
+            "to_id": "8608f816",
+            "from_label": "Net Revenue Retention",
+            "to_label": "ARR Growth",
+            "alternative_winner_id": null,
+            "alternative_winner_label": null
+          },
+          {
+            "edge_id": "35a64cfe->8608f816",
+            "from_id": "35a64cfe",
+            "to_id": "8608f816",
+            "from_label": "SMB Self-Serve Investment",
+            "to_label": "ARR Growth",
+            "alternative_winner_id": null,
+            "alternative_winner_label": null
+          },
+          {
+            "edge_id": "7f4dd76b->83439580",
+            "from_id": "7f4dd76b",
+            "to_id": "83439580",
+            "from_label": "NRR Improvement",
+            "to_label": "move upmarket into enterprise or double down on self-serve SMB over the next 12 months",
+            "alternative_winner_id": null,
+            "alternative_winner_label": null
+          },
+          {
+            "edge_id": "bc936d4c->77f0950d",
+            "from_id": "bc936d4c",
+            "to_id": "77f0950d",
+            "from_label": "Sales Cycle Length",
+            "to_label": "Pipeline Conversion Risk",
+            "alternative_winner_id": null,
+            "alternative_winner_label": null
+          },
+          {
+            "edge_id": "d9de63b8->8608f816",
+            "from_id": "d9de63b8",
+            "to_id": "8608f816",
+            "from_label": "Enterprise AE Headcount Cost",
+            "to_label": "ARR Growth",
+            "alternative_winner_id": null,
+            "alternative_winner_label": null
+          }
+        ],
+        "is_robust": false,
+        "level": "low",
+        "confidence": 0.65695,
+        "confidence_basis": "recommendation_stability_uncalibrated",
+        "recommended_option_id": "e797842a",
+        "recommended_option_label": "Move Upmarket Into Enterprise",
+        "recommended_option_compliance": "not_applicable",
+        "recommended_option_compliance_reason": "no limits were set for this decision",
+        "near_tie": {
+          "is_tie": false,
+          "top_option_id": "e797842a",
+          "second_option_id": "3f02dabe",
+          "tied_option_ids": [
+            "e797842a"
+          ],
+          "gap": 0.33935000000000004,
+          "threshold": 0.1
+        },
+        "display_verdict": "fragile",
+        "display_verdict_reason": "varying any one of the factors we could test did not change which option is most likely to achieve your goal, but this run scored low on our other robustness checks"
+      },
+      "decision_review": {
+        "narrative_summary": "Move Upmarket Into Enterprise produced the best outcome in 66% of runs of this model, and Double Down on Self-Serve SMB produced the best outcome in 32%. The link from Sales Cycle Length to Cash Runway Erosion Risk is fragile and worth checking before acting.",
+        "story_headlines": {
+          "024dc74a": "Status Quo (Hold Strategy) holds SMB investment and hiring both at zero, capping growth.",
+          "36ab03a2": "Pilot Enterprise (1-2 AEs) would need a much stronger link from cycle length to growth to lead.",
+          "3f02dabe": "Double Down on Self-Serve SMB relies on SMB investment lifting NRR and growth together.",
+          "e797842a": "Move Upmarket Into Enterprise reflects a longer sales cycle paired with higher modelled growth."
+        },
+        "robustness_explanation": {
+          "summary": "Overall stability is low, so the ordering holds in about 60% of variations, worth treating as directional rather than settled.",
+          "primary_risk": "The link from Sales Cycle Length to Cash Runway Erosion Risk is the most fragile relationship in the model.",
+          "stability_factors": [
+            "Net Revenue Retention has a positive, high-confidence link into ARR Growth."
+          ],
+          "fragility_factors": [
+            "The link from Sales Cycle Length to Cash Runway Erosion Risk could shift the picture.",
+            "The link from Cash Runway Erosion Risk to the upmarket-versus-SMB goal is also sensitive to your assumptions."
+          ]
+        },
+        "readiness_rationale": "The comparison is settled enough to act on: Move Upmarket Into Enterprise holds a well evidenced share across runs, though the cash runway link and Net Revenue Retention gap are worth closing first given the board's hard limit on runway.",
+        "evidence_enhancements": {
+          "13d88bbb": {
+            "specific_action": "Pull historical cohort NRR data over the last 4 to 6 quarters and validate the 104% figure against a rolling calculation.",
+            "rationale": "Net Revenue Retention feeds ARR Growth directly and is currently only moderately confident.",
+            "evidence_type": "internal_data",
+            "decision_hygiene": "Write down your expected NRR trend before pulling the cohort data."
+          }
+        },
+        "scenario_contexts": {
+          "bc936d4c->8608f816": {
+            "trigger_description": "If the link from Sales Cycle Length to ARR Growth turns out stronger than the model assumes,",
+            "consequence": "the comparison may change; this run does not establish which option would overtake another under that condition."
+          },
+          "3e7de6bc->83439580": {
+            "trigger_description": "If the link from Cash Runway Erosion Risk to move upmarket into enterprise or double down on self-serve SMB over the next 12 months turns out weaker than the model assumes,",
+            "consequence": "the comparison may change; this run does not establish which option would overtake another under that condition."
+          }
+        },
+        "flip_thresholds": [],
+        "bias_findings": [
+          {
+            "type": "PLANNING_FALLACY",
+            "source": "semantic",
+            "description": "The brief states the sales cycle would stretch from 3 weeks to about 5 months without citing prior enterprise sales experience. Is this timeline grounded in a comparable effort?",
+            "affected_elements": [
+              "bc936d4c"
+            ],
+            "suggested_action": "Check this timeline against a comparable enterprise sales cycle your team or a similar company has actually run.",
+            "brief_evidence": "our sales cycle would stretch from 3 weeks to about 5 months",
+            "dsk_claim_id": "DSK-B-008",
+            "evidence_strength": "strong"
+          }
+        ],
+        "key_assumptions": [
+          "The link from Sales Cycle Length to Cash Runway Erosion Risk assumes the longer enterprise cycle does not itself strain the 9 month runway limit.",
+          "The link from Net Revenue Retention to ARR Growth assumes the current 104% figure is representative going forward.",
+          "The board's 9 month runway limit is treated as a hard constraint rather than a negotiable target."
+        ],
+        "decision_quality_prompts": [
+          {
+            "question": "This failed because the enterprise sales cycle ran long and cash runway breached the 9 month limit before enough deals closed, how did that unfold?",
+            "principle": "Pre-mortem (Klein)",
+            "applies_because": "The comparison is settled enough to act on but rests on a fragile link between sales cycle length and cash runway risk.",
+            "dsk_grounding": "general"
+          },
+          {
+            "question": "What would make you switch to Double Down on Self-Serve SMB instead of Move Upmarket Into Enterprise?",
+            "principle": "Consider-the-opposite",
+            "applies_because": "Move Upmarket Into Enterprise produced the best outcome in a clear majority of runs, which is exactly when it is worth stress-testing the alternative.",
+            "dsk_grounding": "general"
+          }
+        ],
+        "pre_mortem": {
+          "failure_scenario": "Twelve months on, the enterprise push failed because the Sales Cycle Length to Cash Runway Erosion Risk link proved stronger than modelled, and hiring 4 AEs pushed runway toward the 9 month limit before deals closed.",
+          "warning_signs": [
+            "Enterprise AE pipeline stalling past the modelled 5 month cycle with few closed deals",
+            "Monthly cash burn tracking ahead of plan against the 9 month runway limit"
+          ],
+          "mitigation": "Set a runway checkpoint tied to AE pipeline progress before extending further enterprise hiring.",
+          "grounded_in": [
+            "bc936d4c->3e7de6bc",
+            "3e7de6bc->83439580"
+          ],
+          "review_trigger": "Reconvene if enterprise pipeline conversion lags the modelled cycle before the next planning cycle."
+        },
+        "produced_at": "2026-09-21T01:13:38.233Z"
+      },
+      "option_comparison_status": "computed",
+      "edge_e_values": [
+        {
+          "edge_id": "35a64cfe::8608f816",
+          "from_id": "35a64cfe",
+          "to_id": "8608f816",
+          "from_label": "SMB Self-Serve Investment",
+          "to_label": "ARR Growth",
+          "e_value": 1.9672,
+          "flip_direction": "increase",
+          "current_mean": 0.34833333333333333,
+          "flip_mean": 0.685233,
+          "stability": {
+            "n_seeds": 10,
+            "n_seeds_flipped": 5,
+            "band_min": 0,
+            "band_median": 0.793308,
+            "band_max": 0.822265,
+            "band_width": 0.822265,
+            "seed_flip_means": [
+              0,
+              0.793308,
+              null,
+              0.822265,
+              null,
+              0.417604,
+              null,
+              null,
+              0.79989,
+              null
+            ]
+          }
+        },
+        {
+          "edge_id": "3e7de6bc::83439580",
+          "from_id": "3e7de6bc",
+          "to_id": "83439580",
+          "from_label": "Cash Runway Erosion Risk",
+          "to_label": "move upmarket into enterprise or double down on self-serve SMB over the next 12 months",
+          "e_value": 1,
+          "flip_direction": "increase",
+          "current_mean": -0.75,
+          "flip_mean": -0.412068,
+          "stability": {
+            "n_seeds": 10,
+            "n_seeds_flipped": 10,
+            "band_min": -0.756126,
+            "band_median": -0.300623,
+            "band_max": 0.598627,
+            "band_width": 1.354753,
+            "seed_flip_means": [
+              -0.321921,
+              -0.362561,
+              -0.38895,
+              -0.279325,
+              -0.146623,
+              -0.756126,
+              0.316693,
+              0,
+              0.598627,
+              -0.373239
+            ]
+          }
+        },
+        {
+          "edge_id": "bc936d4c::3e7de6bc",
+          "from_id": "bc936d4c",
+          "to_id": "3e7de6bc",
+          "from_label": "Sales Cycle Length",
+          "to_label": "Cash Runway Erosion Risk",
+          "e_value": 1,
+          "flip_direction": "increase",
+          "current_mean": -0.4114173228346457,
+          "flip_mean": 0.052316,
+          "stability": {
+            "n_seeds": 10,
+            "n_seeds_flipped": 7,
+            "band_min": 0.110139,
+            "band_median": 0.453203,
+            "band_max": 0.840829,
+            "band_width": 0.7306900000000001,
+            "seed_flip_means": [
+              null,
+              0.200015,
+              0.297188,
+              0.526194,
+              0.840829,
+              0.110139,
+              null,
+              null,
+              0.453203,
+              0.463179
+            ]
+          }
+        },
+        {
+          "edge_id": "d9de63b8::3e7de6bc",
+          "from_id": "d9de63b8",
+          "to_id": "3e7de6bc",
+          "from_label": "Enterprise AE Headcount Cost",
+          "to_label": "Cash Runway Erosion Risk",
+          "e_value": 1,
+          "flip_direction": "increase",
+          "current_mean": -0.5385826771653544,
+          "flip_mean": -0.134302,
+          "stability": {
+            "n_seeds": 10,
+            "n_seeds_flipped": 9,
+            "band_min": -0.861474,
+            "band_median": 1e-06,
+            "band_max": 0.493377,
+            "band_width": 1.354851,
+            "seed_flip_means": [
+              null,
+              -0.163454,
+              1e-06,
+              -0.176509,
+              1e-06,
+              -0.861474,
+              0.493377,
+              1e-06,
+              0.3951,
+              1e-06
+            ]
+          }
+        },
+        {
+          "edge_id": "d9de63b8::8608f816",
+          "from_id": "d9de63b8",
+          "to_id": "8608f816",
+          "from_label": "Enterprise AE Headcount Cost",
+          "to_label": "ARR Growth",
+          "e_value": 1,
+          "flip_direction": "decrease",
+          "current_mean": 0.31666666666666665,
+          "flip_mean": -0.020234,
+          "stability": {
+            "n_seeds": 10,
+            "n_seeds_flipped": 7,
+            "band_min": -0.976912,
+            "band_median": -1e-06,
+            "band_max": 0.340547,
+            "band_width": 1.317459,
+            "seed_flip_means": [
+              0.340547,
+              0.070839,
+              null,
+              0.117114,
+              -0.976912,
+              -0.078126,
+              -0.613088,
+              null,
+              -1e-06,
+              null
+            ]
+          }
+        },
+        {
+          "edge_id": "bc936d4c::8608f816",
+          "from_id": "bc936d4c",
+          "to_id": "8608f816",
+          "from_label": "Sales Cycle Length",
+          "to_label": "ARR Growth",
+          "e_value": 3.1469,
+          "flip_direction": "decrease",
+          "current_mean": -0.225,
+          "flip_mean": -0.708055,
+          "stability": {
+            "n_seeds": 10,
+            "n_seeds_flipped": 4,
+            "band_min": -0.882939,
+            "band_median": -0.695877,
+            "band_max": 0,
+            "band_width": 0.882939,
+            "seed_flip_means": [
+              0,
+              -0.761462,
+              null,
+              -0.882939,
+              null,
+              -0.630292,
+              null,
+              null,
+              null,
+              null
+            ]
+          }
+        }
+      ],
+      "inference_warnings": [
+        {
+          "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+          "message": "5 edge E-value entries were omitted from edge_e_values: 5 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+          "severity": "info"
+        },
+        {
+          "code": "GOAL_DIRECTION_UNATTESTED",
+          "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+          "severity": "warning",
+          "field": "goal_direction"
+        }
+      ],
+      "confidence_tier": "fair",
+      "flip_thresholds": [
+        {
+          "factor_id": "13d88bbb",
+          "factor_label": "Net Revenue Retention",
+          "current_value": 0.52,
+          "flip_value": null,
+          "alternative_winner_id": null,
+          "alternative_winner_label": null,
+          "flip_reason": "structurally_invariant",
+          "iterations_used": 0,
+          "probes_used": 0,
+          "no_flip_in_range": true
+        },
+        {
+          "factor_id": "35a64cfe",
+          "factor_label": "SMB Self-Serve Investment",
+          "current_value": 0,
+          "flip_value": null,
+          "unit": "£",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null,
+          "flip_reason": "no_effect_within_bounds",
+          "iterations_used": 0,
+          "probes_used": 0,
+          "no_flip_in_range": true
+        },
+        {
+          "factor_id": "bc936d4c",
+          "factor_label": "Sales Cycle Length",
+          "current_value": 0.4387,
+          "flip_value": null,
+          "unit": "months",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null,
+          "flip_reason": "structurally_invariant",
+          "iterations_used": 0,
+          "probes_used": 0,
+          "no_flip_in_range": true
+        },
+        {
+          "factor_id": "d9de63b8",
+          "factor_label": "Enterprise AE Headcount Cost",
+          "current_value": 346560,
+          "flip_value": null,
+          "unit": "£",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null,
+          "flip_reason": "structurally_invariant",
+          "iterations_used": 0,
+          "probes_used": 0,
+          "no_flip_in_range": true
+        }
+      ],
+      "decision_brief": {
+        "brief_id": "6f8b46b8-68a7-4cab-b681-b937b2c3bece",
+        "version": "1",
+        "created_at": "2026-09-21T01:13:16.435Z",
+        "headline": "Move Upmarket Into Enterprise produced the best outcome in about 66% of runs of this model, and Double Down on Self-Serve SMB produced the best outcome in about 32%. The link from Sales Cycle Length to ARR Growth is fragile and worth checking.",
+        "options": [
+          {
+            "option_id": "e797842a",
+            "label": "Move Upmarket Into Enterprise",
+            "win_probability": 0.65695,
+            "rank": 1
+          },
+          {
+            "option_id": "3f02dabe",
+            "label": "Double Down on Self-Serve SMB",
+            "win_probability": 0.3176,
+            "rank": 2
+          },
+          {
+            "option_id": "36ab03a2",
+            "label": "Pilot Enterprise (1-2 AEs)",
+            "win_probability": 0.01945,
+            "rank": 3
+          },
+          {
+            "option_id": "024dc74a",
+            "label": "Status Quo (Hold Strategy)",
+            "win_probability": 0.006,
+            "rank": 4
+          }
+        ],
+        "top_drivers": [
+          {
+            "factor_label": "Net Revenue Retention",
+            "sensitivity": 0.3723127035830619,
+            "direction": "positive"
+          }
+        ],
+        "key_assumptions": [
+          "Net Revenue Retention"
+        ],
+        "what_would_change": [
+          "ARR Growth → move upmarket into enterprise or double down on self-serve SMB over the next 12 months",
+          "Cash Runway Erosion Risk → move upmarket into enterprise or double down on self-serve SMB over the next 12 months"
+        ],
+        "robustness": "fragile",
+        "warnings": [
+          {
+            "code": "DOMINANT_FACTOR",
+            "message": "One factor dominates. What would change if Net Revenue Retention had less influence?",
+            "severity": "warning"
+          },
+          {
+            "code": "INFLUENTIAL_EXTERNALS",
+            "message": "External factors Net Revenue Retention significantly affect your outcome but are inherently uncertain. How might you bound these?",
+            "severity": "warning"
+          },
+          {
+            "code": "SCALE_MISMATCH_WARNING",
+            "message": "Intervention values span wide range (max is ~506,667× min). Large magnitudes may dominate outcomes.",
+            "severity": "warning"
+          }
+        ],
+        "headline_banded": {
+          "text": "Move Upmarket Into Enterprise is slightly ahead.",
+          "band": "slightly_ahead",
+          "leader_option_id": "e797842a",
+          "leader_label": "Move Upmarket Into Enterprise",
+          "runner_up_option_id": "3f02dabe",
+          "runner_up_label": "Double Down on Self-Serve SMB",
+          "win_probability_gap": 0.33935000000000004,
+          "robustness_gated": true,
+          "doctrine": "provisional_doctrine_v0"
+        },
+        "defaulted_assumptions": [],
+        "robustness_caveat": {
+          "text": "This run was fragile under the changes we tested. It scored low on the stability measures.",
+          "basis": "is_robust",
+          "flip_evidence": {
+            "status": "all_no_effect",
+            "text": "Varying any one of the factors we could test did not change which option is most likely to achieve your goal."
+          },
+          "doctrine": "provisional_doctrine_v0"
+        },
+        "warning_codes": [
+          "GOAL_DIRECTION_UNATTESTED"
+        ],
+        "analysis_summary": {
+          "leading_option": "Move Upmarket Into Enterprise",
+          "win_probability": 0.65695,
+          "robustness_band": "fragile"
+        }
+      },
+      "factor_evppi": [
+        {
+          "factor_id": "13d88bbb",
+          "evppi": 0,
+          "evppi_raw": 0,
+          "baseline_max_expected_utility": 0.501976,
+          "conditional_max_expected_utility": 0.501976,
+          "units": "outcome",
+          "method": "regression_evppi_v1",
+          "regression_degree": 4,
+          "n_samples": 10000,
+          "clamped_low": false,
+          "clamped_high": false,
+          "noise_floor": 0,
+          "status": "below_resolution",
+          "correlation_active": false
+        }
+      ],
+      "decision_evpi": 0.0775019025180411,
+      "p_win_sensitivity": [
+        {
+          "factor_id": "d9de63b8",
+          "p_win_delta": 0.001375,
+          "p_win_delta_percentage_points": 0.14,
+          "current_metric": 0.669125,
+          "perfect_metric": 0.6705,
+          "metric_type": "p_win_recommended",
+          "method": "p_win_delta_at_mean_v1",
+          "n_samples": 2000,
+          "status": "below_resolution",
+          "clamped": false,
+          "noise_floor": 0.03099,
+          "noise_floor_method": "z95_worst_case_bernoulli_diff",
+          "labelling_doctrine": "provisional_doctrine_v0"
+        },
+        {
+          "factor_id": "35a64cfe",
+          "p_win_delta": 0,
+          "p_win_delta_percentage_points": 0,
+          "current_metric": 0.669125,
+          "perfect_metric": 0.6595,
+          "metric_type": "p_win_recommended",
+          "method": "p_win_delta_at_mean_v1",
+          "n_samples": 2000,
+          "status": "below_resolution",
+          "clamped": true,
+          "noise_floor": 0.03099,
+          "noise_floor_method": "z95_worst_case_bernoulli_diff",
+          "labelling_doctrine": "provisional_doctrine_v0"
+        },
+        {
+          "factor_id": "bc936d4c",
+          "p_win_delta": 0,
+          "p_win_delta_percentage_points": 0,
+          "current_metric": 0.669125,
+          "perfect_metric": 0.62725,
+          "metric_type": "p_win_recommended",
+          "method": "p_win_delta_at_mean_v1",
+          "n_samples": 2000,
+          "status": "below_resolution",
+          "clamped": true,
+          "noise_floor": 0.03099,
+          "noise_floor_method": "z95_worst_case_bernoulli_diff",
+          "labelling_doctrine": "provisional_doctrine_v0"
+        },
+        {
+          "factor_id": "13d88bbb",
+          "p_win_delta": 0,
+          "p_win_delta_percentage_points": 0,
+          "current_metric": 0.669125,
+          "perfect_metric": 0.667625,
+          "metric_type": "p_win_recommended",
+          "method": "p_win_delta_at_mean_v1",
+          "n_samples": 2000,
+          "status": "below_resolution",
+          "clamped": true,
+          "noise_floor": 0.03099,
+          "noise_floor_method": "z95_worst_case_bernoulli_diff",
+          "labelling_doctrine": "provisional_doctrine_v0"
+        }
+      ],
+      "conditional_winners": []
+    },
+    "computed_against_hash": "7cc03cf877d3f221"
+  }
+}

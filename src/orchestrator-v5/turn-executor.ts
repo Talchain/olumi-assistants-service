@@ -12834,6 +12834,14 @@ export async function runTurnExecutor(
               // turn-start reread and remains only as the fallback for a
               // handler that produced no snapshot.
               runGraph: handlerOutcome.__run_graph_snapshot ?? context.persistedGraph,
+              // The admission's claim cap, read with the WIRE GATE'S OWN reader
+              // so the prompt hint and the deterministic caveat can never drift
+              // into two derivations of one question (CLAUDE.md trap 21). One
+              // conjunct only — separation is payload-scoped and is not knowable
+              // here. See `figuresProvisional` on `EnrichDecisionReviewInput`.
+              figuresProvisional:
+                permittedAnalysisModeFromAnalysisReady(analysisReadyForTurn) ===
+                'quantified_provisional',
               ...(timingsEnabled ? { callTelemetrySink } : {}),
               // D-ask-1 (2.11 P0-1) — P1-2: scaffolded-placeholder
               // disclosure channel — the review must never narrate a
