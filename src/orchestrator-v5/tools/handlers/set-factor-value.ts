@@ -37,6 +37,7 @@ import { approvedAdoptionSourceFor } from '../../agent-lane/approved-adoption-co
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { synthesiseDisplayValue } from '../../../cee/factor-extraction/display-value.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
+import { frameDefaultedLinks } from '../../../cee/magnitude/frame-defaulted-links.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
 import {
@@ -617,6 +618,7 @@ export function createSetFactorValueHandler(): HandlerFn {
     const capChanged =
       before.cap !== undefined && after.cap !== undefined && after.cap !== before.cap;
     let rescaledInterventionCount = 0;
+    let linksSized: readonly string[] = [];
 
     // Apply the mutation to a clone and Zod-parse the result.
     const result = applyAndValidateMutation(rawGraph, (clone) => {
@@ -871,6 +873,18 @@ export function createSetFactorValueHandler(): HandlerFn {
         );
       }
 
+      // ⭐ A LEVEL THAT ARRIVES AFTER CONSTRUCTION SIZES OLUMI'S OWN LINKS ON IT (C, DL #70 5849216942). Admission sized
+      // them once, when this factor held no level, so they kept the ±0.5 default. Served (`f-20260926T190952Z`): churn
+      // got 5% from the approved starting point, both links stayed ±0.5, and every option was withheld as out of
+      // domain. Only when the level actually moves, and only links whose size is Olumi's (`frame-defaulted-links.ts`).
+      if (before.value !== after.value || before.raw_value !== after.raw_value || before.cap !== after.cap) {
+        const framed = frameDefaultedLinks(clone, targetId);
+        if (framed.sized.length > 0) {
+          clone.edges = framed.graph.edges;
+          linksSized = framed.sized;
+        }
+      }
+
       return { before, after };
     });
 
@@ -964,6 +978,12 @@ export function createSetFactorValueHandler(): HandlerFn {
           rescaled_intervention_count: rescaledInterventionCount,
         },
         'set_factor_value applied an explicit cap change; option interventions renormalised to preserve absolutes',
+      );
+    }
+    if (linksSized.length > 0) {
+      log.info(
+        { event: 'v5.d1.set_factor_value.links_framed', target_id: targetId, links: linksSized },
+        'set_factor_value re-sized Olumi\'s own placeholder links on the factor\'s new level (ids only; no magnitudes)',
       );
     }
     const scaleNote =
