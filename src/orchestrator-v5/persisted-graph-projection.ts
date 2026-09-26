@@ -34,7 +34,16 @@
  * ORDER IS LOAD-BEARING: `reconcileTopLevelOptionsFromNodes` must run AFTER
  * `normaliseOptionInterventionContract` so a mirrored `options[]` entry copies
  * the already-canonical interventions bundle.
+ *
+ * `dropNullOptionalGraphFields` runs LAST: a `null` on a schema-optional key
+ * makes the stored bytes unreadable by every strict `GraphV3` reader (served
+ * 26 Sep 2026: one UI register poisoned a scenario, and every later canvas edit
+ * returned 500). It is last so a pass that gives a `null` a MEANING runs first —
+ * `normaliseOptionInterventionContract` turns `interventions: null` into `{}`
+ * (P0-A) — and only a `null` nothing else claimed is dropped as absence.
+ * See `drop-null-optional-fields.ts`.
  */
+import { dropNullOptionalGraphFields } from './drop-null-optional-fields.js';
 import { repairGraphForPersistence } from './repair-graph-for-persistence.js';
 import { normaliseOptionInterventionContract } from './normalise-option-interventions.js';
 import { reconcileTopLevelOptionsFromNodes } from './reconcile-top-level-options.js';
@@ -61,5 +70,6 @@ export function projectGraphForPersistence<T>(
   if (graph === undefined || graph === null) return graph;
   const repaired = repairGraphForPersistence(graph, ctx);
   const normalised = normaliseOptionInterventionContract(repaired, ctx);
-  return reconcileTopLevelOptionsFromNodes(normalised, ctx);
+  const reconciled = reconcileTopLevelOptionsFromNodes(normalised, ctx);
+  return dropNullOptionalGraphFields(reconciled, ctx);
 }
