@@ -90,6 +90,14 @@ export function statedThreshold(row: Record<string, unknown>): string | null {
   if (FRACTION_SPELLED_UNIT.test(unit)) return null;
   if (PERCENT_LIKE_UNIT.test(unit) && audit === null
     && !(typeof row.constraint_id === 'string' && USER_UNIT_WRITER_ID.test(row.constraint_id))) return null;
+  return sayLevel(value, unit);
+}
+
+/**
+ * A level in its own units, the one way every coaching card says it: "10% per month", "£400,000",
+ * "500 CHF", "10 hours"; a bare number when there is no unit. `unit` is trimmed by the caller.
+ */
+export function sayLevel(value: number, unit: string): string {
   const n = value.toLocaleString('en-GB', { maximumFractionDigits: 2 });
   if (unit === '') return n;
   if (unit.startsWith('%')) return `${n}${unit}`;
@@ -155,4 +163,36 @@ export function everyLimitProvedUnanchored(graph: Record<string, unknown>, runOp
   if (!ids.every((id): id is string => typeof id === 'string' && id.length > 0)) return false;
   const proved = collectUnanchoredConstraintTargetIds(rows, { nodes: graph.nodes, edges: graph.edges, options: runOptions });
   return ids.every((id) => proved.has(id));
+}
+
+/**
+ * THE LIMITS NAMED BY THESE ROW IDS, joined by identity: each `constraint_id` → its ONE `goal_constraints` row →
+ * that row's `node_id` → the node's `label`, with the user's own figure ({@link statedThreshold}) only for a node
+ * carrying ONE row (the same rule as {@link limitNodeLabels}). In the ids' order, one per distinct node.
+ * Null when any id matches no row or more than one, a row's node is missing, duplicated or unlabelled, two limits
+ * share a label, or they sit on more than {@link MAX_NAMED_LIMITS} nodes: the caller then names no limit.
+ */
+export function limitsNamedByIds(graph: Record<string, unknown>, constraintIds: readonly string[]): readonly NamedLimit[] | null {
+  const rows = graph.goal_constraints;
+  const nodes = graph.nodes;
+  if (constraintIds.length === 0 || !Array.isArray(rows) || !Array.isArray(nodes)) return null;
+  const nodeIds: string[] = [];
+  for (const id of constraintIds) {
+    const matches = rows.filter((r) => readRecord(r)?.constraint_id === id);
+    if (matches.length !== 1) return null;
+    const nodeId = readRecord(matches[0])?.node_id;
+    if (typeof nodeId !== 'string' || nodeId.length === 0) return null;
+    if (!nodeIds.includes(nodeId)) nodeIds.push(nodeId);
+  }
+  if (nodeIds.length > MAX_NAMED_LIMITS) return null;
+  const limits: NamedLimit[] = [];
+  for (const nodeId of nodeIds) {
+    const matches = nodes.filter((n) => readRecord(n)?.id === nodeId);
+    if (matches.length !== 1) return null;
+    const label = readRecord(matches[0])?.label;
+    if (typeof label !== 'string' || label.trim().length === 0) return null;
+    const nodeRows = rows.filter((r) => readRecord(r)?.node_id === nodeId);
+    limits.push({ label: label.trim(), stated: nodeRows.length === 1 ? statedThreshold(readRecord(nodeRows[0])!) : null });
+  }
+  return new Set(limits.map((l) => l.label)).size === limits.length ? limits : null;
 }

@@ -29,7 +29,7 @@ let n = 0;
 let SCENARIO = '';
 const nextScenario = () => { n += 1; SCENARIO = `5a0d1c2b-3a4f-4e5d-8c6b-7a8f9e0d2c${String(n).padStart(2, '0')}`; };
 
-type Row = { id: string; scenario_id: string; turn_id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number; turn_class: string; handler_id: string | null; pending_actions: unknown[]; created_at: string };
+type Row = { id: string; scenario_id: string; turn_id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number; turn_class: string; handler_id: string | null; pending_actions: unknown[]; handler_facts: unknown[]; created_at: string };
 const rows = new Map<string, Row>();
 const order: string[] = [];
 let graphOf = new Map<string, unknown>();
@@ -58,7 +58,7 @@ const store = {
     return row === undefined ? null : { ...row, pending_actions: await parsedPending(row, sid) };
   }),
   readMostRecentPendingActions: vi.fn(async (sid: string) => parsedPending(latestRow(sid), sid)),
-  append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; turn_class?: string; handler_id?: string | null; pending_actions?: unknown[]; graph?: unknown }) => {
+  append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; turn_class?: string; handler_id?: string | null; pending_actions?: unknown[]; graph?: unknown; handler_facts?: unknown[] }) => {
     const k = `${w.scenario_id}:${w.turn_id}`;
     if (!rows.has(k)) {
       tick += 1;
@@ -66,6 +66,8 @@ const store = {
         assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0,
         turn_class: w.turn_class ?? 'direct_answer', handler_id: w.handler_id ?? null,
         pending_actions: jsonbOrder(JSON.parse(JSON.stringify(w.pending_actions ?? []))) as unknown[],
+        // Stored with the turn, as `append_turn_atomic` does, so a writer's own read-back of its fact is served.
+        handler_facts: jsonbOrder(JSON.parse(JSON.stringify(w.handler_facts ?? []))) as unknown[],
         created_at: new Date(Date.UTC(2026, 8, 26, 0, 0, tick)).toISOString() });
       order.push(k);
       if (w.graph !== undefined && w.graph !== null) graphOf.set(w.scenario_id, jsonbOrder(JSON.parse(JSON.stringify(w.graph))));
@@ -74,7 +76,9 @@ const store = {
   }),
   readRecent: vi.fn(async (sid: string) => [...order].reverse().map((k) => rows.get(k)!).filter((r) => r.scenario_id === sid && !r.turn_id.endsWith(':claim'))),
   readFactsFor: vi.fn(async () => []),
-  readFactsWithTurnFor: vi.fn(async () => []),
+  // The production shape (`supabase-store.ts` readFactsWithTurnFor): each stored fact with the id of the turn row it rode on.
+  readFactsWithTurnFor: vi.fn(async (ids: readonly string[]) => [...rows.values()].filter((r) => ids.includes(r.id))
+    .flatMap((r) => r.handler_facts.map((fact) => ({ turn_id: r.id, fact })))),
   readScenarioRunAnalysisFactsFor: vi.fn(async () => ({ facts: [], total_count: 0 })),
   invalidateScoped: vi.fn(async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] })),
   invalidateAll: vi.fn(async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] })),
@@ -271,7 +275,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(r?.readiness_issues, JSON.stringify(r?.readiness_issues)).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'MISSING_OPTION_VALUE', option_id: opt.id, factor_id: 'fac_price', repairability: 'human_input_required' }),
     ]));
-    expect(t2.assistant_text, 'the completion step is named, in plain words').toMatch(/does not yet set a level for Price/);
+    expect(t2.assistant_text, 'the completion step is named, in plain words').toMatch(/does not yet set a level for "Price"/);
     // (B) and whether it can run NOW, from the one verdict: it can, leaving this option out until its level is set.
     expect(t2.assistant_text, t2.assistant_text).toMatch(/The analysis can run now; it will leave out "Test £54 at release" until its levels are set\./);
     expect(t2.assistant_text, 'no raw codes in user prose').not.toMatch(/\b[A-Z]+(?:_[A-Z]+){2,}\b/);
@@ -365,6 +369,13 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
     expect(t2._agent.tool_calls[0], JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: false, mutated: true, refusal: 'not_verified' }));
     expect(t2.assistant_text, t2.assistant_text).not.toMatch(/\bAdded\b/);
+    /**
+     * ⛔ RED (fix/agent-never-shows-instructions-or-codes; code-read of `write-outcome.ts`): the option DID land, and
+     * the user read "Partly saved: the change was refused (not_verified)." — a code, and "refused" for a saved change.
+     * What the user reads is that it could not be confirmed, in words.
+     */
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/could not be confirmed/);
+    expect(t2.assistant_text, t2.assistant_text).not.toMatch(/Not saved|refused|not_verified|\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/);
   }, 120_000);
 
   it('[p1] RED (independent review 00:16Z): a factor whose range is its declared scale_frame — the user\'s £54 is stored on THAT range (0.27, figure kept), never as a bare 54', async () => {
@@ -473,7 +484,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(g.edges.some((e) => e.from === 'dec_x' && e.to === opt!.id), 'linked from the decision').toBe(true);
     expect(g.edges.some((e) => e.from === opt!.id && e.to === fac!.id), 'the option acts on the new factor').toBe(true);
     expect(g.edges.some((e) => e.from === fac!.id && e.to === 'goal_x'), 'the new factor reaches the goal').toBe(true);
-    expect(t2.assistant_text, t2.assistant_text).toMatch(/Also added the factor "AI add-on price", which changes Revenue/);
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/Also added the factor "AI add-on price", which changes "Revenue"/);
     expect(t2.assistant_text, 'the factor is never reported as an option').not.toMatch(/Added "AI add-on price"/);
   }, 120_000);
 
@@ -495,7 +506,66 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const iv = (newOption()?.interventions ?? {})['fac_price'] as { raw_value?: unknown; source?: unknown } | undefined;
     expect(iv?.raw_value, JSON.stringify(iv)).toBe(54);
     expect(iv?.source, 'Olumi\'s figure is never stored as the user\'s').toBe('cee_hypothesis');
-    expect(t2.assistant_text, t2.assistant_text).toMatch(/Its level for Price is Olumi's estimate, for you to correct\./);
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/Its level for "Price" is Olumi's estimate, for you to correct\./);
+  }, 120_000);
+
+  /**
+   * ⛔ ROUND-2 REVIEW, BLOCKER 3: the boundary every fast-path follow-up passes (`withoutAgentDirections`) dropped this
+   * producer's sentences whenever a factor LABEL tripped it — "the user" inside "Size of the user base", a snake_case
+   * label, or the id `labelOf` falls back to — so one click showed only "Saved.": what was added, and the C2
+   * disclosure that the level is Olumi's estimate, were both lost. A label is the user's data, never an instruction.
+   */
+  const estimateOn = (factorLabel: string) => [
+    () => fnCall('propose_new_option', {
+      label: 'Test £54 at release',
+      acts_on: [{ factor_label: factorLabel, direction: 'positive', level: { value: 54, unit: 'GBP', estimate: true, basis: 'the release price Olumi suggested, below the £59 option' } }],
+      rationale: 'Olumi suggested it; the user asked to add all of them.',
+    }),
+    () => say('I would add it at my own estimate of £54. Shall I add it?'),
+  ];
+  const withPriceLabelled = (label: string) => {
+    const g = seedGraph();
+    return { ...g, nodes: g.nodes.map((x) => (x.id === 'fac_price' ? { ...x, label } : x)) };
+  };
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const bothSentences = (text: string, label: string) => {
+    // Quote-agnostic first: the defect is the sentence being DROPPED.
+    expect(text, text).toMatch(new RegExp(`Added "Test £54 at release", linked from the decision and acting on "?${esc(label)}"?\\.`));
+    expect(text, text).toMatch(new RegExp(`Its level for "?${esc(label)}"? is Olumi's estimate, for you to correct\\.`));
+    // Then the exact sentences: each label quoted, as the user's data.
+    expect(text, text).toContain(`Added "Test £54 at release", linked from the decision and acting on "${label}".`);
+    expect(text, text).toContain(`Its level for "${label}" is Olumi's estimate, for you to correct.`);
+  };
+  for (const label of ['Size of the user base', 'cost_per_hire']) {
+    it(`[lbl] RED (round-2 blocker 3): a factor labelled "${label}" → one click → BOTH sentences reach the user`, async () => {
+      graphOf.set(SCENARIO, withPriceLabelled(label));
+      script = estimateOn(label);
+      const t1 = await turn({ message: 'Add all of the options you suggested.' });
+      const approve = approveChipOf(t1);
+      expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+      const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+      expect(t2._diagnostic_trace.fast_path).toBe('approve');
+      expect(t2._agent.tool_calls[0], JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+      bothSentences(t2.assistant_text, label);
+    }, 120_000);
+  }
+
+  it('[lbl-id] RED (round-2 blocker 3): the factor has no label by the time it is read back (labelOf\'s id fallback) → BOTH sentences still reach the user', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    script = estimateOn('Price');
+    const t1 = await turn({ message: 'Add all of the options you suggested.' });
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    const hold = (await heldOnLatestRow())[0]!;
+    // After route-v2 has committed: the label goes (labels are outside the analysis hash, so the confirm still verifies).
+    onInnerSent = (b) => {
+      if ((b['chip'] as { id?: string } | undefined)?.id !== hold.chip_id) return;
+      const g = graphNow();
+      graphOf.set(SCENARIO, { ...g, nodes: g.nodes.map((x) => (x.id === 'fac_price' ? (({ label: _l, ...rest }) => rest)(x) : x)) });
+    };
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(t2._agent.tool_calls[0], JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    bothSentences(t2.assistant_text, 'fac_price');
   }, 120_000);
 
   it('[q3] RED (#1982 review N2): Olumi\'s £64 under an option NAMED "Test £54" → left unset and the Agent is told why; one click adds the option with no level', async () => {
@@ -534,6 +604,64 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(toolOutput.detail).toContain('It would set exactly the same levels as "Raise to £59"');
     expect(inner.filter((b) => (b['chip'] as { intent?: string } | undefined)?.intent === 'add_option'), 'nothing sent').toEqual([]);
     expect(approveChipOf(t1)).toBeUndefined();
+  }, 120_000);
+
+  it('[q5] RED (DL #70 5846812818, served F4/F4e): TWO options in one request, one a twin of "Raise to £59" → the valid one is still proposed as ONE change with ONE chip, the twin is named as not added, and approving adds only the valid one', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    let toolOutput: { ok?: boolean; refusal?: string; not_added?: { option: string; same_levels_as: string }[]; not_added_note?: string; options?: unknown; option?: { label?: string } } = {};
+    script = [
+      () => fnCall('propose_new_option', { options: [
+        { label: 'Test £59 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 59, unit: 'GBP' } }] },
+        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }] },
+      ], rationale: 'The user asked for both.' }),
+      (body) => {
+        const out = (body['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
+        toolOutput = JSON.parse(String(out?.output ?? '{}')) as typeof toolOutput;
+        return say('I can add "Test £54 at release"; "Test £59 at release" would repeat "Raise to £59". Add the £54 one?');
+      },
+    ];
+    const t1 = await turn({ message: 'Add two options: test £59 at release, and test £54 at release.' });
+    expect(toolOutput.ok, JSON.stringify(toolOutput)).toBe(true);
+    expect(toolOutput.not_added).toEqual([{ option: 'Test £59 at release', same_levels_as: 'Raise to £59' }]);
+    expect(toolOutput.not_added_note).toMatch(/Never promise to add it later/);
+    expect(toolOutput.option?.label).toBe('Test £54 at release');
+    const approve = approveChipOf(t1);
+    expect(approve, 'ONE approve chip for the valid option').toBeDefined();
+    await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    const labels = graphNow().nodes.filter((x) => x.kind === 'option').map((x) => x.label);
+    expect(labels).toContain('Test £54 at release');
+    expect(labels).not.toContain('Test £59 at release');
+    expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id), 'linked from the decision').toBe(true);
+  }, 120_000);
+
+  it('[q6] RED (DL #70 5846924842, served BF5): the user gives a level for an option NOT linked to Price → ONE proposal carries the link and the level → one click → the REAL product adds the link and records the level (never "once approved, I can record…")', async () => {
+    const g = seedGraph();
+    g.nodes.push({ id: 'opt_c', kind: 'option', label: 'Cohort test' } as never);
+    g.edges.push({ from: 'dec_x', to: 'opt_c', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' });
+    graphOf.set(SCENARIO, g);
+    let toolOutput: { ok?: boolean; adds_links_note?: string; not_linked?: unknown } = {};
+    script = [
+      () => fnCall('propose_option_interventions', { interventions: [{ option_label: 'Cohort test', factor_label: 'Price', value: 54, basis: 'the user said £54', user_stated: true }] }),
+      (body) => {
+        const out = (body['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
+        toolOutput = JSON.parse(String(out?.output ?? '{}')) as typeof toolOutput;
+        return say('This links Cohort test to Price and records £54. Approve?');
+      },
+    ];
+    const t1 = await turn({ message: 'The cohort test is £54 on Pro plan price.' });
+    expect(toolOutput.ok, JSON.stringify(toolOutput)).toBe(true);
+    expect(toolOutput.not_linked).toBeUndefined();
+    expect(toolOutput.adds_links_note).toMatch(/also adds that link/);
+    const approve = approveChipOf(t1);
+    expect(approve, 'ONE approve chip').toBeDefined();
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    // What the user reads: the level is saved — never "Not saved" for a level the model now holds.
+    expect(String(t2.assistant_text), String(t2.assistant_text)).not.toMatch(/Not saved|Partly saved|could not/i);
+    const after = graphNow();
+    expect(after.edges.some((e) => e.from === 'opt_c' && e.to === 'fac_price'), 'the link was added').toBe(true);
+    const lvl = after.nodes.find((x) => x.id === 'opt_c')?.interventions?.['fac_price'] as { raw_value?: unknown; value?: unknown } | undefined;
+    expect(lvl, JSON.stringify(after.nodes.find((x) => x.id === 'opt_c'))).toBeDefined();
+    expect(Number(lvl!.value)).toBeCloseTo(54 / 200, 6);
   }, 120_000);
 
   it('[p3] RED: a factor with no range at all — the user\'s £54 cannot be stored on one, so the level is left UNSET (never a bare 54) and the Agent is told why', async () => {

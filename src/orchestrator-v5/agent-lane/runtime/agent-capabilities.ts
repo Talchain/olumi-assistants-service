@@ -238,6 +238,27 @@ function quotable(x: number): number {
   return Number(x.toPrecision(15));
 }
 
+/**
+ * ⛔ THIS WRITE COMMITTED, THEN THE MODEL MOVED ON — "COULD NOT BE CONFIRMED", NEVER "NOT SAVED" (round-2 review of
+ * fix/agent-never-shows-instructions-or-codes, blocker 2's class). Called only once the read-back does NOT hold the
+ * change. Proof that THIS write committed comes only from its own response: its committed post-state (`draft_graph`,
+ * which a refused edit omits) holds the change, or it reports a revision other than the approved one AND the model has
+ * since moved past that revision. A refusal answers 200 with the revision it found, unmoved, and no post-state — so it
+ * stays "Not saved". Used by every `authoriseChange` branch that decides landed-ness from the read-back.
+ */
+function committedThenMoved(
+  res: { status: number; json: Record<string, unknown> },
+  approvedRevision: string,
+  after: { graph_hash: string } | null,
+  committedPostStateHolds: (draft: { edges?: unknown }) => boolean,
+): boolean {
+  if (res.status !== 200 || after === null) return false;
+  const draft = res.json.draft_graph;
+  if (draft !== null && typeof draft === 'object' && committedPostStateHolds(draft as { edges?: unknown })) return true;
+  const reported = typeof res.json.graph_hash === 'string' ? res.json.graph_hash : '';
+  return reported !== '' && approvedRevision !== '' && reported !== approvedRevision && after.graph_hash !== '' && after.graph_hash !== reported;
+}
+
 function committedLevelOf(json: Record<string, unknown>, optionId: string, factorId: string): number | undefined {
   const nodes = ((json.draft_graph ?? {}) as { nodes?: unknown }).nodes;
   if (!Array.isArray(nodes)) return undefined;
@@ -922,11 +943,18 @@ export function createAgentCapabilities(
     }
     approvalAppliedThisRequest = true;
     const { summary, unreadable } = receiptSummaryOf(r.json);
+    /**
+     * ⛔ EVERY LABEL IS QUOTED (round-2 review of fix/agent-never-shows-instructions-or-codes, blocker 3). This follow-up
+     * is shown verbatim on the one-click path, through the boundary that withholds anything addressed to the Agent
+     * (`withoutAgentDirections`). A label is the user's data: quoted, it can never read as an instruction or a code —
+     * unquoted, "Size of the user base", `cost_per_hire` or the id fallback below dropped both sentences.
+     */
+    const quoted = (label: string): string => `"${label}"`;
     const sentences = optionIds.map((id) => {
       const node = after!.nodes.find((x) => x.id === id) as { label?: unknown; interventions?: unknown } | undefined;
       const factorIds = after!.edges.filter((e) => e.from === id).map((e) => e.to)
         .filter((to) => after!.nodes.some((x) => x.id === to && x.kind === 'factor'));
-      const labelOf = (fid: string): string => String(after!.nodes.find((x) => x.id === fid)?.label ?? fid);
+      const labelOf = (fid: string): string => quoted(String(after!.nodes.find((x) => x.id === fid)?.label ?? fid));
       const unlevelled = factorIds.filter((fid) => !hasLevel(node, fid)).map(labelOf);
       // Whose each level is, from what was COMMITTED: Olumi's estimates are said as that (C2), never as the user's.
       const estimated = factorIds.filter((fid) => ((node?.interventions ?? {}) as Record<string, { source?: unknown } | undefined>)[fid]?.source === 'cee_hypothesis').map(labelOf);
@@ -937,7 +965,7 @@ export function createAgentCapabilities(
     for (const fid of addedFactorIds) {
       const f = after!.nodes.find((x) => x.id === fid);
       if (f === undefined) continue;
-      const changes = after!.edges.filter((e) => e.from === fid).map((e) => String(after!.nodes.find((x) => x.id === e.to)?.label ?? e.to));
+      const changes = after!.edges.filter((e) => e.from === fid).map((e) => quoted(String(after!.nodes.find((x) => x.id === e.to)?.label ?? e.to)));
       sentences.push(`Also added the factor "${String(f.label ?? fid)}", which changes ${changes.join(', ')}; how strongly is Olumi's estimate. `
         + 'Its current value is not set yet; tell me what it is today and I\'ll record it.');
     }
@@ -992,7 +1020,8 @@ export function createAgentCapabilities(
     parent: StructuredProposal,
     approvedRead: GraphRead,
   ): Promise<ToolResult> => {
-    const unsupported = parent.operations.filter((o) => !(COMPOUND_ORDER as readonly string[]).includes(o.op));
+    const isLevelLink = (o: ProposalOperation): boolean => o.op === 'add_edge' && (o.value as { link_for_level?: unknown } | undefined)?.link_for_level === true;
+    const unsupported = parent.operations.filter((o) => !(COMPOUND_ORDER as readonly string[]).includes(o.op) && !isLevelLink(o));
     if (unsupported.length > 0) {
       return { ok: false, mutated: false, refusal: 'unsupported_compound', detail: `This proposal mixes changes that cannot be applied together: ${[...new Set(unsupported.map((o) => o.op))].join(', ')}.` };
     }
@@ -1176,10 +1205,37 @@ export function createAgentCapabilities(
       carried = next;
     }
 
-    // (3) Levels, each CAS-gated on the revision our OWN previous write produced.
+    // (2b) ⭐ The links the levels need (a level on a factor its option did not yet act on), each CAS-gated on the
+    // revision our OWN previous write produced — the product's `structural_add_edge`; option → factor takes the
+    // topology strength. A link that does not land stops the chain: no level is written on a factor it could not reach.
     let levelsRecorded = 0;
     let levelStop: string | null = null;
-    for (let i = 0; i < levelOps.length; i += 1) {
+    const linkOps = parent.operations.filter(isLevelLink);
+    // ⛔ A link that LANDED is a change to the model even when a later level is refused (Canonical #2004 B1).
+    const linksAdded: string[] = [];
+    const labelOf = (id: string): string => approvedRead.nodes.find((n) => n.id === id)?.label ?? id;
+    for (let i = 0; i < linkOps.length; i += 1) {
+      const [fromId, toId] = linkOps[i]!.path.split('::');
+      const r = await dispatch('/orchestrate/v2/turn', {
+        kind: 'system_event',
+        turn_id: authorisationTurnId(`${parent.proposal_id}#link${i}`),
+        scenario_id: ctx.scenario_id,
+        stage: 'frame',
+        event: { kind: 'structural_add_edge', from: fromId, to: toId, magnitude: 0.5, effect_direction: 'positive', base_graph_hash: carried },
+      });
+      const next = r.json.graph_hash;
+      if (r.status !== 200 || typeof next !== 'string' || next.length === 0) {
+        levelStop = 'a link one of the levels needs could not be added, so no level was written';
+        break;
+      }
+      const rc = receiptSummaryOf(r.json);
+      if (rc.summary !== null) receipts.push(rc.summary);
+      carried = next;
+      linksAdded.push(`${labelOf(fromId!)} \u2192 ${labelOf(toId!)}`);
+    }
+
+    // (3) Levels, each CAS-gated on the revision our OWN previous write produced.
+    for (let i = 0; levelStop === null && i < levelOps.length; i += 1) {
       const o = levelOps[i];
       const [optionId, factorId] = o.path.split('::');
       const v = ((o.value ?? {}) as { normalised?: number }).normalised;
@@ -1211,20 +1267,30 @@ export function createAgentCapabilities(
       const check = await readGraph(ctx.scenario_id);
       const held = check?.nodes.find((n) => n.id === optionId)?.interventions?.[factorId] as { value?: unknown } | number | undefined;
       const heldValue = typeof held === 'number' ? held : (held as { value?: unknown } | undefined)?.value;
-      if (check === null || check.graph_hash !== carried) { levelStop = 'the model changed while the option levels were being recorded'; break; }
-      if (heldValue !== v) { levelStop = `the level for ${o.path} was not recorded`; break; }
+      /**
+       * ⛔ HELD EXACTLY IS RECORDED; THE REVISION ONLY DECIDES WHETHER THE CHAIN GOES ON (round-2 review of
+       * fix/agent-never-shows-instructions-or-codes, blocker 2's class). This checked the revision FIRST, so when another
+       * writer had moved the model a level the model holds exactly as approved was counted as not recorded, and the
+       * user read that it was not saved. The rule is the link writer's: the read-back holding exactly the approved level
+       * is landed. A moved model still gives no revision to carry, so no FURTHER level is written on a guess.
+       */
+      if (check === null) { levelStop = 'the model changed while the option levels were being recorded'; break; }
+      const moved = check.graph_hash !== carried;
+      if (heldValue !== v) { levelStop = moved ? 'the model changed while the option levels were being recorded' : `the level for ${o.path} was not recorded`; break; }
       levelsRecorded += 1;
+      if (moved && i < levelOps.length - 1) { levelStop = 'the model changed while the option levels were being recorded'; break; }
     }
 
     const all = levelStop === null && levelsRecorded === levelOps.length;
     if (all) proposals.markApplied(parent.proposal_id, receipts);
     const parts = [
       ...(valueOps.length > 0 ? [{ part: 'values', ok: valuesLanded, recorded_count: valuesLanded ? valueOps.length : 0, requested_count: valueOps.length }] : []),
+      ...(linkOps.length > 0 ? [{ part: 'links', ok: linksAdded.length === linkOps.length, recorded_count: linksAdded.length, requested_count: linkOps.length }] : []),
       ...(levelOps.length > 0 ? [{ part: 'option_levels', ok: levelStop === null, recorded_count: levelsRecorded, requested_count: levelOps.length }] : []),
     ];
     return {
       ok: all,
-      mutated: valuesLanded || levelsRecorded > 0,
+      mutated: valuesLanded || linksAdded.length > 0 || levelsRecorded > 0,
       applied: all,
       proposal_id: parent.proposal_id,
       parts,
@@ -1242,8 +1308,11 @@ export function createAgentCapabilities(
               'say so when you describe what changed.',
           }
         : {
-            refusal: valuesLanded || levelsRecorded > 0 ? 'partially_applied' : 'not_applied',
-            detail: `${levelStop ?? 'Not every change was recorded'}. Tell the user exactly which part was recorded and which was not.`,
+            refusal: valuesLanded || linksAdded.length > 0 || levelsRecorded > 0 ? 'partially_applied' : 'not_applied',
+            detail:
+              `${levelStop ?? 'Not every change was recorded'}.` +
+              (linksAdded.length > 0 ? ` These links WERE added and stay in the model: ${linksAdded.join('; ')}.` : '') +
+              ' Tell the user exactly which part was recorded and which was not.',
           }),
     };
   };
@@ -1900,7 +1969,6 @@ export function createAgentCapabilities(
       const unresolved: string[] = [];
       const unframed: { factor: string; detail: string }[] = [];
       const unchanged: string[] = [];
-      const notLinked: { option: string; factor: string; acts_on: string[] }[] = [];
       /**
        * ⛔ EVERY SUPPLIED LEVEL THAT IS NOT ACCEPTED, WITH ITS OPTION AND WHY.
        * MEASURED on served d1829c5 (journey J1): the starting point was refused
@@ -1919,6 +1987,8 @@ export function createAgentCapabilities(
         derivedFrame: number | null;
         /** The user GAVE this level (`user_stated`); otherwise it is Olumi's proposal. */
         userStated: boolean;
+        // The option is not yet linked to this factor: the link is added in the same change, before the level.
+        needsLink: boolean;
       }[] = [];
 
       for (const i of input) {
@@ -1967,14 +2037,13 @@ export function createAgentCapabilities(
          * factors the option DOES act on, so the Agent corrects it before the
          * user is asked to approve anything.
          */
-        const linked = linkedFactorsOf(g as never, option.id);
-        if (!linked.some((f) => f.id === factor.id)) {
-          notLinked.push({
-            option: option.label, factor: factor.label,
-            acts_on: linked.map((f) => String(f.label ?? f.id)),
-          });
-          continue;
-        }
+        /**
+         * ⭐ A LEVEL BRINGS ITS LINK (DL #70 5846924842, served BF5 on 1f8327c). Dropping this pair made the Agent propose
+         * the link alone and promise the level ("once it is approved, I can record £54") — a promise no proposal kept,
+         * and the options stayed level-less. The level goes in the SAME proposal as the option → factor link it needs;
+         * on approval the link is written first and the level on the revision that write reported (`applyCompound`).
+         */
+        const needsLink = !linkedFactorsOf(g as never, option.id).some((f) => f.id === factor.id);
         // ⛔ A held status quo takes no level the AGENT supplies (`heldStatusQuoPairs`):
         // not accepted, never an operation. ⭐ The USER's own correction is the
         // exception (independent review of #1849, 5820560331): the Agent is told to
@@ -2096,7 +2165,7 @@ export function createAgentCapabilities(
           option: { id: option.id, label: option.label },
           factor: { id: factor.id, label: factor.label },
           raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' ? os.unit : '',
-          basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote,
+          basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote, needsLink,
         });
       }
 
@@ -2104,7 +2173,6 @@ export function createAgentCapabilities(
         return {
           ok: false, mutated: false, refusal: 'nothing_to_set',
           ...(unresolved.length > 0 ? { unresolved } : {}),
-          ...(notLinked.length > 0 ? { not_linked: notLinked } : {}),
           ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
           ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
           ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
@@ -2116,7 +2184,10 @@ export function createAgentCapabilities(
 
       const ordered = [...set].sort((x, y) =>
         `${x.option.id}::${x.factor.id}` < `${y.option.id}::${y.factor.id}` ? -1 : 1);
-      const operations: ProposalOperation[] = ordered.map((i) => ({
+      // The links the levels need come first; each is written before any level (`applyCompound` step 2b).
+      const linkOps: ProposalOperation[] = ordered.filter((i) => i.needsLink)
+        .map((i) => ({ op: 'add_edge', path: `${i.option.id}::${i.factor.id}`, value: { link_for_level: true } }));
+      const operations: ProposalOperation[] = [...linkOps, ...ordered.map((i): ProposalOperation => ({
         op: 'set_option_intervention',
         path: `${i.option.id}::${i.factor.id}`,
         value: {
@@ -2124,7 +2195,7 @@ export function createAgentCapabilities(
           // Per level, like `valueOpAuthor`: whose level this is travels to the writer (`levelOpAuthor`).
           authored_by: i.userStated ? 'user_stated' : 'model_proposed',
         },
-      }));
+      }))];
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -2133,7 +2204,7 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'model_proposed', basis: 'what each option does, for the user to confirm or correct' },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label:
-          ordered.map((i) => `${i.option.label} sets ${i.factor.label} to ${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`).join('; ') +
+          ordered.map((i) => `${i.option.label} ${i.needsLink ? `acts on ${i.factor.label} (a new link) and sets it` : `sets ${i.factor.label}`} to ${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`).join('; ') +
           ambiguousClause(ambiguous),
       });
       proposals.put(proposal);
@@ -2149,12 +2220,13 @@ export function createAgentCapabilities(
           recorded_on_model_scale: i.normalised,
           model_range: i.cap,
           ...(i.derivedFrame !== null ? { range_taken_from_your_figure: i.derivedFrame } : {}),
+          ...(i.needsLink ? { adds_the_link: true } : {}),
           basis: i.basis,
         })),
         ...(unresolved.length > 0 ? { unresolved } : {}),
-        ...(notLinked.length > 0 ? {
-          not_linked: notLinked,
-          not_linked_note: 'These levels were LEFT OUT: the option is not connected to that factor, so no level can be recorded there. Propose a level on one of the factors each option acts on (listed in acts_on), or say the option needs a link first.',
+        ...(linkOps.length > 0 ? {
+          adds_links_note: 'Some levels are on a factor the option was not yet linked to: this ONE change also adds that link (marked adds_the_link), '
+            + 'and the level is recorded right after it. Say so plainly. Never tell the user a level will be recorded later: it is in this change.',
         } : {}),
         ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
         ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
@@ -2228,17 +2300,34 @@ export function createAgentCapabilities(
           event: { kind: 'edge_strength_edit', from: fromId, to: toId, intent: v.intent, direction_intent: v.direction_intent, magnitude: v.magnitude, expected: v.expected },
         });
         const after = await readGraph(ctx.scenario_id);
-        const e = after?.edges.find((x) => x.from === fromId && x.to === toId);
         const dir = v.direction_intent === 'preserve' ? v.expected.effect_direction : v.direction_intent;
         const want = dir === 'negative' ? -v.magnitude : v.magnitude;
-        const got = (e?.strength as { mean?: unknown } | undefined)?.mean;
-        const src = (e?.provenance !== null && typeof e?.provenance === 'object') ? (e.provenance as { source?: unknown }).source : undefined;
-        const landed = res.status === 200 && typeof got === 'number' && Math.abs(got - want) < 1e-9 && src === 'user_specified'
-          && (typeof res.json.graph_hash !== 'string' || res.json.graph_hash === after?.graph_hash);
+        /** The link as it was approved: exactly this strength, stamped as the user's — in whichever graph holds it. */
+        const holdsApproved = (edges: unknown): boolean => {
+          const x = (Array.isArray(edges) ? edges as { from?: unknown; to?: unknown; strength?: unknown; provenance?: unknown }[] : [])
+            .find((y) => y?.from === fromId && y?.to === toId);
+          const mean = x?.strength !== null && typeof x?.strength === 'object' ? (x.strength as { mean?: unknown }).mean : undefined;
+          const source = x?.provenance !== null && typeof x?.provenance === 'object' ? (x.provenance as { source?: unknown }).source : undefined;
+          return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && source === 'user_specified';
+        };
+        /**
+         * ⛔ LANDED IS WHAT THE MODEL HOLDS, NOT WHETHER TWO REVISIONS ARE EQUAL (round-2 review of
+         * fix/agent-never-shows-instructions-or-codes, blocker 2 — probed through this capability). `landed` also demanded
+         * that this response's revision EQUAL the read-back's, so a link write that landed and was followed by any other
+         * write before the read-back came back `not_applied`, `mutated: false` — "Not saved: none of it was applied." —
+         * while the link held exactly the approved 0.825 stamped as the user's, and the approval was left unapplied.
+         * The read-back holding exactly what was approved is landed; a commit the model no longer shows is "could not be
+         * confirmed" (`committedThenMoved`); only a response that shows nothing committed is "Not saved".
+         */
+        const landed = res.status === 200 && after !== null && holdsApproved(after.edges);
         if (after === null && res.status === 200) {
           // The write may have landed; the read-back failed. Never "as it was" when Olumi cannot see (review of #1950).
           return { ok: false, mutated: false, applied: false, refusal: 'not_confirmed', proposal_id: decision.proposal.proposal_id,
             detail: 'Olumi could not read the model back to confirm whether the link was recorded. Tell the user plainly that it could not be confirmed, and offer to check again.' };
+        }
+        if (!landed && committedThenMoved(res, before.graph_hash, after, (draft) => holdsApproved(draft.edges))) {
+          return { ok: false, mutated: true, applied: false, refusal: 'not_verified', proposal_id: decision.proposal.proposal_id,
+            detail: 'The link was saved, but the model changed again straight afterwards and no longer shows it as approved, so what it now holds could not be confirmed. Read the model again before saying what it holds; do not describe the link as recorded.' };
         }
         if (!landed) {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: decision.proposal.proposal_id,
@@ -2249,10 +2338,19 @@ export function createAgentCapabilities(
         const receipt = receiptSummaryOf(res.json);
         const receipts = receipt.summary !== null ? [receipt.summary] : [];
         proposals.markApplied(decision.proposal.proposal_id, receipts);
+        /**
+         * ⛔ `follow_up` IS WHAT THE USER READS; `note` IS WHAT THE AGENT READS (served f2, CEE `af719a1`, scenario
+         * `bdba963b`): one click on "Record this link" showed this `follow_up` verbatim — "Recorded as the user's own
+         * estimate: … Offer to run the analysis again so they can see what it changes." The typed-approval fast path
+         * shows `follow_up` to the user and no model reads the result there; on the loop path the Agent reads both.
+         * So the sentence the user reads is addressed to them (the label already says "as your own estimate"), and
+         * the next step for the Agent stays in `note`, where only the Agent reads it.
+         */
         return {
           ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, operation_id: operationId, receipts,
           ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
-          follow_up: `Recorded as the user's own estimate: ${decision.proposal.public_label.replace(/^Record /, '')}. Offer to run the analysis again so they can see what it changes.`,
+          follow_up: `${decision.proposal.public_label.replace(/^Record /, 'Recorded ')}.`,
+          note: 'Recorded as the user’s own estimate. Offer to run the analysis again so they can see what it changes.',
         };
       }
 
@@ -3365,6 +3463,28 @@ export function createAgentCapabilities(
         edgeExistsAfter: (after?.edges ?? []).some((e) => e.from === fromId && e.to === toId),
         system_message: String(res.json.assistant_text ?? ''),
       });
+      /**
+       * ⛔ A LINK THIS WRITE ADDED IS NEVER "NOT SAVED" FOR WHAT HAPPENED AFTER IT (round-2 review of
+       * fix/agent-never-shows-instructions-or-codes, blocker 2's class). Landed-ness here is the read-back alone, so a
+       * failed read-back, or a link another writer removed straight after this write committed it, read "Not saved: none
+       * of it was applied." Same rule as the link-strength branch.
+       */
+      if (!confirmation.applied && after === null && res.status === 200) {
+        return {
+          ok: false, mutated: false, applied: false, refusal: 'not_confirmed', proposal_id: decision.proposal.proposal_id,
+          detail: 'Olumi could not read the model back to confirm whether the link was added. Tell the user plainly that it could not be confirmed, and offer to check again.',
+          http: res.status, operation_id: operationId,
+        };
+      }
+      const hasTheLink = (edges: unknown): boolean => Array.isArray(edges)
+        && (edges as { from?: unknown; to?: unknown }[]).some((e) => e?.from === fromId && e?.to === toId);
+      if (!confirmation.applied && committedThenMoved(res, before.graph_hash, after, (draft) => hasTheLink(draft.edges))) {
+        return {
+          ok: false, mutated: true, applied: false, refusal: 'not_verified', proposal_id: decision.proposal.proposal_id,
+          detail: 'The link was added, but the model changed again straight afterwards and no longer shows it, so what it now holds could not be confirmed. Read the model again before saying what it holds; do not describe the link as added.',
+          http: res.status, operation_id: operationId,
+        };
+      }
       if (!confirmation.applied) {
         return {
           ok: false, mutated: false, applied: false, refusal: 'not_applied',
@@ -3706,15 +3826,38 @@ export function createAgentCapabilities(
             + 'Ask the user for a figure within that range, in the same units, or whether that range itself is wrong.',
         };
       }
-      const nfWire = newFactors.length === 0 ? {} : { new_factors: newFactors.map((f) => ({
-        key: f.key, label: f.label,
-        affects: f.affects.map((a) => ({ node_id: a.node_id, effect_direction: a.effect_direction })),
-      })) };
-      const parameters = entries.length === 1
-        ? { parent_decision_id: decision.id, ...entries[0]!.entry, ...nfWire }
-        : { parent_decision_id: decision.id, options: entries.map((e) => e.entry), ...nfWire };
+      /** The new factors a set of options uses: a factor only a left-out option acted on is left out with it. */
+      const factorsOf = (es: typeof entries) => newFactors.filter((f) => es.some((e) => e.plan.newActsOn.some((a) => a.key === f.key)));
+      const parametersOf = (es: typeof entries) => {
+        const nf = factorsOf(es);
+        const nfWire = nf.length === 0 ? {} : { new_factors: nf.map((f) => ({
+          key: f.key, label: f.label,
+          affects: f.affects.map((a) => ({ node_id: a.node_id, effect_direction: a.effect_direction })),
+        })) };
+        return es.length === 1
+          ? { parent_decision_id: decision.id, ...es[0]!.entry, ...nfWire }
+          : { parent_decision_id: decision.id, options: es.map((e) => e.entry), ...nfWire };
+      };
+      /**
+       * ⛔ ONE TWIN NEVER SINKS THE REST (DL #70 5846812818, served F4/F4e). The product refuses a WHOLE batch when one
+       * option repeats an existing option's levels, and names that option (`index`, `sameAs`). The valid options are
+       * still the user's request: that one is left out, named with its twin (`not_added`), and the rest go as ONE
+       * change. A lone option that is a twin is refused as before.
+       */
+      let kept = entries;
+      const notAdded: { option: string; same_levels_as: string }[] = [];
+      let parameters = parametersOf(kept);
       // The product's own transaction, run here purely: a spec it would not build is never sent.
-      const built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
+      let built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
+      while (!built.matched && built.reason === 'same_levels_as_existing_option' && built.sameAs !== undefined
+        && kept.length > 1 && typeof built.index === 'number' && built.index >= 0 && built.index < kept.length) {
+        const twinIndex = built.index;
+        notAdded.push({ option: kept[twinIndex]!.plan.label, same_levels_as: built.sameAs.label });
+        kept = kept.filter((_, i) => i !== twinIndex);
+        parameters = parametersOf(kept);
+        built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
+      }
+      const keptFactors = factorsOf(kept);
       if (!built.matched || JSON.stringify(built.operations).length > GM_HELD_OPERATIONS_MAX_JSON_CHARS) {
         const reason = !built.matched ? String(built.reason) : '';
         /**
@@ -3733,9 +3876,10 @@ export function createAgentCapabilities(
               : '';
         return { ok: false, mutated: false, refusal: 'not_prepared', ...(!built.matched ? { reason: built.reason } : {}),
           ...(twin !== undefined ? { same_levels_as: twin } : {}),
+          ...(notAdded.length > 0 ? { not_added: notAdded } : {}),
           detail: `That could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
       }
-      const labels = plans.map((x) => x.plan.label);
+      const labels = kept.map((x) => x.plan.label);
       const r = await dispatch('/orchestrate/v2/turn', {
         kind: 'message', turn_id: authorisationTurnId(`agent_add_option:${ctx.scenario_id}:${JSON.stringify(parameters)}`), scenario_id: ctx.scenario_id,
         stage: 'frame', turn_class: 'frame', source: 'chip', message: `Add ${labels.map((l) => `the option "${l}"`).join(' and ')}.`,
@@ -3746,7 +3890,7 @@ export function createAgentCapabilities(
        * scenario and the FIRST option's id), and, where the store can be read, the held batch itself adding
        * EVERY option WITH its decision link. Anything else is a hard failure: never retried in other words.
        */
-      const ref = gmHeldProposalRef(ctx.scenario_id, `node:${plans[0]!.plan.optionId}`);
+      const ref = gmHeldProposalRef(ctx.scenario_id, `node:${kept[0]!.plan.optionId}`);
       const offered = Array.isArray(r.json.suggested_actions) ? r.json.suggested_actions as { id?: unknown; label?: unknown; message?: unknown }[] : [];
       const heldChip = r.status === 200 ? offered.find((c) => c?.id === ref) : undefined;
       let heldBatchOk = heldChip !== undefined;
@@ -3754,10 +3898,10 @@ export function createAgentCapabilities(
         try {
           const hold = await liveHeldHold(ctx.scenario_id, ref);
           const ops = hold !== undefined ? heldOpsOf(hold) : [];
-          heldBatchOk = plans.every(({ plan }) => ops.some((o) => o.op === 'add_node' && o.path === plan.optionId)
+          heldBatchOk = kept.every(({ plan }) => ops.some((o) => o.op === 'add_node' && o.path === plan.optionId)
             && ops.some((o) => o.op === 'add_edge' && o.path === `${decision.id}::${plan.optionId}`))
             // Every factor this change adds is in the held batch too, as a factor.
-            && newFactors.every((f) => ops.some((o) => o.op === 'add_node'
+            && keptFactors.every((f) => ops.some((o) => o.op === 'add_node'
               && (o.value as { kind?: unknown } | undefined)?.kind === 'factor'
               && norm((o.value as { label?: unknown } | undefined)?.label) === norm(f.label)));
         } catch {
@@ -3773,7 +3917,7 @@ export function createAgentCapabilities(
             : 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
       }
       heldOptionThisRequest = labels.map((l) => `"${l}"`).join(' and ');
-      const described = entries.map(({ plan, set }) => ({
+      const described = kept.map(({ plan, set }) => ({
         label: plan.label,
         linked_from: String(decision.label ?? ''),
         acts_on: [...plan.actsOn.map((a) => a.label), ...plan.newActsOn.map((a) => a.label)],
@@ -3788,15 +3932,21 @@ export function createAgentCapabilities(
       return {
         ok: true, mutated: false,
         proposal_id: ref,
-        public_label: typeof heldChip!.label === 'string' && heldChip!.label.trim() !== '' ? heldChip!.label : plans[0]!.plan.publicLabel,
+        public_label: typeof heldChip!.label === 'string' && heldChip!.label.trim() !== '' ? heldChip!.label : kept[0]!.plan.publicLabel,
         held_message: typeof heldChip!.message === 'string' ? heldChip!.message : '',
         base_revision: g.graph_hash,
         ...(described.length === 1
           ? { option: { label: described[0]!.label, linked_from: described[0]!.linked_from, acts_on: described[0]!.acts_on }, levels: described[0]!.levels }
           : { options: described }),
-        ...(levelsNotSet.length > 0 ? { levels_not_set: levelsNotSet } : {}),
-        ...(newFactors.length > 0 ? {
-          new_factors: newFactors.map((f) => ({
+        ...(levelsNotSet.some((l) => labels.includes(l.option)) ? { levels_not_set: levelsNotSet.filter((l) => labels.includes(l.option)) } : {}),
+        ...(notAdded.length > 0 ? {
+          not_added: notAdded,
+          not_added_note: `${notAdded.map((n) => `"${n.option}" is NOT in this change: it would set exactly the same levels as "${n.same_levels_as}", so the analysis could not tell the two apart`).join('; ')}. `
+            + 'Say that in one line, and ask the user what makes it different (for example, a factor it changes that the other does not). '
+            + 'Never promise to add it later: it is added only by a new proposal the user approves.',
+        } : {}),
+        ...(keptFactors.length > 0 ? {
+          new_factors: keptFactors.map((f) => ({
             label: f.label,
             changes: f.affects.map((a) => `${a.label} (${a.effect_direction === 'positive' ? 'raises it' : 'lowers it'})`),
             how_strongly: 'Olumi\u2019s estimate, for the user to correct',

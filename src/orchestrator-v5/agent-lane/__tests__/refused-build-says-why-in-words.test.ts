@@ -28,8 +28,16 @@ describe('a refused build says why, in words, with a next step', () => {
     });
   }
 
-  it('CONTRAST: a code nobody has worded still falls back to the honest raw code, never to silence', () => {
-    expect(said('some_new_refusal')).toContain('it was refused (some_new_refusal)');
+  /**
+   * Was "still falls back to the honest raw code". A code is the Agent's, never the user's
+   * (fix/agent-never-shows-instructions-or-codes): an unworded code now reads as one plain sentence with a next
+   * step — still never silence, and still "not built".
+   */
+  it('CONTRAST: a code nobody has worded falls back to a plain sentence with a next step — never to silence, never to the code', () => {
+    const text = said('some_new_refusal');
+    expect(text).toContain('The model was not built');
+    expect(text, text).not.toMatch(/some_new_refusal|some new refusal|refused \(/);
+    expect(text).toMatch(/ask me to try again/i);
   });
 });
 
