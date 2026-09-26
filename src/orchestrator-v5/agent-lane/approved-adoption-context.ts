@@ -85,11 +85,19 @@ export interface ApprovedLevelAdoption {
 /** Olumi's own level, adopted: the contract's model-authored member. */
 export const APPROVED_LEVEL_ADOPTION_SOURCE = 'cee_hypothesis' as const;
 
-const levelStore = new AsyncLocalStorage<ApprovedLevelAdoption>();
+const levelStore = new AsyncLocalStorage<readonly ApprovedLevelAdoption[]>();
 
 /** Run ONE verified approved level write inside its adoption identity. */
 export function runWithApprovedLevelAdoption<T>(adoption: ApprovedLevelAdoption, fn: () => Promise<T>): Promise<T> {
-  return levelStore.run(adoption, fn);
+  return levelStore.run([adoption], fn);
+}
+
+/**
+ * Run ONE verified approved BATCH (one user operation → one commit) inside the adoption identity of every
+ * Olumi-proposed level it carries. Each cell is still stamped only when it matches one of them exactly.
+ */
+export function runWithApprovedLevelAdoptions<T>(adoptions: readonly ApprovedLevelAdoption[], fn: () => Promise<T>): Promise<T> {
+  return levelStore.run([...adoptions], fn);
 }
 
 /**
@@ -102,9 +110,9 @@ export function approvedLevelSourceFor(
   factorId: string,
   modelValue: unknown,
 ): typeof APPROVED_LEVEL_ADOPTION_SOURCE | undefined {
-  const a = levelStore.getStore();
-  if (a === undefined) return undefined;
-  if (a.scenarioId !== scenarioId || a.optionId !== optionId || a.factorId !== factorId) return undefined;
-  if (typeof modelValue !== 'number' || !Number.isFinite(modelValue) || modelValue !== a.modelValue) return undefined;
-  return APPROVED_LEVEL_ADOPTION_SOURCE;
+  const adoptions = levelStore.getStore();
+  if (adoptions === undefined) return undefined;
+  if (typeof modelValue !== 'number' || !Number.isFinite(modelValue)) return undefined;
+  return adoptions.some(a => a.scenarioId === scenarioId && a.optionId === optionId && a.factorId === factorId
+    && a.modelValue === modelValue) ? APPROVED_LEVEL_ADOPTION_SOURCE : undefined;
 }

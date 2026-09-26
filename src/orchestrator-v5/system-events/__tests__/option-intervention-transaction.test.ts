@@ -11,7 +11,7 @@ import type {
   AtomicCommittedModelVersionReceipt, SessionStore, SessionTurnWrite,
 } from '../../session/store.js';
 import type { PendingAction } from '../../session/pending-action.js';
-import { applyOptionInterventionEdit, executeOptionInterventionEdit } from '../option-intervention-edit.js';
+import { applyOptionInterventionEdit, executeOptionInterventionBatch, executeOptionInterventionEdit } from '../option-intervention-edit.js';
 import { runWithApprovedLevelAdoption } from '../../agent-lane/approved-adoption-context.js';
 
 const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -908,5 +908,76 @@ describe('a level brings its link — the real commit (DL #70 5847137399: ONE at
       other_factor: { value: 0.4, source: 'user_specified', target_match: { node_id: 'other_factor' } },
     });
     expect(result.response.assistant_text).toContain('is now linked to');
+  });
+});
+
+describe('ONE user operation → ONE atomic commit, for a WHOLE approved batch (ChatGPT #70 5847200462, BF5\'s two levels)', () => {
+  function unlinkedOtherFactor() {
+    const g = clone(canonicalGraph());
+    g.edges = g.edges.filter(e => !(e.from === 'option' && e.to === 'other_factor'));
+    delete (g.nodes.find(n => n.id === 'option')!.interventions as Record<string, unknown>).other_factor;
+    return projectGraphForPersistence(g) as ReturnType<typeof canonicalGraph>;
+  }
+  const batchFor = (g: ReturnType<typeof canonicalGraph>, targets: { optionId: string; factorId: string; modelValue: number }[]) => {
+    const { optionId: _o, factorId: _f, modelValue: _v, ...common } = inputFor(g);
+    return { ...common, targets };
+  };
+
+  it('RED: two levels — one needing its link — land as ONE durable row, ONE fact, ONE read-back; reload agrees', async () => {
+    const seeded = unlinkedOtherFactor();
+    const persistence = jsonStore(seeded);
+    const result = await executeOptionInterventionBatch(batchFor(seeded, [
+      { optionId: 'option', factorId: 'factor', modelValue: 0.3 },
+      { optionId: 'option', factorId: 'other_factor', modelValue: 0.4 },
+    ]), persistence.fresh());
+    expect(result.kind, JSON.stringify(result)).toBe('committed');
+    if (result.kind !== 'committed') return;
+    expect(persistence.attempts).toHaveLength(1);
+    expect(persistence.durableRows()).toHaveLength(1);
+    expect(persistence.durableRows()[0]!.handler_facts).toHaveLength(1);
+    expect(persistence.durableRows()[0]!.handler_facts[0]).toMatchObject({ result: { status: 'applied', operations_count: 3 } });
+    const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
+    expect(result.graph).toEqual(cold);
+    expect(cold.edges.filter(e => e.from === 'option' && e.to === 'other_factor')).toHaveLength(1);
+    expect(cold.nodes.find(n => n.id === 'option')!.interventions).toMatchObject({
+      factor: { value: 0.3, source: 'user_specified' }, other_factor: { value: 0.4, source: 'user_specified' },
+    });
+    expect(result.response.assistant_text).toContain('is now linked to');
+  });
+
+  it('RED: the SECOND level refused → NOTHING committed — no attempt, no row, the first level and the link not written', async () => {
+    const seeded = unlinkedOtherFactor();
+    const pristine = clone(seeded);
+    const persistence = jsonStore(seeded);
+    const result = await executeOptionInterventionBatch(batchFor(seeded, [
+      { optionId: 'option', factorId: 'factor', modelValue: 0.3 },
+      { optionId: 'option', factorId: 'other_factor', modelValue: 1.5 },
+    ]), persistence.fresh());
+    expect(result).toEqual({ kind: 'refused', reason: 'invalid_model_value', index: 1 });
+    expect(persistence.attempts).toHaveLength(0);
+    expect(persistence.durableRows()).toHaveLength(0);
+    expect(await persistence.fresh().loadGraph(SCENARIO_ID)).toEqual(pristine);
+  });
+
+  it('RED: a retry of the committed batch writes NOTHING more — a verified no-op — and reload still holds both levels', async () => {
+    const seeded = unlinkedOtherFactor();
+    const persistence = jsonStore(seeded);
+    const targets = [{ optionId: 'option', factorId: 'factor', modelValue: 0.3 }, { optionId: 'option', factorId: 'other_factor', modelValue: 0.4 }];
+    expect((await executeOptionInterventionBatch(batchFor(seeded, targets), persistence.fresh())).kind).toBe('committed');
+    const now = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID)) as ReturnType<typeof canonicalGraph>;
+    const retry = await executeOptionInterventionBatch(batchFor(now, targets), persistence.fresh());
+    expect(retry).toEqual({ kind: 'unchanged' });
+    expect(persistence.durableRows()).toHaveLength(1);
+  });
+
+  it('a duplicate pair in one batch is refused before anything is prepared', async () => {
+    const seeded = unlinkedOtherFactor();
+    const persistence = jsonStore(seeded);
+    const result = await executeOptionInterventionBatch(batchFor(seeded, [
+      { optionId: 'option', factorId: 'factor', modelValue: 0.3 },
+      { optionId: 'option', factorId: 'factor', modelValue: 0.35 },
+    ]), persistence.fresh());
+    expect(result).toEqual({ kind: 'refused', reason: 'duplicate_target' });
+    expect(persistence.attempts).toHaveLength(0);
   });
 });

@@ -53,7 +53,9 @@ import {
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getSessionStore } from '../session/index.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
-import { executeOptionInterventionEdit } from './option-intervention-edit.js';
+import { executeOptionInterventionBatch, executeOptionInterventionEdit } from './option-intervention-edit.js';
+import { modelVersionMutationReceiptFromResponse } from '../model-management/mutation-receipt.js';
+import { runWithApprovedLevelAdoptions } from '../agent-lane/approved-adoption-context.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
@@ -229,6 +231,8 @@ export interface DispatchSystemEventResult {
   readonly response: OlumiResponse;
   readonly commitPerformed: boolean;
   readonly commitSkippedReason?: SystemEventCommitSkipReason;
+  /** A refused option-level batch: why, and which target (all or nothing — nothing was written). */
+  readonly refusal?: { readonly reason: string; readonly index?: number };
   /**
    * V5 finaliser contract — system event readiness, by event kind:
    *
@@ -2733,6 +2737,29 @@ async function dispatchOptionInterventionEdit(
   event: Extract<SystemEventTurnPayload['event'], { kind: 'option_intervention_edit' }>,
   requestId: string,
 ): Promise<DispatchSystemEventResult> {
+  return dispatchOptionLevelsBatch(payload, {
+    targets: [{ optionId: event.option_id, factorId: event.factor_id, modelValue: event.value }],
+    base_graph_hash: event.base_graph_hash,
+  }, requestId);
+}
+
+/**
+ * ⭐ ONE USER OPERATION → ONE ATOMIC COMMIT for a WHOLE approved batch of option levels (ChatGPT #70 5847200462,
+ * Runtime 5847274522). The single `option_intervention_edit` event is this with one target. The Agent reaches a
+ * batch IN-PROCESS (`commitOptionLevelsInProcess`) — no wire member is added (`SystemEventSchema` is `.strict()`).
+ * All or nothing: a refused target commits NOTHING (`refusal.index` names it).
+ */
+export async function dispatchOptionLevelsBatch(
+  payload: SystemEventTurnPayload,
+  batch: {
+    readonly targets: readonly { readonly optionId: string; readonly factorId: string; readonly modelValue: number }[];
+    readonly base_graph_hash: string;
+    /** The links the approved proposal declared (`from::to`); a different set writes nothing. */
+    readonly expectedLinks?: readonly string[];
+  },
+  requestId: string,
+): Promise<DispatchSystemEventResult> {
+  const eventKind = batch.targets.length === 1 ? 'option_intervention_edit' : 'option_levels_batch';
   let priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>;
   try {
     priorFactsRead = await loadPriorFactsWithReadState(payload.scenario_id, requestId);
@@ -2742,7 +2769,7 @@ async function dispatchOptionInterventionEdit(
     log.error(
       {
         request_id: requestId,
-        event_kind: event.kind,
+        event_kind: eventKind,
         scenario_id: payload.scenario_id,
         err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
       },
@@ -2753,27 +2780,29 @@ async function dispatchOptionInterventionEdit(
 
   const freshness: FrameFreshness =
     priorFactsRead.status === 'ok'
-      ? deriveAnalysisFreshness(priorFactsRead.facts, event.base_graph_hash).freshness
+      ? deriveAnalysisFreshness(priorFactsRead.facts, batch.base_graph_hash).freshness
       : 'unknown';
   const hasExistingAnalysis =
     priorFactsRead.status === 'ok' && priorFactsRead.facts.some(isSuccessfulRunAnalysisFact);
 
-  const outcome = await executeOptionInterventionEdit(
-    {
-      optionId: event.option_id,
-      factorId: event.factor_id,
-      modelValue: event.value,
-      expectedGraphHash: event.base_graph_hash,
-      scenarioId: payload.scenario_id,
-      turnId: payload.turn_id,
-      requestId,
-      stage: payload.stage,
-      requestHash: computeRequestHash(payload),
-      freshness,
-      hasExistingAnalysis,
-    },
-    getSessionStore(),
-  );
+  const common = {
+    expectedGraphHash: batch.base_graph_hash,
+    scenarioId: payload.scenario_id,
+    turnId: payload.turn_id,
+    requestId,
+    stage: payload.stage,
+    requestHash: computeRequestHash(payload),
+    freshness,
+    hasExistingAnalysis,
+  };
+  // The single event keeps its own entry (itself the one-target form of the batch core); a batch — or a single
+  // level whose approved links are declared — goes through the batch entry.
+  const only = batch.targets.length === 1 && batch.expectedLinks === undefined ? batch.targets[0]! : undefined;
+  const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
+    ? await executeOptionInterventionEdit({ ...common, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue },
+      getSessionStore())
+    : await executeOptionInterventionBatch({ ...common, targets: batch.targets,
+      ...(batch.expectedLinks !== undefined ? { expectedLinks: batch.expectedLinks } : {}) }, getSessionStore());
 
   if (outcome.kind === 'committed') {
     // ⚠ THE GRAPH FIELD IS A VALIDATED VIEW, AND IT IS NOT THE AUTHORITY.
@@ -2823,10 +2852,9 @@ async function dispatchOptionInterventionEdit(
     log.info(
       {
         request_id: requestId,
-        event_kind: event.kind,
+        event_kind: eventKind,
         scenario_id: payload.scenario_id,
-        option_id: event.option_id,
-        factor_id: event.factor_id,
+        targets: batch.targets,
         persisted_row_id: outcome.persistedRowId,
         freshness_after_commit: freshnessAfterCommit.freshness,
         committed_graph_parsed: committedParse.success,
@@ -2899,10 +2927,9 @@ async function dispatchOptionInterventionEdit(
     log.info(
       {
         request_id: requestId,
-        event_kind: event.kind,
+        event_kind: eventKind,
         scenario_id: payload.scenario_id,
-        option_id: event.option_id,
-        factor_id: event.factor_id,
+        targets: batch.targets,
       },
       'V5 option_intervention_edit — verified no-op: the model already holds this value',
     );
@@ -2924,11 +2951,10 @@ async function dispatchOptionInterventionEdit(
       log.warn(
         {
           request_id: requestId,
-          event_kind: event.kind,
+          event_kind: eventKind,
           scenario_id: payload.scenario_id,
-          option_id: event.option_id,
-          factor_id: event.factor_id,
-          client_base_graph_hash: event.base_graph_hash,
+          targets: batch.targets,
+          client_base_graph_hash: batch.base_graph_hash,
           expected_base_graph_hash: expectedBaseGraphHash,
         },
         'V5 option_intervention_edit — stale base: refusing with refresh-and-reconfirm',
@@ -2951,10 +2977,9 @@ async function dispatchOptionInterventionEdit(
     log.warn(
       {
         request_id: requestId,
-        event_kind: event.kind,
+        event_kind: eventKind,
         scenario_id: payload.scenario_id,
-        option_id: event.option_id,
-        factor_id: event.factor_id,
+        targets: batch.targets,
         refusal_reason: outcome.reason,
       },
       'V5 option_intervention_edit — refused, nothing written',
@@ -2963,6 +2988,7 @@ async function dispatchOptionInterventionEdit(
       response: buildAcknowledgementResponse(payload),
       commitPerformed: false,
       commitSkippedReason: 'refused_no_write',
+      refusal: { reason: outcome.reason, ...(outcome.index !== undefined ? { index: outcome.index } : {}) },
       graph: null,
     };
   }
@@ -2975,16 +3001,80 @@ async function dispatchOptionInterventionEdit(
   log.error(
     {
       request_id: requestId,
-      event_kind: event.kind,
+      event_kind: eventKind,
       scenario_id: payload.scenario_id,
-      option_id: event.option_id,
-      factor_id: event.factor_id,
+      targets: batch.targets,
       reason: outcome.reason,
       commit_attempted: outcome.commitAttempted,
     },
     'V5 option_intervention_edit — UNVERIFIED: no success claimed and no rollback asserted',
   );
   return { response: buildAcknowledgementResponse(payload), commitPerformed: false, graph: null };
+}
+
+/** The Agent's whole-request level write (Runtime #70 5847356444): links and levels, ONE commit. */
+export type CommitOptionLevelsInput = {
+  readonly scenario_id: string;
+  /** The proposal's base; a mismatch is `stale`, and nothing is written. */
+  readonly base_graph_hash: string;
+  /** `authorisationTurnId(proposal_id)`: the idempotency key. */
+  readonly turn_id: string;
+  /** The links the approved proposal declared. They must EQUAL the ones its levels need (`links_mismatch` otherwise). */
+  readonly links: readonly { readonly option_id: string; readonly factor_id: string }[];
+  readonly levels: readonly {
+    readonly option_id: string;
+    readonly factor_id: string;
+    /** Model scale (the proposal's `normalised`). */
+    readonly value: number;
+    /** Whose level: an Olumi level is stamped through the server-side adoption authority, never from this string alone. */
+    readonly author: 'user_specified' | 'model_proposed';
+  }[];
+};
+export type CommitOptionLevelsResult =
+  | { readonly status: 'committed'; readonly graph_hash: string;
+      readonly receipt: { readonly version: number; readonly version_id: string; readonly mutation_id: string; readonly source_turn_id: string | null } | null;
+      /** A verified no-op: the model already held every level (a retry). Nothing written; `receipt` is null. */
+      readonly already_applied: boolean }
+  | { readonly status: 'stale' }
+  | { readonly status: 'refused'; readonly reason: string; readonly pair?: { readonly option_id: string; readonly factor_id: string } }
+  /** The commit was attempted and could not be read back: say it could not be confirmed, never "not saved". */
+  | { readonly status: 'unconfirmed' };
+
+/**
+ * The Agent's IN-PROCESS door to `dispatchOptionLevelsBatch`: one approved batch of levels (and the links they need)
+ * as ONE atomic commit, all or nothing. The caller is an already-authorised, scenario-owning request (the Agent
+ * route's ownership pre-flight); this grants nothing new, and adds no wire member.
+ */
+export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput, requestId: string): Promise<CommitOptionLevelsResult> {
+  const targets = input.levels.map(l => ({ optionId: l.option_id, factorId: l.factor_id, modelValue: l.value }));
+  // Olumi's levels are stamped by the SAME server-side authority the single write uses — one adoption per level.
+  const adoptions = input.levels.filter(l => l.author === 'model_proposed').map(l => ({
+    scenarioId: input.scenario_id, proposalId: input.turn_id, optionId: l.option_id, factorId: l.factor_id, modelValue: l.value }));
+  // Hashed like any turn payload: the request digest covers every target and the base revision.
+  const payload = { kind: 'system_event', scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame',
+    event: { kind: 'option_levels_batch', links: input.links, levels: input.levels, base_graph_hash: input.base_graph_hash } } as unknown as SystemEventTurnPayload;
+  const r = await runWithApprovedLevelAdoptions(adoptions, () => dispatchOptionLevelsBatch(payload, {
+    targets, base_graph_hash: input.base_graph_hash, expectedLinks: input.links.map(l => `${l.option_id}::${l.factor_id}`),
+  }, requestId));
+  if (r.graphConflict !== undefined) return { status: 'stale' };
+  if (r.commitSkippedReason === 'refused_no_write') {
+    const at = r.refusal?.index !== undefined ? input.levels[r.refusal.index] : undefined;
+    return { status: 'refused', reason: r.refusal?.reason ?? 'refused',
+      ...(at !== undefined ? { pair: { option_id: at.option_id, factor_id: at.factor_id } } : {}) };
+  }
+  if (r.commitSkippedReason === 'verified_no_op') {
+    return { status: 'committed', graph_hash: input.base_graph_hash, receipt: null, already_applied: true };
+  }
+  const graphHash = (r.response as { graph_hash?: unknown }).graph_hash;
+  if (!r.commitPerformed || typeof graphHash !== 'string' || graphHash.length === 0) return { status: 'unconfirmed' };
+  let receipt: Extract<CommitOptionLevelsResult, { status: 'committed' }>['receipt'] = null;
+  try {
+    const m = modelVersionMutationReceiptFromResponse(r.response);
+    receipt = m === null ? null : { version: m.sequence, version_id: m.version_id, mutation_id: m.mutation_id, source_turn_id: m.source_turn_id };
+  } catch {
+    receipt = null;
+  }
+  return { status: 'committed', graph_hash: graphHash, receipt, already_applied: false };
 }
 
 async function dispatchStructuralRename(

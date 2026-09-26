@@ -115,6 +115,9 @@ function isEditableGraph(value: unknown): value is EditableGraph {
     && GraphV3.passthrough().safeParse(floorGraphSigmaForCompute(value).graph).success;
 }
 
+/** One (option, factor) level this commit writes, with the cell's stamp when it is not the user's own. */
+export type OptionLevelTarget = Pick<OptionInterventionEditInput, 'optionId' | 'factorId' | 'modelValue' | 'source'>;
+
 /**
  * Compare to the original persisted bytes, not two independently normalised
  * graphs. Only the selected cell and its existing canonical mirror may change.
@@ -123,50 +126,72 @@ function isEditableGraph(value: unknown): value is EditableGraph {
 export function optionInterventionPostimageIsScoped(
   before: unknown,
   after: unknown,
-  target: Pick<OptionInterventionEditInput, 'optionId' | 'factorId' | 'modelValue' | 'source'>,
+  target: OptionLevelTarget,
   /** The ONE option → factor topology link this same commit adds (a level brings its link); nothing else may add it. */
   addedLink?: { readonly from: string; readonly to: string },
 ): boolean {
+  return optionInterventionBatchPostimageIsScoped(before, after, [target], addedLink !== undefined ? [addedLink] : []);
+}
+
+/**
+ * ⭐ THE SAME GUARD FOR A WHOLE APPROVED BATCH (one user operation → ONE commit, ChatGPT #70 5847200462): every
+ * selected cell, each declared option → factor link and the options mirror may change — nothing else, and no cell
+ * or link the batch did not declare.
+ */
+export function optionInterventionBatchPostimageIsScoped(
+  before: unknown,
+  after: unknown,
+  targets: readonly OptionLevelTarget[],
+  addedLinks: readonly { readonly from: string; readonly to: string }[] = [],
+): boolean {
   if (!isEditableGraph(before) || !isEditableGraph(after)) return false;
   if (!isDeepStrictEqual(projectGraphForPersistence(before), before)) return false;
-  const oldNodes = before.nodes.filter(node => node.id === target.optionId);
-  const newNodes = after.nodes.filter(node => node.id === target.optionId);
-  if (oldNodes.length !== 1 || newNodes.length !== 1) return false;
-  const oldNode = oldNodes[0]!;
-  const newNode = newNodes[0]!;
-  const entry = InterventionV3.safeParse(newNode.interventions?.[target.factorId]);
-  if (!entry.success || entry.data.value !== target.modelValue
-    || entry.data.source !== (target.source ?? 'user_specified') || entry.data.target_match.node_id !== target.factorId) return false;
-
+  if (targets.length === 0 || new Set(targets.map(t => `${t.optionId}::${t.factorId}`)).size !== targets.length) return false;
   const restored = structuredClone(after);
-  const restoredNode = restored.nodes.find(node => node.id === target.optionId)!;
-  if (oldNode.interventions === undefined) {
-    // A new container may contain this one cell, not unrelated invented cells.
-    if (Object.keys(restoredNode.interventions ?? {}).length !== 1) return false;
-    delete restoredNode.interventions;
-  } else if (Object.hasOwn(oldNode.interventions, target.factorId)) {
-    restoredNode.interventions![target.factorId] = structuredClone(oldNode.interventions[target.factorId]);
-  } else {
-    delete restoredNode.interventions![target.factorId];
-  }
-  if (addedLink !== undefined) {
-    // Exactly one new edge for exactly this pair, absent before, with the topology constants and the level's source.
-    const isLink = (e: { from: string; to: string }) => e.from === addedLink.from && e.to === addedLink.to;
-    const added = restored.edges.filter(isLink);
-    const link = added[0] as (typeof added)[number] & { provenance?: { source?: unknown } } | undefined;
-    if (before.edges.some(isLink) || added.length !== 1 || link === undefined
-      || link.strength.mean !== STRUCTURAL_EDGE_DEFAULTS.strength.mean
-      || link.exists_probability !== STRUCTURAL_EDGE_DEFAULTS.exists_probability
-      || link.provenance?.source !== (target.source ?? 'user_specified')) return false;
-    restored.edges = restored.edges.filter(e => !isLink(e));
-  }
-
   // Derive the options[] mirror through its existing owner, never a copied
   // list of status/raw-intervention/provenance reconciliation rules.
   const specimen = structuredClone(before);
-  const specimenNode = specimen.nodes.find(node => node.id === target.optionId)!;
-  specimenNode.interventions = { ...specimenNode.interventions,
-    [target.factorId]: structuredClone(newNode.interventions![target.factorId]) };
+  const newContainers = new Set<string>();
+  for (const target of targets) {
+    const oldNodes = before.nodes.filter(node => node.id === target.optionId);
+    const newNodes = after.nodes.filter(node => node.id === target.optionId);
+    if (oldNodes.length !== 1 || newNodes.length !== 1) return false;
+    const oldNode = oldNodes[0]!;
+    const newNode = newNodes[0]!;
+    const entry = InterventionV3.safeParse(newNode.interventions?.[target.factorId]);
+    if (!entry.success || entry.data.value !== target.modelValue
+      || entry.data.source !== (target.source ?? 'user_specified') || entry.data.target_match.node_id !== target.factorId) return false;
+    const restoredNode = restored.nodes.find(node => node.id === target.optionId)!;
+    if (oldNode.interventions === undefined) {
+      // A new container may hold only this batch's cells, never unrelated invented cells (checked once all are removed).
+      newContainers.add(target.optionId);
+      delete restoredNode.interventions![target.factorId];
+    } else if (Object.hasOwn(oldNode.interventions, target.factorId)) {
+      restoredNode.interventions![target.factorId] = structuredClone(oldNode.interventions[target.factorId]);
+    } else {
+      delete restoredNode.interventions![target.factorId];
+    }
+    const specimenNode = specimen.nodes.find(node => node.id === target.optionId)!;
+    specimenNode.interventions = { ...specimenNode.interventions,
+      [target.factorId]: structuredClone(newNode.interventions![target.factorId]) };
+  }
+  for (const optionId of newContainers) {
+    const restoredNode = restored.nodes.find(node => node.id === optionId)!;
+    if (Object.keys(restoredNode.interventions ?? {}).length !== 0) return false;
+    delete restoredNode.interventions;
+  }
+  for (const addedLink of addedLinks) {
+    // Exactly one new edge for exactly a declared pair, absent before, with the topology constants and its level's source.
+    const owner = targets.find(t => t.optionId === addedLink.from && t.factorId === addedLink.to);
+    const isLink = (e: { from: string; to: string }) => e.from === addedLink.from && e.to === addedLink.to;
+    const added = restored.edges.filter(isLink);
+    const link = added[0] as (typeof added)[number] & { provenance?: { source?: unknown } } | undefined;
+    if (owner === undefined || before.edges.some(isLink) || added.length !== 1 || link === undefined
+      || link.strength.mean !== STRUCTURAL_EDGE_DEFAULTS.strength.mean
+      || link.exists_probability !== STRUCTURAL_EDGE_DEFAULTS.exists_probability
+      || link.provenance?.source !== (owner.source ?? 'user_specified')) return false;
+    restored.edges = restored.edges.filter(e => !isLink(e));
+  }
   const expectedMirror = reconcileTopLevelOptionsFromNodes(specimen);
   if (!isDeepStrictEqual(after.options, expectedMirror.options)) return false;
   if (Object.hasOwn(before, 'options')) restored.options = structuredClone(before.options);
@@ -180,51 +205,93 @@ export type OptionInterventionCandidate = {
   readonly operations: PatchOperation[];
   readonly handlerFact: NonNullable<ReturnType<typeof buildEditGraphHandlerFact>>;
   readonly analysisGraphHash: string;
-  /** This commit also added the option → factor link the level needs. */
+  /** This commit also added the option → factor link(s) the level(s) need. */
   readonly linkAdded: boolean;
+  readonly linksAdded: number;
+  /** The targets this commit writes (a target the model already holds exactly is left out). */
+  readonly targetsWritten: readonly OptionLevelTarget[];
 };
+
+/** The whole approved batch: N levels on existing options, against ONE base revision. */
+export type OptionInterventionBatchTransactionInput =
+  Omit<OptionInterventionTransactionInput, 'optionId' | 'factorId' | 'modelValue' | 'source'> & {
+    readonly targets: readonly OptionLevelTarget[];
+  };
 
 /** Existing edit machinery prepares the candidate; this function does no I/O. */
 export function applyOptionInterventionEdit(input: OptionInterventionTransactionInput):
   | OptionInterventionCandidate
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly reason: string } {
-  const prepared = prepareOptionInterventionEdit(input);
-  if (prepared.kind !== 'prepared') return prepared;
-  const refuse = (reason: string) => ({ kind: 'refused' as const, reason });
+  const { optionId, factorId, modelValue, source, ...rest } = input;
+  const result = applyOptionInterventionBatch({ ...rest,
+    targets: [{ optionId, factorId, modelValue, ...(source !== undefined ? { source } : {}) }] });
+  return result.kind === 'refused' ? { kind: 'refused', reason: result.reason } : result;
+}
+
+/**
+ * ⭐ ONE USER OPERATION → ONE ATOMIC COMMIT (ChatGPT #70 5847200462, Runtime 5847274522). N levels — each with the
+ * option → factor link it needs — prepared against ONE base revision and written as ONE validate → referee → apply →
+ * scope-guard candidate. ALL OR NOTHING: any target refused refuses the whole batch (`index` names it), so no half of
+ * an approved request is ever committed. No I/O.
+ */
+export function applyOptionInterventionBatch(input: OptionInterventionBatchTransactionInput):
+  | OptionInterventionCandidate
+  | { readonly kind: 'unchanged' }
+  | { readonly kind: 'refused'; readonly reason: string; readonly index?: number } {
+  const refuse = (reason: string, index?: number) => ({ kind: 'refused' as const, reason, ...(index !== undefined ? { index } : {}) });
+  if (input.targets.length === 0) return refuse('no_targets');
+  if (new Set(input.targets.map(t => `${t.optionId}::${t.factorId}`)).size !== input.targets.length) return refuse('duplicate_target');
+  const written: OptionLevelTarget[] = [];
+  const levelOps: Record<string, unknown>[] = [];
+  const linkOps: { readonly operation: Record<string, unknown>; readonly target: OptionLevelTarget }[] = [];
+  for (let i = 0; i < input.targets.length; i += 1) {
+    const target = input.targets[i]!;
+    const prepared = prepareOptionInterventionEdit({ persistedGraph: input.persistedGraph,
+      optionId: target.optionId, factorId: target.factorId, modelValue: target.modelValue,
+      expectedGraphHash: input.expectedGraphHash, ...(target.source !== undefined ? { source: target.source } : {}) });
+    if (prepared.kind === 'refused') return refuse(prepared.reason, i);
+    if (prepared.kind === 'unchanged') continue;
+    written.push(target);
+    levelOps.push(prepared.operation);
+    if (prepared.linkOperation !== undefined) linkOps.push({ operation: prepared.linkOperation, target });
+  }
+  if (written.length === 0) return { kind: 'unchanged' };
   const before = input.persistedGraph;
   if (!isEditableGraph(before)) return refuse('canonical_graph_unavailable');
   if (!isDeepStrictEqual(projectGraphForPersistence(before), before)) {
     return refuse('unrelated_canonical_repair_required');
   }
   try {
-    // ⭐ A level brings its link: the link FIRST, then the level, in this ONE validate → apply → commit.
-    const rawOps = prepared.linkOperation !== undefined ? [prepared.linkOperation, prepared.operation] : [prepared.operation];
+    // ⭐ A level brings its link: every link FIRST, then every level, in this ONE validate → apply → commit.
+    const rawOps = [...linkOps.map(l => l.operation), ...levelOps];
     const raw = parseEditGraphResponse(JSON.stringify({ operations: rawOps,
       removed_edges: [], warnings: [], coaching: null })).operations;
     const validated = validatePatchOperations(raw, before);
     if (!validated.valid || validated.operations.length !== rawOps.length) return refuse('operation_invalid');
     const operations = validated.operations;
-    // The link, when present, is exactly one leading `add_edge` for exactly this pair. It is NOT refereed: it is the
-    // topology link the level implies (the product's own link writer, `structural_add_edge`, is not refereed either),
-    // and `optionInterventionPostimageIsScoped` below pins it to one topology edge with the level's source.
-    if (prepared.linkOperation !== undefined
-      && (operations[0]?.op !== 'add_edge' || operations[0]?.path !== `${input.optionId}::${input.factorId}`)) return refuse('operation_invalid');
-    const levelOperations = prepared.linkOperation !== undefined ? operations.slice(1) : operations;
+    // The links are exactly the leading `add_edge`s, one per declared pair. They are NOT refereed: each is the
+    // topology link its level implies (the product's own link writer, `structural_add_edge`, is not refereed either),
+    // and `optionInterventionBatchPostimageIsScoped` below pins each to one topology edge with its level's source.
+    for (let i = 0; i < linkOps.length; i += 1) {
+      const t = linkOps[i]!.target;
+      if (operations[i]?.op !== 'add_edge' || operations[i]?.path !== `${t.optionId}::${t.factorId}`) return refuse('operation_invalid');
+    }
+    const levelOperations = operations.slice(linkOps.length);
     const decision = evaluateEditGraphMutations({ mode: 'live', operations: levelOperations,
       currentGraph: before, currentGraphHash: input.expectedGraphHash,
       baseGraphHash: input.expectedGraphHash, freshness: input.freshness,
       scenarioId: input.scenarioId, turnId: input.turnId, requestId: input.requestId });
     if (decision.blockApply || decision.governing !== 'proceed') return refuse(`mutation_${decision.governing}`);
     const applied = applyPatchOperations(before, operations);
-    const encoded = encodeOptionInterventionsForEdit(applied, new Set([input.optionId]));
+    const encoded = encodeOptionInterventionsForEdit(applied, new Set(written.map(t => t.optionId)));
     if (encoded.unresolvedOptionIds.length > 0) return refuse('intervention_encoding_unavailable');
     const graph = projectGraphForPersistence(mergeAppliedGraphForPersistence({
       appliedGraph: encoded.graph, persistedBase: before, ingressBase: before,
       scenarioId: input.scenarioId, requestId: input.requestId,
     }));
-    const addedLink = prepared.linkOperation !== undefined ? { from: input.optionId, to: input.factorId } : undefined;
-    if (!isEditableGraph(graph) || !optionInterventionPostimageIsScoped(before, graph, input, addedLink)) {
+    const addedLinks = linkOps.map(l => ({ from: l.target.optionId, to: l.target.factorId }));
+    if (!isEditableGraph(graph) || !optionInterventionBatchPostimageIsScoped(before, graph, written, addedLinks)) {
       return refuse('mutation_scope_mismatch');
     }
     const analysisGraphHash = computeAnalysisAffectingGraphHash(graph);
@@ -236,7 +303,8 @@ export function applyOptionInterventionEdit(input: OptionInterventionTransaction
       preEditGraph: before, hasExistingAnalysis: input.hasExistingAnalysis,
     });
     if (handlerFact === null) return refuse('mutation_fact_unavailable');
-    return { kind: 'candidate', graph, operations, handlerFact, analysisGraphHash, linkAdded: addedLink !== undefined };
+    return { kind: 'candidate', graph, operations, handlerFact, analysisGraphHash,
+      linkAdded: linkOps.length > 0, linksAdded: linkOps.length, targetsWritten: written };
   } catch {
     return refuse('mutation_preparation_failed');
   }
@@ -261,6 +329,33 @@ export async function executeOptionInterventionEdit(input: OptionInterventionExe
   | { readonly kind: 'refused'; readonly reason: string }
   | { readonly kind: 'unverified'; readonly reason: string; readonly commitAttempted: boolean }
 > {
+  const { optionId, factorId, modelValue, ...rest } = input;
+  const outcome = await executeOptionInterventionBatch({ ...rest, targets: [{ optionId, factorId, modelValue }] }, store);
+  return outcome.kind === 'refused' ? { kind: 'refused', reason: outcome.reason } : outcome;
+}
+
+/** The whole approved batch; each cell's stamp is derived server-side, never taken from the caller. */
+export type OptionInterventionBatchExecutionInput =
+  Omit<OptionInterventionExecutionInput, 'optionId' | 'factorId' | 'modelValue'> & {
+    readonly targets: readonly Pick<OptionLevelTarget, 'optionId' | 'factorId' | 'modelValue'>[];
+    /**
+     * The links the APPROVED proposal declared (`from::to`). When given, the links this commit would add must be
+     * exactly these, or nothing is written (`links_mismatch`): what was approved is what is written.
+     */
+    readonly expectedLinks?: readonly string[];
+  };
+
+/**
+ * ⭐ N levels (and the links they need) as ONE commit: one append, one handler fact, one read-back, one receipt.
+ * All or nothing — a refused target commits NOTHING — and a retry on the same turn id is the store's replay.
+ */
+export async function executeOptionInterventionBatch(input: OptionInterventionBatchExecutionInput, store: OptionInterventionStore): Promise<
+  | { readonly kind: 'committed'; readonly response: OlumiResponse; readonly graph: unknown;
+      readonly analysisGraphHash: string; readonly persistedRowId: string }
+  | { readonly kind: 'unchanged' }
+  | { readonly kind: 'refused'; readonly reason: string; readonly index?: number }
+  | { readonly kind: 'unverified'; readonly reason: string; readonly commitAttempted: boolean }
+> {
   let before: unknown;
   let pendings: Awaited<ReturnType<OptionInterventionStore['readMostRecentPendingActions']>>;
   try {
@@ -272,18 +367,27 @@ export async function executeOptionInterventionEdit(input: OptionInterventionExe
   // ⭐ Whose level this is: Olumi's, when THIS write is the approved adoption the Agent's verified
   // proposal names (same scenario, option, factor, value); otherwise the inspector's `user_specified`.
   // Set LAST and unconditionally: a `source` a caller slipped onto the input is overwritten, never kept.
-  const source = approvedLevelSourceFor(input.scenarioId, input.optionId, input.factorId, input.modelValue);
-  const candidate = applyOptionInterventionEdit({ ...input, persistedGraph: before, source });
+  const targets: OptionLevelTarget[] = input.targets.map(t => {
+    const source = approvedLevelSourceFor(input.scenarioId, t.optionId, t.factorId, t.modelValue);
+    return { optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue, ...(source !== undefined ? { source } : {}) };
+  });
+  const { targets: _callerTargets, expectedLinks, ...common } = input;
+  const candidate = applyOptionInterventionBatch({ ...common, persistedGraph: before, targets });
   if (candidate.kind !== 'candidate') return candidate;
-  const option = candidate.graph.nodes.find(node => node.id === input.optionId)!;
-  const factor = candidate.graph.nodes.find(node => node.id === input.factorId)!;
+  if (expectedLinks !== undefined) {
+    const adding = candidate.operations.filter(o => o.op === 'add_edge').map(o => o.path).sort();
+    if (!isDeepStrictEqual(adding, [...new Set(expectedLinks)].sort())) return { kind: 'refused', reason: 'links_mismatch' };
+  }
+  const labelOf = (id: string): string => String(candidate.graph.nodes.find(node => node.id === id)?.label ?? id);
   const holds = threadHoldsThroughMutatingCommit({ priorPendingActions: pendings,
     graphAfterCommit: candidate.graph, graphHashAfterCommit: candidate.analysisGraphHash,
     appliedOperations: candidate.operations, nowMs: Date.now(),
     scenarioId: input.scenarioId, turnId: input.turnId, requestId: input.requestId });
-  const acknowledgment = formatOptionEffectWriteAck({ optionLabel: option.label,
-    factorLabel: factor.label, committedValue: input.modelValue })
-    + (candidate.linkAdded ? ` ${option.label} is now linked to ${factor.label}, in the same change.` : '');
+  const linked = new Set(candidate.operations.filter(o => o.op === 'add_edge').map(o => o.path));
+  const acknowledgment = candidate.targetsWritten.map(t => formatOptionEffectWriteAck({ optionLabel: labelOf(t.optionId),
+    factorLabel: labelOf(t.factorId), committedValue: t.modelValue })
+    + (linked.has(`${t.optionId}::${t.factorId}`) ? ` ${labelOf(t.optionId)} is now linked to ${labelOf(t.factorId)}, in the same change.` : ''))
+    .join(' ');
   const response: OlumiResponse = { response_version: 2,
     assistant_text: holds.notice ? `${acknowledgment}\n\n${holds.notice}` : acknowledgment,
     blocks: [], suggested_actions: [], insights: [], stage_indicator: input.stage };
@@ -306,7 +410,7 @@ export async function executeOptionInterventionEdit(input: OptionInterventionExe
     // CommitResult.persistedGraph is projected INPUT, not DB readback. A
     // duplicate turn may return an older row without applying new request bytes.
     if (!committed.graphPersisted || !isDeepStrictEqual(reloaded, candidate.graph)
-      || readCommittedOptionEffect(reloaded, input.optionId, input.factorId) !== input.modelValue) {
+      || input.targets.some(t => readCommittedOptionEffect(reloaded, t.optionId, t.factorId) !== t.modelValue)) {
       return { kind: 'unverified', reason: 'committed_graph_mismatch', commitAttempted: true };
     }
     // The graph answers "what is saved now?", not "what did this turn

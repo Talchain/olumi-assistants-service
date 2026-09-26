@@ -309,3 +309,67 @@ describe('POST /orchestrate/v2/turn — option_intervention_edit, at the wire', 
     expect(rows.size, 'exactly one of the two 200s should have appended').toBe(1);
   });
 });
+
+describe('the Agent\'s in-process batch door — ONE user operation → ONE atomic commit (ChatGPT #70 5847200462, BF5)', () => {
+  let commitOptionLevelsInProcess: typeof import('../../../src/orchestrator-v5/system-events/dispatch.js').commitOptionLevelsInProcess;
+  beforeAll(async () => {
+    ({ commitOptionLevelsInProcess } = await import('../../../src/orchestrator-v5/system-events/dispatch.js'));
+  });
+  beforeEach(() => {
+    persisted = buildPersistedGraph();
+    rows.clear();
+  });
+  type Level = { option_id: string; factor_id: string; value: number; author: 'user_specified' | 'model_proposed' };
+  const call = (levels: Level[], links: { option_id: string; factor_id: string }[], turnId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee') =>
+    commitOptionLevelsInProcess({ scenario_id: SCENARIO_ID, turn_id: turnId, base_graph_hash: currentHash(), links, levels }, 'req-batch');
+  const graphNow = () => persisted as { edges: { from: string; to: string; provenance?: { source?: string } }[];
+    nodes: { id: string; interventions?: Record<string, { value: number; source?: string }> }[] };
+  const TWO: Level[] = [{ option_id: 'option', factor_id: 'factor', value: 0.35, author: 'user_specified' },
+    { option_id: 'option', factor_id: 'new_factor', value: 0.4, author: 'user_specified' }];
+  const NEW_LINK = [{ option_id: 'option', factor_id: 'new_factor' }];
+
+  it('RED: two levels — one bringing its link — commit as ONE row: committed, not already applied, the revision is the model\'s', async () => {
+    const r = await call(TWO, NEW_LINK);
+    expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false });
+    expect(rows.size).toBe(1);
+    if (r.status === 'committed') expect(r.graph_hash).toBe(currentHash());
+    expect(graphNow().edges.filter(e => e.from === 'option' && e.to === 'new_factor')).toHaveLength(1);
+    expect(graphNow().nodes.find(n => n.id === 'option')?.interventions?.factor?.value).toBe(0.35);
+    expect(graphNow().nodes.find(n => n.id === 'option')?.interventions?.new_factor?.value).toBe(0.4);
+  });
+
+  it('RED: the SECOND level refused → refused, naming its pair, and NOTHING committed (neither the first level nor the link)', async () => {
+    const before = JSON.stringify(persisted);
+    const r = await call([TWO[1]!, { option_id: 'option', factor_id: 'unlinked_factor', value: 0.4, author: 'user_specified' }], NEW_LINK);
+    expect(r).toEqual({ status: 'refused', reason: 'unresolved_effect_relationship', pair: { option_id: 'option', factor_id: 'unlinked_factor' } });
+    expect(rows.size).toBe(0);
+    expect(JSON.stringify(persisted)).toBe(before);
+  });
+
+  it('what was approved is what is written: links that differ from the ones the levels need → refused, nothing written', async () => {
+    const r = await call(TWO, []);
+    expect(r).toEqual({ status: 'refused', reason: 'links_mismatch' });
+    expect(rows.size).toBe(0);
+  });
+
+  it('RED: a retry of the committed batch writes nothing more — already applied, no receipt — and the model holds both levels', async () => {
+    expect((await call(TWO, NEW_LINK)).status).toBe('committed');
+    const retry = await call(TWO, [], 'ffffffff-ffff-4fff-8fff-ffffffffffff');
+    expect(retry).toEqual({ status: 'committed', graph_hash: currentHash(), receipt: null, already_applied: true });
+    expect(rows.size).toBe(1);
+  });
+
+  it('an Olumi level (model_proposed) is stamped Olumi\'s — the level AND the link it brings (#2004 N1) — through the server-side authority', async () => {
+    const r = await call([{ option_id: 'option', factor_id: 'new_factor', value: 0.4, author: 'model_proposed' }], NEW_LINK);
+    expect(r.status, JSON.stringify(r)).toBe('committed');
+    expect(graphNow().nodes.find(n => n.id === 'option')?.interventions?.new_factor?.source).toBe('cee_hypothesis');
+    expect(graphNow().edges.find(e => e.from === 'option' && e.to === 'new_factor')?.provenance?.source).toBe('cee_hypothesis');
+  });
+
+  it('a stale base → stale, nothing written', async () => {
+    const r = await commitOptionLevelsInProcess({ scenario_id: SCENARIO_ID, turn_id: 'abababab-abab-4bab-8bab-abababababab',
+      base_graph_hash: 'deadbeefdeadbeef', links: NEW_LINK, levels: TWO }, 'req-batch');
+    expect(r).toEqual({ status: 'stale' });
+    expect(rows.size).toBe(0);
+  });
+});
