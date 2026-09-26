@@ -289,6 +289,128 @@ describe('applyEdgeStrengthEdit — canonical adapter', () => {
     })).toBe(true);
   });
 
+  /**
+   * ⭐ Served on CEE `1226b3e` (Canvas #70 5848798561): the user approved a confirm of an Olumi-sized link and read
+   * "Not saved: none of it was applied." The writer drops `provenance.natural_effect` and `provenance.magnitude` on
+   * every user write (magnitude contract, R&C 5845818897), so the confirmation allowlist must admit exactly those two
+   * removals — or every confirm on a sized link refuses. Provenance below is the served edge's, verbatim.
+   */
+  describe('confirm_current on an Olumi-sized edge (magnitude contract)', () => {
+    const SERVED_MEAN = 0.19999999999999998;
+    function sizedGraph() {
+      const graph = buildD1Fixture();
+      const edge = edgeIn(graph);
+      edge.strength = { mean: SERVED_MEAN, std: 0.09999999999999999 };
+      edge.effect_direction = 'positive';
+      edge.provenance = {
+        source: 'cee_hypothesis',
+        magnitude: 'olumi_estimate',
+        natural_effect: {
+          amount: 1,
+          amount_unit: 'percentage points',
+          strength_mean: SERVED_MEAN,
+          per_source_change: 10,
+          strength_mean_frame: 'edge_strength',
+          per_source_change_unit: 'GBP/month',
+        },
+      };
+      return graph;
+    }
+    const confirmSized = () =>
+      eventFor({
+        magnitude: SERVED_MEAN,
+        direction_intent: 'preserve',
+        expected: { mean: SERVED_MEAN, effect_direction: 'positive' },
+        intent: 'confirm_current',
+      });
+
+    it('⭐ adopts it: mutated, strength unchanged, stamped as the user\'s, natural_effect and magnitude gone', async () => {
+      const graph = sizedGraph();
+      const beforeStrength = structuredClone(edgeIn(graph).strength);
+      const beforeAnalysisHash = computeAnalysisAffectingGraphHash(graph);
+
+      const result = await apply(graph, confirmSized());
+
+      expect(result.kind === 'refused' ? result.reason : result.kind).toBe('mutated');
+      if (result.kind !== 'mutated') return;
+      const confirmed = edgeIn(result.graph);
+      expect(confirmed.strength).toStrictEqual(beforeStrength);
+      expect(confirmed.effect_direction).toBe('positive');
+      expect(confirmed.provenance?.source).toBe('user_specified');
+      expect(confirmed.provenance_display).toBe('user_set');
+      expect(confirmed.provenance).not.toHaveProperty('natural_effect');
+      expect(confirmed.provenance).not.toHaveProperty('magnitude');
+      expect(result.response.assistant_text).toContain('Confirmed the current strength');
+      expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(beforeAnalysisHash);
+      // The persisted bytes the dispatcher writes, not only the parsed view.
+      const persistedEdge = (result.mutatedGraph as { edges: Array<Record<string, unknown>> }).edges.find(
+        (edge) => edge.from === 'f-budget' && edge.to === 'g-revenue',
+      )!;
+      expect(persistedEdge.provenance).toStrictEqual({ source: 'user_specified' });
+    });
+
+    it('CONTRAST: the same confirm still refuses when it would also drop an additive target-edge field', async () => {
+      const graph = sizedGraph() as GraphV3T & Record<string, unknown>;
+      const edge = edgeIn(graph) as GraphV3T['edges'][number] & Record<string, unknown>;
+      edge.display_note = 'keep this non-analysis metadata';
+
+      const result = await apply(graph, confirmSized());
+
+      expect(result).toMatchObject({
+        kind: 'refused',
+        reason: 'confirmation_would_change_non_provenance_state',
+      });
+    });
+
+    describe('the pure guard admits the two removals and nothing wider', () => {
+      /** The writer's projection for a confirm: source + display stamped, Olumi's sizing dropped. */
+      function stamped(before: GraphV3T): GraphV3T {
+        const after = structuredClone(before);
+        const target = edgeIn(after);
+        const {
+          natural_effect: _naturalEffect,
+          magnitude: _magnitude,
+          ...rest
+        } = (target.provenance ?? {}) as Record<string, unknown>;
+        target.provenance = { ...rest, source: 'user_specified' } as typeof target.provenance;
+        target.provenance_display = 'user_set';
+        return after;
+      }
+      const guard = (before: GraphV3T, after: GraphV3T) =>
+        isProvenanceOnlyEdgeConfirmation({ before, after, from: 'f-budget', to: 'g-revenue' });
+
+      it('⭐ natural_effect and magnitude PRESENT → ABSENT: admitted', () => {
+        const before = sizedGraph();
+        expect(guard(before, stamped(before))).toBe(true);
+      });
+
+      it('natural_effect ADDED (absent before, present after): refused', () => {
+        const before = buildD1Fixture();
+        const after = stamped(before);
+        edgeIn(after).provenance = {
+          ...edgeIn(after).provenance!,
+          natural_effect: edgeIn(sizedGraph()).provenance!.natural_effect!,
+        };
+        expect(guard(before, after)).toBe(false);
+      });
+
+      it('magnitude REWRITTEN: refused', () => {
+        const before = sizedGraph();
+        const after = stamped(before);
+        edgeIn(after).provenance = { ...edgeIn(after).provenance!, magnitude: 'user_stated' };
+        expect(guard(before, after)).toBe(false);
+      });
+
+      it('CONTRAST: both removed AND provenance.reasoning rewritten: refused', () => {
+        const before = sizedGraph();
+        edgeIn(before).provenance = { ...edgeIn(before).provenance!, reasoning: 'Olumi estimate' };
+        const after = stamped(before);
+        edgeIn(after).provenance = { ...edgeIn(after).provenance!, reasoning: 'rewritten' };
+        expect(guard(before, after)).toBe(false);
+      });
+    });
+  });
+
   it('refuses confirm_current when canonical persistence would change analysis inputs', async () => {
     const graph = {
       ...buildD1Fixture(),
