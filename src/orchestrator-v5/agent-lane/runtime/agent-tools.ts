@@ -220,6 +220,23 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function',
+    name: 'propose_goal_target',
+    description:
+      'Set the goal’s success target to the figure the user has just stated (for example "we need at least £60k MRR", '
+      + '"keep churn under 5%"). This does NOT change anything: it prepares ONE change and returns its id, which you keep for '
+      + 'authorise_change: show the user what it sets, never the id, before they approve. Give the figure exactly as the user '
+      + 'wrote it, in their units (60000, with the unit £, for £60k), and whether they said at least or at most. Never use this '
+      + 'for a figure or a direction the user did not state: if they have not given both in their own words, ask first — '
+      + 'a figure or direction they did not state is refused.',
+    parameters: obj({
+      constraint_type: { type: 'string', enum: ['at_least', 'at_most'], description: 'at_least when the user said the goal must reach at least the figure; at_most when they said it must stay at or under it.' },
+      value: { type: 'number', description: 'The figure the user stated, in their own units.' },
+      unit: { type: 'string', description: 'The unit of that figure, as the user gave it (for example £, % or customers).' },
+      rationale: { type: 'string', description: 'What the user said, in their words.' },
+    }, ['constraint_type', 'value', 'unit', 'rationale']),
+  },
+  {
+    type: 'function',
     name: 'propose_option_interventions',
     description:
       'Propose the level an option sets a factor to \u2014 what the option actually DOES. An option ' +
@@ -333,7 +350,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_link_strength', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_link_strength', 'propose_goal_target', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -371,6 +388,10 @@ export interface AgentCapabilities {
   proposeLinkStrength?(ctx: AgentToolContext, args: {
     from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong';
     direction?: 'positive' | 'negative'; rationale: string;
+  }): Promise<ToolResult>;
+  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
+  proposeGoalTarget?(ctx: AgentToolContext, args: {
+    constraint_type: 'at_least' | 'at_most'; value: number; unit: string; rationale: string;
   }): Promise<ToolResult>;
   runAnalysis(ctx: AgentToolContext, args: { reason: string }): Promise<ToolResult>;
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
@@ -437,6 +458,10 @@ export async function dispatchTool(
       return caps.proposeLinkStrength !== undefined
         ? caps.proposeLinkStrength(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'Link strengths cannot be recorded here. Nothing was changed.' };
+    case 'propose_goal_target':
+      return caps.proposeGoalTarget !== undefined
+        ? caps.proposeGoalTarget(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A goal’s target cannot be set here. Nothing was changed.' };
     case 'propose_option_interventions':
       return caps.proposeOptionInterventions(ctx, args as never);
     case 'propose_starting_point':
