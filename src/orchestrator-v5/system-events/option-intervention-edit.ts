@@ -351,7 +351,9 @@ export type OptionInterventionBatchExecutionInput =
  */
 export async function executeOptionInterventionBatch(input: OptionInterventionBatchExecutionInput, store: OptionInterventionStore): Promise<
   | { readonly kind: 'committed'; readonly response: OlumiResponse; readonly graph: unknown;
-      readonly analysisGraphHash: string; readonly persistedRowId: string }
+      readonly analysisGraphHash: string; readonly persistedRowId: string;
+      /** The commit's own version receipt, verified to describe THIS turn and postimage (null: guest / no version). */
+      readonly modelVersionReceipt?: Awaited<ReturnType<typeof commitDirectAnswer>>['modelVersionReceipt'] }
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly reason: string; readonly index?: number }
   | { readonly kind: 'unverified'; readonly reason: string; readonly commitAttempted: boolean }
@@ -438,7 +440,8 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       return { kind: 'unverified', reason: 'committed_receipt_mismatch', commitAttempted: true };
     }
     return { kind: 'committed', response: committed.response, graph: reloaded,
-      analysisGraphHash: candidate.analysisGraphHash, persistedRowId: committed.persisted_row_id };
+      analysisGraphHash: candidate.analysisGraphHash, persistedRowId: committed.persisted_row_id,
+      modelVersionReceipt: receipt };
   } catch {
     return { kind: 'unverified', reason: 'canonical_readback_failed', commitAttempted: true };
   }

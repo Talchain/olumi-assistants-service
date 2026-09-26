@@ -533,6 +533,10 @@ describe('option-intervention transaction — real commit, serialized store boun
     // The twin's own precondition: the receipt was really parsed and attached,
     // so the case above refused a PRESENT receipt rather than an absent one.
     expect(matched.response.model_version_receipt?.version_id).toBe(receiptBase.version_id);
+    // The writer hands its own verified receipt to its caller too (the Agent's in-process door reads THIS, never a
+    // second parse of the response).
+    expect((matched as { modelVersionReceipt?: { version_number: number; source_turn_id: string } }).modelVersionReceipt)
+      .toMatchObject({ version_number: 2, source_turn_id: TURN_ID });
   });
 
   /**
