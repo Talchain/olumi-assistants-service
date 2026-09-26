@@ -79,9 +79,12 @@ export interface AdmittedConstraint {
  * copied the unit verbatim and never asked it. Two rungs, each onto vocabulary PLoT ALREADY handles, and nothing else:
  *
  *   P · a percent HEAD (the classifier's own percent row) + an optional PERIOD tail ("per month", "p.a.") with
- *       1 ≤ |value| ≤ 100 → `"%"`, value UNCHANGED. PLoT reads `"%"` with |v| ≥ 1 as percentage points ([0,100]).
- *       The period stays in the limit's meaning ("Monthly churn"); it is not a scale.
- *   M · a currency head + `k`/`m` → the head, value × 10³ / 10⁶ by EXPONENT PARSING (`4.1 * 1e6` is 4099999.999…).
+ *       1 ≤ |value| ≤ 100 → `"%"`, value UNCHANGED, but ONLY where the target node's level is the percentage ÷ 100
+ *       (`levelIsPercentOver100`). On a node capped elsewhere it takes the node's own non-`"%"` spelling, or stays
+ *       verbatim. PLoT reads `"%"` with |v| ≥ 1 as percentage points ([0,100]). The period stays in the limit's
+ *       meaning ("Monthly churn"); it is not a scale.
+ *   M · a currency head + `k`/`m`, onto a node in the BARE currency of the same family → the node's spelling, value
+ *       × 10³ / 10⁶ by EXPONENT PARSING (`4.1 * 1e6` is 4099999.999…). Any other node: verbatim.
  *
  * ⛔ WHAT THIS MUST NOT DO, each pinned by a control row in `admit-constraint-unit-canonical.test.ts`:
  *   · "% change vs this year's costs" is a percent OF SOMETHING ELSE. As `"%"` PLoT's unit_percent rung would scale it
@@ -94,38 +97,90 @@ const PERCENT_HEADS: readonly string[] = [...(UNIT_SCALE_CLASS_TOKENS.find(([cls
   .sort((a, b) => b.length - a.length);
 const PERIOD_TAIL = /^(?:(?:per|a|an|each|\/)\s*(?:month|year|annum|quarter|week|day)|monthly|annually|annual|yearly|quarterly|weekly|daily|p\.?a\.?)?$/;
 const MAGNITUDE_UNIT = /^(£|gbp|\$|usd|€|eur)\s*(k|m)$/;
+const CURRENCY_FAMILY: Readonly<Record<string, string>> = { '£': 'gbp', gbp: 'gbp', $: 'usd', usd: 'usd', '€': 'eur', eur: 'eur' };
+
+/**
+ * ⛔⛔ THE TARGET NODE DECIDES, NOT THE LIMIT'S UNIT ALONE (#1934 review 5841434798).
+ *
+ * PLoT normalises a limit against its node (`intervention-normaliser.ts` at b09c0f2, :1564-1580): `"%"` takes the
+ * unit_percent rung `[0,100]` and IGNORES `observed_state.cap`; any other unit reaches `deriveRange` →
+ * `explicit_cap [0,cap]`, and two different non-token spellings are then `mismatched`
+ * (`classifyUnitCompatibility`). A unit-only rewrite turned `10 "percent per month"` on a `cap 20` node from 0.5
+ * (right) into 0.1, and `250 "£k"` on a `£k` node from 0.25 into a unit mismatch. So a rewrite happens only where
+ * the node's own scale proves the result: this is the node's `observed_state` as admission wrote it
+ * (`framedObservedState` / `estimatedObservedState`, `admit-model.ts`) plus its `scale_frame`.
+ */
+export interface LimitTargetScale {
+  readonly unit?: string;
+  readonly cap?: number;
+  readonly value?: number;
+  readonly raw_value?: number;
+  readonly scale_frame?: number;
+}
 
 type UnitCanonical = Pick<AdmittedConstraint, 'value' | 'unit' | 'provenance_unit_relabelled' | 'provenance_unit_normalised'>;
 
-export function canonicaliseLimitUnit(value: number, unit: string | undefined): UnitCanonical {
-  if (unit === undefined) return { value };
-  const t = unit.trim().toLowerCase();
+function norm(unit: string): string {
+  return unit.trim().toLowerCase();
+}
 
-  if (unit !== '%' && classifyUnitScaleClass(unit) === 'percent' && Math.abs(value) >= 1 && Math.abs(value) <= 100) {
-    const head = PERCENT_HEADS.find((h) => t.startsWith(h));
-    if (head !== undefined && PERIOD_TAIL.test(t.slice(head.length).trim())) {
-      return {
-        value,
-        unit: '%',
-        provenance_unit_relabelled: { rule: 'agent_lane_limit_unit_v1', pre_normalisation_value: value, pre_normalisation_unit: unit },
-      };
-    }
+/** A percent head (the classifier's own row) and nothing after it but an optional period ("per month", "p.a."). */
+function isPercentWithPeriod(unit: string): boolean {
+  if (classifyUnitScaleClass(unit) !== 'percent') return false;
+  const t = norm(unit);
+  const head = PERCENT_HEADS.find((h) => t.startsWith(h));
+  return head !== undefined && PERIOD_TAIL.test(t.slice(head.length).trim());
+}
+
+/**
+ * True only when the node's level IS the percentage ÷ 100 — the one scale PLoT's `"%"` rung lands on. A frame of
+ * exactly 100 (`cap`, else the estimate's `scale_frame`), or an unframed level that is already a proportion in
+ * [0, 1) (the served churn shape: 0.07; PLoT's own `"%"` rule reads a sub-1 value as a fraction too).
+ */
+function levelIsPercentOver100(target: LimitTargetScale): boolean {
+  if (target.cap !== undefined) return target.cap === 100;
+  if (target.scale_frame !== undefined) return target.scale_frame === 100;
+  return target.raw_value === undefined && typeof target.value === 'number' && target.value >= 0 && target.value < 1;
+}
+
+export function canonicaliseLimitUnit(value: number, unit: string | undefined, target?: LimitTargetScale): UnitCanonical {
+  if (unit === undefined) return { value };
+  const verbatim: UnitCanonical = { value, unit };
+
+  if (isPercentWithPeriod(unit) && Math.abs(value) >= 1 && Math.abs(value) <= 100) {
+    const relabel = (to: string): UnitCanonical => ({
+      value,
+      unit: to,
+      provenance_unit_relabelled: { rule: 'agent_lane_limit_unit_v1', pre_normalisation_value: value, pre_normalisation_unit: unit },
+    });
+    if (target === undefined) return verbatim;
+    const nodeUnit = target.unit;
+    // A node that is not a plain percent (a count, "percentage points") is not the limit's scale: PLoT refuses it.
+    if (nodeUnit !== undefined && !isPercentWithPeriod(nodeUnit)) return verbatim;
+    // The same spelling on a capped node: PLoT already reconciles it against the cap.
+    if (target.cap !== undefined && nodeUnit !== undefined && norm(nodeUnit) === norm(unit)) return verbatim;
+    if (levelIsPercentOver100(target)) return unit === '%' ? verbatim : relabel('%');
+    // A capped node in a spelling PLoT does NOT read as `"%"`: adopt that spelling, so the limit reaches
+    // `explicit_cap [0,cap]` and reconciles. A `"%"`-token node has no such spelling — PLoT ignores its cap.
+    if (target.cap !== undefined && nodeUnit !== undefined && !PERCENT_HEADS.includes(norm(nodeUnit))) return relabel(nodeUnit);
+    return verbatim;
   }
 
-  const m = MAGNITUDE_UNIT.exec(t);
-  if (m !== null) {
+  const m = MAGNITUDE_UNIT.exec(norm(unit));
+  const currencyNode = target?.unit;
+  // Only onto a node in the BARE currency of the same family, in the node's own spelling: PLoT then reads one unit.
+  if (m !== null && currencyNode !== undefined && CURRENCY_FAMILY[norm(currencyNode)] === CURRENCY_FAMILY[m[1]]) {
     const scaled = Number(`${value}e${m[2] === 'k' ? 3 : 6}`);
     if (Number.isFinite(scaled)) {
-      const trimmed = unit.trim();
       return {
         value: scaled,
-        unit: trimmed.slice(0, m[1].length),
+        unit: currencyNode,
         provenance_unit_normalised: { rule: 'agent_lane_limit_magnitude_v1', original_value: value, original_unit: unit },
       };
     }
   }
 
-  return { value, unit };
+  return verbatim;
 }
 
 export interface ConstraintAdmissionResult {
@@ -157,6 +212,7 @@ function canonicalProvenance(candidateProvenance: string): 'explicit' | 'inferre
 export function admitCandidateConstraints(
   candidates: readonly CandidateConstraint[],
   nodeIdFor: (metric: string) => string | undefined,
+  targetScaleFor: (nodeId: string) => LimitTargetScale | undefined = () => undefined,
 ): ConstraintAdmissionResult {
   const constraints: AdmittedConstraint[] = [];
   const loss: RepairEntry[] = [];
@@ -181,8 +237,8 @@ export function admitCandidateConstraints(
 
     const operator = RELAXES_TO[c.operator];
     // The user's number is never adjusted to compensate for the operator. It is rescaled ONLY by a stated magnitude
-    // suffix (£k), and every rewrite is stamped (`canonicaliseLimitUnit`).
-    const { value, unit, ...unitProvenance } = canonicaliseLimitUnit(c.value, c.unit);
+    // suffix (£k) onto a node in the bare currency, and every rewrite is stamped (`canonicaliseLimitUnit`).
+    const { value, unit, ...unitProvenance } = canonicaliseLimitUnit(c.value, c.unit, targetScaleFor(nodeId));
     const admitted: AdmittedConstraint = {
       constraint_id: `agent-lane:${nodeId}:${operator}`,
       node_id: nodeId,

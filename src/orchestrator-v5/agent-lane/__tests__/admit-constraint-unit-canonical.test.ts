@@ -16,7 +16,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 
-import { admitCandidateConstraints, type AdmittedConstraint } from '../admit-constraint.js';
+import { admitCandidateConstraints, type AdmittedConstraint, type LimitTargetScale } from '../admit-constraint.js';
+import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
@@ -30,11 +31,22 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 const LEVER = 'agent-lane:fac_lever:<=';
 
+/**
+ * The target node's scale decides whether a rewrite is safe (review 5841434798), so every row names it. The default is
+ * the served churn shape (restart-bank wbceskm32): a capless PROPORTION (0.07) with no unit — the one shape on which
+ * PLoT's `"%"` rung ([0,100], cap ignored) lands on the same scale as the node's level.
+ */
+const PROPORTION: LimitTargetScale = { value: 0.07 };
+const POUNDS: LimitTargetScale = { unit: '£', cap: 1_000_000, value: 0.4, raw_value: 400_000 };
+
 /** Admit ONE stated upper bound on "Lever" and return it BY IDENTITY (constraint_id), never by value. */
-function admit1(value: number, unit: string | undefined): AdmittedConstraint {
+// A REST parameter, not a default: an explicit `undefined` ("no node scale supplied") must reach admission as undefined.
+function admit1(value: number, unit: string | undefined, ...node: [] | [LimitTargetScale | undefined]): AdmittedConstraint {
+  const target = node.length === 0 ? PROPORTION : node[0];
   const { constraints } = admitCandidateConstraints(
     [{ metric: 'Lever', operator: '<=', value, ...(unit !== undefined ? { unit } : {}), provenance: 'explicit' }],
     (m) => (m === 'Lever' ? 'fac_lever' : undefined),
+    (id) => (id === 'fac_lever' ? target : undefined),
   );
   const hit = constraints.find((c) => c.constraint_id === LEVER);
   expect(hit, 'the admitted constraint is found by its id').toBeDefined();
@@ -63,7 +75,7 @@ describe('admission canonicalises a limit unit PLoT would otherwise misread', ()
   }
 
   it('"£k" 250 is admitted as "£" 250000, and the stated figure is kept for the reader', () => {
-    expect(admit1(250, '£k')).toMatchObject({
+    expect(admit1(250, '£k', POUNDS)).toMatchObject({
       unit: '£',
       value: 250000,
       provenance_unit_normalised: { original_value: 250, original_unit: '£k' },
@@ -71,11 +83,11 @@ describe('admission canonicalises a limit unit PLoT would otherwise misread', ()
   });
 
   it('"£m" 4.1 is exactly 4100000 (no float drift from multiplying)', () => {
-    expect(admit1(4.1, '£m').value).toBe(4100000);
+    expect(admit1(4.1, '£m', POUNDS).value).toBe(4100000);
   });
 
-  it('"GBPk" 900 is "GBP" 900000', () => {
-    expect(admit1(900, 'GBPk')).toMatchObject({ unit: 'GBP', value: 900000 });
+  it('"GBPk" 900 on a "GBP" node is "GBP" 900000', () => {
+    expect(admit1(900, 'GBPk', { unit: 'GBP', cap: 1_000_000 })).toMatchObject({ unit: 'GBP', value: 900000 });
   });
 
   // ── CONTROLS: green on every base, and each must STAY green ──
@@ -119,12 +131,149 @@ describe('admission canonicalises a limit unit PLoT would otherwise misread', ()
         { metric: 'Budget', operator: '<=', value: 900, unit: '£k', provenance: 'explicit' },
       ],
       (m) => (m === 'Budget' ? 'fac_budget' : undefined),
+      () => POUNDS,
     );
     expect(loss.filter((l) => l.field_path.endsWith('.bound_direction'))).toEqual([]);
     expect(constraints.map((c) => [c.operator, c.value, c.unit])).toEqual([
       ['>=', 800000, '£'],
       ['<=', 900000, '£'],
     ]);
+  });
+});
+
+/**
+ * ⛔⛔ THE REWRITE READS THE TARGET NODE (#1934 review 5841434798, CHANGES_REQUIRED on 647caa61).
+ *
+ * PLoT's ladder (`intervention-normaliser.ts` at b09c0f2, :1564-1580): a `"%"` limit takes the unit_percent rung
+ * `[0,100]` BEFORE `deriveRange`, so it IGNORES the node's `observed_state.cap`; any other unit reaches `deriveRange`
+ * → `explicit_cap [0,cap]`, then `classifyUnitCompatibility` (`constraint-units.ts:248`) marks two DIFFERENT
+ * non-token spellings `mismatched`. So on a node framed `{unit "percent per month", cap 20}` the verbatim limit
+ * `10 "percent per month"` is 10/20 = 0.5 — correct — and 647caa61's `"%"` made it 0.1, five times stricter, silently.
+ * On `{unit "£k", cap 1000}` the verbatim `250 "£k"` is 0.25 and 647caa61's `"£" 250000` became a unit mismatch.
+ * Every row below names the node, and the verbatim rows are the ones 647caa61 broke.
+ */
+describe('the rewrite is decided by the TARGET NODE\'s scale, never by the limit\'s unit alone', () => {
+  const PPM_CAP20: LimitTargetScale = { unit: 'percent per month', cap: 20, value: 0.35, raw_value: 7 };
+
+  // ── RED on 647caa61: a rewrite that changes the number PLoT computes ──
+  it('BLOCKING 1: "percent per month" 10 on a {percent per month, cap 20} node stays verbatim (PLoT: explicit_cap → 0.5)', () => {
+    const c = admit1(10, 'percent per month', PPM_CAP20);
+    expect(c).toMatchObject({ unit: 'percent per month', value: 10 });
+    expect(stampKeys(c)).toEqual([]);
+  });
+
+  it('BLOCKING 2: "£k" 250 on a {£k, cap 1000} node stays verbatim (PLoT: explicit_cap → 0.25, reconciled)', () => {
+    const c = admit1(250, '£k', { unit: '£k', cap: 1000, value: 0.4, raw_value: 400 });
+    expect(c).toMatchObject({ unit: '£k', value: 250 });
+    expect(stampKeys(c)).toEqual([]);
+  });
+
+  it('a different percent spelling on a capped node takes THE NODE\'s spelling, so PLoT reconciles it against the cap', () => {
+    expect(admit1(10, '% per month', PPM_CAP20)).toMatchObject({
+      unit: 'percent per month',
+      value: 10,
+      provenance_unit_relabelled: { pre_normalisation_value: 10, pre_normalisation_unit: '% per month' },
+    });
+  });
+
+  it('"%" 10 on a {percent per month, cap 20} node takes the node\'s spelling (as "%" PLoT ignores the cap: 0.1, not 0.5)', () => {
+    expect(admit1(10, '%', PPM_CAP20)).toMatchObject({ unit: 'percent per month', value: 10, provenance_unit_relabelled: { pre_normalisation_unit: '%' } });
+  });
+
+  for (const [why, target] of [
+    ['a "%" node capped at 20 (as "%" the cap is ignored; no spelling reconciles, so PLoT must refuse it)', { unit: '%', cap: 20, value: 0.35, raw_value: 7 }],
+    ['a capless node whose level is a RAW 7 (not a proportion)', { unit: 'percent per month', value: 7 }],
+    ['an estimate framed on 20 (level = raw/20)', { unit: '%', value: 0.35, raw_value: 7, scale_frame: 20 }],
+    ['a level carrying a separate raw figure but no frame (not provably a proportion)', { unit: '%', value: 0.35, raw_value: 7 }],
+    ['a node that is not a percent at all', { unit: 'customers', cap: 1000, value: 0.2, raw_value: 200 }],
+    ['a node with no scale at all', {}],
+    ['no node scale supplied', undefined],
+  ] as const) {
+    it(`"percent per month" 10 stays verbatim on ${why}`, () => {
+      const c = admit1(10, 'percent per month', target as LimitTargetScale | undefined);
+      expect(c).toMatchObject({ unit: 'percent per month', value: 10 });
+      expect(stampKeys(c)).toEqual([]);
+    });
+  }
+
+  for (const [why, target] of [
+    ['a node with no unit', { cap: 1_000_000, value: 0.4 }],
+    ['a "$" node', { unit: '$', cap: 1_000_000 }],
+    ['a "GBP/year" node', { unit: 'GBP/year', cap: 1_000_000 }],
+    ['no node scale supplied', undefined],
+  ] as const) {
+    it(`"£k" 250 stays verbatim on ${why}`, () => {
+      const c = admit1(250, '£k', target as LimitTargetScale | undefined);
+      expect(c).toMatchObject({ unit: '£k', value: 250 });
+      expect(stampKeys(c)).toEqual([]);
+    });
+  }
+
+  it('"£k" 250 on a "GBP" node is "GBP" 250000 — the node\'s own spelling, so PLoT reads them as one unit', () => {
+    expect(admit1(250, '£k', { unit: 'GBP', cap: 1_000_000 })).toMatchObject({ unit: 'GBP', value: 250000 });
+  });
+
+  // ── CONTROLS: the rewrite still happens where the node's level IS the percentage / 100 ──
+  for (const [why, target] of [
+    ['a node capped at exactly 100', { unit: '%', cap: 100, value: 0.07, raw_value: 7 }],
+    ['an estimate framed on 100', { unit: '%', value: 0.07, raw_value: 7, scale_frame: 100 }],
+    ['a capless PROPORTION in the same unit (the served churn shape)', { unit: 'percent per month', value: 0.07 }],
+    ['a capless proportion with no unit', { value: 0.07 }],
+  ] as const) {
+    it(`CONTROL: "percent per month" 10 is "%" on ${why}`, () => {
+      expect(admit1(10, 'percent per month', target as LimitTargetScale)).toMatchObject({ unit: '%', value: 10 });
+    });
+  }
+});
+
+/** Through the REAL model admission — binds that the call site hands each limit its own node's scale. */
+describe('admitCandidateModel hands each limit its target node', () => {
+  const faithful = JSON.parse(
+    readFileSync('src/orchestrator-v5/agent-lane/__tests__/fixtures/faithful.json', 'utf-8'),
+  ) as CandidateModel;
+  function admittedLimit(
+    factor: { unit: string; baseline_value: number; plausible_max?: number; baseline_known?: boolean },
+    limit: { value: number; unit: string },
+  ): AdmittedConstraint {
+    const candidate = {
+      ...faithful,
+      factors: [
+        ...faithful.factors.filter((f) => f.label !== 'Monthly churn rate'),
+        { label: 'Monthly churn rate', role: 'observable', provenance: 'explicit', baseline_known: true, ...factor },
+      ],
+      constraints: [{ metric: 'Monthly churn rate', operator: '<', provenance: 'explicit', ...limit }],
+    } as unknown as CandidateModel;
+    const m = admitCandidateModel(candidate);
+    const node = m.nodes.find((n) => n.label === 'Monthly churn rate');
+    expect(node, 'the churn factor is admitted').toBeDefined();
+    const hit = m.goal_constraints.find((c) => c.constraint_id === `agent-lane:${node!.id}:<=`);
+    expect(hit, 'the limit is admitted on that node, by id').toBeDefined();
+    return hit as AdmittedConstraint;
+  }
+
+  it('a {percent per month, plausible_max 20} factor keeps a "percent per month" limit verbatim', () => {
+    expect(admittedLimit({ unit: 'percent per month', baseline_value: 7, plausible_max: 20 }, { value: 10, unit: 'percent per month' }))
+      .toMatchObject({ unit: 'percent per month', value: 10 });
+  });
+
+  it('the served shape — a proportion baseline (0.07) with no usable range — admits the limit as "%"', () => {
+    expect(admittedLimit({ unit: 'percent per month', baseline_value: 0.07, plausible_max: 0.2 }, { value: 10, unit: 'percent per month' }))
+      .toMatchObject({ unit: '%', value: 10 });
+  });
+
+  it('an AI ESTIMATE framed on 100 (scale_frame, no cap) admits the limit as "%" — the node frame reaches the rewrite', () => {
+    expect(admittedLimit({ unit: 'percent per month', baseline_value: 7, plausible_max: 100, baseline_known: false }, { value: 10, unit: 'percent per month' }))
+      .toMatchObject({ unit: '%', value: 10 });
+  });
+
+  it('a "£" factor turns a "£k" limit into £', () => {
+    expect(admittedLimit({ unit: '£', baseline_value: 400_000, plausible_max: 1_000_000 }, { value: 250, unit: '£k' }))
+      .toMatchObject({ unit: '£', value: 250000 });
+  });
+
+  it('a "£k" factor keeps a "£k" limit verbatim', () => {
+    expect(admittedLimit({ unit: '£k', baseline_value: 400, plausible_max: 1000 }, { value: 250, unit: '£k' }))
+      .toMatchObject({ unit: '£k', value: 250 });
   });
 });
 
@@ -207,7 +356,7 @@ describe('the canonical unit is what PLoT receives', () => {
   });
 
   it('a "£k" 250 limit reaches PLoT as "£" 250000, with its stamp intact through the schema', async () => {
-    const c = wireConstraint(await plotPayloadFor(admit1(250, '£k')));
+    const c = wireConstraint(await plotPayloadFor(admit1(250, '£k', POUNDS)));
     expect(c).toMatchObject({ unit: '£', value: 250000, provenance_unit_normalised: { original_value: 250, original_unit: '£k' } });
   });
 
