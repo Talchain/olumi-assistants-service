@@ -24,7 +24,7 @@ import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { narrateWriteOutcome } from '../write-outcome.js';
 import { assessConstructionSize, COMPACT_LIMITS } from '../construction-size-gate.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
-import { resolveRunAdmission, NO_COMPARISON_NEXT_STEP } from '../../tools/handlers/analysis-ready-core.js';
+import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { labelMatchesBaseline } from '../../../cee/transforms/analysis-ready.js';
 
 // ── the served corpus ────────────────────────────────────────────────────────
@@ -283,10 +283,14 @@ describe.each([
     expect(new Set(prints).size).toBe(prints.length);
   });
 
-  it('RECORDED LIMIT: withholding alone does not make this brief run — the approved served model minus the test option still has one valued option', () => {
+  // Staging moved under this PR: #1963 (Runtime, the Run-time held status quo) makes the admission floor count
+  // the held status quo the run submits. Before #1963 this row RECORDED the limit that withholding alone left
+  // the brief with one valued option and NO_COMPARISON_NEXT_STEP; with #1963 the same cut RUNS, the status quo
+  // being the comparator. Pinned so a regression of either half shows here.
+  it('WITH #1963: the approved served model minus the test option RUNS — the held status quo is the comparator', () => {
     const cut = withoutOption(run.approve.draft_graph, TEST_ID);
     const admission = resolveRunAdmission(cut);
-    expect([admission.willProceed, admission.strict.status, admission.blockedNextStep]).toEqual([false, 'analysis_ready', NO_COMPARISON_NEXT_STEP]);
+    expect([admission.willProceed, admission.strict.status, admission.blockedNextStep]).toEqual([true, 'analysis_ready', null]);
   });
 });
 
@@ -345,13 +349,14 @@ describe('controls — what the rule must never touch', () => {
     expect(optionIds(graph)).toEqual(['keep_pro_price_at_49', 'raise_pro_price_to_59', '49_until_next_quarter']);
     expect(graph.nodes.find((n) => n.id === '49_until_next_quarter')?.interventions).toEqual({ pro_plan_price: { value: 0.245, source: 'cee_hypothesis' } });
     expect(out).not.toHaveProperty('options_withheld');
-    // The run, on the served approved model: that option set to today's price alone PROCEEDS; without it, it does not.
+    // The run, on the served approved model: that option set to today's price alone PROCEEDS. Since #1963 the held
+    // status quo also counts, so the model without it proceeds too; the control's point is that (b) KEEPS it.
     const approved = structuredClone(SHAPE_2.approve.draft_graph);
     const twin = approved.nodes.find((n) => n.id === TEST_ID)!;
     twin.interventions = { pro_plan_price: { value: 0.245, source: 'cee_hypothesis' } };
     approved.edges = approved.edges.filter((e) => !(e.from === TEST_ID && e.to !== 'pro_plan_price'));
     expect(resolveRunAdmission(approved).willProceed).toBe(true);
-    expect(resolveRunAdmission(withoutOption(approved, TEST_ID)).willProceed).toBe(false);
+    expect(resolveRunAdmission(withoutOption(approved, TEST_ID)).willProceed).toBe(true);
   });
 
   it('CONTROL: the status quo is never withheld — a declared status quo acting on the same factors as the user\'s option, with no level, is kept', async () => {
@@ -436,9 +441,9 @@ describe('fix round — an open cell can equal at most one level; the status quo
       ...approved.edges.filter((e) => e.from === TEST_ID).map((e) => ({ ...e, from: '54_with_ai_release' })),
       ...approved.edges.filter((e) => e.to === TEST_ID).map((e) => ({ ...e, to: '54_with_ai_release' })),
     );
-    // Vacuity: every option kept runs; the test and £54 both removed is the dead start.
+    // Every option kept runs. (Before #1963, the test and £54 both removed was the dead start; since #1963 the
+    // held status quo counts, so identity — WHICH options register — is what this row binds, below.)
     expect(resolveRunAdmission(approved).willProceed).toBe(true);
-    expect(resolveRunAdmission(withoutOption(withoutOption(approved, TEST_ID), '54_with_ai_release')).blockedNextStep).toBe(NO_COMPARISON_NEXT_STEP);
     const registered = new Set(optionIds(graph));
     const notRegistered = optionIds(approved).filter((id) => !registered.has(id));
     const admission = resolveRunAdmission(notRegistered.reduce(withoutOption, approved));
