@@ -24,3 +24,24 @@ export function unitsConflict(stated: unknown, factorUnit: unknown): { stated: U
   const f = unitPhraseFamily(factorUnit);
   return s !== null && f !== null && s !== f ? { stated: s, factor: f } : null;
 }
+
+/**
+ * The unit a factor is measured in: its own level's unit, else the unit of a limit the user stated on that SAME
+ * node (`goal_constraints[].unit` joined by `node_id`). A factor with no level has no `observed_state` — the served
+ * shape of churn (AI Quality 5843448904: DL (F) f-20260926T033508Z / f-20260926T031046Z, and every outcome-kind
+ * churn #1965 converts) — and that is exactly where "£49 as churn" lands, so reading the level alone failed open
+ * there. `undefined` only when neither exists; the check then fails open, as before.
+ */
+export function factorUnitOf(
+  rawGraph: unknown,
+  factor: { readonly id?: unknown; readonly observed_state?: unknown } | undefined,
+): string | undefined {
+  const own = (factor?.observed_state as { unit?: unknown } | undefined)?.unit;
+  if (typeof own === 'string' && own.trim() !== '') return own;
+  const limits = (rawGraph as { goal_constraints?: unknown } | null | undefined)?.goal_constraints;
+  if (typeof factor?.id !== 'string' || !Array.isArray(limits)) return undefined;
+  for (const c of limits as { node_id?: unknown; unit?: unknown }[]) {
+    if (c?.node_id === factor.id && typeof c.unit === 'string' && c.unit.trim() !== '') return c.unit;
+  }
+  return undefined;
+}

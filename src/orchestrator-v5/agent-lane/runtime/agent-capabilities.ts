@@ -105,7 +105,7 @@ import { readinessViewOf } from '../readiness-view.js';
 import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
-import { unitsConflict } from '../unit-conflict.js';
+import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel } from './build-model.js';
@@ -1381,7 +1381,7 @@ export function createAgentCapabilities(
         if (res.kind === 'other') { notAFactor.push({ label: res.node.label, kind: String(res.node.kind) }); continue; }
         const node = res.node;
         // ⛔ A figure in another kind of unit is never this factor's value (`unit-conflict.ts`): left out, and said.
-        const nodeUnit = (node.observed_state as { unit?: unknown } | undefined)?.unit;
+        const nodeUnit = factorUnitOf(g.raw, node);
         if (unitsConflict(a?.unit, nodeUnit) !== null) {
           unitMismatch.push({ label: node.label, value: a?.value, unit: String(a?.unit), factor_unit: String(nodeUnit) });
           continue;
@@ -3304,7 +3304,7 @@ export function createAgentCapabilities(
           if (lvl === undefined) return { factor_id: f.id, value: null };
           const factor = g.nodes.find((x) => x.id === f.id);
           // ⛔ A figure in another kind of unit is never this factor's level (`unit-conflict.ts`: a price as churn).
-          const factorUnit = (factor?.observed_state as { unit?: unknown } | undefined)?.unit;
+          const factorUnit = factorUnitOf(g.raw, factor);
           if (unitsConflict(lvl.unit, factorUnit) !== null) {
             unitMismatch.push({ option: plan.label, factor: f.label, value: lvl.value, unit: String(lvl.unit), factor_unit: String(factorUnit) });
             return { factor_id: f.id, value: null };
