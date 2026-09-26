@@ -304,7 +304,26 @@ describe('T4 — every other voice and state is byte-identical to base', () => {
   );
 
   it('an evaluated, met constraint on a real envelope discloses nothing', () => {
-    const v = verdictFor({ constraint_results: [{ constraint_id: CAP.constraint_id, satisfied: true }] }, [CAP]);
+    // b09c0f2 wire shape: a certified row AND the leader's own per-option score.
+    const v = verdictFor(
+      {
+        constraints_status: 'computed',
+        constraint_results: [
+          {
+            constraint_id: CAP.constraint_id,
+            node_id: 'fac_cost',
+            operator: '<=',
+            value: 250000,
+            probability: 0.91,
+            scale_provenance: { source: 'explicit_cap', range_unified: true, decision_grade: true },
+          },
+        ],
+        option_comparison: [
+          { option_id: 'opt_a', win_probability: 0.6, constraint_probabilities: { [CAP.constraint_id]: 0.91 }, probability_of_joint_goal: 0.9 },
+        ],
+      },
+      [CAP],
+    );
     expect(['evaluated_feasible', 'not_applicable']).toContain(v.state);
     expect(buildConstraintDisclosure(v)).toBe('');
   });
