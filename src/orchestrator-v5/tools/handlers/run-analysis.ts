@@ -115,7 +115,9 @@ import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js'
 import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
 import {
   carryLevelLimitBaselines,
+  carryLimitTargetCaps,
   levelLimitBaselineNodeIds,
+  limitTargetCaps,
   unprovablePercentFrameIds,
   withholdUnprovablePercentFrames,
 } from './level-limit-baseline.js';
@@ -912,8 +914,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // A level limit on a node the options move is checked against that node's CURRENT level: carried on this wire
     // copy only, never persisted, so a later edit of the level can never leave a stale copy behind
     // (`level-limit-baseline.ts`).
-    const wireGraph = carryLevelLimitBaselines(graphForAnalysis, snapshot.goal_constraints, snapshot.goal_node_id);
-    if (wireGraph !== graphForAnalysis) {
+    const baselineGraph = carryLevelLimitBaselines(graphForAnalysis, snapshot.goal_constraints, snapshot.goal_node_id);
+    if (baselineGraph !== graphForAnalysis) {
       log.info(
         {
           event: 'run_analysis.level_limit_baseline_carried',
@@ -922,6 +924,20 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           node_ids: [...levelLimitBaselineNodeIds(graphForAnalysis, snapshot.goal_constraints, snapshot.goal_node_id)],
         },
         'run_analysis carried the current level of a level-limited node as its baseline (wire copy only; no magnitudes)',
+      );
+    }
+    // A level limit on a factor is read on that factor's OWN scale: its cap carried as `goal_threshold_cap` on this
+    // wire copy only, where the limit is spelled in the factor's own unit (`limitTargetCaps`, `level-limit-baseline.ts`).
+    const wireGraph = carryLimitTargetCaps(baselineGraph, snapshot.goal_constraints);
+    if (wireGraph !== baselineGraph) {
+      log.info(
+        {
+          event: 'run_analysis.limit_target_cap_carried',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          node_ids: [...limitTargetCaps(baselineGraph, snapshot.goal_constraints).keys()],
+        },
+        'run_analysis carried a level-limited factor\'s own cap as goal_threshold_cap (wire copy only; no magnitudes)',
       );
     }
     const plotPayload: Record<string, unknown> = {
