@@ -17,8 +17,7 @@
  */
 import { STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 
-import { classifyUnitScaleClass } from '../draft/records/unit-scale-class.js';
-import { isPercentWithPeriod } from '../../orchestrator-v5/agent-lane/admit-constraint.js';
+import { percentLevelFrame } from '../../orchestrator-v5/agent-lane/admit-constraint.js';
 import { sizeLink, type MagnitudeNode } from './link-effect.js';
 
 type Rec = Record<string, unknown>;
@@ -46,26 +45,22 @@ function sizedByOlumi(edge: Rec): boolean {
 
 /**
  * ⚠ THE DOMAIN THE ENGINE JUDGES A LIMITED LEVEL ON. A percentage level spelled with a population ("% of Pro subscribers
- * per month", the served starting point) is not a period-only percent, so `levelDomain` gives it no domain and D6 cannot
- * size against it. That is deliberate for open language ("% change …" is no level). But when a LEVEL limit on that same
- * node was admitted in the canonical percent unit (`admit-constraint`: only where the node's own scale proves it), PLoT
- * reads the level on [0, 1] and judges its out-of-domain draws there. A placeholder is sized on that same domain: the
- * typed limit decides, never the phrase.
+ * per month", the served starting point) is not a period-only percent, so on its words alone `levelDomain` gives it no
+ * domain. That is deliberate for open language ("% change …" is no level). A LEVEL limit on the node, admitted in the
+ * canonical percent unit (`percentLevelFrame`, the ONE rule admission also asks), is the structured field that says it is one: `MagnitudeNode.percent_level`, the ONE rule
+ * `levelDomain` applies for admission and here alike (with its typed guard: no option level below zero).
  */
-function limitedPercentUnits(graph: Rec, nodes: readonly Rec[]): Map<string, string> {
-  const out = new Map<string, string>();
+function percentLevelIds(graph: Rec): Set<string> {
+  const out = new Set<string>();
   const limits = Array.isArray(graph.goal_constraints) ? graph.goal_constraints : [];
   for (const c of limits) {
     if (!isRec(c) || c.value_frame !== 'level' || typeof c.node_id !== 'string' || typeof c.unit !== 'string') continue;
-    if (!isPercentWithPeriod(c.unit)) continue;
-    const node = nodes.find((n) => n.id === c.node_id);
-    const own = isRec(node?.observed_state) ? node.observed_state.unit : undefined;
-    if (typeof own === 'string' && classifyUnitScaleClass(own) === 'percent' && !isPercentWithPeriod(own)) out.set(c.node_id, c.unit);
+    if (typeof c.value === 'number' && percentLevelFrame(c.value, c.unit) !== undefined) out.add(c.node_id);
   }
   return out;
 }
 
-function magnitudeNodes(nodes: readonly Rec[], limitUnits: ReadonlyMap<string, string>): Map<string, MagnitudeNode> {
+function magnitudeNodes(nodes: readonly Rec[], percentLevel: ReadonlySet<string>): Map<string, MagnitudeNode> {
   const optionLevels = new Map<string, number[]>();
   for (const n of nodes) {
     if (n.kind !== 'option' || !isRec(n.interventions)) continue;
@@ -78,13 +73,12 @@ function magnitudeNodes(nodes: readonly Rec[], limitUnits: ReadonlyMap<string, s
     label: typeof n.label === 'string' ? n.label : (n.id as string),
     kind: typeof n.kind === 'string' ? n.kind : undefined,
     scale_frame: n.scale_frame,
-    observed_state: isRec(n.observed_state)
-      ? ({ ...n.observed_state, ...(limitUnits.has(n.id as string) ? { unit: limitUnits.get(n.id as string) } : {}) } as MagnitudeNode['observed_state'])
-      : undefined,
+    observed_state: isRec(n.observed_state) ? (n.observed_state as MagnitudeNode['observed_state']) : undefined,
     goal_threshold_cap: n.goal_threshold_cap,
     goal_threshold_unit: n.goal_threshold_unit,
     unit: null,
     option_levels: optionLevels.get(n.id as string) ?? [],
+    ...(percentLevel.has(n.id as string) ? { percent_level: true } : {}),
   }]));
 }
 
@@ -113,7 +107,7 @@ export function frameDefaultedLinks<G>(graph: G, factorId: string): FramedLinks<
     const direction = edge.effect_direction === 'negative' || edge.effect_direction === 'positive'
       ? edge.effect_direction
       : isRec(edge.strength) && finite(edge.strength.mean) && edge.strength.mean < 0 ? 'negative' : 'positive';
-    magnitude ??= magnitudeNodes(nodes, limitedPercentUnits(graph, nodes));
+    magnitude ??= magnitudeNodes(nodes, percentLevelIds(graph));
     const sizing = sizeLink({ direction, user_stated: false }, magnitude.get(from.id as string)!, magnitude.get(to.id as string)!);
     const strength = isRec(edge.strength) ? edge.strength : {};
     const provenance = isRec(edge.provenance) ? edge.provenance : {};
