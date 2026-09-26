@@ -21,10 +21,12 @@ describe('the no-leader sentence never asks for a rerun that cannot help', () =>
     expect(limitCauseCodesOf(SERVED.blocks)).toContain('CONSTRAINT_LEVEL_DRAWS_OUT_OF_DOMAIN');
   });
 
-  it('RED (AI Quality 5847818424, served): the cause is the model’s own estimate → named, and no "fix the limit, run again"', () => {
+  it('RED (AI Quality 5847818424, served): says only what the code proves — levels the figure cannot take, not your limit — and no "fix the limit, run again"', () => {
     const s = agentNoLeaderSentence('constraint_verdict_withheld', SERVED.analysis_ready, limitCauseCodesOf(SERVED.blocks));
-    expect(s).toContain('Olumi’s own estimate of an effect in your model');
+    expect(s).toContain('levels it cannot actually take');
     expect(s).toContain('not your limit');
+    // R&C #2016 B1: the typed code names no estimate and no provenance.
+    expect(s).not.toContain('Olumi’s own estimate');
     expect(s).not.toMatch(FUTILE);
     expect(s).not.toContain('CONSTRAINT_');
   });
@@ -50,7 +52,7 @@ describe('the no-leader sentence never asks for a rerun that cannot help', () =>
       { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'constraint_verdict_withheld', graph: { nodes: [], edges: [] }, analysisReady: SERVED.analysis_ready } as never,
     );
     const text = out.response.assistant_text;
-    expect(text).toContain('Olumi’s own estimate of an effect in your model');
+    expect(text).toContain('levels it cannot actually take');
     expect(text).not.toMatch(FUTILE);
   });
 });

@@ -974,8 +974,10 @@ const BY_WITHHELD_REASON: Readonly<Record<string, string>> = {
  * what is missing and what would change it, never the user's limit when the limit is not the cause.
  */
 const BY_CONSTRAINT_CODE: Readonly<Record<string, string>> = {
+  // Only what the code proves (R&C #2016 B1): the figure was drawn at levels it cannot take. It names no estimate and
+  // no provenance, so the clause blames neither Olumi's estimate nor the user's limit.
   CONSTRAINT_LEVEL_DRAWS_OUT_OF_DOMAIN:
-    'because Olumi\u2019s own estimate of an effect in your model carries the limited figure outside the range your limit is set in, so the limit could not be tested; that estimate, not your limit, is what would have to change, and running the analysis again as it stands will not change it',
+    'because on this run the model\u2019s figures put the figure your limit is on at levels it cannot actually take, so your limit could not be tested; that is about the model\u2019s figures, not your limit, and running the analysis again as it stands will not change that, so ask me which of the model\u2019s figures cause it',
 };
 
 /** The typed warning codes the run's own `analysis_result` block carries (`decision_brief.warnings[].code`). */
