@@ -972,11 +972,13 @@ export async function buildModelFromBrief(
       ...admitted.loss
         // `status_quo_held`: the held status quo is a machine-inferred MEANING
         // (`admit-model.ts`, `wireInertStatusQuo`), so it must be said and correctable.
+        // `level_restated` / `frame_widened` / `signed_level_withheld`: how a factor's option levels
+        // were kept in ONE value space (#69 5835137365) — each changes what a number means, so it is said.
         // `observed_state.baseline`: a goal's current level that could not be carried
         // (`admit-model.ts`) — the user is told why, and what would let it count.
         // `nonlinear_identity[_rejected]` (C46): a declared product the analysis can only add
         // up — the missing capability in plain English — or a declaration that did not hold.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|nonlinear_identity|nonlinear_identity_rejected)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

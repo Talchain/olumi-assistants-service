@@ -264,7 +264,42 @@ export function applyStructuralAddEdge(
   }
   const baseGraph = graphParse.data;
 
-  // ── 2. THE STALE GATE, before anything is resolved ───────────────────────
+  // ── 2. THE DUPLICATE GATE, BEFORE THE STALE GATE — an idempotent no-op ────
+  // Same shape as the sibling's id collision: `base_graph_hash` can be perfectly
+  // fresh and the edge still already be present, because it is present in the
+  // very graph the user was looking at.
+  //
+  // ⭐ AND IT RUNS FIRST (C32, Delivery Lead ruling #70 5841216898). The link the
+  // user asked for already exists in the SERVER's graph, so nothing needs
+  // writing whatever base they claim; refusing it as stale would answer a 409
+  // for a link that is there. That is exactly Canvas "+ Add option": the option
+  // add now writes `decision → option` itself (`structural-add.ts`), and the
+  // follow-up link event still carries the PRE-add hash. Nothing is written on
+  // this path, so deciding it before the stale gate cannot let a stale base
+  // write anything.
+  if (baseGraph.edges.some((e) => e.from === event.from && e.to === event.to)) {
+    log.info(
+      {
+        event: 'v5.system_event.structural_add_edge.edge_already_exists',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+      },
+      'structural_add_edge — that edge is already present; refusing rather than duplicating',
+    );
+    // A decision → option link has no strength to open, so the causal sentence
+    // would point the user at a control that does not exist.
+    const kindOf = (id: string): string | undefined => baseGraph.nodes.find((n) => n.id === id)?.kind;
+    const isDecisionLink = kindOf(event.from) === 'decision' && kindOf(event.to) === 'option';
+    return refuse(
+      payload,
+      'edge_already_exists',
+      isDecisionLink
+        ? `${labelOf(baseGraph, event.to)} is already an option for ${labelOf(baseGraph, event.from)}, so there was nothing to change.`
+        : `${labelOf(baseGraph, event.from)} and ${labelOf(baseGraph, event.to)} are already connected, so I've left the model as it is. Open that connection to change its strength.`,
+    );
+  }
+
+  // ── 3. THE STALE GATE, before anything is resolved ───────────────────────
   const currentBaseHash = computeAnalysisAffectingGraphHash(
     persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
   );
@@ -291,7 +326,7 @@ export function applyStructuralAddEdge(
     );
   }
 
-  // ── 3. THE ENDPOINT GATE — a dangling edge is what the contract forbids ──
+  // ── 4. THE ENDPOINT GATE — a dangling edge is what the contract forbids ──
   // The applier throws NODE_NOT_FOUND, which is the enforcement. This exists
   // for the SENTENCE: "one end of that connection isn't in the model" is
   // followable, "I couldn't apply that" is not.
@@ -312,26 +347,6 @@ export function applyStructuralAddEdge(
       payload,
       'endpoint_unresolved',
       `One end of that connection isn't in the saved model, so I haven't added it. Reload and try again.`,
-    );
-  }
-
-  // ── 4. THE DUPLICATE GATE — the hash cannot catch this either ────────────
-  // Same shape as the sibling's id collision: `base_graph_hash` can be perfectly
-  // fresh and the edge still already be present, because it is present in the
-  // very graph the user was looking at.
-  if (baseGraph.edges.some((e) => e.from === event.from && e.to === event.to)) {
-    log.info(
-      {
-        event: 'v5.system_event.structural_add_edge.edge_already_exists',
-        request_id: requestId,
-        scenario_id: payload.scenario_id,
-      },
-      'structural_add_edge — that edge is already present; refusing rather than duplicating',
-    );
-    return refuse(
-      payload,
-      'edge_already_exists',
-      `${labelOf(baseGraph, event.from)} and ${labelOf(baseGraph, event.to)} are already connected, so I've left the model as it is. Open that connection to change its strength.`,
     );
   }
 

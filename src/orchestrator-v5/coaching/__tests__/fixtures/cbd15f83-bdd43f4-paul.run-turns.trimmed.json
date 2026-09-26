@@ -1,0 +1,196 @@
+{
+  "_provenance": {
+    "source_file": "olumi-debug-1a298d6d-20260925.json (Paul manual test, payloads.cee_response; not in any repo)",
+    "source_sha256": "8778da4e3cdcb62a666c13335ec27572eb242de842e67bac6ef6a6bf1dae1d64",
+    "turns_kept": [
+      "t1"
+    ],
+    "served_build": "CEE bdd43f4a2acc469cfc4a47c88ee44197e2c06211 (Render deploy live 15:54:43Z-17:58:42Z, which covers the 17:26:55-17:54:53Z test window; derived from the Render deploys API, 25 Sep 19:50Z; the export itself records builds.cee = null) · UI 0ae19128",
+    "route": "POST /proxy/v5/turn (stream) -> agent lane, served wire response",
+    "why_this_fixture": "Paul's manual test: the automatic first pass on a model whose churn limit could not be checked (CONSTRAINT_TARGET_UNRELIABLE) withheld the leader (constraint_verdict_withheld), yet the served run-turn card challenged a link (served_run_turn_cards). R&C review #69 5837270934.",
+    "trimmed": true,
+    "trim_note": "Only the Run turns are kept, and of each only: graph_hash, analysis_state (whole), analysis_ready {status, may_run, goal_node_id, freshness, freshness_reason, graph_hash_at_run, current_graph_hash, computed_at, options[{option_id,label}]}, the single analysis_result block {type, computed_against_hash, leading_option_id, summary, win_probabilities, enrichment {robustness, confidence_tier, option_comparison_status, run_provenance, inference_warnings}}, the turn's tools_called, and the run-turn card signal_ids the served build emitted (served_run_turn_cards). Values are byte-identical to the source for every kept field.",
+    "capture_note": "The source holds the ROUTE response only, not the internal run response the Runtime hands to captureAnalysis; runTurnCase reconstructs the capture from the same turn (see fragile-link-challenge-fixtures.ts)."
+  },
+  "scenario_id": "cbd15f83-359b-4456-b7a3-daff6c086695",
+  "turns": {
+    "t1": {
+      "tools_called": [
+        "(not in the export)"
+      ],
+      "graph_hash": "449b882e043ae3e3",
+      "analysis_state": {
+        "run_state": {
+          "kind": "complete_current",
+          "computed_at": "2026-09-25T17:27:54.315Z"
+        },
+        "readiness": {
+          "status": "unknown",
+          "blockers": []
+        },
+        "leader_claim": {
+          "permitted": false,
+          "withheld_reason": "constraint_verdict_withheld"
+        },
+        "robustness": {},
+        "usable_for_prose": true,
+        "usable_for_chips": true,
+        "usable_for_followup": true,
+        "requires_rerun": false,
+        "blocked_unusable": false,
+        "contradictions": []
+      },
+      "analysis_ready": {
+        "status": "ready",
+        "may_run": true,
+        "goal_node_id": "mrr",
+        "freshness": "fresh",
+        "freshness_reason": "agent_readback_run_state_current",
+        "graph_hash_at_run": "449b882e043ae3e3",
+        "current_graph_hash": "449b882e043ae3e3",
+        "computed_at": "2026-09-25T17:27:54.315Z",
+        "options": [
+          {
+            "option_id": "keep_49_price",
+            "label": "Keep £49 Price"
+          },
+          {
+            "option_id": "raise_to_59_at_release",
+            "label": "Raise to £59 at Release"
+          },
+          {
+            "option_id": "raise_to_54_at_release",
+            "label": "Raise to £54 at Release"
+          }
+        ]
+      },
+      "analysis_result": {
+        "type": "analysis_result",
+        "computed_against_hash": "449b882e043ae3e3",
+        "leading_option_id": null,
+        "summary": "Olumi ran a first pass on the model it had just drafted. Nothing in it is confirmed yet, so no option is put forward and no result is called reliable. Use it to find what is wrong.",
+        "enrichment": {
+          "robustness": {
+            "near_tie": {
+              "gap": 0.6606999999999933,
+              "is_tie": false,
+              "threshold": 0.1
+            },
+            "robust_edges": [
+              {
+                "to_id": "pro_subscribers",
+                "edge_id": "monthly_churn->pro_subscribers",
+                "from_id": "monthly_churn",
+                "to_label": "Pro subscribers",
+                "from_label": "Monthly churn",
+                "alternative_winner_id": null,
+                "alternative_winner_label": null
+              }
+            ],
+            "fragile_edges": [
+              {
+                "to_id": "mrr",
+                "edge_id": "pro_plan_price->mrr",
+                "from_id": "pro_plan_price",
+                "visible": true,
+                "severity": "error",
+                "to_label": "MRR",
+                "from_label": "Pro plan price",
+                "switch_probability": 0.6248,
+                "alternative_winner_id": "keep_49_price",
+                "alternative_winner_label": "Keep £49 Price",
+                "marginal_switch_probability": 0.18
+              },
+              {
+                "to_id": "monthly_new_pro_subscribers",
+                "edge_id": "pro_plan_price->monthly_new_pro_subscribers",
+                "from_id": "pro_plan_price",
+                "visible": true,
+                "severity": "warning",
+                "to_label": "Monthly new Pro subscribers",
+                "from_label": "Pro plan price",
+                "switch_probability": 0.17,
+                "alternative_winner_id": "keep_49_price",
+                "alternative_winner_label": "Keep £49 Price",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "pro_subscribers",
+                "edge_id": "monthly_new_pro_subscribers->pro_subscribers",
+                "from_id": "monthly_new_pro_subscribers",
+                "visible": false,
+                "severity": "warning",
+                "to_label": "Pro subscribers",
+                "from_label": "Monthly new Pro subscribers",
+                "switch_probability": 0.1292,
+                "alternative_winner_id": "keep_49_price",
+                "alternative_winner_label": "Keep £49 Price",
+                "marginal_switch_probability": 0
+              },
+              {
+                "to_id": "mrr",
+                "edge_id": "pro_subscribers->mrr",
+                "from_id": "pro_subscribers",
+                "visible": false,
+                "severity": "warning",
+                "to_label": "MRR",
+                "from_label": "Pro subscribers",
+                "switch_probability": 0.0848,
+                "alternative_winner_id": "keep_49_price",
+                "alternative_winner_label": "Keep £49 Price",
+                "marginal_switch_probability": 0
+              }
+            ]
+          },
+          "confidence_tier": "needs_work",
+          "option_comparison_status": "computed",
+          "run_provenance": {
+            "provisional": true,
+            "initiated_by": "auto_post_construction",
+            "construction_turn_id": "graph_registration:d06c0b3d-f969-4857-a71c-58cfbbb44b15"
+          },
+          "inference_warnings": [
+            {
+              "code": "CONSTRAINT_TARGET_UNRELIABLE",
+              "message": "The target on \"Monthly churn\" can't be scored against this model: \"Monthly churn\" is calculated from the factors feeding into it, so the analysis produces a modelled change for it, not a reading on the same scale as your target. Comparing the two would report a near-zero chance for every option no matter how good the options are, so goal-fit probabilities were withheld for this run rather than shown. Setting a current value for \"Monthly churn\" would not change that — it is calculated from its inputs, so it has no measured starting point of its own to anchor to. Your limit is recorded and was left unscored rather than scored against the wrong number.",
+              "severity": "warning"
+            },
+            {
+              "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+              "message": "6 edge E-value entries were omitted from edge_e_values: 6 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+              "severity": "info"
+            },
+            {
+              "code": "CONSTRAINT_FRAME_UNSPECIFIED",
+              "field": "goal_constraints[0].value_frame",
+              "message": "constraint value=1.0 was supplied without goal_constraints[0].value_frame, so the frame it is expressed in is unknown. A level threshold compared against the target's change-from-origin samples yields a structurally impossible probability, so constraint_analysis is omitted rather than guessed. Stamp 'level' or 'delta'.",
+              "severity": "warning"
+            },
+            {
+              "code": "GOAL_DIRECTION_UNATTESTED",
+              "field": "goal_direction",
+              "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+              "severity": "warning"
+            },
+            {
+              "code": "GOAL_THRESHOLD_NOT_CONVERTIBLE",
+              "field": "nodes[mrr].observed_state.baseline",
+              "message": "A 'level' frame requires goal node 'mrr' to carry observed_state.baseline to convert the level into the samples' frame, but it carries no observed_state at all.",
+              "severity": "warning"
+            },
+            {
+              "code": "EVPI_UNAVAILABLE",
+              "field": "p_win_sensitivity",
+              "message": "Win-probability sensitivity (p_win_sensitivity) was skipped: its metric is P(joint_goal) and at least one goal constraint could not be resolved into its target's sample frame. Base analysis is unaffected.",
+              "severity": "warning",
+              "elapsed_ms": 1022.7
+            }
+          ]
+        }
+      },
+      "served_run_turn_cards": [
+        "coach:fragile_link:pro_plan_price→mrr:449b882e043ae3e3:2026-09-25T17:27:54.315Z:auto_first_pass"
+      ]
+    }
+  }
+}

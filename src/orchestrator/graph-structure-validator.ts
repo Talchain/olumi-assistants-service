@@ -102,6 +102,10 @@ export type StructuralViolationCode =
 export interface StructuralViolation {
   code: StructuralViolationCode;
   detail: string;
+  /** (B4) The option a per-option violation is about, when there is one, so a
+   *  readiness blocker can name it by id instead of only in `detail` prose. */
+  option_id?: string;
+  option_label?: string;
 }
 
 export interface StructuralValidationResult {
@@ -468,6 +472,8 @@ function checkOptionDecisionEdges(graph: GraphV3T, violations: StructuralViolati
       violations.push({
         code: 'OPTION_NOT_LINKED_TO_DECISION',
         detail: `Option "${node.id}" (${node.label}) has no inbound edge from a decision — nothing selects it. Add a decision → option edge.`,
+        option_id: node.id,
+        ...(node.label ? { option_label: node.label } : {}),
       });
     }
   }
