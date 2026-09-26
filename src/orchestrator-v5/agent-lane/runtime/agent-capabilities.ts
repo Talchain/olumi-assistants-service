@@ -120,7 +120,7 @@ import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, figureTheUserWrote, figureTheUserWroteFor, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, factorTheUserNamed, figureTheUserWrote, figureTheUserWroteFor, type EntityScope } from '../stated-by-user.js';
 import { figureInUserUnits } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
@@ -1567,7 +1567,7 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: confirm
-          ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}, as your own estimate (strength kept at ${Math.abs(mean)})`
+          ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}, as your own estimate (strength kept at ${quotable(Math.abs(mean))} on Olumi's 0\u20131 scale)`
           : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)} (${magnitude} on Olumi's 0\u20131 scale), as your own estimate${wanted !== current ? `, pushing ${wanted === 'positive' ? 'up' : 'down'}` : ''}`,
       });
       proposals.put(proposal);
@@ -1576,8 +1576,8 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        link: { from: from.label, to: to.label, was: { band: linkBandWord(currentBand), strength: Math.abs(mean), direction: current },
-          becomes: { band: linkBandWord(band), strength: magnitude, direction: wanted }, keeps_current_strength: confirm },
+        link: { from: from.label, to: to.label, was: { band: linkBandWord(currentBand), strength: quotable(Math.abs(mean)), direction: current },
+          becomes: { band: linkBandWord(band), strength: quotable(magnitude), direction: wanted }, keeps_current_strength: confirm },
         note: confirm
           ? 'Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree.'
           : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree.`,
@@ -3921,6 +3921,16 @@ export function createAgentCapabilities(
       const outOfRange: { option: string; factor: string; value: number; range: number }[] = [];
       const unitMismatch: { option: string; factor: string; value: number; unit: string; factor_unit: string }[] = [];
       const levelsNotSet: { option: string; factor: string; value: number; reason: string }[] = [];
+      /**
+       * ⛔ WHOSE LINK (U3, DL 5849023213 (2)). A link with no level is written by Canonical's builder as the user's
+       * unless it says otherwise (`add-option-transaction.ts` `structuralEdgeValue(…, iv.source ?? 'user_specified')`).
+       * It is the user's only when THIS turn's typed words name its factor (`factorTheUserNamed`); otherwise it is Olumi's.
+       */
+      const optionNames = [...rawNodes.filter((n) => n.kind === 'option').map((n) => String(n.label ?? '')), ...plans.map((x) => x.plan.label)];
+      const quantityNames = [...rawNodes.filter((n) => n.kind !== 'option' && n.kind !== 'decision').map((n) => String(n.label ?? '')), ...newFactors.map((f) => f.label)];
+      const linkAuthor = (factorLabel: string): { source?: 'cee_hypothesis' } => (
+        factorTheUserNamed(factorLabel, ctx.user_turn_text, { options: optionNames, others: quantityNames.filter((l) => l !== factorLabel) })
+          ? {} : { source: 'cee_hypothesis' });
       const entries = plans.map(({ spec, plan }) => {
         type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi' };
         const levelById = new Map<string, Lvl>();
@@ -3935,13 +3945,13 @@ export function createAgentCapabilities(
         const set = new Map<string, Lvl>();
         const interventions = plan.actsOn.map((f) => {
           const lvl = levelById.get(f.id);
-          if (lvl === undefined) return { factor_id: f.id, value: null };
+          if (lvl === undefined) return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           const factor = g.nodes.find((x) => x.id === f.id);
           // ⛔ A figure in another kind of unit is never this factor's level (`unit-conflict.ts`: a price as churn).
           const factorUnit = factorUnitOf(g.raw, factor);
           if (unitsConflict(lvl.unit, factorUnit) !== null) {
             unitMismatch.push({ option: plan.label, factor: f.label, value: lvl.value, unit: String(lvl.unit), factor_unit: String(factorUnit) });
-            return { factor_id: f.id, value: null };
+            return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
           /**
            * ⛔ WHOSE LEVEL: the user's only when they wrote the figure (`stated-by-user.ts`: a 0 sent to mean "not set"
@@ -3951,12 +3961,12 @@ export function createAgentCapabilities(
           const byUser = figureTheUserWroteFor(lvl.value, lvl.unit ?? factorUnit, ctx.user_text, scopeIn(g, f.label, plan.label));
           if (!byUser && lvl.estimate === undefined) {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: notWrittenReason(lvl.value, f.label) });
-            return { factor_id: f.id, value: null };
+            return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
           if (!byUser && contradictsItsName(lvl.value, lvl.unit ?? factorUnit, plan.label)) {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
               reason: `Olumi's estimate of ${lvl.value} for ${f.label} does not match the figure in the option's own name ("${plan.label}"), so that level is left unset. Use the figure in the name, or name the option for the figure you mean.` });
-            return { factor_id: f.id, value: null };
+            return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
           lvl.by = byUser ? 'user' : 'olumi';
           const stamp = byUser ? {} : { source: 'cee_hypothesis' as const };
@@ -3965,7 +3975,7 @@ export function createAgentCapabilities(
             const v = lvl.value / frame;
             if (!(v >= 0 && v <= 1)) {
               outOfRange.push({ option: plan.label, factor: f.label, value: lvl.value, range: frame });
-              return { factor_id: f.id, value: null };
+              return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
             }
             const os = (factor?.observed_state ?? {}) as { unit?: unknown };
             const unit = lvl.unit ?? (typeof os.unit === 'string' && os.unit !== '' ? os.unit : undefined);
@@ -3976,7 +3986,7 @@ export function createAgentCapabilities(
           levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
             reason: `The model has no range for ${f.label} to read ${lvl.value} against, so this change leaves that level unset. `
               + `Once the option is added, propose that level with propose_option_interventions, which records a range for ${f.label}.` });
-          return { factor_id: f.id, value: null };
+          return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
         });
         /**
          * A new factor starts with no level on this option: it has no range yet to read a figure against, and its
@@ -3989,7 +3999,7 @@ export function createAgentCapabilities(
               reason: `"${a.label}" is new in this change and has no range yet, so its level is not set here. Once it is added, propose that level with propose_option_interventions.` });
           }
         }
-        const added = plan.newActsOn.map((a) => ({ factor_key: a.key, value: null }));
+        const added = plan.newActsOn.map((a) => ({ factor_key: a.key, value: null, ...linkAuthor(a.label) }));
         return { plan, set, entry: { label: plan.label, option_id: plan.optionId, interventions: [...interventions, ...added] } };
       });
       if (unitMismatch.length > 0) {
