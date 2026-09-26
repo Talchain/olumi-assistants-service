@@ -1431,3 +1431,61 @@ describe('post-merge review of #1920 — a paraphrased status quo gives its shar
     expect(linesOf(withheldGate(text, STAFFING_NODES))).toContain('- Status quo: 45%');
   });
 });
+
+/**
+ * ⛔ "<OPTION> IS (PROVISIONALLY) SEPARATED" NAMES A LEADER (Canonical 5845848896, MEASURED at staging bc09bb14 on
+ * AI Quality's served reply 5845776236). On the permit-with-caveat turn that sentence is Paul's ruling working
+ * ("caveat, not withhold", #38 5576895511) and must stay. On a WITHHELD turn whose separation is still
+ * `separated` (a limit not shown met, a run not confirmed), it is a leader claim in words the classifier did not
+ * read, and it survived the drop. Only a SINGULAR subject counts: "the two options are separated by less than
+ * a point" states a near tie, not a leader.
+ */
+describe('a sentence naming ONE option as separated ranks the options', () => {
+  const SERVED = 'Release to All Now is provisionally separated in this model, but the comparison is fragile.';
+  const NEUTRAL = '- The result turns most on AI assistant adoption rate, an Olumi estimate, not evidence you supplied.';
+  const graph = { nodes: [{ id: 'all', kind: 'option', label: 'Release to All Now' }, { id: 'beta', kind: 'option', label: 'Staged Beta to Top Accounts' }] };
+
+  it('RED: the served sentence and its paraphrases rank the options', () => {
+    for (const s of [
+      SERVED,
+      'Release to All Now is clearly separated from the staged beta.',
+      'Staged Beta to Top Accounts separates from the other option on MRR.',
+      'The broad release stands apart from the staged beta in this model.',
+      'Release to All Now is now separated from the alternative.',
+    ]) expect(sentenceRanksOptions(s, rankingLabelContext(graph, undefined)), s).toBe(true);
+  });
+
+  it('CONTROL: plural near-tie, negation and the separation question itself do not rank', () => {
+    for (const s of [
+      'The two options are separated by less than a point, so they cannot be told apart.',
+      'The options are not separated on this run.',
+      'Release to All Now is not separated from the staged beta.',
+      'How far apart the options are was not established on this run.',
+      'Separation between the options was not measured.',
+      'Price and churn are separated in the model by the conversion factor.',
+    ]) expect(sentenceRanksOptions(s, rankingLabelContext(graph, undefined)), s).toBe(false);
+  });
+
+  const reply = `${SERVED}\n\n${NEUTRAL}`;
+  const gate = (o: { permitted: boolean; reason?: string }) => enforceAgentLaneLeaderClaimsAtWire(
+    {
+      assistant_text: reply, blocks: [], suggested_actions: [],
+      analysis_state: { leader_claim: { permitted: o.permitted, separation: 'separated', ...(o.reason ? { withheld_reason: o.reason } : {}) } },
+    } as unknown as OlumiResponse,
+    {
+      requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: o.permitted, separationEstablished: true,
+      ...(o.reason ? { leaderClaimWithheldReason: o.reason } : {}), graph,
+      analysisReady: { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'quantified_provisional', reasons: [] } },
+    },
+  ).response.assistant_text;
+
+  it('RED: on a WITHHELD turn (a limit not shown met, separation still "separated") the served headline goes; the rest stays', () => {
+    const out = gate({ permitted: false, reason: 'constraint_verdict_withheld' });
+    expect(out).not.toContain('is provisionally separated');
+    expect(out).toContain(NEUTRAL);
+  });
+
+  it('CONTROL: on the permit-with-caveat turn (entitled, separated, quantified_provisional) the served headline is kept', () => {
+    expect(gate({ permitted: true }).startsWith(reply)).toBe(true);
+  });
+});
