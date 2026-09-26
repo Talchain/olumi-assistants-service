@@ -62,6 +62,23 @@
  * carries `:unanchored` in its signal_id. If the proved words do not fit, the
  * card falls back to today's words, never to a link card.
  *
+ * ── THE TYPED VERDICT STATE (26 Sep 2026) ───────────────────────────────────
+ * The route hands the selected run's own constraint verdict state (CEE #1958's
+ * carrier: `readBackState` `constraintVerdictState`, bound to the same fact as
+ * the readback's `analysis_result`). Each state licenses exactly its own claim
+ * (`ConstraintVerdictState`, orchestrator/context/constraint-feasibility.ts):
+ *   - `unevaluated`: "your condition was not checked is assertable HERE AND
+ *     NOWHERE ELSE", for AT LEAST ONE limit. The card says "could not check" (one
+ *     limit), or "could not check at least one of" (more).
+ *   - `identity_unresolved`: neither checked nor unchecked; "could not tell
+ *     whether … was checked".
+ *   - `evaluated_infeasible`: the limit the leader breaks was checked, but naming
+ *     "the option ahead" is barred while the leader is withheld, so today's
+ *     words stay (they are true: "not checked or not met").
+ *   - absent, `null` (not recorded), or anything else: today's words.
+ * The proved cause (above) speaks only when the state is absent or `unevaluated`,
+ * so a mirror that drifted from the producer fails closed.
+ *
  * The prose summary is NOT an input. The automatic first pass replaces it
  * wholesale (compose/unrequested-analysis-confinement.ts), which is why the
  * #1922 prose gate (`summaryAsksUserToRepairALimit`) never saw Paul's limit.
@@ -83,6 +100,7 @@ import { CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/bound
 import { deterministicBlockId } from '../compose/block-id.js';
 import type { NamedLimit } from './bound-graph.js';
 import { WITHHELD_CONSTRAINT_VERDICT } from '../compose/analysis-state-v1.js';
+import type { ConstraintVerdictState } from '../../orchestrator/context/constraint-feasibility.js';
 import {
   FIRST_PASS_PREFIX,
   RUN_TURN_COACHING_CONTRACT,
@@ -97,12 +115,35 @@ import {
 
 export const LIMIT_UNCHECKED_SIGNAL_ID_PREFIX = 'coach:limit_unchecked:';
 
+/**
+ * Which words the card speaks: today's disjunction, the PROVED cause, or the claim the typed verdict
+ * state licenses (`unchecked` ⇐ `unevaluated`, `identity` ⇐ `identity_unresolved`).
+ */
+export type LimitCardArm = 'today' | 'cause' | 'unchecked' | 'identity';
+
+const STATES_WITH_OWN_WORDS: ReadonlySet<ConstraintVerdictState> = new Set<ConstraintVerdictState>([
+  'unevaluated', 'identity_unresolved', 'evaluated_infeasible',
+]);
+
+/** The arm the inputs license. Pure; anything unrecognised is `today`. */
+export function limitCardArm(provedUnanchored: boolean, verdictState: unknown): LimitCardArm {
+  const state = typeof verdictState === 'string' && STATES_WITH_OWN_WORDS.has(verdictState as ConstraintVerdictState)
+    ? (verdictState as ConstraintVerdictState) : null;
+  // A recorded state that is not one of the three the withheld claim fires on is inconsistent: today's words.
+  if (state === null && verdictState !== undefined && verdictState !== null) return 'today';
+  if (provedUnanchored && (state === null || state === 'unevaluated')) return 'cause';
+  if (state === 'unevaluated') return 'unchecked';
+  if (state === 'identity_unresolved') return 'identity';
+  return 'today';
+}
+
 /** The card's block contract, as data (the shared bounds live on RUN_TURN_COACHING_CONTRACT). */
 export const LIMIT_UNCHECKED_CARD_CONTRACT = Object.freeze({
-  signal_id: `${LIMIT_UNCHECKED_SIGNAL_ID_PREFIX}<graph_hash>:<run computed_at>:<effective trigger>[:named][:unanchored]`,
+  signal_id: `${LIMIT_UNCHECKED_SIGNAL_ID_PREFIX}<graph_hash>:<run computed_at>:<effective trigger>[:named][:unanchored|:unchecked|:identity]`,
   block_id: 'deterministicBlockId(signal_id)',
   reads: "readback analysis_state.leader_claim: permitted === false && withheld_reason === 'constraint_verdict_withheld'"
-    + '; for the cause, bound-graph.ts everyLimitProvedUnanchored(the bound graph, analysis_ready.options)',
+    + '; for the cause, bound-graph.ts everyLimitProvedUnanchored(the bound graph, analysis_ready.options)'
+    + '; for the verdict words, the readback constraintVerdictState',
   target_refs: '[]',
   dsk_claim_provenance: 'absent',
   action_intent: 'absent',
@@ -126,8 +167,8 @@ export function leaderWithheldForALimit(analysisState: unknown): boolean {
 export function composeLimitUncheckedCard(
   firstPass: boolean,
   limits?: string | readonly (string | NamedLimit)[],
-  /** Every limit PROVED on a part Olumi works out from other parts (`everyLimitProvedUnanchored`). */
-  provedUnanchored = false,
+  /** Which words ({@link limitCardArm}); `true` is the proved cause, for callers that predate the arms. */
+  arm: LimitCardArm | boolean = 'today',
 ): FragileLinkChallengeCopy {
   const named: NamedLimit[] = limits === undefined ? [] : (typeof limits === 'string' ? [limits] : [...limits])
     .map((l) => (typeof l === 'string' ? { label: l, stated: null } : l));
@@ -135,7 +176,9 @@ export function composeLimitUncheckedCard(
   // The body carries "one reason"; a prompt that would not fit with it drops that clause, never the no-write ask.
   const promptOf = (forms: readonly string[]) => forms.find((p) => p.length <= promptMax) ?? forms[forms.length - 1]!;
   const ASK = 'Explain what that means for how far I can rely on this analysis. Don\'t change the model or re-run anything yet.';
-  if (provedUnanchored) return composeProvedCause(firstPass, named, ASK);
+  const which: LimitCardArm = arm === true ? 'cause' : arm === false ? 'today' : arm;
+  if (which === 'cause') return composeProvedCause(firstPass, named, ASK);
+  if (which === 'unchecked' || which === 'identity') return composeTypedVerdict(firstPass, named, ASK, which);
   if (named.length >= 2) {
     const quoted = named.map((l) => `“${l.label}”${l.stated !== null ? ` (${l.stated})` : ''}`);
     const list = `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
@@ -231,6 +274,49 @@ function composeProvedCause(firstPass: boolean, named: readonly NamedLimit[], as
   };
 }
 
+/**
+ * The typed-verdict words. `unchecked` says "could not check" for ONE limit and "could not check at least
+ * one of" for more (the state proves at least one); `identity` says "could not tell whether … was checked".
+ */
+function composeTypedVerdict(
+  firstPass: boolean,
+  named: readonly NamedLimit[],
+  ask: string,
+  arm: 'unchecked' | 'identity',
+): FragileLinkChallengeCopy {
+  const { body_max: bodyMax, action_prompt_max: promptMax } = RUN_TURN_COACHING_CONTRACT.limits;
+  const fit = (forms: readonly string[], max: number) => forms.find((f) => f.length <= max) ?? forms[forms.length - 1]!;
+  const quoted = named.map((l) => `“${l.label}”${l.stated !== null ? ` (${l.stated})` : ''}`);
+  const REASON = ' That is one reason no option is put forward yet.';
+  const bodyOf = (finding: string) => fit([`${finding}${REASON}`, finding]
+    .map((f) => (firstPass ? `${FIRST_PASS_PREFIX}it ${f}` : `This analysis ${f}`)), bodyMax);
+  const list = quoted.length >= 2 ? `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}` : null;
+  const what = list !== null ? { yours: `your limits on ${list}`, mine: `my limits on ${list}`, were: 'were' }
+    : quoted.length === 1 ? { yours: `your limit on ${quoted[0]}`, mine: `my limit on ${quoted[0]}`, were: 'was' }
+      : { yours: 'the limits on the model', mine: 'the limits on my model', were: 'were' };
+  const plural = quoted.length !== 1;
+  if (arm === 'unchecked') {
+    const some = plural ? 'at least one of ' : '';
+    return {
+      title: plural ? 'Not every limit could be checked' : 'Your limit could not be checked',
+      body: bodyOf(`could not check ${some}${what.yours}.`),
+      action_label: plural ? 'What this means for my limits' : 'What this means for my limit',
+      action_prompt: fit([`Olumi could not check ${some}${what.mine} in this analysis. ${ask}`], promptMax),
+    };
+  }
+  return {
+    title: plural ? 'Check your limits before relying on this' : 'Check your limit before relying on this',
+    body: bodyOf(`could not tell whether ${what.yours} ${what.were} checked.`),
+    action_label: plural ? 'What this means for my limits' : 'What this means for my limit',
+    action_prompt: fit([`Olumi could not tell whether ${what.mine} ${what.were} checked in this analysis. ${ask}`], promptMax),
+  };
+}
+
+/** One block_id, one body: each arm's words carry their own signal suffix. */
+const ARM_SIGNAL_SUFFIX: Readonly<Record<LimitCardArm, string>> = Object.freeze({
+  today: '', cause: ':unanchored', unchecked: ':unchecked', identity: ':identity',
+});
+
 export type LimitUncheckedCardDecision =
   | { readonly block: CoachingBlock; readonly reason: null }
   | { readonly block: null; readonly reason: Exclude<RunTurnCoachingReason, 'no_run_this_turn'> };
@@ -246,6 +332,8 @@ export function buildLimitUncheckedCard(
   limitLabel?: string | readonly (string | NamedLimit)[],
   /** `bound-graph.ts` `everyLimitProvedUnanchored` on the SAME bound graph; false → today's words. */
   provedUnanchored = false,
+  /** The readback's `constraintVerdictState` (the run's own); absent or `null` → the proof or today's words. */
+  verdictState?: unknown,
 ): LimitUncheckedCardDecision {
   // (0) identity, repeated so the builder is total on its own.
   const result = readRecord(input.analysisResult);
@@ -269,14 +357,15 @@ export function buildLimitUncheckedCard(
     ...(namedLimits === null ? [] : [namedLimits, namedLimits.map((l) => ({ label: l.label, stated: null }))]),
     undefined,
   ];
-  const arms = provedUnanchored ? [true, false] : [false];
-  const chosen = arms.flatMap((cause) => nameForms.map((ls) => ({ cause, named: ls !== undefined, copy: composeLimitUncheckedCard(firstPass, ls, cause) })))
+  const licensed = limitCardArm(provedUnanchored, verdictState);
+  const arms: LimitCardArm[] = licensed === 'today' ? ['today'] : [licensed, 'today'];
+  const chosen = arms.flatMap((arm) => nameForms.map((ls) => ({ arm, named: ls !== undefined, copy: composeLimitUncheckedCard(firstPass, ls, arm) })))
     .find((c) => copyPasses(c.copy));
   if (chosen === undefined) return { block: null, reason: 'copy_gate' };
   const { copy } = chosen;
 
   const signalId = `${LIMIT_UNCHECKED_SIGNAL_ID_PREFIX}${input.graphHash}:${input.computedAt}:${effectiveTrigger}`
-    + `${chosen.named ? ':named' : ''}${chosen.cause ? ':unanchored' : ''}`;
+    + `${chosen.named ? ':named' : ''}${ARM_SIGNAL_SUFFIX[chosen.arm]}`;
   const parsed = CoachingBlockSchema.safeParse({
     type: 'coaching',
     coaching_kind: RUN_TURN_COACHING_CONTRACT.block.coaching_kind,

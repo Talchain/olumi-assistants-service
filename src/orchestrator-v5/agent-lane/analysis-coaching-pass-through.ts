@@ -51,6 +51,11 @@ export interface RunTurnCoachingFinal {
    * fact from it ONLY after `coaching/bound-graph.ts` proves its analysis-affecting hash is `graphHash`.
    */
   graph?: unknown;
+  /**
+   * The selected run's own constraint verdict state, from the SAME graph read (`readBackState`
+   * `constraintVerdictState`, CEE #1958: bound to the fact `analysisResult` came from). `null` = not recorded.
+   */
+  constraintVerdictState?: string | null;
 }
 
 export interface RunTurnCoachingResult {
@@ -252,7 +257,7 @@ export function runTurnCoaching(
     // The cause, only on proof from the SAME bound graph and the bound run's own options.
     const provedUnanchored = boundGraph !== null
       && everyLimitProvedUnanchored(boundGraph, record(captured.analysis_ready)?.options);
-    const limit = buildLimitUncheckedCard(input, limitLabels, provedUnanchored);
+    const limit = buildLimitUncheckedCard(input, limitLabels, provedUnanchored, final.constraintVerdictState);
     if (limit.block === null) return { blocks: upstream, eligibility: { eligible: false, reason: limit.reason } };
     return { blocks: dedupeByBlockId([...upstream, limit.block]), eligibility: { eligible: true } };
   }
