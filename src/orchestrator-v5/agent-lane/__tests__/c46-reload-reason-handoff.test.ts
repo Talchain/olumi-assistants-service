@@ -560,3 +560,83 @@ describe("H1a′: every CEE writer a saved model passes through keeps the C46 ca
     expect(carriersOf(projectGraphForPersistence(structuredClone(out.graph)))).toEqual({ mrr: CARRIER });
   });
 });
+
+/**
+ * ⭐ AX2 BINDING (DL #70 5850777104; AI Conversation builds, R&C reviews). The run-turn card was dropped on every
+ * explicit Run whose readback named the C46 cause. Served: DL `f-20260926T225029Z/04-F8-run`, `/09-F6-run` and AIC
+ * `rerun-after-write-P1D-CLOSE…` turns 2 and 5 → `coaching: {eligible:false, reason:"identity_mismatch"}`, 0 coaching
+ * blocks, `suggested_actions: []`; every Run whose readback read `constraint_verdict_withheld` kept its card
+ * (`225444Z/04,/09,/13`, `225029Z/13`). Why: the Run response's claim is the V5 finaliser's, whose C46 cause is
+ * caller-stated and stated by no route-v2 caller, so it reads the constraint token; the graph read judges the SAME
+ * fact on the graph the run analysed and names the product. `bindCapturedRun` compared the two claims by deep
+ * equality. Real handler, real finaliser, real read route below — the route test's fake inner endpoint echoes the
+ * readback state and cannot see this.
+ */
+describe('AX2 binding: an explicit Run on the product brief keeps its run-turn card', () => {
+  const READY = { status: 'ready' as const, goal_node_id: 'mrr', options: [], analysis_admission: { permitted_analysis_mode: 'comparative_leader' } };
+  /** The Run response as route-v2 composes it: the V5 finaliser, no C46 cause stated (no production caller states it). */
+  const runResponse = async (graph: Graph, fact: RunAnalysisHandlerFact) => {
+    const { buildAnalysisResultBlock, composeDirectAnswerResponse } = await import('../../compose.js');
+    const { finaliseV5Response } = await import('../../response-finaliser.js');
+    const { deriveAnalysisFreshness } = await import('../../context/freshness.js');
+    const { canonicalStateFromFreshness } = await import('../../context/canonical-analysis-state.js');
+    const { readMayNameLeadingOptionVerdict } = await import('../../context/claim-safety-read.js');
+    const freshness = deriveAnalysisFreshness([fact], deriveDecisionContextGraphHash(graph), undefined, { priorFactsReadOk: true });
+    const response = composeDirectAnswerResponse({
+      assistant_text: 'ran', stage: 'analyse', answerKind: 'substantive', blocks: [buildAnalysisResultBlock(fact, READY as never)],
+    });
+    const may = readMayNameLeadingOptionVerdict([fact], { newestAnalysisFact: null, readOk: true, windowTruncated: false }).may_name_leading_option;
+    return finaliseV5Response(response, {
+      scenarioId: SCENARIO, analysisReady: READY as never, freshness, canonicalState: canonicalStateFromFreshness(freshness, {}),
+      priorFacts: [fact], mayNameLeadingOption: may, graph,
+    } as never);
+  };
+  const coachAfter = async (graph: Graph, fact: RunAnalysisHandlerFact, capture: (c: Record<string, unknown>) => Record<string, unknown> = (c) => c) => {
+    const { runTurnCoaching } = await import('../analysis-coaching-pass-through.js');
+    const run = await runResponse(graph, fact);
+    const read = await reload(graph, fact);
+    const captured = capture({ scenario_id: SCENARIO, status: 200, trigger: 'explicit_run', blocks: run.blocks, analysis_state: run.analysis_state, analysis_ready: READY });
+    const out = runTurnCoaching(captured as never, {
+      scenarioId: SCENARIO, graphHash: deriveDecisionContextGraphHash(graph), analysisState: read.analysis_state,
+      analysisResult: read.analysis_result, graph, constraintVerdictState: read.analysis_constraint_verdict_state ?? null,
+    } as never);
+    return { run, read, out };
+  };
+
+  it('RED (served 225029Z/09): the Run response says the constraint token, the readback the product cause — ONE run; the card binds', async () => {
+    const graph = await build(PRODUCT);
+    const fact = await runOn(graph);
+    const { run, read, out } = await coachAfter(graph, fact);
+    expect(run.analysis_state?.leader_claim.withheld_reason, 'premise: the Run response (finaliser, nothing stated)').toBe(WITHHELD_CONSTRAINT_VERDICT);
+    expect(read.analysis_state?.leader_claim.withheld_reason, 'premise: the readback names the product').toBe(WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN);
+    expect(read.analysis_state?.run_state.kind).toBe('complete_current');
+    // It binds: the card is judged on its own gates, exactly as on the linear brief (this harness's engine stub carries
+    // no fragile-edge evidence, so the card's own gate is what declines here — never the binding).
+    expect(out.eligibility).not.toEqual({ eligible: false, reason: 'identity_mismatch' });
+    const linear = await build(ADDITIVE);
+    expect(out.eligibility, 'the same outcome as a Run whose two sides agree').toEqual((await coachAfter(linear, await runOn(linear))).out.eligibility);
+  });
+
+  it('CONTRAST (served 225444Z/09): the linear brief — both sides agree — still binds, unchanged', async () => {
+    const graph = await build(ADDITIVE);
+    const fact = await runOn(graph);
+    const { run, read, out } = await coachAfter(graph, fact);
+    expect(run.analysis_state?.leader_claim).toEqual(read.analysis_state?.leader_claim);
+    expect(out.eligibility.eligible === true || out.eligibility.reason !== 'identity_mismatch', 'it binds').toBe(true);
+  });
+
+  it('GUARD: a capture that is really another run still refuses — a different time, or a different permission', async () => {
+    const graph = await build(PRODUCT);
+    const fact = await runOn(graph);
+    const stale = (c: Record<string, unknown>) => {
+      const s = c.analysis_state as { run_state: Record<string, unknown> };
+      return { ...c, analysis_state: { ...s, run_state: { ...s.run_state, computed_at: '2026-09-26T00:00:00.000Z' } } };
+    };
+    expect((await coachAfter(graph, fact, stale)).out.eligibility).toEqual({ eligible: false, reason: 'identity_mismatch' });
+    const granted = (c: Record<string, unknown>) => {
+      const s = c.analysis_state as { leader_claim: Record<string, unknown> };
+      return { ...c, analysis_state: { ...s, leader_claim: { permitted: true, separation: 'separated' } } };
+    };
+    expect((await coachAfter(graph, fact, granted)).out.eligibility).toEqual({ eligible: false, reason: 'identity_mismatch' });
+  });
+});

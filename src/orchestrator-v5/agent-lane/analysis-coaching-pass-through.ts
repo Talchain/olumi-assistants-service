@@ -12,7 +12,6 @@
  * `currentAnalysisCoaching`, which returns the same blocks — and appends them
  * beside the readback `analysis_result`.
  */
-import { isDeepStrictEqual } from 'node:util';
 import { CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/boundary';
 import { compareAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
 import {
@@ -191,9 +190,15 @@ function bindCapturedRun(captured: CapturedAnalysis, final: RunTurnCoachingFinal
   if (identity.status !== 'match') return null;
   if (!Object.hasOwn(oldResult, 'leading_option_id') || !Object.hasOwn(newResult, 'leading_option_id')
     || !sameLeaderDesignation(oldResult.leading_option_id, newResult.leading_option_id, record(newState?.leader_claim))) return null;
-  if (typeof record(oldState?.leader_claim)?.permitted !== 'boolean'
-    || typeof record(newState?.leader_claim)?.permitted !== 'boolean'
-    || !isDeepStrictEqual(oldState?.leader_claim, newState?.leader_claim)) return null;
+  // ⭐ THE PERMISSION, NOT THE REASON STRING (AX2, DL #70 5850777104; R&C 5850798620). The Run response's claim is the
+  // V5 finaliser's, whose C46 cause is caller-stated and stated by no route-v2 caller, so on a product brief it reads
+  // `constraint_verdict_withheld`; the graph read judges the SAME fact on the graph the run analysed and names
+  // `nonlinear_identity_sign_unproven`. Deep equality dropped the card on every such explicit Run (served
+  // f-20260926T225029Z/04,/09: identity_mismatch; every Run reading the constraint token kept it). The run's identity
+  // is decided above (scenario, hash, time); the card reads the permission and the designation, so those bind.
+  const oldPermitted = record(oldState?.leader_claim)?.permitted;
+  const newPermitted = record(newState?.leader_claim)?.permitted;
+  if (typeof oldPermitted !== 'boolean' || typeof newPermitted !== 'boolean' || oldPermitted !== newPermitted) return null;
   return { graphHash: final.graphHash, computedAt: identity.identity.computed_at, analysisResult: asTheGateLeavesIt(newResult, newState), fullIdentity: true };
 }
 
