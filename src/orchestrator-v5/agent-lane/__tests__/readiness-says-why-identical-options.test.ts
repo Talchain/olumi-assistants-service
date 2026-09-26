@@ -27,6 +27,17 @@ const copy = (): G => JSON.parse(JSON.stringify(served)) as G;
 /** The run path's own reason for refusing this graph — the identity every row binds to. */
 const runPathReason = (g: unknown): string | null => resolveRunAdmission(toCanonicalAssessableGraph(g)).blockedNextStep;
 
+/**
+ * The served graph WITHOUT its held status quo: two options set identical levels and nothing else is compared.
+ * Since #1963 the held status quo is the comparator the run submits, so the served graph as drafted RUNS; this is
+ * the refusal it used to stand for, in both landing orders.
+ */
+const noStatusQuo = (): G => {
+  const g = copy();
+  g.nodes = g.nodes.filter((n) => n.id !== 'keep_current_pricing');
+  g.edges = g.edges.filter((e) => e.from !== 'keep_current_pricing' && e.to !== 'keep_current_pricing');
+  return g;
+};
 /** (a) the test option removed: the baseline plus ONE option that sets levels. */
 const oneOption = (): G => {
   const g = copy();
@@ -44,8 +55,7 @@ const baselineMatches = (): G => {
 
 describe('the readiness view gives the refusal\'s own reason when no demand explains it', () => {
   for (const [name, graph] of [
-    ['served: two options set identical levels', () => served],
-    ['(a) the baseline and one option that sets levels', oneOption],
+    ['served, without its status quo: two options set identical levels', noStatusQuo],
     ['(b) the baseline sets the same levels as the only option', baselineMatches],
   ] as const) {
     it(`RED: ${name} → may_run false, and the reason IS the run path's own next step`, () => {
