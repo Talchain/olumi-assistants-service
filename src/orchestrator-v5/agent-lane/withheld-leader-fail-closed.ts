@@ -266,6 +266,15 @@ const RANKING_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegE
     re: /\bbetter\s+than\b|\bbetter\s+(?:option|choice|bet|path|route|outcome|result|performer|pick|alternative|fit|candidate|position|odds|chances?|prospects?)s?\b|\b(?:perform(?:s|ed|ing)?|do|does|did|doing|fare[sd]?|faring|scor(?:e|es|ed|ing)|comes?\s+out|came\s+out|fits?|fitted|works?|worked)\s+better\b/i,
   },
   { code: 'ahead', re: /\bahead\b/i },
+  /**
+   * Served on bc09bb1 (Canonical 5845848896, AI Quality 5845776236): "Release to All Now is provisionally separated in
+   * this model". ONE option as the subject — singular verbs only, since "the two options are separated by less than a
+   * point" states a near tie — and never negated: "not" is not an allowed qualifier, so "is not separated" cannot match.
+   */
+  {
+    code: 'separated',
+    re: /\b(?:is|was|looks|seems|appears|comes\s+out|came\s+out)\s+(?:(?:provisionally|clearly|already|now|still|firmly|somewhat|meaningfully|materially|well|fairly|reasonably|largely)\s+)*separated\b|\bseparates\s+(?:itself\s+)?from\b|\bstands\s+apart\s+from\b/i,
+  },
   { code: 'win', re: /\b(?:wins?|winners?|winning)\b/i },
   {
     code: 'top',

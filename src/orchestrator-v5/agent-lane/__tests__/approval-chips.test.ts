@@ -121,7 +121,7 @@ describe('the route offers one-click approval for the proposal it just made', ()
       if (call === 1) {
         return new Response(JSON.stringify({ output: [{
           type: 'function_call', name: 'propose_model_change', call_id: 'c1',
-          arguments: JSON.stringify({ from_label: 'Team size', to_label: 'Velocity', direction: 'positive', rationale: 'More people ship more.' }),
+          arguments: JSON.stringify({ from_label: 'Team size', to_label: 'Velocity', direction: 'positive', strength: 'strong', rationale: 'More people ship more.' }),
         }] }), { status: 200 });
       }
       // The second model call sees the proposal's id in its tool output — and,
@@ -146,7 +146,7 @@ describe('the route offers one-click approval for the proposal it just made', ()
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
 
   it('RED: the reply carries a "Make this change" chip whose message is the typed approval, and shows no id', async () => {
-    const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b', message: 'Should team size drive velocity?' } });
+    const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b', message: 'Team size strongly drives velocity, so connect them.' } });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { assistant_text: string; suggested_actions: { label: string; message: string }[]; _agent: { tool_calls: { name: string; ok: boolean }[] } };
     // Vacuity guards: the proposal really was made, and the model really printed its id.

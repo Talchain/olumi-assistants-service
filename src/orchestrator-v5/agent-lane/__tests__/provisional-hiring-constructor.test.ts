@@ -278,7 +278,10 @@ describe('provisional hiring construction uses real admission and registration p
     const withUserLink = { ...live, links: [...live.links, { from: 'Maintain Current Staffing', to: 'Hiring delay', direction: 'negative' as const, provenance: 'explicit', effect_amount: null, effect_per_source_change: null, effect_provenance: null }] } as CandidateModel;
     const { result, graph, calls } = await construct(withUserLink);
     expect(result.ok, JSON.stringify(result).slice(0, 400)).toBe(true);
-    expect(calls).toBe(1);
+    // The served capture names most levers' factors with no level (the c22 class), so the
+    // ONE retry is the coverage repair — never the user's link, which is no issue at all.
+    expect(prepareProvisionalCandidate(withUserLink).level_gaps.length).toBeGreaterThan(0);
+    expect(calls).toBe(2);
     const userEdge = graph?.edges.find((e) => e.from === 'maintain_current_staffing' && e.to === 'hiring_delay');
     expect(userEdge?.provenance).toMatchObject({ source: 'brief_extraction' });
     expect(userEdge?.effect_direction).toBe('negative');

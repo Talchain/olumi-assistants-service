@@ -31,6 +31,9 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
   return { ...actual, resolveUserIdentity: async () => ({ mode: 'off' }) };
 });
 
+// A link is proposed only with the band the user typed THIS turn (#70 5845493088).
+const TYPED_BAND = 'Team size strongly drives velocity, so connect them.';
+
 describe('fast path 2: a typed approval chip applies its exact proposal with zero model calls', () => {
   let app: FastifyInstance;
   let modelCalls = 0;
@@ -49,7 +52,7 @@ describe('fast path 2: a typed approval chip applies its exact proposal with zer
         const from = proposals === 1 ? 'Team size' : 'Morale';
         return new Response(JSON.stringify({ output: [{
           type: 'function_call', name: 'propose_model_change', call_id: `c${proposals}`,
-          arguments: JSON.stringify({ from_label: from, to_label: 'Velocity', direction: 'positive', rationale: 'It moves velocity.' }),
+          arguments: JSON.stringify({ from_label: from, to_label: 'Velocity', direction: 'positive', strength: 'strong', rationale: 'It moves velocity.' }),
         }] }), { status: 200 });
       }
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'This would connect Team size to Velocity. Approve it if that is right.' }] }] }), { status: 200 });
@@ -74,7 +77,7 @@ describe('fast path 2: a typed approval chip applies its exact proposal with zer
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
 
   it('RED: the offered approve chip carries the proposal’s identity in its id; the click applies it with 0 model calls', async () => {
-    const t1 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Should team size drive velocity?' } });
+    const t1 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: TYPED_BAND } });
     const b1 = t1.json() as { suggested_actions: { id: string; label: string; message: string }[]; _agent: { tool_calls: { name: string; proposal_id?: string }[] } };
     const proposalId = b1._agent.tool_calls.find((c) => c.name === 'propose_model_change')?.proposal_id;
     expect(proposalId, 'the control: a real proposal was made').toMatch(/^prop_/);
@@ -107,7 +110,7 @@ describe('fast path 2: a typed approval chip applies its exact proposal with zer
   it('CONTROL (Codex 1): the chip names A, A is gone, B is outstanding: no write to B, no model call, no analysis', async () => {
     // Make B outstanding: a fresh proposal the model offers now.
     modelCallsReset();
-    const tb = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Should team size drive velocity?' } });
+    const tb = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: TYPED_BAND } });
     const bId = (tb.json() as { _agent: { tool_calls: { name: string; proposal_id?: string }[] } })._agent.tool_calls.find((c) => c.name === 'propose_model_change')?.proposal_id;
     expect(bId, 'the control: B really is outstanding').toMatch(/^prop_/);
     const before = modelCalls; const commitsBefore = commits.length;

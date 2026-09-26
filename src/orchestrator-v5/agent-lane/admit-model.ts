@@ -402,7 +402,7 @@ export function slugId(label: string): string {
 }
 
 /** Same words, ignoring case and spacing — the test for "the same thing". */
-const canonicalLabel = (label: string): string => label.trim().toLowerCase().replace(/\s+/g, ' ');
+export const canonicalLabel = (label: string): string => label.trim().toLowerCase().replace(/\s+/g, ' ');
 
 /**
  * Deterministic, collision-safe id assignment in a fixed traversal order.

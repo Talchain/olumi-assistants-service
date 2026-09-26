@@ -52,7 +52,7 @@ import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
-import { narrateWriteOutcome, notAdoptedLine, staleResultLine, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { narrateWriteOutcome, notAdoptedLine, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
@@ -233,7 +233,7 @@ const sessions = new SessionBindingRegistry();
 const MUTATION_INSTRUCTION =
   config.proxy.agentLanePreview === true
     ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
-    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link, propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
+    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link (with the strength band the user named; if they named none, ask how strong first), propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
 
 /** Marks a board edit in the Agent's history — defined beside `needsDurableSeed`, which must recognise it. */
 export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.js';
@@ -646,7 +646,7 @@ export function withheldToolsOf(body: Record<string, unknown>): readonly string[
   return typedApprovalOf(body) === undefined && !typedRunOf(body) ? CHIP_TURN_WITHHELD_TOOLS : [];
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -673,6 +673,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   let analysisResult: unknown;
   /** The selected run's constraint verdict state, carried with `analysisResult` (same fact); `null` = not recorded. */
   let constraintVerdictState: string | null | undefined;
+  let leaderLimitRisks: readonly unknown[] | null | undefined;
   /**
    * ⛔ THE CANVAS RENDERS FROM `draft_graph`, NOT FROM `graph_hash`.
    *
@@ -707,6 +708,10 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       const cvs = after.json.analysis_constraint_verdict_state;
       if (cvs === null) constraintVerdictState = null;
       else if (asVerdictState(cvs) !== null) constraintVerdictState = asVerdictState(cvs);
+      // The selected run's leader-limit risks, from the SAME graph read and fact (Canonical 5843920234:
+      // `analysis_leader_limit_risks`). Only `null` or an array is carried; the card checks every element.
+      const llr = after.json.analysis_leader_limit_risks;
+      if (llr === null || Array.isArray(llr)) leaderLimitRisks = llr;
       /**
        * ⭐ READINESS FROM THE MOMENT THE MODEL EXISTS, not from the moment
        * someone runs an analysis.
@@ -833,7 +838,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1488,8 +1493,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * one: the option "cannot be compared yet"). Nothing reads the tool result on this path, so
          * without this the user read "Saved" and nothing about what still blocks the comparison.
          * Server-authored text only — never model prose.
+         *
+         * ⛔ AND NEVER AN INSTRUCTION MEANT FOR THE AGENT (served f2, CEE `af719a1`, scenario `bdba963b`): the
+         * link-strength follow-up reached the user as "… Offer to run the analysis again so they can see what it
+         * changes." Every follow-up passes the same boundary (`withoutAgentDirections`), so a capability that puts
+         * Agent guidance in the wrong field drops that sentence here, and the drop is logged — not shown.
          */
-        const followUp = typeof applied.follow_up === 'string' ? applied.follow_up.trim() : '';
+        const guarded = withoutAgentDirections(typeof applied.follow_up === 'string' ? applied.follow_up : '');
+        if (guarded.dropped.length > 0) {
+          log.warn({ scenario_id: scenarioId, dropped: guarded.dropped }, 'agent-lane: a follow-up addressed to the Agent was withheld from the user');
+        }
+        const followUp = guarded.text.trim();
         const said = [narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }).status ?? '', followUp].filter((x) => x !== '').join(' ');
         const ms = Date.now() - fastStartedAt;
         result = {
@@ -1704,7 +1718,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * BEFORE the reply is composed, because the Run offer below keys on the
      * readiness this same response carries.
      */
-    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState } = await readBackState(dispatch, scenarioId);
+    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks } = await readBackState(dispatch, scenarioId);
     const fa = firstAnalysis?.outcome;
     // An analysis of THIS revision exists because this turn's construction ran it (or already had).
     const firstAnalysisExists = fa !== undefined && (fa.ran || fa.reason === 'already_ran_for_construction');
@@ -1829,7 +1843,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * without it the first pass is blank. Only the blocks the contract BUILDS are added: the run's own
      * blocks stay under `bindRunBlocksToReadback`'s rule above.
      */
-    const runCoaching = runTurnCoaching(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState });
+    const runCoaching = runTurnCoaching(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks });
     const coachingBound = [...runBound, ...runCoaching.blocks.filter((b) => !lastRunBlocks.includes(b))];
     const coachingBlocks: unknown[] = coachingBound.length === 0
       ? []

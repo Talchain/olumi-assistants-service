@@ -360,10 +360,20 @@ export function permittedAnalysisModeFromAnalysisReady(
  *       here.
  *
  * ⭐ SO SUPPRESSION FIRES IFF `mode === 'quantified_provisional'` — precisely
- * the cell the admission itself refuses in writing. Every sentence that cell can
- * ship (`SEMANTIC_REASON`, routed by `modeReason`) denies a leader: two say
- * verbatim *"no option can be called the leader"*, the third that there is *"no
- * comparison to draw a leader from"*. No other legitimate population is caught.
+ * the cell the admission itself caps in writing. When this was written, every
+ * sentence that cell could ship (`SEMANTIC_REASON`, routed by `modeReason`)
+ * denied a leader: two said verbatim *"no option can be called the leader"*, the
+ * third that there is *"no comparison to draw a leader from"*.
+ *
+ * ⚠ CORRECTED 26 Sep 2026 (DL #70 5845827326), NOT DELETED: Paul's 7 Sep ruling
+ * for this class is "caveat, not withhold" (programme-docs#38 5576895511), and
+ * the agent lane names a separated leader here WITH a caveat
+ * (`agentLaneLeaderWithheld`). A denial beside that caveated leader was one fact
+ * stated two ways, so the two machine-estimate sentences now say figures, *and
+ * which option they favour*, can be shown only as provisional. This predicate is
+ * UNCHANGED: it still caps the claim on this cell, and the agent-lane mirror
+ * still decides WHETHER the caveated form may ship. No other legitimate
+ * population is caught.
  *
  * ⚠⚠ THE STAND-DOWN ON `exploratory` IS A JUDGEMENT, NOT A MEASUREMENT — SAID
  * PLAINLY SO THE NEXT READER DOES NOT INHERIT IT AS EVIDENCE. Every red control
@@ -1108,12 +1118,12 @@ const SEMANTIC_REASON: Readonly<
   all_machine_authored: {
     code: 'CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED',
     message:
-      'Every estimate this comparison rests on is Olumi’s, not yours. Figures can be shown as provisional, but no option can be called the leader and no result can be called stable or robust until you have set at least one of them.',
+      'Every estimate this comparison rests on is Olumi’s, not yours. Figures, and which option they favour, can be shown only as provisional, and no result can be called stable or robust until you have set at least one of them.',
   },
   user_stated_not_material: {
     code: 'USER_STATED_PARAMETERS_NOT_MATERIAL',
     message:
-      'The values you have set sit outside what this comparison turns on, so every estimate behind it is still Olumi’s. Figures can be shown as provisional, but no option can be called the leader until you have set a value on a factor one of the options changes, or on another factor on the chain from there to your goal.',
+      'The values you have set sit outside what this comparison turns on, so none of the figures that decide it are yours yet. Figures, and which option they favour, can be shown only as provisional until you have set a value on a factor one of the options changes, or on another factor on the chain from there to your goal.',
   },
   material_user_stated: {
     code: 'CONFIDENCE_PARAMETERS_PARTLY_USER_STATED',

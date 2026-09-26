@@ -237,6 +237,27 @@ function quotable(x: number): number {
   return Number(x.toPrecision(15));
 }
 
+/**
+ * ⛔ THIS WRITE COMMITTED, THEN THE MODEL MOVED ON — "COULD NOT BE CONFIRMED", NEVER "NOT SAVED" (round-2 review of
+ * fix/agent-never-shows-instructions-or-codes, blocker 2's class). Called only once the read-back does NOT hold the
+ * change. Proof that THIS write committed comes only from its own response: its committed post-state (`draft_graph`,
+ * which a refused edit omits) holds the change, or it reports a revision other than the approved one AND the model has
+ * since moved past that revision. A refusal answers 200 with the revision it found, unmoved, and no post-state — so it
+ * stays "Not saved". Used by every `authoriseChange` branch that decides landed-ness from the read-back.
+ */
+function committedThenMoved(
+  res: { status: number; json: Record<string, unknown> },
+  approvedRevision: string,
+  after: { graph_hash: string } | null,
+  committedPostStateHolds: (draft: { edges?: unknown }) => boolean,
+): boolean {
+  if (res.status !== 200 || after === null) return false;
+  const draft = res.json.draft_graph;
+  if (draft !== null && typeof draft === 'object' && committedPostStateHolds(draft as { edges?: unknown })) return true;
+  const reported = typeof res.json.graph_hash === 'string' ? res.json.graph_hash : '';
+  return reported !== '' && approvedRevision !== '' && reported !== approvedRevision && after.graph_hash !== '' && after.graph_hash !== reported;
+}
+
 function committedLevelOf(json: Record<string, unknown>, optionId: string, factorId: string): number | undefined {
   const nodes = ((json.draft_graph ?? {}) as { nodes?: unknown }).nodes;
   if (!Array.isArray(nodes)) return undefined;
@@ -929,11 +950,18 @@ export function createAgentCapabilities(
     }
     approvalAppliedThisRequest = true;
     const { summary, unreadable } = receiptSummaryOf(r.json);
+    /**
+     * ⛔ EVERY LABEL IS QUOTED (round-2 review of fix/agent-never-shows-instructions-or-codes, blocker 3). This follow-up
+     * is shown verbatim on the one-click path, through the boundary that withholds anything addressed to the Agent
+     * (`withoutAgentDirections`). A label is the user's data: quoted, it can never read as an instruction or a code —
+     * unquoted, "Size of the user base", `cost_per_hire` or the id fallback below dropped both sentences.
+     */
+    const quoted = (label: string): string => `"${label}"`;
     const sentences = optionIds.map((id) => {
       const node = after!.nodes.find((x) => x.id === id) as { label?: unknown; interventions?: unknown } | undefined;
       const factorIds = after!.edges.filter((e) => e.from === id).map((e) => e.to)
         .filter((to) => after!.nodes.some((x) => x.id === to && x.kind === 'factor'));
-      const labelOf = (fid: string): string => String(after!.nodes.find((x) => x.id === fid)?.label ?? fid);
+      const labelOf = (fid: string): string => quoted(String(after!.nodes.find((x) => x.id === fid)?.label ?? fid));
       const unlevelled = factorIds.filter((fid) => !hasLevel(node, fid)).map(labelOf);
       // Whose each level is, from what was COMMITTED: Olumi's estimates are said as that (C2), never as the user's.
       const estimated = factorIds.filter((fid) => ((node?.interventions ?? {}) as Record<string, { source?: unknown } | undefined>)[fid]?.source === 'cee_hypothesis').map(labelOf);
@@ -944,7 +972,7 @@ export function createAgentCapabilities(
     for (const fid of addedFactorIds) {
       const f = after!.nodes.find((x) => x.id === fid);
       if (f === undefined) continue;
-      const changes = after!.edges.filter((e) => e.from === fid).map((e) => String(after!.nodes.find((x) => x.id === e.to)?.label ?? e.to));
+      const changes = after!.edges.filter((e) => e.from === fid).map((e) => quoted(String(after!.nodes.find((x) => x.id === e.to)?.label ?? e.to)));
       sentences.push(`Also added the factor "${String(f.label ?? fid)}", which changes ${changes.join(', ')}; how strongly is Olumi's estimate. `
         + 'Its current value is not set yet; tell me what it is today and I\'ll record it.');
     }
@@ -1218,9 +1246,18 @@ export function createAgentCapabilities(
       const check = await readGraph(ctx.scenario_id);
       const held = check?.nodes.find((n) => n.id === optionId)?.interventions?.[factorId] as { value?: unknown } | number | undefined;
       const heldValue = typeof held === 'number' ? held : (held as { value?: unknown } | undefined)?.value;
-      if (check === null || check.graph_hash !== carried) { levelStop = 'the model changed while the option levels were being recorded'; break; }
-      if (heldValue !== v) { levelStop = `the level for ${o.path} was not recorded`; break; }
+      /**
+       * ⛔ HELD EXACTLY IS RECORDED; THE REVISION ONLY DECIDES WHETHER THE CHAIN GOES ON (round-2 review of
+       * fix/agent-never-shows-instructions-or-codes, blocker 2's class). This checked the revision FIRST, so when another
+       * writer had moved the model a level the model holds exactly as approved was counted as not recorded, and the
+       * user read that it was not saved. The rule is the link writer's: the read-back holding exactly the approved level
+       * is landed. A moved model still gives no revision to carry, so no FURTHER level is written on a guess.
+       */
+      if (check === null) { levelStop = 'the model changed while the option levels were being recorded'; break; }
+      const moved = check.graph_hash !== carried;
+      if (heldValue !== v) { levelStop = moved ? 'the model changed while the option levels were being recorded' : `the level for ${o.path} was not recorded`; break; }
       levelsRecorded += 1;
+      if (moved && i < levelOps.length - 1) { levelStop = 'the model changed while the option levels were being recorded'; break; }
     }
 
     const all = levelStop === null && levelsRecorded === levelOps.length;
@@ -1508,8 +1545,31 @@ export function createAgentCapabilities(
       if (g.edges.some((e) => e.from === from.id && e.to === to.id)) {
         return { ok: false, mutated: false, refusal: 'already_present', detail: 'That link is already in the model.' };
       }
+      /**
+       * ⛔ A NEW LINK CARRIES ONLY THE BAND THE USER TYPED THIS TURN (Delivery Lead #70 5845493088, agreed by Canonical
+       * 5845487856: "The Agent proposes a link only with the band the user typed THIS turn … With no band it asks 'how
+       * strong…?'. The user_specified stamp is then TRUE."). The link writer stamps every link it adds `user_specified`
+       * (`structural-add-edge.ts`), so the strength sent with it is recorded as the user's own estimate. Before this, an
+       * approval sent a fixed 0.5 and Olumi's placeholder read as the user's figure.
+       *
+       * The band must be named in THIS turn's typed words by the one matcher `propose_link_strength` uses
+       * (`bandTheUserWrote` — the same band words, negations and question rules, never a second copy), and it is sent as
+       * that band's midpoint (`bandMidpoint`). Checked after the refusals above, so the user is never asked how strong a
+       * link that cannot be added is.
+       */
+      const band = isInfluenceBand(args?.strength) ? args.strength : undefined;
+      if (band === undefined || !bandTheUserWrote(band, ctx.user_turn_text)) {
+        const ask = 'ask them "how strong is that effect: weak, moderate, strong or very strong?" and never offer a band as theirs.';
+        return { ok: false, mutated: false, refusal: 'strength_not_stated',
+          detail: band === undefined
+            ? `${args?.strength === undefined ? 'No strength was given' : 'The strength given is not one of weak, moderate, strong or very strong'}, so nothing was prepared. `
+              + `If the user named one of those bands for this link in this message, call again with it as strength; otherwise ${ask}`
+            : `The user has not called the link from "${from.label}" to "${to.label}" ${band} in this message, in their own words, so nothing was prepared: `
+              + `it would be recorded as their estimate. Instead, ${ask}` };
+      }
+      const magnitude = bandMidpoint(band);
       const operations: ProposalOperation[] = [
-        { op: 'add_edge', path: `${from.id}::${to.id}`, value: { effect_direction: args.direction } },
+        { op: 'add_edge', path: `${from.id}::${to.id}`, value: { effect_direction: args.direction, magnitude } },
       ];
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
@@ -1518,7 +1578,7 @@ export function createAgentCapabilities(
         operations,
         provenance: { authored_by: 'model_proposed', basis: args.rationale },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Connect "${from.label}" to "${to.label}" (${args.direction})`,
+        public_label: `Connect "${from.label}" to "${to.label}" (${args.direction}) as ${band}, your own estimate`,
       });
       proposals.put(proposal);
       return {
@@ -1526,7 +1586,8 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        note: 'Nothing has changed. Show this to the user and ask them to approve it before calling authorise_change.',
+        link: { from: from.label, to: to.label, direction: args.direction, band, strength: magnitude },
+        note: `Nothing has changed. Tell the user the link will be recorded as ${band}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and ask them to approve it before calling authorise_change.`,
       };
     },
 
@@ -2211,17 +2272,34 @@ export function createAgentCapabilities(
           event: { kind: 'edge_strength_edit', from: fromId, to: toId, intent: v.intent, direction_intent: v.direction_intent, magnitude: v.magnitude, expected: v.expected },
         });
         const after = await readGraph(ctx.scenario_id);
-        const e = after?.edges.find((x) => x.from === fromId && x.to === toId);
         const dir = v.direction_intent === 'preserve' ? v.expected.effect_direction : v.direction_intent;
         const want = dir === 'negative' ? -v.magnitude : v.magnitude;
-        const got = (e?.strength as { mean?: unknown } | undefined)?.mean;
-        const src = (e?.provenance !== null && typeof e?.provenance === 'object') ? (e.provenance as { source?: unknown }).source : undefined;
-        const landed = res.status === 200 && typeof got === 'number' && Math.abs(got - want) < 1e-9 && src === 'user_specified'
-          && (typeof res.json.graph_hash !== 'string' || res.json.graph_hash === after?.graph_hash);
+        /** The link as it was approved: exactly this strength, stamped as the user's — in whichever graph holds it. */
+        const holdsApproved = (edges: unknown): boolean => {
+          const x = (Array.isArray(edges) ? edges as { from?: unknown; to?: unknown; strength?: unknown; provenance?: unknown }[] : [])
+            .find((y) => y?.from === fromId && y?.to === toId);
+          const mean = x?.strength !== null && typeof x?.strength === 'object' ? (x.strength as { mean?: unknown }).mean : undefined;
+          const source = x?.provenance !== null && typeof x?.provenance === 'object' ? (x.provenance as { source?: unknown }).source : undefined;
+          return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && source === 'user_specified';
+        };
+        /**
+         * ⛔ LANDED IS WHAT THE MODEL HOLDS, NOT WHETHER TWO REVISIONS ARE EQUAL (round-2 review of
+         * fix/agent-never-shows-instructions-or-codes, blocker 2 — probed through this capability). `landed` also demanded
+         * that this response's revision EQUAL the read-back's, so a link write that landed and was followed by any other
+         * write before the read-back came back `not_applied`, `mutated: false` — "Not saved: none of it was applied." —
+         * while the link held exactly the approved 0.825 stamped as the user's, and the approval was left unapplied.
+         * The read-back holding exactly what was approved is landed; a commit the model no longer shows is "could not be
+         * confirmed" (`committedThenMoved`); only a response that shows nothing committed is "Not saved".
+         */
+        const landed = res.status === 200 && after !== null && holdsApproved(after.edges);
         if (after === null && res.status === 200) {
           // The write may have landed; the read-back failed. Never "as it was" when Olumi cannot see (review of #1950).
           return { ok: false, mutated: false, applied: false, refusal: 'not_confirmed', proposal_id: decision.proposal.proposal_id,
             detail: 'Olumi could not read the model back to confirm whether the link was recorded. Tell the user plainly that it could not be confirmed, and offer to check again.' };
+        }
+        if (!landed && committedThenMoved(res, before.graph_hash, after, (draft) => holdsApproved(draft.edges))) {
+          return { ok: false, mutated: true, applied: false, refusal: 'not_verified', proposal_id: decision.proposal.proposal_id,
+            detail: 'The link was saved, but the model changed again straight afterwards and no longer shows it as approved, so what it now holds could not be confirmed. Read the model again before saying what it holds; do not describe the link as recorded.' };
         }
         if (!landed) {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: decision.proposal.proposal_id,
@@ -2232,10 +2310,19 @@ export function createAgentCapabilities(
         const receipt = receiptSummaryOf(res.json);
         const receipts = receipt.summary !== null ? [receipt.summary] : [];
         proposals.markApplied(decision.proposal.proposal_id, receipts);
+        /**
+         * ⛔ `follow_up` IS WHAT THE USER READS; `note` IS WHAT THE AGENT READS (served f2, CEE `af719a1`, scenario
+         * `bdba963b`): one click on "Record this link" showed this `follow_up` verbatim — "Recorded as the user's own
+         * estimate: … Offer to run the analysis again so they can see what it changes." The typed-approval fast path
+         * shows `follow_up` to the user and no model reads the result there; on the loop path the Agent reads both.
+         * So the sentence the user reads is addressed to them (the label already says "as your own estimate"), and
+         * the next step for the Agent stays in `note`, where only the Agent reads it.
+         */
         return {
           ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, operation_id: operationId, receipts,
           ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
-          follow_up: `Recorded as the user's own estimate: ${decision.proposal.public_label.replace(/^Record /, '')}. Offer to run the analysis again so they can see what it changes.`,
+          follow_up: `${decision.proposal.public_label.replace(/^Record /, 'Recorded ')}.`,
+          note: 'Recorded as the user’s own estimate. Offer to run the analysis again so they can see what it changes.',
         };
       }
 
@@ -3292,7 +3379,15 @@ export function createAgentCapabilities(
 
       const op = ops[0];
       const [fromId, toId] = op.path.split('::');
-      const direction = (op.value as { effect_direction: 'positive' | 'negative' }).effect_direction;
+      const { effect_direction: direction, magnitude: storedMagnitude } = op.value as { effect_direction: 'positive' | 'negative'; magnitude?: unknown };
+      /**
+       * ⭐ THE STRENGTH SENT IS THE USER'S BAND (#70 5845493088): `proposeModelChange` stores the midpoint of the band the
+       * user typed, and the writer stamps it `user_specified` — now true. ⚠ A proposal restored from the durable carrier
+       * that was made BEFORE that rule carries no magnitude: it keeps the projection default 0.5 and its disclosure
+       * (`placeholder_strength`), so nothing restored breaks.
+       */
+      const usersStrength = typeof storedMagnitude === 'number' && Number.isFinite(storedMagnitude) && storedMagnitude > 0 && storedMagnitude <= 1
+        ? storedMagnitude : undefined;
       /**
        * ⭐ THE OPERATION IDENTITY IS DERIVED, NOT MINTED.
        *
@@ -3323,11 +3418,11 @@ export function createAgentCapabilities(
           kind: 'structural_add_edge',
           from: fromId,
           to: toId,
-          // ⚠ REPRESENTATION LOSS, RECORDED IN THE RESULT. The wire REQUIRES a
-          // magnitude and forbids `unknown`, so a direction-only authorisation
-          // cannot be expressed. This number is the projection default, not the
-          // user's claim, and the Agent is told so explicitly below.
-          magnitude: 0.5,
+          // The midpoint of the band the user typed (`proposeModelChange`). ⚠ A proposal
+          // restored from before that rule has none, and the wire REQUIRES a magnitude and
+          // forbids `unknown`: it sends the projection default, not the user's claim, and
+          // the result says so below.
+          magnitude: usersStrength ?? 0.5,
           effect_direction: direction,
           base_graph_hash: decision.proposal.base_graph_identity_hash,
         },
@@ -3340,6 +3435,28 @@ export function createAgentCapabilities(
         edgeExistsAfter: (after?.edges ?? []).some((e) => e.from === fromId && e.to === toId),
         system_message: String(res.json.assistant_text ?? ''),
       });
+      /**
+       * ⛔ A LINK THIS WRITE ADDED IS NEVER "NOT SAVED" FOR WHAT HAPPENED AFTER IT (round-2 review of
+       * fix/agent-never-shows-instructions-or-codes, blocker 2's class). Landed-ness here is the read-back alone, so a
+       * failed read-back, or a link another writer removed straight after this write committed it, read "Not saved: none
+       * of it was applied." Same rule as the link-strength branch.
+       */
+      if (!confirmation.applied && after === null && res.status === 200) {
+        return {
+          ok: false, mutated: false, applied: false, refusal: 'not_confirmed', proposal_id: decision.proposal.proposal_id,
+          detail: 'Olumi could not read the model back to confirm whether the link was added. Tell the user plainly that it could not be confirmed, and offer to check again.',
+          http: res.status, operation_id: operationId,
+        };
+      }
+      const hasTheLink = (edges: unknown): boolean => Array.isArray(edges)
+        && (edges as { from?: unknown; to?: unknown }[]).some((e) => e?.from === fromId && e?.to === toId);
+      if (!confirmation.applied && committedThenMoved(res, before.graph_hash, after, (draft) => hasTheLink(draft.edges))) {
+        return {
+          ok: false, mutated: true, applied: false, refusal: 'not_verified', proposal_id: decision.proposal.proposal_id,
+          detail: 'The link was added, but the model changed again straight afterwards and no longer shows it, so what it now holds could not be confirmed. Read the model again before saying what it holds; do not describe the link as added.',
+          http: res.status, operation_id: operationId,
+        };
+      }
       if (!confirmation.applied) {
         return {
           ok: false, mutated: false, applied: false, refusal: 'not_applied',
@@ -3353,15 +3470,19 @@ export function createAgentCapabilities(
         ok: true, mutated: true, applied: true,
         receipts: edgeReceipts,
         ...(edgeReceipt.unreadable ? { receipt_unreadable: true } : {}),
-        // Olumi discloses this to the user deterministically; see disclosure.ts.
-        placeholder_strength: true,
         proposal_id: decision.proposal.proposal_id,
         operation_id: operationId,
         revision_before: confirmation.revision_before,
         revision_after: confirmation.revision_after,
-        not_represented:
-          'The direction was recorded. No strength was stated by the user, so the model carries a ' +
-          'placeholder strength that is not a measurement — say so if you describe the change.',
+        ...(usersStrength !== undefined
+          ? { detail: `Recorded with the strength the user stated, as their own estimate: ${decision.proposal.public_label}.` }
+          : {
+            // Olumi discloses this to the user deterministically; see disclosure.ts.
+            placeholder_strength: true,
+            not_represented:
+              'The direction was recorded. No strength was stated by the user, so the model carries a ' +
+              'placeholder strength that is not a measurement — say so if you describe the change.',
+          }),
       };
     },
 
@@ -3677,26 +3798,60 @@ export function createAgentCapabilities(
             + 'Ask the user for a figure within that range, in the same units, or whether that range itself is wrong.',
         };
       }
-      const nfWire = newFactors.length === 0 ? {} : { new_factors: newFactors.map((f) => ({
-        key: f.key, label: f.label,
-        affects: f.affects.map((a) => ({ node_id: a.node_id, effect_direction: a.effect_direction })),
-      })) };
-      const parameters = entries.length === 1
-        ? { parent_decision_id: decision.id, ...entries[0]!.entry, ...nfWire }
-        : { parent_decision_id: decision.id, options: entries.map((e) => e.entry), ...nfWire };
+      /** The new factors a set of options uses: a factor only a left-out option acted on is left out with it. */
+      const factorsOf = (es: typeof entries) => newFactors.filter((f) => es.some((e) => e.plan.newActsOn.some((a) => a.key === f.key)));
+      const parametersOf = (es: typeof entries) => {
+        const nf = factorsOf(es);
+        const nfWire = nf.length === 0 ? {} : { new_factors: nf.map((f) => ({
+          key: f.key, label: f.label,
+          affects: f.affects.map((a) => ({ node_id: a.node_id, effect_direction: a.effect_direction })),
+        })) };
+        return es.length === 1
+          ? { parent_decision_id: decision.id, ...es[0]!.entry, ...nfWire }
+          : { parent_decision_id: decision.id, options: es.map((e) => e.entry), ...nfWire };
+      };
+      /**
+       * ⛔ ONE TWIN NEVER SINKS THE REST (DL #70 5846812818, served F4/F4e). The product refuses a WHOLE batch when one
+       * option repeats an existing option's levels, and names that option (`index`, `sameAs`). The valid options are
+       * still the user's request: that one is left out, named with its twin (`not_added`), and the rest go as ONE
+       * change. A lone option that is a twin is refused as before.
+       */
+      let kept = entries;
+      const notAdded: { option: string; same_levels_as: string }[] = [];
+      let parameters = parametersOf(kept);
       // The product's own transaction, run here purely: a spec it would not build is never sent.
-      const built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
+      let built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
+      while (!built.matched && built.reason === 'same_levels_as_existing_option' && built.sameAs !== undefined
+        && kept.length > 1 && typeof built.index === 'number' && built.index >= 0 && built.index < kept.length) {
+        const twinIndex = built.index;
+        notAdded.push({ option: kept[twinIndex]!.plan.label, same_levels_as: built.sameAs.label });
+        kept = kept.filter((_, i) => i !== twinIndex);
+        parameters = parametersOf(kept);
+        built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
+      }
+      const keptFactors = factorsOf(kept);
       if (!built.matched || JSON.stringify(built.operations).length > GM_HELD_OPERATIONS_MAX_JSON_CHARS) {
         const reason = !built.matched ? String(built.reason) : '';
+        /**
+         * ⛔ A TWIN IS NAMED (#1990 review, Runtime follow-up). The product refuses an option whose levels equal an
+         * existing option's — the engine cannot tell them apart and the run drops one silently ("Not analysed").
+         * The Agent says WHICH option it would repeat, so the user can change a level, never a bare "could not".
+         */
+        const twin = !built.matched && built.sameAs !== undefined ? built.sameAs.label : undefined;
         const why = reason === 'new_factor_unreachable'
           ? ' Nothing the new factor changes leads to the goal, so it could not affect the comparison: ask the user what it changes.'
           : reason === 'new_factor_exists'
             ? ' The model already has a factor by that name: name it in acts_on instead of adding it.'
-            : '';
+            : reason === 'same_levels_as_existing_option'
+              ? ` It would set exactly the same levels as "${twin ?? 'an option already in the model'}", so the analysis could not tell the two apart: `
+                + 'say so, and ask the user which level this option should change.'
+              : '';
         return { ok: false, mutated: false, refusal: 'not_prepared', ...(!built.matched ? { reason: built.reason } : {}),
+          ...(twin !== undefined ? { same_levels_as: twin } : {}),
+          ...(notAdded.length > 0 ? { not_added: notAdded } : {}),
           detail: `That could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
       }
-      const labels = plans.map((x) => x.plan.label);
+      const labels = kept.map((x) => x.plan.label);
       const r = await dispatch('/orchestrate/v2/turn', {
         kind: 'message', turn_id: authorisationTurnId(`agent_add_option:${ctx.scenario_id}:${JSON.stringify(parameters)}`), scenario_id: ctx.scenario_id,
         stage: 'frame', turn_class: 'frame', source: 'chip', message: `Add ${labels.map((l) => `the option "${l}"`).join(' and ')}.`,
@@ -3707,7 +3862,7 @@ export function createAgentCapabilities(
        * scenario and the FIRST option's id), and, where the store can be read, the held batch itself adding
        * EVERY option WITH its decision link. Anything else is a hard failure: never retried in other words.
        */
-      const ref = gmHeldProposalRef(ctx.scenario_id, `node:${plans[0]!.plan.optionId}`);
+      const ref = gmHeldProposalRef(ctx.scenario_id, `node:${kept[0]!.plan.optionId}`);
       const offered = Array.isArray(r.json.suggested_actions) ? r.json.suggested_actions as { id?: unknown; label?: unknown; message?: unknown }[] : [];
       const heldChip = r.status === 200 ? offered.find((c) => c?.id === ref) : undefined;
       let heldBatchOk = heldChip !== undefined;
@@ -3715,10 +3870,10 @@ export function createAgentCapabilities(
         try {
           const hold = await liveHeldHold(ctx.scenario_id, ref);
           const ops = hold !== undefined ? heldOpsOf(hold) : [];
-          heldBatchOk = plans.every(({ plan }) => ops.some((o) => o.op === 'add_node' && o.path === plan.optionId)
+          heldBatchOk = kept.every(({ plan }) => ops.some((o) => o.op === 'add_node' && o.path === plan.optionId)
             && ops.some((o) => o.op === 'add_edge' && o.path === `${decision.id}::${plan.optionId}`))
             // Every factor this change adds is in the held batch too, as a factor.
-            && newFactors.every((f) => ops.some((o) => o.op === 'add_node'
+            && keptFactors.every((f) => ops.some((o) => o.op === 'add_node'
               && (o.value as { kind?: unknown } | undefined)?.kind === 'factor'
               && norm((o.value as { label?: unknown } | undefined)?.label) === norm(f.label)));
         } catch {
@@ -3726,11 +3881,15 @@ export function createAgentCapabilities(
         }
       }
       if (!heldBatchOk) {
+        // A change the product REFUSED with its own sentence (no hold offered) — say that sentence, never a bare "could not".
+        const said = heldChip === undefined && r.status === 200 && typeof r.json.assistant_text === 'string' ? r.json.assistant_text.trim() : '';
         return { ok: false, mutated: false, refusal: 'not_prepared',
-          detail: 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
+          detail: said !== ''
+            ? `Olumi did not prepare that change, so nothing was added. Olumi said: "${said}" Tell the user plainly; do not retry it in other words.`
+            : 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
       }
       heldOptionThisRequest = labels.map((l) => `"${l}"`).join(' and ');
-      const described = entries.map(({ plan, set }) => ({
+      const described = kept.map(({ plan, set }) => ({
         label: plan.label,
         linked_from: String(decision.label ?? ''),
         acts_on: [...plan.actsOn.map((a) => a.label), ...plan.newActsOn.map((a) => a.label)],
@@ -3745,15 +3904,21 @@ export function createAgentCapabilities(
       return {
         ok: true, mutated: false,
         proposal_id: ref,
-        public_label: typeof heldChip!.label === 'string' && heldChip!.label.trim() !== '' ? heldChip!.label : plans[0]!.plan.publicLabel,
+        public_label: typeof heldChip!.label === 'string' && heldChip!.label.trim() !== '' ? heldChip!.label : kept[0]!.plan.publicLabel,
         held_message: typeof heldChip!.message === 'string' ? heldChip!.message : '',
         base_revision: g.graph_hash,
         ...(described.length === 1
           ? { option: { label: described[0]!.label, linked_from: described[0]!.linked_from, acts_on: described[0]!.acts_on }, levels: described[0]!.levels }
           : { options: described }),
-        ...(levelsNotSet.length > 0 ? { levels_not_set: levelsNotSet } : {}),
-        ...(newFactors.length > 0 ? {
-          new_factors: newFactors.map((f) => ({
+        ...(levelsNotSet.some((l) => labels.includes(l.option)) ? { levels_not_set: levelsNotSet.filter((l) => labels.includes(l.option)) } : {}),
+        ...(notAdded.length > 0 ? {
+          not_added: notAdded,
+          not_added_note: `${notAdded.map((n) => `"${n.option}" is NOT in this change: it would set exactly the same levels as "${n.same_levels_as}", so the analysis could not tell the two apart`).join('; ')}. `
+            + 'Say that in one line, and ask the user what makes it different (for example, a factor it changes that the other does not). '
+            + 'Never promise to add it later: it is added only by a new proposal the user approves.',
+        } : {}),
+        ...(keptFactors.length > 0 ? {
+          new_factors: keptFactors.map((f) => ({
             label: f.label,
             changes: f.affects.map((a) => `${a.label} (${a.effect_direction === 'positive' ? 'raises it' : 'lowers it'})`),
             how_strongly: 'Olumi\u2019s estimate, for the user to correct',

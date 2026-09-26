@@ -30,11 +30,13 @@ const link = (from: string, to: string, provenance = 'inferred') => ({ from, to,
 function candidate(opts: { extraFactors: number; options?: string[]; explicitLinks?: [string, string][] }) {
   const names = Array.from({ length: opts.extraFactors }, (_, i) => `Secondary factor ${i}`);
   const options = opts.options ?? ['Hire a tech lead', 'Hire two developers'];
+  // Each option carries an estimated level and the factor an estimated baseline, as the constructor
+  // now asks (c22): a level-free draft spends the coverage retry, which these size tests do not measure.
   return {
     goal: { metric: 'Velocity', operator: '>=', value: 20, unit: 'points', horizon_months: 6, provenance: 'explicit' },
     constraints: [],
-    options: options.map((label) => ({ label, provenance: 'explicit', changes: ['Delivery capacity'], interventions: [] })),
-    factors: [factor('Delivery capacity', 'inferred'), ...names.map((n) => factor(n))],
+    options: options.map((label) => ({ label, provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Delivery capacity', value: 60, value_kind: 'absolute', unit: 'points', provenance: 'ai_proposed' }] })),
+    factors: [{ ...factor('Delivery capacity', 'inferred'), baseline_value: 50 }, ...names.map((n) => factor(n))],
     risks: [],
     outcomes: [{ label: 'Velocity', provenance: 'inferred' }],
     links: [

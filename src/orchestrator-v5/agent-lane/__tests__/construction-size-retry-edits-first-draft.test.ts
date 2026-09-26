@@ -16,7 +16,8 @@
  * item exactly. A retry with construction issues keeps its existing repair input (unchanged, not measured here).
  */
 import { describe, expect, it, vi } from 'vitest';
-import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import { buildModelFromBrief, prepareProvisionalCandidate, type CallStructuredModel } from '../runtime/build-model.js';
+import type { CandidateModel } from '../admit-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 
 const SCENARIO = '55555555-5555-4555-8555-555555555555';
@@ -30,8 +31,14 @@ function candidate(extra: number) {
   return {
     goal: { metric: 'Platform delivered by Q3', operator: '>=', value: 1, unit: null, horizon_months: 9, provenance: 'explicit' },
     constraints: [],
-    options: ['Hire two senior engineers', 'Hire four junior engineers'].map((label) => ({ label, provenance: 'explicit', changes: ['Delivery capacity'], interventions: [] })),
-    factors: [factor('Delivery capacity', 'inferred'), ...names.map((n) => factor(n))],
+    // Each option LEVELS the factor it acts on, and that factor has a baseline, so the draft has no construction
+    // issue of any kind (#1891 makes a `changes`-only pair or an unset acted-on baseline a repair issue): the
+    // retry below is SIZE-ONLY, which is the case this file measures.
+    options: ([['Hire two senior engineers', 60], ['Hire four junior engineers', 55]] as const).map(([label, level]) => ({
+      label, provenance: 'explicit', changes: [],
+      interventions: [{ factor_label: 'Delivery capacity', value: level, value_kind: 'absolute', unit: 'points', provenance: 'ai_proposed' }],
+    })),
+    factors: [{ ...factor('Delivery capacity', 'inferred'), baseline_value: 40, unit: 'points' }, ...names.map((n) => factor(n))],
     risks: [], outcomes: [{ label: 'Platform delivered by Q3', provenance: 'inferred' }],
     links: [link('Delivery capacity', 'Platform delivered by Q3'), ...names.map((n) => link(n, 'Platform delivered by Q3'))],
     unknowns: [],
@@ -51,6 +58,8 @@ const dispatch = (async (path: string) => path.endsWith('/graph/register')
 describe('a size retry EDITS its own first draft', () => {
   it('the retry receives the first draft, and is told to copy every kept item exactly', async () => {
     const first = candidate(20);
+    const p = prepareProvisionalCandidate(first as unknown as CandidateModel);
+    expect([...p.mechanism_issues, ...p.level_gaps, ...p.baseline_gaps], 'PRECONDITION: a size-only retry (no repair issue)').toEqual([]);
     const s = sequence(first, candidate(3));
     const out = await buildModelFromBrief(SCENARIO, BRIEF, dispatch, s.fn);
     expect(out['size_retried'], 'PRECONDITION: the first draft was oversized').toBe(true);

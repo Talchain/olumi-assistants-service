@@ -144,9 +144,9 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     return { b, turnId };
   };
   /** An ordinary composer message the Agent answers directly, with no tool call. */
-  const askedTurn = async (text: string, scenario = SCENARIO, calls: Record<string, unknown>[][] = []) => {
+  const askedTurn = async (text: string, scenario = SCENARIO, calls: Record<string, unknown>[][] = [], message = 'What does the analysis say?') => {
     callModelOutputs = [...calls, say(text)];
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: scenario, message: 'What does the analysis say?', turn_id: nextTurnId() } });
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: scenario, message, turn_id: nextTurnId() } });
     expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
     expect(callModelOutputs, 'the control: the scripted reply was consumed').toEqual([]);
     return r.json() as Body;
@@ -243,8 +243,10 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
    */
   const proposeLink = (from: string, to: string) => [{
     type: 'function_call', name: 'propose_model_change', call_id: `p-${from}-${to}`,
-    arguments: JSON.stringify({ from_label: from, to_label: to, direction: 'positive', rationale: 'Timing changes how the price lands.' }),
+    arguments: JSON.stringify({ from_label: from, to_label: to, direction: 'positive', strength: 'strong', rationale: 'Timing changes how the price lands.' }),
   }];
+  /** A link is proposed only with the band the user typed THIS turn (#70 5845493088). */
+  const PROPOSING = 'Timing strongly shapes how the price lands, so add that link.';
   /** A proposal reply over a current result: first sentence, four bullets, a closing ask. */
   const PROPOSAL_REPLY = [
     'The run turns on how the price rise lands, so I suggest one change to the model before you rely on it.',
@@ -264,7 +266,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     const would = synthesiseAnswerShapeFromText(PROPOSAL_REPLY)!;
     expect(would.detail, 'the control: shaped, the fourth bullet would go behind "Show more"').toContain('What it leaves alone');
 
-    const proposed = await askedTurn(PROPOSAL_REPLY, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a10', [proposeLink('Price-release alignment', 'Pro conversion rate')]) as Offered;
+    const proposed = await askedTurn(PROPOSAL_REPLY, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a10', [proposeLink('Price-release alignment', 'Pro conversion rate')], PROPOSING) as Offered;
     expect(proposed._agent.tool_calls, 'the control: the proposal was made').toMatchObject([{ name: 'propose_model_change', ok: true }]);
     expect(carriesResult(proposed), 'the control: over a current result').toBe(true);
     expect(await offersApprove(proposed), 'the control: the approve chip is offered').toBe(true);
@@ -275,7 +277,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   it('7b. CONSENT: a Run with a bulleted reply that carries a waiting proposal’s approve chip → NOT shaped; text byte-identical', async () => {
     const SID = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a13';
     // Setup: the proposal the Run will carry (its own shape is test 7a's business, not asserted here).
-    const proposed = await askedTurn(PROPOSAL_REPLY, SID, [proposeLink('Price-release alignment', 'Pro conversion rate')]) as Offered;
+    const proposed = await askedTurn(PROPOSAL_REPLY, SID, [proposeLink('Price-release alignment', 'Pro conversion rate')], PROPOSING) as Offered;
     expect(await offersApprove(proposed), 'the control: a proposal is waiting').toBe(true);
 
     const { b } = await typedRun(FOUR_BULLETS.text, SID);
@@ -297,7 +299,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     const proposed = await askedTurn(PROPOSAL_REPLY, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12', [
       proposeLink('Price-release alignment', 'Pro conversion rate'),
       proposeLink('Perceived Pro value', 'Pro subscriber base'),
-    ]) as Offered;
+    ], PROPOSING) as Offered;
     expect(proposed._agent.tool_calls, 'the control: both proposals were made').toMatchObject([{ name: 'propose_model_change', ok: true }, { name: 'propose_model_change', ok: true }]);
     expect(carriesResult(proposed), 'the control: over a current result').toBe(true);
     expect(await offersApprove(proposed), 'the control: two pending, so no approve chip').toBe(false);

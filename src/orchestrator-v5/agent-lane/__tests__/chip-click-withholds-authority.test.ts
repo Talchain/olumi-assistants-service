@@ -114,23 +114,39 @@ describe('a chip click that is not the approval or the Run withholds authority f
     expect(b._agent.mutated).toBe(false);
   });
 
+  /*
+   * A new LINK cannot be proposed on a click: its strength must be a band the user TYPED this turn (#70 5845493088), and
+   * a chip's words are Olumi's. So the same-turn propose-and-authorise is pinned with a proposal a click CAN make
+   * (starting assumptions), and the link on a click with its own refusal below.
+   */
   it('propose AND authorise in the same click turn → nothing written; the proposal still gets its approve chip', async () => {
     script = [
-      call('propose_model_change', () => ({ from_label: 'Morale', to_label: 'Velocity', direction: 'positive', rationale: 'x' })),
+      call('propose_assumptions', () => ({ assumptions: [{ factor_label: 'Morale', value: 7, unit: 'score', basis: 'x' }] })),
       call('authorise_change', (b) => ({ proposal_id: lastProposalId(b) })),
       say('I have proposed it; approve it if you want it.'),
     ];
     const b = await send(coachingClick());
     expect(commits).toBe(0);
     expect(b._agent.mutated).toBe(false);
-    expect(b._agent.tool_calls.map((c) => [c.name, c.ok])).toEqual([['propose_model_change', true], ['authorise_change', false]]);
+    expect(b._agent.tool_calls.map((c) => [c.name, c.ok])).toEqual([['propose_assumptions', true], ['authorise_change', false]]);
     expect(b._agent.tool_calls[1]).toEqual(expect.objectContaining({ refusal: 'withheld_on_chip_turn', mutated: false }));
     expect((b.suggested_actions ?? []).some((a) => a.id.startsWith('agent-approve-proposal'))).toBe(true);
   });
 
+  it('a link proposed on the click (the chip\'s words are Olumi\'s, never the user\'s band) → strength_not_stated, nothing prepared or written', async () => {
+    script = [
+      call('propose_model_change', () => ({ from_label: 'Morale', to_label: 'Velocity', direction: 'positive', strength: 'strong', rationale: 'x' })),
+      say('How strong is that effect: weak, moderate, strong or very strong?'),
+    ];
+    const b = await send(coachingClick());
+    expect(commits).toBe(0);
+    expect(b._agent.tool_calls).toEqual([expect.objectContaining({ name: 'propose_model_change', ok: false, mutated: false, refusal: 'strength_not_stated' })]);
+    expect((b.suggested_actions ?? []).some((a) => a.id.startsWith('agent-approve-proposal'))).toBe(false);
+  });
+
   it('a proposal outstanding from an EARLIER turn, authorised on the click → nothing written', async () => {
-    script = [call('propose_model_change', () => ({ from_label: 'Team size', to_label: 'Velocity', direction: 'positive', rationale: 'x' })), say('Shall I add it?')];
-    const t1 = await send({ kind: 'message', scenario_id: SCENARIO, agent_session_id: `sess-g4-${SCENARIO}`, message: 'Should team size drive velocity?' });
+    script = [call('propose_model_change', () => ({ from_label: 'Team size', to_label: 'Velocity', direction: 'positive', strength: 'strong', rationale: 'x' })), say('Shall I add it?')];
+    const t1 = await send({ kind: 'message', scenario_id: SCENARIO, agent_session_id: `sess-g4-${SCENARIO}`, message: 'Team size strongly drives velocity, so connect them.' });
     const pid = t1._agent.tool_calls.find((c) => c.name === 'propose_model_change')?.proposal_id;
     expect(pid, 'control: a real proposal is outstanding').toMatch(/^prop_/);
     script = [call('authorise_change', () => ({ proposal_id: pid })), say('Not applied.')];
@@ -140,8 +156,8 @@ describe('a chip click that is not the approval or the Run withholds authority f
   });
 
   it('CONTROL (scope): the same earlier-turn authorisation from a COMPOSER message still writes', async () => {
-    script = [call('propose_model_change', () => ({ from_label: 'Team size', to_label: 'Velocity', direction: 'positive', rationale: 'x' })), say('Shall I add it?')];
-    const t1 = await send({ kind: 'message', scenario_id: SCENARIO, agent_session_id: `sess-c1-${SCENARIO}`, message: 'Should team size drive velocity?' });
+    script = [call('propose_model_change', () => ({ from_label: 'Team size', to_label: 'Velocity', direction: 'positive', strength: 'strong', rationale: 'x' })), say('Shall I add it?')];
+    const t1 = await send({ kind: 'message', scenario_id: SCENARIO, agent_session_id: `sess-c1-${SCENARIO}`, message: 'Team size strongly drives velocity, so connect them.' });
     const pid = t1._agent.tool_calls.find((c) => c.name === 'propose_model_change')?.proposal_id;
     expect(pid).toMatch(/^prop_/);
     script = [call('authorise_change', () => ({ proposal_id: pid })), say('Applied.')];
