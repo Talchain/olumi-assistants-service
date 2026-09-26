@@ -158,9 +158,11 @@ describe('add a link: a committed link is never "Not saved" because of what happ
   const edgeWriter = (opts: { refuse?: boolean } = {}) => (g: G, ev: Record<string, unknown>) => (opts.refuse === true
     ? { g, committed: false, moved: false }
     : { g: { ...g, edges: [...g.edges, { from: String(ev['from']), to: String(ev['to']), strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'negative' as const }] }, committed: true, moved: true });
+  const linkCtx = { ...ctx, user_turn_text: 'Competitive pricing has a strong effect on monthly churn.' };
   const propose = async (d: InternalDispatch, store: ProposalStore) => {
     const caps = createAgentCapabilities(d, store);
-    const p = await caps.proposeModelChange(ctx, { from_label: 'Competitive pricing', to_label: 'Monthly churn', direction: 'negative', rationale: 'competitor discounts raise churn' });
+    // #1996: a new link carries the band the user typed THIS turn.
+    const p = await caps.proposeModelChange(linkCtx, { from_label: 'Competitive pricing', to_label: 'Monthly churn', direction: 'negative', strength: 'strong', rationale: 'competitor discounts raise churn' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     return { caps, id: String(p.proposal_id) };
   };

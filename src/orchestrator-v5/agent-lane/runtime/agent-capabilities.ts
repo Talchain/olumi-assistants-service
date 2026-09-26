@@ -1027,7 +1027,8 @@ export function createAgentCapabilities(
     parent: StructuredProposal,
     approvedRead: GraphRead,
   ): Promise<ToolResult> => {
-    const unsupported = parent.operations.filter((o) => !(COMPOUND_ORDER as readonly string[]).includes(o.op));
+    const isLevelLink = (o: ProposalOperation): boolean => o.op === 'add_edge' && (o.value as { link_for_level?: unknown } | undefined)?.link_for_level === true;
+    const unsupported = parent.operations.filter((o) => !(COMPOUND_ORDER as readonly string[]).includes(o.op) && !isLevelLink(o));
     if (unsupported.length > 0) {
       return { ok: false, mutated: false, refusal: 'unsupported_compound', detail: `This proposal mixes changes that cannot be applied together: ${[...new Set(unsupported.map((o) => o.op))].join(', ')}.` };
     }
@@ -1211,10 +1212,37 @@ export function createAgentCapabilities(
       carried = next;
     }
 
-    // (3) Levels, each CAS-gated on the revision our OWN previous write produced.
+    // (2b) ⭐ The links the levels need (a level on a factor its option did not yet act on), each CAS-gated on the
+    // revision our OWN previous write produced — the product's `structural_add_edge`; option → factor takes the
+    // topology strength. A link that does not land stops the chain: no level is written on a factor it could not reach.
     let levelsRecorded = 0;
     let levelStop: string | null = null;
-    for (let i = 0; i < levelOps.length; i += 1) {
+    const linkOps = parent.operations.filter(isLevelLink);
+    // ⛔ A link that LANDED is a change to the model even when a later level is refused (Canonical #2004 B1).
+    const linksAdded: string[] = [];
+    const labelOf = (id: string): string => approvedRead.nodes.find((n) => n.id === id)?.label ?? id;
+    for (let i = 0; i < linkOps.length; i += 1) {
+      const [fromId, toId] = linkOps[i]!.path.split('::');
+      const r = await dispatch('/orchestrate/v2/turn', {
+        kind: 'system_event',
+        turn_id: authorisationTurnId(`${parent.proposal_id}#link${i}`),
+        scenario_id: ctx.scenario_id,
+        stage: 'frame',
+        event: { kind: 'structural_add_edge', from: fromId, to: toId, magnitude: 0.5, effect_direction: 'positive', base_graph_hash: carried },
+      });
+      const next = r.json.graph_hash;
+      if (r.status !== 200 || typeof next !== 'string' || next.length === 0) {
+        levelStop = 'a link one of the levels needs could not be added, so no level was written';
+        break;
+      }
+      const rc = receiptSummaryOf(r.json);
+      if (rc.summary !== null) receipts.push(rc.summary);
+      carried = next;
+      linksAdded.push(`${labelOf(fromId!)} \u2192 ${labelOf(toId!)}`);
+    }
+
+    // (3) Levels, each CAS-gated on the revision our OWN previous write produced.
+    for (let i = 0; levelStop === null && i < levelOps.length; i += 1) {
       const o = levelOps[i];
       const [optionId, factorId] = o.path.split('::');
       const v = ((o.value ?? {}) as { normalised?: number }).normalised;
@@ -1264,11 +1292,12 @@ export function createAgentCapabilities(
     if (all) proposals.markApplied(parent.proposal_id, receipts);
     const parts = [
       ...(valueOps.length > 0 ? [{ part: 'values', ok: valuesLanded, recorded_count: valuesLanded ? valueOps.length : 0, requested_count: valueOps.length }] : []),
+      ...(linkOps.length > 0 ? [{ part: 'links', ok: linksAdded.length === linkOps.length, recorded_count: linksAdded.length, requested_count: linkOps.length }] : []),
       ...(levelOps.length > 0 ? [{ part: 'option_levels', ok: levelStop === null, recorded_count: levelsRecorded, requested_count: levelOps.length }] : []),
     ];
     return {
       ok: all,
-      mutated: valuesLanded || levelsRecorded > 0,
+      mutated: valuesLanded || linksAdded.length > 0 || levelsRecorded > 0,
       applied: all,
       proposal_id: parent.proposal_id,
       parts,
@@ -1286,8 +1315,11 @@ export function createAgentCapabilities(
               'say so when you describe what changed.',
           }
         : {
-            refusal: valuesLanded || levelsRecorded > 0 ? 'partially_applied' : 'not_applied',
-            detail: `${levelStop ?? 'Not every change was recorded'}. Tell the user exactly which part was recorded and which was not.`,
+            refusal: valuesLanded || linksAdded.length > 0 || levelsRecorded > 0 ? 'partially_applied' : 'not_applied',
+            detail:
+              `${levelStop ?? 'Not every change was recorded'}.` +
+              (linksAdded.length > 0 ? ` These links WERE added and stay in the model: ${linksAdded.join('; ')}.` : '') +
+              ' Tell the user exactly which part was recorded and which was not.',
           }),
     };
   };
@@ -1944,7 +1976,6 @@ export function createAgentCapabilities(
       const unresolved: string[] = [];
       const unframed: { factor: string; detail: string }[] = [];
       const unchanged: string[] = [];
-      const notLinked: { option: string; factor: string; acts_on: string[] }[] = [];
       /**
        * ⛔ EVERY SUPPLIED LEVEL THAT IS NOT ACCEPTED, WITH ITS OPTION AND WHY.
        * MEASURED on served d1829c5 (journey J1): the starting point was refused
@@ -1963,6 +1994,8 @@ export function createAgentCapabilities(
         derivedFrame: number | null;
         /** The user GAVE this level (`user_stated`); otherwise it is Olumi's proposal. */
         userStated: boolean;
+        // The option is not yet linked to this factor: the link is added in the same change, before the level.
+        needsLink: boolean;
       }[] = [];
 
       for (const i of input) {
@@ -2011,14 +2044,13 @@ export function createAgentCapabilities(
          * factors the option DOES act on, so the Agent corrects it before the
          * user is asked to approve anything.
          */
-        const linked = linkedFactorsOf(g as never, option.id);
-        if (!linked.some((f) => f.id === factor.id)) {
-          notLinked.push({
-            option: option.label, factor: factor.label,
-            acts_on: linked.map((f) => String(f.label ?? f.id)),
-          });
-          continue;
-        }
+        /**
+         * ⭐ A LEVEL BRINGS ITS LINK (DL #70 5846924842, served BF5 on 1f8327c). Dropping this pair made the Agent propose
+         * the link alone and promise the level ("once it is approved, I can record £54") — a promise no proposal kept,
+         * and the options stayed level-less. The level goes in the SAME proposal as the option → factor link it needs;
+         * on approval the link is written first and the level on the revision that write reported (`applyCompound`).
+         */
+        const needsLink = !linkedFactorsOf(g as never, option.id).some((f) => f.id === factor.id);
         // ⛔ A held status quo takes no level the AGENT supplies (`heldStatusQuoPairs`):
         // not accepted, never an operation. ⭐ The USER's own correction is the
         // exception (independent review of #1849, 5820560331): the Agent is told to
@@ -2140,7 +2172,7 @@ export function createAgentCapabilities(
           option: { id: option.id, label: option.label },
           factor: { id: factor.id, label: factor.label },
           raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' ? os.unit : '',
-          basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote,
+          basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote, needsLink,
         });
       }
 
@@ -2148,7 +2180,6 @@ export function createAgentCapabilities(
         return {
           ok: false, mutated: false, refusal: 'nothing_to_set',
           ...(unresolved.length > 0 ? { unresolved } : {}),
-          ...(notLinked.length > 0 ? { not_linked: notLinked } : {}),
           ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
           ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
           ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
@@ -2160,7 +2191,10 @@ export function createAgentCapabilities(
 
       const ordered = [...set].sort((x, y) =>
         `${x.option.id}::${x.factor.id}` < `${y.option.id}::${y.factor.id}` ? -1 : 1);
-      const operations: ProposalOperation[] = ordered.map((i) => ({
+      // The links the levels need come first; each is written before any level (`applyCompound` step 2b).
+      const linkOps: ProposalOperation[] = ordered.filter((i) => i.needsLink)
+        .map((i) => ({ op: 'add_edge', path: `${i.option.id}::${i.factor.id}`, value: { link_for_level: true } }));
+      const operations: ProposalOperation[] = [...linkOps, ...ordered.map((i): ProposalOperation => ({
         op: 'set_option_intervention',
         path: `${i.option.id}::${i.factor.id}`,
         value: {
@@ -2168,7 +2202,7 @@ export function createAgentCapabilities(
           // Per level, like `valueOpAuthor`: whose level this is travels to the writer (`levelOpAuthor`).
           authored_by: i.userStated ? 'user_stated' : 'model_proposed',
         },
-      }));
+      }))];
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -2177,7 +2211,7 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'model_proposed', basis: 'what each option does, for the user to confirm or correct' },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label:
-          ordered.map((i) => `${i.option.label} sets ${i.factor.label} to ${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`).join('; ') +
+          ordered.map((i) => `${i.option.label} ${i.needsLink ? `acts on ${i.factor.label} (a new link) and sets it` : `sets ${i.factor.label}`} to ${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`).join('; ') +
           ambiguousClause(ambiguous),
       });
       proposals.put(proposal);
@@ -2193,12 +2227,13 @@ export function createAgentCapabilities(
           recorded_on_model_scale: i.normalised,
           model_range: i.cap,
           ...(i.derivedFrame !== null ? { range_taken_from_your_figure: i.derivedFrame } : {}),
+          ...(i.needsLink ? { adds_the_link: true } : {}),
           basis: i.basis,
         })),
         ...(unresolved.length > 0 ? { unresolved } : {}),
-        ...(notLinked.length > 0 ? {
-          not_linked: notLinked,
-          not_linked_note: 'These levels were LEFT OUT: the option is not connected to that factor, so no level can be recorded there. Propose a level on one of the factors each option acts on (listed in acts_on), or say the option needs a link first.',
+        ...(linkOps.length > 0 ? {
+          adds_links_note: 'Some levels are on a factor the option was not yet linked to: this ONE change also adds that link (marked adds_the_link), '
+            + 'and the level is recorded right after it. Say so plainly. Never tell the user a level will be recorded later: it is in this change.',
         } : {}),
         ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
         ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
