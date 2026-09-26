@@ -83,6 +83,7 @@ import type {
   MutationVerdict,
   RefereeVerdict,
 } from '../graph-management/types.js';
+import { boundTypedEnvelopeCap } from '../graph-management/types.js';
 import {
   isPendingActionExpired,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
@@ -131,6 +132,13 @@ export interface EditGmEvaluationInput {
    * resume path. Event NAMES are unchanged (frozen registry).
    */
   readonly dispatchPath?: 'edit_graph' | 'gm_held_resume';
+  /**
+   * (A) — the envelope cap for a CEE-BUILT typed transaction (the multi-option
+   * add). Absent → `PROPOSAL_CAP`. The hold RECORDS it (`envelope_cap`) so the
+   * confirm-time re-referee and the thread-through judge the batch under the
+   * same cap it was held under. Bounded by `boundTypedEnvelopeCap`.
+   */
+  readonly envelopeCap?: number;
   /**
    * F-3 negation guard (probe P8/P9, 2026-07-20): the CURRENT turn's raw
    * user message, used ONLY for deterministic protection-scope extraction
@@ -782,7 +790,9 @@ function refereeBatch(input: EditGmEvaluationInput): RefereedBatch {
     makeCandidateId: randomUUID,
     ...(input.rationales !== undefined ? { rationales: input.rationales } : {}),
   });
-  const verdicts = refereeMutationBatch(raw, input.currentGraph, frame);
+  const verdicts = refereeMutationBatch(raw, input.currentGraph, frame, {
+    ...(input.envelopeCap !== undefined ? { envelopeCap: input.envelopeCap } : {}),
+  });
   // Batch-level failures (cap / unreadable batch) return ONE verdict for the
   // whole batch — no per-envelope pairing exists.
   if (verdicts.length !== raw.length) {
@@ -831,6 +841,8 @@ export interface HeldBatchAssessment {
  */
 export function assessHeldBatchAgainstGraph(input: {
   readonly operations: readonly EditPatchOperationLike[];
+  /** (A) — the hold's recorded typed cap (`readGmHeldResume`); absent → default. */
+  readonly envelopeCap?: number;
   readonly currentGraph: unknown;
   readonly currentGraphHash: string;
   readonly scenarioId: string;
@@ -843,6 +855,7 @@ export function assessHeldBatchAgainstGraph(input: {
       // by refereeBatch (no telemetry, no routing on this pure path).
       mode: 'shadow',
       operations: input.operations,
+      ...(input.envelopeCap !== undefined ? { envelopeCap: input.envelopeCap } : {}),
       currentGraph: input.currentGraph,
       currentGraphHash: input.currentGraphHash,
       baseGraphHash: input.currentGraphHash,
@@ -884,6 +897,7 @@ function buildHeldPending(
     readonly apply_wiring: string;
     readonly operations?: readonly EditPatchOperationLike[];
     readonly operations_count?: number;
+    readonly envelope_cap?: number;
   } => {
     try {
       const serialised = JSON.stringify(input.operations);
@@ -892,10 +906,14 @@ function buildHeldPending(
         serialised.length > 0 &&
         serialised.length <= GM_HELD_OPERATIONS_MAX_JSON_CHARS
       ) {
+        const envelopeCap = boundTypedEnvelopeCap(input.envelopeCap);
         return {
           apply_wiring: GM_HELD_APPLY_WIRING_EXECUTE,
           operations: input.operations,
           operations_count: input.operations.length,
+          // (A) — recorded ONLY when a typed transaction widened the cap, so
+          // every existing hold keeps its exact bytes.
+          ...(envelopeCap !== undefined ? { envelope_cap: envelopeCap } : {}),
         };
       }
     } catch {

@@ -4563,6 +4563,7 @@ export async function runTurnExecutor(
         }
         const outcome = executeGmHeldResume({
           operations: read.operations,
+          ...(read.envelopeCap !== undefined ? { envelopeCap: read.envelopeCap } : {}),
           currentGraph: gmBaseGraph,
           currentGraphHash: gmBaseHash,
           freshness: freshness?.freshness ?? 'unknown',
@@ -4811,8 +4812,10 @@ export async function runTurnExecutor(
             continue;
           }
           const preStepGraph = workingGraph;
+          const stepCap = reads[i]!.envelopeCap;
           const outcome = executeGmHeldResume({
             operations: reads[i]!.operations,
+            ...(stepCap !== undefined ? { envelopeCap: stepCap } : {}),
             currentGraph: preStepGraph,
             currentGraphHash: workingHash,
             freshness: freshness?.freshness ?? 'unknown',
