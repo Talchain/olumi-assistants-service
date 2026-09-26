@@ -1471,7 +1471,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * Server-authored text only — never model prose.
          */
         const followUp = typeof applied.follow_up === 'string' ? applied.follow_up.trim() : '';
-        const said = [narrateWriteOutcome('', [call], [applied]).status ?? '', followUp].filter((x) => x !== '').join(' ');
+        const said = [narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }).status ?? '', followUp].filter((x) => x !== '').join(' ');
         const ms = Date.now() - fastStartedAt;
         result = {
           // The reply the user reads is composed from this text plus Olumi's status line.
@@ -1829,7 +1829,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // (finding 3 on #1786, 5807230197).
     const narration = fastPath === 'run'
       ? { text, status: null as string | null, stripped: [] as string[] }
-      : narrateWriteOutcome(text, result.tool_calls, result.tool_results);
+      : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null });
     // (B) A write landed on this turn → say whether the model can run now, from the readback's one verdict.
     const wroteThisTurn = fastPath !== 'run'
       && result.tool_results.some((r) => (r as { mutated?: unknown; applied?: unknown } | undefined)?.mutated === true || (r as { applied?: unknown } | undefined)?.applied === true);
