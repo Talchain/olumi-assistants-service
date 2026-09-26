@@ -29,11 +29,14 @@ const served = (name: string): Graph =>
   (JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')) as { draft_graph: Graph }).draft_graph;
 const SERVED_OUTCOME = served('served-paul-churn-outcome-20260926T032916Z.json');
 const SERVED_FACTOR = served('served-paul-churn-factor-20260926T032913Z.json');
+/** The served limit row was captured before #1919, which stamps the drafter's stated frame; nothing else differs. */
+const SERVED_FACTOR_GC_FRAMED = (SERVED_FACTOR.goal_constraints as Record<string, unknown>[]).map((c) => ({ ...c, value_frame: 'level' }));
 
 const BRIEF =
   'Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase the '
   + 'Pro plan price from £49 to £59 per month with the next AI feature release?';
-const CHURN_LIMIT = { metric: 'Monthly churn', operator: '<', value: 10, unit: 'percent per month', provenance: 'explicit' };
+// #1919: the drafter states every limit's frame (`frame` is required by the strict schema); "under 10%" limits the level.
+const CHURN_LIMIT = { metric: 'Monthly churn', operator: '<', value: 10, unit: 'percent per month', provenance: 'explicit', frame: 'level' };
 const link = (from: string, to: string, direction: 'positive' | 'negative') => ({ from, to, direction, provenance: 'inferred' });
 
 /** Served 20260926T032916Z-48389, by node id: `monthly_churn` is an OUTCOME the user's limit names. */
@@ -169,11 +172,12 @@ describe('a limit the user states on a level is admitted on a factor that can ho
 
   it('RED: the limit still names that node, as the served factor-kind draft carries it (unit on the node’s frame)', async () => {
     const { graph } = await register(outcomeDraft());
-    expect(graph.goal_constraints).toStrictEqual(SERVED_FACTOR.goal_constraints);
+    expect(graph.goal_constraints).toStrictEqual(SERVED_FACTOR_GC_FRAMED);
     expect(graph.goal_constraints).toStrictEqual([{
       constraint_id: 'agent-lane:monthly_churn:<=', node_id: 'monthly_churn', operator: '<=', value: 10, label: 'Monthly churn', unit: '%',
       provenance: 'explicit',
       provenance_unit_relabelled: { rule: 'agent_lane_limit_unit_v1', pre_normalisation_value: 10, pre_normalisation_unit: 'percent per month' },
+      value_frame: 'level',
     }]);
   });
 
@@ -219,7 +223,7 @@ describe('CONTROLS — what the rule must leave alone', () => {
     const { graph } = await register(factorDraft());
     expect(graph.nodes).toStrictEqual(SERVED_FACTOR.nodes);
     expect(edgeKeys(graph)).toEqual(edgeKeys(SERVED_FACTOR));
-    expect(graph.goal_constraints).toStrictEqual(SERVED_FACTOR.goal_constraints);
+    expect(graph.goal_constraints).toStrictEqual(SERVED_FACTOR_GC_FRAMED);
   });
 
   it('an outcome NO limit names stays the served outcome', async () => {
@@ -238,7 +242,7 @@ describe('CONTROLS — what the rule must leave alone', () => {
 
   it('a relative-change limit ("must not rise by more than 2 points") leaves the outcome an outcome', async () => {
     for (const unit of ['percentage points', 'pp']) {
-      const { graph } = await register(outcomeDraft({ constraints: [{ metric: 'Monthly churn', operator: '<=', value: 2, unit, provenance: 'explicit' }] }));
+      const { graph } = await register(outcomeDraft({ constraints: [{ metric: 'Monthly churn', operator: '<=', value: 2, unit, provenance: 'explicit', frame: 'delta' }] }));
       expect(byId(graph, 'monthly_churn'), unit).toStrictEqual(byId(SERVED_OUTCOME, 'monthly_churn'));
       expect(graph.goal_constraints?.map((c) => c.node_id), unit).toEqual(['monthly_churn']);
     }
@@ -247,8 +251,8 @@ describe('CONTROLS — what the rule must leave alone', () => {
   it('a limit on the goal stays on the goal, and one on a risk leaves the risk a risk', async () => {
     const { graph } = await register(outcomeDraft({ constraints: [
       CHURN_LIMIT,
-      { metric: 'MRR', operator: '<=', value: 50, unit: '%', provenance: 'explicit' },
-      { metric: 'Price sensitivity', operator: '<=', value: 50, unit: '%', provenance: 'explicit' },
+      { metric: 'MRR', operator: '<=', value: 50, unit: '%', provenance: 'explicit', frame: 'level' },
+      { metric: 'Price sensitivity', operator: '<=', value: 50, unit: '%', provenance: 'explicit', frame: 'level' },
     ] }));
     expect(byId(graph, 'mrr')).toStrictEqual(byId(SERVED_OUTCOME, 'mrr'));
     expect(byId(graph, 'price_sensitivity')).toStrictEqual(byId(SERVED_OUTCOME, 'price_sensitivity'));
@@ -257,7 +261,7 @@ describe('CONTROLS — what the rule must leave alone', () => {
   });
 
   it('a money limit on a limited total stays on its outcome (the rule is the percent level only)', async () => {
-    const { graph } = await register(outcomeDraft({ constraints: [{ metric: 'Monthly churn', operator: '<=', value: 5000, unit: 'GBP', provenance: 'explicit' }] }));
+    const { graph } = await register(outcomeDraft({ constraints: [{ metric: 'Monthly churn', operator: '<=', value: 5000, unit: 'GBP', provenance: 'explicit', frame: 'level' }] }));
     expect(byId(graph, 'monthly_churn')).toStrictEqual(byId(SERVED_OUTCOME, 'monthly_churn'));
   });
 });

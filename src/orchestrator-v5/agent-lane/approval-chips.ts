@@ -32,7 +32,28 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_goal_current_level: { label: 'Record this current level', message: 'Yes, record it.' },
   // A link's strength recorded as the user's own (challenge → authorised revision): one button, carried like the rest.
   propose_link_strength: { label: 'Record this link', message: 'Yes, record that.' },
+  // The goal's success target the user stated, written through the product's typed target writer.
+  propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
 };
+
+/**
+ * ⛔ ONE APPROVAL CARRIES ONE CHANGE, SO A TURN LEAVES AT MOST ONE PROPOSAL OPEN (AI Conversation #70 5847130065 (a);
+ * DL `bf-20260926T113645Z` turns[3]: a link and a level both proposed, "Approve both changes?", and no control —
+ * the chip rule below rightly offers none for two, since approving one supersedes the other). `agent-loop.ts` refuses
+ * a second proposing call with this code while one from the same turn awaits the user's yes; nothing is stored.
+ */
+export const ONE_CHANGE_PER_APPROVAL = 'one_change_per_approval';
+export const ONE_CHANGE_PER_APPROVAL_DETAIL =
+  'A change from this turn is already awaiting the user\u2019s approval, and one approval carries one change: approving '
+  + 'it moves the model, so a second proposal made now could never be approved after it. Nothing was stored. If both '
+  + 'belong to one operation, propose them in ONE call instead (propose_new_option carries up to 4 options in `options`; '
+  + 'propose_starting_point carries starting values and option levels together; propose_option_interventions adds the '
+  + 'link a level needs). Otherwise present the change '
+  + 'already proposed, and tell the user this further change is not proposed yet \u2014 they can ask for it once they '
+  + 'have answered. Never ask them to approve both.';
+
+/** Whether a tool leaves a proposal awaiting the user's yes — the approve chip's own list. */
+export const isProposingTool = (name: string): boolean => APPROVE[name] !== undefined;
 
 export const AMEND_CHIP: SuggestedAction = {
   id: 'agent-amend-proposal',
@@ -122,8 +143,8 @@ const MIN_ENTITY_CHARS = 6;
 const entriesOf = (x: unknown): Record<string, unknown>[] =>
   (Array.isArray(x) ? x.filter((e): e is Record<string, unknown> => e !== null && typeof e === 'object') : []);
 
-/** The figure in the user's units, exactly as stored, or null when it cannot be shown exactly. */
-function figureInUserUnits(value: unknown, unit: unknown): string | null {
+/** The figure in the user's units, exactly as stored, or null when it cannot be shown exactly. Also names a goal target's figure. */
+export function figureInUserUnits(value: unknown, unit: unknown): string | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
   const u = typeof unit === 'string' ? unit.trim() : '';
   // "GBP/year", "£ per month": the currency figure, then its period.
