@@ -402,10 +402,12 @@ export function assessRouteAdmission(graph: unknown): RouteAdmissionVerdict {
       ? // ⭐ A REFUSAL IS NEVER SILENT HERE EITHER. Strict readiness passed, so
         // the run was refused by the SECOND admission term alone (the comparison
         // floor: nothing to compare). This branch used to emit nothing, so
-        // `may_run: false` arrived with no reason on every surface that reads
-        // this verdict (`/graph-readiness`, the panel, the Agent's view). The
-        // reason is the run path's OWN — `blockedNextStep`, the single
-        // derivation in `resolveRunAdmission` — never a second check.
+        // `may_run: false` reached `/graph-readiness` and the panel with no
+        // reason. The reason is the run path's OWN — `blockedNextStep`, the
+        // single derivation in `resolveRunAdmission` — never a second check.
+        // ⚠ SCOPE: the Agent's view (`agent-lane/readiness-view.ts`) projects
+        // `readiness_issues` only and does not read `blocker_reason`; it picks
+        // this reason up in its own change (Runtime #1955), not here.
         (admission.willProceed || admission.blockedNextStep === null
           ? {}
           : { blocker_reason: admission.blockedNextStep })
