@@ -47,7 +47,7 @@ function wire(freshness: 'fresh' | 'stale' | 'none' | 'unknown', hasFact: boolea
   } as never);
   return { canonical, state: state as unknown as {
     run_state: { kind: string }; readiness: { status: string; blockers: Array<{ code: string }> };
-    usable_for_prose: boolean; usable_for_followup: boolean; requires_rerun: boolean; blocked_unusable: boolean;
+    usable_for_prose: boolean; usable_for_chips: boolean; usable_for_followup: boolean; requires_rerun: boolean; blocked_unusable: boolean;
   } };
 }
 
@@ -63,8 +63,14 @@ describe('(B) a blocked admission keeps the prior run', () => {
     expect(state.readiness.blockers.map((b) => b.code)).toEqual(['OPTION_NOT_LINKED_TO_DECISION']);
   });
 
-  it('FRESH prior run + BLOCKED model → complete_current (the run is not erased)', () => {
-    expect(wire('fresh', true, BLOCKED).state.run_state.kind).toBe('complete_current');
+  it('FRESH prior run + BLOCKED model → complete_current (the run is not erased), its chips stay, no rerun', () => {
+    const { state } = wire('fresh', true, BLOCKED);
+    expect(state.run_state.kind).toBe('complete_current');
+    // DECIDED, not incidental (#1936 review): readiness is about the MODEL, so a
+    // CURRENT result keeps its result-derived chips; what a blocked model loses
+    // is the licence to RE-RUN, never the run it already has.
+    expect(state.usable_for_chips).toBe(true);
+    expect(state.requires_rerun).toBe(false);
   });
 
   it('CONTROL: STALE + ADMITTED → a rerun IS offered', () => {
