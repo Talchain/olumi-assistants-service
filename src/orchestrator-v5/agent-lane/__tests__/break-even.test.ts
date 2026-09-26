@@ -3,7 +3,7 @@
  *
  * FIXTURE: the served model DL's joined run `f-20260926T201724Z` ran on at 05-F8-run (graph_hash 783e01ff): MRR carries
  * the product identity Pro plan price × Pro paying subscribers (inferred, not stated in the brief), today's price is
- * £49 (the brief's), today's subscribers 300 (Olumi's figure, adopted), and the options set £59 (brief), £54 (Olumi's)
+ * £49 (the brief's), today's subscribers 300 (Olumi's figure, approved as an assumption), and the options set £59 (brief), £54 (Olumi's)
  * and £49 (brief). That Run's reply led with "No option can be put forward…" and gave no arithmetic at all.
  *
  * Expected figures, by hand: 49 × 300 = 14,700. 14,700 ÷ 59 = 249.2 → 250 must stay (a loss of at most 50);
@@ -27,7 +27,7 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
     expect(be).toEqual({
       goal: 'MRR', price_factor: 'Pro plan price', volume_factor: 'Pro paying subscribers', unit: 'GBP/month',
       identity_stated_in_brief: false,
-      baseline_price: 49, baseline_price_by: 'user', baseline_volume: 300, baseline_volume_by: 'olumi_adopted', baseline_goal: 14_700,
+      baseline_price: 49, baseline_price_by: 'user', baseline_volume: 300, baseline_volume_by: 'approved', baseline_goal: 14_700,
       options: [
         { option: 'Raise Pro to £59', price: 59, price_by: 'user', keep_at_least: 250 },
         { option: 'Hold £49 with AI release', price: 49, price_by: 'user' },
@@ -40,7 +40,7 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
   it('RED (served F8): the paragraph the user reads answers the question, with the figures and whose they are', () => {
     const said = breakEvenLine(breakEvenFor(graph())!);
     expect(said).toContain('If MRR is Pro plan price × Pro paying subscribers (Olumi’s reading of your goal)');
-    expect(said).toContain('at £49/month and 300 Pro paying subscribers (Olumi’s figure, which you adopted), MRR is £14,700/month today.');
+    expect(said).toContain('at £49/month and 300 Pro paying subscribers (an assumption you approved), MRR is £14,700/month today.');
     expect(said).toContain('At £59/month, MRR stays at least that while 250 or more of the 300 stay (a loss of at most 50).');
     expect(said).toContain('At £54/month (Olumi’s estimate), MRR stays at least that while 273 or more');
     expect(said).toContain('£20,000/month needs 339 at £59/month, 371 at £54/month or 409 at £49/month.');

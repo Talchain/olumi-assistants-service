@@ -15,6 +15,7 @@
  * inexact or in another unit — never an approximate answer.
  */
 import { nonlinearIdentityForAgent } from './admit-model.js';
+import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 
 type Node = {
   id: string; kind?: string; label?: string;
@@ -24,7 +25,7 @@ type Node = {
   nonlinear_identity?: { stated_in_brief?: unknown } | null;
 };
 
-export type FigureBy = 'user' | 'olumi_adopted' | 'olumi';
+export type FigureBy = 'user' | 'approved' | 'olumi';
 
 export interface BreakEvenOption {
   readonly option: string;
@@ -52,10 +53,16 @@ export interface BreakEven {
   readonly target?: { readonly value: number; readonly needs: readonly { readonly price: number; readonly volume: number }[] };
 }
 
+/**
+ * Whose figure it is, by the estate's ONE authorship rule (`classifyValueSource`) — never a second table here.
+ * `user_ratified` (an estimate the user confirmed or approved as an assumption) is NOT the user's figure and is said
+ * as approved; anything the rule cannot attribute (a repair, an unknown stamp) makes the whole answer `null`.
+ */
 const byOf = (source: unknown): FigureBy | null => {
-  if (source === 'user_specified' || source === 'user_override' || source === 'brief_extraction' || source === 'user_edit') return 'user';
-  if (source === 'user_assumption') return 'olumi_adopted';
-  if (source === 'cee_hypothesis') return 'olumi';
+  const provenance = classifyValueSource(source);
+  if (provenance === 'user_stated') return 'user';
+  if (provenance === 'user_ratified') return 'approved';
+  if (provenance === 'ai_drafted') return 'olumi';
   return null;
 };
 
@@ -128,7 +135,7 @@ function money(n: number, unit: string): string {
   const digits = n.toLocaleString('en-GB', { maximumFractionDigits: 2 });
   return m === null ? `${digits} ${unit}` : `${CURRENCY[m[1]!.toLowerCase()]}${digits}${m[2] !== undefined ? `/${m[2]}` : ''}`;
 }
-const whose = (by: FigureBy): string => (by === 'user' ? '' : by === 'olumi_adopted' ? ' (Olumi’s figure, which you adopted)' : ' (Olumi’s estimate)');
+const whose = (by: FigureBy): string => (by === 'user' ? '' : by === 'approved' ? ' (an assumption you approved)' : ' (Olumi’s estimate)');
 const count = (n: number): string => n.toLocaleString('en-GB');
 
 /** The one paragraph the user reads (draft wording; AI Experience owns the words, MG reviews the maths). */
