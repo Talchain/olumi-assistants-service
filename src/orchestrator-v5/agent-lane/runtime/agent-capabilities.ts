@@ -117,7 +117,7 @@ import { bandFromMagnitude, INFLUENCE_BAND_THRESHOLDS, type InfluenceBand } from
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
-import { contradictsItsName, figureTheUserWrote } from '../stated-by-user.js';
+import { bandTheUserWrote, contradictsItsName, figureTheUserWrote } from '../stated-by-user.js';
 import { defaultFrameFor, nonlinearIdentityForAgent } from '../admit-model.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
@@ -1406,6 +1406,12 @@ export function createAgentCapabilities(
           detail: 'The strength must be one of: weak, moderate, strong, very strong. Nothing was prepared; ask the user which.' };
       }
       const band = args.strength;
+      // ⛔ Recorded as the user's only when the user named the band (`bandTheUserWrote`); the writer stamps it as theirs.
+      if (!bandTheUserWrote(band, ctx.user_turn_text)) {
+        return { ok: false, mutated: false, refusal: 'strength_not_stated',
+          detail: `The user has not called this link ${band} in this message, in their own words, so nothing was prepared: it would be recorded as their estimate. `
+            + 'Ask them how strong they think it is \u2014 weak, moderate, strong or very strong \u2014 and never offer a band as theirs.' };
+      }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const fromRes = resolveNamed(g, String(args.from_label ?? ''), () => true);

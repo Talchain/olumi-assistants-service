@@ -75,7 +75,7 @@ export type AddOptionTransactionOutcome =
       readonly reason:
         // Every builder refusal except `too_many_options`, which is REFUSED with a sentence, not skipped —
         // including the new-factor reasons (ruling #70 5843972346).
-        | Exclude<AddOptionsSkipReason, 'too_many_options'>
+        | Exclude<AddOptionsSkipReason, 'too_many_options' | 'same_levels_as_existing_option'>
         | 'gm_not_live'
         | 'no_graph_hash'
         | 'unreadable_graph'
@@ -106,7 +106,7 @@ export type AddOptionTransactionOutcome =
        * and no pending: never a hold whose "yes" would silently decline.
        */
       readonly kind: 'refused';
-      readonly reason: 'too_many_options' | 'too_many_changes' | 'payload_too_large';
+      readonly reason: 'too_many_options' | 'too_many_changes' | 'payload_too_large' | 'same_levels_as_existing_option';
       readonly response: OlumiResponse;
     };
 
@@ -202,6 +202,8 @@ function toGraphView(currentGraph: unknown): AddOptionGraphView | null {
       kind: n.kind,
       label: n.label,
       ...(typeof (n as { category?: unknown }).category === 'string' ? { category: (n as { category: string }).category } : {}),
+      // An option's levels, so the builder can refuse a second option with the same ones.
+      ...(n.kind === 'option' && n.interventions != null ? { interventions: n.interventions } : {}),
     })),
     edges: parsed.data.edges.map((e) => ({ from: e.from, to: e.to })),
   };
@@ -234,6 +236,20 @@ export function dispatchAddOptionTransaction(
         response: refusedResponse(
           `I can add up to ${MAX_OPTIONS_PER_TRANSACTION} options in one go, so I haven't ` +
             `changed anything. Tell me the first ${MAX_OPTIONS_PER_TRANSACTION} and I'll add the rest after.`,
+          input.stage,
+        ),
+      };
+    }
+    if (built.reason === 'same_levels_as_existing_option') {
+      // REFUSED WITH A SENTENCE, never skipped: a skip falls through to the free-text edit lane, which could add
+      // the duplicate anyway. The engine cannot tell two options with the same levels apart.
+      const twin = built.sameAs?.label;
+      return {
+        kind: 'refused',
+        reason: 'same_levels_as_existing_option',
+        response: refusedResponse(
+          `That option would set exactly the same levels as ${twin !== undefined ? `"${twin}"` : 'an option already in the model'}, ` +
+            `so the analysis could not tell them apart. I haven't added it. Change at least one of its levels to make it a different choice.`,
           input.stage,
         ),
       };
