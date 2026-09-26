@@ -45,6 +45,8 @@ function candidate(opts: { extraFactors: number; options?: string[]; explicitLin
     unknowns: [],
   };
 }
+/** The one question for two user options nothing tells apart (`admit-model.ts`, DL #70 5842361028 / 5842400604). */
+const STATED_TWINS = 'What makes "Hire a tech lead" different from "Hire two developers"? As drafted, nothing the model holds tells them apart, so the analysis cannot compare them yet.';
 const sizeOf = (c: unknown) => assessConstructionSize(admitCandidateModel(c as CandidateModel, {}));
 
 function structuredSequence(...payloads: readonly unknown[]) {
@@ -178,7 +180,9 @@ describe('⛔ identity is the FULL stated text and the stated direction (Panel p
     const left = out.left_out_to_stay_compact as { kind: string; label: string }[] | undefined;
     expect(left?.map((x) => x.label).sort()).toEqual(Array.from({ length: 13 }, (_, i) => `Secondary factor ${i + 2}`).sort());
     // The stated 6-month deadline is asked first (construction-goal-losses-are-said.test.ts), then what the retry parked.
-    expect(out.open_questions).toEqual(['Does "Velocity" get there within 6 months? The model holds no deadline yet, so no result answers that.', 'Does team morale matter here?']);
+    // This fixture's two USER options both act on "Delivery capacity" with no level, so nothing the model holds tells
+    // them apart: they are kept and asked about once, ahead of the parked questions (construction-no-identical-options.test.ts).
+    expect(out.open_questions).toEqual(['Does "Velocity" get there within 6 months? The model holds no deadline yet, so no result answers that.', STATED_TWINS, 'Does team morale matter here?']);
     expect((out.not_represented as string[]).join(' ')).toMatch(/13 item\(s\) from the first draft were left out/);
   });
 
@@ -190,7 +194,7 @@ describe('⛔ identity is the FULL stated text and the stated direction (Panel p
     const out = await buildModelFromBrief(SCENARIO, BRIEF, dp.d, s.fn) as Record<string, unknown>;
     expect(s.calls, 'vacuity: no retry — this is the common path').toHaveLength(1);
     expect(out.ok, JSON.stringify(out)).toBe(true);
-    expect(out.open_questions).toEqual(['Does "Velocity" get there within 6 months? The model holds no deadline yet, so no result answers that.', 'Is the bottleneck coordination or capacity?', 'What does onboarding cost the current team?']);
+    expect(out.open_questions).toEqual(['Does "Velocity" get there within 6 months? The model holds no deadline yet, so no result answers that.', STATED_TWINS, 'Is the bottleneck coordination or capacity?', 'What does onboarding cost the current team?']);
   });
 
   it('CONTRAST: a first model within the limit reports nothing left out', async () => {

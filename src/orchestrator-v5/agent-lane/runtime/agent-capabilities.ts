@@ -41,6 +41,11 @@ import { isPendingActionExpired, type PendingAction } from '../../session/pendin
  * idempotency key, and the stable key is what the replay arm needs.
  */
 
+/** A value whose unit is another kind than its factor's (a price as churn): left out, and the Agent says why. */
+const UNIT_MISMATCH_NOTE =
+  'Left out because the figure is in a different kind of unit from the factor (for example a price given for a rate). '
+  + 'Never record a figure the user gave for something else as this factor\u2019s value; ask for its own figure if needed.';
+
 /** What the Agent is told to say about a named input that cannot hold a value. */
 const NOT_A_FACTOR_NOTE =
   'These were named but are not factors (for example a risk), so no starting value can be set on them and they are ' +
@@ -100,6 +105,7 @@ import { readinessViewOf } from '../readiness-view.js';
 import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
+import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel } from './build-model.js';
@@ -1198,6 +1204,49 @@ export function createAgentCapabilities(
     }
     return missing;
   };
+  /**
+   * ⭐ WHAT THE ONE VERDICT WOULD SAY IF THIS WERE APPROVED (served ef99a97 / cb1778b: a starting point that filled
+   * every level but made two options identical — the user's one approval led straight to "nothing to compare").
+   * The stored graph with the proposal's levels (and value presence) applied, read by the SAME `readinessViewOf`.
+   * A preview for the Agent's words only; nothing here is written.
+   */
+  const readinessIfApplied = async (ctx: AgentToolContext, ops: readonly ProposalOperation[]): Promise<ReturnType<typeof readinessViewOf>> => {
+    const g = await readGraph(ctx.scenario_id);
+    if (g === null) return readinessViewOf(undefined);
+    const raw = JSON.parse(JSON.stringify(g.raw)) as { nodes?: { id?: unknown; interventions?: unknown; observed_state?: Record<string, unknown> }[] };
+    const byId = new Map((raw.nodes ?? []).map((n) => [String(n.id), n] as const));
+    for (const o of ops) {
+      if (o.op === 'set_option_intervention') {
+        const [optionId, factorId] = o.path.split('::') as [string, string];
+        const v = (o.value as { normalised?: unknown } | undefined)?.normalised;
+        const n = byId.get(optionId);
+        if (n !== undefined && typeof v === 'number') n.interventions = { ...((n.interventions ?? {}) as Record<string, unknown>), [factorId]: { value: v } };
+      } else if (o.op === 'set_factor_value') {
+        const n = byId.get(o.path);
+        const v = (o.value as { value?: unknown } | undefined)?.value;
+        const cap = n?.observed_state?.cap;
+        if (n !== undefined && typeof v === 'number') {
+          // Stored against the factor's range when it has one; the verdict reads presence and range, never this figure's meaning.
+          const stored = typeof cap === 'number' && cap > 0 ? v / cap : v <= 1 ? v : 1;
+          n.observed_state = { ...(n.observed_state ?? {}), value: stored };
+        }
+      }
+    }
+    return readinessViewOf(raw);
+  };
+  /**
+   * What the Agent must say BEFORE the approval when the preview still blocks: the verdict's own words — the
+   * user's demands, else the refusal's `reason` (the run path's `blockedNextStep`) — never an example that may not
+   * fit this model (#1957 review: a one-option model was told to ask about "identical options").
+   */
+  const stillBlockedNote = (v: ReturnType<typeof readinessViewOf>): string => {
+    if (!v.checked || v.may_run !== false) return '';
+    const why = [...v.needs_from_user.map((i) => i.message), ...(v.needs_from_user.length === 0 && v.reason !== undefined ? [v.reason] : [])]
+      .map((m) => m.trim().replace(/\.+$/, ''))
+      .filter((m) => m !== '');
+    return ` Even after this approval the analysis could still not run: ${why.length > 0 ? why.join('. ') : 'the model would still be blocked'}. `
+      + 'Say so plainly BEFORE asking for approval, and ask the user for what this cannot settle — never invent a difference or a figure.';
+  };
   const levelPathsOf = (ps: readonly StructuredProposal[]): Set<string> =>
     new Set(ps.flatMap((p) => p.operations).filter((o) => o.op === 'set_option_intervention').map((o) => o.path));
   /**
@@ -1359,6 +1408,7 @@ export function createAgentCapabilities(
       const notAFactor: { label: string; kind: string }[] = [];
       const ambiguous: AmbiguousTarget[] = [];
       const occupied: { label: string; current_value: number }[] = [];
+      const unitMismatch: { label: string; value: unknown; unit: string; factor_unit: string }[] = [];
       const seen = new Set<string>();
       const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number }[] = [];
 
@@ -1373,6 +1423,12 @@ export function createAgentCapabilities(
         }
         if (res.kind === 'other') { notAFactor.push({ label: res.node.label, kind: String(res.node.kind) }); continue; }
         const node = res.node;
+        // ⛔ A figure in another kind of unit is never this factor's value (`unit-conflict.ts`): left out, and said.
+        const nodeUnit = factorUnitOf(g.raw, node);
+        if (unitsConflict(a?.unit, nodeUnit) !== null) {
+          unitMismatch.push({ label: node.label, value: a?.value, unit: String(a?.unit), factor_unit: String(nodeUnit) });
+          continue;
+        }
         /**
          * ⛔ THE APPROVAL MUST SHOW THE USER'S OWN NUMBER, NOT THE MODEL'S DIVISOR
          * (Codex 5810763729 item 1). `observed_state.value` is the number read against
@@ -1425,6 +1481,7 @@ export function createAgentCapabilities(
           unresolved_labels: unresolved, already_valued: occupied,
           ...(notAFactor.length > 0 ? { not_a_factor: notAFactor } : {}),
           ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
+          ...(unitMismatch.length > 0 ? { unit_mismatch: unitMismatch, unit_mismatch_note: UNIT_MISMATCH_NOTE } : {}),
           detail:
             'None of those could be adopted. Read the state again and use the labels exactly as they appear; ' +
             'factors that already hold a value are left alone.',
@@ -1498,6 +1555,7 @@ export function createAgentCapabilities(
         // so the user is never asked to approve a value that cannot be saved.
         ...(notAFactor.length > 0 ? { not_a_factor: notAFactor, not_a_factor_note: NOT_A_FACTOR_NOTE } : {}),
         ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
+        ...(unitMismatch.length > 0 ? { unit_mismatch: unitMismatch, unit_mismatch_note: UNIT_MISMATCH_NOTE } : {}),
         note:
           'Nothing has changed. Show the user each value and what it rests on, say plainly that these are ' +
           'assumptions to adopt or correct and NOT measurements, and call authorise_change with this ' +
@@ -1574,7 +1632,9 @@ export function createAgentCapabilities(
             ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor } : {}), ...ambiguity, ...refused,
           });
         }
-        return { ...made[0], ...ambiguity, ...refused };
+        const ifApproved = await readinessIfApplied(ctx, only?.operations ?? []);
+        return { ...made[0], ...ambiguity, ...refused, readiness_if_approved: ifApproved,
+          ...(stillBlockedNote(ifApproved) !== '' ? { note: `${String(made[0].note ?? '')}${stillBlockedNote(ifApproved)}` } : {}) };
       }
       const halves = made.map((r) => proposals.get(r.proposal_id as string)).filter((p): p is StructuredProposal => p !== undefined);
       if (halves.length !== 2 || halves[0].base_graph_identity_hash !== halves[1].base_graph_identity_hash) {
@@ -1604,7 +1664,9 @@ export function createAgentCapabilities(
       replaceEarlierStartingPoints(ctx);
       proposals.put(compound);
       for (const h of halves) proposals.discard(h.proposal_id);
+      const ifApproved = await readinessIfApplied(ctx, compound.operations);
       return {
+        readiness_if_approved: ifApproved,
         ok: true, mutated: false,
         proposal_id: compound.proposal_id,
         public_label: compound.public_label,
@@ -1624,7 +1686,7 @@ export function createAgentCapabilities(
         note:
           'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +
           'assumptions to adopt or correct, NOT measurements, and that ONE approval applies all of them. Then call ' +
-          'authorise_change with this proposal_id once they agree.',
+          'authorise_change with this proposal_id once they agree.' + stillBlockedNote(ifApproved),
       };
     },
 
@@ -3273,6 +3335,7 @@ export function createAgentCapabilities(
       const rawNodes = ((g.raw as { nodes?: unknown }).nodes as { id: string; kind?: string; label?: string; description?: string }[] | undefined) ?? [];
       const norm = (v: unknown): string => String(v ?? '').trim().toLowerCase();
       const outOfRange: { option: string; factor: string; value: number; range: number }[] = [];
+      const unitMismatch: { option: string; factor: string; value: number; unit: string; factor_unit: string }[] = [];
       const levelsNotSet: { option: string; factor: string; value: number; reason: string }[] = [];
       const entries = plans.map(({ spec, plan }) => {
         const levelById = new Map<string, { value: number; unit?: string }>();
@@ -3287,6 +3350,12 @@ export function createAgentCapabilities(
           const lvl = levelById.get(f.id);
           if (lvl === undefined) return { factor_id: f.id, value: null };
           const factor = g.nodes.find((x) => x.id === f.id);
+          // ⛔ A figure in another kind of unit is never this factor's level (`unit-conflict.ts`: a price as churn).
+          const factorUnit = factorUnitOf(g.raw, factor);
+          if (unitsConflict(lvl.unit, factorUnit) !== null) {
+            unitMismatch.push({ option: plan.label, factor: f.label, value: lvl.value, unit: String(lvl.unit), factor_unit: String(factorUnit) });
+            return { factor_id: f.id, value: null };
+          }
           const frame = levelFrameOf(factor);
           if (frame !== null) {
             const v = lvl.value / frame;
@@ -3307,6 +3376,15 @@ export function createAgentCapabilities(
         });
         return { plan, set, entry: { label: plan.label, option_id: plan.optionId, interventions } };
       });
+      if (unitMismatch.length > 0) {
+        const m = unitMismatch[0]!;
+        return {
+          ok: false, mutated: false, refusal: 'level_unit_mismatch', unit_mismatch: unitMismatch,
+          detail: `${m.value} ${m.unit} is not a level for ${m.factor}, which the model measures in ${m.factor_unit}. Nothing was prepared. `
+            + 'A figure the user gave for something else (a price, say) is never another factor\u2019s level. Call propose_new_option '
+            + `once more with that level left out, and ask the user for ${m.factor}\u2019s own figure only if they want to set it.`,
+        };
+      }
       if (outOfRange.length > 0) {
         const o = outOfRange[0]!;
         return {
