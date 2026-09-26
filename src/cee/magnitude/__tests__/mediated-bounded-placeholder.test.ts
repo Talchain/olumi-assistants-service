@@ -58,3 +58,35 @@ describe('PR1b: a link into a bounded target is sized to its frame even when the
     expect(s.mean).toBeCloseTo(-0.1, 12);
   });
 });
+
+/**
+ * AI Quality's engine-direct decomposition of the SERVED part-2 draft (CEE 4202cda, #70 5848134950): the AI score (0–100,
+ * options 0 and 70) -> churn (Olumi's 6% estimate), Olumi's size "−0.5 pp per 10 points" (β −0.05). Its ±2σ band over the
+ * options' swing reaches 0.06 − 0.1·0.7 = −1% churn: impossible. Judged on the HELD baseline, it is set aside for the
+ * frame-aware placeholder −0.06/(4·0.7) ≈ −0.0214 — the one change the decomposition showed closes row C.
+ */
+describe('PR1b: D4 judges Olumi\'s own size against the baseline the model holds (Olumi-authored β only)', () => {
+  const churn6: MagnitudeNode = { ...churnEstimated, observed_state: { unit: 'percent per month', value: 0.06, raw_value: 6, source: 'cee_inference', extractionType: 'inferred' } };
+  const aiScore: MagnitudeNode = { label: 'AI feature score', kind: 'factor', scale_frame: 100, observed_state: { unit: 'score out of 100', value: 0, raw_value: 0, source: 'cee_inference' }, option_levels: [0, 0.7] };
+
+  it('RED (served part 2): Olumi\'s −0.5 pp per 10 points is set aside for the placeholder ≈ −0.0214, stamped, and asked quoting the estimate', () => {
+    const s = sizeLink({ direction: 'negative', effect_amount: -0.5, effect_per_source_change: 10, user_stated: false }, aiScore, churn6);
+    expect(s.outcome).toBe('placeholder');
+    expect(s.problem).toBe('out_of_domain');
+    expect(s.mean).toBeCloseTo(-0.06 / (4 * 0.7), 12);
+    expect(s.magnitude).toBe('olumi_placeholder');
+    expect(s.question).toContain('6% today');
+  });
+
+  it('CONTRAST (D7): the USER\'s own −0.5 pp per 10 points on the same shape is kept exactly — Olumi\'s guess never overrides what the user said', () => {
+    const s = sizeLink({ direction: 'negative', effect_amount: -0.5, effect_per_source_change: 10, user_stated: true }, aiScore, churn6);
+    expect(s.outcome).toBe('user_stated');
+    expect(s.mean).toBeCloseTo(-0.05, 12);
+  });
+
+  it('CONTRAST: an in-domain Olumi size on the same shape is kept as the estimate (−0.1 pp per 10 points)', () => {
+    const s = sizeLink({ direction: 'negative', effect_amount: -0.1, effect_per_source_change: 10, user_stated: false }, aiScore, churn6);
+    expect(s.outcome).toBe('estimate');
+    expect(s.mean).toBeCloseTo(-0.01, 12);
+  });
+});

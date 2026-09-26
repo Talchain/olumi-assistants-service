@@ -375,6 +375,14 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
    * STATED size, stays known-baseline only (`check` above).
    */
   const held = baseline ?? heldBaseline(target);
+  /**
+   * ⭐ D4 FOR OLUMI'S OWN SIZE (AI Quality's engine-direct decomposition of the served part-2 draft, #70 5848134950):
+   * an Olumi-authored β is judged against the baseline the model HOLDS — Olumi's estimate included — over the options'
+   * OWN swing. That closed row C (AI→churn set aside for the frame-aware placeholder; out-of-domain 1.3–2.2%). A
+   * USER-stated size (D7) keeps the known-baseline check: Olumi's guess never overrides what the user said.
+   */
+  const judge = link.user_stated ? check : (check ?? (held !== undefined && domain !== null && swing !== null
+    && withinDomain({ lo: held, hi: held }, domain) ? { baseline: held, domain, swing, frame: targetFrame as number } : null));
   const sizeCheck = check ?? (held !== undefined && domain !== null && withinDomain({ lo: held, hi: held }, domain)
     ? { baseline: held, domain, swing: swing ?? FULL_RANGE_SWING, frame: targetFrame as number }
     : null);
@@ -385,7 +393,7 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
 
   if (beta !== null && problem === undefined) {
     const sigma = Math.abs(beta) / 2;
-    const outOfDomain = check !== null && !withinDomain(domainBand(check.baseline, beta, sigma, check.swing), check.domain);
+    const outOfDomain = judge !== null && !withinDomain(domainBand(judge.baseline, beta, sigma, judge.swing), judge.domain);
     const issue: LinkSizeProblem | undefined = outOfDomain ? 'out_of_domain' : Math.abs(beta) > 1 ? 'not_representable' : undefined;
     if (link.user_stated) {
       // D7: kept exactly as stated, whatever the frame says; asked about when it cannot hold.
@@ -416,7 +424,7 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
 
   const question = (() => {
     if (problem === 'out_of_domain') {
-      return `Olumi estimated that ${statement}, but "${target.label}" is ${today(check!)} today, so that cannot hold across your `
+      return `Olumi estimated that ${statement}, but "${target.label}" is ${today(judge!)} today, so that cannot hold across your `
         + `options and was not used: ${standIn} stands in for it. ${HOW_MUCH(source, target)}`;
     }
     if (problem === 'not_representable') {
