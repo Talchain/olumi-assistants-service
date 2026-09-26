@@ -24,6 +24,7 @@ const graph = {
     { id: 'price', kind: 'factor', label: 'Monthly Pro plan price' },
     { id: 'churn', kind: 'factor', label: 'Price-driven churn' },
     { id: 'mrr', kind: 'goal', label: 'MRR' },
+    { id: 'subs', kind: 'factor', label: 'Pro subscribers' },
   ],
   edges: [
     { from: 'price', to: 'churn', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive', provenance: { source: 'cee_hypothesis' }, defaulted: true },
@@ -78,5 +79,36 @@ describe('the model is told "Slight" IS `weak`, and asks for a band in the canva
       said('Lower the link from Monthly Pro plan price to Price-driven churn slightly.'), LINK);
     expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: false, refusal: 'strength_not_stated' }));
     expect(p).not.toHaveProperty('proposal_id');
+  });
+});
+
+describe('what the user READS about a link says "slight", never the enum\'s `weak` (joined run, UI cd6a82e4 + CEE 5f941f2)', () => {
+  // Served: the model prepared the change on the first turn, but the receipt the user read was
+  // "Recorded … as weak (0.1 on Olumi's 0 - 1 scale)" beside a canvas pill that says Slight.
+  it('RED: a link-strength preview, the tool result the model relays and the receipt label all say slight', async () => {
+    const p = await createAgentCapabilities(d, new ProposalStore()).proposeLinkStrength!(
+      said('The link from Monthly Pro plan price to Price-driven churn is slight.'), LINK);
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true }));
+    const r = p as unknown as { public_label: string; note: string; link: { was: { band: string }; becomes: { band: string } } };
+    // The public label is what the approval's "Recorded …" receipt is made from.
+    expect(r.public_label).toContain('as slight (0.1 on Olumi');
+    expect(r.note).toContain('recorded as slight');
+    expect(r.link.becomes.band).toBe('slight');
+    expect(r.link.was.band).toBe('strong');
+    expect(JSON.stringify(r)).not.toMatch(/\bweak\b/);
+  });
+
+  it('RED: a NEW link at the lowest band is labelled slight too', async () => {
+    const p = await createAgentCapabilities(d, new ProposalStore()).proposeModelChange(
+      said('Monthly Pro plan price has a slight effect on Pro subscribers.'),
+      { from_label: 'Monthly Pro plan price', to_label: 'Pro subscribers', direction: 'negative', strength: 'weak', rationale: 'The user said so.' });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true }));
+    expect(String((p as { public_label?: unknown }).public_label)).toBe('Connect "Monthly Pro plan price" to "Pro subscribers" (negative) as slight, your own estimate');
+  });
+
+  it('CONTRAST: the other bands read exactly as before', async () => {
+    const p = await createAgentCapabilities(d, new ProposalStore()).proposeLinkStrength!(
+      said('The link from Monthly Pro plan price to Price-driven churn is very strong.'), { ...LINK, strength: 'very strong' as const });
+    expect(String((p as { public_label?: unknown }).public_label)).toContain('as very strong (');
   });
 });
