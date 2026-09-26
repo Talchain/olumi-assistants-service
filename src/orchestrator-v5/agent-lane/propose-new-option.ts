@@ -135,8 +135,10 @@ export function planNewOption(
       ok: false,
       refusal: 'no_such_factor',
       detail:
-        `The model has no factor called ${unresolved.map((u) => `"${u}"`).join(' or ')}. `
-        + 'Use the labels get_canonical_state returned, or add the option against the factors it does have.',
+        `The model has no factor called ${unresolved.map((u) => `"${u}"`).join(' or ')}. Nothing was prepared. `
+        + 'If you used a different name for a factor the model has, use its label from get_canonical_state. Otherwise add the option '
+        + 'NOW against the factors it does have (call propose_new_option again without the missing one), and tell the user plainly which '
+        + 'part of the option the model does not yet represent. Never present it as fully represented.',
       unresolved_labels: unresolved,
     };
   }
