@@ -35,16 +35,19 @@ import { GraphV3 } from '../../schemas/cee-v3.js';
 import {
   buildNeedsEncodingAddNotice,
   evaluateEditGraphMutations,
+  GM_HELD_OPERATIONS_MAX_JSON_CHARS,
   type EditGmChip,
   type EditGmGoverningVerdict,
 } from './edit-graph-referee-gate.js';
-import type { FrameFreshness } from '../graph-management/types.js';
+import { TYPED_TRANSACTION_ENVELOPE_CAP, type FrameFreshness } from '../graph-management/types.js';
 import type { PendingAction } from '../session/pending-action.js';
 import {
-  buildAddOptionTransaction,
+  buildAddOptionsTransaction,
+  MAX_OPTIONS_PER_TRANSACTION,
   type AddOptionGraphView,
   type AddOptionSkipReason,
 } from '../routing/add-option-transaction.js';
+import { log } from '../../utils/telemetry.js';
 
 type StageIndicator = OlumiResponse['stage_indicator'];
 type BoundaryAction = OlumiResponse['suggested_actions'][number];
@@ -89,7 +92,45 @@ export type AddOptionTransactionOutcome =
       readonly configured: boolean;
       /** Factors linked with NO value — the explicit unknowns this hold discloses. */
       readonly linkedUnvaluedFactorIds: readonly string[];
+      /**
+       * (A) — every option this ONE hold adds, in request order. The single
+       * fields above describe the FIRST, so single-option callers are unchanged.
+       */
+      readonly options: readonly AddOptionHeldEntry[];
+    }
+  | {
+      /**
+       * (A) — a batch the hold cannot carry, refused at PROPOSE with a sentence
+       * and no pending: never a hold whose "yes" would silently decline.
+       */
+      readonly kind: 'refused';
+      readonly reason: 'too_many_options' | 'too_many_changes' | 'payload_too_large';
+      readonly response: OlumiResponse;
     };
+
+export interface AddOptionHeldEntry {
+  readonly optionId: string;
+  readonly optionLabel: string;
+  readonly configured: boolean;
+  readonly linkedUnvaluedFactorIds: readonly string[];
+}
+
+function refusedResponse(text: string, stage: StageIndicator): OlumiResponse {
+  return {
+    response_version: 2,
+    assistant_text: text,
+    blocks: [],
+    suggested_actions: [],
+    insights: [],
+    stage_indicator: stage,
+  } as OlumiResponse;
+}
+
+/** "'A'", "'A' and 'B'", "'A', 'B' and 'C'". */
+function joinQuoted(labels: readonly string[]): string {
+  const q = labels.map((l) => `'${l}'`);
+  return q.length <= 1 ? (q[0] ?? '') : `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}`;
+}
 
 /** Positive completeness disclosure — the option lands analysable. */
 function buildConfiguredNotice(label: string): string {
@@ -177,10 +218,75 @@ export function dispatchAddOptionTransaction(
   const graphView = toGraphView(input.currentGraph);
   if (graphView === null) return { kind: 'skip', reason: 'unreadable_graph' };
 
-  const built = buildAddOptionTransaction(input.parameters, graphView);
-  if (!built.matched) return { kind: 'skip', reason: built.reason };
-  const { operations, optionId, optionLabel, configured, linkedUnvaluedFactorIds } =
-    built.proposal;
+  const built = buildAddOptionsTransaction(input.parameters, graphView);
+  if (!built.matched) {
+    if (built.reason === 'too_many_options') {
+      return {
+        kind: 'refused',
+        reason: 'too_many_options',
+        response: refusedResponse(
+          `I can add up to ${MAX_OPTIONS_PER_TRANSACTION} options in one go, so I haven't ` +
+            `changed anything. Tell me the first ${MAX_OPTIONS_PER_TRANSACTION} and I'll add the rest after.`,
+          input.stage,
+        ),
+      };
+    }
+    return { kind: 'skip', reason: built.reason };
+  }
+  const { operations, proposals } = built;
+  const first = proposals[0]!;
+  const { optionId, optionLabel, linkedUnvaluedFactorIds } = first;
+  const configured = proposals.every((p) => p.configured);
+
+  // (A) — the hold carries its operations in the pending's JSONB, capped at
+  // GM_HELD_OPERATIONS_MAX_JSON_CHARS. Past it, the gate would mint a hold in
+  // the DECLINE posture, and the user's "yes" would apply nothing. Refuse HERE,
+  // before any hold exists, and say so.
+  // (A) — past the typed envelope cap, the referee would reject the batch and
+  // the route would fall through to the free-text edit lane (review 5841737272
+  // N1: 4 options × 7 factors = 36 ops). Refuse HERE with a sentence instead.
+  if (operations.length > TYPED_TRANSACTION_ENVELOPE_CAP) {
+    return {
+      kind: 'refused',
+      reason: 'too_many_changes',
+      response: refusedResponse(
+        proposals.length === 1
+          ? `That option changes more than I can hold for one approval, so I haven't changed ` +
+              `anything. Give me its main effects first and I'll add the rest after.`
+          : `That is more changes than I can hold for one approval, so I haven't changed ` +
+              `anything. Add fewer options, or fewer effects per option, and I'll put them in.`,
+        input.stage,
+      ),
+    };
+  }
+
+  const payloadChars = JSON.stringify(operations).length;
+  if (payloadChars > GM_HELD_OPERATIONS_MAX_JSON_CHARS) {
+    log.warn(
+      {
+        event: 'v5.add_option.payload_too_large',
+        request_id: input.requestId,
+        scenario_id: input.scenarioId,
+        options: proposals.length,
+        operations: operations.length,
+        payload_chars: payloadChars,
+      },
+      'add-option — the batch is past the hold payload cap; refusing at propose',
+    );
+    return {
+      kind: 'refused',
+      reason: 'payload_too_large',
+      response: refusedResponse(
+        // Review 5841737272 N2: one option is not "groups".
+        proposals.length === 1
+          ? `That option carries more than I can hold for one approval, so I haven't changed ` +
+              `anything. Give me its main effects first and I'll add the rest after.`
+          : `That is too much to hold for one approval, so I haven't changed anything. ` +
+              `Add the options in smaller groups and I'll put each group in.`,
+        input.stage,
+      ),
+    };
+  }
 
   // Referee the batch through the SAME gate the free-text edit uses. The ops
   // were built against `currentGraph`, so `baseGraphHash === currentGraphHash`
@@ -197,6 +303,10 @@ export function dispatchAddOptionTransaction(
     turnId: input.turnId,
     requestId: input.requestId,
     dispatchPath: 'edit_graph',
+    // (A) — a CEE-built typed transaction: its size is bounded by the builder
+    // (`MAX_OPTIONS_PER_TRANSACTION`), so the referee judges it under the typed
+    // ceiling, and the hold records that cap for the confirm.
+    envelopeCap: TYPED_TRANSACTION_ENVELOPE_CAP,
     // No userMessage: the F-3 protection-scope demotion keys on free-text
     // ("do not touch X") which a typed add_option turn does not carry, and a
     // structural add targets only the NEW option, never a protected entity.
@@ -225,7 +335,17 @@ export function dispatchAddOptionTransaction(
   // gate's structural heads-up fires exactly when there are no factor links,
   // which is precisely `configured === false` here (one factor edge per value),
   // so relying on it never drops the disclosure.
-  const disclosure = configured ? buildConfiguredNotice(optionLabel) : null;
+  const multi = proposals.length > 1;
+  const configuredLabels = proposals.filter((p) => p.configured).map((p) => p.optionLabel);
+  const disclosure = !multi
+    ? configured
+      ? buildConfiguredNotice(optionLabel)
+      : null
+    : configuredLabels.length > 0
+      ? `${joinQuoted(configuredLabels)} ${configuredLabels.length === 1 ? 'comes' : 'come'} with ` +
+        `effect values, so once you apply this ${configuredLabels.length === 1 ? 'it is' : 'they are'} ` +
+        `configured and the analysis can run.`
+      : null;
   let baseText = decision.assistantText ?? '';
 
   // ⭐ THE LINKED-BUT-UNVALUED CASE (text leg). The option lands with factor
@@ -236,21 +356,23 @@ export function dispatchAddOptionTransaction(
   // (trap 12: the dominant defect is the hand-maintained mirror). If it ever
   // stops matching, the worst case is both sentences shipping, never a
   // silently dropped disclosure.
-  let linkedNotice: string | null = null;
-  if (linkedUnvaluedFactorIds.length > 0) {
-    const labelOf = (id: string): string =>
-      graphView.nodes.find((n) => n.id === id)?.label ?? id;
-    linkedNotice = buildLinkedUnvaluedNotice(
-      optionLabel,
-      linkedUnvaluedFactorIds.map(labelOf),
+  const linkedNotices: string[] = [];
+  const labelOf = (id: string): string =>
+    graphView.nodes.find((n) => n.id === id)?.label ?? id;
+  for (const p of proposals) {
+    if (p.linkedUnvaluedFactorIds.length === 0) continue;
+    linkedNotices.push(
+      buildLinkedUnvaluedNotice(p.optionLabel, p.linkedUnvaluedFactorIds.map(labelOf)),
     );
+  }
+  if (linkedNotices.length > 0) {
     const generic = buildNeedsEncodingAddNotice(operations, input.currentGraph);
     if (generic !== null && baseText.includes(generic)) {
       baseText = baseText.replace(generic, '').replace(/\s{2,}/g, ' ').trim();
     }
   }
 
-  const trailing = [disclosure, linkedNotice].filter(
+  const trailing = [disclosure, ...linkedNotices].filter(
     (t): t is string => t !== null && t.length > 0,
   );
   const assistantText = [baseText, ...trailing]
@@ -280,5 +402,11 @@ export function dispatchAddOptionTransaction(
     optionLabel,
     configured,
     linkedUnvaluedFactorIds,
+    options: proposals.map((p) => ({
+      optionId: p.optionId,
+      optionLabel: p.optionLabel,
+      configured: p.configured,
+      linkedUnvaluedFactorIds: p.linkedUnvaluedFactorIds,
+    })),
   };
 }

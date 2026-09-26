@@ -24,7 +24,9 @@ import {
 } from '../coaching/fragile-link-challenge.js';
 import { buildNoFlaggedLinkCard } from '../coaching/no-flagged-link-card.js';
 import { buildLimitUncheckedCard, leaderWithheldForALimit } from '../coaching/limit-unchecked-card.js';
-import { graphBoundToHash, soleLimitNodeLabel } from '../coaching/bound-graph.js';
+import { graphBoundToHash, limitNodeLabels } from '../coaching/bound-graph.js';
+import { buildNearTieCard } from '../coaching/near-tie-card.js';
+import { edgeAuthorshipIn } from '../coaching/edge-strength-authorship.js';
 import { WITHHELD_NEAR_TIE } from '../compose/analysis-state-v1.js';
 import { summaryAsksUserToRepairALimit } from '../coaching/constraint-gap-disclosure.js';
 
@@ -225,6 +227,8 @@ export function runTurnCoaching(
   if (summaryAsksUserToRepairALimit(bound.analysisResult.summary)) {
     return { blocks: upstream, eligibility: { eligible: false, reason: 'limit_repair_pending' } };
   }
+  // The run's own graph, only when its analysis-affecting hash is the bound run's.
+  const boundGraph = graphBoundToHash(final.graph, bound.graphHash);
   // (3)–(5) grounding, claim policy, copy — the producer's gates.
   const input: FragileLinkChallengeInput = {
     analysisResult: bound.analysisResult,
@@ -235,6 +239,7 @@ export function runTurnCoaching(
     // `fresh`) and the hash binding above held — the strictest faithful verdict here.
     freshness: 'fresh',
     optionLabels: optionLabelsFromReady(captured.analysis_ready),
+    edgeAuthorship: edgeAuthorshipIn(boundGraph),
   };
   // (2c) ONE next action, TYPED: when the READBACK's leader claim is withheld for
   // a limit, the limit is the decisive caveat — the limit card is the turn's one
@@ -243,9 +248,8 @@ export function runTurnCoaching(
   // confinement.ts), so the prose gate above is blind there. A refused limit card
   // fails CLOSED (no card), never back to a link card.
   if (leaderWithheldForALimit(final.analysisState)) {
-    const boundGraph = graphBoundToHash(final.graph, bound.graphHash);
-    const limitLabel = boundGraph !== null ? soleLimitNodeLabel(boundGraph) ?? undefined : undefined;
-    const limit = buildLimitUncheckedCard(input, limitLabel);
+    const limitLabels = boundGraph !== null ? limitNodeLabels(boundGraph) ?? undefined : undefined;
+    const limit = buildLimitUncheckedCard(input, limitLabels);
     if (limit.block === null) return { blocks: upstream, eligibility: { eligible: false, reason: limit.reason } };
     return { blocks: dedupeByBlockId([...upstream, limit.block]), eligibility: { eligible: true } };
   }
@@ -254,6 +258,13 @@ export function runTurnCoaching(
     ? buildNoFlaggedLinkCard(input)
     : built;
   if (chosen.block === null) {
+    // (2d) The automatic first pass of a NEAR TIE with no flagged link (AI Quality 5841805590): no link
+    // card can speak, so the one move is to ask which difference matters most. Its own gates decide;
+    // when it declines, the link path's reason stands.
+    const readyOptions = record(captured.analysis_ready)?.options;
+    const tie = buildNearTieCard(input, record(record(final.analysisState)?.leader_claim)?.withheld_reason,
+      Array.isArray(readyOptions) ? readyOptions.length : null);
+    if (tie.block !== null) return { blocks: dedupeByBlockId([...upstream, tie.block]), eligibility: { eligible: true } };
     return { blocks: upstream, eligibility: { eligible: false, reason: chosen.reason } };
   }
   return { blocks: dedupeByBlockId([...upstream, chosen.block]), eligibility: { eligible: true } };

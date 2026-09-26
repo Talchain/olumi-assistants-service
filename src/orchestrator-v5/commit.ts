@@ -803,9 +803,14 @@ export function isCompetingRunAnalysisSuggestionChip(chip: SuggestedAction): boo
  * system-event sites and both remaining chip-click continuity sites DO
  * thread priors. Line numbers are as of that SHA — trust the function names,
  * re-derive the lines:
- *   - `system-events/dispatch.ts:1543` and `:1595`, both inside
- *     `dispatchFactorValueEdit` (a MUTATING path, so it needs
- *     `threadHoldsThroughMutatingCommit`, not a plain thread);
+ *   - ~~`system-events/dispatch.ts` `dispatchFactorValueEdit`~~ — ⭐ CLOSED
+ *     (26 Sep 2026, #1947). Every MUTATING system-event commit (seven writers)
+ *     now runs `threadHoldsThroughMutatingCommit` through
+ *     `threadHoldsThroughSystemEventMutation`, with this write's applied ops
+ *     (never null, so the draft oracle cannot retire a concept offer silently);
+ *     and the factor-value REFUSAL commit threads the priors plainly (it writes
+ *     no graph). A failed pending read still commits without threading, and is
+ *     logged as `v5.system_event.pending_wipe_risk_on_mutation_commit`;
  *   - ~~the run_analysis SUCCESS commit in `dispatchChipClickRunAnalysis`
  *     (`handlers/chip-click-dispatch.ts`)~~ — ⭐ CLOSED (2.1353 rounds 3-4,
  *     PR #1286). It reads the prior row with

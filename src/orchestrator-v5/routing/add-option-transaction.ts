@@ -172,6 +172,12 @@ export type AddOptionBuildResult =
   | { readonly matched: true; readonly proposal: AddOptionProposal }
   | { readonly matched: false; readonly reason: AddOptionSkipReason };
 
+/**
+ * (A) — the most options ONE typed transaction may add. Four options of up to
+ * six factors each stay inside `TYPED_TRANSACTION_ENVELOPE_CAP` (4 × 8 = 32).
+ */
+export const MAX_OPTIONS_PER_TRANSACTION = 4;
+
 /** Canonical id pattern (mirrors NodeV3/OptionV3 `id`). */
 const CANONICAL_ID_RE = /^[a-z0-9_:-]+$/;
 
@@ -327,4 +333,86 @@ export function buildAddOptionTransaction(
       linkedUnvaluedFactorIds: unvalued.map((iv) => iv.factor_id),
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// (A) — several options in ONE transaction (Canonical CONTRACT #70 5841241418)
+// ---------------------------------------------------------------------------
+
+/**
+ * `chip.parameters` for a multi-option add:
+ *
+ *   { parent_decision_id?, options: [ <the single-option spec above>, ... ] }
+ *
+ * A top-level `parent_decision_id` is the default for every entry that omits
+ * its own. Each entry is the SAME spec `buildAddOptionTransaction` validates —
+ * there is one definition of an option add, composed, never a second parser.
+ */
+const MultiOptionParamsSchema = z.object({
+  parent_decision_id: z.string().min(1).optional(),
+  options: z.array(z.record(z.string(), z.unknown())).min(1),
+});
+
+export type AddOptionsSkipReason = AddOptionSkipReason | 'too_many_options';
+
+export type AddOptionsBuildResult =
+  | {
+      readonly matched: true;
+      /** One proposal per option, in request order. */
+      readonly proposals: readonly AddOptionProposal[];
+      /** Every option's ops, concatenated in order: ONE batch, ONE hold. */
+      readonly operations: PatchOperation[];
+    }
+  | { readonly matched: false; readonly reason: AddOptionsSkipReason; readonly index?: number };
+
+/**
+ * Build ONE batch for one or several options.
+ *
+ * A bag WITHOUT `options` is the single-option spec, byte-identical to
+ * `buildAddOptionTransaction`. With `options`, each entry is built against the
+ * graph PLUS the options before it, so ids stay distinct and a later entry can
+ * never collide with an earlier one. ALL-OR-NOTHING: the first entry that fails
+ * fails the whole batch, with its reason and index — no partial proposal.
+ */
+export function buildAddOptionsTransaction(
+  parameters: unknown,
+  graph: AddOptionGraphView | null,
+): AddOptionsBuildResult {
+  const multi =
+    parameters !== null &&
+    typeof parameters === 'object' &&
+    !Array.isArray(parameters) &&
+    'options' in (parameters as Record<string, unknown>);
+  if (!multi) {
+    const single = buildAddOptionTransaction(parameters, graph);
+    return single.matched
+      ? { matched: true, proposals: [single.proposal], operations: [...single.proposal.operations] }
+      : { matched: false, reason: single.reason };
+  }
+  if (graph === null) return { matched: false, reason: 'no_graph' };
+  const parsed = MultiOptionParamsSchema.safeParse(parameters);
+  if (!parsed.success) return { matched: false, reason: 'parameters_invalid' };
+  const { parent_decision_id, options } = parsed.data;
+  if (options.length > MAX_OPTIONS_PER_TRANSACTION) {
+    return { matched: false, reason: 'too_many_options' };
+  }
+
+  let view: AddOptionGraphView = graph;
+  const proposals: AddOptionProposal[] = [];
+  for (let index = 0; index < options.length; index += 1) {
+    const entry = options[index]!;
+    const spec =
+      parent_decision_id !== undefined && entry.parent_decision_id === undefined
+        ? { ...entry, parent_decision_id }
+        : entry;
+    const built = buildAddOptionTransaction(spec, view);
+    if (!built.matched) return { matched: false, reason: built.reason, index };
+    proposals.push(built.proposal);
+    const { optionId, optionLabel } = built.proposal;
+    view = {
+      nodes: [...view.nodes, { id: optionId, kind: 'option', label: optionLabel }],
+      edges: view.edges,
+    };
+  }
+  return { matched: true, proposals, operations: proposals.flatMap((p) => p.operations) };
 }
