@@ -70,6 +70,10 @@ function buildPersistedGraph() {
         { id: 'unlinked_factor', kind: 'factor', label: 'Unrelated', observed_state: { value: 0.3, source: 'brief_extraction' } },
         // A factor with no edge to the option at all: a level on it brings its option → factor link in the same commit.
         { id: 'new_factor', kind: 'factor', label: 'Adoption', observed_state: { value: 0.3, source: 'brief_extraction' } },
+        // A factor with no value and no range yet (the served NEW-factor shape): a compound value gives it both.
+        { id: 'amount_factor', kind: 'factor', label: 'Seats' },
+        // A factor holding a bare amount with no range: a level read on it brings its range (today a SEPARATE commit).
+        { id: 'bare_amount', kind: 'factor', label: 'Headcount', observed_state: { value: 40, source: 'brief_extraction' } },
       ],
       edges: [
         ['option', 'factor'], ['option', 'other_factor'], ['factor', 'goal'], ['other_factor', 'goal'],
@@ -80,6 +84,17 @@ function buildPersistedGraph() {
     }),
     options: [] as Array<Record<string, unknown>>,
   });
+}
+
+/** JSONB's object key order (shorter keys first, then bytewise), applied recursively, through a JSON round trip. */
+function jsonbRoundTrip(value: unknown): unknown {
+  const order = (v: unknown): unknown => Array.isArray(v) ? v.map(order)
+    : v !== null && typeof v === 'object'
+      ? Object.fromEntries(Object.keys(v as Record<string, unknown>)
+        .sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0))
+        .map(k => [k, order((v as Record<string, unknown>)[k])]))
+      : v;
+  return order(JSON.parse(JSON.stringify(value)));
 }
 
 let persisted: unknown = buildPersistedGraph();
@@ -108,10 +123,13 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
       assistant_message: r.write.assistantMessage ?? null,
       created_at: '2026-09-08T00:00:00.000Z',
     })),
+    // The store's REAL read-back shape: each fact comes back from JSONB — keys re-ordered (by length, then bytes),
+    // re-parsed — never the object that was written (AI Conversation #70 5849290342: a same-object fake hid a
+    // key-order compare that fails on Supabase).
     readFactsWithTurnFor: async (ids: readonly string[]) => [...rows.values()].flatMap(r => {
       if (!ids.includes(r.id)) return [];
       const facts = (r.write.handler_facts ?? []) as unknown[];
-      return facts.map(fact => ({ turn_id: r.id, fact_created_at: '2026-09-08T00:00:00.000Z', fact }));
+      return facts.map(fact => ({ turn_id: r.id, fact_created_at: '2026-09-08T00:00:00.000Z', fact: jsonbRoundTrip(fact) }));
     }),
     append: async (write: Record<string, unknown>) => {
       const key = `${String(write.scenario_id)}/${String(write.turn_id)}`;
@@ -418,6 +436,138 @@ describe('the Agent\'s in-process batch door — ONE user operation → ONE atom
     const r = await call([{ option_id: 'option', factor_id: 'new_factor', value: 0.2, author: 'user_specified', raw_value: 10, unit: '£ per month', cap: 100 } as Level], NEW_LINK);
     expect(r).toMatchObject({ status: 'refused', reason: 'level_frame_mismatch' });
     expect(rows.size).toBe(0);
+  });
+
+  describe('⭐ a COMPOUND approval — values AND levels — is ONE commit (Canonical #70 5849037691)', () => {
+    type Value = { factor_id: string; value: number; unit?: string; author: 'user_specified' | 'model_proposed' };
+    type Frame = { factor_id: string; cap: number };
+    const callWith = (values: Value[], levels: Level[], links: { option_id: string; factor_id: string }[], turnId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', frames: Frame[] = []) =>
+      commitOptionLevelsInProcess({ scenario_id: SCENARIO_ID, turn_id: turnId, base_graph_hash: currentHash(), links, levels, values,
+        ...(frames.length > 0 ? { frames } : {}) }, 'req-compound');
+    const factorOs = (id: string) => (graphNow().nodes.find(n => n.id === id) as { observed_state?: Record<string, unknown> } | undefined)?.observed_state;
+    const COVERAGE_60: Value[] = [{ factor_id: 'factor', value: 60, unit: '%', author: 'user_specified' }];
+
+    it('RED: the user\'s value and two levels (one bringing its link) land in ONE row, ONE receipt', async () => {
+      receiptFor = (write) => ({
+        mutation_id: '33333333-3333-4333-8333-333333333333', version_id: '55555555-5555-4555-8555-555555555555', version_number: 8,
+        graph_identity_hash: 'a'.repeat(64), analysis_affecting_hash: 'b'.repeat(64), hash_algorithm: 'sha256',
+        identity_projection_version: 'v1', identity_normaliser_version: 'v1', graph_schema_version: 'graph.v3',
+        actor_kind: 'system', authored_by: null, creation_kind: 'committed_mutation', source_version_id: null,
+        parent_version_id: null, root_version_id: null, undo_version_id: null, event_id: 'evt-compound',
+        graph: write.graph, source_turn_id: write.turn_id,
+      });
+      try {
+        const r = await callWith(COVERAGE_60, TWO, NEW_LINK);
+        expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false,
+          receipt: { version: 8, version_id: '55555555-5555-4555-8555-555555555555', source_turn_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' } });
+        expect(rows.size, 'ONE append for the value, the link and both levels').toBe(1);
+        expect(factorOs('factor'), JSON.stringify(factorOs('factor'))).toMatchObject({ value: 0.6, raw_value: 60 });
+        expect(graphNow().nodes.find(n => n.id === 'option')?.interventions?.factor?.value).toBe(0.35);
+        expect(graphNow().nodes.find(n => n.id === 'option')?.interventions?.new_factor?.value).toBe(0.4);
+        expect(graphNow().edges.filter(e => e.from === 'option' && e.to === 'new_factor')).toHaveLength(1);
+        if (r.status === 'committed') expect(r.graph_hash).toBe(currentHash());
+        // The ONE row carries BOTH writers' facts — the value's (`set_factor_value`) and the links+levels' (`edit_graph`).
+        expect(([...rows.values()][0]!.write.handler_facts as { fact_type: string }[]).map(f => f.fact_type).sort())
+          .toEqual(['edit_graph', 'set_factor_value']);
+      } finally {
+        receiptFor = undefined;
+      }
+    });
+
+    it('RED: a level refused → the VALUE is not written either (no half of the approval lands)', async () => {
+      const before = JSON.stringify(persisted);
+      const r = await callWith(COVERAGE_60, [TWO[1]!, { option_id: 'option', factor_id: 'unlinked_factor', value: 0.4, author: 'user_specified' }], NEW_LINK);
+      expect(r).toEqual({ status: 'refused', reason: 'unresolved_effect_relationship', pair: { option_id: 'option', factor_id: 'unlinked_factor' } });
+      expect(rows.size).toBe(0);
+      expect(JSON.stringify(persisted)).toBe(before);
+    });
+
+    it('a value refused → refused naming that value, and NOTHING written (not the levels either)', async () => {
+      const before = JSON.stringify(persisted);
+      const r = await callWith([{ factor_id: 'option', value: 3, author: 'user_specified' }], TWO, NEW_LINK);
+      expect(r).toEqual({ status: 'refused', reason: 'value_target_not_factor', value: { factor_id: 'option' } });
+      expect(rows.size).toBe(0);
+      expect(JSON.stringify(persisted)).toBe(before);
+    });
+
+    it('a stale base → stale, and the value is not applied (the persisted model is byte-identical)', async () => {
+      const before = JSON.stringify(persisted);
+      const r = await commitOptionLevelsInProcess({ scenario_id: SCENARIO_ID, turn_id: 'abababab-abab-4bab-8bab-abababababac',
+        base_graph_hash: 'deadbeefdeadbeef', links: NEW_LINK, levels: TWO, values: COVERAGE_60 }, 'req-compound');
+      expect(r).toEqual({ status: 'stale' });
+      expect(rows.size).toBe(0);
+      expect(JSON.stringify(persisted)).toBe(before);
+    });
+
+    it('RED (AI Conversation N1): a range whose level the model ALREADY holds still commits — never silently dropped', async () => {
+      const held: Level = { option_id: 'option', factor_id: 'factor', value: 0.2, author: 'user_specified' };
+      const r = await callWith([], [held], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccca2', [{ factor_id: 'bare_amount', cap: 100 }]);
+      expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false });
+      expect(rows.size, 'the range is ONE commit').toBe(1);
+      expect(factorOs('bare_amount')).toMatchObject({ value: 0.4, raw_value: 40, cap: 100 });
+    });
+
+    it('RED: a value on a factor with NO range, and the range the approval disclosed, land in the SAME commit as the level', async () => {
+      const r = await callWith([{ factor_id: 'amount_factor', value: 10, unit: 'seats', author: 'user_specified' }], [TWO[0]!], [],
+        'cccccccc-cccc-4ccc-8ccc-ccccccccccc1', [{ factor_id: 'amount_factor', cap: 100 }]);
+      expect(r.status, JSON.stringify(r)).toBe('committed');
+      expect(rows.size).toBe(1);
+      expect(factorOs('amount_factor'), JSON.stringify(factorOs('amount_factor'))).toMatchObject({ value: 0.1, raw_value: 10, cap: 100, unit: 'seats', declared_scale: 'unit_interval' });
+    });
+
+    it('RED (the separate range commit): a level\'s range for a factor holding a bare amount lands WITH the level — no value, one commit', async () => {
+      const r = await callWith([], [TWO[0]!], [], 'cccccccc-cccc-4ccc-8ccc-ccccccccccc2', [{ factor_id: 'bare_amount', cap: 100 }]);
+      expect(r.status, JSON.stringify(r)).toBe('committed');
+      expect(rows.size).toBe(1);
+      expect(factorOs('bare_amount')).toMatchObject({ value: 0.4, raw_value: 40, cap: 100, declared_scale: 'unit_interval' });
+      expect(graphNow().nodes.find(n => n.id === 'option')?.interventions?.factor?.value).toBe(0.35);
+    });
+
+    it('an Olumi value the user approved is stored as the user\'s ASSUMPTION, not their own figure — through the writer\'s adoption authority', async () => {
+      const r = await callWith([{ factor_id: 'factor', value: 60, unit: '%', author: 'model_proposed' }], [TWO[0]!], [], 'cccccccc-cccc-4ccc-8ccc-ccccccccccc3');
+      expect(r.status, JSON.stringify(r)).toBe('committed');
+      expect(factorOs('factor')?.source, JSON.stringify(factorOs('factor'))).toBe('user_assumption');
+    });
+
+    it('a range for a factor that already declares one is refused — naming it — and nothing is written', async () => {
+      const before = JSON.stringify(persisted);
+      const r = await callWith(COVERAGE_60, TWO, NEW_LINK, 'cccccccc-cccc-4ccc-8ccc-ccccccccccc4', [{ factor_id: 'factor', cap: 1000 }]);
+      expect(r).toEqual({ status: 'refused', reason: 'frame_not_applicable', frame: { factor_id: 'factor' } });
+      expect(rows.size).toBe(0);
+      expect(JSON.stringify(persisted)).toBe(before);
+    });
+
+    it('RED (Canvas 5849242463): a range + a REFUSED level → nothing lands, not even the range (no in-place write to the read graph)', async () => {
+      const before = JSON.stringify(persisted);
+      const r = await callWith([], [TWO[1]!, { option_id: 'option', factor_id: 'unlinked_factor', value: 0.4, author: 'user_specified' }], NEW_LINK,
+        'cccccccc-cccc-4ccc-8ccc-ccccccccccc9', [{ factor_id: 'bare_amount', cap: 100 }]);
+      expect(r).toEqual({ status: 'refused', reason: 'unresolved_effect_relationship', pair: { option_id: 'option', factor_id: 'unlinked_factor' } });
+      expect(rows.size).toBe(0);
+      expect(JSON.stringify(persisted)).toBe(before);
+    });
+
+    it('a value on one factor + a range on ANOTHER + a refused level → the read graph is untouched (no aliasing through the value writer\'s merge)', async () => {
+      const before = JSON.stringify(persisted);
+      const r = await callWith(COVERAGE_60, [TWO[1]!, { option_id: 'option', factor_id: 'unlinked_factor', value: 0.4, author: 'user_specified' }], NEW_LINK,
+        'cccccccc-cccc-4ccc-8ccc-cccccccccca0', [{ factor_id: 'bare_amount', cap: 100 }]);
+      expect(r).toEqual({ status: 'refused', reason: 'unresolved_effect_relationship', pair: { option_id: 'option', factor_id: 'unlinked_factor' } });
+      expect(rows.size).toBe(0);
+      expect(JSON.stringify(persisted)).toBe(before);
+    });
+
+    it('(R&C 5849235251) an Olumi value on a factor with NO range is stored as the user\'s assumption too — never their own figure', async () => {
+      const r = await callWith([{ factor_id: 'amount_factor', value: 10, unit: 'seats', author: 'model_proposed' }], [TWO[0]!], [],
+        'cccccccc-cccc-4ccc-8ccc-cccccccccca1', [{ factor_id: 'amount_factor', cap: 100 }]);
+      expect(r.status, JSON.stringify(r)).toBe('committed');
+      expect(factorOs('amount_factor'), JSON.stringify(factorOs('amount_factor'))).toMatchObject({ value: 0.1, raw_value: 10, cap: 100, source: 'user_assumption' });
+    });
+
+    it('a retry of the committed compound writes nothing more — already applied', async () => {
+      expect((await callWith(COVERAGE_60, TWO, NEW_LINK)).status).toBe('committed');
+      const retry = await callWith(COVERAGE_60, TWO, [], 'dddddddd-dddd-4ddd-8ddd-ddddddddddde');
+      expect(retry, JSON.stringify(retry)).toMatchObject({ status: 'committed', already_applied: true, receipt: null });
+      expect(rows.size).toBe(1);
+    });
   });
 
   it('a stale base → stale, nothing written', async () => {

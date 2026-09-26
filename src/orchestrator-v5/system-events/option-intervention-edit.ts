@@ -67,9 +67,10 @@ import { threadHoldsThroughMutatingCommit } from '../handlers/hold-thread-throug
 import type { FrameFreshness } from '../graph-management/types.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { reconcileTopLevelOptionsFromNodes } from '../reconcile-top-level-options.js';
-import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor } from '../agent-lane/approved-adoption-context.js';
+import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, runWithApprovedAdoption } from '../agent-lane/approved-adoption-context.js';
 import { structuralEdgeValue } from '../routing/add-option-transaction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
+import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value-edit.js';
 
 /**
  * Internal preparation for an explicit option→factor edit. This is NOT a wire
@@ -318,6 +319,127 @@ export function applyOptionInterventionBatch(input: OptionInterventionBatchTrans
 }
 
 /** `source` is not an input here: it is derived below from the server-internal adoption context. */
+/**
+ * A factor value approved TOGETHER with option levels (one compound approval), in the user's own units — the figure
+ * the user approved, never the model's 0–1 scale. The canonical value writer (`applyFactorValueEdit`) owns the
+ * conversion, exactly as it does for an inspector edit.
+ */
+export interface ApprovedFactorValue {
+  readonly factorId: string;
+  readonly value: number;
+  readonly unit?: string;
+  /**
+   * Olumi proposed this value and the user approved it: stamped as the user's ASSUMPTION through the writer's own
+   * adoption authority (`runWithApprovedAdoption`), never as the user's own figure. It can only narrow the stamp.
+   */
+  readonly adopted?: boolean;
+}
+/**
+ * A range for a factor that holds a bare amount and declares none — the one its figure (or the level read on it) was
+ * normalised against. Applied AFTER the values, so a value and its range land in the same commit.
+ */
+export interface ApprovedFactorFrame {
+  readonly factorId: string;
+  readonly cap: number;
+}
+type ValueHandlerFact = Extract<FactorValueEditResult, { kind: 'mutated' }>['handlerFacts'][number];
+
+/**
+ * ⛔ ONLY THE DECLARED FACTORS' VALUES MAY CHANGE: on each declared factor, the members the canonical value writer owns
+ * (`observed_state`, and the node's own `display_value`, `provenance` and `scale_frame` it restates with the value) —
+ * and nothing else anywhere in the graph: no other member, node, edge, option or top-level field.
+ */
+const VALUE_WRITER_OWNED_NODE_MEMBERS = ['observed_state', 'display_value', 'provenance', 'scale_frame'] as const;
+export function factorValuesPostimageIsScoped(before: unknown, after: unknown, factorIds: readonly string[]): boolean {
+  if (!isEditableGraph(before) || !isEditableGraph(after)) return false;
+  if (factorIds.length === 0 || new Set(factorIds).size !== factorIds.length) return false;
+  const restored = structuredClone(after);
+  for (const id of factorIds) {
+    const was = before.nodes.filter(node => node.id === id);
+    const now = restored.nodes.filter(node => node.id === id);
+    if (was.length !== 1 || now.length !== 1 || was[0]!.kind !== 'factor') return false;
+    const node = now[0]! as Record<string, unknown>;
+    const prior = was[0]! as Record<string, unknown>;
+    for (const member of VALUE_WRITER_OWNED_NODE_MEMBERS) {
+      if (Object.hasOwn(prior, member)) node[member] = structuredClone(prior[member]);
+      else delete node[member];
+    }
+  }
+  return isDeepStrictEqual(restored, before);
+}
+
+/**
+ * The approved values, applied IN MEMORY through the canonical value writer against ONE base, in order — the values
+ * half of a compound approval, so that it commits in the SAME append as the levels. All or nothing: the first value
+ * refused refuses the whole approval (`valueIndex` names it). No I/O beyond the writer's own (it writes nothing).
+ */
+async function applyApprovedFactorValues(
+  before: EditableGraph,
+  values: readonly ApprovedFactorValue[],
+  frames: readonly ApprovedFactorFrame[],
+  ctx: { readonly scenarioId: string; readonly turnId: string; readonly requestId: string; readonly stage: OlumiResponse['stage_indicator'] },
+): Promise<
+  | { readonly kind: 'applied'; readonly graph: EditableGraph; readonly handlerFacts: readonly ValueHandlerFact[]; readonly confirmations: readonly string[] }
+  | { readonly kind: 'refused'; readonly reason: string; readonly valueIndex?: number; readonly frameIndex?: number }
+> {
+  const refuse = (reason: string, valueIndex: number) => ({ kind: 'refused' as const, reason, valueIndex });
+  const refuseFrame = (reason: string, frameIndex: number) => ({ kind: 'refused' as const, reason, frameIndex });
+  const seen = new Set<string>();
+  // ⛔ A COPY, never the graph that was read (Canvas #70 5849242463): the frames below write in place, and a refused
+  // approval must leave the read graph — and so the CAS base and the persisted model — exactly as it was.
+  let working: unknown = structuredClone(before);
+  const handlerFacts: ValueHandlerFact[] = [];
+  const confirmations: string[] = [];
+  for (let i = 0; i < values.length; i += 1) {
+    const v = values[i]!;
+    if (seen.has(v.factorId)) return refuse('duplicate_value', i);
+    seen.add(v.factorId);
+    if (!Number.isFinite(v.value)) return refuse('value_invalid', i);
+    const node = (working as EditableGraph).nodes.find(n => n.id === v.factorId);
+    if (node === undefined || node.kind !== 'factor') return refuse('value_target_not_factor', i);
+    const os = (node.observed_state ?? {}) as { cap?: unknown };
+    const factorCap = typeof os.cap === 'number' && os.cap > 0 ? os.cap : undefined;
+    const unit = v.unit !== undefined && v.unit.trim() !== '' ? v.unit.trim() : undefined;
+    // The compound's own event, unchanged: on a capped factor the writer is handed the level AND the user's figure.
+    const event = { kind: 'factor_value_edit' as const, target_id: v.factorId,
+      ...(factorCap !== undefined ? { value: v.value / factorCap, raw_value: v.value } : { value: v.value }),
+      ...(unit !== undefined ? { unit } : {}) };
+    const write = () => applyFactorValueEdit({
+      payload: { kind: 'system_event', turn_id: ctx.turnId, scenario_id: ctx.scenarioId, stage: ctx.stage, event } as never,
+      event: event as never, requestId: ctx.requestId, persistedGraph: working, priorFacts: [],
+    });
+    const res = v.adopted === true
+      ? await runWithApprovedAdoption({ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, targetId: v.factorId, rawValue: v.value }, write)
+      : await write();
+    if (res.kind !== 'mutated') return refuse(`value_${res.reason}`, i);
+    working = res.mutatedGraph;
+    handlerFacts.push(...res.handlerFacts);
+    if (res.response.assistant_text) confirmations.push(res.response.assistant_text);
+  }
+  // ⭐ THE RANGES, IN THE SAME COMMIT: a factor holding a bare amount is read on the range the approval disclosed.
+  const framedIds = new Set<string>();
+  for (let i = 0; i < frames.length; i += 1) {
+    const f = frames[i]!;
+    if (framedIds.has(f.factorId)) return refuseFrame('duplicate_frame', i);
+    framedIds.add(f.factorId);
+    if (!Number.isFinite(f.cap) || !(f.cap > 0)) return refuseFrame('frame_invalid', i);
+    const node = (working as EditableGraph).nodes.find(n => n.id === f.factorId) as (EditableGraph['nodes'][number] & { scale_frame?: unknown }) | undefined;
+    if (node === undefined || node.kind !== 'factor') return refuseFrame('frame_target_not_factor', i);
+    const os = (node.observed_state ?? {}) as Record<string, unknown>;
+    const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+    // Only a bare amount with no range of its own: a factor that already declares one is never re-read on another.
+    if (typeof raw !== 'number' || !Number.isFinite(raw) || typeof os.cap === 'number'
+      || (typeof node.scale_frame === 'number' && node.scale_frame > 1)) return refuseFrame('frame_not_applicable', i);
+    (node as Record<string, unknown>).observed_state = { ...os, value: raw / f.cap, raw_value: raw, cap: f.cap, declared_scale: 'unit_interval' };
+  }
+  const graph = projectGraphForPersistence(working);
+  const touched = [...new Set([...values.map(v => v.factorId), ...frames.map(f => f.factorId)])];
+  if (!isEditableGraph(graph) || !factorValuesPostimageIsScoped(before, graph, touched)) {
+    return refuse('value_scope_mismatch', Math.max(0, values.length - 1));
+  }
+  return { kind: 'applied', graph, handlerFacts, confirmations };
+}
+
 export type OptionInterventionExecutionInput = Omit<OptionInterventionTransactionInput, 'persistedGraph' | 'source'> & {
   readonly stage: OlumiResponse['stage_indicator'];
   /** Existing caller request digest: informational, NOT the idempotency key. */
@@ -350,6 +472,13 @@ export type OptionInterventionBatchExecutionInput =
      * exactly these, or nothing is written (`links_mismatch`): what was approved is what is written.
      */
     readonly expectedLinks?: readonly string[];
+    /**
+     * ⭐ A COMPOUND APPROVAL'S FACTOR VALUES (Canonical #70 5849037691): applied through the canonical value writer on
+     * the SAME base, and written in the SAME append as the links and levels — one approval, one commit, one receipt.
+     */
+    readonly values?: readonly ApprovedFactorValue[];
+    /** The ranges the approval attaches to factors holding a bare amount — in the SAME commit. */
+    readonly frames?: readonly ApprovedFactorFrame[];
   };
 
 /**
@@ -362,7 +491,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       /** The commit's own version receipt, verified to describe THIS turn and postimage (null: guest / no version). */
       readonly modelVersionReceipt?: Awaited<ReturnType<typeof commitDirectAnswer>>['modelVersionReceipt'] }
   | { readonly kind: 'unchanged' }
-  | { readonly kind: 'refused'; readonly reason: string; readonly index?: number }
+  | { readonly kind: 'refused'; readonly reason: string; readonly index?: number; readonly valueIndex?: number; readonly frameIndex?: number }
   | { readonly kind: 'unverified'; readonly reason: string; readonly commitAttempted: boolean }
 > {
   let before: unknown;
@@ -381,22 +510,58 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     return { optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue, ...(source !== undefined ? { source } : {}),
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
-  const { targets: _callerTargets, expectedLinks, ...common } = input;
-  const candidate = applyOptionInterventionBatch({ ...common, persistedGraph: before, targets });
-  if (candidate.kind !== 'candidate') return candidate;
+  const { targets: _callerTargets, expectedLinks, values: _callerValues, frames: _callerFrames, ...common } = input;
+  // ⭐ THE VALUES FIRST, ON THE PERSISTED BASE, IN MEMORY — then the links and levels on the graph they produce, and ONE
+  // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
+  // levels are prepared on the post-value graph, so their own stale check can no longer see the caller's base.
+  const values = input.values ?? [];
+  const frames = input.frames ?? [];
+  let levelBase: unknown = before;
+  let levelBaseHash = input.expectedGraphHash;
+  let valueFacts: readonly ValueHandlerFact[] = [];
+  let valueConfirmations: readonly string[] = [];
+  if (values.length + frames.length > 0) {
+    if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), before)) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    const applied = await applyApprovedFactorValues(before, values, frames,
+      { scenarioId: input.scenarioId, turnId: input.turnId, requestId: input.requestId, stage: input.stage });
+    if (applied.kind === 'refused') {
+      return { kind: 'refused', reason: applied.reason,
+        ...(applied.valueIndex !== undefined ? { valueIndex: applied.valueIndex } : {}),
+        ...(applied.frameIndex !== undefined ? { frameIndex: applied.frameIndex } : {}) };
+    }
+    const appliedHash = computeAnalysisAffectingGraphHash(applied.graph);
+    if (!appliedHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    levelBase = applied.graph;
+    levelBaseHash = appliedHash;
+    valueFacts = applied.handlerFacts;
+    valueConfirmations = applied.confirmations;
+  }
+  const valuesChanged = values.length + frames.length > 0 && !isDeepStrictEqual(levelBase, before);
+  const candidate = applyOptionInterventionBatch({ ...common, expectedGraphHash: levelBaseHash, persistedGraph: levelBase, targets });
+  if (candidate.kind === 'refused') return candidate;
+  if (candidate.kind === 'unchanged' && !valuesChanged) return candidate;
+  // Every level already held (a compound whose values alone change): the values commit on their own, still ONE append.
+  const plan = candidate.kind === 'candidate'
+    ? { graph: candidate.graph, operations: candidate.operations, analysisGraphHash: candidate.analysisGraphHash,
+      targetsWritten: candidate.targetsWritten, handlerFacts: [...valueFacts, candidate.handlerFact] as unknown[] }
+    : { graph: levelBase as EditableGraph, operations: [] as PatchOperation[], analysisGraphHash: levelBaseHash,
+      targetsWritten: [] as OptionLevelTarget[], handlerFacts: [...valueFacts] as unknown[] };
   if (expectedLinks !== undefined) {
-    const adding = candidate.operations.filter(o => o.op === 'add_edge').map(o => o.path).sort();
+    const adding = plan.operations.filter(o => o.op === 'add_edge').map(o => o.path).sort();
     if (!isDeepStrictEqual(adding, [...new Set(expectedLinks)].sort())) return { kind: 'refused', reason: 'links_mismatch' };
   }
-  const labelOf = (id: string): string => String(candidate.graph.nodes.find(node => node.id === id)?.label ?? id);
+  const labelOf = (id: string): string => String(plan.graph.nodes.find(node => node.id === id)?.label ?? id);
   const holds = threadHoldsThroughMutatingCommit({ priorPendingActions: pendings,
-    graphAfterCommit: candidate.graph, graphHashAfterCommit: candidate.analysisGraphHash,
-    appliedOperations: candidate.operations, nowMs: Date.now(),
+    graphAfterCommit: plan.graph, graphHashAfterCommit: plan.analysisGraphHash,
+    appliedOperations: plan.operations, nowMs: Date.now(),
     scenarioId: input.scenarioId, turnId: input.turnId, requestId: input.requestId });
-  const linked = new Set(candidate.operations.filter(o => o.op === 'add_edge').map(o => o.path));
-  const acknowledgment = candidate.targetsWritten.map(t => formatOptionEffectWriteAck({ optionLabel: labelOf(t.optionId),
+  const linked = new Set(plan.operations.filter(o => o.op === 'add_edge').map(o => o.path));
+  const acknowledgment = [...valueConfirmations, ...plan.targetsWritten.map(t => formatOptionEffectWriteAck({ optionLabel: labelOf(t.optionId),
     factorLabel: labelOf(t.factorId), committedValue: t.modelValue })
-    + (linked.has(`${t.optionId}::${t.factorId}`) ? ` ${labelOf(t.optionId)} is now linked to ${labelOf(t.factorId)}, in the same change.` : ''))
+    + (linked.has(`${t.optionId}::${t.factorId}`) ? ` ${labelOf(t.optionId)} is now linked to ${labelOf(t.factorId)}, in the same change.` : ''))]
     .join(' ');
   const response: OlumiResponse = { response_version: 2,
     assistant_text: holds.notice ? `${acknowledgment}\n\n${holds.notice}` : acknowledgment,
@@ -406,9 +571,9 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     committed = await commitDirectAnswer(response, {
       scenario_id: input.scenarioId, turn_id: input.turnId, request_hash: input.requestHash,
       turn_class: 'direct_answer', handler_id: null, llm_calls_used: 0, duration_ms: 0,
-      handler_facts: [candidate.handlerFact], graph: candidate.graph, contentGraph: candidate.graph,
+      handler_facts: plan.handlerFacts as never, graph: plan.graph, contentGraph: plan.graph,
       baseGraphForInvariants: before, ...computeExpectedGraphCasHashes(before),
-      graph_hash: candidate.analysisGraphHash, priorPendingActions: holds.threaded,
+      graph_hash: plan.analysisGraphHash, priorPendingActions: holds.threaded,
     }, store);
   } catch {
     // A transport error need not prove rollback. No Applied response or claim
@@ -419,7 +584,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     const reloaded = await store.loadGraph(input.scenarioId);
     // CommitResult.persistedGraph is projected INPUT, not DB readback. A
     // duplicate turn may return an older row without applying new request bytes.
-    if (!committed.graphPersisted || !isDeepStrictEqual(reloaded, candidate.graph)
+    if (!committed.graphPersisted || !isDeepStrictEqual(reloaded, plan.graph)
       || input.targets.some(t => readCommittedOptionEffect(reloaded, t.optionId, t.factorId) !== t.modelValue)) {
       return { kind: 'unverified', reason: 'committed_graph_mismatch', commitAttempted: true };
     }
@@ -436,8 +601,18 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       return { kind: 'unverified', reason: 'committed_turn_unverified', commitAttempted: true };
     }
     const facts = await store.readFactsWithTurnFor([committed.persisted_row_id]);
-    if (facts.length !== 1 || facts[0]?.turn_id !== committed.persisted_row_id
-      || !isDeepStrictEqual(facts[0].fact, candidate.handlerFact)) {
+    // Every fact this ONE commit wrote (the values' and the levels'), bound to its row — matched as a multiset by
+    // DEEP equality, never by serialised strings: the store reads facts back from JSONB, which re-orders keys
+    // (AI Conversation #70 5849290342; the 25 Sep JSONB class).
+    const unmatched = [...plan.handlerFacts];
+    const everyFactIsOurs = facts.every(f => {
+      const at = unmatched.findIndex(expected => isDeepStrictEqual(f.fact, expected));
+      if (at < 0) return false;
+      unmatched.splice(at, 1);
+      return true;
+    });
+    if (facts.length !== plan.handlerFacts.length || facts.some(f => f.turn_id !== committed.persisted_row_id)
+      || !everyFactIsOurs || unmatched.length !== 0) {
       return { kind: 'unverified', reason: 'committed_fact_unverified', commitAttempted: true };
     }
     // Guest/no-version success is valid. If a version receipt exists, it
@@ -448,7 +623,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       return { kind: 'unverified', reason: 'committed_receipt_mismatch', commitAttempted: true };
     }
     return { kind: 'committed', response: committed.response, graph: reloaded,
-      analysisGraphHash: candidate.analysisGraphHash, persistedRowId: committed.persisted_row_id,
+      analysisGraphHash: plan.analysisGraphHash, persistedRowId: committed.persisted_row_id,
       modelVersionReceipt: receipt };
   } catch {
     return { kind: 'unverified', reason: 'canonical_readback_failed', commitAttempted: true };
