@@ -156,7 +156,18 @@ describe('BLOCKING — a figure in another currency is refused, never relabelled
     expect(r.detail).toContain('GBP MRR');
   });
 
-  it.each([['£'], ['GBP'], ['GBP MRR'], ['GBP/month']])('CONTRAST: 12000 %s — the goal\'s own currency — is recorded as raw 12000', async (unit) => {
+  it.each([
+    ['GBP ARR', 'GBP ARR'],
+    ['GBP per year', 'GBP per year'],
+    ['GBP/month', 'GBP/month'],
+  ])('RED: 12000 %s — the goal\'s currency, another measure or period — → unit_mismatch; nothing prepared', async (unit, named) => {
+    const r = await refusedAndInert({ ...T2, unit });
+    expect(r.refusal).toBe('unit_mismatch');
+    expect(r.detail).toContain(named);
+    expect(r.detail).toContain('GBP MRR');
+  });
+
+  it.each([['£'], ['GBP'], ['GBP MRR'], ['£ MRR'], ['gbp mrr']])('CONTRAST: 12000 %s — the goal\'s own unit — is recorded as raw 12000', async (unit) => {
     const { h, applied } = await proposeAndApprove({ ...T2, unit });
     expect(applied.applied, JSON.stringify(applied)).toBe(true);
     expect(goalOf(h.stored()).observed_state).toStrictEqual(levelOf(12000));

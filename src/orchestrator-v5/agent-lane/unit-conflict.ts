@@ -20,6 +20,12 @@ export function unitPhraseHead(unit: unknown): string | null {
   return lead === undefined || lead === '' ? null : lead;
 }
 
+/** What follows the leading token, case-folded ("GBP MRR" → "mrr", "£ per month" → "per month"); '' when nothing. */
+export function unitPhraseTail(unit: unknown): string {
+  if (typeof unit !== 'string') return '';
+  return unit.trim().split(/[\s/]+/).slice(1).join(' ').toLowerCase();
+}
+
 export function unitPhraseFamily(unit: unknown): UnitFamily | null {
   const lead = unitPhraseHead(unit);
   return lead === null ? null : unitFamilyOf(lead.toLowerCase());

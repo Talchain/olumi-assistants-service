@@ -36,7 +36,9 @@ import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { sameUnit } from '../../utils/currency-alphabet.js';
 import { admitStatedGoalLevel } from './admit-model.js';
 import { canonicaliseLimitUnit } from './admit-constraint.js';
-import { unitPhraseFamily, unitPhraseHead, unitsConflict } from './unit-conflict.js';
+import { unitPhraseFamily, unitPhraseHead, unitPhraseTail, unitsConflict } from './unit-conflict.js';
+import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { createProposal, type ProposalOperation, type ProposalStore, type ReceiptSummary, type StructuredProposal } from './proposal.js';
 import { registrationTurnId } from '../graph-registration/registration-identity.js';
 import type { AgentToolContext, ToolResult } from './runtime/agent-tools.js';
@@ -120,12 +122,33 @@ type StatedLevel =
   | { readonly ok: false; readonly refusal: 'unit_mismatch' | 'unit_unstated' | 'unit_unrecognised'; readonly detail: string };
 
 /**
+ * The same unit, spelled either way: the whole phrase on the estate's own same-unit key (`unitComparisonKey`: case,
+ * the currency alphabet, rate spellings — "£/month" ≡ "GBP per month"), or the same head with no other measure named
+ * after it ("£" or "£ MRR" for "GBP MRR"; never "GBP ARR" or "GBP per year"). Heads are the same on case and one
+ * plural ("user" ≡ "users", "month" ≡ "months"; "weeks" ≠ "months"), or both plain percent on the scale-class
+ * classifier ("%" ≡ "percent"; "pp" is another class). Nothing here converts.
+ */
+function sameUnitPhrase(stated: string, goalUnit: string): boolean {
+  if (unitComparisonKey(stated) === unitComparisonKey(goalUnit)) return true;
+  const sh = unitPhraseHead(stated) ?? '';
+  const gh = unitPhraseHead(goalUnit) ?? '';
+  const fold = (h: string): string => h.toLowerCase().replace(/s$/, '');
+  const sameHead = fold(sh) === fold(gh) ||
+    (classifyUnitScaleClass(sh) === 'percent' && classifyUnitScaleClass(gh) === 'percent') ||
+    sameUnit(sh, gh);
+  const tail = unitPhraseTail(stated);
+  return sameHead && (tail === '' || tail === unitPhraseTail(goalUnit));
+}
+
+/**
  * ⛔ THE STATED FIGURE, READ IN THE GOAL'S OWN UNIT — or refused. Never relabelled.
  *
  * Verified at 68602637 (DEFECT_FOUND): the family check alone let `12000 USD` through as "12000 GBP MRR" (USD, $,
  * EUR and "GBP MRR" are all the currency family) and `12 £k` through as raw 12 — 1000x too small, so the chance
  * of reaching £20k read as nil. The rungs, in order:
- *   1. A goal whose own unit no classifier reads (or has none) is held to nothing — the lane's fail-open rule.
+ *   1. A goal with no unit is held to nothing (named residual). A goal whose unit no classifier reads ("customers")
+ *      refuses a figure in a unit the classifier DOES read — it cannot be the same unit — and otherwise fails open,
+ *      as the lane does.
  *   2. A k/m suffix on the goal's OWN currency is scaled by the admit-constraint M-rung itself
  *      (`canonicaliseLimitUnit`, the node side given as the goal's bare currency head), and its stamp is kept.
  *      The accepted suffixes are therefore exactly the M-rung's; anything else falls to rung 3.
@@ -133,15 +156,26 @@ type StatedLevel =
  *      for the figure in the goal's own unit — the headline goal-fit number is never fed by an unclassified figure.
  *   4. Another kind of unit ("%", "users") is refused (`unitsConflict`).
  *   5. Another currency is refused: both heads must be ONE currency (`sameUnit`: £ ≡ GBP). No rate is applied.
+ *   6. Another measure or unit of the same kind is refused ("GBP ARR" or "GBP per year" for "GBP MRR", "weeks"
+ *      for "months", "pp" for "%"): `sameUnitPhrase`.
  */
 export function readStatedGoalLevel(value: number, statedUnit: unknown, goal: { readonly label: string; readonly unit: string | undefined }): StatedLevel {
   const stated = typeof statedUnit === 'string' ? statedUnit.trim() : '';
+  if (goal.unit === undefined) return { ok: true, raw: value };
   const goalFamily = unitPhraseFamily(goal.unit);
-  const goalHead = unitPhraseHead(goal.unit);
-  if (goal.unit === undefined || goalFamily === null || goalHead === null) return { ok: true, raw: value };
+  const goalHead = unitPhraseHead(goal.unit) ?? '';
+  const statedFamily = unitPhraseFamily(stated);
 
   const askInstead =
     `Nothing was prepared; ask the user for the current level of "${goal.label}" in ${goal.unit}, written out in full.`;
+  const anotherKind: StatedLevel = {
+    ok: false, refusal: 'unit_mismatch',
+    detail: `${value} ${stated} is in a different kind of unit from "${goal.label}", which is measured in ${goal.unit}. ` +
+      'A figure given for something else is never recorded as the goal’s current level. Nothing was prepared; ask ' +
+      `the user for the current level of "${goal.label}" itself.`,
+  };
+
+  if (goalFamily === null) return statedFamily !== null ? anotherKind : { ok: true, raw: value };
 
   if (goalFamily === 'currency' && stated !== '') {
     const scaled = canonicaliseLimitUnit(value, stated, { unit: goalHead });
@@ -155,26 +189,27 @@ export function readStatedGoalLevel(value: number, statedUnit: unknown, goal: { 
         `assumed to be in the goal's unit. ${askInstead}`,
     };
   }
-  if (unitPhraseFamily(stated) === null) {
+  if (statedFamily === null) {
     return {
       ok: false, refusal: 'unit_unrecognised',
       detail: `"${stated}" is not a unit that can be matched to ${goal.unit}, the unit "${goal.label}" is measured in, ` +
         `so ${value} ${stated} is never recorded as its current level. ${askInstead}`,
     };
   }
-  if (unitsConflict(stated, goal.unit) !== null) {
-    return {
-      ok: false, refusal: 'unit_mismatch',
-      detail: `${value} ${stated} is in a different kind of unit from "${goal.label}", which is measured in ${goal.unit}. ` +
-        'A figure given for something else is never recorded as the goal’s current level. Nothing was prepared; ask ' +
-        `the user for the current level of "${goal.label}" itself.`,
-    };
-  }
+  if (unitsConflict(stated, goal.unit) !== null) return anotherKind;
   if (goalFamily === 'currency' && !sameUnit(unitPhraseHead(stated) ?? '', goalHead)) {
     return {
       ok: false, refusal: 'unit_mismatch',
       detail: `${value} ${stated} is not in the currency of "${goal.label}", which is measured in ${goal.unit}. No ` +
         `exchange rate is ever applied, so it is never recorded as the goal's current level. ${askInstead}`,
+    };
+  }
+  if (!sameUnitPhrase(stated, goal.unit)) {
+    return {
+      ok: false, refusal: 'unit_mismatch',
+      detail: `${value} ${stated} is not in ${goal.unit}, the unit "${goal.label}" is measured in, and nothing is ` +
+        'converted. If this figure IS the user’s current level of the goal, pass it in the goal’s own unit; if it is ' +
+        `another measure or period, it is never recorded as the goal's current level. ${askInstead}`,
     };
   }
   return { ok: true, raw: value };
