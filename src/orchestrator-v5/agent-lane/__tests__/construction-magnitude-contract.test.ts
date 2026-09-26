@@ -292,7 +292,7 @@ describe('natural_effect: the size the edge carries, in natural units, keyed to 
   it('R1\'s estimate: −1 percentage point of churn per switch of AI, keyed to the edge\'s −0.01', async () => {
     const { graph } = await register(t3({ amount: -1, per: 1, by: 'ai_proposed' }));
     const e = edge(graph, AI, CHURN);
-    expect(natural(e)).toStrictEqual({ amount: -1, unit: 'percentage points', per_source_change: 1, source_unit: 'switch', strength_mean: -0.01 });
+    expect(natural(e)).toStrictEqual({ amount: -1, amount_unit: 'percentage points', per_source_change: 1, per_source_change_unit: 'switch', strength_mean: -0.01, strength_mean_frame: 'edge_strength' });
     expect(natural(e)?.strength_mean).toBe(e.strength.mean);
   });
 
@@ -300,7 +300,7 @@ describe('natural_effect: the size the edge carries, in natural units, keyed to 
     const { graph } = await register(t3(UNKNOWN));
     const e = edge(graph, AI, CHURN);
     expect(e.provenance?.magnitude).toBe('olumi_placeholder');
-    expect(natural(e)).toStrictEqual({ amount: -1, unit: 'percentage points', per_source_change: 1, source_unit: 'switch', strength_mean: -0.01 });
+    expect(natural(e)).toStrictEqual({ amount: -1, amount_unit: 'percentage points', per_source_change: 1, per_source_change_unit: 'switch', strength_mean: -0.01, strength_mean_frame: 'edge_strength' });
     expect(natural(e)?.strength_mean).toBe(e.strength.mean);
   });
 
@@ -314,6 +314,6 @@ describe('natural_effect: the size the edge carries, in natural units, keyed to 
   it('R4: the user\'s own "−6 points" is said exactly as they stated it, keyed to −0.06', async () => {
     const { graph } = await register(t3({ amount: -6, per: 1, by: 'explicit' }, 'explicit'));
     const e = edge(graph, AI, CHURN);
-    expect(natural(e)).toStrictEqual({ amount: -6, unit: 'percentage points', per_source_change: 1, source_unit: 'switch', strength_mean: -0.06 });
+    expect(natural(e)).toStrictEqual({ amount: -6, amount_unit: 'percentage points', per_source_change: 1, per_source_change_unit: 'switch', strength_mean: -0.06, strength_mean_frame: 'edge_strength' });
   });
 });

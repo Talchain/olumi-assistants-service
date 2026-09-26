@@ -206,10 +206,13 @@ export interface LinkStatement {
  */
 export interface NaturalEffect {
   readonly amount: number;
-  readonly unit: string;
+  /** Each number names its own warrant (CEE's value-warrant guard): a level-scoped `unit` would not say which it attests. */
+  readonly amount_unit: string;
   readonly per_source_change: number;
-  readonly source_unit: string;
+  readonly per_source_change_unit: string;
   readonly strength_mean: number;
+  /** `strength_mean` is on the edge's normalised strength frame, never in natural units. */
+  readonly strength_mean_frame: 'edge_strength';
 }
 
 /** Why a stated size is not what the edge carries, or why it is asked about. */
@@ -310,10 +313,11 @@ export function naturalEffectOf(
   if (!finite(amount)) return undefined;
   return {
     amount: round6(amount),
-    unit: targetUnitWords(target, targetFrame),
+    amount_unit: targetUnitWords(target, targetFrame),
     per_source_change: round6(per),
-    source_unit: sourceUnitWords(source, sourceFrame),
+    per_source_change_unit: sourceUnitWords(source, sourceFrame),
     strength_mean: beta,
+    strength_mean_frame: 'edge_strength',
   };
 }
 

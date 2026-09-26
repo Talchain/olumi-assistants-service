@@ -201,7 +201,7 @@ describe('A3.1 Task 3 — adjust_edge_strength stamps edge provenance', () => {
       source: 'cee_hypothesis',
       reasoning: 'kept-by-the-write',
       magnitude: 'olumi_estimate',
-      natural_effect: { amount: 2, unit: 'GBP', per_source_change: 1, source_unit: 'GBP', strength_mean: target!.strength.mean },
+      natural_effect: { amount: 2, amount_unit: 'GBP', per_source_change: 1, per_source_change_unit: 'GBP', strength_mean: target!.strength.mean, strength_mean_frame: 'edge_strength' },
     } as never;
     const proposal: ProposalAction = {
       handler_id: 'adjust_edge_strength',

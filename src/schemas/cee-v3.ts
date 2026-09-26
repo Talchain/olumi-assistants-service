@@ -511,10 +511,11 @@ export const EdgeProvenanceV3 = z.object({
    */
   natural_effect: z.object({
     amount: z.number().finite(),
-    unit: z.string(),
+    amount_unit: z.string(),
     per_source_change: z.number().finite(),
-    source_unit: z.string(),
+    per_source_change_unit: z.string(),
     strength_mean: z.number().finite(),
+    strength_mean_frame: z.literal("edge_strength"),
   }).optional().catch(undefined),
 }).passthrough(); // CIL Phase 0: preserve additive fields
 export type EdgeProvenanceV3T = z.infer<typeof EdgeProvenanceV3>;
