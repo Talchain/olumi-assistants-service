@@ -126,17 +126,14 @@ describe('2.349 R1 — a constraint the producer disclosed it removed does not w
     expect(verdict.outOfScopeConstraints).toEqual([DEADLINE]);
   });
 
-  it("the reason text is NOT allowlisted — PRESENCE in the channel is the signal (trap 12)", () => {
-    // PLoT types `reason` as an open `string` and emits two values today. A
-    // hand-listed set in CEE would go silently short the day a third appears,
-    // and the shortfall would fail in the WITHHOLDING direction — straight back
-    // into this defect. Both live reasons, and an invented future one, behave
-    // identically.
-    for (const reason of [
-      'temporal_deadline',
-      'temporal_against_normalised_goal',
-      'a_reason_that_does_not_exist_yet',
-    ]) {
+  it("both TEMPORAL reasons are out of scope — the model cannot test a deadline", () => {
+    // ⛔ SUPERSEDED (AI Quality claim-permission ruling, #70 5844891057): this row used to assert that
+    // ANY reason — including an invented future one — partitions off ("presence is the signal", trap 12).
+    // Presence proves the limit was not SCORED, not that the model cannot score it: PLoT also removes
+    // limits it REFUSED for frame fidelity (2.878, #370), and naming a leader past those is the claim
+    // the ruling forbids. The permissive list is now explicit; see constraint-verdict-refused-limits.test.ts
+    // for the refused and unknown reasons, which withhold.
+    for (const reason of ['temporal_deadline', 'temporal_against_normalised_goal']) {
       const verdict = deriveConstraintVerdict(
         envelope({ filtered: [filteredRecord(DEADLINE.constraint_id, reason)] }),
         [DEADLINE],

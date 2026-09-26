@@ -874,14 +874,23 @@ function collectProducerNotDecisionGradeConstraintIds(
  * silently failed to score — and the second reading is what withheld the
  * leading option on every brief carrying a time phrase.
  *
- * NO REASON ALLOWLIST, DELIBERATELY (CLAUDE.md trap 12). PLoT types `reason`
- * as an open `string` and emits two values today (`temporal_deadline`,
- * `temporal_against_normalised_goal`); a hand-listed set here would be a
- * mirror that goes silently short the day a third is added, and the missing
- * entry would fail in the WITHHOLDING direction — i.e. straight back into this
- * defect. The semantics that matter are carried by PRESENCE in the channel,
- * not by the reason text: a constraint the producer states it removed before
- * computing cannot have been scored, and no user restatement can change that.
+ * ⛔ WHICH REMOVALS ARE "OUT OF SCOPE" — AI Quality claim-permission ruling
+ * (#70 5844891057). The channel carries TWO kinds of removal, and they are
+ * different claims:
+ *   · the model CANNOT test the limit (PLoT `normalisation/constraint-filter.ts`:
+ *     `temporal_deadline`, `temporal_against_normalised_goal`) — "this analysis
+ *     does not test that" is true, and the leader may be named on what it does test;
+ *   · PLoT REFUSED a limit it could test once its frame or units are stated
+ *     (ROADMAP 2.878 `delta_frame_value_altered_by_normalisation`; PLoT #370
+ *     `percent_unit_disagrees_with_target_frame`) — that is "not checked", owed a
+ *     units repair, and the leader stays withheld until it is.
+ * So only the first kind is partitioned off ({@link OUT_OF_SCOPE_FILTER_REASONS}).
+ * Every other reason — a fidelity refusal, one CEE has never seen, or none —
+ * stays a ratified limit with no score, and rule 3 makes it `unevaluated`.
+ * The list sits on the PERMISSIVE side on purpose: a reason missing from it
+ * fails toward withholding, never toward naming a leader past a limit nobody
+ * checked. (This supersedes 2.349's "no reason allowlist": presence proves the
+ * limit was not scored, not that the model cannot score it.)
  *
  * IDENTITY-BOUND. Only ids are collected, and the caller matches them against
  * the ratified ids exactly — a filtered record naming something we never
@@ -894,8 +903,8 @@ function collectProducerNotDecisionGradeConstraintIds(
  */
 function collectProducerFilteredConstraintIds(
   envelope: Record<string, unknown>,
-): Set<string> {
-  const out = new Set<string>();
+): { outOfScope: Set<string>; refused: Set<string> } {
+  const out = { outOfScope: new Set<string>(), refused: new Set<string>() };
   const meta = envelope._meta;
   if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) return out;
   const filtered = (meta as Record<string, unknown>).filtered_constraints;
@@ -903,10 +912,23 @@ function collectProducerFilteredConstraintIds(
   for (const entry of filtered) {
     if (entry === null || typeof entry !== 'object') continue;
     const id = readString((entry as Record<string, unknown>).constraint_id);
-    if (id !== null) out.add(id);
+    if (id === null) continue;
+    const reason = readString((entry as Record<string, unknown>).reason);
+    (reason !== null && OUT_OF_SCOPE_FILTER_REASONS.has(reason) ? out.outOfScope : out.refused).add(id);
   }
   return out;
 }
+
+/**
+ * The producer's removal reasons that mean "the model cannot test this limit"
+ * (PLoT `normalisation/constraint-filter.ts`, verified at PLoT staging
+ * `b09c0f2`). The ONLY reasons partitioned off as out of scope — see
+ * {@link collectProducerFilteredConstraintIds}.
+ */
+export const OUT_OF_SCOPE_FILTER_REASONS: ReadonlySet<string> = new Set([
+  'temporal_deadline',
+  'temporal_against_normalised_goal',
+]);
 
 /** Codes on the producer's warning channels that mean "not decision-grade". */
 function collectNotDecisionGradeCodes(
@@ -1062,8 +1084,12 @@ export function deriveConstraintVerdict(
   const unmeasured: RatifiedConstraint[] = [];
   const effective: RatifiedConstraint[] = [];
   for (const c of ratified) {
-    if (producerFiltered.has(c.constraint_id)) {
+    if (producerFiltered.outOfScope.has(c.constraint_id)) {
       outOfScope.push(c);
+    } else if (producerFiltered.refused.has(c.constraint_id)) {
+      // REFUSED by the producer (ruling #70 5844891057): it stays a ratified limit with no score, so
+      // rule 3 makes it `unevaluated`, before the unmeasured partition could name a leader past it.
+      effective.push(c);
     } else if (unmeasuredTargetIds?.has(c.constraint_id) === true) {
       unmeasured.push(c);
     } else {
@@ -1107,10 +1133,13 @@ export function deriveConstraintVerdict(
   }
 
   const evaluated = collectEvaluatedConstraintIds(envelope);
-  const unscored = effective.filter((c) => !evaluated.has(c.constraint_id));
+  // A limit the producer REFUSED is unscored for a reason it stated, not because the id spaces
+  // failed to line up — so it never counts toward rule 2's "nothing reconciles" (it lands in rule 3).
+  const reconcilable = effective.filter((c) => !producerFiltered.refused.has(c.constraint_id));
+  const unscored = reconcilable.filter((c) => !evaluated.has(c.constraint_id));
 
   // 2. Evaluations exist; not one of them is an id we ratified.
-  if (evaluated.size > 0 && unscored.length === effective.length) {
+  if (evaluated.size > 0 && reconcilable.length > 0 && unscored.length === reconcilable.length) {
     return verdict('identity_unresolved', {
       constraints: [...effective],
       leaderInfeasibility: leader,
