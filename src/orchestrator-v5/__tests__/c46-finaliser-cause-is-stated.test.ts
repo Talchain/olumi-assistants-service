@@ -256,8 +256,11 @@ describe('why the finaliser cannot derive it (#1876\'s class, C46 edition): the 
  * only when the claim's bound fact IS the fact the entitlement is read from; #1876's two-fact shape keeps today's token.
  */
 const LIMIT = 'agent-lane:monthly_churn:<=';
-const withChurnLimit = (g: Graph): Graph => ({ ...g,
-  goal_constraints: [{ constraint_id: LIMIT, node_id: 'mrr', operator: '<=', value: 0.1, label: 'Monthly churn at most 10%' }] } as Graph);
+/** The user's limit, on the node it names: churn (not the MRR identity), or — for N1 — on the identity's goal itself. */
+const withChurnLimit = (g: Graph, on: 'churn' | 'identity_goal' = 'churn'): Graph => {
+  const node = on === 'churn' ? g.nodes.find((n) => n.label === 'Monthly churn')!.id : 'mrr';
+  return { ...g, goal_constraints: [{ constraint_id: LIMIT, node_id: node, operator: '<=', value: 0.1, label: 'Monthly churn at most 10%' }] } as Graph;
+};
 const everyOption = (fact: RunAnalysisHandlerFact, ps: readonly number[], state: string, extra: Record<string, unknown> = {}): RunAnalysisHandlerFact => RunAnalysisHandlerFactSchema.parse({
   ...fact,
   result: {
@@ -289,6 +292,12 @@ describe('F-LIMIT through the finaliser: what every option does, only from the O
     const fact = everyOption(await runOn(graph), [0.169, 0.1796], 'evaluated_feasible');
     const out = finalise(graph, [fact], fact, false, { leaderWithheldBecauseNonlinearIdentity: true });
     expect(out.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT });
+  });
+
+  it('N1 (AI Conversation 5851022332): a limit ON the product identity\'s goal → today\'s token (its P is the additive model C46 distrusts)', async () => {
+    const graph = withChurnLimit(await build(PRODUCT), 'identity_goal');
+    const fact = everyOption(await runOn(graph), [0.0054, 0.0191], 'evaluated_infeasible');
+    expect(finalise(graph, [fact], fact, false).analysis_state?.leader_claim.withheld_reason).toBe(WITHHELD_CONSTRAINT_VERDICT);
   });
 
   it('CONTRAST: the limit is not the user\'s (not on the graph) → today\'s token, never a claim about a limit they never set', async () => {

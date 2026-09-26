@@ -111,7 +111,7 @@ import {
   wasAnalysisRequestedByUser,
 } from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
 // C46 stage 1: WHY a persisted fact's leader was withheld, when the reason is a product the analysis adds up.
-import { nonlinearIdentityLeaderClaimCause } from '../orchestrator-v5/agent-lane/admit-model.js';
+import { nodesUnderANonlinearIdentity, nonlinearIdentityLeaderClaimCause } from '../orchestrator-v5/agent-lane/admit-model.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import {
@@ -371,7 +371,12 @@ export async function readScenarioAnalysis(
             // F-LIMIT: judged on the SAME fact the permission above was read from (null when out of date), against the
             // limits the user ratified on this graph.
             ...(() => {
-              const limit = fact !== null ? deriveEveryOptionLimitVerdict(fact.result, readRatifiedConstraints(params.graph)) : null;
+              // N1: never a limit on a node whose P the additive model gives under a nonlinear identity.
+              const distrusted = nodesUnderANonlinearIdentity(params.graph);
+              const limit = fact !== null
+                ? deriveEveryOptionLimitVerdict(fact.result,
+                  readRatifiedConstraints(params.graph).filter((c) => c.node_id == null || !distrusted.has(c.node_id)))
+                : null;
               return limit === null ? {} : { everyOptionLimit: limit.kind };
             })(),
           };
