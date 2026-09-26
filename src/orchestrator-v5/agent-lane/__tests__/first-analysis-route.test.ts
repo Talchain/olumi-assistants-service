@@ -511,3 +511,59 @@ describe('RED: no time left in the proxy budget → skip, say so, offer Run (tes
     expect(b.assistant_text).toContain(firstAnalysisSentence({ ran: false, reason: 'no_time' })!);
   });
 });
+
+/**
+ * ⭐ AX2 (DL #70 5850471417) ON THE REAL ROUTE: the build turn's automatic first pass was not asked to rank anything, so
+ * a ranking the model writes is dropped WITHOUT the "no option can be put forward…" sentence; a later turn that asks
+ * still gets it. The build's parked questions reach the wire whole (`_agent.open_questions`).
+ */
+describe('AX2: the build turn does not explain an absence nobody asked about', () => {
+  let app: FastifyInstance;
+  const RANKING = 'Hiring a tech lead produces the strongest delivery reliability outcome.';
+  beforeAll(async () => {
+    installFetch();
+    installRunStub();
+    process.env.AGENT_LANE_ENABLED = 'true';
+    process.env.AGENT_LANE_PREVIEW = 'false';
+    app = await buildApp();
+  }, 120_000);
+  afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => {
+    nextScenario();
+    script = []; modelBodies = [];
+    knobs = { graph: READY_GRAPH, coachingHash: 'readback', runStateKind: 'complete_current', leaderClaim: { permitted: false, withheld_reason: 'auto_initiated' } };
+  });
+
+  it('PRECONDITION: the classifier sees the ranking sentence (positive control)', async () => {
+    const { sentenceRanksOptions } = await import('../withheld-leader-fail-closed.js');
+    expect(sentenceRanksOptions(RANKING)).toBe(true);
+  });
+
+  it('RED (build turn): the ranking is dropped and no no-leader sentence is added', async () => {
+    const { AGENT_NO_LEADER_SENTENCES } = await import('../withheld-leader-fail-closed.js');
+    script = [callTool('build_model_from_brief', { brief: BRIEF }), say(`Here is where the model stands. ${RANKING}`)];
+    const b = await turn(app, { message: BRIEF });
+    expect(b._diagnostic_trace.first_analysis).toMatchObject({ ran: true });
+    expect(b.assistant_text).not.toContain(RANKING);
+    for (const s of AGENT_NO_LEADER_SENTENCES) expect(b.assistant_text).not.toContain(s);
+  });
+
+  it('CONTRAST (a later question turn, no run): asked "which is best?", the same drop still says why', async () => {
+    const { AGENT_NO_LEADER_SENTENCES } = await import('../withheld-leader-fail-closed.js');
+    await buildTurn(app);
+    // A kept sentence beside the ranking, so the never-silent rule cannot be what adds the sentence.
+    script = [say(`Here is where the model stands. ${RANKING}`)];
+    const b = await turn(app, { message: 'Which option is best?' });
+    expect(b.assistant_text).toContain('Here is where the model stands.');
+    expect(b.assistant_text).not.toContain(RANKING);
+    expect(AGENT_NO_LEADER_SENTENCES.some((s) => b.assistant_text.includes(s)), b.assistant_text).toBe(true);
+  });
+
+  it('COMPLETE: the build turn carries every parked question on the wire, and the reply shows at most two', async () => {
+    const b = await buildTurn(app) as Body & { _agent: { open_questions?: string[] } };
+    const qs = b._agent.open_questions;
+    expect(Array.isArray(qs) && qs.length > 0, JSON.stringify(b._agent)).toBe(true);
+    expect(b.assistant_text).toContain(qs![0]!);
+    for (const q of qs!.slice(2)) expect(b.assistant_text).not.toContain(q);
+  });
+});
