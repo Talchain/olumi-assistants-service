@@ -62,6 +62,7 @@ import {
   WITHHELD_RUN_IDENTITY_UNCONFIRMED,
   WITHHELD_RUN_IDENTITY_CONFLICT,
   WITHHELD_UNREQUESTED_ANALYSIS,
+  WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
   composeAnalysisStateV1,
   leaderClaimReasonKind,
   readRawRobustnessFromResponseBody,
@@ -255,8 +256,12 @@ describe('S6 — separation_unavailable is NOT EVALUATED, not WITHHELD', () => {
           // 2026-09-25: the automatic first pass's cause, named apart from a real
           // constraint verdict (#63 5825404689).
           WITHHELD_UNREQUESTED_ANALYSIS,
+          // 2026-09-26: C46 stage 1 — the leader's sign on a product the analysis only adds up
+          // (AI Quality #70 5842580505: kind `withheld`, no schemas member).
+          WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
         ]),
       );
+      expect(LEADER_CLAIM_REASON_KINDS[WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]).toBe('withheld');
 
       for (const code of minted) {
         expect(

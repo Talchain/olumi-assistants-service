@@ -68,7 +68,7 @@ function candidateFromServed(g: SGraph, opts: { olumi?: 'ai_proposed' | 'inferre
     goal: {
       metric: goal.label, operator: '>=', target_stated: true, value: goal.goal_threshold_raw ?? null, unit: goal.goal_threshold_unit ?? '',
       horizon_months: opts.horizon === undefined ? 12 : opts.horizon, provenance: 'explicit',
-      baseline_known: false, baseline_value: null, baseline_provenance: 'explicit',
+      baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
     },
     constraints: (g.goal_constraints ?? []).map((c) => ({
       metric: c.label, operator: c.operator, value: c.provenance_unit_relabelled?.pre_normalisation_value ?? c.value,
@@ -107,6 +107,7 @@ function candidateFromServed(g: SGraph, opts: { olumi?: 'ai_proposed' | 'inferre
         .map((e) => ({ from: byId.get(e.from)!.label, to: byId.get(e.to)!.label, direction: e.effect_direction ?? 'positive',
           provenance: e.provenance?.source === 'brief_extraction' ? 'explicit' : 'inferred' })),
     ],
+    identities: [],
     unknowns: opts.unknowns ?? [],
   } as unknown as CandidateModel & { unknowns: string[] };
 }

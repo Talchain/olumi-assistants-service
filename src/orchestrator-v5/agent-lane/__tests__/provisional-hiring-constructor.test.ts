@@ -10,7 +10,7 @@ import { narrateWriteOutcome } from '../write-outcome.js';
 // This is a no-provider contract fixture, not a claim about generated model quality.
 function hiring() {
   return {
-    goal: { metric: 'Productivity', operator: '>=', target_stated: false, value: null, unit: '%', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit' },
+    goal: { metric: 'Productivity', operator: '>=', target_stated: false, value: null, unit: '%', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null },
     constraints: [],
     options: [
       { label: 'Hire a tech lead', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [{ factor_label: 'Tech leads', value: 1, value_kind: 'additional', unit: 'people', provenance: 'explicit' }] },
@@ -31,6 +31,7 @@ function hiring() {
       { from: 'Onboarding disruption', to: 'Productivity', direction: 'negative' as const, provenance: 'ai_proposed' },
       { from: 'Leadership mismatch', to: 'Productivity', direction: 'negative' as const, provenance: 'ai_proposed' },
     ],
+    identities: [],
     unknowns: ['Current headcount is estimated, not confirmed.'],
   };
 }

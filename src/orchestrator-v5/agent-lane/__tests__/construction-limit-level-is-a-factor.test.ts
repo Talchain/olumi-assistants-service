@@ -41,7 +41,7 @@ function outcomeDraft(over: Record<string, unknown> = {}) {
   return {
     goal: {
       metric: 'MRR', operator: '>=', target_stated: true, value: 20000, unit: 'GBP per month', horizon_months: 12, provenance: 'explicit',
-      baseline_known: false, baseline_value: null, baseline_provenance: 'explicit',
+      baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
     },
     constraints: [CHURN_LIMIT],
     options: [
@@ -68,6 +68,7 @@ function outcomeDraft(over: Record<string, unknown> = {}) {
       link('Monthly churn', 'Pro plan subscribers', 'negative'),
       link('Pro plan subscribers', 'MRR', 'positive'),
     ],
+    identities: [],
     unknowns: [],
     ...over,
   };
@@ -78,7 +79,7 @@ function factorDraft() {
   return {
     goal: {
       metric: 'Monthly recurring revenue (MRR)', operator: '>=', target_stated: true, value: 20000, unit: 'GBP per month', horizon_months: 12,
-      provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit',
+      provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
     },
     constraints: [CHURN_LIMIT],
     options: [
@@ -108,6 +109,7 @@ function factorDraft() {
       link('Active Pro subscribers', 'Monthly recurring revenue (MRR)', 'positive'),
       link('Pro plan price', 'Monthly recurring revenue (MRR)', 'positive'),
     ],
+    identities: [],
     unknowns: [],
   };
 }

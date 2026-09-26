@@ -42,7 +42,7 @@ const st = (sid: string): Scenario => {
  * `bound`: the run answers from THAT served turn, and the readback after it returns THAT turn's own graph
  * (whose analysis-affecting hash is the turn's graph_hash), as `assist.v1.scenario-graph.ts` computes it.
  */
-let knobs: { graph: typeof READY_GRAPH; readbackAfterRun: 'current' | 'stale'; bound?: { turn: Turn; graph: Record<string, unknown> } } = { graph: READY_GRAPH, readbackAfterRun: 'current' };
+let knobs: { graph: typeof READY_GRAPH; readbackAfterRun: 'current' | 'stale'; bound?: { turn: Turn; graph: Record<string, unknown>; verdictState?: unknown } } = { graph: READY_GRAPH, readbackAfterRun: 'current' };
 const runTurnOf = (): Turn => knobs.bound?.turn ?? T2;
 
 const { runStub } = vi.hoisted(() => ({ runStub: { impl: null as null | ((a: unknown) => Promise<unknown>) } }));
@@ -97,7 +97,9 @@ function readbackOf(s: Scenario): Record<string, unknown> {
   if (!s.ran) return { graph: s.graph, graph_hash: runTurnOf().graph_hash, analysis_state: { run_state: { kind: 'never_run' }, leader_claim: { permitted: false, withheld_reason: 'no_analysis' } } };
   if (knobs.bound) {
     const b = knobs.bound.turn;
-    return { graph: knobs.bound.graph, graph_hash: b.graph_hash, analysis_state: b.analysis_state, analysis_result: b.analysis_result, analysis_ready: b.analysis_ready };
+    return { graph: knobs.bound.graph, graph_hash: b.graph_hash, analysis_state: b.analysis_state, analysis_result: b.analysis_result, analysis_ready: b.analysis_ready,
+      // The graph read's `analysis_constraint_verdict_state` (#1958), present only when the knob sets it.
+      ...(knobs.bound.verdictState !== undefined ? { analysis_constraint_verdict_state: knobs.bound.verdictState } : {}) };
   }
   if (knobs.readbackAfterRun === 'stale') {
     return { graph: s.graph, graph_hash: T2.graph_hash, analysis_state: { ...T2.analysis_state, run_state: { kind: 'complete_stale', computed_at: COMPUTED_AT, cause: 'graph_changed' }, usable_for_chips: false } };
@@ -231,12 +233,33 @@ describe('the automatic first analysis shows the fragile-link coaching card', ()
     expect(CoachingBlockSchema.safeParse(card).success).toBe(true);
     const computedAt = (PAUL_T1.analysis_state.run_state as { computed_at: string }).computed_at;
     // Reverting agent-v1-turn.ts's `graph: readbackGraph` turns this RED: the card falls back to the generic words.
-    expect(card.signal_id).toBe(`coach:limit_unchecked:${PAUL_T1.graph_hash}:${computedAt}:auto_first_pass:named`);
+    // Churn is worked out from price and adoption on this graph and no run option sets it, so the route's card also
+    // says the PROVED cause (`:unanchored`): the route hands the run's own analysis_ready options to the proof.
+    expect(card.signal_id).toBe(`coach:limit_unchecked:${PAUL_T1.graph_hash}:${computedAt}:auto_first_pass:named:unanchored`);
     expect(String(card.body)).toContain('your limit on “Monthly churn”');
+    expect(String(card.body)).toContain('Olumi works that out from other parts of your model');
     expect(String(card.action_prompt)).toContain('my limit on “Monthly churn”');
     expect(card.action_label).toBe('What this means for my limit');
     expect(card.graph_hash_at_generation).toBe(r.graph_hash);
     expect(r._diagnostic_trace.coaching).toEqual({ eligible: true });
+  });
+
+  it('SEAM: the route hands the graph read\'s own verdict state to the card → identity_unresolved speaks for itself, even on a proved graph', async () => {
+    knobs.bound = { turn: PAUL_T1, graph: PAUL_GRAPH, verdictState: 'identity_unresolved' };
+    const r = await buildTurn(app);
+    const cards = coachingOf(r);
+    expect(cards).toHaveLength(1);
+    const computedAt = (PAUL_T1.analysis_state.run_state as { computed_at: string }).computed_at;
+    // Reverting agent-v1-turn.ts's `constraintVerdictState` threading turns this RED: the card says the proved cause.
+    expect(cards[0]!.signal_id).toBe(`coach:limit_unchecked:${PAUL_T1.graph_hash}:${computedAt}:auto_first_pass:named:identity`);
+    expect(String(cards[0]!.body)).toContain('could not tell whether your limit on “Monthly churn”');
+  });
+
+  it('SEAM control: a graph read whose verdict state AGREES with the proof (unevaluated) keeps the proved cause', async () => {
+    knobs.bound = { turn: PAUL_T1, graph: PAUL_GRAPH, verdictState: 'unevaluated' };
+    const cards = coachingOf(await buildTurn(app));
+    expect(cards).toHaveLength(1);
+    expect(String(cards[0]!.signal_id).endsWith(':named:unanchored')).toBe(true);
   });
 
   it('RED: an explicit Run on the same model → its OWN card (explicit copy, a different block_id)', async () => {

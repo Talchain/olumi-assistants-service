@@ -39,10 +39,11 @@ import { BOARD_EDIT_PREFIX, HistoryStore, historyFromDurableTurns, needsDurableS
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
 import { log } from '../utils/telemetry.js';
+import { asVerdictState } from '../orchestrator/context/constraint-feasibility.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
-import type { AgentLaneMode } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { readinessSentence, readinessViewOf } from '../orchestrator-v5/agent-lane/readiness-view.js';
 import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
@@ -52,6 +53,7 @@ import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/anal
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { narrateWriteOutcome, notAdoptedLine, staleResultLine, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
@@ -364,7 +366,12 @@ const AGENT_INSTRUCTIONS = [
    * ordering is sensitive to, and let the user change it and see how much it matters.
    */
   'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one. Name a leading option ONLY when the result you are reporting carries `claim_permissions.leader_may_be_named: true`; an earlier analysis read from get_canonical_state carries no such permission, so never name a leader from it. Otherwise do not name, rank or hint at one, and do not quote win percentages as a ranking, whatever else the result contains \u2014 say in plain words why no option can be put forward yet. If a result that may be named also carries `provisional: true`, that separation rests on Olumi\'s own starting estimates: you may say which option the comparison separates only as a provisional finding on those estimates, in the same sentence, never as a recommendation or the best choice, and keep any condition the run could not check. When `leader_may_be_named` is false, the finding you lead with is why no option can be put forward \u2014 not which option the comparison favours. Do not say, even hedged or \u201con current assumptions\u201d, that any option leads, is favoured, scores or comes out highest, strongest or best, is ahead, or wins in any share of runs; describe robustness and sensitivity without saying which option they favour. When the result reports sensitivity, name the one assumption the ordering is most sensitive to, say whether it comes from the user or is Olumi\u2019s estimate (or that its source is not recorded), and offer to change it. When the result is fragile or a near tie, say that this uncertainty is itself the finding. When the run says a limit cannot be checked in this model yet, say so plainly and do not suggest any step, input or model change to make it checkable.',
-  'When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each, and — ONLY for a figure the user stated — the level it sets each factor to; it is linked from the decision automatically. When they ask for several (up to 4), call it ONCE with all of them in `options`: that is one change they approve once, and it lands whole or not at all \u2014 never one call per option. When the user asks you to add options, add them in this turn \u2014 do not first ask what they do, unless which way it pushes a factor is unclear: link each to the factors in the model it clearly acts on, leave any level the user did not state unset, and afterwards name what is still needed. If part of what an option does has no factor in the model, add it against the factors it does have and say plainly which part the model does not yet represent \u2014 unless what it would set there is what the model already has today (for example keeping a price at its current level): then it could not be told apart from carrying on as now, so do not add it; say which part the model does not represent and offer to add that factor first; if NONE of what it does has a factor in the model, do not add it and never link it to an unrelated factor \u2014 say the model does not represent it yet and offer to add that factor first; never merge two different options into one. Then call authorise_change once they confirm. A factor with no stated level is added with no level: say plainly which, and ask for the figure. Never invent a level or a direction; if you are not sure, ask.',
+  /*
+   * ⭐ CHALLENGE → AUTHORISED REVISION → RERUN. Served (F) row F8 on 319dde1: asked to record a link as strong, as
+   * the user's own estimate, the Agent said it could not. propose_link_strength reaches the product's own link writer.
+   */
+  'When the user says how strong an existing link is (for example "that effect is strong", "price barely affects churn") or that it pushes the other way, call propose_link_strength with their word (weak, moderate, strong or very strong) \u2014 and a direction ONLY if they said it pushes the other way. Tell them what it will record, including the figure the result gives when the strength changes, and call authorise_change once they agree. After it is recorded, offer to run the analysis again so they can see what it changes. Never change a link\u2019s strength the user did not state.',
+  'When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each, and the level it sets each factor to: the user\u2019s own figure, or \u2014 for an option YOU suggested \u2014 your own suggested figure, marked `estimate` with its basis, which is recorded and shown as Olumi\u2019s estimate, never as theirs; it is linked from the decision automatically. When they ask for several (up to 4), call it ONCE with all of them in `options`: that is one change they approve once, and it lands whole or not at all \u2014 never one call per option. When the user asks you to add options, add them in this turn \u2014 do not first ask what they do, unless which way it pushes a factor is unclear: link each to the factors in the model it clearly acts on, leave unset any level that is neither the user\u2019s figure nor your own marked estimate, and afterwards name what is still needed. If part of what an option does has no factor in the model, add that factor IN THE SAME CHANGE through `new_factors` and name it in the option\u2019s acts_on: say what it changes in the model (the goal, an outcome, a risk, or a factor no option sets) and which way \u2014 from the user\u2019s words, or where it is plain from the option itself (a paid add-on adds revenue); if it is unclear, ask; the preview names each direction so the user can correct it \u2014 and in the preview say it is a new factor, what it changes, that how strongly is Olumi\u2019s estimate, and that its current value is still needed. Never link an option to an unrelated factor instead. If the user would rather not add that factor, add the option against the factors it does have and say plainly which part the model does not yet represent \u2014 unless what it would set there is what the model already has today (for example keeping a price at its current level): then it could not be told apart from carrying on as now, so do not add it; say which part the model does not represent. Never merge two different options into one. Then call authorise_change once they confirm. A factor with no level is added with no level: say plainly which, and ask for the figure. Never put a placeholder (0 or any figure) where there is no level, never pass your own figure as the user\u2019s, and never guess a direction that is unclear; if you are not sure, ask.',
   /*
    * \u26d4 NO AUTOMATIC RUN AFTER A REVISION (Codex 5810763729, 24 Sep). This
    * instruction used to end "after it applies, run_analysis in the same turn and
@@ -639,7 +646,7 @@ export function withheldToolsOf(body: Record<string, unknown>): readonly string[
   return typedApprovalOf(body) === undefined && !typedRunOf(body) ? CHIP_TURN_WITHHELD_TOOLS : [];
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -664,6 +671,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
    * Unavailable readback → no result: never manufacture currentness.
    */
   let analysisResult: unknown;
+  /** The selected run's constraint verdict state, carried with `analysisResult` (same fact); `null` = not recorded. */
+  let constraintVerdictState: string | null | undefined;
   /**
    * ⛔ THE CANVAS RENDERS FROM `draft_graph`, NOT FROM `graph_hash`.
    *
@@ -692,6 +701,12 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       analysisReady = after.json.analysis_ready;
       if (typeof after.json.analysis_state === 'object' && after.json.analysis_state !== null) analysisState = after.json.analysis_state;
       if (typeof after.json.analysis_result === 'object' && after.json.analysis_result !== null) analysisResult = after.json.analysis_result;
+      // The selected run's own constraint verdict state, bound to the SAME fact as
+      // `analysis_result` by the graph read (R&C #70 5842182272). `null` = not recorded.
+      // Narrowed through the contract's own enum: a string that is not a state is not carried.
+      const cvs = after.json.analysis_constraint_verdict_state;
+      if (cvs === null) constraintVerdictState = null;
+      else if (asVerdictState(cvs) !== null) constraintVerdictState = asVerdictState(cvs);
       /**
        * ⭐ READINESS FROM THE MOMENT THE MODEL EXISTS, not from the moment
        * someone runs an analysis.
@@ -818,7 +833,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1428,6 +1443,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     const history = histories.get(sessionId);
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
+    /** Every tool runs as THIS request: its scenario, its user, and the user's own words (`stated-by-user.ts`). */
+    const typedNow = typedByUser(body) ? message : null;
+    const toolCtx: AgentToolContext = { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
+    if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
 
     /**
      * ⭐ FAST PATH 2 — A TYPED APPROVAL IS APPLIED, NOT INTERPRETED (RC #63 5803960423 /
@@ -1447,7 +1466,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const fastStartedAt = Date.now();
       const applied = await dispatchTool(
         'authorise_change', JSON.stringify({ proposal_id: approvedProposal }),
-        { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }, capabilities, mode,
+        toolCtx, capabilities, mode,
       );
       /**
        * ⛔ THE TYPED IDENTITY STAYS AUTHORITATIVE, EVEN WHEN THE PROPOSAL IS GONE
@@ -1504,7 +1523,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (result === undefined && approvedProposal === undefined && typedRunOf(body)) {
       const fastStartedAt = Date.now();
       const ran = await dispatchTool('run_analysis', JSON.stringify({ reason: 'the user pressed Run' }),
-        { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }, capabilities, mode);
+        toolCtx, capabilities, mode);
       /**
        * ⛔ THE INTERPRETER IS GIVEN THE CLAIM PERMISSIONS, NOT LEFT TO INFER THEM. v0.2 says
        * "use only supplied … currentness and claim permissions", and the run's own tool result
@@ -1578,7 +1597,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (result === undefined) try {
       result = await runAgentTurn(
         {
-          ctx: { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id },
+          ctx: toolCtx,
           history,
           message,
           instructions: AGENT_INSTRUCTIONS,
@@ -1685,7 +1704,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * BEFORE the reply is composed, because the Run offer below keys on the
      * readiness this same response carries.
      */
-    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph } = await readBackState(dispatch, scenarioId);
+    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState } = await readBackState(dispatch, scenarioId);
     const fa = firstAnalysis?.outcome;
     // An analysis of THIS revision exists because this turn's construction ran it (or already had).
     const firstAnalysisExists = fa !== undefined && (fa.ran || fa.reason === 'already_ran_for_construction');
@@ -1810,7 +1829,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * without it the first pass is blank. Only the blocks the contract BUILDS are added: the run's own
      * blocks stay under `bindRunBlocksToReadback`'s rule above.
      */
-    const runCoaching = runTurnCoaching(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph });
+    const runCoaching = runTurnCoaching(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState });
     const coachingBound = [...runBound, ...runCoaching.blocks.filter((b) => !lastRunBlocks.includes(b))];
     const coachingBlocks: unknown[] = coachingBound.length === 0
       ? []

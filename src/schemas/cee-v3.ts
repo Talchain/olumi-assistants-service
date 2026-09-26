@@ -443,6 +443,51 @@ export const NodeV3 = z.object({
    *  there while `provenance` returns 41 and `label` 80), so this is not a
    *  published-contract change. A consumer on a stale pin simply drops it. */
   label_placeholder: z.boolean().optional(),
+  /**
+   * ⛔ C46 — THIS QUANTITY IS ITS FACTORS MULTIPLIED TOGETHER (goal / outcome / factor nodes).
+   *
+   * The analyse path is a linear SCM (`node = intercept + Σ parent × strength`, #70
+   * 5841215337): it ADDS the factors' effects, so for a product such as MRR = price ×
+   * subscribers it can get even the SIGN of an option's effect wrong (£49 → £59: −1,360 at
+   * 100 subscribers, +640 at 300; the linear model says −960 at both). The ruling (#70
+   * 5841314428) is that no leader may be named on it where the sign can flip.
+   *
+   * CEE-MINTED at construction (`agent-lane/admit-model.ts` `markProductIdentities`) from a
+   * product the drafter DECLARED and admission checked structurally — never from a label.
+   * It persists the DECLARATION, never a verdict: `run_analysis` re-runs the same sign test
+   * on the graph it actually analysed (`nonlinearIdentityLeaderWithhold`), so an option added
+   * after construction is judged too. `stated_in_brief` says whose reading it is (the
+   * brief's, or Olumi's), so the sentence never presents Olumi's reading as the user's.
+   *
+   * ⚠ THIS DECLARATION IS LOAD-BEARING, NOT DOCUMENTATION — the warning `goal_threshold_frame`
+   * carries. `NodeV3` is a plain `z.object`, so an undeclared `nonlinear_identity` is SILENTLY
+   * DELETED by `GraphV3.safeParse` on the run path and the withhold reaches nothing.
+   *
+   * ABSENCE MEANS NO DECLARED PRODUCT — every graph persisted before this field, and every
+   * linear brief, reads exactly as before. A malformed value is dropped (`.catch`), never a
+   * new reason to refuse a stored graph. REMOVE-ONLY BY CONSTRUCTION: the only reader can
+   * withhold a leader claim, never grant one.
+   *
+   * WHO CAN WRITE IT, stated precisely (the `goal_direction` precedent's wording):
+   *  · an UPDATE cannot — the root is absent from `aiEditableFieldRoots('node')`, so
+   *    `field-safety.ts` refuses any `update_node` op naming it;
+   *  · the draft path does not — its field-by-field `transformNodeToV3` does not copy it;
+   *  · ⚠ a model `add_node` COULD carry it (`CEE_ANALYSIS_OWNED_ROOTS` does not list it). Its
+   *    worst case is an over-withheld leader, never a false one. Listing it there is a
+   *    follow-up for the field-safety owner.
+   *
+   * NOT VALUE-BEARING: it names which nodes multiply, never a magnitude. Not mirrored in
+   * `openapi.yaml`; a consumer on a stale pin simply drops it.
+   */
+  nonlinear_identity: z
+    .object({
+      operation: z.literal('product'),
+      factor_ids: z.array(z.string().min(1)).min(2),
+      stated_in_brief: z.boolean(),
+    })
+    .strict()
+    .optional()
+    .catch(undefined),
 }); // CIL Phase 1: declared fields only — unknown fields stripped with warning
 export type NodeV3T = z.infer<typeof NodeV3>;
 
