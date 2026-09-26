@@ -28,11 +28,12 @@ import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchai
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
-import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
+import { isPercentScaledUnit, unitPinnedScaleFrame } from '../../cee/draft/records/unit-scale-class.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import {
   admitCandidateConstraints,
+  canonicaliseLimitUnit,
   type CandidateConstraint,
   type AdmittedConstraint,
 } from './admit-constraint.js';
@@ -1257,6 +1258,49 @@ export function admitCandidateModel(
     });
   }
 
+  /** The node a limit names: its exact label, else a case-insensitive label match; never a fuzzy guess. */
+  const nodeIdForMetric = (metric: string): string | undefined => {
+    const exact = ids.get(metric);
+    if (exact !== undefined) return exact;
+    const wanted = metric.trim().toLowerCase();
+    for (const [label, id] of ids) if (label.trim().toLowerCase() === wanted) return id;
+    return undefined;
+  };
+
+  /**
+   * ⛔ A LIMIT THE USER STATED ON A LEVEL NAMES A QUANTITY THAT CAN HOLD ONE (R&C 5842795947, DL 5842800634).
+   *
+   * SERVED (CEE 08f6f90, Paul's brief "…keeping monthly churn under 10%…"): in about 2 of 7 first passes the drafter
+   * made "Monthly churn" an OUTCOME. The limit attached, but Paul's "about 4% today, from our billing data" had nowhere
+   * to land — "Monthly churn is currently an outcome, not a factor that can hold a starting value" — because the value
+   * writer takes only a factor (`SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS`). Drafted as a factor, the same journey
+   * reached a proposal 5/5.
+   *
+   * So an OUTCOME named by a limit that (a) the user stated (the brief-stated class, `admit-constraint.ts`
+   * `isUserAuthored`'s rule) and (b) is a percentage LEVEL is admitted as an observable FACTOR: the same id, label,
+   * authorship and links, and exactly the served factor-kind shape. A level here is a unit that pins a frame on its own
+   * (`unitPinnedScaleFrame`) AND that the limit canonicaliser carries as a plain `"%"` on that frame — a percent head
+   * with at most a period ("% per month"), above 1 and up to 100. "percentage points" / "pp" (a change), "% change vs …", a money or
+   * count limit, a goal and a risk are left exactly as they were. The frame is the one the unit pins (a unit of
+   * measurement, which is what the served factor-kind node carries); no starting value is written — the slot stays
+   * empty for the user's own figure. An outcome carries no value or frame to keep (its entity has no `node` payload).
+   */
+  const limitedLevelFrames = new Map<string, number>();
+  for (const c of model.constraints) {
+    if (inferenceClassFor(c.provenance) !== 'brief_stated') continue;
+    const frame = unitPinnedScaleFrame(c.unit, c.value);
+    if (frame === undefined || canonicaliseLimitUnit(c.value, c.unit, { scale_frame: frame }).unit !== '%') continue;
+    const id = nodeIdForMetric(c.metric);
+    if (id !== undefined) limitedLevelFrames.set(id, frame);
+  }
+  for (const n of nodes) {
+    const frame = limitedLevelFrames.get(n.id);
+    if (frame === undefined || n.kind !== 'outcome') continue;
+    n.kind = 'factor';
+    n.category = 'observable';
+    n.scale_frame = frame;
+  }
+
   const allLinks: CandidateLink[] = [...model.links, ...(widened.proposed_links ?? [])];
   const resolvable: CandidateLink[] = [];
   const unresolved: { from: string; to: string; reason: string; detail: string }[] = [];
@@ -1481,14 +1525,7 @@ export function admitCandidateModel(
   const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
   const constraintResult = admitCandidateConstraints(
     model.constraints,
-    (metric) => {
-      const exact = ids.get(metric);
-      if (exact !== undefined) return exact;
-      // Fall back to a case-insensitive label match; never a fuzzy guess.
-      const wanted = metric.trim().toLowerCase();
-      for (const [label, id] of ids) if (label.trim().toLowerCase() === wanted) return id;
-      return undefined;
-    },
+    nodeIdForMetric,
     // A limit's unit is canonicalised against ITS node's scale — the one PLoT will normalise it against.
     (nodeId) => {
       const n = nodeById.get(nodeId);
