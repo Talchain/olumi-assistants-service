@@ -44,7 +44,8 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 
 const SCENARIO = '3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f';
 const USER = 'user-held';
-const ctx = { scenario_id: SCENARIO, authenticated_user_id: USER, request_id: 'r' };
+/** What the user wrote in these rows: a figure is recorded as theirs only when it is here (`stated-by-user.ts`). */
+const ctx = { scenario_id: SCENARIO, authenticated_user_id: USER, request_id: 'r', user_text: 'Carrying on backfills 1 developer and hires 0 tech leads. Onboarding workload stays at 30, or 31 if we add one, or 40. We hire 3 developers this year.' };
 
 type Edge = { from: string; to: string; origin?: string; provenance?: Record<string, unknown>; strength?: unknown; exists_probability?: number; effect_direction?: string };
 type Node = { id: string; kind: string; label: string; observed_state?: Record<string, unknown>; scale_frame?: number; interventions?: Record<string, unknown> };
