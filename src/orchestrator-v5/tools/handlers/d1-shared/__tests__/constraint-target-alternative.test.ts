@@ -267,6 +267,11 @@ describe('the candidate must be SCORABLE, not merely measured', () => {
  * with a directed incoming edge BEFORE it reads `observed_state`; served `e39f6e0` saved a user level on
  * such a target (Monthly churn 3% → 2.4%) and the re-run still could not check the limit. If this mirror
  * ever started reading the level, the arm would go quiet exactly where PLoT still refuses.
+ *
+ * ⚠ SUPERSEDED FOR A LEVEL-FRAMED LIMIT (26 Sep, P1-c): PLoT `e2755cfe`/`30d7a60b` anchor a limit whose own
+ * `value_frame` is 'level' on the target's observed baseline, so such a row is no longer collected
+ * (`coaching/__tests__/level-limit-is-not-a-structural-refusal.test.ts`). These rows carry no `value_frame`,
+ * which is PLoT's unchanged three-limb verdict, so every assertion below still holds.
  */
 describe('collectUnanchoredConstraintTargetIds — a level on a derived target does not anchor it', () => {
   const churnLimit = [{ constraint_id: 'c_churn', node_id: 'monthly_churn' }];
