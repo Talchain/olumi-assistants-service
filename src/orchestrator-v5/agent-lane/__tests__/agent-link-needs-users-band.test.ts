@@ -67,7 +67,8 @@ describe('⛔ propose_model_change records a link\'s strength only as the band t
     const store = new ProposalStore();
     const p = await createAgentCapabilities(w.d, store).proposeModelChange(said('Price affects churn.'), { ...LINK, strength: 'strong' });
     expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'strength_not_stated' }));
-    expect(String(p.detail)).toContain('how strong is that effect: weak, moderate, strong or very strong?');
+    // The canvas's own band words (Canvas #70 5847910497): the user never reads "weak" on a pill, so is never asked for it.
+    expect(String(p.detail)).toContain('how strong is that effect: slight, moderate, strong or very strong?');
     expect(String(p.detail)).toMatch(/never offer a band as theirs/);
     expect(p).not.toHaveProperty('proposal_id');
     expect(store.outstanding(SCENARIO, null)).toEqual([]);

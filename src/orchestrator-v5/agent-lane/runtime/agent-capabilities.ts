@@ -1472,14 +1472,15 @@ export function createAgentCapabilities(
       if (readOnly) return refuseReadOnly();
       if (!isInfluenceBand(args?.strength)) {
         return { ok: false, mutated: false, refusal: 'unreadable_strength',
-          detail: 'The strength must be one of: weak, moderate, strong, very strong. Nothing was prepared; ask the user which.' };
+          detail: 'The strength must be one of the tool\u2019s values: weak (the canvas\u2019s Slight), moderate, strong, very strong. Nothing was prepared; '
+            + 'ask the user which, in the canvas\u2019s words: slight, moderate, strong or very strong.' };
       }
       const band = args.strength;
       // ⛔ Recorded as the user's only when the user named the band (`bandTheUserWrote`); the writer stamps it as theirs.
       if (!bandTheUserWrote(band, ctx.user_turn_text)) {
         return { ok: false, mutated: false, refusal: 'strength_not_stated',
           detail: `The user has not called this link ${band} in this message, in their own words, so nothing was prepared: it would be recorded as their estimate. `
-            + 'Ask them how strong they think it is \u2014 weak, moderate, strong or very strong \u2014 and never offer a band as theirs.' };
+            + 'Ask them how strong they think it is \u2014 slight, moderate, strong or very strong \u2014 and never offer a band as theirs.' };
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
@@ -1591,10 +1592,10 @@ export function createAgentCapabilities(
        */
       const band = isInfluenceBand(args?.strength) ? args.strength : undefined;
       if (band === undefined || !bandTheUserWrote(band, ctx.user_turn_text)) {
-        const ask = 'ask them "how strong is that effect: weak, moderate, strong or very strong?" and never offer a band as theirs.';
+        const ask = 'ask them "how strong is that effect: slight, moderate, strong or very strong?" and never offer a band as theirs.';
         return { ok: false, mutated: false, refusal: 'strength_not_stated',
           detail: band === undefined
-            ? `${args?.strength === undefined ? 'No strength was given' : 'The strength given is not one of weak, moderate, strong or very strong'}, so nothing was prepared. `
+            ? `${args?.strength === undefined ? 'No strength was given' : 'The strength given is not one of weak (the canvas\u2019s Slight), moderate, strong or very strong'}, so nothing was prepared. `
               + `If the user named one of those bands for this link in this message, call again with it as strength; otherwise ${ask}`
             : `The user has not called the link from "${from.label}" to "${to.label}" ${band} in this message, in their own words, so nothing was prepared: `
               + `it would be recorded as their estimate. Instead, ${ask}` };

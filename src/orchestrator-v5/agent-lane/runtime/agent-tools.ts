@@ -12,6 +12,16 @@
  * server-side loop and not an MCP surface OpenAI calls from outside.
  */
 
+/**
+ * ⭐ THE CANVAS'S WORD FOR THE LOWEST BAND IS "Slight" (Canvas #70 5847910497). The `strength` enum keeps the wire value
+ * `weak`, but the user reads "Slight" on every link pill. Served on CEE `92c2e34`: told "the link … is slight", the model
+ * asked "does slight mean weak?"; the user's "Yes." named no band, so it was refused, and the user was then told to say
+ * "weak" — a word the canvas never shows. `bandTheUserWrote` already grounds "slight" (#2008); this tells the model so.
+ */
+export const SLIGHT_IS_WEAK =
+  ' The canvas calls the lowest band Slight: when the user calls a link slight, that IS `weak` \u2014 pass `weak`, and never ask '
+  + 'whether slight means weak. When you ask the user for a band, use the canvas\u2019s words: slight, moderate, strong or very strong.';
+
 export interface AgentToolContext {
   /** Bound from the request, never from model output. */
   readonly scenario_id: string;
@@ -79,7 +89,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'proposal and returns its id, which you keep for authorise_change: show the user what it changes, never the id, before asking them to approve. ' +
       'Use the labels exactly as get_canonical_state returned them. ' +
       'The link is recorded with `strength` as the user\u2019s own estimate, so give ONLY the band the user named for it in this message; ' +
-      'if they named none, ask how strong the effect is first \u2014 a band they did not say is refused.',
+      'if they named none, ask how strong the effect is first \u2014 a band they did not say is refused.' + SLIGHT_IS_WEAK,
     parameters: obj({
       from_label: { type: 'string' },
       to_label: { type: 'string' },
@@ -209,7 +219,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
       + 'recorded as theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
       + 'Give `direction` ONLY when the user said the link pushes the other way. Never use this for a strength the user did not state: '
-      + 'if they have not named a band in their own words, ask which it is first \u2014 a band they did not say is refused.',
+      + 'if they have not named a band in their own words, ask which it is first \u2014 a band they did not say is refused.' + SLIGHT_IS_WEAK,
     parameters: obj({
       from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
       to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
