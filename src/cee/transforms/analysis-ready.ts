@@ -40,6 +40,7 @@ import { classifyEncodedInterventionAdmissibility } from "../../orchestrator/sha
 // the two-authorities shape this estate keeps paying for (trap 21).
 import { isRepairAuthoredOptionFactorEdge } from "../../graph/repair-authored-edge.js";
 import { resolveScaleFrame } from "../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
+import { isSwitch, resolveMagnitudeFrame, switchStateWords, type MagnitudeNode } from "../magnitude/link-effect.js";
 
 // ============================================================================
 // Types
@@ -491,12 +492,17 @@ function renderFactorCurrentLevel(
   factorNode: NodeV3T,
   currentLevel: number,
   levelCameFromObservedState: boolean,
+  isSwitchFactor: boolean,
 ): string {
   const bareLevel = String(parseFloat(currentLevel.toFixed(2)));
 
   // The level is not the observed state's — nothing on `observed_state`
   // describes it, so nothing on `observed_state` may render it.
   if (!levelCameFromObservedState) return bareLevel;
+
+  // A switch's state is said in words, ahead of every string rung (see `switchFactorIds`).
+  const switchWords = isSwitchFactor ? switchStateWords(currentLevel) : undefined;
+  if (switchWords !== undefined) return switchWords;
 
   const os = factorNode.observed_state;
   const factorLabel = (factorNode.label ?? "").toLowerCase().trim();
@@ -518,6 +524,41 @@ function renderFactorCurrentLevel(
 
   // Rung 3, terminal: say the level plainly.
   return bareLevel;
+}
+
+/**
+ * ⭐ A 0/1 SWITCH IS SAID AS "on" / "off" (served-claim audit UF-3, #70 5850056041).
+ *
+ * ⚠ SERVED (CEE staging, `f-20260926T202112Z/01-F1-brief.json`): the release switch (`unit: "binary (0/1)"`, held at 0,
+ * every release option sets 1) reached the option card as `display_value: "1"`, and after the starting point was
+ * adopted (`f-20260926T201724Z/07-F5-approve1.json`) the blocker read "is currently 0 release status (0/1)". Its
+ * persisted `display_value` held that same string, so the factor's own display rung carried the defect too.
+ *
+ * Which factor is a switch is the magnitude contract's one test, `isSwitch` (frame 1, the held level and every option
+ * level exactly 0 or 1), over the factor's graph fields and every level the options set on it: a structured test, no
+ * unit wording read. Its words are `switchStateWords`, the vocabulary `statementWords` already says "switching on" in.
+ * A switch's level is exact, so its words rank ahead of every string rung; any other factor renders exactly as before.
+ */
+function switchFactorIds(factorNodeMap: ReadonlyMap<string, NodeV3T>, options: readonly OptionV3T[]): Set<string> {
+  const levels = new Map<string, number[]>();
+  for (const option of options) {
+    for (const [factorId, iv] of Object.entries(option.interventions ?? {})) {
+      const v = typeof iv === "number" ? iv : (iv as { value?: unknown } | undefined)?.value;
+      if (typeof v === "number" && Number.isFinite(v)) levels.set(factorId, [...(levels.get(factorId) ?? []), v]);
+    }
+  }
+  const out = new Set<string>();
+  for (const [id, node] of factorNodeMap) {
+    const mn: MagnitudeNode = {
+      label: node.label ?? id,
+      kind: "factor",
+      scale_frame: (node as { scale_frame?: unknown }).scale_frame,
+      observed_state: node.observed_state as MagnitudeNode["observed_state"],
+      option_levels: levels.get(id) ?? [],
+    };
+    if (isSwitch(mn, resolveMagnitudeFrame(mn))) out.add(id);
+  }
+  return out;
 }
 
 /**
@@ -544,6 +585,7 @@ function buildInterventionDetail(
   factorNode: NodeV3T | undefined,
   intervention: OptionV3T["interventions"][string] | undefined,
   carriedRawValue: number | string | boolean | undefined,
+  isSwitchFactor: boolean,
 ): InterventionDetail {
   // ⚠ F3 (Codex, 2026-08-13) — AN OPTION'S RECEIPT USED TO DESCRIBE THE FACTOR,
   // NOT THE OPTION. Every branch below returned the FACTOR's
@@ -632,6 +674,10 @@ function buildInterventionDetail(
     ...(ownRawValue !== null && { raw_value: ownRawValue }),
     ...(unit !== undefined && { unit }),
   };
+
+  // A switch's state is said in words, ahead of every string route (see `switchFactorIds`).
+  const switchWords = isSwitchFactor ? switchStateWords(normalisedValue) : undefined;
+  if (switchWords !== undefined) return { display_value: switchWords, ...ownFields };
 
   // A carried native amount owns its numeric presentation. A display string
   // can be a stale projection of the same intervention; it must not override
@@ -738,6 +784,7 @@ export function buildAnalysisReadyPayload(
       factorNodeMap.set(node.id, node);
     }
   }
+  const switchIds = switchFactorIds(factorNodeMap, options);
 
   // Build option→factor adjacency from V3 graph edges.
   //
@@ -917,6 +964,7 @@ export function buildAnalysisReadyPayload(
                 factorNode,
                 currentLevel,
                 typeof observedValue === "number",
+                switchIds.has(factorId),
               )}. What should option "${analysisOpt.label}" set it to?`
             : `Factor "${factorLabel}" needs a numeric value for option "${analysisOpt.label}"`,
         suggested_action: "add_value",
@@ -1039,6 +1087,7 @@ export function buildAnalysisReadyPayload(
       const v3Intervention = v3Option?.interventions?.[factorId];
       details[factorId] = buildInterventionDetail(
         factorId, numericValue, factorNode, v3Intervention, analysisOpt.raw_interventions?.[factorId],
+        switchIds.has(factorId),
       );
     }
     analysisOpt.intervention_details = details;

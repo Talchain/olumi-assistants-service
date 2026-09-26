@@ -277,6 +277,14 @@ export function isSwitch(node: MagnitudeNode, frame: number | undefined): boolea
   return levels.length > 0 && levels.every((v) => v === 0 || v === 1);
 }
 
+/**
+ * The words a switch's state is said in: the same vocabulary as "switching on" in `statementWords`. `undefined` for any
+ * level that is not exactly 0 or 1, so a caller can only use it on a level `isSwitch` already admits.
+ */
+export function switchStateWords(level: number): 'on' | 'off' | undefined {
+  return level === 1 ? 'on' : level === 0 ? 'off' : undefined;
+}
+
 const isPercentLevel = (node: MagnitudeNode, frame: number | undefined): boolean => {
   const unit = unitOf(node);
   return frame === 100 && unit !== undefined && isPercentWithPeriod(unit);
