@@ -944,8 +944,14 @@ const NO_LEADER_OPENING = WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL.trim().replace
 
 /** One clause of why, one next action — keyed by the typed `leader_claim.withheld_reason`. */
 const BY_WITHHELD_REASON: Readonly<Record<string, string>> = {
+  /**
+   * ⛔ NEVER A FUTILE "FIX THE LIMIT, RUN AGAIN" (DL #70 5847835872; R&C 5847390325, AI Quality 5847818424): on both
+   * served instances the cause was not the user's limit (an upstream refusal of a level limit on a factor every option
+   * sets; the model's own link size), so a rerun loops. No typed code today proves a restated limit gets checked
+   * (`constraint-gap-disclosure.ts`), so the default asks for neither; a typed cause names what would change.
+   */
   [WITHHELD_CONSTRAINT_VERDICT]:
-    'because a limit on your model was not shown to be met on this run; tell me whether that limit is right as it stands, then run the analysis again',
+    'because a limit on your model was not shown to be met on this run, and running the analysis again as it stands will not change that; ask me what the limit needs before it can be checked',
   [WITHHELD_NEAR_TIE]:
     'because the options came out too close together on this run to tell apart; tell me what matters most to you between them',
   [WITHHELD_SEPARATION_UNAVAILABLE]:
@@ -962,6 +968,24 @@ const BY_WITHHELD_REASON: Readonly<Record<string, string>> = {
     'because Olumi reads your goal as depending on quantities that multiply together, and this model adds their ' +
     'effects up rather than multiplying them; running the analysis again will not change that',
 };
+
+/**
+ * When the limit's verdict was withheld: its TYPED cause, from the run's own `decision_brief.warnings[].code` —
+ * what is missing and what would change it, never the user's limit when the limit is not the cause.
+ */
+const BY_CONSTRAINT_CODE: Readonly<Record<string, string>> = {
+  CONSTRAINT_LEVEL_DRAWS_OUT_OF_DOMAIN:
+    'because Olumi\u2019s own estimate of an effect in your model carries the limited figure outside the range your limit is set in, so the limit could not be tested; that estimate, not your limit, is what would have to change, and running the analysis again as it stands will not change it',
+};
+
+/** The typed warning codes the run's own `analysis_result` block carries (`decision_brief.warnings[].code`). */
+export function limitCauseCodesOf(blocks: unknown): readonly string[] {
+  if (!Array.isArray(blocks)) return [];
+  const result = blocks.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') as { enrichment?: { decision_brief?: { warnings?: unknown } } } | undefined;
+  const warnings = result?.enrichment?.decision_brief?.warnings;
+  if (!Array.isArray(warnings)) return [];
+  return warnings.map((w) => (w as { code?: unknown } | null)?.code).filter((c): c is string => typeof c === 'string');
+}
 
 /** Keyed by the admission's `permitted_analysis_mode` reason code, when the claim itself did not withhold. */
 const BY_ADMISSION_REASON: Readonly<Record<string, string>> = {
@@ -983,7 +1007,7 @@ const sentence = (clause: string): string => `${NO_LEADER_OPENING}, ${clause}.`;
 
 /** Every sentence this module can append — the build-time probe and the idempotence check read this. */
 export const AGENT_NO_LEADER_SENTENCES: readonly string[] = [
-  ...new Set([...Object.values(BY_WITHHELD_REASON), ...Object.values(BY_ADMISSION_REASON), REASON_NOT_RECORDED].map(sentence)),
+  ...new Set([...Object.values(BY_WITHHELD_REASON), ...Object.values(BY_CONSTRAINT_CODE), ...Object.values(BY_ADMISSION_REASON), REASON_NOT_RECORDED].map(sentence)),
 ];
 
 function admissionModeReasonCode(analysisReady: unknown): string | undefined {
@@ -1002,11 +1026,15 @@ function admissionModeReasonCode(analysisReady: unknown): string | undefined {
  * automatic first run's "every estimate is Olumi's" — so reading the token first told a user with no
  * limits in their brief that "a limit on your model was not shown to be met".
  */
-export function agentNoLeaderSentence(withheldReason: string | undefined, analysisReady: unknown): string {
+export function agentNoLeaderSentence(withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = []): string {
   const mode = permittedAnalysisModeFromAnalysisReady(analysisReady);
   if (mode !== null && mode !== 'comparative_leader') {
     const code = admissionModeReasonCode(analysisReady);
     if (code !== undefined && BY_ADMISSION_REASON[code] !== undefined) return sentence(BY_ADMISSION_REASON[code]!);
+  }
+  if (withheldReason === WITHHELD_CONSTRAINT_VERDICT) {
+    const cause = limitCauseCodes.find((c) => BY_CONSTRAINT_CODE[c] !== undefined);
+    if (cause !== undefined) return sentence(BY_CONSTRAINT_CODE[cause]!);
   }
   if (withheldReason !== undefined && BY_WITHHELD_REASON[withheldReason] !== undefined) return sentence(BY_WITHHELD_REASON[withheldReason]!);
   return sentence(REASON_NOT_RECORDED);
@@ -1373,7 +1401,7 @@ export function enforceAgentLaneLeaderClaimsAtWire(
         droppedSentences = projected.droppedSentences;
         const withheldReason = claimPermissionsFrom((response as { analysis_state?: unknown }).analysis_state, opts.analysisReady).withheld_reason
           ?? opts.leaderClaimWithheldReason;
-        const closing = agentNoLeaderSentence(withheldReason, opts.analysisReady);
+        const closing = agentNoLeaderSentence(withheldReason, opts.analysisReady, limitCauseCodesOf((response as { blocks?: unknown }).blocks));
         const body = projected.text.trimEnd();
         next = { ...response, assistant_text: body.length === 0 ? closing : `${body}\n\n${closing}` } as OlumiResponse;
         log.info(
