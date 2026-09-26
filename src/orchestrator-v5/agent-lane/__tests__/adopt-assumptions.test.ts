@@ -17,6 +17,7 @@ import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, authorisationTurnId, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { committedValueWrite } from './fixtures/served-value-write.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440000';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r' };
@@ -121,7 +122,7 @@ describe('authorise_change applies the STORED assumptions', () => {
     const p = fakeProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const prop = await caps.proposeAssumptions(ctx, ASK);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
 
     expect(applied.ok, JSON.stringify(applied)).toBe(true);
     expect(applied.mutated).toBe(true);
@@ -144,7 +145,7 @@ describe('authorise_change applies the STORED assumptions', () => {
     const p1 = fakeProduct();
     const c1 = createAgentCapabilities(p1.d, new ProposalStore());
     const prop = await c1.proposeAssumptions(ctx, ASK);
-    await c1.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    await c1.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
 
     const id = String(prop.proposal_id);
     expect(p1.posted.map((x) => x.turn_id)).toEqual([
@@ -159,7 +160,7 @@ describe('authorise_change applies the STORED assumptions', () => {
     const p2 = fakeProduct();
     const c2 = createAgentCapabilities(p2.d, new ProposalStore());
     const prop2 = await c2.proposeAssumptions(ctx, ASK);
-    await c2.authoriseChange(ctx, { proposal_id: String(prop2.proposal_id) });
+    await c2.authoriseChange(nextRequest(ctx), { proposal_id: String(prop2.proposal_id) });
     expect(p2.posted.map((x) => x.turn_id)).toEqual(p1.posted.map((x) => x.turn_id));
   });
 
@@ -168,7 +169,7 @@ describe('authorise_change applies the STORED assumptions', () => {
     const p = fakeProduct({ rescale: { monthly_churn_rate: 0.035 } });
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const prop = await caps.proposeAssumptions(ctx, ASK);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(applied.must_disclose_rescaling).toBe(true);
     // ⚠ UPDATED — this list used to hold ONE entry, and that was the defect.
     // `Pro subscribers` was approved as 400 and the model computes with 0.4 (a
@@ -188,7 +189,7 @@ describe('authorise_change applies the STORED assumptions', () => {
     const p = fakeProduct({ failOn: ['pro_subscribers'] });
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const prop = await caps.proposeAssumptions(ctx, ASK);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(applied.adopted_count).toBe(1);
     expect(applied.requested_count).toBe(2);
     // ⚠ `recorded` is now the FINAL stored value, not the pre-frame one: 3.5 on a
@@ -199,7 +200,7 @@ describe('authorise_change applies the STORED assumptions', () => {
       { factor: 'Pro subscribers', requested: 400, recorded: null },
     ]);
     // Not marked applied, so a retry can still complete the rest.
-    const again = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const again = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(again.already_applied).toBeUndefined();
   });
 
@@ -207,7 +208,7 @@ describe('authorise_change applies the STORED assumptions', () => {
     const p = fakeProduct({ failOn: ['monthly_churn_rate', 'pro_subscribers'] });
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const prop = await caps.proposeAssumptions(ctx, ASK);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(applied.ok).toBe(false);
     expect(applied.mutated).toBe(false);
     expect(applied.refusal).toBe('not_applied');
@@ -261,7 +262,7 @@ describe('a value adopted onto an unframed factor gets a range, or the analysis 
     const p = fakeProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const prop = await caps.proposeAssumptions(ctx, ASK);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
 
     // 400 subscribers is a bare amount; 3.5 is too. Both get a derived range.
     expect(applied.ranges_added_for_analysis).toEqual([
@@ -283,7 +284,7 @@ describe('a value adopted onto an unframed factor gets a range, or the analysis 
     const prop = await caps.proposeAssumptions(ctx, {
       assumptions: [{ factor_label: 'Monthly churn rate', value: 0.035, unit: 'proportion', basis: 'already a proportion' }],
     });
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     // The contrast control: no range, no second write, no disclosure noise.
     expect(applied.ranges_added_for_analysis).toBeUndefined();
     expect(p.registered).toHaveLength(0);
@@ -294,7 +295,7 @@ describe('a value adopted onto an unframed factor gets a range, or the analysis 
     const p = fakeProduct({ registerFails: true });
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const prop = await caps.proposeAssumptions(ctx, ASK);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(applied.ok).toBe(true);
     expect(applied.ranges_added_for_analysis).toBeUndefined();
     expect(applied.failures).toContainEqual({ factor: 'scale_frame', detail: 'could not attach a range: http 500' });

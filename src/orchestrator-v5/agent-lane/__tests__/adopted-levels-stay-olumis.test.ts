@@ -26,6 +26,7 @@ import { executeOptionInterventionEdit } from '../../system-events/option-interv
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { AGENT_TOOLS, dispatchTool } from '../runtime/agent-tools.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d';
 const USER = 'user-adopt';
@@ -133,7 +134,7 @@ describe('an approved option level carries WHOSE level it is, through the real w
       interventions: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'one hire' }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
-    const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    const out = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(p.cell('hire_a_tech_lead', 'tech_leads_hired')).toMatchObject({ value: 0.1, source: 'cee_hypothesis' });
   });
@@ -144,7 +145,7 @@ describe('an approved option level carries WHOSE level it is, through the real w
     const r = await caps.proposeOptionInterventions(ctx, {
       interventions: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'the user: one hire', user_stated: true }],
     });
-    expect((await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) })).ok).toBe(true);
+    expect((await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) })).ok).toBe(true);
     expect(p.cell('hire_a_tech_lead', 'tech_leads_hired')).toMatchObject({ value: 0.1, source: 'user_specified' });
   });
 
@@ -160,7 +161,7 @@ describe('an approved option level carries WHOSE level it is, through the real w
       ],
     });
     expect(sp.ok, JSON.stringify(sp)).toBe(true);
-    const out = await caps.authoriseChange(ctx, { proposal_id: String(sp.proposal_id) });
+    const out = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(sp.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(p.cell('hire_a_tech_lead', 'tech_leads_hired')).toMatchObject({ value: 0.1, source: 'cee_hypothesis' });
     expect(p.cell('hire_two_developers', 'onboarding_share')).toMatchObject({ value: 0.45, source: 'user_specified' });
@@ -200,7 +201,7 @@ describe('the Agent-facing contract can say whose level it is', () => {
       interventions: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'the user: one hire', user_stated: true }],
     }), ctx, caps);
     expect(r.ok, JSON.stringify(r)).toBe(true);
-    const out = await dispatchTool('authorise_change', JSON.stringify({ proposal_id: r.proposal_id }), ctx, caps);
+    const out = await dispatchTool('authorise_change', JSON.stringify({ proposal_id: r.proposal_id }), nextRequest(ctx), caps);
     expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(p.cell('hire_a_tech_lead', 'tech_leads_hired')).toMatchObject({ value: 0.1, source: 'user_specified' });
   });
@@ -211,7 +212,7 @@ describe('the Agent-facing contract can say whose level it is', () => {
     const r = await dispatchTool('propose_option_interventions', JSON.stringify({
       interventions: [{ option_label: 'Hire a Tech Lead', factor_label: 'Tech leads hired', value: 1, basis: 'one hire, as a starting point' }],
     }), ctx, caps);
-    expect((await dispatchTool('authorise_change', JSON.stringify({ proposal_id: r.proposal_id }), ctx, caps)).ok).toBe(true);
+    expect((await dispatchTool('authorise_change', JSON.stringify({ proposal_id: r.proposal_id }), nextRequest(ctx), caps)).ok).toBe(true);
     expect(p.cell('hire_a_tech_lead', 'tech_leads_hired')).toMatchObject({ value: 0.1, source: 'cee_hypothesis' });
   });
 });

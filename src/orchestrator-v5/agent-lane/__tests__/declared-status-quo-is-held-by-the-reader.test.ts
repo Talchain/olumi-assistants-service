@@ -29,6 +29,7 @@ import { readIsBaseline } from '../../../cee/baseline-identity.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import { slugId, type CandidateModel } from '../admit-model.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b';
 /** What the user wrote in these rows: a figure is recorded as theirs only when it is here (`stated-by-user.ts`). */
@@ -227,7 +228,7 @@ describe('(1) the served pricing shape: a DECLARED "Keep £49 Pro Price" held by
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r).not.toHaveProperty('levels_not_accepted');
-    expect((await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) })).ok).toBe(true);
+    expect((await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) })).ok).toBe(true);
     expect(p.posted).toEqual([`level ${KEEP}::${PRICE}`]);
     expect(p.read().find((n) => n.id === KEEP)?.interventions).toEqual({ [PRICE]: { value: 45 / 200 } });
   });
@@ -251,7 +252,7 @@ describe('(1) the served pricing shape: a DECLARED "Keep £49 Pro Price" held by
       expect.objectContaining({ option: KEEP_LABEL, factor: '£59 price exposure', value: 0 }),
     ]);
     expect(levelPaths(store, r.proposal_id)).toEqual(ORDINARY_PATHS);
-    expect((await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) })).ok).toBe(true);
+    expect((await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) })).ok).toBe(true);
     expect(p.posted.filter((x) => x.startsWith(`level ${KEEP}::`))).toEqual([]);
     expect(p.read().find((n) => n.id === KEEP)).not.toHaveProperty('interventions');
   });

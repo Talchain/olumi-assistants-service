@@ -35,6 +35,7 @@ import { describe, expect, it } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { committedValueWrite } from './fixtures/served-value-write.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440000';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r' };
@@ -101,7 +102,7 @@ async function authorise(opts: { competitorFramesBetweenTheReads?: boolean } = {
   const p = product(opts);
   const caps = createAgentCapabilities(p.d, new ProposalStore());
   const prop = await caps.proposeAssumptions(ctx as never, ASK as never);
-  const r = await caps.authoriseChange(ctx as never, { proposal_id: String(prop.proposal_id) } as never);
+  const r = await caps.authoriseChange(nextRequest(ctx) as never, { proposal_id: String(prop.proposal_id) } as never);
   return { p, r: r as Record<string, unknown> };
 }
 

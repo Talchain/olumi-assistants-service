@@ -108,6 +108,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 
 import { planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
+import { AWAITING_YOUR_APPROVAL } from '../approval-chips.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
@@ -783,6 +784,42 @@ export function createAgentCapabilities(
    */
   let heldOptionThisRequest: string | undefined;
   /**
+   * ⛔ THE AGENT NEVER APPROVES A CHANGE IT PREPARED IN THE SAME REQUEST — the user sees it first, and the one
+   * approval is theirs.
+   *
+   * CODE-READ at 0479d0c5, adversarially re-checked: tools are withheld only on a chip turn (`withheldToolsOf`
+   * returns [] for a typed composer message), and `ProposalStore.authorise` checks the proposal's subject,
+   * integrity and base revision, never which request minted it; a `gmh_` ref went straight to `confirmHeld`. So a
+   * typed "add a Premium tier" could `propose_new_option` and then `authorise_change` the ref it had just been
+   * handed, in ONE reply, and change the model before the user saw the exact change — the shape the route
+   * measured once before on a click (#63 5819380376: "a same-turn propose-and-authorise (commits:1)").
+   *
+   * Every id a proposer MINTS is recorded here against the request that minted it: each `prop_` at the one point it
+   * enters the store (`holdForApproval`, building blocks included), and each `gmh_` as soon as its add-option turn is
+   * sent (the product may hold it even when this capability then reports `not_prepared`, and `get_canonical_state`
+   * would list it). `authoriseChange` refuses any of them in that request as `awaiting_your_approval`, nothing
+   * written. Keyed by the request's own `request_id` (bound by the route, never model output) inside a capability
+   * set the route creates per request, so nothing outlives the request: the NEXT one — the approve chip, or a typed
+   * "yes" — applies it exactly as before (`agent-cannot-approve-its-own-proposal.test.ts`).
+   *
+   * ⚠ Known cost, priced: an Agent that RE-proposes an identical change on the user's "yes" turn and then approves
+   * the re-minted id is refused too, and the chip is offered again (one more click). A same-request re-mint is not
+   * trusted as "already seen": a `gmh_` ref names the option, not its content, so a re-mint can hold a different
+   * change under the same ref.
+   */
+  const preparedByRequest = new Map<string, Set<string>>();
+  const markPrepared = (ctx: AgentToolContext, id: string): void => {
+    const ids = preparedByRequest.get(ctx.request_id) ?? new Set<string>();
+    ids.add(id);
+    preparedByRequest.set(ctx.request_id, ids);
+  };
+  const preparedInThisRequest = (ctx: AgentToolContext, id: string): boolean => preparedByRequest.get(ctx.request_id)?.has(id) === true;
+  /** The one way a proposer stores a `prop_` proposal: stored for the user's approval, and recorded as this request's. */
+  const holdForApproval = (ctx: AgentToolContext, p: StructuredProposal): StructuredProposal => {
+    markPrepared(ctx, p.proposal_id);
+    return proposals.put(p);
+  };
+  /**
    * Normalise the read route's `graph_identity_hash` to the 64-hex value the
    * register route compares. `''` means "no identity to anchor to" — the route
    * returns `null` for an absent, unparseable or identity-empty graph — and
@@ -1450,7 +1487,7 @@ export function createAgentCapabilities(
           ? `Record "${from.label}" \u2192 "${to.label}" as ${band}, as your own estimate (strength kept at ${Math.abs(mean)})`
           : `Record "${from.label}" \u2192 "${to.label}" as ${band} (${magnitude} on Olumi's 0\u20131 scale), as your own estimate${wanted !== current ? `, pushing ${wanted === 'positive' ? 'up' : 'down'}` : ''}`,
       });
-      proposals.put(proposal);
+      holdForApproval(ctx, proposal);
       return {
         ok: true, mutated: false,
         proposal_id: proposal.proposal_id,
@@ -1506,7 +1543,7 @@ export function createAgentCapabilities(
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: `Connect "${from.label}" to "${to.label}" (${args.direction})`,
       });
-      proposals.put(proposal);
+      holdForApproval(ctx, proposal);
       return {
         ok: true, mutated: false,
         proposal_id: proposal.proposal_id,
@@ -1693,7 +1730,7 @@ export function createAgentCapabilities(
         // and staging’s label alone calls a revision an adoption.
         public_label: heading + ordered.map(describe).join('; ') + leftOutClause(notAFactor) + ambiguousClause(ambiguous),
       });
-      proposals.put(proposal);
+      holdForApproval(ctx, proposal);
       return {
         ok: true, mutated: false,
         proposal_id: proposal.proposal_id,
@@ -1820,7 +1857,7 @@ export function createAgentCapabilities(
         public_label: `${halves[0].public_label}; ${halves[1].public_label}`,
       });
       replaceEarlierStartingPoints(ctx);
-      proposals.put(compound);
+      holdForApproval(ctx, compound);
       for (const h of halves) proposals.discard(h.proposal_id);
       const ifApproved = await readinessIfApplied(ctx, compound.operations);
       return {
@@ -2105,7 +2142,7 @@ export function createAgentCapabilities(
           ordered.map((i) => `${i.option.label} sets ${i.factor.label} to ${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`).join('; ') +
           ambiguousClause(ambiguous),
       });
-      proposals.put(proposal);
+      holdForApproval(ctx, proposal);
       return {
         ok: true, mutated: false,
         proposal_id: proposal.proposal_id,
@@ -2138,6 +2175,15 @@ export function createAgentCapabilities(
 
     async authoriseChange(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
+      // Prepared in THIS request (`preparedByRequest`): the user has not seen it, so it waits for their approval.
+      if (typeof args?.proposal_id === 'string' && preparedInThisRequest(ctx, args.proposal_id)) {
+        return {
+          ok: false, mutated: false, refusal: AWAITING_YOUR_APPROVAL, proposal_id: args.proposal_id,
+          detail: 'This change was prepared in this same reply, so the user has not seen it and cannot have approved it. '
+            + 'Nothing was changed. Show the user exactly what it changes (never the id) and ask them to approve it; it is '
+            + 'applied only when they approve it in their next message. Do not call authorise_change for it again in this reply.',
+        };
+      }
       // A held add-option (C52) is confirmed on the product's own seam, never through the proposal store.
       if (typeof args?.proposal_id === 'string' && /^gmh_[0-9a-f]{12}$/.test(args.proposal_id)) return confirmHeld(ctx, args.proposal_id);
       const before = await readGraph(ctx.scenario_id);
@@ -3689,6 +3735,8 @@ export function createAgentCapabilities(
        * EVERY option WITH its decision link. Anything else is a hard failure: never retried in other words.
        */
       const ref = gmHeldProposalRef(ctx.scenario_id, `node:${plans[0]!.plan.optionId}`);
+      // Minted by the turn just sent, whatever this capability reports next: never approvable in this request.
+      markPrepared(ctx, ref);
       const offered = Array.isArray(r.json.suggested_actions) ? r.json.suggested_actions as { id?: unknown; label?: unknown; message?: unknown }[] : [];
       const heldChip = r.status === 200 ? offered.find((c) => c?.id === ref) : undefined;
       let heldBatchOk = heldChip !== undefined;

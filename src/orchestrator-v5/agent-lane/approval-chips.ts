@@ -39,12 +39,21 @@ export const AMEND_CHIP: SuggestedAction = {
 };
 
 /**
+ * ⛔ THE REFUSAL OF AN APPROVAL THE AGENT TRIED TO GIVE ITSELF — `authorise_change` on an id a proposer minted in
+ * the SAME request (`agent-capabilities.ts`, `agent-cannot-approve-its-own-proposal.test.ts`). The user has not
+ * seen that change yet, so nothing is written and it stays waiting for THEIR approval: it consumed nothing, and
+ * the approve chip for it is still offered.
+ */
+export const AWAITING_YOUR_APPROVAL = 'awaiting_your_approval';
+
+/**
  * The proposals a turn's own tool calls leave awaiting the user's yes, each with the tool that made it —
  * the ONE rule the approve chip and the build's save line (`write-outcome.ts`) both read. Empty when any
- * authorisation's identity is unknown: never a guess about which proposal it consumed.
+ * authorisation's identity is unknown: never a guess about which proposal it consumed. An authorisation
+ * refused as {@link AWAITING_YOUR_APPROVAL} is not one: it consumed nothing, so its proposal keeps its chip.
  */
 export function proposalsAwaitingApproval(
-  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[],
+  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string; refusal?: string }[],
 ): ReadonlyMap<string, string> {
   /**
    * A turn that authorised something consumes THOSE proposals only: one that approved A and proposed
@@ -57,7 +66,7 @@ export function proposalsAwaitingApproval(
    * (Codex #1806 5807933515: propose B on H0, then approve A → H1, offered a chip that could not
    * commit). So only a proposal made AFTER the turn's last model change is still offerable.
    */
-  const authorisations = toolCalls.filter((c) => c.name === 'authorise_change');
+  const authorisations = toolCalls.filter((c) => c.name === 'authorise_change' && c.refusal !== AWAITING_YOUR_APPROVAL);
   if (authorisations.some((c) => typeof c.proposal_id !== 'string')) return new Map();
   const consumed = new Set(authorisations.map((c) => c.proposal_id as string));
   const lastChange = toolCalls.map((c) => c.mutated).lastIndexOf(true);
@@ -75,7 +84,7 @@ export interface ApprovalLabelSource {
 }
 
 export function approvalChipsFor(
-  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[],
+  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string; refusal?: string }[],
   labelSourceFor?: (proposalId: string) => ApprovalLabelSource | undefined,
 ): SuggestedAction[] {
   const offered = proposalsAwaitingApproval(toolCalls);

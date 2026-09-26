@@ -16,6 +16,7 @@ import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { censusConfidenceParameters } from '../../admission/analysis-admission.js';
 import { earnsAuthorshipCredit, structureProvenance } from '../../../cee/graph-readiness/obligation-provenance.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a';
 /** What the user wrote in these rows: a figure is recorded as theirs only when it is here (`stated-by-user.ts`). */
@@ -92,7 +93,7 @@ async function adoptValuesOnly() {
   const shown = store.get(String(proposed.proposal_id))!;
   expect(shown.provenance.authored_by, 'precondition: Olumi authored it').toBe('model_proposed');
   expect(new Set(shown.operations.map((o) => o.op)), 'precondition: values only — the single-kind path').toEqual(new Set(['set_factor_value']));
-  const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+  const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
   expect(applied.ok, JSON.stringify(applied)).toBe(true);
   return { p, caps, proposalId: String(proposed.proposal_id) };
 }
@@ -118,7 +119,7 @@ describe('values-only approval of Olumi’s figures, through the real writer', (
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const proposed = await caps.proposeAssumptions(ctx, { assumptions: OLUMIS });
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
     expect(String(applied.not_represented)).toContain('Coordination load is Olumi’s figure that the user adopted as an assumption');
     expect(String(applied.not_represented)).not.toContain('the user’s own');
   });
@@ -126,7 +127,7 @@ describe('values-only approval of Olumi’s figures, through the real writer', (
   it('NEGATIVE: a replayed approval writes nothing more and relabels nothing', async () => {
     const { p, caps, proposalId } = await adoptValuesOnly();
     const before = { writes: p.writes(), os: p.byId().coordination_load.observed_state };
-    const again = await caps.authoriseChange(ctx, { proposal_id: proposalId });
+    const again = await caps.authoriseChange(nextRequest(ctx), { proposal_id: proposalId });
     expect(again).toMatchObject({ already_applied: true });
     expect(p.writes()).toBe(before.writes);
     expect(p.byId().coordination_load.observed_state).toEqual(before.os);
@@ -139,7 +140,7 @@ describe('an approval that is not verified never enters the adoption context', (
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const proposed = await caps.proposeAssumptions(ctx, { assumptions: OLUMIS });
-    const other = await caps.authoriseChange({ ...ctx, authenticated_user_id: 'someone-else' }, { proposal_id: String(proposed.proposal_id) });
+    const other = await caps.authoriseChange(nextRequest({ ...ctx, authenticated_user_id: 'someone-else' }), { proposal_id: String(proposed.proposal_id) });
     expect(other.ok).not.toBe(true);
     expect(p.writes()).toBe(0);
     expect(p.byId().coordination_load.observed_state).toBeUndefined();
@@ -156,7 +157,7 @@ describe('an approval that is not verified never enters the adoption context', (
     // PRECONDITION, proven not assumed: the foreign write landed, so the model really moved.
     expect(p.writes()).toBe(1);
     const writesBefore = p.writes();
-    const stale = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const stale = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
     expect(stale.ok).not.toBe(true);
     expect(p.writes()).toBe(writesBefore);
     expect(p.byId().coordination_load.observed_state).toBeUndefined();
@@ -172,7 +173,7 @@ describe('the user’s own figure stays theirs', () => {
       assumptions: [{ factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true }],
     } as never);
     expect(store.get(String(proposed.proposal_id))!.provenance.authored_by).toBe('user_stated');
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
     expect(applied.ok, JSON.stringify(applied)).toBe(true);
     expect(p.byId().team_size.observed_state?.source).toBe('user_override');
     // Codex 5825564214: what the approval tells the Agent matches that stamp.
@@ -204,7 +205,7 @@ describe('a collaborator changes the same target after our write', () => {
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const proposed = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Monthly budget', value: ours, basis: 'the user said it', revise: true }] } as never);
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
     expect(p.byId().monthly_budget.observed_state?.value, 'PRECONDITION: theirs is what the model holds').toBe(theirs);
     expect(applied.changed_since_by_another_writer).toEqual([{ factor: 'Monthly budget', saved: ours, now: theirs }]);
   });
@@ -215,7 +216,7 @@ describe('a collaborator changes the same target after our write', () => {
     const caps = createAgentCapabilities(p.d, store);
     const proposed = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Monthly budget', value: 300, basis: 'the user said 300', revise: true }] } as never);
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
     // PRECONDITIONS, proven: our write landed, and the collaborator's figure is what the model now holds.
     expect(p.writes(), 'our one write').toBe(1);
     expect(p.byId().monthly_budget.observed_state?.value).toBe(800);
@@ -234,7 +235,7 @@ describe('a collaborator changes the same target after our write', () => {
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
     const proposed = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Monthly budget', value: 300, basis: 'the user said 300', revise: true }] } as never);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
     expect(applied).not.toHaveProperty('changed_since_by_another_writer');
     expect(String(applied.not_represented)).toContain('Monthly budget is the user’s own figure, stored as theirs.');
   });
@@ -248,7 +249,7 @@ describe('a partial approval: one value lands, one is refused', () => {
     const caps = createAgentCapabilities(p.d, store);
     const proposed = await caps.proposeAssumptions(ctx, { assumptions } as never);
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
     return { p, applied };
   }
 
@@ -304,7 +305,7 @@ describe('a proposal holding BOTH the user’s revision and Olumi’s figure', (
     expect(shown.provenance.authored_by).toBe('model_proposed');
     expect(shown.operations.map((o) => o.path).sort()).toEqual(['coordination_load', 'team_size']);
     expect(new Set(shown.operations.map((o) => o.op))).toEqual(new Set(['set_factor_value']));
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
     expect(applied.ok, JSON.stringify(applied)).toBe(true);
     expect(p.writes(), 'both values landed').toBe(2);
     return p;
@@ -334,7 +335,7 @@ describe('a proposal holding BOTH the user’s revision and Olumi’s figure', (
         { factor_label: 'Coordination load', value: 40, unit: 'index points (0-100)', basis: 'Olumi suggested forty' },
       ],
     } as never);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
     const said = String(applied.not_represented);
     expect(said).toContain('Team size is the user’s own figure, stored as theirs.');
     expect(said).toContain('Coordination load is Olumi’s figure that the user adopted as an assumption, not a measurement, stored as the user’s assumption.');

@@ -19,6 +19,7 @@
 import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d';
 const guest = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r-guest' };
@@ -78,7 +79,7 @@ async function approveLevels(p: ReturnType<typeof product>, levels: Record<strin
   const caps = createAgentCapabilities(p.d, new ProposalStore());
   const prop = await caps.proposeOptionInterventions(guest, { interventions: levels } as never);
   expect(prop.ok, JSON.stringify(prop)).toBe(true);
-  return (await caps.authoriseChange(guest, { proposal_id: String(prop.proposal_id) })) as Record<string, unknown>;
+  return (await caps.authoriseChange(nextRequest(guest), { proposal_id: String(prop.proposal_id) })) as Record<string, unknown>;
 }
 
 const PRICE_TO_60 = { option_label: 'Raise price', factor_label: 'Price', value: 60, basis: 'the user said 60' };

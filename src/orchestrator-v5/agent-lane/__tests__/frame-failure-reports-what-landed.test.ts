@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { committedValueWrite } from './fixtures/served-value-write.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440000';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r' };
@@ -117,7 +118,7 @@ async function authorise(opts: { frameRefusal?: boolean; competingWriter?: 'atta
   const p = product(opts);
   const caps = createAgentCapabilities(p.d, new ProposalStore());
   const prop = await caps.proposeAssumptions(ctx as never, ASK as never);
-  const r = await caps.authoriseChange(ctx as never, { proposal_id: String(prop.proposal_id) } as never);
+  const r = await caps.authoriseChange(nextRequest(ctx) as never, { proposal_id: String(prop.proposal_id) } as never);
   return { p, r: r as Record<string, unknown> };
 }
 
@@ -329,7 +330,7 @@ describe('⛔ LIMB 1 (caller half) — an intervening rename is NOT overwritten'
     const p = renamingProduct(renameAfterRead);
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const prop = await caps.proposeAssumptions(ctx as never, ASK as never);
-    await caps.authoriseChange(ctx as never, { proposal_id: String(prop.proposal_id) } as never);
+    await caps.authoriseChange(nextRequest(ctx) as never, { proposal_id: String(prop.proposal_id) } as never);
     return p;
   }
 
@@ -420,7 +421,7 @@ describe('⛔ LIMB 1 (the assertion half) — the frame write carries the identi
     const p = identityProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const prop = await caps.proposeAssumptions(ctx as never, ASK as never);
-    await caps.authoriseChange(ctx as never, { proposal_id: String(prop.proposal_id) } as never);
+    await caps.authoriseChange(nextRequest(ctx) as never, { proposal_id: String(prop.proposal_id) } as never);
 
     const frame = p.registered[p.registered.length - 1];
     expect(frame, 'no register happened — control would be vacuous').toBeDefined();
@@ -451,7 +452,7 @@ describe('⛔ LIMB 1 (the assertion half) — the frame write carries the identi
     };
     const caps = createAgentCapabilities(d, new ProposalStore());
     const prop = await caps.proposeAssumptions(ctx as never, ASK as never);
-    await caps.authoriseChange(ctx as never, { proposal_id: String(prop.proposal_id) } as never);
+    await caps.authoriseChange(nextRequest(ctx) as never, { proposal_id: String(prop.proposal_id) } as never);
     const frame = registered[registered.length - 1];
     expect(frame).toBeDefined();
     expect('expected_graph_identity_hash' in frame, 'fabricated an identity the read never supplied').toBe(false);

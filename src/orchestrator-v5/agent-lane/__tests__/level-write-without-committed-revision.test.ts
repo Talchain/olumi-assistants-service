@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../../orchestrator/context/constants.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-l', request_id: 'r' };
@@ -58,7 +59,7 @@ async function approveOneLevel(committed: boolean) {
     interventions: [{ option_label: 'Hire Two Developers', factor_label: 'Developers hired', value: 2, basis: 'two hires' }],
   });
   expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
-  const r = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+  const r = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
   return { r, p };
 }
 

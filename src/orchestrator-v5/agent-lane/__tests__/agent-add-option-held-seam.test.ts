@@ -306,6 +306,39 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id)).toBe(true);
   }, 120_000);
 
+  /**
+   * ⛔ THE AGENT NEVER APPROVES ITS OWN HOLD IN THE SAME REPLY (`agent-cannot-approve-its-own-proposal.test.ts`). A
+   * typed "add …" reaches the Agent with every tool, and before this rule `propose_new_option` then
+   * `authorise_change(gmh_…)` in ONE reply sent the product's confirm and the option landed before the user saw it.
+   */
+  it('[sa1] RED: a typed "add …" → propose_new_option then authorise_change(gmh_…) in ONE reply → refused, NO confirm sent, the hold still carried and offered; CONTRAST: that chip on the next turn adds it', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const heldRefIn = (body: Record<string, unknown>): string => {
+      const outs = ((body['input'] ?? []) as { type?: string; output?: string }[]).filter((i) => i.type === 'function_call_output');
+      return (JSON.parse(outs.at(-1)?.output ?? '{}') as { proposal_id?: string }).proposal_id ?? 'none';
+    };
+    script = [
+      () => fnCall('propose_new_option', { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }], rationale: 'The user asked for it.' }),
+      (body) => fnCall('authorise_change', { proposal_id: heldRefIn(body) }),
+      () => say('Added "Test £54 at release".'),
+    ];
+    const t1 = await turn({ message: 'Add an option: test £54 at release.' });
+    const ref = t1._agent.tool_calls.find((c) => c.name === 'propose_new_option')?.proposal_id;
+    expect(ref, JSON.stringify(t1._agent.tool_calls)).toMatch(/^gmh_[0-9a-f]{12}$/);
+    expect(t1._agent.tool_calls.find((c) => c.name === 'authorise_change'), JSON.stringify(t1._agent.tool_calls))
+      .toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'awaiting_your_approval', proposal_id: ref }));
+    expect(inner.filter((b) => (b['chip'] as { id?: string } | undefined)?.id === ref), 'the product\'s confirm was never sent').toEqual([]);
+    expect(newOption(), 'nothing was added').toBeUndefined();
+    expect((await heldOnLatestRow()).map((p) => p.chip_id), 'the hold is still waiting').toEqual([ref]);
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(t1.suggested_actions)).toBe(`agent-approve-proposal:${ref}`);
+    expect(t1.assistant_text, t1.assistant_text).toMatch(/Not saved: nothing changes until you approve it/);
+
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: ref })]);
+    expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id), 'added, linked from the decision').toBe(true);
+  }, 120_000);
+
   it('[s] the model moves between the offer and the click → the product answers 200 but applies nothing, and the Agent does NOT report it as added', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const approve = approveChipOf(await proposeOptionC(54))!;

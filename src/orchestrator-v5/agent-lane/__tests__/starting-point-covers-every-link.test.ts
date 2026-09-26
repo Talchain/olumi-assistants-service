@@ -17,6 +17,7 @@
 import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '8b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e';
 const USER = 'user-a';
@@ -98,7 +99,7 @@ describe('an incomplete starting point leaves NOTHING approvable', () => {
     const r = await caps.proposeStartingPoint(ctx, { assumptions: VALUES, option_levels: FULL_LEVELS });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(store.outstanding(SCENARIO, USER).map((o) => o.proposal_id)).toEqual([r.proposal_id]);
-    const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    const out = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(out.applied).toBe(true);
     const byId = Object.fromEntries(p.read().map((n) => [n.id, n]));
@@ -114,7 +115,7 @@ describe('an incomplete starting point leaves NOTHING approvable', () => {
     const second = await caps.proposeStartingPoint(ctx, { assumptions: VALUES, option_levels: FULL_LEVELS.map((l) => ({ ...l, value: l.value + 1 })) });
     expect(first.ok && second.ok).toBe(true);
     expect(store.outstanding(SCENARIO, USER).map((o) => o.proposal_id)).toEqual([second.proposal_id]);
-    const stale = await caps.authoriseChange(ctx, { proposal_id: String(first.proposal_id) });
+    const stale = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(first.proposal_id) });
     expect(stale.ok).toBe(false);
     expect(stale.refusal).toBe('unknown_proposal');
     expect(p.posted).toEqual([]);

@@ -29,6 +29,7 @@ import { structuralFacts } from '../structural-facts.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../../graph/repair-authored-edge.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../../orchestrator/context/constants.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 // Only the route-level prompt capture (d) needs these; the capability tests never touch them.
 const sessionStore = {
@@ -225,7 +226,7 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
       const ops = store.get(String(r.proposal_id))!.operations;
       expect(ops.filter((o) => o.path === heldPath)).toEqual([]);
       expect(ops.filter((o) => o.op === 'set_option_intervention').map((o) => o.path).sort()).toEqual(ORDINARY_PATHS);
-      const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+      const out = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) });
       expect(out.ok, JSON.stringify(out)).toBe(true);
       expect(p.posted.filter((x) => x.startsWith('level ')).sort()).toEqual(ORDINARY_PATHS.map((x) => `level ${x}`));
       expect(p.read().find((n) => n.id === SQ)).not.toHaveProperty('interventions');
@@ -247,7 +248,7 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
       expect(r.ok, JSON.stringify(r)).toBe(true);
       expect(r).not.toHaveProperty('levels_not_accepted');
       expect(store.size()).toBe(1);
-      const auth = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+      const auth = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) });
       expect(auth.ok, JSON.stringify(auth)).toBe(true);
       expect(p.posted).toEqual([`level ${SQ}::developers_hired`]);
       expect(p.read().find((n) => n.id === SQ)?.interventions).toEqual({ developers_hired: { value: expect.any(Number) } });
@@ -279,7 +280,7 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
       });
       expect(r.ok, JSON.stringify(r)).toBe(true);
       expect(r).not.toHaveProperty('levels_not_accepted');
-      const auth = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+      const auth = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) });
       expect(auth.ok, JSON.stringify(auth)).toBe(true);
       expect(p.posted).toContain(`level ${SQ}::developers_hired`);
     });
@@ -349,7 +350,7 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
       const ops = store.get(String(r.proposal_id))!.operations;
       expect(ops.filter((o) => o.path.startsWith(`${SQ}::`))).toEqual([]);
       expect(ops.filter((o) => o.op === 'set_option_intervention').map((o) => o.path).sort()).toEqual(ORDINARY_PATHS);
-      const auth = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+      const auth = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) });
       expect(auth.ok, JSON.stringify(auth)).toBe(true);
       expect(p.posted.filter((x) => x.startsWith(`level ${SQ}::`))).toEqual([]);
       expect(p.read().find((n) => n.id === SQ)).not.toHaveProperty('interventions');
@@ -364,7 +365,7 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
         assumptions: VALUES,
         option_levels: [...ORDINARY_LEVELS, { option_label: statusQuoLabel, factor_label: 'Onboarding workload', value: 30, basis: 'as now', user_stated: true }],
       });
-      expect((await caps.authoriseChange(ctx, { proposal_id: String(sp.proposal_id) })).ok).toBe(true);
+      expect((await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(sp.proposal_id) })).ok).toBe(true);
       expect(p.read().find((n) => n.id === SQ)).not.toHaveProperty('interventions');
       // The starting value is then corrected to 40 (any writer — here, straight through registration).
       const now = await p.d(`/assist/v1/scenarios/${SCENARIO}/graph`, {});
@@ -396,7 +397,7 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
       });
       expect(r.ok, JSON.stringify(r)).toBe(true);
       expect(r).not.toHaveProperty('levels_not_accepted');
-      expect((await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) })).ok).toBe(true);
+      expect((await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) })).ok).toBe(true);
       expect(p.posted).toContain(`level ${SQ}::onboarding_workload`);
     });
 
@@ -412,7 +413,7 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
       expect(r.ok, JSON.stringify(r)).toBe(true);
       expect(r).not.toHaveProperty('levels_not_accepted');
       expect(p.posted).toEqual([]);
-      expect((await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) })).ok).toBe(true);
+      expect((await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) })).ok).toBe(true);
       expect(p.posted).toContain(`level ${SQ}::developers_hired`);
     });
 
@@ -605,7 +606,7 @@ describe('a status quo with one ordinary link keeps its OTHER pairs held', () =>
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r).not.toHaveProperty('options_missing_levels');
-    const auth = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    const auth = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) });
     expect(auth.ok, JSON.stringify(auth)).toBe(true);
     expect(p.posted).toContain(`level ${SQ}::onboarding_workload`);
     expect(p.posted).not.toContain(`level ${SQ}::developers_hired`);

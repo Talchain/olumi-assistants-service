@@ -16,6 +16,7 @@
 import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
 const USER = 'user-a';
@@ -108,7 +109,7 @@ describe('a level is only proposed on a factor the option is wired to', () => {
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r.not_linked).toEqual([{ option: 'Internal Lead Trial', factor: 'Team size', acts_on: ['Coordination load'] }]);
-    const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    const out = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) });
     // At the served head this was `partially_applied` with ZERO levels: the
     // unlinked level was written first-refused and stopped the chain.
     expect(out.ok, JSON.stringify(out)).toBe(true);

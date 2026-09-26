@@ -26,7 +26,7 @@
  */
 
 import type { ToolResult } from './runtime/agent-tools.js';
-import { proposalsAwaitingApproval } from './approval-chips.js';
+import { AWAITING_YOUR_APPROVAL, proposalsAwaitingApproval } from './approval-chips.js';
 
 /** Tools whose result is a WRITE to the user's model. Proposers change nothing. */
 export const WRITE_TOOLS: readonly string[] = ['authorise_change', 'build_model_from_brief'];
@@ -63,6 +63,8 @@ const REFUSAL_WORDS: Record<string, string> = {
   model_changed_while_proposing: 'the model changed while it was being put together',
   model_already_exists: 'a model already exists for this decision',
   read_only_preview: 'this preview cannot change the model',
+  // The Agent tried to approve a change it had only just prepared: the user approves it, after seeing it.
+  [AWAITING_YOUR_APPROVAL]: 'nothing changes until you approve it — check the change above, and approve it if it is right',
   // ⛔ A REFUSED BUILD, IN WORDS WITH A NEXT STEP (served `785185b7`, scenario
   // `03b93536`): the user read "it was refused (model_too_large)" — a code, no
   // reason, nothing to do next. Every refusal `runtime/build-model.ts` returns.
@@ -145,7 +147,8 @@ function openQuestionsLine(r: ToolResult): string {
  *
  * Derived from the turn's own tool results by the approve chip's own rule (`proposalsAwaitingApproval`),
  * never from the model's prose. An authorisation refused before it named any proposal (a call withheld
- * on a chip turn, a read-only refusal) consumed nothing, so it is not an unknown identity here.
+ * on a chip turn, a read-only refusal) consumed nothing, so it is not an unknown identity here; nor did one
+ * refused as awaiting the user's approval, so its refusal travels with it to that rule.
  */
 const FIGURE_PROPOSERS: readonly string[] = ['propose_starting_point', 'propose_assumptions', 'propose_option_interventions'];
 type AwaitingApproval = 'figures' | 'change' | null;
@@ -153,7 +156,11 @@ function awaitingApproval(toolCalls: readonly { name: string }[], toolResults: r
   const calls = toolCalls
     .map((c, i) => {
       const r = toolResults[i];
-      return { name: c.name, ok: r?.ok === true, mutated: r?.mutated === true, ...(typeof r?.proposal_id === 'string' ? { proposal_id: r.proposal_id } : {}) };
+      return {
+        name: c.name, ok: r?.ok === true, mutated: r?.mutated === true,
+        ...(typeof r?.proposal_id === 'string' ? { proposal_id: r.proposal_id } : {}),
+        ...(typeof r?.refusal === 'string' ? { refusal: r.refusal } : {}),
+      };
     })
     .filter((c) => !(c.name === 'authorise_change' && !c.ok && !c.mutated && c.proposal_id === undefined));
   const waiting = [...proposalsAwaitingApproval(calls).values()];

@@ -27,6 +27,7 @@
 import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '0c9d8e7f-6a5b-4c3d-8e2f-1a0b9c8d7e6f';
 /** A guest: the served build mints no receipt the Agent can read for one. */
@@ -113,7 +114,7 @@ async function approve(p: ReturnType<typeof product>, assumptions: Record<string
   const prop = await caps.proposeAssumptions(guest, { assumptions } as never);
   expect(prop.ok, JSON.stringify(prop)).toBe(true);
   const revAtApproval = p.rev();
-  const r = await caps.authoriseChange(guest, { proposal_id: String(prop.proposal_id) });
+  const r = await caps.authoriseChange(nextRequest(guest), { proposal_id: String(prop.proposal_id) });
   return { r: r as Record<string, unknown>, revAtApproval };
 }
 

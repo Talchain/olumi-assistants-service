@@ -25,6 +25,7 @@ import { ProposalStore } from '../proposal.js';
 import type { CallStructuredModel } from '../runtime/build-model.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '22222222-2222-4222-8222-222222222222';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'req-range' };
@@ -117,7 +118,7 @@ async function built() {
 async function adopt(caps: ReturnType<typeof createAgentCapabilities>, factor_label: string, value: number) {
   const proposed = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label, value, unit: 'FTE', basis: 'the user said so' }] });
   expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
-  return caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+  return caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
 }
 
 describe('construction stores a factor range where the product reads it', () => {

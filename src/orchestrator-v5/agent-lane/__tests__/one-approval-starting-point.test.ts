@@ -26,6 +26,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import { committedValueWrite } from './fixtures/served-value-write.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 /**
  * Every option wired to every factor. The real product only records a level on
@@ -153,8 +154,8 @@ describe('the dead end this closes — two proposals, one approval', () => {
     const a = await caps.proposeAssumptions(ctx, { assumptions: ASSUMPTIONS });
     const b = await caps.proposeOptionInterventions(ctx, { interventions: LEVELS });
     expect(a.ok && b.ok, JSON.stringify({ a, b })).toBe(true);
-    expect((await caps.authoriseChange(ctx, { proposal_id: String(a.proposal_id) })).ok).toBe(true);
-    const second = await caps.authoriseChange(ctx, { proposal_id: String(b.proposal_id) });
+    expect((await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(a.proposal_id) })).ok).toBe(true);
+    const second = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(b.proposal_id) });
     expect(second.ok).toBe(false);
     expect(second.refusal).toBe('superseded');
   });
@@ -179,7 +180,7 @@ describe('propose_starting_point', () => {
 
   it('(P) RED-first: ONE approval = ONE conditional values write, then each level CAS-gated on OUR previous write', async () => {
     const { p, store, caps, id } = await proposed();
-    const applied = await caps.authoriseChange(ctx, { proposal_id: id });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: id });
     expect(applied.ok, JSON.stringify(applied)).toBe(true);
     expect(applied.applied).toBe(true);
     expect(applied.mutated).toBe(true);
@@ -197,7 +198,7 @@ describe('propose_starting_point', () => {
     expect(Object.keys(byId.hire_two.interventions ?? {})).toEqual(['team_size']);
     expect(Object.keys(byId.hire_lead.interventions ?? {})).toEqual(['team_size']);
     expect(store.outstanding(SCENARIO, USER)).toEqual([]);
-    const again = await caps.authoriseChange(ctx, { proposal_id: id });
+    const again = await caps.authoriseChange(nextRequest(ctx), { proposal_id: id });
     expect(again.already_applied).toBe(true);
     expect(p.posted).toHaveLength(3);
   });
@@ -205,7 +206,7 @@ describe('propose_starting_point', () => {
   it('(A) an UNRELATED edit after the approval, before the first write → ZERO writes, not_applied', async () => {
     // Read 1 is authoriseChange's own authorisation read; the foreign edit lands right after it.
     const { p, store, caps, id } = await proposed({ foreignEditAfterReads: 1 });
-    const out = await caps.authoriseChange(ctx, { proposal_id: id });
+    const out = await caps.authoriseChange(nextRequest(ctx), { proposal_id: id });
     expect(out.ok).toBe(false);
     expect(out.applied).toBe(false);
     expect(out.mutated).toBe(false);
@@ -221,7 +222,7 @@ describe('propose_starting_point', () => {
 
   it('(B) an UNRELATED edit after the values, before the levels → values landed, ZERO level writes, partially_applied', async () => {
     const { p, store, caps, id } = await proposed({ foreignEditAfterRegister: true });
-    const out = await caps.authoriseChange(ctx, { proposal_id: id });
+    const out = await caps.authoriseChange(nextRequest(ctx), { proposal_id: id });
     expect(out.ok).toBe(false);
     expect(out.applied).toBe(false);
     expect(out.mutated).toBe(true);
@@ -262,7 +263,7 @@ describe('propose_starting_point', () => {
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const kinds = new Set(store.get(String(r.proposal_id))!.operations.map((o) => o.op));
     expect([...kinds].sort(), 'both halves must be in the ONE proposal for this case to mean anything').toEqual(['set_factor_value', 'set_option_intervention']);
-    const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    const out = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) });
     expect(out.ok).toBe(false);
     expect(out.applied).toBe(false);
     expect(out.mutated).toBe(false);
@@ -278,7 +279,7 @@ describe('propose_starting_point', () => {
   it('a level that refuses is reported as PARTIAL, and never listed as a second thing to approve', async () => {
     // Levels apply in id order (hire_lead, then hire_two); the SECOND refuses.
     const { p, store, caps, id } = await proposed({ failOn: ['hire_two::team_size'] });
-    const out = await caps.authoriseChange(ctx, { proposal_id: id });
+    const out = await caps.authoriseChange(nextRequest(ctx), { proposal_id: id });
     expect(out.ok).toBe(false);
     expect(out.refusal).toBe('partially_applied');
     const parts = out.parts as { part: string; ok: boolean; recorded_count: number }[];

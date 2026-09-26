@@ -32,6 +32,7 @@ import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { ObservedStateV3 } from '../../../schemas/cee-v3.js';
 import { censusConfidenceParameters } from '../../admission/analysis-admission.js';
 import { earnsAuthorshipCredit, structureProvenance } from '../../../cee/graph-readiness/obligation-provenance.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
 const USER = 'user-a';
@@ -122,7 +123,7 @@ async function adoptOlumisStartingPoint() {
   const kinds = new Set(store.get(String(proposed.proposal_id))!.operations.map((o) => o.op));
   expect([...kinds].sort(), 'the compound path is the one under test').toEqual(['set_factor_value', 'set_option_intervention']);
   expect(store.get(String(proposed.proposal_id))!.provenance.authored_by).toBe('model_proposed');
-  const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+  const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
   expect(applied.ok, JSON.stringify(applied)).toBe(true);
   return { p, store, caps, applied };
 }
@@ -183,7 +184,7 @@ describe('adopting Olumi’s starting point stores its values as the user’s AS
     const shown = store.get(String(proposed.proposal_id))!;
     expect([...new Set(shown.operations.map((o) => o.op))].sort(), 'the compound path').toEqual(['set_factor_value', 'set_option_intervention']);
     expect(shown.provenance.authored_by).toBe('model_proposed');
-    const applied = await caps.authoriseChange(ctx, { proposal_id: shown.proposal_id });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: shown.proposal_id });
     expect(applied.ok, JSON.stringify(applied)).toBe(true);
     expect(p.byId().team_size.observed_state).toMatchObject({ raw_value: 6, source: 'user_override' });
     expect(p.byId().coordination_load.observed_state).toMatchObject({ raw_value: 40, source: 'user_assumption' });
@@ -211,7 +212,7 @@ describe('adopting Olumi’s starting point stores its values as the user’s AS
       public_label: shown.public_label,
     });
     store.put(theirs);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: theirs.proposal_id });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: theirs.proposal_id });
     expect(applied.ok, JSON.stringify(applied)).toBe(true);
     expect(p.byId().coordination_load.observed_state?.source).toBe('user_override');
   });
@@ -280,7 +281,7 @@ describe('values-only: a revision the USER named keeps the writer’s path and s
     } as never);
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     expect(store.get(String(proposed.proposal_id))!.provenance.authored_by).toBe('user_stated');
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
     expect(applied.ok, JSON.stringify(applied)).toBe(true);
     expect(p.byId().team_size.observed_state?.source).toBe('user_override');
     expect(p.registered, 'the writer path, not a register').toHaveLength(0);

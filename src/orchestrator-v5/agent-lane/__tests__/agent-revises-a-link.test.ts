@@ -20,6 +20,7 @@ import { describe, it, expect } from 'vitest';
 import { OrchestratorTurnPayloadSchema } from '@talchain/schemas/boundary';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440077';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r' };
@@ -72,7 +73,7 @@ describe('the Agent records a link\'s strength as the user\'s own, through the p
     expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     expect(w.sent, 'a proposal writes nothing').toEqual([]);
     expect(String(p.public_label)).toMatch(/Pro plan price.*MRR.*strong/i);
-    const r = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    const r = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(p.proposal_id) });
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true }));
     expect(w.sent).toHaveLength(1);
     parsesOnTheWire(w.sent[0]!);
@@ -86,7 +87,7 @@ describe('the Agent records a link\'s strength as the user\'s own, through the p
     const w = world(graphWith(0.8));
     const caps = createAgentCapabilities(w.d, new ProposalStore());
     const p = await caps.proposeLinkStrength!(ctx, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'x' });
-    await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(p.proposal_id) });
     parsesOnTheWire(w.sent[0]!);
     expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ intent: 'confirm_current', direction_intent: 'preserve', magnitude: 0.8 }));
     expect(w.graph().edges[0]!.strength.mean).toBe(0.8);
@@ -96,7 +97,7 @@ describe('the Agent records a link\'s strength as the user\'s own, through the p
     const w = world(graphWith(-0.4, 'negative'));
     const caps = createAgentCapabilities(w.d, new ProposalStore());
     const p = await caps.proposeLinkStrength!(ctx, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'weak', direction: 'positive', rationale: 'x' });
-    await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(p.proposal_id) });
     parsesOnTheWire(w.sent[0]!);
     expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ intent: 'set', direction_intent: 'positive', magnitude: 0.15, expected: { mean: -0.4, effect_direction: 'negative' } }));
   });
@@ -110,7 +111,7 @@ describe('the Agent records a link\'s strength as the user\'s own, through the p
     };
     const caps = createAgentCapabilities(refusing, new ProposalStore());
     const p = await caps.proposeLinkStrength!(ctx, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'x' });
-    const r = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    const r = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(p.proposal_id) });
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'not_applied' }));
     expect(String(r.detail)).toMatch(/haven't changed anything/);
   });
@@ -124,7 +125,7 @@ describe('the Agent records a link\'s strength as the user\'s own, through the p
     };
     const caps = createAgentCapabilities(blind, new ProposalStore());
     const p = await caps.proposeLinkStrength!(ctx, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'x' });
-    const r = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    const r = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(p.proposal_id) });
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, refusal: 'not_confirmed' }));
     expect(String(r.detail)).toMatch(/could not be confirmed/);
   });
@@ -144,8 +145,8 @@ describe('the Agent records a link\'s strength as the user\'s own, through the p
     const p = await caps.proposeLinkStrength!(ctx, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'x' });
     // Another writer moves the model.
     const other = await caps.proposeLinkStrength!(ctx, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'weak', rationale: 'y' });
-    await caps.authoriseChange(ctx, { proposal_id: String(other.proposal_id) });
-    const r = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(other.proposal_id) });
+    const r = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(p.proposal_id) });
     expect(r).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'superseded' }));
     expect(w.sent).toHaveLength(1);
   });
@@ -173,7 +174,7 @@ describe('a link-strength proposal is approvable like every other: one button, c
     const fresh = new ProposalStore();
     expect(rehydrateProposals([pa!], fresh, { scenario_id: SCENARIO, user_id: null })).toBe(1);
     // …and the restored proposal applies exactly the approved event.
-    const r = await createAgentCapabilities(w.d, fresh).authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    const r = await createAgentCapabilities(w.d, fresh).authoriseChange(nextRequest(ctx), { proposal_id: String(p.proposal_id) });
     expect(r).toEqual(expect.objectContaining({ ok: true, applied: true }));
     expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ kind: 'edge_strength_edit', intent: 'set', magnitude: 0.825, expected: { mean: 0.5, effect_direction: 'positive' } }));
   });

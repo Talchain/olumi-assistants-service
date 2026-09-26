@@ -23,6 +23,7 @@ import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { committedValueWrite } from './fixtures/served-value-write.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440000';
 /** What the user wrote in these rows: a figure is recorded as theirs only when it is here (`stated-by-user.ts`). */
@@ -214,7 +215,7 @@ describe('a value the user revises is saved on its own frame, and only called sa
     expect(String(proposed.public_label)).toContain('70 points → 50 points');
     expect(String(proposed.public_label), 'the model divisor must never reach the chip').not.toContain('0.7');
 
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
     expect(applied.ok, JSON.stringify(applied)).toBe(true);
     expect(applied.applied).toBe(true);
 
@@ -236,7 +237,7 @@ describe('a value the user revises is saved on its own frame, and only called sa
     const proposed = await caps.proposeAssumptions(ctx, {
       assumptions: [{ factor_label: 'Evidence strength', value: 50, unit: 'points', basis: 'the user said 50', revise: true }],
     });
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
 
     // The stored value is untouched and still numeric — the old readback called this "Saved".
     expect(p.read()[0]!.observed_state).toMatchObject({ value: 0.7, raw_value: 70 });
@@ -256,7 +257,7 @@ describe('a value the user revises is saved on its own frame, and only called sa
     const proposed = await caps.proposeAssumptions(ctx, {
       assumptions: [{ factor_label: 'Evidence strength', value: 50, unit: 'points', basis: 'the user said 50', revise: true }],
     });
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
     expect(p.read()[0]!.observed_state, 'the write really did land').toMatchObject({ value: 0.5, raw_value: 50 });
     expect(applied.applied, 'a committed write with a degraded receipt must still read as saved').toBe(true);
     expect(applied.values).toEqual([{ factor: 'Evidence strength', requested: 50, recorded: 50 }]);
@@ -271,7 +272,7 @@ describe('a value the user revises is saved on its own frame, and only called sa
     expect(proposed.assumptions).toEqual([
       { factor: 'Monthly churn rate', value: 6, unit: '%', basis: 'the user asked', replaces: 4 },
     ]);
-    await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposed.proposal_id) });
     const edit = (p.posted as Record<string, unknown>[]).find((e) => e?.kind === 'factor_value_edit');
     expect(edit!.value, 'an uncapped input reaches the writer exactly as the user gave it').toBe(6);
     expect(edit!.raw_value, 'and carries no invented frame').toBeUndefined();

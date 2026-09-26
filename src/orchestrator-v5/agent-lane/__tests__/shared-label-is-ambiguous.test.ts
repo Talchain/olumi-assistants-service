@@ -18,6 +18,7 @@ import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { committedValueWrite } from './fixtures/served-value-write.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '2c3d4e5f-6071-4b8c-9d0e-1f2a3b4c5d6e';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r' };
@@ -110,7 +111,7 @@ describe('(iv) a label shared by two writable factors is AMBIGUOUS, and nothing 
     expect(String(r.public_label)).toContain('more than one entity is called this');
     expect(String(r.public_label)).toContain('"Churn"');
 
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) });
     expect(applied.ok, JSON.stringify(applied)).toBe(true);
     expect(p.writes).toEqual([{ kind: 'factor_value_edit', target: 'price' }]);
   });
@@ -137,7 +138,7 @@ describe('(v) a node id disambiguates, and the write goes to exactly that node',
     } as never);
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(store.get(String(r.proposal_id))!.operations.map((o) => o.path)).toEqual(['churn_support']);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) });
     expect(applied.ok, JSON.stringify(applied)).toBe(true);
     expect(p.writes).toEqual([{ kind: 'factor_value_edit', target: 'churn_support' }]);
   });

@@ -20,6 +20,7 @@ import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, receiptSummaryOf, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { ModelVersionMutationReceiptV1LocalSchema } from '../../model-management/mutation-receipt.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440000';
 const MUTATION_ID = 'cb1dd25d-36c3-4beb-aadf-5a016b2bce25';
@@ -82,8 +83,8 @@ async function authoriseTwice(receipt: 'valid' | 'none' | 'malformed') {
   const prop = await caps.proposeModelChange(ctx, {
     from_label: 'Pro plan price', to_label: 'Monthly churn', direction: 'positive', rationale: 'price rises push churn',
   });
-  const first = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
-  const retry = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+  const first = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
+  const retry = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
   return { prop, first, retry, writes: p.writes };
 }
 

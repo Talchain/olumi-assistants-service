@@ -12,6 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, authorisationTurnId, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 const SCENARIO = '11111111-1111-1111-1111-111111111111';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r' };
@@ -48,7 +49,7 @@ async function authoriseOnce() {
     from_label: 'Competitive pricing', to_label: 'Monthly churn',
     direction: 'negative', rationale: 'competitor discounts raise churn',
   });
-  const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposal.proposal_id) });
+  const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(proposal.proposal_id) });
   const write = posted.find((p) => p.kind === 'system_event');
   return { proposal, applied, write, posted };
 }
@@ -75,7 +76,7 @@ describe('the operation identity carried into the write', () => {
       from_label: 'Competitive pricing', to_label: 'Monthly churn',
       direction: 'positive', rationale: 'competitor discounts raise churn',
     });
-    await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(p.proposal_id) });
     const other = await authoriseOnce();
     expect(posted.find((x) => x.kind === 'system_event')?.turn_id).not.toBe(other.write?.turn_id);
   });

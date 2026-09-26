@@ -17,6 +17,7 @@ import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, authorisationTurnId, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { renormaliseOptionInterventionsForCapChange } from '../../tools/handlers/d1-shared/renormalise-interventions-for-cap-change.js';
+import { nextRequest } from './fixtures/next-request.js';
 
 /**
  * Every option wired to every factor. The real product only records a level on
@@ -147,7 +148,7 @@ describe('the value is read against the factor’s declared range', () => {
     ]);
     expect(p.posted).toHaveLength(0);
 
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) });
     expect(applied.ok, JSON.stringify(applied)).toBe(true);
     expect(applied.ranges_added_for_analysis).toEqual([{ factor: 'Pro subscribers', range: 1000 }]);
     const subs = p.read().find((n) => n.id === 'subscribers')!;
@@ -163,7 +164,7 @@ describe('the value is read against the factor’s declared range', () => {
       interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Release availability', value: 100, basis: 'released' }],
     });
     expect(r.ok, JSON.stringify(r)).toBe(true);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) });
     // ⛔ The contrast control: no range written, no invented baseline, and the
     // level still lands. The baseline gate skips a valueless factor anyway.
     expect(applied.ranges_added_for_analysis).toBeUndefined();
@@ -218,7 +219,7 @@ describe('authorise_change records the STORED levels', () => {
     };
     const caps = createAgentCapabilities(d, new ProposalStore());
     const prop = await caps.proposeOptionInterventions(ctx, ASK);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(p.read().find((n) => n.id === 'phase_increase')?.interventions?.feature_value, 'PRECONDITION: theirs is what the model holds').toEqual({ value: 0.2 });
     expect(applied).toMatchObject({ recorded_count: 1, requested_count: 2, failures: [{ path: 'phase_increase::pro_plan_price', detail: 'http 409' }] });
     expect(applied.interventions).toEqual([
@@ -268,7 +269,7 @@ describe('authorise_change records the STORED levels', () => {
     const store = new ProposalStore();
     const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(setLevel('phase_increase', 'pro_plan_price', null))), store);
     const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(p.read().find((n) => n.id === 'phase_increase')?.interventions, 'PRECONDITION: the level is gone').toEqual({});
     expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, applied: true, recorded_count: 1, requested_count: 1 });
     expect(applied.interventions).toEqual([{ option: 'Phase Pro price increase', factor: 'Pro plan price', requested: 54, recorded: 54 / 200 }]);
@@ -279,7 +280,7 @@ describe('authorise_change records the STORED levels', () => {
     expect(said).toContain('Pro plan price was saved by this approval, but someone else has since removed it');
     expect(said).not.toMatch(/was NOT|left the model unchanged/);
     // markApplied ran: a second "yes" to the same proposal writes nothing.
-    const again = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const again = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(again.mutated, JSON.stringify(again)).toBe(false);
     expect(p.posted).toHaveLength(1);
   });
@@ -289,7 +290,7 @@ describe('authorise_change records the STORED levels', () => {
     const p = fakeProduct();
     const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(setLevel('phase_increase', 'pro_plan_price', 0.3))), new ProposalStore());
     const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(applied.changed_since_by_another_writer).toEqual([
       { option: 'Phase Pro price increase', factor: 'Pro plan price', saved: 54, now: 60, unit: 'GBP/month' },
     ]);
@@ -304,7 +305,7 @@ describe('authorise_change records the STORED levels', () => {
     const p = fakeProduct({ draftGraph: true, storeAs: (v) => Number((v + 0.005).toFixed(3)) });
     const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(setLevel('phase_increase', 'pro_plan_price', 0.3))), new ProposalStore());
     const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(applied.interventions).toEqual([{ option: 'Phase Pro price increase', factor: 'Pro plan price', requested: 54, recorded: 0.275 }]);
     expect(applied.changed_since_by_another_writer).toEqual([
       { option: 'Phase Pro price increase', factor: 'Pro plan price', saved: 55, now: 60, unit: 'GBP/month' },
@@ -315,7 +316,7 @@ describe('authorise_change records the STORED levels', () => {
     const p = fakeProduct({ draftGraph: true, storeAs: (v) => Number((v + 0.005).toFixed(3)) });
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(applied).toMatchObject({ ok: true, recorded_count: 1 });
     expect(applied.interventions).toEqual([{ option: 'Phase Pro price increase', factor: 'Pro plan price', requested: 54, recorded: 0.275 }]);
     expect(applied).not.toHaveProperty('changed_since_by_another_writer');
@@ -327,7 +328,7 @@ describe('authorise_change records the STORED levels', () => {
     const p = fakeProduct();
     const caps = createAgentCapabilities(onOurWrite(p, () => p.failReads()), new ProposalStore());
     const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, applied: true, recorded_count: 1, current_state_unknown: true });
     expect(applied).not.toHaveProperty('changed_since_by_another_writer');
     const said = String(applied.not_represented);
@@ -353,7 +354,7 @@ describe('authorise_change records the STORED levels', () => {
     const p = fakeProduct();
     const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(extendPriceRange)), new ProposalStore());
     const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(cell(p), 'PRECONDITION: the renormaliser kept the absolute').toEqual({ value: 54 / 400, raw_value: 54 });
     expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, applied: true, recorded_count: 1 });
     expect(applied).not.toHaveProperty('changed_since_by_another_writer');
@@ -368,7 +369,7 @@ describe('authorise_change records the STORED levels', () => {
       p.foreign((ns) => ns.map((n) => (n.id === 'phase_increase' ? { ...n, interventions: { ...(n.interventions ?? {}), pro_plan_price: { value: 0.15, raw_value: 60 } } } : n)));
     }), new ProposalStore());
     const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(applied.changed_since_by_another_writer).toEqual([
       { option: 'Phase Pro price increase', factor: 'Pro plan price', saved: 54, now: 60, unit: 'GBP/month' },
     ]);
@@ -382,7 +383,7 @@ describe('authorise_change records the STORED levels', () => {
       return n;
     }))), new ProposalStore());
     const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1, current_state_unknown: true });
     expect(applied).not.toHaveProperty('changed_since_by_another_writer');
   });
@@ -394,7 +395,7 @@ describe('authorise_change records the STORED levels', () => {
       p.foreign((ns) => ns.map((n) => (n.id === 'phase_increase' ? { ...n, interventions: { pro_plan_price: { value: 0.135, raw_value: 99 } } } : n)));
     }), new ProposalStore());
     const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(applied, JSON.stringify(applied)).toMatchObject({ current_state_unknown: true });
     expect(applied).not.toHaveProperty('changed_since_by_another_writer');
   });
@@ -410,7 +411,7 @@ describe('authorise_change records the STORED levels', () => {
     };
     const caps = createAgentCapabilities(d, new ProposalStore());
     const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1, current_state_unknown: true });
     expect(String(applied.not_represented)).not.toContain('someone else');
   });
@@ -427,7 +428,7 @@ describe('authorise_change records the STORED levels', () => {
     };
     const caps = createAgentCapabilities(d, new ProposalStore());
     const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1, current_state_unknown: true });
     expect(applied).not.toHaveProperty('changed_since_by_another_writer');
   });
@@ -444,7 +445,7 @@ describe('authorise_change records the STORED levels', () => {
       const p = fakeProduct({ extraNodes: [ARR] });
       const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(renameGoal)), new ProposalStore());
       const prop = await caps.proposeOptionInterventions(ctx, askArr(v));
-      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
       expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1 });
       expect(applied).not.toHaveProperty('changed_since_by_another_writer');
       expect(String(applied.not_represented)).not.toContain('someone else');
@@ -454,7 +455,7 @@ describe('authorise_change records the STORED levels', () => {
       const p = fakeProduct({ extraNodes: [ARR], draftGraph: true, storeAs: (x) => x + 3e-8 });
       const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(renameGoal)), new ProposalStore());
       const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_567));
-      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
       expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1 });
       expect(applied).not.toHaveProperty('changed_since_by_another_writer');
     });
@@ -470,7 +471,7 @@ describe('authorise_change records the STORED levels', () => {
       const p = fakeProduct({ extraNodes: [BIG] });
       const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(setLevel('phase_increase', 'arr', theirs / 2_000_000_000))), new ProposalStore());
       const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_564_999));
-      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
       expect(applied.changed_since_by_another_writer).toEqual([
         { option: 'Phase Pro price increase', factor: 'Annual revenue', saved: 1_234_564_999, now: theirs, unit: 'GBP' },
       ]);
@@ -479,7 +480,7 @@ describe('authorise_change records the STORED levels', () => {
       const p = fakeProduct({ extraNodes: [BIG] });
       const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(renameGoal)), new ProposalStore());
       const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_564_999));
-      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
       expect(applied).not.toHaveProperty('changed_since_by_another_writer');
     });
     /**
@@ -494,7 +495,7 @@ describe('authorise_change records the STORED levels', () => {
       const p = fakeProduct({ extraNodes: [HUGE] });
       const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(setLevel('phase_increase', 'arr', theirs / 2e12))), new ProposalStore());
       const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_564_999_999));
-      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
       expect(applied.changed_since_by_another_writer).toEqual([
         { option: 'Phase Pro price increase', factor: 'Annual revenue', saved: 1_234_564_999_999, now: theirs, unit: 'GBP' },
       ]);
@@ -503,7 +504,7 @@ describe('authorise_change records the STORED levels', () => {
       const p = fakeProduct({ extraNodes: [HUGE] });
       const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(renameGoal)), new ProposalStore());
       const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_564_999_999));
-      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
       expect(applied).not.toHaveProperty('changed_since_by_another_writer');
       expect(applied).not.toHaveProperty('current_state_unknown');
     });
@@ -512,7 +513,7 @@ describe('authorise_change records the STORED levels', () => {
       const p = fakeProduct({ extraNodes: [ARR], draftGraph: false, storeAs: (x) => x + 3e-8 });
       const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(renameGoal)), new ProposalStore());
       const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_567));
-      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
       expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1, current_state_unknown: true });
       expect(applied).not.toHaveProperty('changed_since_by_another_writer');
     });
@@ -520,7 +521,7 @@ describe('authorise_change records the STORED levels', () => {
       const p = fakeProduct({ extraNodes: [ARR] });
       const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign(setLevel('phase_increase', 'arr', 0.75))), new ProposalStore());
       const prop = await caps.proposeOptionInterventions(ctx, askArr(1_234_567));
-      const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+      const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
       expect(applied.changed_since_by_another_writer).toEqual([
         { option: 'Phase Pro price increase', factor: 'Annual revenue', saved: 1_234_567, now: 1_500_000, unit: 'GBP' },
       ]);
@@ -531,7 +532,7 @@ describe('authorise_change records the STORED levels', () => {
     const p = fakeProduct();
     const caps = createAgentCapabilities(onOurWrite(p, () => p.foreign((ns) => ns.filter((n) => n.id !== 'phase_increase'))), new ProposalStore());
     const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(applied.changed_since_by_another_writer).toEqual([
       { option: 'Phase Pro price increase', factor: 'Pro plan price', saved: 54, now: null, unit: 'GBP/month' },
     ]);
@@ -552,7 +553,7 @@ describe('authorise_change records the STORED levels', () => {
     };
     const caps = createAgentCapabilities(d, new ProposalStore());
     const prop = await caps.proposeOptionInterventions(ctx, PRICE_ONLY);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, recorded_count: 1, current_state_unknown: true });
     expect(applied).not.toHaveProperty('changed_since_by_another_writer');
     expect(String(applied.not_represented)).not.toContain('someone else');
@@ -562,7 +563,7 @@ describe('authorise_change records the STORED levels', () => {
     const p = fakeProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const prop = await caps.proposeOptionInterventions(ctx, ASK);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(applied).not.toHaveProperty('changed_since_by_another_writer');
     expect(String(applied.not_represented)).toContain('What each option does is now recorded');
   });
@@ -571,7 +572,7 @@ describe('authorise_change records the STORED levels', () => {
     const p = fakeProduct();
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const prop = await caps.proposeOptionInterventions(ctx, ASK);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
 
     expect(applied.ok, JSON.stringify(applied)).toBe(true);
     expect(applied.recorded_count).toBe(2);
@@ -598,7 +599,7 @@ describe('authorise_change records the STORED levels', () => {
     const p1 = fakeProduct();
     const c1 = createAgentCapabilities(p1.d, new ProposalStore());
     const prop = await c1.proposeOptionInterventions(ctx, ASK);
-    await c1.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    await c1.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     const id = String(prop.proposal_id);
     expect(p1.posted.map((x) => x.turn_id)).toEqual([authorisationTurnId(`${id}#0`), authorisationTurnId(`${id}#1`)]);
     expect(new Set(p1.posted.map((x) => x.turn_id)).size).toBe(2);
@@ -606,7 +607,7 @@ describe('authorise_change records the STORED levels', () => {
     const p2 = fakeProduct();
     const c2 = createAgentCapabilities(p2.d, new ProposalStore());
     const prop2 = await c2.proposeOptionInterventions(ctx, ASK);
-    await c2.authoriseChange(ctx, { proposal_id: String(prop2.proposal_id) });
+    await c2.authoriseChange(nextRequest(ctx), { proposal_id: String(prop2.proposal_id) });
     expect(p2.posted.map((x) => x.turn_id)).toEqual(p1.posted.map((x) => x.turn_id));
   });
 
@@ -614,7 +615,7 @@ describe('authorise_change records the STORED levels', () => {
     const p = fakeProduct({ failOn: ['phase_increase::pro_plan_price', 'phase_increase::feature_value'] });
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const prop = await caps.proposeOptionInterventions(ctx, ASK);
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(prop.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(prop.proposal_id) });
     expect(applied.ok).toBe(false);
     expect(applied.mutated).toBe(false);
     expect(applied.refusal).toBe('not_applied');
@@ -668,7 +669,7 @@ describe('a range that could not be attached is reported, not assumed', () => {
     const r = await caps.proposeOptionInterventions(ctx, {
       interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Pro subscribers', value: 300, basis: 'growth' }],
     });
-    const applied = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    const applied = await caps.authoriseChange(nextRequest(ctx), { proposal_id: String(r.proposal_id) });
     expect(applied.ranges_added_for_analysis).toBeUndefined();
     expect(applied.failures).toContainEqual({ path: 'scale_frame', detail: 'could not attach a range: http 500' });
   });
