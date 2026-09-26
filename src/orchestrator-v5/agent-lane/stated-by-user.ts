@@ -94,8 +94,11 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
   const otherWords = [...new Set(scope.others.flatMap(wordsOf))];
   const decisiveTarget = targetWords.filter((t) => !otherWords.some((o) => sameWord(t, o)));
   const decisiveOther = otherWords.filter((o) => !targetWords.some((t) => sameWord(t, o)));
+  // The figure's own unit names no entity (R&C #2013 B1): "£59 per month" in GBP/month is not about "Monthly churn".
+  const unitWords = typeof unit === 'string' ? wordsOf(unit) : [];
   const mentionOf = (w: string): 'target' | 'other' | null => {
     if (w.length < 3) return null;
+    if (unitWords.some((u) => sameWord(u, w))) return null;
     const t = decisiveTarget.some((x) => sameWord(x, w));
     const o = decisiveOther.some((x) => sameWord(x, w));
     return t && !o ? 'target' : o && !t ? 'other' : null;

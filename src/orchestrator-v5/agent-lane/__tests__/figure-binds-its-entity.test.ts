@@ -83,6 +83,24 @@ describe('a figure the user wrote about THIS entity, or about nothing named, sta
     expect(figureTheUserWroteFor(59, 'GBP per month', t, MRR)).toBe(false);
   });
 
+  it('RED (R&C #2013 B1, Paul\'s served brief + labels): "£49 to £59 per month" — the unit\'s own word names no entity', () => {
+    // The brief as sent (#69 5837135232) and the served draft_graph's labels on CEE 10fbbdf; the option is "£59 AI feature launch".
+    const served = ['MRR', 'Pro plan price', 'AI feature rollout coverage', 'AI feature perceived value', 'Monthly churn', 'Price resistance', 'Paying Pro subscribers'];
+    const scope = (...target: string[]) => ({ target, others: served.filter((l) => !target.includes(l)) });
+    const t = 'Should we increase the Pro plan price from £49 to £59 per month with the next AI feature release?';
+    expect(figureTheUserWroteFor(59, 'GBP/month', t, scope('Pro plan price', '£59 AI feature launch')), 'the option level Paul typed').toBe(true);
+    expect(figureTheUserWroteFor(49, 'GBP/month', t, scope('Pro plan price'))).toBe(true);
+    // CONTRASTS stay false: £59 is not churn's (served unit percentage), and £20k is MRR's, not the price's.
+    expect(figureTheUserWroteFor(59, 'percentage', t, scope('Monthly churn'))).toBe(false);
+    expect(figureTheUserWroteFor(20000, 'GBP/month', 'Our MRR is £20,000.', scope('Pro plan price'))).toBe(false);
+  });
+
+  it('CONTROL (R&C #2013 note): "the price" without "plan" still binds, by rule 4, when the clause names no other label word', () => {
+    const served = ['MRR', 'Pro plan price', 'AI feature rollout coverage', 'AI feature perceived value', 'Monthly churn', 'Price resistance', 'Paying Pro subscribers'];
+    const scope = { target: ['Pro plan price', '£59 AI feature launch'], others: served.filter((l) => l !== 'Pro plan price') };
+    expect(figureTheUserWroteFor(59, 'GBP/month', 'Raise the price to £59 per month.', scope)).toBe(true);
+  });
+
   it('unit rules are the old reading\'s: "£49" is never a percentage, "4%" never a price, no text proves nothing', () => {
     expect(figureTheUserWroteFor(49, '%', 'Keep the price at £49.', PRICE)).toBe(false);
     expect(figureTheUserWroteFor(4, 'GBP per month', 'Price rises 4%.', PRICE)).toBe(false);
