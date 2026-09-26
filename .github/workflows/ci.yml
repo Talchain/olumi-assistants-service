@@ -292,8 +292,31 @@ jobs:
   # merges. Coverage thresholds are a regression RATCHET at the measured
   # baseline (see vitest.config.ts), so a red here means a REAL regression —
   # new test failures or a coverage drop — not a stale aspiration.
+  #
+  # ⚠ NOT ON THE STAGING PR PATH (24 Sep 2026). It runs on pushes to staging
+  # and main (post-merge, still visible), on EVERY PR to main (main's
+  # pre-merge protections are deliberately unchanged), and on a staging PR
+  # that carries the `full-suite` label. The label is read when the PR next
+  # runs CI (a push, or a reopen), because `labeled` is not one of this
+  # workflow's PR event types.
+  # On any other staging PR it reports SKIPPED, never success. Why:
+  #   · The estate merge gate waits on EVERY check-run on the head, advisory
+  #     included, so on a PR this job set merge time.
+  #   · It is 47% of CI job-minutes (12,234 of 26,007 min over 48h to
+  #     24 Sep 17:00Z), more than the required job, and it competes with other
+  #     PRs' REQUIRED jobs for the same runner slots. At 18:10Z, 10 jobs were
+  #     running and 13 queued; one PR's required job had waited 21 min.
+  #   · Caught-only-here count over the same 48h: 0. Among completed PR
+  #     runs where both jobs finished, it failed while `Lint, TypeCheck, Unit
+  #     Tests` passed 0 times in 246 (0 in 155 push runs).
+  # What moves post-merge rather than disappearing: the coverage ratchet and
+  # the Codecov upload. A red here on staging is a real regression.
   full-test-suite:
     name: Full Test Suite (advisory)
+    if: >-
+      ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/main'))
+      || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main')
+      || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-suite')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
