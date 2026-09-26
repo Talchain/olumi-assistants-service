@@ -125,8 +125,12 @@ function norm(unit: string): string {
   return unit.trim().toLowerCase();
 }
 
-/** A percent head (the classifier's own row) and nothing after it but an optional period ("per month", "p.a."). */
-function isPercentWithPeriod(unit: string): boolean {
+/**
+ * A percent head (the classifier's own row) and nothing after it but an optional period ("per month", "p.a.").
+ * Exported as the one "is this a percentage LEVEL?" test: the magnitude contract reads a target's domain with it
+ * (`cee/magnitude/link-effect.ts`), so a "% change" is never read as a level bounded by 0 and 100.
+ */
+export function isPercentWithPeriod(unit: string): boolean {
   if (classifyUnitScaleClass(unit) !== 'percent') return false;
   const t = norm(unit);
   const head = PERCENT_HEADS.find((h) => t.startsWith(h));

@@ -503,6 +503,8 @@ export const EdgeProvenanceV3 = z.object({
   source: z.enum(["brief_extraction", "cee_hypothesis", "domain_knowledge", "user_specified"]),
   /** Optional reasoning */
   reasoning: z.string().optional(),
+  /** Who sized the link (magnitude contract D9); `source: 'user_specified'` wins at read time. A malformed value is dropped. */
+  magnitude: z.enum(["user_stated", "olumi_estimate", "olumi_placeholder"]).optional().catch(undefined),
 }).passthrough(); // CIL Phase 0: preserve additive fields
 export type EdgeProvenanceV3T = z.infer<typeof EdgeProvenanceV3>;
 
