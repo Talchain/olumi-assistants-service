@@ -113,7 +113,10 @@ import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonica
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import {
   readConstraintVerdictStateFromResult,
+  readLeaderLimitRisksFromResult,
+  readRatifiedConstraints,
   type ConstraintVerdictState,
+  type LeaderLimitRisk,
 } from '../orchestrator/context/constraint-feasibility.js';
 import { deriveAnalysisFreshness, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
 import { isScenarioAnalysisReasoningAuthority } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
@@ -143,6 +146,16 @@ export interface ScenarioAnalysisRead {
    * guess). Carried beside `analysis_state` because `AnalysisStateV1` is strict.
    */
   readonly analysis_constraint_verdict_state?: ConstraintVerdictState | null;
+  /**
+   * The SELECTED fact's leader-limit risks (R&C #70 5843907129): each ratified,
+   * producer-certified limit the leading option is more likely than not to break.
+   * Read by the one reader (`readLeaderLimitRisksFromResult`) off the fact's own
+   * PLoT body, against the limits the hash-bound graph ratifies, under the SAME
+   * gates as `analysis_constraint_verdict_state`. `[]` = read, nothing at risk;
+   * `null` = the fact carries no body to read. The transport block drops
+   * `constraint_results`, so this cannot be derived from `analysis_result`.
+   */
+  readonly analysis_leader_limit_risks?: LeaderLimitRisk[] | null;
 }
 
 const NOT_ANSWERED: ScenarioAnalysisRead = Object.freeze({
@@ -350,7 +363,10 @@ export async function readScenarioAnalysis(
       // Gated on the DELIVERED block, not only the fact: a run-binding that withholds
       // `analysis_result` withholds this too, so it ships exactly when that block does.
       ...(fact !== null && boundResult !== null
-        ? { analysis_constraint_verdict_state: readConstraintVerdictStateFromResult(fact.result) }
+        ? {
+            analysis_constraint_verdict_state: readConstraintVerdictStateFromResult(fact.result),
+            analysis_leader_limit_risks: readLeaderLimitRisksFromResult(fact.result, readRatifiedConstraints(params.graph)),
+          }
         : {}),
     };
   } catch (err) {
