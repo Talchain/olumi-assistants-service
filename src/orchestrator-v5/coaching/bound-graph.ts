@@ -55,13 +55,21 @@ const USER_UNIT_WRITER_ID = /^(?:agent-lane:|gc-)/;
 const PREFIX_CURRENCY_SYMBOLS: ReadonlySet<string> = new Set(
   Object.keys(CURRENCY_SYMBOL_TO_CODE).filter((symbol) => !/^[a-z]+$/i.test(symbol)),
 );
+/**
+ * Units spelled as a FRACTION of one ("fraction", "proportion/month", "ratio", "share"). The user never states a limit
+ * that way: served 26 Sep, the drafter wrote Paul's "under 10%" as `0.1 proportion/month` (Delivery Lead (F)
+ * `f-20260926T033924Z`, AI Quality 5843218716). Saying it back would put "0.1" in his mouth, so the card names the
+ * limit without a figure, exactly as for a bare `fraction`.
+ */
+const FRACTION_SPELLED_UNIT = /^(?:fraction|proportion|ratio|share)\b/i;
 /** Units whose scale is ambiguous on the wire (percent vs fraction; points; basis points). */
 const PERCENT_LIKE_UNIT = /%|\bpercent\b|\bpp\b|\bbps\b|basis point/i;
 
 /**
  * THE USER'S OWN THRESHOLD, said back — or null. Only for a row the user stated
  * (`provenance: 'explicit'`) with a canonical operator, in a LEVEL frame (absent or `'level'`; a
- * `'delta'` threshold is a change from the baseline). A bare `fraction` is never the user's wording.
+ * `'delta'` threshold is a change from the baseline). A fraction spelling ({@link FRACTION_SPELLED_UNIT}) is never the
+ * user's wording.
  * A PERCENT-LIKE unit is said back only when the row proves its scale: an audit trail naming the
  * user's original (`provenance_unit_normalised`, preferred), or a row minted by a user-units writer
  * ({@link USER_UNIT_WRITER_ID}). Scale is never inferred from magnitude.
@@ -78,7 +86,7 @@ export function statedThreshold(row: Record<string, unknown>): string | null {
   const unitRaw = audit !== null ? audit.original_unit : row.unit;
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   const unit = typeof unitRaw === 'string' ? unitRaw.trim() : '';
-  if (/^fraction$/i.test(unit)) return null;
+  if (FRACTION_SPELLED_UNIT.test(unit)) return null;
   if (PERCENT_LIKE_UNIT.test(unit) && audit === null
     && !(typeof row.constraint_id === 'string' && USER_UNIT_WRITER_ID.test(row.constraint_id))) return null;
   const n = value.toLocaleString('en-GB', { maximumFractionDigits: 2 });

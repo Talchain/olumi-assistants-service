@@ -341,6 +341,16 @@ const rebind = (c: ReturnType<typeof runTurnCase>, graph: Record<string, unknown
  const result={...(c.final.analysisResult as object),computed_against_hash:hash};
  return {captured:{...statelessCapture(c.captured),blocks:[result]} as CapturedAnalysis, final:{...c.final,graphHash:hash,analysisResult:result,graph}};
 };
+test('NAMED LIMIT — the served fraction spelling (0.1 proportion/month, (F) f-20260926T033924Z) names the limit WITHOUT a figure: never "0.1" as Paul\'s own',()=>{
+ const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ Object.assign(g.goal_constraints[0],{value:0.1,unit:'proportion/month'});
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const {captured,final}=rebind(c,g);
+ const cards=runTurnCards(runTurnCoaching(captured,final).blocks);
+ assert.equal(cards.length,1);
+ assert.match(cards[0]!.body,/your limit on “Monthly churn”: it was not checked or not met\./);
+ for (const t of [cards[0]!.title,cards[0]!.body,cards[0]!.action_label,cards[0]!.action_prompt]) assert.doesNotMatch(String(t),/0\.1|proportion/);
+});
 // ── STATED THRESHOLD (Delivery Lead 5841804719: F3 deterministic) — the user's own limit, said back by identity ──
 test('STATED THRESHOLD — said back only when the user stated it, in a level frame, at a scale the ROW proves',()=>{
  // A user-units writer's row (the agent lane mints `agent-lane:…`, add_constraint `gc-…`).
@@ -362,6 +372,13 @@ test('STATED THRESHOLD — said back only when the user stated it, in a level fr
  // Refused: not the user's statement, a change frame, a bare fraction, a bad operator/value, and a PERCENT whose
  // scale the row does not prove (the compound-goal extractor stores 200% as `2` under '%': never say "2%").
  for (const [why,bad] of [['inferred',{...row,provenance:'inferred'}],['proxy',{...row,provenance:'proxy'}],['no provenance',{...row,provenance:undefined}],['delta frame',{...row,value_frame:'delta'}],['bare fraction',{...row,value:0.1,unit:'fraction'}],['operator',{...row,operator:'=='}],['NaN',{...row,value:Number.NaN}],['string value',{...row,value:'10'}],['extractor percent',{...row,constraint_id:'constraint_n_min',operator:'>=',value:2,unit:'%'}],['percent, no id',{...row,constraint_id:undefined}],['percent word',{...row,constraint_id:'constraint_n_max',unit:'percent per month'}],['basis points',{...row,constraint_id:'constraint_n_max',unit:'bps'}]] as [string,Record<string,unknown>][]) assert.equal(statedThreshold(bad),null,why);
+ // A FRACTION SPELLING is never the user's wording (AI Quality 5843218716): the served (F) run f-20260926T033924Z drafted
+ // Paul's "under 10%" as {value: 0.1, unit: 'proportion/month'}. Refused like a bare 'fraction', whatever the writer.
+ for (const unit of ['proportion/month','Proportion per month','proportion','ratio','share of revenue','fraction']) {
+  assert.equal(statedThreshold({...row,value:0.1,unit}),null,unit);
+ }
+ // Anchored at the start of a word: a unit that merely CONTAINS one of the words is not refused by this rule.
+ assert.equal(statedThreshold({...row,value:3,unit:'hours per share'}),'3 hours per share');
 });
 test('STATED THRESHOLD — fed from the PRODUCTION compound-goal extractor: "at least 200%" is never said back as "2%" (#1948 review)',()=>{
  for (const [brief,forbidden] of [['Revenue growth must be at least 200%.',/\b2%/],['Utilisation must stay under 100%.',/\b1%/],['ROI must be at least 150%. Keep monthly churn under 10%.',/\b1\.5%/]] as [string,RegExp][]) {
