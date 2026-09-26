@@ -232,6 +232,17 @@ export const WITHHELD_UNREQUESTED_ANALYSIS = 'unrequested_analysis_withheld';
 export const WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN = 'nonlinear_identity_sign_unproven';
 
 /**
+ * ⛔ P1-d (AI Quality #70 5850056041, DL 5850069309) — THE RUN IS OUT OF DATE, and no caller stated why its leader
+ * is withheld. The read route presents no fact for an out-of-date run (`selected = fresh ? historical : null`), so
+ * `mayNameLeadingOption` is false with no cause, and the claim used to fall through to `constraint_verdict_withheld`
+ * for EVERY such run. Served (DL `f-20260926T201724Z`): the canvas card then read `· Goal only` and the Agent said a
+ * limit was not met, on a run whose limit verdict PERMITTED its leader. The current model has not been analysed, so
+ * it classifies `not_evaluated`, like an unconfirmed run identity. A cause the caller DID state still outranks it.
+ * Minted in CEE, no schemas member (`leader_claim.withheld_reason` is `z.string().min(1).optional()`).
+ */
+export const WITHHELD_RUN_OUT_OF_DATE = 'analysis_out_of_date';
+
+/**
  * ⭐ TWO DIFFERENT FACTS WEAR THE SAME `withheld_reason` FIELD (S6, 2026-08-26).
  *
  * WIRE-WITNESSED on the stale route: `leader_claim.permitted: false,
@@ -297,6 +308,7 @@ export const LEADER_CLAIM_REASON_KINDS: Readonly<
   [WITHHELD_SEPARATION_UNAVAILABLE]: 'not_evaluated',
   [WITHHELD_RUN_IDENTITY_UNCONFIRMED]: 'not_evaluated',
   [WITHHELD_RUN_IDENTITY_CONFLICT]: 'not_evaluated',
+  [WITHHELD_RUN_OUT_OF_DATE]: 'not_evaluated',
 };
 
 /**
@@ -871,7 +883,7 @@ export function separationWithholdFromRobustness(
   return raw !== null ? WITHHELD_NEAR_TIE : WITHHELD_SEPARATION_UNAVAILABLE;
 }
 
-function composeLeaderClaim(input: AnalysisStateComposeInput): AnalysisLeaderClaim {
+function composeLeaderClaim(input: AnalysisStateComposeInput, runState: AnalysisRunState): AnalysisLeaderClaim {
   const entitled = input.mayNameLeadingOption === true;
   const raw: RawRobustnessSignals | null = input.rawRobustness;
   const separationKnown = raw !== null;
@@ -900,7 +912,10 @@ function composeLeaderClaim(input: AnalysisStateComposeInput): AnalysisLeaderCla
         ? WITHHELD_UNREQUESTED_ANALYSIS
         : input.withheldBecauseNonlinearIdentity === true
           ? WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN
-          : WITHHELD_CONSTRAINT_VERDICT
+          // P1-d: an out-of-date run is not "withheld for a limit" (see WITHHELD_RUN_OUT_OF_DATE).
+          : runState.kind === 'complete_stale'
+            ? WITHHELD_RUN_OUT_OF_DATE
+            : WITHHELD_CONSTRAINT_VERDICT
       : separationWithholdFromRobustness(raw)!;
   }
   // ABSENCE IS DISTINCT: omitted means no separation statement was computed,
@@ -967,15 +982,16 @@ export function composeAnalysisStateV1(
     };
   }
 
+  const runState = composeRunState(input);
   return {
-    run_state: composeRunState(input),
+    run_state: runState,
     readiness: {
       status: readinessStatus,
       // An EMPTY list here is a positive claim: readiness was assessed and
       // nothing is blocking. It is distinct from `analysis_state` being absent.
       blockers: wireBlockers(input.readiness, readinessStatus),
     },
-    leader_claim: composeLeaderClaim(input),
+    leader_claim: composeLeaderClaim(input, runState),
     robustness: composeRobustness(input),
     // The five predicates are COPIED from the canonical verdict, never
     // recomputed: a consumer that re-derives them re-opens the divergence this

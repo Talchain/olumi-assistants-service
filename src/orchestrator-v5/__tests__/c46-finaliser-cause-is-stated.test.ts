@@ -42,6 +42,7 @@ import { leaderWithheldForALimit } from '../coaching/limit-unchecked-card.js';
 import {
   WITHHELD_CONSTRAINT_VERDICT,
   WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
+  WITHHELD_RUN_OUT_OF_DATE,
   WITHHELD_UNREQUESTED_ANALYSIS,
 } from '../compose/analysis-state-v1.js';
 
@@ -239,6 +240,8 @@ describe('why the finaliser cannot derive it (#1876\'s class, C46 edition): the 
     expect(nonlinearIdentityLeaderWithhold(edited, 'raise_pro_to_59', { comparedOptionIds: ['raise_pro_to_59', 'keep_pro_at_49'] }), 'premise: this graph\'s own sign test would find the product').not.toBeNull();
     const out = finalise(edited, [fact], fact, false);
     expect(out.analysis_state?.run_state).toMatchObject({ kind: 'complete_stale' });
-    expect(out.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: WITHHELD_CONSTRAINT_VERDICT });
+    // P1-d (AI Quality #70 5850056041): the out-of-date run's reason, never the product and never a limit.
+    expect(out.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: WITHHELD_RUN_OUT_OF_DATE });
+    expect(leaderWithheldForALimit(out.analysis_state), 'P1-d: out of date is not a limit').toBe(false);
   });
 });
