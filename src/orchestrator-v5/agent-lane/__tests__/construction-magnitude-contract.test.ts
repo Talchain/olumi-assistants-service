@@ -279,3 +279,41 @@ describe('§6: the CIL 0.5-signature detectors do not see a D6 placeholder, and 
     expect(detectStrengthMeanDominant(nodes, edges).mean_defaulted_edge_ids).toContain(signature);
   });
 });
+
+/**
+ * ⭐ THE CANVAS BAND CONTRACT (#70 5845713522 + R&C 5845818897): the size the edge CARRIES, said in natural units, with
+ * the β it was written for as the staleness key. Bound by identity: `strength_mean` must equal THIS edge's own mean.
+ * R6 above is the contrast: an unchanged edge's provenance is exactly `{ source }`, so no natural size speaks there.
+ */
+describe('natural_effect: the size the edge carries, in natural units, keyed to its own mean', () => {
+  const natural = (e: Edge): Record<string, unknown> | undefined =>
+    (e.provenance as { natural_effect?: Record<string, unknown> } | undefined)?.natural_effect;
+
+  it('R1\'s estimate: −1 percentage point of churn per switch of AI, keyed to the edge\'s −0.01', async () => {
+    const { graph } = await register(t3({ amount: -1, per: 1, by: 'ai_proposed' }));
+    const e = edge(graph, AI, CHURN);
+    expect(natural(e)).toStrictEqual({ amount: -1, unit: 'percentage points', per_source_change: 1, source_unit: 'switch', strength_mean: -0.01 });
+    expect(natural(e)?.strength_mean).toBe(e.strength.mean);
+  });
+
+  it('R2\'s placeholder says the PLACEHOLDER\'s own size (−1 point), marked by `magnitude`', async () => {
+    const { graph } = await register(t3(UNKNOWN));
+    const e = edge(graph, AI, CHURN);
+    expect(e.provenance?.magnitude).toBe('olumi_placeholder');
+    expect(natural(e)).toStrictEqual({ amount: -1, unit: 'percentage points', per_source_change: 1, source_unit: 'switch', strength_mean: -0.01 });
+    expect(natural(e)?.strength_mean).toBe(e.strength.mean);
+  });
+
+  it('R3: Olumi\'s set-aside "−6 points" never speaks — the edge says the placeholder\'s −1', async () => {
+    const { graph } = await register(t3({ amount: -6, per: 1, by: 'ai_proposed' }));
+    const e = edge(graph, AI, CHURN);
+    expect(natural(e)?.amount).toBe(-1);
+    expect(natural(e)?.strength_mean).toBe(e.strength.mean);
+  });
+
+  it('R4: the user\'s own "−6 points" is said exactly as they stated it, keyed to −0.06', async () => {
+    const { graph } = await register(t3({ amount: -6, per: 1, by: 'explicit' }, 'explicit'));
+    const e = edge(graph, AI, CHURN);
+    expect(natural(e)).toStrictEqual({ amount: -6, unit: 'percentage points', per_source_change: 1, source_unit: 'switch', strength_mean: -0.06 });
+  });
+});
