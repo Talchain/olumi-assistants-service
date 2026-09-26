@@ -34,7 +34,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { admitCandidateModel, findMechanismPath, type CandidateModel } from '../admit-model.js';
+import { admitCandidateModel, findBreakableLoop, findMechanismPath, type CandidateModel } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -362,6 +362,10 @@ export function retrySchemaPinningGoal(goal: CandidateModel['goal']): Record<str
  *   mechanism test is admission's own (`findMechanismPath`), over the same edges
  *   admission searches: option→factor from `changes`/`interventions`, every
  *   directed link, and no machine shortcut.
+ *   It also names every LOOP that one of Olumi's own (non-`explicit`) links closes,
+ *   over the edges admission registers (option→factor, every directed link), so the
+ *   retry may break it; a retry that comes back still looped is not adopted, and
+ *   admission's `breakLoops` withholds and says one link per loop either way.
  *
  * ⛔ An EXPLICIT `value_kind:"absolute"` level on a factor whose baseline is NOT
  * known is demoted to `ai_proposed`: with no known starting point it may be an
@@ -542,6 +546,26 @@ export function prepareProvisionalCandidate(model: CandidateModel): {
   for (const link of shortcuts) {
     if (findMechanismPath(mechanismGraph, link.from, link.to) !== null) continue;
     mechanism_issues.push(`${link.from} -> ${link.to}: retain this risk hypothesis through a causal factor or mediator, not a direct option-risk setting`);
+  }
+  // ⛔ A LOOP CLOSED BY ONE OF OLUMI'S OWN LINKS (served bdd43f4a: "AI feature availability" and "AI
+  // release delay" linked both ways; readiness refused the whole model on CYCLE_DETECTED). Asked of the
+  // retry first, naming the loop; admission's `breakLoops` is the deterministic backstop for whatever is
+  // admitted. A loop made only of the user's `explicit` links is theirs to resolve, never an issue.
+  // The edges are the ones admission registers: what each option acts on, and every directed link.
+  const isOlumisLink = (e: { provenance?: string }): boolean => e.provenance !== undefined && e.provenance !== 'explicit';
+  let loopGraph: { from: string; to: string; provenance?: string }[] = [
+    ...mechanismGraph.filter((e) => !('provenance' in e)),
+    ...model.links.filter((l) => l.direction !== 'unknown'),
+  ];
+  for (let loop = findBreakableLoop(loopGraph, isOlumisLink); loop !== null; loop = findBreakableLoop(loopGraph, isOlumisLink)) {
+    const labels = loop.map((e) => e.from);
+    mechanism_issues.push(
+      `${[...labels, labels[0]!].map((l) => `"${l}"`).join(' -> ')} is a loop: a model cannot hold one. `
+      + 'Keep the direction that carries the cause toward the goal metric, remove the link that points back, and keep every '
+      + 'option and risk connected to the goal through links whose direction you state.',
+    );
+    const named = loop[0]!;
+    loopGraph = loopGraph.filter((e) => e !== named);
   }
   return { candidate: { ...model, options }, mechanism_issues, additions_without_total, provenance_demoted };
 }
@@ -856,6 +880,8 @@ export async function buildModelFromBrief(
   // True only when this construction had ALREADY been committed and the route
   // handed back the original version rather than writing another.
   const replayed = (reg.json as { replayed?: unknown }).replayed === true;
+  // A link left out of a loop has its own sentence (`loop_withheld`, below), and its direction WAS stated.
+  const directionless = admitted.withheld.filter((w) => w.reason !== 'loop_closing_link');
 
   return {
     ok: true,
@@ -900,8 +926,8 @@ export async function buildModelFromBrief(
       ...preparation.provenance_demoted.map((d) =>
         `I've treated your ${d.value} for "${d.factor}" in "${d.option}" as a working figure because the current ` +
         `level of "${d.factor}" is unknown \u2014 confirm it and I'll mark it as yours.`),
-      admitted.withheld.length > 0
-        ? `${admitted.withheld.length} relationship(s) were left out because nobody has stated which way they run.`
+      directionless.length > 0
+        ? `${directionless.length} relationship(s) were left out because nobody has stated which way they run.`
         : undefined,
       leftOut.length > 0
         ? `${leftOut.length} item(s) from the first draft were left out to keep the model compact: ${leftOut.map((x) => x.label).join('; ')}.`
@@ -924,7 +950,9 @@ export async function buildModelFromBrief(
         // (`admit-model.ts`, `wireInertStatusQuo`), so it must be said and correctable.
         // `observed_state.baseline`: a goal's current level that could not be carried
         // (`admit-model.ts`) — the user is told why, and what would let it count.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction)$|\.observed_state\.baseline$/.test(l.field_path))
+        // `loop_withheld` / `loop_kept`: a loop the model could not hold (`admit-model.ts`,
+        // `breakLoops`) — which link was left out, or that the user's own loop was kept.
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|loop_withheld|loop_kept)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
