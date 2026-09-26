@@ -601,10 +601,18 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       return { kind: 'unverified', reason: 'committed_turn_unverified', commitAttempted: true };
     }
     const facts = await store.readFactsWithTurnFor([committed.persisted_row_id]);
-    // Every fact this ONE commit wrote (the values' and the levels'), bound to its row — as a set, not by read order.
-    const factKey = (f: unknown): string => JSON.stringify(f);
+    // Every fact this ONE commit wrote (the values' and the levels'), bound to its row — matched as a multiset by
+    // DEEP equality, never by serialised strings: the store reads facts back from JSONB, which re-orders keys
+    // (AI Conversation #70 5849290342; the 25 Sep JSONB class).
+    const unmatched = [...plan.handlerFacts];
+    const everyFactIsOurs = facts.every(f => {
+      const at = unmatched.findIndex(expected => isDeepStrictEqual(f.fact, expected));
+      if (at < 0) return false;
+      unmatched.splice(at, 1);
+      return true;
+    });
     if (facts.length !== plan.handlerFacts.length || facts.some(f => f.turn_id !== committed.persisted_row_id)
-      || !isDeepStrictEqual(facts.map(f => factKey(f.fact)).sort(), plan.handlerFacts.map(factKey).sort())) {
+      || !everyFactIsOurs || unmatched.length !== 0) {
       return { kind: 'unverified', reason: 'committed_fact_unverified', commitAttempted: true };
     }
     // Guest/no-version success is valid. If a version receipt exists, it

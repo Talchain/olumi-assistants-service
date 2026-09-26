@@ -86,6 +86,17 @@ function buildPersistedGraph() {
   });
 }
 
+/** JSONB's object key order (shorter keys first, then bytewise), applied recursively, through a JSON round trip. */
+function jsonbRoundTrip(value: unknown): unknown {
+  const order = (v: unknown): unknown => Array.isArray(v) ? v.map(order)
+    : v !== null && typeof v === 'object'
+      ? Object.fromEntries(Object.keys(v as Record<string, unknown>)
+        .sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0))
+        .map(k => [k, order((v as Record<string, unknown>)[k])]))
+      : v;
+  return order(JSON.parse(JSON.stringify(value)));
+}
+
 let persisted: unknown = buildPersistedGraph();
 /** When set, the store's atomic append reports this version receipt (as `append_turn_atomic_v5` does). */
 let receiptFor: ((write: Record<string, unknown>) => Record<string, unknown>) | undefined;
@@ -112,10 +123,13 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
       assistant_message: r.write.assistantMessage ?? null,
       created_at: '2026-09-08T00:00:00.000Z',
     })),
+    // The store's REAL read-back shape: each fact comes back from JSONB — keys re-ordered (by length, then bytes),
+    // re-parsed — never the object that was written (AI Conversation #70 5849290342: a same-object fake hid a
+    // key-order compare that fails on Supabase).
     readFactsWithTurnFor: async (ids: readonly string[]) => [...rows.values()].flatMap(r => {
       if (!ids.includes(r.id)) return [];
       const facts = (r.write.handler_facts ?? []) as unknown[];
-      return facts.map(fact => ({ turn_id: r.id, fact_created_at: '2026-09-08T00:00:00.000Z', fact }));
+      return facts.map(fact => ({ turn_id: r.id, fact_created_at: '2026-09-08T00:00:00.000Z', fact: jsonbRoundTrip(fact) }));
     }),
     append: async (write: Record<string, unknown>) => {
       const key = `${String(write.scenario_id)}/${String(write.turn_id)}`;
@@ -476,11 +490,21 @@ describe('the Agent\'s in-process batch door — ONE user operation → ONE atom
       expect(JSON.stringify(persisted)).toBe(before);
     });
 
-    it('a stale base → stale, and the value is not applied', async () => {
+    it('a stale base → stale, and the value is not applied (the persisted model is byte-identical)', async () => {
+      const before = JSON.stringify(persisted);
       const r = await commitOptionLevelsInProcess({ scenario_id: SCENARIO_ID, turn_id: 'abababab-abab-4bab-8bab-abababababac',
         base_graph_hash: 'deadbeefdeadbeef', links: NEW_LINK, levels: TWO, values: COVERAGE_60 }, 'req-compound');
       expect(r).toEqual({ status: 'stale' });
       expect(rows.size).toBe(0);
+      expect(JSON.stringify(persisted)).toBe(before);
+    });
+
+    it('RED (AI Conversation N1): a range whose level the model ALREADY holds still commits — never silently dropped', async () => {
+      const held: Level = { option_id: 'option', factor_id: 'factor', value: 0.2, author: 'user_specified' };
+      const r = await callWith([], [held], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccca2', [{ factor_id: 'bare_amount', cap: 100 }]);
+      expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false });
+      expect(rows.size, 'the range is ONE commit').toBe(1);
+      expect(factorOs('bare_amount')).toMatchObject({ value: 0.4, raw_value: 40, cap: 100 });
     });
 
     it('RED: a value on a factor with NO range, and the range the approval disclosed, land in the SAME commit as the level', async () => {
