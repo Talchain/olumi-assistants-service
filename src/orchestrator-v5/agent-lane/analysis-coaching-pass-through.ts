@@ -24,7 +24,7 @@ import {
 } from '../coaching/fragile-link-challenge.js';
 import { buildNoFlaggedLinkCard } from '../coaching/no-flagged-link-card.js';
 import { buildLimitUncheckedCard, leaderWithheldForALimit } from '../coaching/limit-unchecked-card.js';
-import { graphBoundToHash, limitNodeLabels } from '../coaching/bound-graph.js';
+import { everyLimitProvedUnanchored, graphBoundToHash, limitNodeLabels } from '../coaching/bound-graph.js';
 import { buildNearTieCard } from '../coaching/near-tie-card.js';
 import { edgeAuthorshipIn } from '../coaching/edge-strength-authorship.js';
 import { WITHHELD_NEAR_TIE } from '../compose/analysis-state-v1.js';
@@ -51,6 +51,11 @@ export interface RunTurnCoachingFinal {
    * fact from it ONLY after `coaching/bound-graph.ts` proves its analysis-affecting hash is `graphHash`.
    */
   graph?: unknown;
+  /**
+   * The selected run's own constraint verdict state, from the SAME graph read (`readBackState`
+   * `constraintVerdictState`, CEE #1958: bound to the fact `analysisResult` came from). `null` = not recorded.
+   */
+  constraintVerdictState?: string | null;
 }
 
 export interface RunTurnCoachingResult {
@@ -249,7 +254,10 @@ export function runTurnCoaching(
   // fails CLOSED (no card), never back to a link card.
   if (leaderWithheldForALimit(final.analysisState)) {
     const limitLabels = boundGraph !== null ? limitNodeLabels(boundGraph) ?? undefined : undefined;
-    const limit = buildLimitUncheckedCard(input, limitLabels);
+    // The cause, only on proof from the SAME bound graph and the bound run's own options.
+    const provedUnanchored = boundGraph !== null
+      && everyLimitProvedUnanchored(boundGraph, record(captured.analysis_ready)?.options);
+    const limit = buildLimitUncheckedCard(input, limitLabels, provedUnanchored, final.constraintVerdictState);
     if (limit.block === null) return { blocks: upstream, eligibility: { eligible: false, reason: limit.reason } };
     return { blocks: dedupeByBlockId([...upstream, limit.block]), eligibility: { eligible: true } };
   }
