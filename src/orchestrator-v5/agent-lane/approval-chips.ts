@@ -181,9 +181,16 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
   const levelOps = ops.filter((o) => o.op === 'set_option_intervention');
   const levelLink = (o: (typeof ops)[number]): boolean => o.op === 'add_edge' && (o.value as { link_for_level?: unknown } | undefined)?.link_for_level === true;
   // One level alone keeps its "Save £X for …" label below.
-  if (ops.length > 1 && levelOps.length > 0 && ops.every((o) => o.op === 'set_option_intervention' || levelLink(o))
-    && levelOps.every((o) => (o.value as { authored_by?: unknown } | undefined)?.authored_by === 'user_stated')) {
-    return levelOps.length === 1 ? 'Record this level' : `Record these ${levelOps.length} levels`;
+  const byUser = levelOps.filter((o) => (o.value as { authored_by?: unknown } | undefined)?.authored_by === 'user_stated').length;
+  if (ops.length > 1 && levelOps.length > 0 && ops.every((o) => o.op === 'set_option_intervention' || levelLink(o)) && byUser > 0) {
+    if (byUser === levelOps.length) return levelOps.length === 1 ? 'Record this level' : `Record these ${levelOps.length} levels`;
+    /**
+     * ⛔ A MIXED BATCH NAMES BOTH (AI Conversation #70 5850225237 U8, served on 24df058): the user's 6% churn and Olumi's
+     * AI-availability estimate were one approval, and the chip read "Use as starting option levels", calling the user's
+     * own figure a starting estimate. It says what is recorded and how many of those are Olumi's.
+     */
+    const olumi = levelOps.length - byUser;
+    return `Record ${levelOps.length} levels (${olumi} Olumi estimate${olumi === 1 ? '' : 's'})`;
   }
   if (ops.length === 0 || ops.some((o) => !FIGURE_OPS.has(o.op))) return fallback;
   if (ops.length > 1) {

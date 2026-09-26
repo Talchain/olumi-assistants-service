@@ -89,13 +89,24 @@ describe('the writer is handed the user\'s figure with each level, in the ONE co
     expect(label).toBe('Record these 2 levels');
   });
 
-  it('CONTRAST: Olumi\'s own estimate stays Olumi\'s — the writer is told so, and the control does not claim it is the user\'s', async () => {
+  it('RED (U8, served 24df058): Olumi\'s estimate beside the user\'s level — the writer is told whose each is, and the control names both', async () => {
     const { label, level } = await approve(true, { interventions: [
       { option_label: ADD_ON, factor_label: 'Paid AI add-on price', value: 12, unit: '£ per month', basis: 'a typical add-on price' },
       { option_label: COHORT, factor_label: 'Pro plan monthly price', value: 54, basis: 'the user: £54 per month', user_stated: true },
     ] });
     expect(level('opt_add_on')).toMatchObject({ author: 'model_proposed', raw_value: 12 });
-    expect(label).not.toMatch(/^Record/);
+    // U8 (AI Conversation 5850225237): a mixed batch names both — never "starting" for the user's own figure, never
+    // "Record these 2 levels" as if both were theirs.
+    expect(label).toBe('Record 2 levels (1 Olumi estimate)');
+  });
+
+  it('CONTRAST: a batch of ONLY Olumi\'s estimates keeps its starting-estimate label (nothing in it is the user\'s)', async () => {
+    const { label } = await approve(true, { interventions: [
+      { option_label: ADD_ON, factor_label: 'Paid AI add-on price', value: 12, unit: '£ per month', basis: 'a typical add-on price' },
+      { option_label: COHORT, factor_label: 'Pro plan monthly price', value: 57, basis: 'the middle of the tested range' },
+    ] });
+    // Unchanged from staging: Olumi's figures, offered as a starting point.
+    expect(label).toBe('Use these 2 starting figures');
   });
 
   it('RED (Canonical #2025 B1): a unit the MODEL supplies never grounds a figure the user wrote about another entity', async () => {
