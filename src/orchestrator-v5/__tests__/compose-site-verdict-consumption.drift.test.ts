@@ -1786,7 +1786,9 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // The load-bearing composition. If `summary` ever stops being
     // "withheld-able headline, else a locked template", the `gated` stance is
     // void — so the exact expression is pinned, not paraphrased.
-    expect(RUN_ANALYSIS).toContain('const headline = buildAnalysisResultHeadline(headlineInput);');
+    // C46 stage 1: the headline is ALSO withheld when the leader's sign on a multiplied goal is not proven —
+    // still "withheld-able headline, else a locked template".
+    expect(RUN_ANALYSIS).toContain('const headline = nonlinearIdentityWithhold !== null ? null : buildAnalysisResultHeadline(headlineInput);');
     // ROADMAP 2.579 added a THIRD disclosure slot, appended after the
     // constraint-gap one. The `gated` stance is unaffected and the pin is
     // updated rather than loosened: `summary` is still "withheld-able headline,
@@ -1882,7 +1884,11 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // `constraint_verdict_state` untouched (CLAUDE.md trap 21: two authorities,
     // two questions, named apart rather than aligned).
     expect(RUN_ANALYSIS).toContain('projectClaimSafety(constraintVerdict),');
-    expect(RUN_ANALYSIS).toContain('constraint_verdict: applyIntakeToLeaderPermission(');
+    // C46 stage 1 (#70 5841833807): a THIRD remove-only conjunct, outermost — the leader's sign on a product the
+    // analysis adds up. It leaves `constraint_verdict_state` untouched, like the intake half.
+    expect(RUN_ANALYSIS).toContain(
+      'constraint_verdict: applyNonlinearIdentityToLeaderPermission(\n          applyIntakeToLeaderPermission(',
+    );
   });
 
   it('chip-click confirmationText: HOP 4 — EVERY withholding verdict state withholds the headline', () => {

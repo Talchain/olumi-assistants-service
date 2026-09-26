@@ -108,7 +108,10 @@ import {
 import {
   leaderWithheldOnlyBecauseUnrequested,
   mayPresentLeaderClaimForFact,
+  wasAnalysisRequestedByUser,
 } from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
+// C46 stage 1: WHY a persisted fact's leader was withheld, when the reason is a product the analysis adds up.
+import { nonlinearIdentityLeaderClaimCause } from '../orchestrator-v5/agent-lane/admit-model.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import {
@@ -347,7 +350,25 @@ export async function readScenarioAnalysis(
         // WHY it is withheld, when the fact can prove it: its own constraint verdict
         // permitted a leader and nobody asked for this run (the automatic first
         // pass). Otherwise the constraint token stands (#63 5825404689).
-        withheldBecauseUnrequested: fact !== null && leaderWithheldOnlyBecauseUnrequested(fact),
+        // C46 (AI Quality option (i), #70 5842615260): the product takes the field only when the fact's own
+        // constraint verdict permitted; a first pass keeps the unrequested code. Bound to the ONE fact the
+        // permission above was read from, and judged on the graph the run ANALYSED (OpenAI Runtime #70
+        // 5843934816): `currentGraphHash` is this route's own freshness hash of `params.graph`, the value it
+        // compared with the fact's `graph_hash_at_run`; the cause is refused unless the two are equal.
+        ...(() => {
+          const c46 = fact !== null
+            ? nonlinearIdentityLeaderClaimCause({
+              graph: params.graph,
+              graphHash: currentGraphHash,
+              result: fact.result,
+              requested: wasAnalysisRequestedByUser(fact),
+            })
+            : null;
+          return {
+            withheldBecauseUnrequested: (fact !== null && leaderWithheldOnlyBecauseUnrequested(fact)) || c46?.withheldBecauseUnrequested === true,
+            withheldBecauseNonlinearIdentity: c46?.withheldBecauseNonlinearIdentity === true,
+          };
+        })(),
         rawRobustness:
           analysisResult !== null
             ? readRawRobustnessFromResponseBody({ blocks: [analysisResult] })

@@ -213,6 +213,23 @@ export const WITHHELD_RUN_IDENTITY_CONFLICT = 'analysis_run_identity_conflict';
  * WE LOOKED AND DECLINED, by policy — so it classifies `withheld`.
  */
 export const WITHHELD_UNREQUESTED_ANALYSIS = 'unrequested_analysis_withheld';
+/**
+ * ⛔ C46 STAGE 1 — the run was evaluated, the constraint verdict PERMITTED a leader, and the leader
+ * was withheld because the goal depends on a PRODUCT of modelled quantities (MRR = price ×
+ * subscribers) that the analysis only adds up, and the leader's sign against another compared option
+ * is not proven (`agent-lane/admit-model.ts` `nonlinearIdentityLeaderWithhold`; ruling #70
+ * 5841314428). WE LOOKED AND DECLINED — so it classifies `withheld`, never `not_evaluated` (AI Quality
+ * #70 5842580505: the run was evaluated; the SIGN is what is unproven). Minted in CEE, no schemas
+ * member: `leader_claim.withheld_reason` is `z.string().min(1).optional()` at @talchain/schemas 0.59.0.
+ *
+ * ⚠ PRECEDENCE — AI Quality's option (i), #70 5842615260: while the CONSTRAINT verdict withholds,
+ * `constraint_verdict_withheld` keeps the field, because `coaching/limit-unchecked-card.ts` keys the
+ * limit card on exactly that code and both causes are true; C46 then speaks through its own channels
+ * (the Agent's `claim_permissions.nonlinear_identity`, and construction's open question). An
+ * unrequested first pass keeps `unrequested_analysis_withheld` (policy, #70 5841878117). This code
+ * takes the field only when the constraint verdict permits and the run was requested.
+ */
+export const WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN = 'nonlinear_identity_sign_unproven';
 
 /**
  * ⭐ TWO DIFFERENT FACTS WEAR THE SAME `withheld_reason` FIELD (S6, 2026-08-26).
@@ -275,6 +292,7 @@ export const LEADER_CLAIM_REASON_KINDS: Readonly<
 > = {
   [WITHHELD_CONSTRAINT_VERDICT]: 'withheld',
   [WITHHELD_UNREQUESTED_ANALYSIS]: 'withheld',
+  [WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]: 'withheld',
   [WITHHELD_NEAR_TIE]: 'withheld',
   [WITHHELD_SEPARATION_UNAVAILABLE]: 'not_evaluated',
   [WITHHELD_RUN_IDENTITY_UNCONFIRMED]: 'not_evaluated',
@@ -478,6 +496,15 @@ export interface AnalysisStateComposeInput {
    * composer never re-derives it (one authority per question).
    */
   readonly withheldBecauseUnrequested?: boolean;
+  /**
+   * OPTIONAL CAUSE for a `mayNameLeadingOption: false` verdict (C46): the fact's own constraint
+   * verdict PERMITTED a leader, the run was requested, and the leader was withheld because its sign
+   * against another compared option is not proven on a product the analysis adds up. Decided by the
+   * caller that holds the fact AND the graph (`nonlinearIdentityCauseForFact`, `agent-lane/admit-model.ts`)
+   * — this composer never re-derives it. Absent or false keeps today's code, so no existing caller
+   * changes; `withheldBecauseUnrequested` outranks it (see WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN).
+   */
+  readonly withheldBecauseNonlinearIdentity?: boolean;
   /** The engine's own robustness signals as they appear on this turn's wire. */
   readonly rawRobustness: RawRobustnessSignals | null;
   /**
@@ -865,10 +892,15 @@ function composeLeaderClaim(input: AnalysisStateComposeInput): AnalysisLeaderCla
     // disagree. `!` is sound only because this branch runs when
     // `permitted === false`, and with `entitled === true` that forces
     // `separates === false`, which is exactly when the helper returns non-null.
+    // C46: the unrequested first pass outranks the identity (policy), and the identity cause is
+    // supplied only when the constraint verdict itself permitted — so `constraint_verdict_withheld`
+    // keeps the field while a limit withholds (AI Quality option (i), #70 5842615260).
     claim.withheld_reason = !entitled
       ? input.withheldBecauseUnrequested === true
         ? WITHHELD_UNREQUESTED_ANALYSIS
-        : WITHHELD_CONSTRAINT_VERDICT
+        : input.withheldBecauseNonlinearIdentity === true
+          ? WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN
+          : WITHHELD_CONSTRAINT_VERDICT
       : separationWithholdFromRobustness(raw)!;
   }
   // ABSENCE IS DISTINCT: omitted means no separation statement was computed,
