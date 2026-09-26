@@ -158,6 +158,19 @@ function levelIsPercentOver100(target: LimitTargetScale): boolean {
   );
 }
 
+/**
+ * ⛔ A LEVEL LIMIT MAY BE CHECKED AGAINST ITS NODE'S OWN LEVEL ONLY WHERE PLoT READS BOTH ON ONE SCALE (#70 5841905430).
+ *
+ * The one decision-grade mismatch: a `"%"`-token limit takes PLoT's unit_percent rung (`[0,100]`, the node's cap
+ * ignored), so on a node whose level is NOT the percentage ÷ 100 (`{%, scale_frame 20}`: level = raw/20) the check would
+ * be certified on the wrong scale — "≤ 10%" scored as "≤ 2%". Every other shape either reconciles (explicit_cap, same
+ * spelling) or is heuristic, which PLoT marks not decision-grade and CEE withholds (#1943).
+ */
+export function limitReadsOnNodeScale(unit: string | undefined, target: LimitTargetScale): boolean {
+  if (unit === undefined || !PERCENT_HEADS.includes(norm(unit))) return true;
+  return levelIsPercentOver100(target);
+}
+
 export function canonicaliseLimitUnit(value: number, unit: string | undefined, target?: LimitTargetScale): UnitCanonical {
   if (unit === undefined) return { value };
   const verbatim: UnitCanonical = { value, unit };
