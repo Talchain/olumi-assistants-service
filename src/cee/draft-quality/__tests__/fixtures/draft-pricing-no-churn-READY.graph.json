@@ -1,0 +1,94 @@
+{
+ "edges": [
+  {
+   "from": "1311b8e7",
+   "to": "8f5e99d8"
+  },
+  {
+   "from": "32b7e30c",
+   "to": "ed5b5711"
+  },
+  {
+   "from": "36f739e4",
+   "to": "ed5b5711"
+  },
+  {
+   "from": "45376300",
+   "to": "94fa174b"
+  },
+  {
+   "from": "8f5e99d8",
+   "to": "94fa174b"
+  },
+  {
+   "from": "94fa174b",
+   "to": "8a5386ff"
+  },
+  {
+   "from": "a9731ab3",
+   "to": "32b7e30c"
+  },
+  {
+   "from": "a9731ab3",
+   "to": "36f739e4"
+  },
+  {
+   "from": "a9731ab3",
+   "to": "b3393563"
+  },
+  {
+   "from": "b3393563",
+   "to": "ed5b5711"
+  },
+  {
+   "from": "ed5b5711",
+   "to": "8f5e99d8"
+  },
+  {
+   "from": "ed5b5711",
+   "to": "94fa174b"
+  }
+ ],
+ "nodes": [
+  {
+   "id": "1311b8e7",
+   "kind": "factor"
+  },
+  {
+   "id": "32b7e30c",
+   "kind": "option"
+  },
+  {
+   "id": "36f739e4",
+   "kind": "option"
+  },
+  {
+   "id": "45376300",
+   "kind": "factor"
+  },
+  {
+   "id": "8a5386ff",
+   "kind": "goal"
+  },
+  {
+   "id": "8f5e99d8",
+   "kind": "risk"
+  },
+  {
+   "id": "94fa174b",
+   "kind": "outcome"
+  },
+  {
+   "id": "a9731ab3",
+   "kind": "decision"
+  },
+  {
+   "id": "b3393563",
+   "kind": "option"
+  },
+  {
+   "id": "ed5b5711",
+   "kind": "factor"
+  }
+ ]
+}

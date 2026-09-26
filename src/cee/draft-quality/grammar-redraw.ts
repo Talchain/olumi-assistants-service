@@ -1,0 +1,248 @@
+/**
+ * ⭐⭐ THE STRUCTURE REDRAW — one extra draw when the drafter produced a model
+ * that refuses its own options, and never for any other reason.
+ *
+ * ⚠ THE NAME SAYS "grammar" FOR ONE REASON ONLY: it was written when the single
+ * known defect was an `option→risk` link the ALLOWED EDGE PATTERNS rule forbids.
+ * There are now TWO, and the second is not an edge at all — an option that states
+ * a value and carries no intervention for it. `draft-structure.ts` holds both and
+ * the selection is over REFUSED OPTIONS, not over edges.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY THIS IS A THIRD AUTHORITY AND NOT A CLAUSE IN EITHER EXISTING ONE.
+ *
+ * The draft path already funds two redraws, and each answers its own question
+ * with its own default (the trap-21 discipline this estate keeps):
+ *
+ *   · `classifyRetryableDraftFailure` — "did this draft FAIL in a
+ *     self-declared-stochastic way?" Fails CLOSED. Never ships an invalid model.
+ *   · `applyDraftQualityPass` — "did this draft SUCCEED and still not cover the
+ *     brief?" Fails OPEN. Selects on COVERAGE.
+ *   · this one — "did this draft SUCCEED and break the grammar its own prompt
+ *     states?" Fails OPEN. Selects on LEGALITY.
+ *
+ * ⛔ IT CANNOT BE FOLDED INTO THE QUALITY PASS, and the reason is directional.
+ * That pass ships the second draw only when `isMaterallyRicher` — coverage,
+ * which REWARDS MORE NODES. A draw that fixes this defect is typically the
+ * same size or smaller, so the richer-selector would reject exactly the draw
+ * this exists to keep. Two selectors pulling opposite ways under one predicate
+ * is how one lane closes a harm its neighbour reopens.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE GUARANTEES, and each is a test in `__tests__/grammar-redraw.test.ts`.
+ *
+ *   · A CLEAN DRAW IS UNTOUCHED — the same object, no redraw, no budget read,
+ *     no telemetry branch. Roughly half of live traffic already drafts clean
+ *     and must not pay a millisecond for this.
+ *   · IT NEVER TURNS A SUCCESS INTO A FAILURE. If the second draw fails, or is
+ *     unreadable, or is not cleaner, the user gets `first` byte-identical.
+ *   · IT NEVER THROWS. Every arm is wrapped; a defect introduced here later
+ *     still cannot break drafting.
+ *   · EXACTLY ONE EXTRA DRAW. There is no loop, and `attemptSource !== 'first'`
+ *     is structurally incapable of funding one.
+ *   · IT SPENDS NOTHING IT CANNOT AFFORD. The budget question is asked with
+ *     the SAME primitives the failure retry uses — `getDraftLlmRetryBudgetMs`
+ *     against `MIN_DRAFT_RETRY_BUDGET_MS` — never a second encoding of "is
+ *     there time?".
+ *   · IT MUTATES NO GRAPH. It chooses between two draws the drafter produced.
+ *     No edge is dropped, added or re-pointed anywhere in this file.
+ */
+
+import {
+  getDraftLlmRetryBudgetMs,
+  MIN_DRAFT_RETRY_BUDGET_MS,
+} from '../../config/timeouts.js';
+import { log } from '../../utils/telemetry.js';
+import type { UnifiedPipelineResult } from '../unified-pipeline/types.js';
+import {
+  buildDraftStructureDirective,
+  buildRedrawDisclosure,
+  readDraftStructureFacts,
+  secondDrawIsStructurallyCleaner,
+  violatesDraftStructure,
+  withRedrawDisclosure,
+  type DraftStructureFacts,
+} from './draft-structure.js';
+import type { DraftAttemptSource } from './types.js';
+
+/** Why no second draw was spent. Each value is a DIFFERENT diagnosis, and
+ *  collapsing any two of them would hide which population a request is in. */
+export type GrammarRedrawSkipReason =
+  | 'draft_failed'
+  | 'graph_unreadable'
+  | 'grammar_clean'
+  | 'redraw_already_spent'
+  | 'no_redraw_available'
+  | 'budget_unaffordable';
+
+export type GrammarRedrawDecision =
+  | { readonly redraw: true; readonly facts: DraftStructureFacts; readonly retryBudgetMs: number }
+  | { readonly redraw: false; readonly reason: GrammarRedrawSkipReason; readonly facts: DraftStructureFacts | null };
+
+/**
+ * ⭐ WHY THIS RETURNS `drawSpent` AND NOT JUST THE RESULT.
+ *
+ * The caller chains this into `applyDraftQualityPass`, which can fund a draw of
+ * its own. "Did the second draw WIN?" and "did we SPEND a draw?" are different
+ * questions, and a caller that infers the second from the first (by comparing
+ * object identity) gets it wrong in exactly the expensive case: a redraw that
+ * was spent and LOST looks identical to no redraw at all, so the quality pass
+ * would then fund a THIRD full draw on the user's clock.
+ */
+export interface GrammarRedrawResult {
+  readonly result: UnifiedPipelineResult;
+  /** True iff the drafter was actually called again, whichever draw shipped. */
+  readonly drawSpent: boolean;
+}
+
+export interface GrammarRedrawInput {
+  readonly first: UnifiedPipelineResult;
+  readonly requestId: string;
+  readonly elapsedMs: number;
+  readonly attemptSource?: DraftAttemptSource;
+  readonly redraw?: (directive: string) => Promise<UnifiedPipelineResult>;
+}
+
+/**
+ * ⭐ THE WHOLE DECISION, PURE AND SEPARATELY TESTABLE.
+ *
+ * Kept out of the async pass so every arm can be asserted without mocking a
+ * pipeline. The order of the guards is the order of cost: shape first, then
+ * the free predicate, then the capability checks, and only last the budget —
+ * so a clean draw never reaches a clock read at all.
+ */
+export function decideGrammarRedraw(
+  input: Pick<GrammarRedrawInput, 'first' | 'elapsedMs' | 'attemptSource' | 'redraw'>,
+): GrammarRedrawDecision {
+  if (input.first.statusCode !== 200) return { redraw: false, reason: 'draft_failed', facts: null };
+
+  // ⚠ THE WHOLE BODY, NOT THE GRAPH. One of the two defects lives in
+  // `analysis_ready`, a DERIVED payload — a reader handed only the graph is
+  // structurally incapable of seeing it, which is exactly how it went unnoticed
+  // until the eighth draw.
+  const facts = readDraftStructureFacts(input.first.body);
+  if (!facts.readable) return { redraw: false, reason: 'graph_unreadable', facts };
+  if (!violatesDraftStructure(facts)) return { redraw: false, reason: 'grammar_clean', facts };
+
+  if ((input.attemptSource ?? 'first') !== 'first') {
+    return { redraw: false, reason: 'redraw_already_spent', facts };
+  }
+  if (!input.redraw) return { redraw: false, reason: 'no_redraw_available', facts };
+
+  const retryBudgetMs = getDraftLlmRetryBudgetMs(input.elapsedMs);
+  if (retryBudgetMs < MIN_DRAFT_RETRY_BUDGET_MS) {
+    return { redraw: false, reason: 'budget_unaffordable', facts };
+  }
+  return { redraw: true, facts, retryBudgetMs };
+}
+
+/**
+ * Spend at most one extra draw to satisfy the drafter's own edge grammar.
+ *
+ * Returns `first` unchanged on every arm except a second draw that is
+ * measurably cleaner. Never throws.
+ */
+export async function applyGrammarRedraw(
+  input: GrammarRedrawInput,
+): Promise<GrammarRedrawResult> {
+  try {
+    return await runGrammarRedraw(input);
+  } catch (err) {
+    // Defence in depth, matching `applyDraftQualityPass`: a defect added here
+    // later must not be able to break a draft that is otherwise shippable.
+    log.warn(
+      { request_id: input.requestId, err: err instanceof Error ? err.message : String(err) },
+      'grammar redraw threw — returning the original draft unchanged (fail open)',
+    );
+    // ⚠ `drawSpent: true` is the HONEST answer on the throw arm: the drafter
+    // may well have been called before the throw, and claiming otherwise would
+    // license the next pass to spend another full draw on a request that has
+    // already paid for one.
+    return { result: input.first, drawSpent: true };
+  }
+}
+
+async function runGrammarRedraw(input: GrammarRedrawInput): Promise<GrammarRedrawResult> {
+  const decision = decideGrammarRedraw(input);
+
+  // ⭐ EMITTED ON EVERY ARM INCLUDING THE CLEAN ONE, and that is the point: the
+  // violation rate is the OUTCOME metric this change is judged on. A pass whose
+  // no-op arm is silent converts a measurable problem into an unmeasurable one,
+  // and there would be no way to tell a fixed drafter from a broken detector.
+  log.info(
+    {
+      event: 'cee.draft.edge_grammar',
+      request_id: input.requestId,
+      readable: decision.facts?.readable ?? false,
+      // ⭐ THE OUTCOME METRIC IS REFUSED OPTIONS. `violation_count` mixes two
+      // units (edges per edge, targets per distinct string) and is kept for
+      // continuity only — filter dashboards on `refused_options`.
+      refused_options: decision.facts?.refusedOptions ?? null,
+      violation_count: decision.facts?.totalViolations ?? null,
+      // Broken out, because "the drafter wired an option to a risk" and "the
+      // drafter targeted something that is not a node" are different diagnoses
+      // about the same producer, and one number cannot tell them apart.
+      edge_violations: decision.facts?.edgeGrammar.violations.length ?? null,
+      unresolvable_targets: decision.facts?.unresolvableTargets.length ?? null,
+      // ⛔ WAS A SUM, WHICH DOUBLE-COUNTED AN OPTION CARRYING BOTH DEFECTS.
+      // `refusedOptions` is the union over option identity; these two stay as
+      // per-mechanism breakdowns and must not be added together.
+      edge_options_affected: decision.facts?.edgeGrammar.optionsAffected ?? null,
+      target_options_affected: decision.facts?.optionsWithUnresolvableTarget ?? null,
+      attempt_source: input.attemptSource ?? 'first',
+      redraw: decision.redraw,
+      skip_reason: decision.redraw ? null : decision.reason,
+      elapsed_ms: input.elapsedMs,
+    },
+    'Draft measured against the ALLOWED EDGE PATTERNS rule',
+  );
+
+  if (!decision.redraw) return { result: input.first, drawSpent: false };
+  /* c8 ignore next */
+  if (!input.redraw) return { result: input.first, drawSpent: false };
+
+  const second = await input.redraw(buildDraftStructureDirective(decision.facts));
+
+  // ⛔ A REDRAW MUST NEVER TURN A SUCCESSFUL DRAFT INTO A FAILURE. The first
+  // draw is a shippable model; the second is a gamble taken on the user's
+  // behalf. If it fails, they get what they would have had.
+  if (second.statusCode !== 200) {
+    log.info(
+      { event: 'cee.draft.edge_grammar_redraw', request_id: input.requestId, shipped: 'first', second_outcome: 'draft_failed' },
+      'Grammar redraw failed — shipping the original draft',
+    );
+    return { result: input.first, drawSpent: true };
+  }
+
+  const secondFacts = readDraftStructureFacts(second.body);
+  const shipSecond = secondDrawIsStructurallyCleaner(decision.facts, secondFacts);
+
+  log.info(
+    {
+      event: 'cee.draft.edge_grammar_redraw',
+      request_id: input.requestId,
+      first_refused_options: decision.facts.refusedOptions,
+      second_refused_options: secondFacts.readable ? secondFacts.refusedOptions : null,
+      second_readable: secondFacts.readable,
+      shipped: shipSecond ? 'second' : 'first',
+      // `second_outcome` separates "the drafter could not do better" from "the
+      // second draw could not be read" — opposite diagnoses that a single
+      // `shipped: first` would spell the same.
+      second_outcome: !secondFacts.readable ? 'unreadable' : shipSecond ? 'cleaner' : 'not_cleaner',
+    },
+    'Grammar redraw complete',
+  );
+
+  // ⭐⭐ A SHIPPED REDRAW IS DISCLOSED. An automatic change to the team's causal
+  // model may not be silent — `redraw_spent` reached only the trace before this.
+  // The sentence describes THE FIRST DRAW's defects, because those are what
+  // caused the second draft; it names no id, no label and no count of the
+  // user's material.
+  //
+  // ⚠ Only when the SECOND draw ships. If the first draw wins there was no
+  // change to disclose, and saying otherwise would be a false claim about their
+  // model.
+  if (!shipSecond) return { result: input.first, drawSpent: true };
+  const disclosed = withRedrawDisclosure(second.body, buildRedrawDisclosure(decision.facts));
+  return { result: { ...second, body: disclosed }, drawSpent: true };
+}
