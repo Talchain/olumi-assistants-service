@@ -341,7 +341,7 @@ export async function applyGoalCurrentLevel(
   if (goal === undefined || goal.kind !== 'goal') return notApplied('The goal is no longer in the model, so nothing was written.');
   // ⛔ RE-VALIDATED AT APPLY TIME: the level frame, and the same unit, figure and cap the proposal was prepared against.
   const against = (op.value as { against?: GoalTarget } | undefined)?.against;
-  const now = targetOf(goal as unknown as Record<string, unknown>);
+  const now = targetOf(goal);
   if (against === undefined || now.goal_threshold_frame !== 'level' || !sameTarget(against, now)) {
     return {
       ok: false, mutated: false, applied: false, proposal_id: proposal.proposal_id, refusal: 'superseded',
