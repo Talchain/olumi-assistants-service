@@ -75,7 +75,10 @@ describe('PR1b: D4 judges Olumi\'s own size against the baseline the model holds
     expect(s.problem).toBe('out_of_domain');
     expect(s.mean).toBeCloseTo(-0.06 / (4 * 0.7), 12);
     expect(s.magnitude).toBe('olumi_placeholder');
-    expect(s.question).toContain('6% today');
+    // AI Quality's blocker (5848196913): the 6% is Olumi's estimate and is said as such — never "is 6% today".
+    expect(s.question).toContain("Olumi's own estimate");
+    expect(s.question).toContain('6%');
+    expect(s.question).not.toMatch(/is 6% today/);
   });
 
   it('CONTRAST (D7): the USER\'s own −0.5 pp per 10 points on the same shape is kept exactly — Olumi\'s guess never overrides what the user said', () => {

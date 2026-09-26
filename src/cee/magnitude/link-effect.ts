@@ -424,7 +424,12 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
 
   const question = (() => {
     if (problem === 'out_of_domain') {
-      return `Olumi estimated that ${statement}, but "${target.label}" is ${today(judge!)} today, so that cannot hold across your `
+      // Today's level is said as what it is: known, or Olumi's own estimate — never an estimate passed off as known
+      // (AI Quality on #2020, 5848196913).
+      const level = check !== null
+        ? `"${target.label}" is ${today(check)} today`
+        : `Olumi's own estimate of "${target.label}" today is ${today(judge!)}`;
+      return `Olumi estimated that ${statement}, but ${level}, so that cannot hold across your `
         + `options and was not used: ${standIn} stands in for it. ${HOW_MUCH(source, target)}`;
     }
     if (problem === 'not_representable') {
