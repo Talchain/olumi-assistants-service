@@ -71,28 +71,135 @@ const REFUSAL_WORDS: Record<string, string> = {
   construction_failed: 'the model builder could not produce a usable model this time — ask me to try again',
   admitted_graph_invalid: 'what came back did not form a valid model, so nothing was saved — ask me to try again',
   registration_refused: 'it could not be saved to this decision — ask me to try again',
+  /**
+   * ⛔ EVERY CODE A WRITE TOOL RETURNS HAS WORDS (fix/agent-never-shows-instructions-or-codes). Until now these fell
+   * through to "the change was refused (<code>)": `authoriseChange` / `confirmHeld` (`not_found`), `applyCompound`
+   * (`unsupported_compound`), `dispatchTool` (`unparsable_arguments`, `unknown_tool`), the Agent loop's withheld call
+   * (`withheld_on_chip_turn`) and `buildModelFromBrief` (`construction_unavailable`, `empty_brief`). A compound part's
+   * `reason` reads through this same map (`unresolved_effect_relationship` is the option-level writer's refusal).
+   */
+  not_found: 'Olumi could not read this decision’s model, so nothing was changed — ask me to try again',
+  unsupported_compound: 'this proposal mixes changes that cannot be applied together, so nothing was changed — ask me to propose them one at a time',
+  unparsable_arguments: 'the request could not be read, so nothing was changed — ask me again',
+  unknown_tool: 'that change cannot be made here, so nothing was changed',
+  withheld_on_chip_turn: 'a suggestion button cannot approve a change — approving has its own button',
+  construction_unavailable: 'building a model is not available right now — ask me to try again later',
+  empty_brief: 'there was no description of the decision to build it from — tell me what you are deciding',
+  unresolved_effect_relationship: 'the option does not act on that factor, so no level could be set for it',
 };
 
-const PART_NAMES: Record<string, string> = { values: 'starting values', option_levels: 'option levels' };
+/**
+ * ⛔ A CHANGE OLUMI COULD NOT CONFIRM IS NEVER "NOT SAVED", AND NEVER "REFUSED" (code-read, this fix). Each of these
+ * arrives when the write was SENT and may well have landed — `not_verified` even carries `mutated: true` (the held
+ * add-option's own response showed it applied, then the model moved before the read-back), and `not_confirmed` /
+ * `model_not_readable_after_write` mean the read-back itself failed. The user read "Partly saved: the change was
+ * refused (not_verified)." for an option that DID land. Said as what is true: sent, not confirmed, and how to check.
+ */
+const UNCONFIRMED_WORDS: Record<string, string> = {
+  not_verified: 'The change was sent, but it could not be confirmed: the model may have changed again straight afterwards, so Olumi cannot yet say what it now holds. Look at the model, or ask me to check it.',
+  not_confirmed: 'The change was sent, but it could not be confirmed: Olumi could not read the model back afterwards. Ask me to check whether it was recorded.',
+  model_not_readable_after_write: 'The model could not be confirmed: Olumi could not read it back after building it. Ask me to check whether it was saved.',
+};
+
+/**
+ * ⛔ NO RAW CODE REACHES THE USER, EVEN ONE NOBODY HAS WORDED YET. The fallbacks used to print the code itself
+ * ("it was refused (model_too_large)", served `785185b7`; "the change was refused (not_verified)"). A code is for the
+ * Agent (it reads the result's `refusal` and `detail`); the user reads one plain sentence with a next step.
+ */
+const GENERIC_NOT_SAVED = 'the change could not be made this time — ask me to try again';
+const GENERIC_PARTLY_SAVED = 'not all of the change could be made — ask me what is still missing';
+const GENERIC_NOT_BUILT = 'something went wrong while building it — ask me to try again';
+
+/**
+ * ⛔ WHAT THE USER READS IS NEVER AN INSTRUCTION TO THE AGENT (served f2, CEE `af719a1`, scenario `bdba963b`, journey Q
+ * witness). One click on "Record this link" showed the capability's `follow_up` verbatim: "Recorded as the user's own
+ * estimate: … Offer to run the analysis again so they can see what it changes." A capability result is read by TWO
+ * audiences — the Agent (every field, on the loop path) and the user (only `follow_up`, shown verbatim by the
+ * typed-approval fast path, where no model reads the result). Guidance for the Agent belongs in `note` / `detail`;
+ * this is the boundary that holds when a producer forgets.
+ *
+ * A sentence is the Agent's when it names the reader in the third person ("the user" — Olumi says "you"), opens with
+ * an instruction to the Agent ("Offer…", "Say so", "Tell the user…", "Call…", "Read the model…"), speaks of the
+ * proposal's id, or names a code (a snake_case tool, field or refusal) outside a quoted label. Such a sentence is
+ * dropped whole, never rewritten; the corpus it is tested on is the capability's own `note`/`detail` register and the
+ * served f2 and d3 follow-ups (`agent-never-shows-instructions-or-codes.test.ts`).
+ */
+const AGENT_READER = /\bthe user(?:['’]s)?\b/i;
+const AGENT_IMPERATIVE = /^(?:[-•*>\s]*)(?:Offer\b|Say (?:so|that|it|plainly)\b|Tell (?:the user|them)\b|Ask (?:the user|them)\b|Call\b|Relay\b|Report\b|Read (?:the|it) (?:model|state|result)|Read it again\b|Do not (?:describe|say|claim|invent)\b|Don['’]t (?:describe|say|claim|invent)\b)/;
+const AGENT_ID = /\bnever the id\b|\bproposal[ _]id\b/i;
+const CODE_TOKEN = /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/;
+const QUOTED = /"[^"]*"|“[^”]*”/g;
+/** A quoted span, held aside while the sentence is judged: private-use delimiters no label or rule can contain. */
+const HELD_SPAN = /(\d+)/g;
+
+/**
+ * ⛔ A LABEL IS THE USER'S DATA, NEVER AN INSTRUCTION (round-2 review of this fix, blocker 3). The rules above ran over
+ * UNQUOTED factor labels in the held add-option's follow-up, so "Size of the user base" (reads as "the user"), a
+ * snake_case label such as `cost_per_hire`, or the id the producer falls back to dropped BOTH of its sentences, and one
+ * click showed only "Saved." — losing what was added and the C2 disclosure that a level is Olumi's estimate. So every
+ * producer quotes each label (`agent-capabilities.ts`), and here every quoted span is held aside BEFORE the text is
+ * split into sentences (a label holding ". " — "Acme Inc. price" — split mid-label and left a fragment, review
+ * non-blocking 2) and before any rule runs. Only the words OUTSIDE a label can make a sentence the Agent's.
+ */
+export function withoutAgentDirections(text: string): { readonly text: string; readonly dropped: readonly string[] } {
+  const dropped: string[] = [];
+  const kept = text
+    .split('\n')
+    .map((line) => {
+      const spans: string[] = [];
+      const masked = line.replace(QUOTED, (span) => { spans.push(span); return `${spans.length - 1}`; });
+      const unmask = (s: string): string => s.replace(HELD_SPAN, (_held, i: string) => spans[Number(i)] ?? '');
+      const sentences = masked.split(/(?<=[.!?])\s+/);
+      const keep = sentences.filter((s) => {
+        const agents = AGENT_READER.test(s) || AGENT_IMPERATIVE.test(s.trim()) || AGENT_ID.test(s) || CODE_TOKEN.test(s);
+        if (agents) dropped.push(unmask(s).trim());
+        return !agents;
+      });
+      return keep.length === sentences.length ? line : unmask(keep.join(' '));
+    })
+    .join('\n')
+    .trim();
+  return { text: dropped.length === 0 ? text : kept, dropped };
+}
+
+/** Each part a compound approval reports, named for the user (one, many). A part nobody has named is "a change". */
+const PART_NAMES: Record<string, readonly [string, string]> = {
+  values: ['starting value', 'starting values'],
+  option_levels: ['option level', 'option levels'],
+};
+const UNNAMED_PART: readonly [string, string] = ['change', 'changes'];
 
 /**
  * A compound approval (#1712) reports each part: what was recorded, out of how
  * many, and with which receipts. State exactly that — "Saved 6 of 6 starting
- * values as version 2. Not saved: 0 of 2 option levels (…)." — never a vague
- * "part of it".
+ * values as version 2. Saved 1 of 2 option levels; 1 was not saved (…)." — never
+ * a vague "part of it".
+ *
+ * ⛔ EACH COUNT UNDER ITS OWN WORD (round-2 review of fix/agent-never-shows-instructions-or-codes, blocker 1).
+ * `recorded_count` is what LANDED. It was printed under "Not saved:", so a starting point whose third level stopped
+ * read "Not saved: 2 of 3 option levels" when 2 of the 3 WERE saved and 1 was not — and on the one-click path this
+ * line is all the user reads. What landed is said as saved, what did not as not saved, each with its own count.
  */
 function partsLine(r: ToolResult): string | null {
   const parts = Array.isArray(r.parts) ? (r.parts as ToolResult[]) : null;
   if (parts === null || parts.length === 0) return null;
   const bits = parts.map((p) => {
-    const what = PART_NAMES[String(p.part)] ?? String(p.part ?? 'change');
+    const [one, many] = PART_NAMES[String(p.part)] ?? UNNAMED_PART;
     const rec = typeof p.recorded_count === 'number' ? p.recorded_count : null;
     const req = typeof p.requested_count === 'number' ? p.requested_count : null;
-    const count = rec !== null && req !== null ? `${rec} of ${req} ` : '';
-    if (p.ok === true) return `Saved ${count}${what}${versionPhrase(versionsOf(p))}.`;
-    const code = String(p.reason ?? p.refusal ?? '');
-    const why = code !== '' ? ` (${REFUSAL_WORDS[code] ?? code.replace(/_/g, ' ')})` : '';
-    return `Not saved: ${count}${what}${why}.`;
+    const versions = versionPhrase(versionsOf(p));
+    if (p.ok === true) return `Saved ${rec !== null && req !== null ? `${rec} of ${req} ` : ''}${many}${versions}.`;
+    // A reason nobody has worded is left out rather than shown as a code.
+    const words = REFUSAL_WORDS[String(p.reason ?? p.refusal ?? '')];
+    const why = words !== undefined ? ` (${words})` : '';
+    if (rec === null || req === null) return `Not saved: ${many}${why}.`;
+    const missing = req - rec;
+    if (rec > 0) {
+      return missing > 0
+        ? `Saved ${rec} of ${req} ${many}${versions}; ${missing} ${missing === 1 ? 'was' : 'were'} not saved${why}.`
+        : `Saved ${rec} of ${req} ${many}${versions}.`;
+    }
+    return req === 1 ? `Not saved: the ${one}${why}.` : `Not saved: none of the ${req} ${many}${why}.`;
   });
   // A part the chain never reached is still not saved — say so.
   if (r.ok !== true && r.refusal === 'partially_applied' && parts.every((p) => p.part !== 'option_levels') && parts.some((p) => p.part === 'values')) {
@@ -174,7 +281,9 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
         : `I saved the model I drafted${at}. ${pending === 'figures' ? 'The figures above are not recorded until you approve them.' : 'What I proposed above is not made until you approve it.'}`;
       return `${saved}${leftOutLine(r)}${openQuestionsLine(r)}${contextFactorsLine(r)}`;
     }
-    return `The model was not built: ${REFUSAL_WORDS[String(r.refusal)] ?? `it was refused (${String(r.refusal ?? 'unknown')})`}.`;
+    const unconfirmed = UNCONFIRMED_WORDS[String(r.refusal)];
+    if (unconfirmed !== undefined) return unconfirmed;
+    return `The model was not built: ${REFUSAL_WORDS[String(r.refusal)] ?? GENERIC_NOT_BUILT}.`;
   }
   const perPart = partsLine(r);
   if (perPart !== null) return perPart;
@@ -207,8 +316,10 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
       + 'if the model has changed since, you will be asked to confirm again.';
   }
   const code = String(r.refusal ?? '');
+  const unconfirmed = UNCONFIRMED_WORDS[code];
+  if (unconfirmed !== undefined) return unconfirmed;
   const mutated = r.mutated === true;
-  return `${mutated ? 'Partly saved' : 'Not saved'}: ${REFUSAL_WORDS[code] ?? `the change was refused (${code || 'unknown reason'})`}.`;
+  return `${mutated ? 'Partly saved' : 'Not saved'}: ${REFUSAL_WORDS[code] ?? (mutated ? GENERIC_PARTLY_SAVED : GENERIC_NOT_SAVED)}.`;
 }
 
 export interface WriteOutcomeNarration {

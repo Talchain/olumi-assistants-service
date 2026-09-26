@@ -26,6 +26,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import { committedValueWrite } from './fixtures/served-value-write.js';
+import { narrateWriteOutcome } from '../write-outcome.js';
 
 /**
  * Every option wired to every factor. The real product only records a level on
@@ -71,6 +72,13 @@ function fakeProduct(opts: {
   foreignEditAfterRegister?: boolean;
   /** A different starting model, for cases the shared one cannot express. */
   base?: Node[];
+  /**
+   * The level write for this `option::factor` answers 200 with NO revision (it committed nothing), while ANOTHER
+   * writer makes the model hold exactly that level and moves the revision (round-2 review, blocker 2's class).
+   */
+  levelHeldByAnotherWriter?: string;
+  /** The level write for this target answers 200 with no revision and NOTHING else moves (the writer's verified no-op). */
+  levelNoOp?: string;
 } = {}) {
   const posted: Posted[] = [];
   let nodes: Node[] = (opts.base ?? BASE).map((n) => ({ ...n, ...(n.observed_state ? { observed_state: { ...n.observed_state } } : {}) }));
@@ -111,7 +119,9 @@ function fakeProduct(opts: {
         if (opts.failOn?.includes(target) === true) return { status: 422, json: {} };
         nodes = nodes.map((n) => (n.id === ev.option_id
           ? { ...n, interventions: { ...(n.interventions ?? {}), [String(ev.factor_id)]: { value: ev.value } } } : n));
+        if (opts.levelNoOp === target) return { status: 200, json: { assistant_text: 'That level is already set.' } };
         rev += 1;
+        if (opts.levelHeldByAnotherWriter === target) return { status: 200, json: { assistant_text: 'That level is already set.' } };
         return { status: 200, json: { assistant_text: 'Recorded.', graph_hash: `h${rev}` } };
       }
       return { status: 400, json: {} };
@@ -285,6 +295,54 @@ describe('propose_starting_point', () => {
     expect(parts.map((x) => [x.part, x.ok, x.recorded_count])).toEqual([['values', true, 1], ['option_levels', false, 1]]);
     expect(p.posted.filter((x) => x.kind === 'option_intervention_edit')).toHaveLength(2);
     expect(store.outstanding(SCENARIO, USER).map((w) => w.proposal_id)).toEqual([id]);
+  });
+
+  /**
+   * ⛔ ROUND-2 REVIEW, BLOCKER 1, ON THE REAL CAPABILITY: the second level refuses, so 1 of the 2 levels WAS saved.
+   * The user read "Not saved: 1 of 2 option levels." — the count of what landed, printed under "Not saved".
+   */
+  it('RED (round-2 blocker 1): the second level refuses → the user reads that 1 of 2 levels WAS saved and 1 was not', async () => {
+    const { caps, id } = await proposed({ failOn: ['hire_two::team_size'] });
+    const out = await caps.authoriseChange(ctx, { proposal_id: id });
+    expect(narrateWriteOutcome('', [{ name: 'authorise_change' }], [out]).status)
+      .toBe('Saved 1 of 1 starting values. Saved 1 of 2 option levels; 1 was not saved.');
+  });
+
+  /**
+   * ⛔ ROUND-2 REVIEW, BLOCKER 2'S CLASS, IN THE COMPOUND: a level write that answers 200 with no revision is a verified
+   * no-op only if the model holds exactly the approved level. That was decided by HASH EQUALITY first, so when another
+   * writer had moved the model the level was "not recorded" although the model holds exactly what was approved. The
+   * rule is the link writer's: the read-back holding exactly the approved level is LANDED; the chain still never
+   * writes a further level on a revision it cannot prove.
+   */
+  it('RED (round-2 blocker 2 class): the LAST level\'s write committed nothing but the model holds exactly the approved level after another writer moved it → recorded, the approval marked applied', async () => {
+    const { p, store, caps, id } = await proposed({ levelHeldByAnotherWriter: 'hire_two::team_size' });
+    const out = await caps.authoriseChange(ctx, { proposal_id: id });
+    const parts = out.parts as { part: string; ok: boolean; recorded_count: number }[];
+    expect(parts.map((x) => [x.part, x.ok, x.recorded_count]), JSON.stringify(out)).toEqual([['values', true, 1], ['option_levels', true, 2]]);
+    expect(out.ok).toBe(true);
+    expect(out.applied).toBe(true);
+    expect(p.posted.filter((x) => x.kind === 'option_intervention_edit').map((x) => x.target)).toEqual(['hire_lead::team_size', 'hire_two::team_size']);
+    expect(store.outstanding(SCENARIO, USER)).toEqual([]);
+    expect(narrateWriteOutcome('', [{ name: 'authorise_change' }], [out]).status).toBe('Saved 1 of 1 starting values. Saved 2 of 2 option levels.');
+  });
+
+  it('RED (round-2 blocker 2 class): the FIRST level held that way → counted, and NO further level is written on a revision the chain cannot prove', async () => {
+    const { p, store, caps, id } = await proposed({ levelHeldByAnotherWriter: 'hire_lead::team_size' });
+    const out = await caps.authoriseChange(ctx, { proposal_id: id });
+    const parts = out.parts as { part: string; ok: boolean; recorded_count: number }[];
+    expect(parts.map((x) => [x.part, x.ok, x.recorded_count]), JSON.stringify(out)).toEqual([['values', true, 1], ['option_levels', false, 1]]);
+    expect(out.refusal).toBe('partially_applied');
+    expect(p.posted.filter((x) => x.kind === 'option_intervention_edit').map((x) => x.target)).toEqual(['hire_lead::team_size']);
+    expect(store.outstanding(SCENARIO, USER).map((w) => w.proposal_id)).toEqual([id]);
+  });
+
+  it('CONTROL (passes at base): the same no-revision answer with NO other writer and the level held → a verified no-op, recorded', async () => {
+    const { store, caps, id } = await proposed({ levelNoOp: 'hire_two::team_size' });
+    const out = await caps.authoriseChange(ctx, { proposal_id: id });
+    const parts = out.parts as { part: string; ok: boolean; recorded_count: number }[];
+    expect(parts.map((x) => [x.part, x.ok, x.recorded_count]), JSON.stringify(out)).toEqual([['values', true, 1], ['option_levels', true, 2]]);
+    expect(store.outstanding(SCENARIO, USER)).toEqual([]);
   });
 
   it('CONTRAST: with only one kind it is an ordinary single proposal', async () => {
