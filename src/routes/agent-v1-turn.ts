@@ -51,7 +51,7 @@ import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
-import { narrateWriteOutcome, notAdoptedLine, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { narrateWriteOutcome, notAdoptedLine, staleResultLine, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
@@ -364,7 +364,7 @@ const AGENT_INSTRUCTIONS = [
    * ordering is sensitive to, and let the user change it and see how much it matters.
    */
   'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one. Name a leading option ONLY when the result you are reporting carries `claim_permissions.leader_may_be_named: true`; an earlier analysis read from get_canonical_state carries no such permission, so never name a leader from it. Otherwise do not name, rank or hint at one, and do not quote win percentages as a ranking, whatever else the result contains \u2014 say in plain words why no option can be put forward yet. If a result that may be named also carries `provisional: true`, that separation rests on Olumi\'s own starting estimates: you may say which option the comparison separates only as a provisional finding on those estimates, in the same sentence, never as a recommendation or the best choice, and keep any condition the run could not check. When `leader_may_be_named` is false, the finding you lead with is why no option can be put forward \u2014 not which option the comparison favours. Do not say, even hedged or \u201con current assumptions\u201d, that any option leads, is favoured, scores or comes out highest, strongest or best, is ahead, or wins in any share of runs; describe robustness and sensitivity without saying which option they favour. When the result reports sensitivity, name the one assumption the ordering is most sensitive to, say whether it comes from the user or is Olumi\u2019s estimate (or that its source is not recorded), and offer to change it. When the result is fragile or a near tie, say that this uncertainty is itself the finding. When the run says a limit cannot be checked in this model yet, say so plainly and do not suggest any step, input or model change to make it checkable.',
-  'When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each, and — ONLY for a figure the user stated — the level it sets each factor to; it is linked from the decision automatically. Then call authorise_change once they confirm. A factor with no stated level is added with no level: say plainly which, and ask for the figure. Never invent a level or a direction; if you are not sure, ask.',
+  'When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each, and — ONLY for a figure the user stated — the level it sets each factor to; it is linked from the decision automatically. When they ask for several (up to 4), call it ONCE with all of them in `options`: that is one change they approve once, and it lands whole or not at all \u2014 never one call per option. Then call authorise_change once they confirm. A factor with no stated level is added with no level: say plainly which, and ask for the figure. Never invent a level or a direction; if you are not sure, ask.',
   /*
    * \u26d4 NO AUTOMATIC RUN AFTER A REVISION (Codex 5810763729, 24 Sep). This
    * instruction used to end "after it applies, run_analysis in the same turn and
@@ -1471,7 +1471,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * Server-authored text only — never model prose.
          */
         const followUp = typeof applied.follow_up === 'string' ? applied.follow_up.trim() : '';
-        const said = [narrateWriteOutcome('', [call], [applied]).status ?? '', followUp].filter((x) => x !== '').join(' ');
+        const said = [narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }).status ?? '', followUp].filter((x) => x !== '').join(' ');
         const ms = Date.now() - fastStartedAt;
         result = {
           // The reply the user reads is composed from this text plus Olumi's status line.
@@ -1829,18 +1829,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // (finding 3 on #1786, 5807230197).
     const narration = fastPath === 'run'
       ? { text, status: null as string | null, stripped: [] as string[] }
-      : narrateWriteOutcome(text, result.tool_calls, result.tool_results);
+      : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null });
     // (B) A write landed on this turn → say whether the model can run now, from the readback's one verdict.
     const wroteThisTurn = fastPath !== 'run'
       && result.tool_results.some((r) => (r as { mutated?: unknown; applied?: unknown } | undefined)?.mutated === true || (r as { applied?: unknown } | undefined)?.applied === true);
-    const readinessLine = wroteThisTurn ? postWriteReadinessLine(readbackGraph, analysisReady) : null;
+    // An authorised revision says what it did to the result on screen, from this turn's typed readback (R&C 5842738466).
+    const staleLine = wroteThisTurn ? staleResultLine(analysisState, analysisReady) : null;
+    const postWriteReadiness = wroteThisTurn ? postWriteReadinessLine(readbackGraph, analysisReady) : null;
+    // "Run it again" already says a run is permitted; the readiness sentence would repeat it.
+    const readinessLine = staleLine !== null && (analysisReady as { may_run?: unknown } | undefined)?.may_run === true ? null : postWriteReadiness;
     const composed = composeDirectAnswerResponse({
       // ⛔ A proposal id is a binding for authorise_change, never text a user reads or
       // types (display-ids.ts). Applied here, before the answer row is written, so a
       // replay returns exactly what the user first saw.
       // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
       assistant_text: withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, owed),
-        [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), readinessLine].filter((x): x is string => x !== null && x !== '').join(' ') || null)),
+        [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, readinessLine].filter((x): x is string => x !== null && x !== '').join(' ') || null)),
       stage: 'frame',
       answerKind: 'substantive',
       // One click approves the ONE proposal just offered — the same words as typing "yes".

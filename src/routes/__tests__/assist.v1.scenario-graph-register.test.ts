@@ -82,6 +82,7 @@ import registerRoute from "../assist.v1.scenario-graph-register.js";
 import { computeGraphIdentityHash } from "../../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../../orchestrator-v5/persisted-graph-projection.js";
+import { GraphV3 } from "../../schemas/cee-v3.js";
 import { GraphStaleWriteError } from "../../orchestrator-v5/session/store.js";
 import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES } from "../../config/graphCaps.js";
 import { resolveCeeRateLimit } from "../../cee/config/limits.js";
@@ -1732,6 +1733,38 @@ describe("register — create-only construction: `null` refuses a real model, no
     const res = await post(app, SCENARIO, { graph: IMPORTED, expected_graph_identity_hash: null, operation_id: OP });
     expect(res.statusCode).toBe(409);
     expect(append).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
+
+describe("register — the stored bytes are readable by every strict reader (served 26 Sep 2026, CEE 319dde1)", () => {
+  // The UI's register after a value edit carried `extractionType: null` on the
+  // user-set factor. Stored verbatim, the bytes failed `GraphV3`, and every later
+  // canvas edit failed closed with 500. The fixture is the SERVED persisted graph.
+  const SERVED_UI_NULL_STAMP = (
+    JSON.parse(
+      readFileSync(
+        new URL("../../orchestrator-v5/__tests__/fixtures/register-ui-null-stamp.served-319dde1.json", import.meta.url),
+        "utf8",
+      ),
+    ) as { graph: WireGraph }
+  ).graph;
+
+  it("PRECONDITION: the submitted bytes fail GraphV3", () => {
+    expect(GraphV3.safeParse(SERVED_UI_NULL_STAMP).success).toBe(false);
+  });
+
+  it("⭐ what the route WRITES parses as GraphV3, and the ack's identity is the written bytes' identity", async () => {
+    loadGraph.mockResolvedValue(null);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: SERVED_UI_NULL_STAMP });
+    expect(res.statusCode).toBe(200);
+    const written = writtenGraph();
+    const parsed = GraphV3.safeParse(written);
+    expect(parsed.success ? [] : parsed.error.issues.map((i) => i.path.join("."))).toEqual([]);
+    expect(res.json().graph_identity_hash?.value ?? res.json().graph_identity_hash).toBe(
+      computeGraphIdentityHash(written as never)?.value,
+    );
     await app.close();
   });
 });
