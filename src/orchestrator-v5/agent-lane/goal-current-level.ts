@@ -25,15 +25,18 @@
  *     metric is never written to the goal.
  *   · IS IT THE USER'S? `user_stated: true`, or refused — Olumi's estimate never sets the chance of reaching
  *     the user's target (the brief path withholds an estimate for the same reason).
- *   · IS IT IN THE GOAL'S KIND OF UNIT? (`unitsConflict`, the lane's one classifier). "12%" for a GBP goal
- *     would pass the scale rule (12 / 25000 is inside [0, 1]), so this check is the one that refuses it.
+ *   · IS IT IN THE GOAL'S OWN UNIT? (`readStatedGoalLevel`, below). "12%" for a GBP goal would pass the scale
+ *     rule (12 / 25000 is inside [0, 1]), so the unit check is the one that refuses it — and on this path it
+ *     FAILS CLOSED, because the figure feeds the headline chance of reaching the target.
  * The goal's comparator is NOT persisted (`admit-model.ts`, the `goal_operator` loss), so the Agent states
  * how the user put the target (`goal_is`) — the same model-read the brief's `operator` is — and an unstated
  * one is refused, never defaulted.
  */
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
+import { sameUnit } from '../../utils/currency-alphabet.js';
 import { admitStatedGoalLevel } from './admit-model.js';
-import { unitsConflict } from './unit-conflict.js';
+import { canonicaliseLimitUnit } from './admit-constraint.js';
+import { unitPhraseFamily, unitPhraseHead, unitsConflict } from './unit-conflict.js';
 import { createProposal, type ProposalOperation, type ProposalStore, type ReceiptSummary, type StructuredProposal } from './proposal.js';
 import { registrationTurnId } from '../graph-registration/registration-identity.js';
 import type { AgentToolContext, ToolResult } from './runtime/agent-tools.js';
@@ -67,6 +70,13 @@ const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinit
 const refuse = (refusal: string, detail: string, extra: Record<string, unknown> = {}): ToolResult =>
   ({ ok: false, mutated: false, refusal, detail, ...extra });
 
+/** A rescale by a stated magnitude suffix — the admit-constraint M-rung's own stamp, carried verbatim. */
+interface UnitNormalised {
+  readonly rule: string;
+  readonly original_value: number;
+  readonly original_unit: string;
+}
+
 /** The goal's own observed_state carried on the proposal — what `authorise_change` writes, byte for byte. */
 interface GoalObservedState {
   readonly value: number;
@@ -75,6 +85,99 @@ interface GoalObservedState {
   readonly source: string;
   readonly raw_value: number;
   readonly cap: number;
+  readonly provenance_unit_normalised?: UnitNormalised;
+}
+
+/**
+ * The goal's stated target the level is measured against — its persisted frame, unit, figure and cap. Carried on
+ * the proposal and required UNCHANGED at apply time: the frame and the unit are outside the analysis hash the
+ * proposal is bound to, so the store's base check alone would let an approval land on a goal that moved to the
+ * delta frame or to another unit after the figure was prepared.
+ */
+interface GoalTarget {
+  readonly goal_threshold_frame: unknown;
+  readonly goal_threshold_unit: string | null;
+  readonly goal_threshold_raw: unknown;
+  readonly goal_threshold_cap: unknown;
+}
+
+function targetOf(node: Record<string, unknown>): GoalTarget {
+  const unit = node.goal_threshold_unit;
+  return {
+    goal_threshold_frame: node.goal_threshold_frame,
+    goal_threshold_unit: typeof unit === 'string' && unit.trim() !== '' ? unit : null,
+    goal_threshold_raw: node.goal_threshold_raw,
+    goal_threshold_cap: node.goal_threshold_cap,
+  };
+}
+
+const sameTarget = (a: GoalTarget, b: GoalTarget): boolean =>
+  a.goal_threshold_frame === b.goal_threshold_frame && a.goal_threshold_unit === b.goal_threshold_unit &&
+  a.goal_threshold_raw === b.goal_threshold_raw && a.goal_threshold_cap === b.goal_threshold_cap;
+
+type StatedLevel =
+  | { readonly ok: true; readonly raw: number; readonly normalised?: UnitNormalised }
+  | { readonly ok: false; readonly refusal: 'unit_mismatch' | 'unit_unstated' | 'unit_unrecognised'; readonly detail: string };
+
+/**
+ * ⛔ THE STATED FIGURE, READ IN THE GOAL'S OWN UNIT — or refused. Never relabelled.
+ *
+ * Verified at 68602637 (DEFECT_FOUND): the family check alone let `12000 USD` through as "12000 GBP MRR" (USD, $,
+ * EUR and "GBP MRR" are all the currency family) and `12 £k` through as raw 12 — 1000x too small, so the chance
+ * of reaching £20k read as nil. The rungs, in order:
+ *   1. A goal whose own unit no classifier reads (or has none) is held to nothing — the lane's fail-open rule.
+ *   2. A k/m suffix on the goal's OWN currency is scaled by the admit-constraint M-rung itself
+ *      (`canonicaliseLimitUnit`, the node side given as the goal's bare currency head), and its stamp is kept.
+ *      The accepted suffixes are therefore exactly the M-rung's; anything else falls to rung 3.
+ *   3. FAIL CLOSED: no unit, or one no classifier reads ("subscribers", "$k"), is refused and the user is asked
+ *      for the figure in the goal's own unit — the headline goal-fit number is never fed by an unclassified figure.
+ *   4. Another kind of unit ("%", "users") is refused (`unitsConflict`).
+ *   5. Another currency is refused: both heads must be ONE currency (`sameUnit`: £ ≡ GBP). No rate is applied.
+ */
+export function readStatedGoalLevel(value: number, statedUnit: unknown, goal: { readonly label: string; readonly unit: string | undefined }): StatedLevel {
+  const stated = typeof statedUnit === 'string' ? statedUnit.trim() : '';
+  const goalFamily = unitPhraseFamily(goal.unit);
+  const goalHead = unitPhraseHead(goal.unit);
+  if (goal.unit === undefined || goalFamily === null || goalHead === null) return { ok: true, raw: value };
+
+  const askInstead =
+    `Nothing was prepared; ask the user for the current level of "${goal.label}" in ${goal.unit}, written out in full.`;
+
+  if (goalFamily === 'currency' && stated !== '') {
+    const scaled = canonicaliseLimitUnit(value, stated, { unit: goalHead });
+    if (scaled.provenance_unit_normalised !== undefined) return { ok: true, raw: scaled.value, normalised: scaled.provenance_unit_normalised };
+  }
+
+  if (stated === '') {
+    return {
+      ok: false, refusal: 'unit_unstated',
+      detail: `${value} was given with no unit, and "${goal.label}" is measured in ${goal.unit}. A figure is never ` +
+        `assumed to be in the goal's unit. ${askInstead}`,
+    };
+  }
+  if (unitPhraseFamily(stated) === null) {
+    return {
+      ok: false, refusal: 'unit_unrecognised',
+      detail: `"${stated}" is not a unit that can be matched to ${goal.unit}, the unit "${goal.label}" is measured in, ` +
+        `so ${value} ${stated} is never recorded as its current level. ${askInstead}`,
+    };
+  }
+  if (unitsConflict(stated, goal.unit) !== null) {
+    return {
+      ok: false, refusal: 'unit_mismatch',
+      detail: `${value} ${stated} is in a different kind of unit from "${goal.label}", which is measured in ${goal.unit}. ` +
+        'A figure given for something else is never recorded as the goal’s current level. Nothing was prepared; ask ' +
+        `the user for the current level of "${goal.label}" itself.`,
+    };
+  }
+  if (goalFamily === 'currency' && !sameUnit(unitPhraseHead(stated) ?? '', goalHead)) {
+    return {
+      ok: false, refusal: 'unit_mismatch',
+      detail: `${value} ${stated} is not in the currency of "${goal.label}", which is measured in ${goal.unit}. No ` +
+        `exchange rate is ever applied, so it is never recorded as the goal's current level. ${askInstead}`,
+    };
+  }
+  return { ok: true, raw: value };
 }
 
 function goalLevelOf(op: ProposalOperation | undefined): GoalObservedState | undefined {
@@ -142,15 +245,11 @@ export async function proposeGoalCurrentLevel(
   }
   const goalUnit = typeof node.goal_threshold_unit === 'string' && node.goal_threshold_unit.trim() !== '' ? node.goal_threshold_unit : undefined;
 
-  // ── IN THE GOAL'S KIND OF UNIT?
-  if (unitsConflict(args?.unit, goalUnit) !== null) {
-    return refuse(
-      'unit_mismatch',
-      `${value} ${String(args?.unit)} is in a different kind of unit from "${goal.label}", which is measured in ${goalUnit}. ` +
-      'A figure given for something else is never recorded as the goal’s current level. Nothing was prepared; ask ' +
-      `the user for the current level of "${goal.label}" itself.`,
-    );
-  }
+  // ── IN THE GOAL'S OWN UNIT? (scaled by a stated k/m suffix only as the M-rung scales a limit; else refused)
+  const stated = readStatedGoalLevel(value, args?.unit, { label: goal.label, unit: goalUnit });
+  if (!stated.ok) return refuse(stated.refusal, stated.detail);
+  const raw = stated.raw;
+  const statedUnit = typeof args?.unit === 'string' ? args.unit.trim() : '';
 
   // ── HOW THE USER PUT THE TARGET (not persisted: stated by the Agent from the user's words, never defaulted).
   const operator = typeof args?.goal_is === 'string' ? OPERATOR_OF[args.goal_is] : undefined;
@@ -163,34 +262,39 @@ export async function proposeGoalCurrentLevel(
   }
 
   // ── THE BRIEF PATH'S OWN RULE: operator tail, then scale and direction.
-  const verdict = admitStatedGoalLevel({ metric: goal.label, operator, rawTarget: target, rawBaseline: value, cap });
+  const verdict = admitStatedGoalLevel({ metric: goal.label, operator, rawTarget: target, rawBaseline: raw, cap });
   if (!verdict.admitted) return refuse('not_admitted', verdict.reason);
 
   const existing = goal.observed_state;
   const existingRaw = num(existing?.raw_value) ? existing!.raw_value as number : undefined;
-  if (existingRaw === value && existing?.source === USER_EDIT_SOURCE) {
-    return refuse('already_recorded', `${value}${goalUnit !== undefined ? ` ${goalUnit}` : ''} is already recorded as the user’s current level of "${goal.label}". Nothing to change.`);
+  if (existingRaw === raw && existing?.source === USER_EDIT_SOURCE) {
+    return refuse('already_recorded', `${raw}${goalUnit !== undefined ? ` ${goalUnit}` : ''} is already recorded as the user’s current level of "${goal.label}". Nothing to change.`);
   }
   const observed: GoalObservedState = {
     value: verdict.normalised,
     baseline: verdict.normalised,
     ...(goalUnit !== undefined ? { unit: goalUnit } : {}),
     source: USER_EDIT_SOURCE,
-    raw_value: value,
+    raw_value: raw,
     cap,
+    ...(stated.normalised !== undefined ? { provenance_unit_normalised: stated.normalised } : {}),
   };
   const withUnit = (x: number) => `${x}${goalUnit !== undefined ? ` ${goalUnit}` : ''}`;
-  const replaces = existingRaw !== undefined && existingRaw !== value ? existingRaw : undefined;
+  // ⛔ THE USER'S OWN FIGURE AND UNIT, as they gave it — never relabelled in the goal's unit — plus, when a stated
+  // suffix was scaled, what it is recorded as. The target and a replaced record are the goal's own, in its unit.
+  const asStated = `${value}${statedUnit !== '' ? ` ${statedUnit}` : ''}`;
+  const figure = stated.normalised !== undefined ? `${asStated}, which is ${withUnit(raw)}` : asStated;
+  const replaces = existingRaw !== undefined && existingRaw !== raw ? existingRaw : undefined;
   const proposal = createProposal({
     scenario_id: ctx.scenario_id,
     user_id: ctx.authenticated_user_id,
     base_graph_identity_hash: g.graph_hash,
-    operations: [{ op: GOAL_CURRENT_LEVEL_OP, path: goal.id, value: { goal_current_level: observed } }],
+    operations: [{ op: GOAL_CURRENT_LEVEL_OP, path: goal.id, value: { goal_current_level: observed, against: targetOf(node) } }],
     provenance: { authored_by: 'user_stated', basis: 'the current level of the goal, as the user stated it' },
     validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label:
       `Record the current level of "${goal.label}" as your figure: ` +
-      (replaces !== undefined ? `${withUnit(replaces)} → ${withUnit(value)}` : withUnit(value)) +
+      (replaces !== undefined ? `${withUnit(replaces)} → ${figure}` : figure) +
       ` (target ${withUnit(target)})`,
   });
   deps.proposals.put(proposal);
@@ -200,12 +304,15 @@ export async function proposeGoalCurrentLevel(
     public_label: proposal.public_label,
     base_revision: g.graph_hash,
     goal: goal.label,
-    current_level: { value, ...(goalUnit !== undefined ? { unit: goalUnit } : {}) },
+    current_level: { value: raw, ...(goalUnit !== undefined ? { unit: goalUnit } : {}) },
+    as_stated: { value, ...(statedUnit !== '' ? { unit: statedUnit } : {}) },
     target: { value: target, ...(goalUnit !== undefined ? { unit: goalUnit } : {}) },
     ...(replaces !== undefined ? { replaces } : {}),
     note:
-      'Nothing has changed. Show the user the figure and that it will be recorded as THEIR current level of the goal, ' +
-      'never the id, and call authorise_change with this proposal_id only once they agree.',
+      'Nothing has changed. Show the user the figure as they gave it' +
+      (stated.normalised !== undefined ? ` and what it is recorded as (${asStated} is ${withUnit(raw)})` : '') +
+      ', and that it will be recorded as THEIR current level of the goal, never the id, and call authorise_change ' +
+      'with this proposal_id only once they agree.',
   };
 }
 
@@ -232,9 +339,20 @@ export async function applyGoalCurrentLevel(
   const notApplied = (detail: string): ToolResult => ({ ok: false, mutated: false, applied: false, proposal_id: proposal.proposal_id, refusal: 'not_applied', detail });
   const goal = approved.nodes.find((n) => n.id === op.path);
   if (goal === undefined || goal.kind !== 'goal') return notApplied('The goal is no longer in the model, so nothing was written.');
+  // ⛔ RE-VALIDATED AT APPLY TIME: the level frame, and the same unit, figure and cap the proposal was prepared against.
+  const against = (op.value as { against?: GoalTarget } | undefined)?.against;
+  const now = targetOf(goal as unknown as Record<string, unknown>);
+  if (against === undefined || now.goal_threshold_frame !== 'level' || !sameTarget(against, now)) {
+    return {
+      ok: false, mutated: false, applied: false, proposal_id: proposal.proposal_id, refusal: 'superseded',
+      detail: `The target of "${goal.label}" changed after this was prepared, so nothing was written. Read the model again and propose afresh.`,
+    };
+  }
 
   const operationId = deps.operationId(`${proposal.proposal_id}#goal_current_level`);
-  const nodes = approved.nodes.map((n) => (n.id === op.path ? { ...n, observed_state: { ...(n.observed_state ?? {}), ...os } } : n));
+  // A rescale stamp describes the figure it came with: a new figure without one never inherits the previous one's.
+  const { provenance_unit_normalised: _previousStamp, ...kept } = (goal.observed_state ?? {}) as Record<string, unknown>;
+  const nodes = approved.nodes.map((n) => (n.id === op.path ? { ...n, observed_state: { ...kept, ...os } } : n));
   const reg = await deps.dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
     graph: { ...approved.raw, nodes },
     ...(approved.graph_hash !== '' ? { expected_graph_hash: approved.graph_hash } : {}),
