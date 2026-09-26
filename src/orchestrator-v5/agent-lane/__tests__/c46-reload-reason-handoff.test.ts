@@ -18,6 +18,12 @@
  *    HANDOFF. When the caller line lands these fail loudly and must be flipped to `it`.
  *  · A FOURTH TRIPWIRE (verification of 1047641f, blocking): the Delivery Lead's acceptance case — Paul's brief with
  *    the churn limit scored and met. Today the reload tells him his churn limit "was not checked or not met".
+ *
+ * ⭐ H1 LANDED (read route, seam reviewer Canonical State): the four tripwires are `it` now. The route passes
+ * `nonlinearIdentityLeaderClaimCause` the ONE fact its permission was read from, this graph, and its own freshness
+ * hash of this graph — so the graph the run ANALYSED decides (OpenAI Runtime #70 5843934816). The last block pins
+ * Runtime's row on the reload: after an edit the run is not current, nothing new is withheld, and the reply is the
+ * one a linear brief's out-of-date run gets.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -42,7 +48,7 @@ vi.mock('../../session/index.js', async (importOriginal) => ({
 import { readScenarioAnalysis } from '../../../routes/scenario-graph-analysis-read.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
-import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
+import { deriveDecisionContextGraphHash, loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import type { SessionStore } from '../../session/store.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
@@ -194,19 +200,19 @@ describe('C46 on the production reload — the stamp reaches it; the REASON wait
     expect((read.analysis_result as { leading_option_id?: unknown } | null)?.leading_option_id).toBe('raise_pro_to_59');
   });
 
-  it.fails('HANDOFF TRIPWIRE: the reload names the C46 reason (needs the read-route caller line)', async () => {
+  it('HANDOFF (landed): the reload names the C46 reason (needs the read-route caller line)', async () => {
     const graph = await build(PRODUCT);
     const read = await reload(graph, await runOn(graph));
     expect(read.analysis_state?.leader_claim.withheld_reason).toBe(WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN);
   });
 
-  it.fails('HANDOFF TRIPWIRE: no limit card is triggered on a brief that set no limit (needs the caller line)', async () => {
+  it('HANDOFF (landed): no limit card is triggered on a brief that set no limit (needs the caller line)', async () => {
     const graph = await build(PRODUCT);
     const read = await reload(graph, await runOn(graph));
     expect(leaderWithheldForALimit(read.analysis_state)).toBe(false);
   });
 
-  it.fails('HANDOFF TRIPWIRE: the automatic first pass keeps `unrequested_analysis_withheld` (needs the caller line)', async () => {
+  it('HANDOFF (landed): the automatic first pass keeps `unrequested_analysis_withheld` (needs the caller line)', async () => {
     const graph = await build(PRODUCT);
     const read = await reload(graph, autoInitiated(await runOn(graph)));
     expect(read.analysis_state?.leader_claim.withheld_reason).toBe(WITHHELD_UNREQUESTED_ANALYSIS);
@@ -226,10 +232,92 @@ describe('C46 on the production reload — the stamp reaches it; the REASON wait
     expect((scored.analysis_result as { leading_option_id?: unknown } | null)?.leading_option_id).toBeNull();
   });
 
-  it.fails('HANDOFF TRIPWIRE (acceptance case): churn SCORED AND MET — the reload names the product, never "your churn limit was not met" (needs the caller line)', async () => {
+  it('HANDOFF (landed, acceptance case): churn SCORED AND MET — the reload names the product, never "your churn limit was not met" (needs the caller line)', async () => {
     const graph = await build(PRODUCT_WITH_CHURN_LIMIT);
     const read = await reload(graph, churnScoredAndMet(await runOn(graph)));
     expect(read.analysis_state?.leader_claim.withheld_reason).toBe(WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN);
     expect(leaderWithheldForALimit(read.analysis_state)).toBe(false);
+  });
+});
+
+/**
+ * ⛔ RUNTIME'S ROW ON THE RELOAD (#70 5843934816): a run on the product graph (MRR = price × subscribers), then an
+ * edit. Which graph decides, and what does the reload say?
+ *
+ * The run analysed the registered graph; after an analysis-affecting edit the read route's freshness hash of the
+ * edited graph differs from the run's `graph_hash_at_run`, so the run is not current, the route selects no fact to
+ * present (`selected = fresh ? historical : null`) and the C46 cause is never judged — neither on the edited graph
+ * nor on the analysed one, which no fact carries. Nothing new is withheld: the reply is EXACTLY the reply a linear
+ * brief's out-of-date run gets (the CONTROL below, whose run PERMITTED its leader).
+ *
+ * These two rows pass without H1 as well (EXECUTED): the route presents no fact once the run is out of date. They
+ * GUARD the rule — a route that judged its historical fact on the edited graph would name the product here.
+ *
+ * ⚠ That reply's reason, `constraint_verdict_withheld`, is the base read route's for EVERY out-of-date run (no fact ⇒
+ * `mayNameLeadingOption: false` ⇒ the constraint token), not a C46 claim. It is pinned here as today's value, by
+ * identity with the linear control; whether an out-of-date run should carry a limit reason at all is Canonical's.
+ */
+describe('Runtime\'s row on the reload: after an edit, the graph the run analysed is out of reach — nothing new is withheld', () => {
+  /** The user deletes "Pro subscribers": its node, every link touching it, and the product it made MRR. */
+  const withoutTheProduct = (g: Graph): Graph => {
+    const out = structuredClone(g);
+    out.nodes = out.nodes.filter((n) => n.id !== 'pro_subscribers');
+    out.edges = out.edges.filter((e) => e.from !== 'pro_subscribers' && e.to !== 'pro_subscribers');
+    for (const n of out.nodes) delete n.nonlinear_identity;
+    return out;
+  };
+  /** An edit that KEEPS the product: Pro subscribers' starting level, 300 → 400 of a plausible 2,000 (0.15 → 0.2). */
+  const subscribersAt400 = (g: Graph): Graph => {
+    const out = structuredClone(g);
+    const n = out.nodes.find((x) => x.id === 'pro_subscribers')!;
+    expect((n.observed_state as { value?: unknown }).value, 'premise: the stored starting level').toBe(0.15);
+    n.observed_state = { ...(n.observed_state as object), value: 0.2 };
+    return out;
+  };
+  /** The linear brief's out-of-date reload: its run PERMITTED "Raise Pro to £59"; then "Non-Pro MRR" is deleted. */
+  async function linearStaleReload() {
+    const graph = await build(ADDITIVE);
+    const fact = await runOn(graph);
+    expect(fact.result.constraint_verdict?.may_name_leading_option, 'premise: the linear run permitted its leader').toBe(true);
+    const edited = structuredClone(graph);
+    edited.nodes = edited.nodes.filter((n) => n.id !== 'non_pro_mrr');
+    edited.edges = edited.edges.filter((e) => e.from !== 'non_pro_mrr' && e.to !== 'non_pro_mrr');
+    return reload(edited, fact);
+  }
+  const STALE_REPLY = { permitted: false, withheld_reason: WITHHELD_CONSTRAINT_VERDICT };
+
+  it('PREMISE: before the edit the reload judges the graph the run analysed — the product is the reason', async () => {
+    const graph = await build(PRODUCT);
+    const fact = await runOn(graph);
+    expect(deriveDecisionContextGraphHash(graph), 'the read route\'s hash of this graph is the run\'s').toBe(fact.result.graph_hash_at_run);
+    const read = await reload(graph, fact);
+    expect(read.analysis_state?.run_state.kind).toBe('complete_current');
+    expect(read.analysis_state?.leader_claim.withheld_reason).toBe(WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN);
+  });
+
+  it('GUARD (Runtime\'s row): the edit REMOVES the product — the run is out of date, no leader, and the reply is the linear brief\'s out-of-date reply, never the product', async () => {
+    const graph = await build(PRODUCT);
+    const fact = await runOn(graph);
+    const edited = withoutTheProduct(graph);
+    expect(deriveDecisionContextGraphHash(edited), 'premise: the edit changed what the analysis reads').not.toBe(fact.result.graph_hash_at_run);
+    const read = await reload(edited, fact);
+    expect(read.analysis_state?.run_state).toMatchObject({ kind: 'complete_stale', cause: 'graph_changed' });
+    expect(read.analysis_result).toBeNull();
+    expect(read.analysis_state?.leader_claim).toEqual(STALE_REPLY);
+    const control = await linearStaleReload();
+    expect(control.analysis_state?.run_state).toMatchObject({ kind: 'complete_stale', cause: 'graph_changed' });
+    expect(read.analysis_state?.leader_claim, 'the same reply as the linear brief\'s out-of-date run').toEqual(control.analysis_state?.leader_claim);
+    expect(leaderWithheldForALimit(read.analysis_state)).toBe(leaderWithheldForALimit(control.analysis_state));
+  });
+
+  it('GUARD (discriminating): the edit KEEPS the product — still a graph the run never analysed; the same out-of-date reply, never the product', async () => {
+    const graph = await build(PRODUCT);
+    const fact = await runOn(graph);
+    const edited = subscribersAt400(graph);
+    expect(deriveDecisionContextGraphHash(edited), 'premise: the edit changed what the analysis reads').not.toBe(fact.result.graph_hash_at_run);
+    const read = await reload(edited, fact);
+    expect(read.analysis_state?.run_state).toMatchObject({ kind: 'complete_stale', cause: 'graph_changed' });
+    expect(read.analysis_result).toBeNull();
+    expect(read.analysis_state?.leader_claim).toEqual(STALE_REPLY);
   });
 });
