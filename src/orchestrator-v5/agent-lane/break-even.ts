@@ -16,12 +16,14 @@
  */
 import { nonlinearIdentityForAgent } from './admit-model.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
+import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 
 type Node = {
   id: string; kind?: string; label?: string;
   observed_state?: { value?: unknown; raw_value?: unknown; cap?: unknown; unit?: unknown; source?: unknown } | null;
   interventions?: Record<string, unknown>;
-  goal_threshold_raw?: unknown; goal_threshold_unit?: unknown;
+  goal_threshold_raw?: unknown; goal_threshold_unit?: unknown; goal_threshold_frame?: unknown;
   nonlinear_identity?: { stated_in_brief?: unknown } | null;
 };
 
@@ -78,6 +80,9 @@ function exactRaw(stored: { value?: unknown; raw_value?: unknown } | null | unde
 export function breakEvenFor(graph: unknown): BreakEven | null {
   const finding = nonlinearIdentityForAgent(graph, true);
   if (finding === null || finding.outcome_id !== finding.goal_id || finding.factor_ids.length !== 2) return null;
+  // MG B2 (#2051 5850436075): "stays at least that" and "needs N" are a floor's words; a goal to REDUCE reads them
+  // backwards (for a cap, N at £p is the most allowed). The estate's one direction authority decides; no answer otherwise.
+  if (deriveEmittedGoalDirection(graph, finding.goal_id) === 'minimise') return null;
   const nodes = ((graph as { nodes?: unknown } | null)?.nodes ?? []) as Node[];
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const goal = byId.get(finding.goal_id);
@@ -98,6 +103,9 @@ export function breakEvenFor(graph: unknown): BreakEven | null {
   const v0By = byOf(vos?.source);
   const unit = typeof pos?.unit === 'string' ? pos.unit.trim() : '';
   if (p0 === null || v0 === null || p0By === null || v0By === null || !(p0 > 0) || !(v0 > 0) || unit === '') return null;
+  // MG B3: the volume must be a COUNT with a stated unit — a rate (%, points, basis points) times a price is no revenue.
+  const volumeUnit = typeof vos?.unit === 'string' ? vos.unit.trim() : '';
+  if (volumeUnit === '' || classifyUnitScaleClass(volumeUnit) !== 'unknown') return null;
   const baselineGoal = p0 * v0;
   const rows: BreakEvenOption[] = [];
   for (const o of options) {
@@ -122,7 +130,9 @@ export function breakEvenFor(graph: unknown): BreakEven | null {
     identity_stated_in_brief: goal.nonlinear_identity?.stated_in_brief === true,
     baseline_price: p0, baseline_price_by: p0By, baseline_volume: v0, baseline_volume_by: v0By, baseline_goal: baselineGoal,
     options: rows,
-    ...(typeof targetValue === 'number' && targetValue > 0 && targetUnit.toLowerCase() === unit.toLowerCase()
+    // MG B1: only a LEVEL target is an amount to reach; a delta ("grow MRR by £5k") is not, and an absent frame is not
+    // assumed to be one.
+    ...(goal.goal_threshold_frame === 'level' && typeof targetValue === 'number' && targetValue > 0 && targetUnit.toLowerCase() === unit.toLowerCase()
       ? { target: { value: targetValue, needs: prices.map((p) => ({ price: p, volume: Math.ceil(targetValue / p - 1e-9) })) } }
       : {}),
   };

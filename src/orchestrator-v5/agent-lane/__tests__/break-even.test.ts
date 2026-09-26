@@ -12,6 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { breakEvenFor, breakEvenLine } from '../break-even.js';
+import { deriveEmittedGoalDirection } from '../../goal-target/goal-direction.js';
 
 const served = JSON.parse(readFileSync(new URL('./fixtures/served-f8-run-graph-d6b09c0.json', import.meta.url), 'utf8')) as { nodes: Record<string, unknown>[]; edges: unknown[] };
 const graph = (change?: (nodes: Record<string, unknown>[]) => void) => {
@@ -60,5 +61,37 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
     const be = breakEvenFor(graph((ns) => { node(ns, 'mrr').goal_threshold_unit = 'GBP/year'; }));
     expect(be?.target).toBeUndefined();
     expect(be?.options[0]).toMatchObject({ keep_at_least: 250 });
+  });
+
+  /**
+   * MG's maths review (#2051 5850436075, Model Generation 71229dfd): three input shapes stated a false figure. Adopted
+   * verbatim as RED rows (P1, P2, P4); P3 pins the exact-division boundary.
+   */
+  it('RED (MG P1): a DELTA-framed target ("grow MRR by £5,000/month") is not stated as an absolute £5,000 target', () => {
+    const be = breakEvenFor(graph((ns) => { const g = node(ns, 'mrr'); g.goal_threshold_frame = 'delta'; g.goal_threshold_raw = 5000; }));
+    expect(be).not.toBeNull();
+    expect(be!.target === undefined || be!.target.value === 19_700).toBe(true);
+  });
+
+  it('RED (MG P1, fail-closed): a target with no stated frame is not assumed to be a level', () => {
+    const be = breakEvenFor(graph((ns) => { delete node(ns, 'mrr').goal_threshold_frame; }));
+    expect(be).not.toBeNull();
+    expect(be!.target).toBeUndefined();
+  });
+
+  it('RED (MG P2): a goal to REDUCE gets no "stays at least that" / "needs" answer', () => {
+    const g = graph((ns) => { node(ns, 'mrr').label = 'Reduce monthly hosting cost'; });
+    expect(deriveEmittedGoalDirection(g, 'mrr')).toBe('minimise');
+    expect(breakEvenFor(g)).toBeNull();
+  });
+
+  it('BOUNDARY (MG P3): exact division — 14,700 ÷ £60 = 245 exactly → keep 245, not 246', () => {
+    const be = breakEvenFor(graph((ns) => { (node(ns, 'raise_pro_to_59').interventions as Record<string, unknown>).pro_plan_price = { value: 0.3, source: 'brief_extraction' }; }));
+    expect(be!.options[0]).toMatchObject({ price: 60, keep_at_least: 245 });
+  });
+
+  it('RED (MG P4): a volume that is not a count (a % rate) is never multiplied by a price', () => {
+    expect(breakEvenFor(graph((ns) => { (node(ns, 'pro_paying_subscribers').observed_state as Record<string, unknown>).unit = '%'; }))).toBeNull();
+    expect(breakEvenFor(graph((ns) => { (node(ns, 'pro_paying_subscribers').observed_state as Record<string, unknown>).unit = ''; }))).toBeNull();
   });
 });
