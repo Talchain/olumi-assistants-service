@@ -71,7 +71,7 @@ import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, runWithApproved
 import { structuralEdgeValue } from '../routing/add-option-transaction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value-edit.js';
-import { frameDefaultedLinks } from '../../cee/magnitude/frame-defaulted-links.js';
+import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 
 /**
  * Internal preparation for an explicit option→factor edit. This is NOT a wire
@@ -611,20 +611,8 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     scenarioId: input.scenarioId, turnId: input.turnId, requestId: input.requestId });
   const linked = new Set(plan.operations.filter(o => o.op === 'add_edge').map(o => o.path));
   // P1-a: one line naming Olumi's own links this commit re-sized, labels read from the committed graph.
-  const resizedLine = (() => {
-    if (linksResized.length === 0) return [];
-    const valued = new Set([...values.map(v => v.factorId), ...frames.map(f => f.factorId)]);
-    // Each link once: under the valued factor it points INTO, else the valued factor it leaves.
-    const home = (l: { from: string; to: string }) => (valued.has(l.to) ? l.to : l.from);
-    return [...valued].flatMap((id) => {
-      const mine = linksResized.filter(l => home(l) === id);
-      if (mine.length === 0) return [];
-      const others = mine.map(l => `"${labelOf(l.from === id ? l.to : l.from)}"`).join(', ');
-      const into = mine.every(l => l.to === id);
-      return [`Olumi also re-sized its own placeholder links ${into ? 'into' : 'on'} "${labelOf(id)}" so they fit the new level (${others}). `
-        + 'They are Olumi\'s placeholders, not measurements.'];
-    });
-  })();
+  const resizedLine = groupResizedLinks(linksResized, [...values.map(v => v.factorId), ...frames.map(f => f.factorId)], labelOf)
+    .map(resizedLinksSentence);
   const acknowledgment = [...valueConfirmations, ...resizedLine, ...plan.targetsWritten.map(t => formatOptionEffectWriteAck({ optionLabel: labelOf(t.optionId),
     factorLabel: labelOf(t.factorId), committedValue: t.modelValue })
     + (linked.has(`${t.optionId}::${t.factorId}`) ? ` ${labelOf(t.optionId)} is now linked to ${labelOf(t.factorId)}, in the same change.` : ''))]

@@ -2157,6 +2157,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(stateFacts.rescaled.length > 0
           || stateFacts.ranges_added.length > 0
           || (stateFacts.ranges_not_attached ?? []).length > 0
+          || (stateFacts.links_resized ?? []).length > 0
           || stateFacts.current_state_unknown === true
           ? { state_facts: stateFacts }
           : {}),

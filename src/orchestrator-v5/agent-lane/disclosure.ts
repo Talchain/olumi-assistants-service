@@ -18,6 +18,8 @@
  * that appears on every turn is noise, and noise is how a real one gets missed.
  */
 
+import { resizedLinksSentence, type ResizedLinksGroup } from '../../cee/magnitude/frame-defaulted-links.js';
+
 export interface DisclosableOutcome {
   /** A write happened. */
   readonly mutated: boolean;
@@ -109,6 +111,7 @@ export function valueChangeDisclosures(facts: {
   }[];
   readonly ranges_added: readonly { readonly factor: string; readonly range: number }[];
   readonly ranges_not_attached?: readonly { readonly factor: string; readonly range: number }[];
+  readonly links_resized?: readonly ResizedLinksGroup[];
   readonly current_state_unknown?: boolean;
 } | null | undefined): readonly string[] {
   if (facts === null || facts === undefined) return [];
@@ -237,6 +240,9 @@ export function valueChangeDisclosures(facts: {
    * contract and the missing range may be stated. Still NOTHING about the VALUES,
    * which the readback does not check: no "unchanged", no "do not re-enter".
    */
+  // ⭐ P1-a: Olumi's own links a new level re-sized — the door's own sentence, word for word (one author of the words).
+  for (const g of facts.links_resized ?? []) owed.push(resizedLinksSentence(g));
+
   const refused = (facts.ranges_not_attached ?? []).map((r) => r.factor);
   if (refused.length > 0) {
     owed.push(

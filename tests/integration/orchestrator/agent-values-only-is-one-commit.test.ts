@@ -146,6 +146,54 @@ describe('Olumi\'s starting point with NO levels (served F1s) is ONE commit thro
     expect((out.receipts as unknown[] | undefined)?.length, JSON.stringify(out.receipts)).toBe(1);
   });
 
+  /**
+   * ⭐ A2 / P1-a (DL #70 5850069309, finish ledger 5850221324): the SERVED shape — after the starting point, the user's
+   * 12% churn (DL's `201724Z` "12% approval") re-sizes Olumi's own links into churn. The door names them; the Agent
+   * route states them from `state_facts`, in the door's own words. RED before: nothing carried them past the door.
+   */
+  it('RED (A2, the 12% approval): the links Olumi re-sized are carried to the reply — structured AND said, in the door\'s words', async () => {
+    const { collectTurnStateFacts } = await import('../../../src/orchestrator-v5/agent-lane/turn-state-facts.js');
+    const { valueChangeDisclosures } = await import('../../../src/orchestrator-v5/agent-lane/disclosure.js');
+    const { caps, ctx } = agent();
+    const p = await caps.proposeStartingPoint(ctx, F1S as never);
+    expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
+    const twelve = await caps.proposeAssumptions(ctx, {
+      assumptions: [{ factor_label: 'Monthly churn', value: 12, unit: '%', basis: 'the user said 12%', revise: true }] } as never);
+    expect(twelve.ok, JSON.stringify(twelve)).toBe(true);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(twelve.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    const churn = ((out as { links_resized?: { factor: string; direction: string; links: string[] }[] }).links_resized ?? [])
+      .find((g) => g.factor === 'Monthly churn');
+    expect(churn, JSON.stringify(out)).toBeDefined();
+    // The SERVED FIELD DL's harness checks (#2043 body): both links INTO churn, and nothing else under churn.
+    expect({ ...churn!, links: [...churn!.links].sort() }).toEqual({ factor: 'Monthly churn', direction: 'into', links: ['AI feature availability', 'Price sensitivity'] });
+    const facts = collectTurnStateFacts([out]);
+    expect(facts.links_resized, JSON.stringify(facts)).toContainEqual(churn);
+    const said = valueChangeDisclosures(facts).join(' ');
+    expect(said).toContain('Olumi also re-sized its own placeholder links');
+    expect(said).toContain('"Monthly churn" so they fit the new level');
+    expect(said).toContain('"Price sensitivity"');
+    expect(said).toContain('"AI feature availability"');
+    expect(said).toContain('They are Olumi\'s placeholders, not measurements.');
+  });
+
+  it('CONTRAST (A2): a value on a factor with no Olumi-sized link carries no links_resized and says nothing about links', async () => {
+    const { collectTurnStateFacts } = await import('../../../src/orchestrator-v5/agent-lane/turn-state-facts.js');
+    const { valueChangeDisclosures } = await import('../../../src/orchestrator-v5/agent-lane/disclosure.js');
+    const g = persisted as { nodes: { id: string }[]; edges: { from: string; to: string; provenance?: unknown }[] };
+    // Every link on churn is the user's own: nothing of Olumi's to re-size.
+    for (const e of g.edges) if (e.from === 'monthly_churn' || e.to === 'monthly_churn') e.provenance = { source: 'user_specified' };
+    const { caps, ctx } = agent();
+    const p = await caps.proposeAssumptions(ctx, {
+      assumptions: [{ factor_label: 'Monthly churn', value: 12, unit: '%', basis: 'the user said 12%', revise: true }] } as never);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(Object.hasOwn(out, 'links_resized'), JSON.stringify(out)).toBe(false);
+    const facts = collectTurnStateFacts([out]);
+    expect(Object.hasOwn(facts, 'links_resized')).toBe(false);
+    expect(valueChangeDisclosures(facts).join(' ')).not.toContain('re-sized');
+  });
+
   it('RED (retry): approving the same starting point again adds no commit', async () => {
     const { caps, ctx } = agent();
     const p = await caps.proposeStartingPoint(ctx, F1S as never);
