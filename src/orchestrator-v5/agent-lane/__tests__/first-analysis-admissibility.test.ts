@@ -162,19 +162,19 @@ describe('a freshly built model is admissible for a provisional first analysis (
     expect(graph.edges.filter((e) => e.from === 'keep_the_current_price' && e.to !== 'decision_monthly_recurring_revenue')).toEqual([]);
   });
 
-  it('PRICING ("Status quo: stay at £49", one price arm): held and ready, but the Run floor finds one lever — nothing to compare', async () => {
+  it('PRICING ("Status quo: stay at £49", one price arm): held and ready — and the Run floor now counts the held status quo, so it proceeds', async () => {
     const { graph } = await registered(PRICING_STATUS_QUO());
-    // The held baseline is accepted by readiness: no blocker, is_baseline, ready…
+    // ⭐ Changed on purpose (Delivery Lead 5842717741; MG 5842710702). The floor used to count only options
+    // WITH a level, so a held status quo (no stored copy, #1902) beside one price arm refused "nothing to
+    // compare" — Paul's own question could not run. The floor now fingerprints the set the run SUBMITS, in
+    // which `gateAnalysableOptions` holds the status quo at the current values. Same verdict as two arms.
     expect(verdict(graph)).toEqual({
-      willProceed: false, mode: 'exploratory', blockers: [],
+      willProceed: true, mode: 'comparative_leader', blockers: [],
       ceeInference: ['monthly_churn_rate', 'pro_subscribers'],
     });
     const sq = resolveRunAdmission(graph).assessment.analysisReady?.options.find((o) => o.option_id === 'status_quo_stay_at_49');
     expect([sq?.is_baseline, sq?.status]).toEqual([true, 'ready']);
-    // …and the refusal is the Run admission's comparison floor (`comparisonSurvivesDedup`,
-    // mirroring PLoT's IDENTICAL_OPTIONS), which counts only options WITH a level.
-    // Not this lane's rule; reported in the PR, pinned here so a change is seen.
-    expect(resolveRunAdmission(graph).blockedNextStep).toBe('Name at least two different options you are weighing, then run analysis.');
+    expect(resolveRunAdmission(graph).blockedNextStep).toBeNull();
     expect(graph.nodes.find((n) => n.id === 'pro_plan_price')?.observed_state?.source).toBe('brief_extraction');
   });
 

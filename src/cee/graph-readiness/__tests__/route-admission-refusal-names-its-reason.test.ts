@@ -25,9 +25,20 @@ import { resolveRunAdmission } from '../../../orchestrator-v5/tools/handlers/ana
 // of it carry the test along.
 const NEXT_STEP = 'Name at least two different options you are weighing, then run analysis.';
 
-const SERVED = JSON.parse(
+const SERVED_AS_DRAFTED = JSON.parse(
   readFileSync(new URL('./fixtures/served-identical-options-ef99a97.json', import.meta.url), 'utf8'),
-) as unknown;
+) as { nodes: Array<{ id: string }>; edges: Array<{ from: string; to: string }> };
+/**
+ * The served graph WITHOUT its held status quo ("Keep current pricing"). Since #1963 the Run floor
+ * counts a held status quo at its current values, so the drafted graph (status quo + two identical
+ * £59 options) now RUNS — a real comparison. The refusal this file pins is the one left when there is
+ * no status quo: two options that cannot be told apart. Same served bytes, one option removed.
+ */
+const SERVED = {
+  ...SERVED_AS_DRAFTED,
+  nodes: SERVED_AS_DRAFTED.nodes.filter((n) => n.id !== 'keep_current_pricing'),
+  edges: SERVED_AS_DRAFTED.edges.filter((e) => e.from !== 'keep_current_pricing' && e.to !== 'keep_current_pricing'),
+} as unknown;
 
 const edge = (from: string, to: string) => ({
   from, to, strength: { mean: 0.6, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' as const,
