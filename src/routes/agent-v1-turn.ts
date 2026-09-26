@@ -46,7 +46,7 @@ import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurn
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { commitOptionLevelsInProcess } from '../orchestrator-v5/system-events/dispatch.js';
-import { readinessSentence, readinessViewOf } from '../orchestrator-v5/agent-lane/readiness-view.js';
+import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
 import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
@@ -485,6 +485,16 @@ export function postWriteReadinessLine(graph: unknown, analysisReady: unknown): 
   if (view.may_run === true && !admitsRunOffer(analysisReady)) return null;
   if (view.may_run === false && !knownNotRunnable(analysisReady)) return null;
   return readinessSentence(view);
+}
+
+/**
+ * ⛔ AFTER A WRITE, A LEVEL ONLY THE USER CAN GIVE IS ASKED FOR, EVEN WHEN THE RUN IS ADMITTED (AI Conversation #70
+ * 5849012990 U3; DL 5849023213). Said beside "run it again", from the same readback, and only when this turn's Run
+ * control admits a run: a refusal already names what it needs (`postWriteReadinessLine`).
+ */
+export function postWriteAskLine(graph: unknown, analysisReady: unknown): string | null {
+  if (!admitsRunOffer(analysisReady)) return null;
+  return stillNeededLine(readinessViewOf(graph));
 }
 
 /** The approve chip's id prefix, taken from the chip's own producer — never a copy of its string. */
@@ -1903,6 +1913,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // An authorised revision says what it did to the result on screen, from this turn's typed readback (R&C 5842738466).
     const staleLine = wroteThisTurn ? staleResultLine(analysisState, analysisReady) : null;
     const postWriteReadiness = wroteThisTurn ? postWriteReadinessLine(readbackGraph, analysisReady) : null;
+    const askLine = wroteThisTurn ? postWriteAskLine(readbackGraph, analysisReady) : null;
     // "Run it again" already says a run is permitted; the readiness sentence would repeat it.
     const readinessLine = staleLine !== null && (analysisReady as { may_run?: unknown } | undefined)?.may_run === true ? null : postWriteReadiness;
     const composed = composeDirectAnswerResponse({
@@ -1911,7 +1922,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // replay returns exactly what the user first saw.
       // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
       assistant_text: withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, owed),
-        [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, readinessLine].filter((x): x is string => x !== null && x !== '').join(' ') || null)),
+        [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, readinessLine, askLine].filter((x): x is string => x !== null && x !== '').join(' ') || null)),
       stage: 'frame',
       answerKind: 'substantive',
       // One click approves the ONE proposal just offered — the same words as typing "yes".

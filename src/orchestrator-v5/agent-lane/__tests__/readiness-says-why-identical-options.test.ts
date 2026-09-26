@@ -94,7 +94,7 @@ describe('the readiness view gives the refusal\'s own reason when no demand expl
 
   it('a reason that already says the model can\'t be analysed is not said twice', () => {
     const reason = "This model can't be analysed yet. The values involved are Olumi's own suggestions, not yours — ask Olumi to work them through, or set them yourself.";
-    expect(readinessSentence({ checked: true, may_run: false, needs_from_user: [], olumi_can_offer: [], will_run_without: [], reason }))
+    expect(readinessSentence({ checked: true, may_run: false, needs_from_user: [], olumi_can_offer: [], will_run_without: [], levels_not_set: [], reason }))
       .toBe("The analysis can't run yet. The values involved are Olumi's own suggestions, not yours — ask Olumi to work them through, or set them yourself.");
   });
 });

@@ -41,6 +41,6 @@ describe('the approve reply says the result on screen predates the change', () =
   it('RED: the Agent route puts it in the reply, after the save line, from THIS turn\'s readback', () => {
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
     expect(route).toContain('const staleLine = wroteThisTurn ? staleResultLine(analysisState, analysisReady) : null;');
-    expect(route).toMatch(/\[narration\.status, notAdoptedLine\(result\.tool_calls, result\.tool_results\), staleLine, readinessLine\]/);
+    expect(route).toMatch(/\[narration\.status, notAdoptedLine\(result\.tool_calls, result\.tool_results\), staleLine, readinessLine, askLine\]/);
   });
 });

@@ -36,11 +36,17 @@ export interface ReadinessView {
   readonly olumi_can_offer: readonly ReadinessItem[];
   /** Options a run would leave out until they are complete, by label. */
   readonly will_run_without: readonly string[];
+  /**
+   * Option levels no one has set (`MISSING_OPTION_VALUE`, not waived by leaving the option out), by label — whether
+   * the verdict demands them or only offers help: either way the figure is the user's to give. A run can still be
+   * admitted without them (AI Conversation #70 5849012990 U3), so they are named on their own.
+   */
+  readonly levels_not_set: readonly { readonly option: string; readonly factor: string }[];
   /** Why a run is refused when no demand explains it: the refusal's own words. Present only then. */
   readonly reason?: string;
 }
 
-const UNCHECKED: ReadinessView = { checked: false, needs_from_user: [], olumi_can_offer: [], will_run_without: [] };
+const UNCHECKED: ReadinessView = { checked: false, needs_from_user: [], olumi_can_offer: [], will_run_without: [], levels_not_set: [] };
 
 /** An internal code or field name is never user prose. */
 const CODE_LIKE = /\b[A-Z]+(?:_[A-Z]+){2,}\b/;
@@ -66,9 +72,15 @@ export function readinessViewOf(rawGraph: unknown): ReadinessView {
   if (verdict.may_run === 'unknown') return UNCHECKED;
   const needs: ReadinessItem[] = [];
   const offers: ReadinessItem[] = [];
+  const levelsNotSet: { option: string; factor: string }[] = [];
   for (const issue of verdict.readiness_issues) {
     const item = itemOf(issue);
     if (item === undefined) continue;
+    if ((issue as { code?: unknown }).code === 'MISSING_OPTION_VALUE' && issue.waived_by_exclusion !== true
+      && item.option !== undefined && item.factor !== undefined
+      && !levelsNotSet.some((l) => l.option === item.option && l.factor === item.factor)) {
+      levelsNotSet.push({ option: item.option, factor: item.factor });
+    }
     const isDemand = issue.repairability === 'human_input_required' && issue.obligation !== 'offered' && issue.waived_by_exclusion !== true;
     if (isDemand) needs.push(item);
     else if (issue.obligation === 'offered') offers.push(item);
@@ -96,6 +108,7 @@ export function readinessViewOf(rawGraph: unknown): ReadinessView {
     needs_from_user: dedupe(needs),
     olumi_can_offer: dedupe(offers),
     will_run_without: excluded,
+    levels_not_set: levelsNotSet,
     ...(reason !== undefined ? { reason } : {}),
   };
 }
@@ -112,6 +125,20 @@ const listOf = (xs: readonly string[]): string =>
  * The ONE sentence the user reads after a change, from the same verdict. Deterministic; plain English; never a
  * code. Says whether the analysis can run NOW — and what it would leave out, or what stands in the way.
  */
+/**
+ * ⛔ AN ADMITTED RUN CAN STILL BE WAITING ON A LEVEL ONLY THE USER CAN GIVE (AI Conversation #70 5849012990 U3, served
+ * 79c299a turns[4]): after one approval "Keep £49 and add a paid AI add-on" acted on AI feature availability with no
+ * level; the run was admitted and the receipt said only "run it again". Named as the question the user can answer,
+ * from the verdict's own labels — never a code. Only while a run is admitted: a refusal already names what it needs.
+ */
+export function stillNeededLine(view: ReadinessView): string | null {
+  if (!view.checked || view.may_run !== true || view.levels_not_set.length === 0) return null;
+  const n = view.levels_not_set.length;
+  const asks = view.levels_not_set.slice(0, 2).map((l) => `what does "${l.option}" set ${l.factor} to`).join(', and ');
+  if (n === 1) return `One level is not set yet: ${asks}?`;
+  return n === 2 ? `Two levels are not set yet: ${asks}?` : `${n} levels are not set yet, including: ${asks}?`;
+}
+
 /**
  * The refusal's own words without an opening that already says the model can't be analysed — every sentence that
  * quotes a reason after its own "can't run" uses this, so none reads "can't … can't" (#1957 review, advisory 2).
