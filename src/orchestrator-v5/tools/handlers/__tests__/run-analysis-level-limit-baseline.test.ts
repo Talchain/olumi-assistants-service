@@ -83,6 +83,19 @@ function carried(churn: Churn, limits: Limit[], opts: { churnIsRoot?: boolean } 
   };
 }
 
+/** A hand-built non-root target (`f → n → goal`) in the served estimate shape, overridable per row. */
+function hand(target: Record<string, unknown>) {
+  return {
+    nodes: [
+      { id: 'goal', kind: 'goal', label: 'MRR' },
+      { id: 'f', kind: 'factor', label: 'Price' },
+      { kind: 'factor', label: 'Churn', scale_frame: 100, observed_state: { value: 0.07, raw_value: 7, source: 'cee_inference' }, ...target },
+    ],
+    edges: [{ from: 'f', to: String(target.id) }, { from: String(target.id), to: 'goal' }],
+  };
+}
+const PCT10 = (id: string) => [{ node_id: id, operator: '<=', value: 10, unit: '%', value_frame: 'level' }];
+
 describe('a level limit on a non-root node is checked against that node\'s current level', () => {
   // ── RED before #1919: no baseline, so ISL refuses `missing_target_baseline` ──
   it('the served shape: a "%" limit on the churn ESTIMATE framed on 100 carries baseline = its own value (0.07)', () => {
@@ -161,18 +174,49 @@ describe('a level limit on a non-root node is checked against that node\'s curre
   });
 
   it('CONTROL: a "%" limit on a non-root GOAL carries nothing, by kind or by id (#1840 owns the goal\'s baseline)', () => {
-    const graph = {
-      nodes: [
-        { id: 'g', kind: 'goal', label: 'Churn', scale_frame: 100, observed_state: { value: 0.07 } },
-        { id: 'f', kind: 'factor', label: 'Price' },
-      ],
-      edges: [{ from: 'f', to: 'g' }],
-    };
-    const limits = [{ node_id: 'g', operator: '<=', value: 10, unit: '%', value_frame: 'level' }];
-    expect(levelLimitBaselineNodeIds(graph, limits).size).toBe(0);
-    const asOutcome = { ...graph, nodes: graph.nodes.map((n) => (n.id === 'g' ? { ...n, kind: 'outcome' } : n)) };
-    expect(levelLimitBaselineNodeIds(asOutcome, limits), 'PRESENT control: the same node as an outcome carries').toEqual(new Set(['g']));
-    expect(levelLimitBaselineNodeIds(asOutcome, limits, 'g').size, 'the goal id alone excludes it').toBe(0);
+    const graph = hand({ id: 'g', kind: 'goal' });
+    expect(levelLimitBaselineNodeIds(graph, PCT10('g')).size).toBe(0);
+    const asFactor = hand({ id: 'g', kind: 'factor' });
+    expect(levelLimitBaselineNodeIds(asFactor, PCT10('g')), 'PRESENT control: the same node as a factor carries').toEqual(new Set(['g']));
+    expect(levelLimitBaselineNodeIds(asFactor, PCT10('g'), 'g').size, 'the goal id alone excludes it').toBe(0);
+  });
+
+  // ── B3 (review 5842400886): the carrier runs for EVERY scenario, so it stays out of cells other paths own ──
+  it('B3: a RISK/OUTCOME target with a model value carries nothing (add_constraint ASKS for that level; no answer ⇒ no baseline)', () => {
+    // The reviewer's reproduction: the row add_constraint writes, on a classic risk node carrying an LLM-authored 0.3.
+    const risk = { nodes: [
+      { id: 'goal', kind: 'goal', label: 'MRR' },
+      { id: 'fac_price', kind: 'factor', label: 'Price' },
+      { id: 'risk_churn', kind: 'risk', label: 'Churn risk', observed_state: { value: 0.3, source: 'cee_inference' } },
+    ], edges: [{ from: 'fac_price', to: 'risk_churn' }, { from: 'risk_churn', to: 'goal' }] };
+    const limits = [{ node_id: 'risk_churn', operator: '<=', value: 10, unit: '%', value_frame: 'level', provenance: 'explicit' }];
+    expect(levelLimitBaselineNodeIds(risk, limits, 'goal').size).toBe(0);
+    for (const kind of ['risk', 'outcome']) {
+      expect(levelLimitBaselineNodeIds(hand({ id: 'n', kind }), PCT10('n')).size, `${kind} in the carried shape`).toBe(0);
+    }
+  });
+
+  it('B1: only a limit spelled exactly "%" carries — a verbatim "% per month" or a currency limit does not', () => {
+    for (const unit of ['% per month', 'GBP', 'percent']) {
+      const limits = [{ node_id: 'n', operator: '<=', value: 10, unit, value_frame: 'level' }];
+      expect(levelLimitBaselineNodeIds(hand({ id: 'n' }), limits).size, unit).toBe(0);
+    }
+    expect(levelLimitBaselineNodeIds(hand({ id: 'n' }), PCT10('n')), 'PRESENT: "%"').toEqual(new Set(['n']));
+  });
+
+  it('B3: a unitless level in [0,1) is not proof of a "%" proportion — carries nothing', () => {
+    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, source: 'cee_inference' }, scale_frame: undefined }), PCT10('n')).size).toBe(0);
+  });
+
+  it('B3: a level with no author marker carries nothing; the user\'s own level carries', () => {
+    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7 } }), PCT10('n')).size, 'no source').toBe(0);
+    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7, source: 'brief_extraction' } }), PCT10('n')), 'the user\'s figure').toEqual(new Set(['n']));
+  });
+
+  it('B3: the node must ATTEST percent ÷ 100 (value = raw_value ÷ 100); a mismatched pair carries nothing', () => {
+    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 20, source: 'cee_inference' } }), PCT10('n')).size).toBe(0);
+    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7, source: 'cee_inference', cap: 20 }, scale_frame: undefined }), PCT10('n')).size, 'capped on 20').toBe(0);
+    expect(levelLimitBaselineNodeIds(hand({ id: 'n', observed_state: { value: 0.07, raw_value: 7, source: 'cee_inference', cap: 100 }, scale_frame: undefined }), PCT10('n')), 'PRESENT: capped on 100').toEqual(new Set(['n']));
   });
 
   it('FILL-ONLY: an existing baseline, whoever wrote it, is never overwritten', () => {
