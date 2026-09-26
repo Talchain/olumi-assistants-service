@@ -225,13 +225,13 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Set the goal’s success target to the figure the user has just stated (for example "we need at least £60k MRR", '
       + '"keep churn under 5%"). This does NOT change anything: it prepares ONE change and returns its id, which you keep for '
       + 'authorise_change: show the user what it sets, never the id, before they approve. Give the figure exactly as the user '
-      + 'wrote it, in their units (60000 and "£" for "£60k"), and whether they said at least or at most. Never use this '
+      + 'wrote it, in their units (60000, with the unit £, for £60k), and whether they said at least or at most. Never use this '
       + 'for a figure or a direction the user did not state: if they have not given both in their own words, ask first — '
       + 'a figure or direction they did not state is refused.',
     parameters: obj({
       constraint_type: { type: 'string', enum: ['at_least', 'at_most'], description: 'at_least when the user said the goal must reach at least the figure; at_most when they said it must stay at or under it.' },
       value: { type: 'number', description: 'The figure the user stated, in their own units.' },
-      unit: { type: 'string', description: 'The unit of that figure, as the user gave it (e.g. "£", "%", "customers").' },
+      unit: { type: 'string', description: 'The unit of that figure, as the user gave it (for example £, % or customers).' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
     }, ['constraint_type', 'value', 'unit', 'rationale']),
   },
