@@ -1151,6 +1151,34 @@ export function deriveLeaderLimitRisks(
 }
 
 /**
+ * ⭐ THE ONE READER over a persisted run fact — the readback carrier's source (#70 5842617884 / 5842658396).
+ *
+ * The transport block drops `constraint_results` (`P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP`), so
+ * {@link deriveLeaderLimitRisks} over a readback block can only ever return `[]`. The FACT does not drop it: the run
+ * fact stores `enrichment` = the verbatim PLoT body (`run-analysis.ts`, `enrichment: response`) and
+ * `leading_option_id` = the SAME variable {@link deriveConstraintVerdict} was given. So the carrier reads the risks off
+ * the fact, beside {@link readConstraintVerdictStateFromResult}, under the same freshness gate — the same bytes the
+ * verdict used, no second envelope, no schema change.
+ *
+ * `ratified` is the caller's `readRatifiedConstraints` of the hash-bound graph (identical to the run's set while the
+ * freshness gate holds). `null` when the fact carries no PLoT body to read; `[]` when it does and no limit is at risk.
+ * Pure.
+ */
+export function readLeaderLimitRisksFromResult(
+  result: unknown,
+  ratified: readonly RatifiedConstraint[],
+): LeaderLimitRisk[] | null {
+  if (!isPlainObject(result)) return null;
+  const record = result as Record<string, unknown>;
+  const enrichment = record.enrichment;
+  if (!isPlainObject(enrichment)) return null;
+  const leader = typeof record.leading_option_id === 'string' && record.leading_option_id.length > 0
+    ? record.leading_option_id
+    : null;
+  return deriveLeaderLimitRisks(enrichment as Record<string, unknown>, leader, ratified);
+}
+
+/**
  * The constraint ids whose `constraint_results` entry the PRODUCER certifies: the marker parses under
  * `EnrichmentScaleProvenanceSchema` AND `decision_grade === true`. The positive twin of
  * {@link collectProducerNotDecisionGradeConstraintIds} — same parse, same rule — for a caller that needs PROOF of

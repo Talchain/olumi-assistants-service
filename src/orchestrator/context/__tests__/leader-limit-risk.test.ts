@@ -15,6 +15,7 @@ import {
   deriveConstraintVerdict,
   deriveLeaderLimitRisks,
   LEADER_LIMIT_RISK_THRESHOLD,
+  readLeaderLimitRisksFromResult,
   type RatifiedConstraint,
 } from '../constraint-feasibility.js';
 
@@ -111,5 +112,38 @@ describe('CONTROLS — never a risk without evidence', () => {
     expect(deriveLeaderLimitRisks(u3bLeaderAt(0.3), null, RATIFIED)).toEqual([]);
     expect(deriveLeaderLimitRisks(u3bLeaderAt(0.3), '', RATIFIED)).toEqual([]);
     expect(deriveLeaderLimitRisks(u3bLeaderAt(0.3), 'opt_absent', RATIFIED)).toEqual([]);
+  });
+});
+
+describe('readLeaderLimitRisksFromResult — the carrier reads the PERSISTED FACT, never the transport block', () => {
+  /** The run fact's own shape: `enrichment` is the verbatim PLoT body, `leading_option_id` the verdict's own input. */
+  const fact = (enrichment: Json | undefined, leading_option_id = LEADER) => ({
+    scenario_id: 's', leading_option_id, summary: '', ...(enrichment !== undefined ? { enrichment } : {}),
+  });
+
+  it('a fact whose PLoT body scores the leader at 0.3 yields the risk, by identity', () => {
+    expect(readLeaderLimitRisksFromResult(fact(u3bLeaderAt(0.3)), RATIFIED)).toEqual([
+      { constraint_id: 'gc_u3b', label: 'First-year cost at most £250k', source_quote: 'keep first-year cost under £250k', probability: 0.3 },
+    ]);
+  });
+
+  it('PRESENT control: the fact as served (0.981) yields [] — computed, none at risk', () => {
+    expect(readLeaderLimitRisksFromResult(fact(capture('U3b')), RATIFIED)).toEqual([]);
+  });
+
+  it('WHY THE FACT: the transport shape (no `constraint_results`) certifies nothing, so it could only ever say []', () => {
+    const transport = u3bLeaderAt(0.3);
+    delete transport.constraint_results;
+    expect(readLeaderLimitRisksFromResult(fact(transport), RATIFIED)).toEqual([]);
+  });
+
+  it('a fact with no PLoT body is null (not computed), never [] (computed, none)', () => {
+    expect(readLeaderLimitRisksFromResult(fact(undefined), RATIFIED)).toBeNull();
+    expect(readLeaderLimitRisksFromResult(null, RATIFIED)).toBeNull();
+    expect(readLeaderLimitRisksFromResult([], RATIFIED)).toBeNull();
+  });
+
+  it('a fact with no leader (the empty-string sentinel) yields []', () => {
+    expect(readLeaderLimitRisksFromResult(fact(u3bLeaderAt(0.3), ''), RATIFIED)).toEqual([]);
   });
 });
