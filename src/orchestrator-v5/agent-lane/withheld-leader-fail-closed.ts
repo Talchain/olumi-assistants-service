@@ -1020,11 +1020,19 @@ export const AGENT_NO_LEADER_SENTENCES: readonly string[] = [
  * ⭐ AX2 (DL #70 5850471417, item 2): ONE statement of the limitation on a Run turn. Served (`f-20260926T201724Z/05`,
  * `/12`), the model's own reply said the product reason ("No option can be put forward on MRR yet: … multiplying them")
  * and this module then said it again. The sentence is skipped ONLY when the one about to be appended IS the product-
- * identity sentence AND a kept sentence says that reason in plain words: it names the goal (its label, read from the
- * graph) together with multiplication. Any other reason, an admission reason, or a reply that does not say it keeps it.
+ * identity sentence AND a kept sentence says that reason in plain words: it says no option is put forward, names the
+ * goal (its label, read from the graph) and names multiplication. Any other reason, an admission reason, or a reply that
+ * does not say all three in one sentence keeps it.
  */
 const PRODUCT_IDENTITY_SENTENCE = sentence(BY_WITHHELD_REASON[WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]!);
 const MULTIPLICATION = /\bmultipl(?:y|ies|ied|ying|ication)\b/i;
+/**
+ * FAIL CLOSED (R&C, #2054 5850645728 B1): the SAME sentence must also say that no option is put forward. The goal and
+ * multiplication alone are arithmetic, not a reason — "Your £20k MRR target means multiplying price by subscribers…"
+ * (AX1's own answer) would otherwise suppress the only statement of WHY. Keeping a duplicate is harmless; losing the
+ * reason is not.
+ */
+const SAYS_WITHHELD = /\b(?:no (?:single )?option|can(?:no|')t (?:say|tell|compare|rank|put forward)|cannot (?:say|tell|compare|rank|put forward))\b/i;
 const escapeForRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 export function replyAlreadySaysProductReason(body: string, graph: unknown): boolean {
@@ -1034,7 +1042,7 @@ export function replyAlreadySaysProductReason(body: string, graph: unknown): boo
       && typeof (n as { label?: unknown }).label === 'string' && ((n as { label: string }).label).trim() !== '')
     .map((n) => new RegExp(`(^|[^\\p{L}\\p{N}])${escapeForRegExp(n.label.trim())}(?=[^\\p{L}\\p{N}]|$)`, 'iu'));
   if (goals.length === 0) return false;
-  return splitIntoRedactableUnits(body).some((unit) => MULTIPLICATION.test(unit) && goals.some((g) => g.test(unit)));
+  return splitIntoRedactableUnits(body).some((unit) => SAYS_WITHHELD.test(unit) && MULTIPLICATION.test(unit) && goals.some((g) => g.test(unit)));
 }
 
 function admissionModeReasonCode(analysisReady: unknown): string | undefined {

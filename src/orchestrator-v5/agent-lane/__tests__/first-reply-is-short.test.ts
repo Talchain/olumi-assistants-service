@@ -116,6 +116,12 @@ describe('AX2 (item 2): a Run reply states the product reason ONCE', () => {
     expect(said).not.toContain(SERVED_CLOSING);
   });
 
+  it('RED (R&C B1, fail closed): arithmetic that names the goal and multiplying is not a reason — the sentence is kept', () => {
+    // R&C's probes (#2054 5850645728), verbatim: AX1-style arithmetic, which says nothing about why no option is named.
+    expect(run('Your \u00a320k MRR target means multiplying price by subscribers: it needs 339 subscribers at \u00a359, or 409 at \u00a349.')).toContain(SERVED_CLOSING);
+    expect(run('To reach \u00a320k MRR, multiply \u00a359 by 339 subscribers.')).toContain(SERVED_CLOSING);
+  });
+
   it('CONTRAST: a reply that does not state the reason keeps the sentence', () => {
     const withoutLead = SERVED_05.slice(SERVED_05.indexOf('- The'));
     expect(run(withoutLead)).toContain(SERVED_CLOSING);
