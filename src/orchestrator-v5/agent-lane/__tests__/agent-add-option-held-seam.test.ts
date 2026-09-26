@@ -486,6 +486,10 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(g.edges.some((e) => e.from === fac!.id && e.to === 'goal_x'), 'the new factor reaches the goal').toBe(true);
     expect(t2.assistant_text, t2.assistant_text).toMatch(/Also added the factor "AI add-on price", which changes "Revenue"/);
     expect(t2.assistant_text, 'the factor is never reported as an option').not.toMatch(/Added "AI add-on price"/);
+    // Audit MAG-2 (served 201724Z steps 06–07): the new factor's link is the flat default, so its size is a placeholder,
+    // never "Olumi's estimate".
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/"Revenue"; how strongly is not known yet: Olumi used a placeholder strength, not an estimate\./);
+    expect(t2.assistant_text).not.toMatch(/how strongly is Olumi's estimate/);
   }, 120_000);
 
   it('[q2] RED (C2, #70 5844173937; needs Canonical\'s builder to stamp it): Olumi\'s own suggested level → ONE approval → COMMITTED as cee_hypothesis and said as Olumi\'s estimate — never stored as the user\'s', async () => {
