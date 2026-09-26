@@ -77,10 +77,11 @@ describe('a values-only approval (Olumi\'s starting point) is ONE door call, all
     expect(calls, 'one approval, one call').toHaveLength(1);
     expect(calls[0]!.levels).toEqual([]);
     expect(calls[0]!.links).toEqual([]);
-    expect(calls[0]!.values?.map((v) => [v.factor_id, v.value, v.author])).toEqual([
+    // All three, in the user's units, as Olumi's (order is the proposal's own).
+    expect(calls[0]!.values?.map((v) => [v.factor_id, v.value, v.author]).sort()).toEqual([
       ['ai_feature_availability', 0, 'model_proposed'],
-      ['pro_paying_subscribers', 300, 'model_proposed'],
       ['monthly_churn', 7, 'model_proposed'],
+      ['pro_paying_subscribers', 300, 'model_proposed'],
     ]);
     // Not one `factor_value_edit` from the capability: the N-commit path is gone.
     expect(p.writes.slice(writesBefore).filter((w) => w === 'factor_value_edit')).toEqual([]);
