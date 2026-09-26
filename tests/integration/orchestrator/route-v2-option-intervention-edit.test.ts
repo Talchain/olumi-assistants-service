@@ -577,6 +577,24 @@ describe('the Agent\'s in-process batch door — ONE user operation → ONE atom
       expect(into('price_sensitivity').provenance?.magnitude).toBe('olumi_placeholder');
     });
 
+    it('RED (MG 5849581652): a RANGE moves Olumi\'s links like a value does — churn\'s bare 5 on a range of 100 → the 2 links into churn ±0.0125', async () => {
+      const served = JSON.parse(readFileSync('tests/fixtures/magnitude/c-run1-served-graphs.json', 'utf-8')).run1_step01;
+      // The served graph, with churn holding a bare 5 and no range of its own (the shape a frame is for).
+      const churn = served.nodes.find((n: { id: string }) => n.id === 'monthly_churn');
+      delete churn.scale_frame;
+      churn.observed_state = { value: 5, unit: '% of Pro subscribers per month', source: 'brief_extraction' };
+      persisted = projectGraphForPersistence(structuredClone(served));
+      const r = await callWith([], [{ option_id: 'keep_current_setup', factor_id: 'pro_plan_price', value: 0.245, author: 'user_specified' }], [],
+        'cccccccc-cccc-4ccc-8ccc-cccccccccca4', [{ factor_id: 'monthly_churn', cap: 100 }]);
+      expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false });
+      expect(rows.size).toBe(1);
+      expect(factorOs('monthly_churn')).toMatchObject({ value: 0.05, raw_value: 5, cap: 100 });
+      const into = (from: string) => (graphNow().edges as { from: string; to: string; strength: { mean: number }; provenance?: { magnitude?: string } }[])
+        .find(e => e.from === from && e.to === 'monthly_churn')!;
+      expect([into('price_sensitivity').strength.mean, into('ai_feature_availability').strength.mean]).toEqual([0.0125, -0.0125]);
+      expect(into('ai_feature_availability').provenance?.magnitude).toBe('olumi_placeholder');
+    });
+
     it('a retry of the committed compound writes nothing more — already applied', async () => {
       expect((await callWith(COVERAGE_60, TWO, NEW_LINK)).status).toBe('committed');
       const retry = await callWith(COVERAGE_60, TWO, [], 'dddddddd-dddd-4ddd-8ddd-ddddddddddde');

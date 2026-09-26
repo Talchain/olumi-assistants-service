@@ -451,6 +451,10 @@ async function applyApprovedFactorValues(
       || (typeof node.scale_frame === 'number' && node.scale_frame > 1)) return refuseFrame('frame_not_applicable', i);
     (node as Record<string, unknown>).observed_state = { ...os, value: raw / f.cap, raw_value: raw, cap: f.cap, declared_scale: 'unit_interval' };
   }
+  // ⭐ A RANGE MOVES OLUMI'S LINKS TOO (MG #70 5849581652): the level a frame sets is a level like any other, so the
+  // Olumi-sized links on that factor are re-derived on it — the same contract the value writer applies (#2033), and the
+  // one the scope guard below re-derives over the values and frames together.
+  for (const id of framedIds) working = frameDefaultedLinks(working, id).graph;
   const graph = projectGraphForPersistence(working);
   const touched = [...new Set([...values.map(v => v.factorId), ...frames.map(f => f.factorId)])];
   if (!isEditableGraph(graph) || !factorValuesPostimageIsScoped(before, graph, touched)) {
