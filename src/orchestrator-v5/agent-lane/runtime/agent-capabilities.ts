@@ -101,7 +101,7 @@ import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSumm
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
-import { readinessViewOf } from '../readiness-view.js';
+import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
 import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
@@ -1241,7 +1241,7 @@ export function createAgentCapabilities(
    */
   const stillBlockedNote = (v: ReturnType<typeof readinessViewOf>): string => {
     if (!v.checked || v.may_run !== false) return '';
-    const why = [...v.needs_from_user.map((i) => i.message), ...(v.needs_from_user.length === 0 && v.reason !== undefined ? [v.reason] : [])]
+    const why = [...v.needs_from_user.map((i) => i.message), ...(v.needs_from_user.length === 0 && v.reason !== undefined ? [withoutCantRunOpening(v.reason)] : [])]
       .map((m) => m.trim().replace(/\.+$/, ''))
       .filter((m) => m !== '');
     return ` Even after this approval the analysis could still not run: ${why.length > 0 ? why.join('. ') : 'the model would still be blocked'}. `
