@@ -45,7 +45,7 @@ import {
   buildAddOptionsTransaction,
   MAX_OPTIONS_PER_TRANSACTION,
   type AddOptionGraphView,
-  type AddOptionSkipReason,
+  type AddOptionsSkipReason,
 } from '../routing/add-option-transaction.js';
 import { log } from '../../utils/telemetry.js';
 
@@ -73,7 +73,9 @@ export type AddOptionTransactionOutcome =
   | {
       readonly kind: 'skip';
       readonly reason:
-        | AddOptionSkipReason
+        // Every builder refusal except `too_many_options`, which is REFUSED with a sentence, not skipped —
+        // including the new-factor reasons (ruling #70 5843972346).
+        | Exclude<AddOptionsSkipReason, 'too_many_options'>
         | 'gm_not_live'
         | 'no_graph_hash'
         | 'unreadable_graph'
@@ -195,7 +197,12 @@ function toGraphView(currentGraph: unknown): AddOptionGraphView | null {
   const parsed = GraphV3.safeParse(currentGraph);
   if (!parsed.success) return null;
   return {
-    nodes: parsed.data.nodes.map((n) => ({ id: n.id, kind: n.kind, label: n.label })),
+    nodes: parsed.data.nodes.map((n) => ({
+      id: n.id,
+      kind: n.kind,
+      label: n.label,
+      ...(typeof (n as { category?: unknown }).category === 'string' ? { category: (n as { category: string }).category } : {}),
+    })),
     edges: parsed.data.edges.map((e) => ({ from: e.from, to: e.to })),
   };
 }
@@ -357,8 +364,11 @@ export function dispatchAddOptionTransaction(
   // stops matching, the worst case is both sentences shipping, never a
   // silently dropped disclosure.
   const linkedNotices: string[] = [];
+  // A factor this batch ADDS is not in the pre-edit graph: name it from the batch (contract 5843960061).
   const labelOf = (id: string): string =>
-    graphView.nodes.find((n) => n.id === id)?.label ?? id;
+    built.newFactors.find((f) => f.id === id)?.label ??
+    graphView.nodes.find((n) => n.id === id)?.label ??
+    id;
   for (const p of proposals) {
     if (p.linkedUnvaluedFactorIds.length === 0) continue;
     linkedNotices.push(
