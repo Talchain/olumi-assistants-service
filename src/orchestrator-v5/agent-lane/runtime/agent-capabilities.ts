@@ -41,6 +41,11 @@ import { isPendingActionExpired, type PendingAction } from '../../session/pendin
  * idempotency key, and the stable key is what the replay arm needs.
  */
 
+/** A value whose unit is another kind than its factor's (a price as churn): left out, and the Agent says why. */
+const UNIT_MISMATCH_NOTE =
+  'Left out because the figure is in a different kind of unit from the factor (for example a price given for a rate). '
+  + 'Never record a figure the user gave for something else as this factor\u2019s value; ask for its own figure if needed.';
+
 /** What the Agent is told to say about a named input that cannot hold a value. */
 const NOT_A_FACTOR_NOTE =
   'These were named but are not factors (for example a risk), so no starting value can be set on them and they are ' +
@@ -100,6 +105,7 @@ import { readinessViewOf } from '../readiness-view.js';
 import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
+import { unitsConflict } from '../unit-conflict.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel } from './build-model.js';
@@ -1359,6 +1365,7 @@ export function createAgentCapabilities(
       const notAFactor: { label: string; kind: string }[] = [];
       const ambiguous: AmbiguousTarget[] = [];
       const occupied: { label: string; current_value: number }[] = [];
+      const unitMismatch: { label: string; value: unknown; unit: string; factor_unit: string }[] = [];
       const seen = new Set<string>();
       const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number }[] = [];
 
@@ -1373,6 +1380,12 @@ export function createAgentCapabilities(
         }
         if (res.kind === 'other') { notAFactor.push({ label: res.node.label, kind: String(res.node.kind) }); continue; }
         const node = res.node;
+        // ⛔ A figure in another kind of unit is never this factor's value (`unit-conflict.ts`): left out, and said.
+        const nodeUnit = (node.observed_state as { unit?: unknown } | undefined)?.unit;
+        if (unitsConflict(a?.unit, nodeUnit) !== null) {
+          unitMismatch.push({ label: node.label, value: a?.value, unit: String(a?.unit), factor_unit: String(nodeUnit) });
+          continue;
+        }
         /**
          * ⛔ THE APPROVAL MUST SHOW THE USER'S OWN NUMBER, NOT THE MODEL'S DIVISOR
          * (Codex 5810763729 item 1). `observed_state.value` is the number read against
@@ -1425,6 +1438,7 @@ export function createAgentCapabilities(
           unresolved_labels: unresolved, already_valued: occupied,
           ...(notAFactor.length > 0 ? { not_a_factor: notAFactor } : {}),
           ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
+          ...(unitMismatch.length > 0 ? { unit_mismatch: unitMismatch, unit_mismatch_note: UNIT_MISMATCH_NOTE } : {}),
           detail:
             'None of those could be adopted. Read the state again and use the labels exactly as they appear; ' +
             'factors that already hold a value are left alone.',
@@ -1498,6 +1512,7 @@ export function createAgentCapabilities(
         // so the user is never asked to approve a value that cannot be saved.
         ...(notAFactor.length > 0 ? { not_a_factor: notAFactor, not_a_factor_note: NOT_A_FACTOR_NOTE } : {}),
         ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
+        ...(unitMismatch.length > 0 ? { unit_mismatch: unitMismatch, unit_mismatch_note: UNIT_MISMATCH_NOTE } : {}),
         note:
           'Nothing has changed. Show the user each value and what it rests on, say plainly that these are ' +
           'assumptions to adopt or correct and NOT measurements, and call authorise_change with this ' +
@@ -3273,6 +3288,7 @@ export function createAgentCapabilities(
       const rawNodes = ((g.raw as { nodes?: unknown }).nodes as { id: string; kind?: string; label?: string; description?: string }[] | undefined) ?? [];
       const norm = (v: unknown): string => String(v ?? '').trim().toLowerCase();
       const outOfRange: { option: string; factor: string; value: number; range: number }[] = [];
+      const unitMismatch: { option: string; factor: string; value: number; unit: string; factor_unit: string }[] = [];
       const levelsNotSet: { option: string; factor: string; value: number; reason: string }[] = [];
       const entries = plans.map(({ spec, plan }) => {
         const levelById = new Map<string, { value: number; unit?: string }>();
@@ -3287,6 +3303,12 @@ export function createAgentCapabilities(
           const lvl = levelById.get(f.id);
           if (lvl === undefined) return { factor_id: f.id, value: null };
           const factor = g.nodes.find((x) => x.id === f.id);
+          // ⛔ A figure in another kind of unit is never this factor's level (`unit-conflict.ts`: a price as churn).
+          const factorUnit = (factor?.observed_state as { unit?: unknown } | undefined)?.unit;
+          if (unitsConflict(lvl.unit, factorUnit) !== null) {
+            unitMismatch.push({ option: plan.label, factor: f.label, value: lvl.value, unit: String(lvl.unit), factor_unit: String(factorUnit) });
+            return { factor_id: f.id, value: null };
+          }
           const frame = levelFrameOf(factor);
           if (frame !== null) {
             const v = lvl.value / frame;
@@ -3307,6 +3329,15 @@ export function createAgentCapabilities(
         });
         return { plan, set, entry: { label: plan.label, option_id: plan.optionId, interventions } };
       });
+      if (unitMismatch.length > 0) {
+        const m = unitMismatch[0]!;
+        return {
+          ok: false, mutated: false, refusal: 'level_unit_mismatch', unit_mismatch: unitMismatch,
+          detail: `${m.value} ${m.unit} is not a level for ${m.factor}, which the model measures in ${m.factor_unit}. Nothing was prepared. `
+            + 'A figure the user gave for something else (a price, say) is never another factor\u2019s level. Call propose_new_option '
+            + `once more with that level left out, and ask the user for ${m.factor}\u2019s own figure only if they want to set it.`,
+        };
+      }
       if (outOfRange.length > 0) {
         const o = outOfRange[0]!;
         return {
