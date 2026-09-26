@@ -112,6 +112,14 @@ const listOf = (xs: readonly string[]): string =>
  * The ONE sentence the user reads after a change, from the same verdict. Deterministic; plain English; never a
  * code. Says whether the analysis can run NOW — and what it would leave out, or what stands in the way.
  */
+/**
+ * The refusal's own words without an opening that already says the model can't be analysed — every sentence that
+ * quotes a reason after its own "can't run" uses this, so none reads "can't … can't" (#1957 review, advisory 2).
+ */
+export function withoutCantRunOpening(reason: string): string {
+  return reason.replace(/^This model can(?:'|\u2019)t be analysed yet\.\s*/i, '');
+}
+
 export function readinessSentence(view: ReadinessView): string {
   if (!view.checked) return 'I could not check whether the analysis can run yet.';
   if (view.may_run === true) {
@@ -122,6 +130,6 @@ export function readinessSentence(view: ReadinessView): string {
   const why = view.needs_from_user.slice(0, 2).map((i) => i.message.replace(/\s+$/, '')).join(' ');
   if (why !== '') return `The analysis can't run yet. ${why}`;
   // The refusal's own words may open by saying so already; never "can't … can't".
-  const reason = (view.reason ?? '').replace(/^This model can(?:'|\u2019)t be analysed yet\.\s*/i, '');
+  const reason = withoutCantRunOpening(view.reason ?? '');
   return reason !== '' ? `The analysis can't run yet. ${reason}` : "The analysis can't run yet.";
 }

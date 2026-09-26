@@ -111,7 +111,7 @@ import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSumm
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
-import { readinessViewOf } from '../readiness-view.js';
+import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
 import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { bandFromMagnitude, INFLUENCE_BAND_THRESHOLDS, type InfluenceBand } from '../../format/influence-bands.js';
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
@@ -1127,6 +1127,13 @@ export function createAgentCapabilities(
       const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
         graph: { ...(working as Record<string, unknown>), nodes: workingNodes },
         expected_graph_hash: carried,
+        /**
+         * ⭐ AND THE IDENTITY EXPECTATION, from the SAME read these bytes come from (`approvedRead`), as the frame
+         * writes send it. A rename that lands between that read and the route's own is outside the analysis
+         * projection, so only this refuses it; without it the whole-graph write restores the stale label
+         * (Canonical 5844410312; the #1743 counterexample #1810 closed for the frame writes).
+         */
+        ...(approvedRead.graph_identity_hash !== '' ? { expected_graph_identity_hash: approvedRead.graph_identity_hash } : {}),
         operation_id: operationId,
       });
       if (reg.status !== 200) {
@@ -1301,7 +1308,7 @@ export function createAgentCapabilities(
    */
   const stillBlockedNote = (v: ReturnType<typeof readinessViewOf>): string => {
     if (!v.checked || v.may_run !== false) return '';
-    const why = [...v.needs_from_user.map((i) => i.message), ...(v.needs_from_user.length === 0 && v.reason !== undefined ? [v.reason] : [])]
+    const why = [...v.needs_from_user.map((i) => i.message), ...(v.needs_from_user.length === 0 && v.reason !== undefined ? [withoutCantRunOpening(v.reason)] : [])]
       .map((m) => m.trim().replace(/\.+$/, ''))
       .filter((m) => m !== '');
     return ` Even after this approval the analysis could still not run: ${why.length > 0 ? why.join('. ') : 'the model would still be blocked'}. `
