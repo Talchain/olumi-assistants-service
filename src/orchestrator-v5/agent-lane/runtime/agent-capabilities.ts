@@ -1198,6 +1198,49 @@ export function createAgentCapabilities(
     }
     return missing;
   };
+  /**
+   * ⭐ WHAT THE ONE VERDICT WOULD SAY IF THIS WERE APPROVED (served ef99a97 / cb1778b: a starting point that filled
+   * every level but made two options identical — the user's one approval led straight to "nothing to compare").
+   * The stored graph with the proposal's levels (and value presence) applied, read by the SAME `readinessViewOf`.
+   * A preview for the Agent's words only; nothing here is written.
+   */
+  const readinessIfApplied = async (ctx: AgentToolContext, ops: readonly ProposalOperation[]): Promise<ReturnType<typeof readinessViewOf>> => {
+    const g = await readGraph(ctx.scenario_id);
+    if (g === null) return readinessViewOf(undefined);
+    const raw = JSON.parse(JSON.stringify(g.raw)) as { nodes?: { id?: unknown; interventions?: unknown; observed_state?: Record<string, unknown> }[] };
+    const byId = new Map((raw.nodes ?? []).map((n) => [String(n.id), n] as const));
+    for (const o of ops) {
+      if (o.op === 'set_option_intervention') {
+        const [optionId, factorId] = o.path.split('::') as [string, string];
+        const v = (o.value as { normalised?: unknown } | undefined)?.normalised;
+        const n = byId.get(optionId);
+        if (n !== undefined && typeof v === 'number') n.interventions = { ...((n.interventions ?? {}) as Record<string, unknown>), [factorId]: { value: v } };
+      } else if (o.op === 'set_factor_value') {
+        const n = byId.get(o.path);
+        const v = (o.value as { value?: unknown } | undefined)?.value;
+        const cap = n?.observed_state?.cap;
+        if (n !== undefined && typeof v === 'number') {
+          // Stored against the factor's range when it has one; the verdict reads presence and range, never this figure's meaning.
+          const stored = typeof cap === 'number' && cap > 0 ? v / cap : v <= 1 ? v : 1;
+          n.observed_state = { ...(n.observed_state ?? {}), value: stored };
+        }
+      }
+    }
+    return readinessViewOf(raw);
+  };
+  /**
+   * What the Agent must say BEFORE the approval when the preview still blocks: the verdict's own words — the
+   * user's demands, else the refusal's `reason` (the run path's `blockedNextStep`) — never an example that may not
+   * fit this model (#1957 review: a one-option model was told to ask about "identical options").
+   */
+  const stillBlockedNote = (v: ReturnType<typeof readinessViewOf>): string => {
+    if (!v.checked || v.may_run !== false) return '';
+    const why = [...v.needs_from_user.map((i) => i.message), ...(v.needs_from_user.length === 0 && v.reason !== undefined ? [v.reason] : [])]
+      .map((m) => m.trim().replace(/\.+$/, ''))
+      .filter((m) => m !== '');
+    return ` Even after this approval the analysis could still not run: ${why.length > 0 ? why.join('. ') : 'the model would still be blocked'}. `
+      + 'Say so plainly BEFORE asking for approval, and ask the user for what this cannot settle — never invent a difference or a figure.';
+  };
   const levelPathsOf = (ps: readonly StructuredProposal[]): Set<string> =>
     new Set(ps.flatMap((p) => p.operations).filter((o) => o.op === 'set_option_intervention').map((o) => o.path));
   /**
@@ -1574,7 +1617,9 @@ export function createAgentCapabilities(
             ...(a !== null && Array.isArray(a.not_a_factor) ? { not_a_factor: a.not_a_factor } : {}), ...ambiguity, ...refused,
           });
         }
-        return { ...made[0], ...ambiguity, ...refused };
+        const ifApproved = await readinessIfApplied(ctx, only?.operations ?? []);
+        return { ...made[0], ...ambiguity, ...refused, readiness_if_approved: ifApproved,
+          ...(stillBlockedNote(ifApproved) !== '' ? { note: `${String(made[0].note ?? '')}${stillBlockedNote(ifApproved)}` } : {}) };
       }
       const halves = made.map((r) => proposals.get(r.proposal_id as string)).filter((p): p is StructuredProposal => p !== undefined);
       if (halves.length !== 2 || halves[0].base_graph_identity_hash !== halves[1].base_graph_identity_hash) {
@@ -1604,7 +1649,9 @@ export function createAgentCapabilities(
       replaceEarlierStartingPoints(ctx);
       proposals.put(compound);
       for (const h of halves) proposals.discard(h.proposal_id);
+      const ifApproved = await readinessIfApplied(ctx, compound.operations);
       return {
+        readiness_if_approved: ifApproved,
         ok: true, mutated: false,
         proposal_id: compound.proposal_id,
         public_label: compound.public_label,
@@ -1624,7 +1671,7 @@ export function createAgentCapabilities(
         note:
           'Nothing has changed. Show the user every value and level and what each rests on, say plainly they are ' +
           'assumptions to adopt or correct, NOT measurements, and that ONE approval applies all of them. Then call ' +
-          'authorise_change with this proposal_id once they agree.',
+          'authorise_change with this proposal_id once they agree.' + stillBlockedNote(ifApproved),
       };
     },
 
