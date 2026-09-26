@@ -67,7 +67,20 @@ export function contradictsItsName(value: number, unit: unknown, name: string): 
  *   the prompt's own example ("price barely affects churn").
  * - NOT A DENIAL OR A QUESTION (review B2, N1): a band in a question ("Is it strong or weak?", or a sentence opened by an
  *   auxiliary: "is it strong"), or with a negator anywhere earlier in its clause ("doesn't have a strong effect", "not as
- *   strong as you think", "isnt", "cannot", "without", "I doubt", "anything but"), grounds nothing.
+ *   strong as you think", "isnt", "cannot", "without", "I doubt", "anything but"), grounds nothing. Nor does a band set
+ *   aside just before it ("strong rather than moderate", "instead of moderate", "more than moderate", "less than strong").
+ * - NOT LEFT TO OLUMI (round-2 review of a2a46135, which stored "Connect price to churn, you decide how strong." + strong
+ *   as the user's 0.825): a band names NOTHING when
+ *   (i) "how", "whether" or "if" comes earlier in its clause — it asks about or supposes a band ("you decide how strong",
+ *       "I wonder whether it is strong", "tell me if it is moderate");
+ *   (ii) it is one of two or more band words offered as ALTERNATIVES in its sentence — "or" or a slash between them
+ *       ("moderate or strong", "either weak or moderate", "strong/weak"), or a range ("moderate to strong",
+ *       "moderate-to-strong", "between moderate and strong"). ", not" is a contrast, not an alternative: "It is strong,
+ *       not moderate." names strong (and denies moderate);
+ *   (iii) the turn ANYWHERE hands the choice to Olumi ("you decide", "up to you", "your call", "whatever you think",
+ *       "use your judgement", "you know best", "I don't know how strong", …: `HANDS_THE_CHOICE_TO_OLUMI`).
+ *   Those phrases are a closed list over open language, so it misses some ("dealer's choice"); every miss is a phrasing
+ *   whose band would still be grounded, as before this rule, and every rule here errs toward the Agent asking.
  * - KNOWN LIMIT: the word is not tied to the link. One message naming a band for a DIFFERENT link ("Marketing strongly
  *   drives signups; the price link looks wrong") still grounds it. Every miss makes the Agent ask which band.
  */
@@ -91,23 +104,73 @@ const AUXILIARY_FIRST = /^\s*(?:is|are|was|were|am|do|does|did|can|could|would|s
  * Olumi's opinion, and stay questions.
  */
 const REQUEST_FORM = /^\s*(?:please\s+)?(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:record|set|make|mark|change|put|update|use|save|keep|treat)\b/i;
+/** (i) A band after one of these in its clause is asked about or supposed ("you decide how strong"), never named. */
+const ASKS_OR_SUPPOSES = /\b(?:how|whether|if)\b/i;
+/** A band set aside just before it: "strong rather than moderate", "instead of moderate", "more than moderate". */
+const SET_ASIDE_BEFORE = /\b(?:(?:rather|more|less|other)\s+than|instead\s+of)\s+(?:(?:a|an|the|just|merely|only)\s+)?$/i;
+/** (ii) Every band word, the longest reading first ("very strong" is one word here, never also "strong"). */
+const ANY_BAND_WORD = /\b(?:very\s+strong(?:ly)?|strong(?:ly)?|moderate(?:ly)?|weak(?:ly)?|barely)\b/gi;
+/** (ii) Between two band words, what offers them as alternatives: "or" or a slash anywhere, or a range joiner alone. */
+const ALTERNATIVE_BETWEEN = /\bor\b|\/|^\s*(?:[-\u2013]|to|[-\u2013]\s*to\s*[-\u2013])\s*$/i;
+/**
+ * (iii) The user hands the choice of strength to Olumi, anywhere in the turn: every band word in it is then Olumi's pick.
+ * A closed list over open language \u2014 see the rule's KNOWN LIMIT above; a phrase it misses still grounds as before.
+ */
+const HANDS_THE_CHOICE_TO_OLUMI = new RegExp([
+  "\\b(?:you|olumi)\\s+(?:to\\s+|can\\s+|should\\s+)?(?:decide|pick|choose)\\b",
+  "\\byou\\s+tell\\s+me\\b",
+  "\\byou(?:['\\u2019]d)?\\s+know\\s+(?:best|better)\\b",
+  "\\bup\\s+to\\s+you\\b",
+  "\\byour\\s+(?:call|choice|pick)\\b",
+  "\\b(?:whatever|whichever)\\s+you\\s+(?:think|want|prefer|like|feel|reckon|say|decide|pick|choose)\\b",
+  "\\bleave\\s+(?:it|that|this|the\\s+\\w+)\\s+(?:up\\s+)?to\\s+you\\b",
+  "\\buse\\s+your\\s+(?:own\\s+|best\\s+)?judge?ment\\b",
+  "\\bas\\s+you\\s+see\\s+fit\\b",
+  // "I don't know how strong", "not sure how strongly", "no idea how weak": the user says they have no band to give.
+  "(?:\\bdo\\s+not\\s+know|\\bdon['\\u2019]?t\\s+know|\\bnot\\s+sure|\\bunsure|\\bno\\s+idea)\\s+how\\s+(?:very\\s+)?(?:strong|weak|moderate)",
+].join('|'), 'i');
 
-/** Whether `band` is named in `turnText`, neither denied nor asked about. No text (or none bound) proves nothing: false. */
+/**
+ * Whether `band` is named in `turnText` \u2014 neither denied, asked about, offered among alternatives, nor left to Olumi.
+ * No text (or none bound) proves nothing: false.
+ */
 export function bandTheUserWrote(band: string, turnText: string | null | undefined): boolean {
   const re = BAND_WORDS[band];
   if (re === undefined || typeof turnText !== 'string') return false;
+  // (iii) The user left the choice to Olumi: no band word in this turn is theirs.
+  if (HANDS_THE_CHOICE_TO_OLUMI.test(turnText)) return false;
   for (const m of turnText.matchAll(re)) {
     // The sentence the word sits in, and the part of its clause before it (a clause restarts after , ; : a dash, or "but").
     const start = Math.max(turnText.lastIndexOf('.', m.index), turnText.lastIndexOf('!', m.index), turnText.lastIndexOf('?', m.index), turnText.lastIndexOf('\n', m.index)) + 1;
     const endAt = turnText.slice(m.index).search(/[.!?\n]/);
     const sentenceEnd = endAt < 0 ? '' : turnText.charAt(m.index + endAt);
+    const sentenceStop = endAt < 0 ? turnText.length : m.index + endAt;
     const sentenceBefore = turnText.slice(start, m.index);
     if ((sentenceEnd === '?' || AUXILIARY_FIRST.test(sentenceBefore)) && !REQUEST_FORM.test(sentenceBefore)) continue;
     // "anything but strong" denies it: read as a negator, never as a clause break.
     const clauseBefore = sentenceBefore.replace(/\banything\s+but\b/gi, 'not').split(/[,;:\u2013\u2014]|\s-\s|\bbut\b/i).pop() ?? '';
     if (NEGATOR.test(clauseBefore)) continue;
+    if (SET_ASIDE_BEFORE.test(clauseBefore)) continue;
     if (band === 'strong' && /\bvery\s+$/i.test(clauseBefore)) continue;
+    // (i) Asked about or supposed, not named.
+    if (ASKS_OR_SUPPOSES.test(clauseBefore)) continue;
+    // (ii) One of two or more band words offered as alternatives in this sentence.
+    if (offeredAsAlternative(turnText, m.index, m.index + m[0].length, start, sentenceStop)) continue;
     return true;
+  }
+  return false;
+}
+
+/** Whether the band word at [from, to) sits among alternatives: another band word in [start, stop) joined to it by "or", "/", or a range. */
+function offeredAsAlternative(text: string, from: number, to: number, start: number, stop: number): boolean {
+  for (const o of text.slice(start, stop).matchAll(ANY_BAND_WORD)) {
+    const oFrom = start + o.index;
+    const oTo = oFrom + o[0].length;
+    if (oTo > from && oFrom < to) continue; // the same word (or "very strong" around "strong")
+    const between = text.slice(Math.min(to, oTo), Math.max(from, oFrom));
+    if (ALTERNATIVE_BETWEEN.test(between)) return true;
+    // "between moderate and strong": a range, named by "between" before the first of the two.
+    if (/^\s+and\s+$/i.test(between) && /\bbetween\s+$/i.test(text.slice(start, Math.min(from, oFrom)))) return true;
   }
   return false;
 }

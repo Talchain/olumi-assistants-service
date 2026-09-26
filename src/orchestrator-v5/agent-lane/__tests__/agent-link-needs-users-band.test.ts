@@ -159,6 +159,94 @@ describe('⛔ propose_model_change records a link\'s strength only as the band t
   });
 });
 
+/**
+ * ⛔ ROUND-2 REVIEW of a2a46135 (CHANGES_REQUIRED): reproduced end to end — "Connect price to churn, you decide how
+ * strong." with the Agent passing strong prepared the link, sent magnitude 0.825 and stored it stamped user_specified,
+ * with no disclosure; "Moderate or strong, you pick." grounded either band. A band that follows "how"/"whether", sits
+ * among alternatives, or is in a turn that hands the choice to Olumi names nothing, so the Agent asks. The fix is in the
+ * shared matcher (`bandTheUserWrote`), which propose_link_strength uses too (agent-revises-a-link.test.ts).
+ */
+describe('⛔ round-2 review: a band the user leaves to Olumi, asks about, or offers among alternatives is never theirs', () => {
+  async function attempt(text: string, band: 'weak' | 'moderate' | 'strong' | 'very strong') {
+    const w = world();
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeModelChange(said(text), { ...LINK, strength: band });
+    return { refusal: p.refusal ?? null, prepared: store.outstanding(SCENARIO, null).length, sent: w.sent.length };
+  }
+  const refused = { refusal: 'strength_not_stated', prepared: 0, sent: 0 };
+
+  it('RED: the reviewer\'s two probes are refused — nothing prepared, nothing sent; the reviewer\'s control still refuses', async () => {
+    expect({
+      'strong ← Connect price to churn, you decide how strong.': await attempt('Connect price to churn, you decide how strong.', 'strong'),
+      'moderate ← Connect price to churn. Moderate or strong, you pick.': await attempt('Connect price to churn. Moderate or strong, you pick.', 'moderate'),
+      'strong ← Connect price to churn. Moderate or strong, you pick.': await attempt('Connect price to churn. Moderate or strong, you pick.', 'strong'),
+      'strong ← Connect price to churn.': await attempt('Connect price to churn.', 'strong'),
+    }).toEqual({
+      'strong ← Connect price to churn, you decide how strong.': refused,
+      'moderate ← Connect price to churn. Moderate or strong, you pick.': refused,
+      'strong ← Connect price to churn. Moderate or strong, you pick.': refused,
+      'strong ← Connect price to churn.': refused,
+    });
+  });
+
+  it('RED (i): a band after "how" or "whether" is asked about, not named', async () => {
+    const rows = [
+      ['I wonder how strongly price raises churn.', 'strong'],
+      ['Tell me whether price strongly raises churn.', 'strong'],
+    ] as const;
+    const got: Record<string, unknown> = {};
+    for (const [text, band] of rows) got[`${band} ← ${text}`] = await attempt(text, band);
+    expect(got).toEqual(Object.fromEntries(rows.map(([text, band]) => [`${band} ← ${text}`, refused])));
+  });
+
+  it('RED (ii): band words offered as alternatives name neither', async () => {
+    const rows = [
+      ['Price raises churn, either weak or moderate.', 'weak'],
+      ['Price raises churn, either weak or moderate.', 'moderate'],
+      ['Price raises churn: strong/weak.', 'strong'],
+    ] as const;
+    const got: Record<string, unknown> = {};
+    for (const [text, band] of rows) got[`${band} ← ${text}`] = await attempt(text, band);
+    expect(got).toEqual(Object.fromEntries(rows.map(([text, band]) => [`${band} ← ${text}`, refused])));
+  });
+
+  it('RED (iii): a turn that hands the choice to Olumi names no band, wherever the band word sits', async () => {
+    const rows = [
+      ['Price strongly raises churn. Your call.', 'strong'],
+      ['Price strongly raises churn, but up to you.', 'strong'],
+      ['Price strongly raises churn, whatever you think.', 'strong'],
+      ['I don\'t know how strong. Price strongly raises churn.', 'strong'],
+    ] as const;
+    const got: Record<string, unknown> = {};
+    for (const [text, band] of rows) got[`${band} ← ${text}`] = await attempt(text, band);
+    expect(got).toEqual(Object.fromEntries(rows.map(([text, band]) => [`${band} ← ${text}`, refused])));
+  });
+
+  it('RED (same class): a band set aside by "rather than" is not named', async () => {
+    expect(await attempt('Price raises churn: strong rather than moderate.', 'moderate')).toEqual(refused);
+  });
+
+  it('contrasts still ground end to end: approve → strong\'s midpoint, stored as the user\'s; "strong, not moderate" never grounds moderate', async () => {
+    const got: Record<string, unknown> = {};
+    for (const text of ['Price strongly raises churn.', 'Make it strong.', 'Can you record it as strong?', 'It is strong, not moderate.']) {
+      const w = world();
+      const caps = createAgentCapabilities(w.d, new ProposalStore());
+      const p = await caps.proposeModelChange(said(text), { ...LINK, strength: 'strong' });
+      const r = p.ok ? await caps.authoriseChange(said('Yes.'), { proposal_id: String(p.proposal_id) }) : p;
+      const ev = (w.sent[0]?.['event'] ?? {}) as Record<string, unknown>;
+      got[text] = { applied: r.applied ?? false, kind: ev['kind'] ?? null, magnitude: ev['magnitude'] ?? null, placeholder: r.placeholder_strength ?? null, stored: w.edges()[0]?.provenance.source ?? null };
+    }
+    const grounded = { applied: true, kind: 'structural_add_edge', magnitude: 0.825, placeholder: null, stored: 'user_specified' };
+    expect(got).toEqual({
+      'Price strongly raises churn.': grounded,
+      'Make it strong.': grounded,
+      'Can you record it as strong?': grounded,
+      'It is strong, not moderate.': grounded,
+    });
+    expect(await attempt('It is strong, not moderate.', 'moderate')).toEqual(refused);
+  });
+});
+
 describe('a link proposed with the user\'s band survives a restart; one proposed before this change keeps its placeholder', () => {
   async function restored(proposal: ReturnType<typeof createProposal>) {
     const { proposalPendingAction, rehydrateProposals } = await import('../durable-proposal.js');

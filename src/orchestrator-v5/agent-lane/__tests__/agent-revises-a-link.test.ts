@@ -272,6 +272,122 @@ describe('⛔ a band is recorded as the user\'s only when the user named it (AI 
     }
   });
 
+  /**
+   * ⛔ ROUND-2 REVIEW of a2a46135 (the new-link band): the SHARED matcher grounded a band the user never chose. Probed
+   * end to end: "Connect price to churn, you decide how strong." + strong stored 0.825 stamped user_specified. The fix
+   * is in `bandTheUserWrote`, so propose_link_strength and propose_model_change refuse these alike. Each row is keyed by
+   * its exact band and text, so the diff names every row that grounds.
+   */
+  const verdicts = (rows: ReadonlyArray<readonly [string, string]>) =>
+    Object.fromEntries(rows.map(([text, band]) => [`${band} ← ${text}`, bandTheUserWrote(band, text)]));
+  const allFalse = (rows: ReadonlyArray<readonly [string, string]>) =>
+    Object.fromEntries(rows.map(([text, band]) => [`${band} ← ${text}`, false]));
+
+  it('RED (round-2 review, i): a band after "how", "whether" or "if" asks about or supposes one, and names none', () => {
+    const rows = [
+      ['I wonder how strongly price drives MRR.', 'strong'],
+      ['Tell me how strong the price effect on MRR is.', 'strong'],
+      ['I wonder whether price strongly drives MRR.', 'strong'],
+      ['Let me know whether the effect is weak.', 'weak'],
+      ['Tell me if the price link is moderate.', 'moderate'],
+      ['If the effect is very strong then MRR falls fast.', 'very strong'],
+    ] as const;
+    expect(verdicts(rows)).toEqual(allFalse(rows));
+  });
+
+  it('RED (round-2 review, ii): two or more band words offered as alternatives (or a range) name neither', () => {
+    const rows = [
+      ['Price drives MRR, moderate or strong.', 'moderate'],
+      ['Price drives MRR, moderate or strong.', 'strong'],
+      ['It is either weak or moderate.', 'weak'],
+      ['It is either weak or moderate.', 'moderate'],
+      ['Record it as strong/weak.', 'strong'],
+      ['Record it as strong/weak.', 'weak'],
+      ['Weak, or maybe moderate.', 'weak'],
+      ['Weak, or maybe moderate.', 'moderate'],
+      ['Strong or very strong.', 'strong'],
+      ['Strong or very strong.', 'very strong'],
+      ['Record it as moderate-to-strong.', 'strong'],
+      ['Record it as moderate to strong.', 'moderate'],
+      ['Somewhere between moderate and strong.', 'strong'],
+    ] as const;
+    expect(verdicts(rows)).toEqual(allFalse(rows));
+  });
+
+  it('RED (round-2 review, iii): a turn that hands the choice to Olumi names no band anywhere in it', () => {
+    const rows = [
+      ['Price drives MRR, strong. You decide.', 'strong'],
+      ['Make it moderate, you pick.', 'moderate'],
+      ['Weak, you choose.', 'weak'],
+      ['I want you to decide. Strong.', 'strong'],
+      ['Strong, but up to you.', 'strong'],
+      ['Strong. Your call.', 'strong'],
+      ['Moderate. Your choice.', 'moderate'],
+      ['Make it strong, or whatever you think.', 'strong'],
+      ['Strong, whichever you think fits.', 'strong'],
+      ['Strong. I will leave it to you.', 'strong'],
+      ['Strong, use your judgement.', 'strong'],
+      ['Weak, use your judgment.', 'weak'],
+      ['Strong, you tell me.', 'strong'],
+      ['Record it as strong as you see fit.', 'strong'],
+      ['Strong. You know best.', 'strong'],
+      ['I don\'t know how strong. Put strong.', 'strong'],
+      ['I dont know how strong it is. Record it as strong.', 'strong'],
+      ['Not sure how strong. Strong, then.', 'strong'],
+    ] as const;
+    expect(verdicts(rows)).toEqual(allFalse(rows));
+  });
+
+  it('RED (round-2 review, same class): a band set aside by "rather than", "instead of", "more/less than" names none', () => {
+    const rows = [
+      ['It is strong rather than moderate.', 'moderate'],
+      ['Record it as weak instead of moderate.', 'moderate'],
+      ['It is more than moderate.', 'moderate'],
+      ['It is less than strong.', 'strong'],
+    ] as const;
+    expect(verdicts(rows)).toEqual(allFalse(rows));
+  });
+
+  it('round-2 contrasts: a band the user plainly names still grounds; "strong, not moderate" names strong and denies moderate', () => {
+    const named = [
+      ['Price strongly raises churn.', 'strong'],
+      ['Make it strong.', 'strong'],
+      ['Can you record it as strong?', 'strong'],
+      // Two band words, but ", not" CONTRASTS them — the user chose strong and denied moderate; nothing is left to Olumi.
+      ['It is strong, not moderate.', 'strong'],
+      ['It is strong rather than moderate.', 'strong'],
+      // "anyhow" is not "how"; "how" AFTER the band ("…is how I'd put it") asks nothing about it.
+      ['Anyhow it is strong.', 'strong'],
+      ['Strong is how I would put it.', 'strong'],
+      ['You asked how strong — it is strong.', 'strong'],
+    ] as const;
+    expect(verdicts(named)).toEqual(Object.fromEntries(named.map(([text, band]) => [`${band} ← ${text}`, true])));
+    expect(bandTheUserWrote('moderate', 'It is strong, not moderate.')).toBe(false);
+  });
+
+  it('RED (round-2 review): the reviewer\'s probes through propose_link_strength are refused, nothing prepared or sent; the control still refuses and a named band still prepares', async () => {
+    const run = async (text: string, band: 'weak' | 'moderate' | 'strong' | 'very strong') => {
+      const w = world(graphWith(0.5));
+      const store = new ProposalStore();
+      const p = await createAgentCapabilities(w.d, store).proposeLinkStrength!({ ...ctx, user_text: text, user_turn_text: text }, { from_label: 'Pro plan price', to_label: 'MRR', strength: band, rationale: 'x' });
+      return { refusal: p.refusal ?? null, prepared: store.outstanding(SCENARIO, null).length, sent: w.sent.length };
+    };
+    const refused = { refusal: 'strength_not_stated', prepared: 0, sent: 0 };
+    expect({
+      'strong ← you decide how strong': await run('Connect price to churn, you decide how strong.', 'strong'),
+      'moderate ← Moderate or strong, you pick': await run('Connect price to churn. Moderate or strong, you pick.', 'moderate'),
+      'strong ← Moderate or strong, you pick': await run('Connect price to churn. Moderate or strong, you pick.', 'strong'),
+      'strong ← (control) no band': await run('Connect price to churn.', 'strong'),
+      'strong ← strong, not moderate': await run('It is strong, not moderate.', 'strong'),
+    }).toEqual({
+      'strong ← you decide how strong': refused,
+      'moderate ← Moderate or strong, you pick': refused,
+      'strong ← Moderate or strong, you pick': refused,
+      'strong ← (control) no band': refused,
+      'strong ← strong, not moderate': { refusal: null, prepared: 1, sent: 0 },
+    });
+  });
+
   it('RED (#1984 review N2): with nothing typed THIS turn, the band is never read from the rest of the conversation', async () => {
     const w = world(graphWith(0.5));
     const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeLinkStrength!(
