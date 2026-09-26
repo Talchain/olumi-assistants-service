@@ -257,14 +257,28 @@ export const NodeV3 = z.object({
    * undeclared `goal_direction` is SILENTLY DELETED by `GraphV3.safeParse` on the
    * run path (build-turn-context.ts) and the stated sense reaches nothing.
    *
-   * ABSENCE MEANS UNATTESTED — never defaulted, and never `'target'` (a target
-   * sense needs a threshold contract ISL refuses to run without). An
-   * unrecognised value is dropped (`.catch`), never a new reason to refuse a
-   * stored graph.
+   * ABSENCE MEANS UNATTESTED — never defaulted. An unrecognised value is dropped
+   * (`.catch`), never a new reason to refuse a stored graph.
    *
-   * NOT AI-EDITABLE: the root is absent from `aiEditableFieldRoots('node')`, so
-   * `field-safety.ts` refuses any `update_node` op naming it, and the draft path's
-   * field-by-field `transformNodeToV3` does not copy it. No model authors it.
+   * `'target'` IS DROPPED DELIBERATELY, not forgotten: a target sense is only
+   * meaningful beside its threshold and frame, and ISL refuses to run one
+   * without them. It stays out of this enum until CEE forwards a target sense
+   * together with its threshold and frame.
+   *
+   * WHO CAN WRITE IT, stated precisely (not "no model authors it"):
+   *  · an UPDATE cannot — the root is absent from `aiEditableFieldRoots('node')`,
+   *    so `field-safety.ts` refuses any `update_node` op naming it;
+   *  · the draft path does not — its field-by-field `transformNodeToV3` does not
+   *    copy it;
+   *  · ⚠ a model `add_node` COULD carry it. Add values are screened only against
+   *    `PIPELINE_OWNED_ROOTS`, and `CEE_ANALYSIS_OWNED_ROOTS` does not yet list
+   *    `goal_direction`, so a model-authored goal node could arrive with a sense
+   *    the user never stated, and `run_analysis` would forward it as attested.
+   *    Listing it there is a follow-up for the field-safety owner.
+   *
+   * THE EVENTUAL CONTRACT OWNER is `@talchain/schemas` (schemas PR #48, ROADMAP
+   * 2.1192). This local declaration is the carrier until that lands; it does not
+   * make CEE the owner of the field's meaning.
    */
   goal_direction: z.enum(['maximise', 'minimise']).optional().catch(undefined),
   /**

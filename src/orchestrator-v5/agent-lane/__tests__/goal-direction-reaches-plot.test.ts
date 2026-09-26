@@ -242,6 +242,34 @@ describe('the stated goal direction reaches the PLoT /v2/run body', () => {
     });
   }
 
+  // ── A GOAL STATED ONLY AS A DIRECTION (no target number) still carries its sense ─
+  // "Keep churn down" names a sense and no number. The no-target branch of the goal
+  // node writes no threshold trio, and the sense must be stamped there too — the same
+  // stamp, not a second path. The label names no direction, so the label classifier
+  // cannot supply it: only the stamp can put it on the wire.
+  for (const [operator, sense] of [['<=', 'minimise'], ['>=', 'maximise']] as const) {
+    it(`a NO-TARGET goal stated as ${operator} (a direction, no number) registers and sends goal_direction=${sense}`, async () => {
+      const { registered, body, directionEvents } = await plotBodyFor(candidate({
+        metric: 'Monthly churn rate', operator, target_stated: false, value: null, unit: '%', provenance: 'explicit',
+      }));
+      const stored = goalIn(registered, 'monthly_churn_rate');
+      expect(stored?.kind).toBe('goal');
+      // Bound to the NO-TARGET branch by identity: no threshold trio was written.
+      expect(stored).not.toHaveProperty('goal_threshold_raw');
+      expect(stored).not.toHaveProperty('goal_threshold');
+      expect(stored?.goal_direction).toBe(sense);
+      expect(body.goal_node_id).toBe('monthly_churn_rate');
+      expect(goalIn(body.graph, 'monthly_churn_rate')?.goal_direction).toBe(sense);
+      expect(body.goal_direction).toBe(sense);
+      expect(directionEvents).toEqual([
+        expect.objectContaining({
+          level: 'info', event: 'cee.goal_direction.attested', goal_direction: sense,
+          goal_node_id: 'monthly_churn_rate', provenance: 'attested_from_goal_operator', label_derived: null,
+        }),
+      ]);
+    });
+  }
+
   // ── AN INFERRED GOAL IS NOT THE USER'S: nothing attested, label fallback only ─
   for (const provenance of ['inferred', 'ai_proposed'] as const) {
     it(`an ${provenance} goal is not stamped and sends nothing attested (label names no direction ⇒ no key)`, async () => {

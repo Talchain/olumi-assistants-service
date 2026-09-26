@@ -260,6 +260,41 @@ describe('an attested goal_direction on the goal node reaches the PLoT payload',
     expect(events).toEqual([]);
   });
 
+  // ── THE GOAL IS BOUND BY IDENTITY: `snapshot.goal_node_id` AND kind 'goal' ──
+  // A graph can hold more than one goal node. Only the one the Run is FOR may lend
+  // its sense to the request; the first goal node in array order is not the goal.
+  /** Two goal nodes: the FIRST (not the run's goal) carries maximise; `goal_metric` is the run's goal. */
+  function twoGoalGraph(runGoalLabel: string, runGoalExtra: Record<string, unknown>): GraphV3T {
+    const g = rawGraphWithGoalLabel(runGoalLabel, runGoalExtra);
+    return GraphV3.parse({
+      ...g,
+      nodes: [{ id: 'goal_other', kind: 'goal', label: 'Brand reach', goal_direction: 'maximise' }, ...g.nodes],
+    });
+  }
+
+  it('two goal nodes: the RUN goal\'s own minimise is sent, never the first goal node\'s maximise', async () => {
+    const { payload, events } = await withDirectionLog(twoGoalGraph('Revenue', { goal_direction: 'minimise' }));
+    expect(payload.goal_node_id).toBe('goal_metric');
+    expect(payload.goal_direction).toBe('minimise');
+    expect(events).toEqual([
+      expect.objectContaining({ level: 'info', event: 'cee.goal_direction.attested', goal_direction: 'minimise', goal_node_id: 'goal_metric' }),
+    ]);
+  });
+
+  it('two goal nodes: a run goal with NO sense falls back to its own label, never borrowing the other goal\'s maximise', async () => {
+    const { payload, events } = await withDirectionLog(twoGoalGraph('Minimise monthly churn', {}));
+    expect(payload.goal_direction).toBe('minimise');
+    expect(events.map((e) => [e.event, e.provenance])).toEqual([['cee.goal_direction.derived', 'derived_from_goal_label']]);
+  });
+
+  it('a node carrying the run goal\'s id but NOT kind goal is not the goal: nothing attested', async () => {
+    const { payload, events } = await withDirectionLog(
+      graphWithGoalLabel('Revenue', { kind: 'outcome', goal_direction: 'minimise' }),
+    );
+    expect('goal_direction' in payload).toBe(false);
+    expect(events).toEqual([]);
+  });
+
   it('an unrecognised sense on the goal node is never forwarded; the label fallback still runs', async () => {
     // Raw (unparsed) on purpose: this pins the forwarder's own guard, not NodeV3's.
     const { payload, events } = await withDirectionLog(
