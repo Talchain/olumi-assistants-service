@@ -115,7 +115,7 @@ import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
 import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
 import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { type InfluenceBand } from '../../format/influence-bands.js';
-import { edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
+import { CANVAS_BAND_WORD, edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
 import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
@@ -282,7 +282,8 @@ function committedThenMoved(
  * (Canvas #70, UI cd6a82e4 + CEE 5f941f2): the receipt the user read was "Recorded … as weak (0.1 …)" beside a Slight pill.
  * Every preview, public label (and so the "Recorded" receipt) and note that names a link's band uses this word.
  */
-const linkBandWord = (band: InfluenceBand): string => (band === 'weak' ? 'slight' : band);
+// ONE authority for the word (R&C #2023 review): the shared map beside the band table, never a second copy here.
+const linkBandWord = (band: InfluenceBand): string => CANVAS_BAND_WORD[band];
 
 /** Marks a compound starting point, so a newer one can replace it before approval. */
 const STARTING_POINT_BASIS = 'a starting point \u2014 values and what each option sets \u2014 for the user to adopt or correct in one approval';
@@ -618,6 +619,10 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
       ...(str(source) ? { source } : {}),
       ...(str(e.effect_direction) ? { direction: e.effect_direction } : {}),
       ...(st !== undefined && num(st.mean) ? { strength: { mean: st.mean, ...(num(st.std) ? { std: st.std } : {}) } } : {}),
+      // ⭐ The band, in the canvas's own WORD (`format/edge-strength-bands.ts`, #2003): without it the Agent named
+      // bands from its own priors — served e13eda8 called a 0.5 link (the canvas's "Strong") "moderate". The lowest is
+      // "slight" as on the pill, never the enum's `weak` (the model relays what it reads; tool calls still pass `weak`, #2017).
+      ...(st !== undefined && num(st.mean) ? { band: CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(st.mean))] } : {}),
       ...(num(e.exists_probability) ? { exists_probability: e.exists_probability } : {}),
       ...(e.defaulted === true ? { defaulted: true } : {}),
       ...(str(e.origin) ? { origin: e.origin } : {}),
