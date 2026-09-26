@@ -244,6 +244,18 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // wrongly stamped `user_override` upstream classifies as `user_stated` and is
   // counted as the user's. That is an argument for keeping the WRITERS' entries
   // honest, not for giving this one a write path it does not have.
+  // ── The goal's current level, stated by the user IN CHAT (AI Quality 5843320710). Reviewed 26 Sep 2026
+  // ── against this guard's one truth condition. A STAMP SITE, not a mention: it writes USER_EDIT_SOURCE
+  // ── (through the constant) onto the goal's `observed_state`, and names the literal in prose.
+  //
+  // HOW THE VALUE REACHES THE STAMP: the user types their current level in chat; the Agent passes that
+  // figure with `user_stated: true` (refused without it — `not_the_users_figure`); the proposer stores ONE
+  // exact held proposal and writes nothing; only the user's explicit approval of THAT stored proposal
+  // (`authorise_change`, content-hashed and bound to the approved revision) writes it. Two consents, and
+  // NEVER the brief: nothing here reads brief text, and the brief path keeps `brief_extraction`
+  // (`admit-model.ts`). Executed in `agent-lane/__tests__/goal-current-level-from-chat.test.ts`.
+  "orchestrator-v5/agent-lane/goal-current-level.ts":
+    "a stamp site — USER_EDIT_SOURCE on the goal's current level ONLY after the user stated it in chat (user_stated required) AND approved the exact held proposal (authorise_change); never read from the brief",
   "orchestrator-v5/admission/analysis-admission.ts":
     "comment only, and NOT a writer — the literal appears once in censusConfidenceParameters' docblock naming the control the ratified arm differs from; the module is a pure counter with no write path (proven on a deep-frozen graph across four arms) and derives no authorship rule of its own, delegating every authorship decision to earnsAuthorshipCredit. ⚠ Unlike the reader entries above its failure direction is NOT safe — a permissive mis-read would license comparative_leader — so the delegation, not the direction, is what makes it sound",
 };
