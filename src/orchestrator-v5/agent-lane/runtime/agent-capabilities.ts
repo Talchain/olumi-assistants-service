@@ -3713,15 +3713,38 @@ export function createAgentCapabilities(
             + 'Ask the user for a figure within that range, in the same units, or whether that range itself is wrong.',
         };
       }
-      const nfWire = newFactors.length === 0 ? {} : { new_factors: newFactors.map((f) => ({
-        key: f.key, label: f.label,
-        affects: f.affects.map((a) => ({ node_id: a.node_id, effect_direction: a.effect_direction })),
-      })) };
-      const parameters = entries.length === 1
-        ? { parent_decision_id: decision.id, ...entries[0]!.entry, ...nfWire }
-        : { parent_decision_id: decision.id, options: entries.map((e) => e.entry), ...nfWire };
+      /** The new factors a set of options uses: a factor only a left-out option acted on is left out with it. */
+      const factorsOf = (es: typeof entries) => newFactors.filter((f) => es.some((e) => e.plan.newActsOn.some((a) => a.key === f.key)));
+      const parametersOf = (es: typeof entries) => {
+        const nf = factorsOf(es);
+        const nfWire = nf.length === 0 ? {} : { new_factors: nf.map((f) => ({
+          key: f.key, label: f.label,
+          affects: f.affects.map((a) => ({ node_id: a.node_id, effect_direction: a.effect_direction })),
+        })) };
+        return es.length === 1
+          ? { parent_decision_id: decision.id, ...es[0]!.entry, ...nfWire }
+          : { parent_decision_id: decision.id, options: es.map((e) => e.entry), ...nfWire };
+      };
+      /**
+       * ⛔ ONE TWIN NEVER SINKS THE REST (DL #70 5846812818, served F4/F4e). The product refuses a WHOLE batch when one
+       * option repeats an existing option's levels, and names that option (`index`, `sameAs`). The valid options are
+       * still the user's request: that one is left out, named with its twin (`not_added`), and the rest go as ONE
+       * change. A lone option that is a twin is refused as before.
+       */
+      let kept = entries;
+      const notAdded: { option: string; same_levels_as: string }[] = [];
+      let parameters = parametersOf(kept);
       // The product's own transaction, run here purely: a spec it would not build is never sent.
-      const built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
+      let built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
+      while (!built.matched && built.reason === 'same_levels_as_existing_option' && built.sameAs !== undefined
+        && kept.length > 1 && typeof built.index === 'number' && built.index >= 0 && built.index < kept.length) {
+        const twinIndex = built.index;
+        notAdded.push({ option: kept[twinIndex]!.plan.label, same_levels_as: built.sameAs.label });
+        kept = kept.filter((_, i) => i !== twinIndex);
+        parameters = parametersOf(kept);
+        built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
+      }
+      const keptFactors = factorsOf(kept);
       if (!built.matched || JSON.stringify(built.operations).length > GM_HELD_OPERATIONS_MAX_JSON_CHARS) {
         const reason = !built.matched ? String(built.reason) : '';
         /**
@@ -3740,9 +3763,10 @@ export function createAgentCapabilities(
               : '';
         return { ok: false, mutated: false, refusal: 'not_prepared', ...(!built.matched ? { reason: built.reason } : {}),
           ...(twin !== undefined ? { same_levels_as: twin } : {}),
+          ...(notAdded.length > 0 ? { not_added: notAdded } : {}),
           detail: `That could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
       }
-      const labels = plans.map((x) => x.plan.label);
+      const labels = kept.map((x) => x.plan.label);
       const r = await dispatch('/orchestrate/v2/turn', {
         kind: 'message', turn_id: authorisationTurnId(`agent_add_option:${ctx.scenario_id}:${JSON.stringify(parameters)}`), scenario_id: ctx.scenario_id,
         stage: 'frame', turn_class: 'frame', source: 'chip', message: `Add ${labels.map((l) => `the option "${l}"`).join(' and ')}.`,
@@ -3753,7 +3777,7 @@ export function createAgentCapabilities(
        * scenario and the FIRST option's id), and, where the store can be read, the held batch itself adding
        * EVERY option WITH its decision link. Anything else is a hard failure: never retried in other words.
        */
-      const ref = gmHeldProposalRef(ctx.scenario_id, `node:${plans[0]!.plan.optionId}`);
+      const ref = gmHeldProposalRef(ctx.scenario_id, `node:${kept[0]!.plan.optionId}`);
       const offered = Array.isArray(r.json.suggested_actions) ? r.json.suggested_actions as { id?: unknown; label?: unknown; message?: unknown }[] : [];
       const heldChip = r.status === 200 ? offered.find((c) => c?.id === ref) : undefined;
       let heldBatchOk = heldChip !== undefined;
@@ -3761,10 +3785,10 @@ export function createAgentCapabilities(
         try {
           const hold = await liveHeldHold(ctx.scenario_id, ref);
           const ops = hold !== undefined ? heldOpsOf(hold) : [];
-          heldBatchOk = plans.every(({ plan }) => ops.some((o) => o.op === 'add_node' && o.path === plan.optionId)
+          heldBatchOk = kept.every(({ plan }) => ops.some((o) => o.op === 'add_node' && o.path === plan.optionId)
             && ops.some((o) => o.op === 'add_edge' && o.path === `${decision.id}::${plan.optionId}`))
             // Every factor this change adds is in the held batch too, as a factor.
-            && newFactors.every((f) => ops.some((o) => o.op === 'add_node'
+            && keptFactors.every((f) => ops.some((o) => o.op === 'add_node'
               && (o.value as { kind?: unknown } | undefined)?.kind === 'factor'
               && norm((o.value as { label?: unknown } | undefined)?.label) === norm(f.label)));
         } catch {
@@ -3780,7 +3804,7 @@ export function createAgentCapabilities(
             : 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
       }
       heldOptionThisRequest = labels.map((l) => `"${l}"`).join(' and ');
-      const described = entries.map(({ plan, set }) => ({
+      const described = kept.map(({ plan, set }) => ({
         label: plan.label,
         linked_from: String(decision.label ?? ''),
         acts_on: [...plan.actsOn.map((a) => a.label), ...plan.newActsOn.map((a) => a.label)],
@@ -3795,15 +3819,21 @@ export function createAgentCapabilities(
       return {
         ok: true, mutated: false,
         proposal_id: ref,
-        public_label: typeof heldChip!.label === 'string' && heldChip!.label.trim() !== '' ? heldChip!.label : plans[0]!.plan.publicLabel,
+        public_label: typeof heldChip!.label === 'string' && heldChip!.label.trim() !== '' ? heldChip!.label : kept[0]!.plan.publicLabel,
         held_message: typeof heldChip!.message === 'string' ? heldChip!.message : '',
         base_revision: g.graph_hash,
         ...(described.length === 1
           ? { option: { label: described[0]!.label, linked_from: described[0]!.linked_from, acts_on: described[0]!.acts_on }, levels: described[0]!.levels }
           : { options: described }),
-        ...(levelsNotSet.length > 0 ? { levels_not_set: levelsNotSet } : {}),
-        ...(newFactors.length > 0 ? {
-          new_factors: newFactors.map((f) => ({
+        ...(levelsNotSet.some((l) => labels.includes(l.option)) ? { levels_not_set: levelsNotSet.filter((l) => labels.includes(l.option)) } : {}),
+        ...(notAdded.length > 0 ? {
+          not_added: notAdded,
+          not_added_note: `${notAdded.map((n) => `"${n.option}" is NOT in this change: it would set exactly the same levels as "${n.same_levels_as}", so the analysis could not tell the two apart`).join('; ')}. `
+            + 'Say that in one line, and ask the user what makes it different (for example, a factor it changes that the other does not). '
+            + 'Never promise to add it later: it is added only by a new proposal the user approves.',
+        } : {}),
+        ...(keptFactors.length > 0 ? {
+          new_factors: keptFactors.map((f) => ({
             label: f.label,
             changes: f.affects.map((a) => `${a.label} (${a.effect_direction === 'positive' ? 'raises it' : 'lowers it'})`),
             how_strongly: 'Olumi\u2019s estimate, for the user to correct',
