@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { fixtureUrl } from '../../coaching/__tests__/fragile-link-challenge-fixtures.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { statedThreshold } from '../../coaching/bound-graph.js';
+import { limitCardArm, type LimitCardArm } from '../../coaching/limit-unchecked-card.js';
 import { extractCompoundGoals, normaliseConstraintUnits, toGoalConstraints } from '../../../cee/compound-goal/extractor.js';
 import { GoalConstraintSchema } from '../../../schemas/assist.js';
 const hash = '0123456789abcdef';
@@ -285,6 +286,14 @@ test('LIMIT FIRST — the prose repair step still wins: a summary asking the use
 const graphFixture = (name: string) => (JSON.parse(readFileSync(fixtureUrl(name), 'utf8')) as {graph: Record<string, unknown>}).graph;
 const PAUL_GRAPH = graphFixture('cbd15f83-bdd43f4-paul.draft-graph.json');
 const PRICING_T2_GRAPH = graphFixture('pricing-7212945c-06325c6.t2.draft-graph.json');
+// A limit on a ROOT factor is not PROVED to sit on a worked-out part (PROVED CAUSE, below), so the card keeps the
+// words the naming rows pin; both arms share the naming. DERIVED mutation (labelled): drops the directed links INTO
+// each limit node, in place, and returns the graph.
+const unproved = (g: Record<string, any>) => {
+ const targets=new Set((g.goal_constraints as {node_id: string}[]).map(r=>r.node_id));
+ g.edges=(g.edges as {to: string; edge_type?: string}[]).filter(e=>!targets.has(e.to)||e.edge_type==='bidirected');
+ return g;
+};
 test('NAMED LIMIT — Paul 1a298d6d: with its own hash-bound graph the one card names "Monthly churn" (card and prompt)',()=>{
  const c=runTurnCase('paul','t1','auto_first_pass');
  // Present control: the graph's one limit row joins to the node "Monthly churn".
@@ -293,9 +302,10 @@ test('NAMED LIMIT — Paul 1a298d6d: with its own hash-bound graph the one card 
  assert.deepEqual(out.eligibility,{eligible:true});
  const cards=runTurnCards(out.blocks);
  assert.equal(cards.length,1);
- assert.equal(cards[0]!.signal_id,`${LIMIT_CARD}449b882e043ae3e3:2026-09-25T17:27:54.315Z:auto_first_pass:named`);
+ // Churn is worked out from price and adoption on this graph, so the card says the PROVED cause (see PROVED CAUSE).
+ assert.equal(cards[0]!.signal_id,`${LIMIT_CARD}449b882e043ae3e3:2026-09-25T17:27:54.315Z:auto_first_pass:named:unanchored`);
  // The user's own stated threshold (row: explicit, <=, 10, 'percent per month'), joined by node_id, said back.
- assert.match(cards[0]!.body,/your limit on “Monthly churn” \(10 percent per month\): it was not checked or not met\./);
+ assert.match(cards[0]!.body,/your limit on “Monthly churn” \(10 percent per month\): Olumi works that out from other parts of your model/);
  assert.match(cards[0]!.action_prompt??'',/my limit on “Monthly churn” \(10 percent per month\)/);
  // Olumi adds no figure of its own: the only digits are the user's stated threshold.
  assert.doesNotMatch((cards[0]!.body+(cards[0]!.action_prompt??'')).split('(10 percent per month)').join(''),/\d/);
@@ -304,8 +314,8 @@ test('NAMED LIMIT — the second brief (pricing explicit Run, served 06325c6) na
  const c=runTurnCase('pricing','t2','explicit_run');
  const cards=runTurnCards(runTurnCoaching(c.captured,{...c.final,graph:PRICING_T2_GRAPH}).blocks);
  assert.equal(cards.length,1);
- assert.ok(cards[0]!.signal_id.endsWith(':explicit_run:named'));
- assert.match(cards[0]!.body,/^This analysis could not confirm that the options stay within your limit on “Monthly churn”/);
+ assert.ok(cards[0]!.signal_id.endsWith(':explicit_run:named:unanchored'));
+ assert.match(cards[0]!.body,/^This analysis could not check your limit on “Monthly churn”/);
 });
 test('NAMED LIMIT — no graph, ANOTHER turn\'s graph, or an unbindable graph → the generic words, never a guessed name',()=>{
  const c=runTurnCase('paul','t1','auto_first_pass');
@@ -324,7 +334,7 @@ test('NAMED LIMITS — two limit nodes → the card names BOTH, never one of the
  // A DERIVED mutation of the served graph (labelled): a second limit on another node. The hash no longer
  // matches, so the test re-points the readback hash at the mutated graph through the real hash function.
  two.goal_constraints=[...two.goal_constraints,{...two.goal_constraints[0],constraint_id:'agent-lane:mrr:>=',node_id:'mrr',operator:'>=',label:'MRR'}];
- const hash=computeAnalysisAffectingGraphHash(two as never)!;
+ const hash=computeAnalysisAffectingGraphHash(unproved(two) as never)!;
  const result={...(c.final.analysisResult as object),computed_against_hash:hash};
  const cards=runTurnCards(runTurnCoaching({...statelessCapture(c.captured),blocks:[result]},{...c.final,graphHash:hash,analysisResult:result,graph:two}).blocks);
  assert.equal(cards.length,1);
@@ -345,7 +355,7 @@ test('NAMED LIMIT — the served fraction spelling (0.1 proportion/month, (F) f-
  const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
  Object.assign(g.goal_constraints[0],{value:0.1,unit:'proportion/month'});
  const c=runTurnCase('paul','t1','auto_first_pass');
- const {captured,final}=rebind(c,g);
+ const {captured,final}=rebind(c,unproved(g));
  const cards=runTurnCards(runTurnCoaching(captured,final).blocks);
  assert.equal(cards.length,1);
  assert.match(cards[0]!.body,/your limit on “Monthly churn”: it was not checked or not met\./);
@@ -396,7 +406,7 @@ test('STATED THRESHOLD — two rows on one node: the node is named, no threshold
  const c=runTurnCase('paul','t1','auto_first_pass');
  const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
  g.goal_constraints=[g.goal_constraints[0],{...g.goal_constraints[0],constraint_id:'agent-lane:monthly_churn:>=',operator:'>=',value:1}];
- const {captured,final}=rebind(c,g);
+ const {captured,final}=rebind(c,unproved(g));
  const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
  assert.match(card.body,/your limit on “Monthly churn”: it was not checked or not met\./);
  assert.doesNotMatch(card.body,/\d/);
@@ -405,7 +415,7 @@ test('STATED THRESHOLD — a threshold the copy gates refuse (a raw decimal) fal
  const c=runTurnCase('paul','t1','auto_first_pass');
  const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
  g.goal_constraints=[{...g.goal_constraints[0],value:0.5,unit:''}];
- const {captured,final}=rebind(c,g);
+ const {captured,final}=rebind(c,unproved(g));
  const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
  // Present control: the stated form exists and is refused by the gates.
  assert.equal(statedThreshold(g.goal_constraints[0]),'0.5');
@@ -416,7 +426,7 @@ const withLimitsOn = (nodeIds: string[]) => {
  const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
  const row=g.goal_constraints[0];
  g.goal_constraints=nodeIds.map((id,i)=>({...row,constraint_id:`agent-lane:${id}:${i}`,node_id:id}));
- return g;
+ return unproved(g);
 };
 test('NAMED LIMITS — three limit nodes are all named, in the rows\' order; four → the generic words',()=>{
  const c=runTurnCase('paul','t1','auto_first_pass');
@@ -447,7 +457,7 @@ test('NAMED LIMIT — the name is the NODE\'s label (joined by node_id), never t
  const c=runTurnCase('paul','t1','auto_first_pass');
  const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
  g.goal_constraints=[{...g.goal_constraints[0],label:'Churn ceiling I typed'}];
- const {captured,final}=rebind(c,g);
+ const {captured,final}=rebind(c,unproved(g));
  const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
  assert.match(card.body,/“Monthly churn”/);
  assert.doesNotMatch(card.body,/Churn ceiling I typed/);
@@ -456,7 +466,7 @@ test('NAMED LIMIT — a user\'s own figure in the label ("Churn ≤ 4%") is quot
  const c=runTurnCase('paul','t1','auto_first_pass');
  const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
  const node=g.nodes.find((n: {id: string})=>n.id==='monthly_churn'); node.label='Churn ≤ 4%';
- const {captured,final}=rebind(c,g);
+ const {captured,final}=rebind(c,unproved(g));
  const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
  assert.ok(card.signal_id.endsWith(':auto_first_pass:named'));
  for (const words of [card.body, card.action_prompt??'']) {
@@ -469,13 +479,173 @@ test('NAMED LIMIT — a node label the copy gates refuse (a raw decimal) ships t
  const c=runTurnCase('paul','t1','auto_first_pass');
  const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
  const node=g.nodes.find((n: {id: string})=>n.id==='monthly_churn'); node.label='Churn at 0.5 per month';
- const {captured,final}=rebind(c,g);
+ const {captured,final}=rebind(c,unproved(g));
  const out=runTurnCoaching(captured,final);
  assert.deepEqual(out.eligibility,{eligible:true});
  const cards=runTurnCards(out.blocks);
  assert.equal(cards.length,1);
  assert.ok(cards[0]!.signal_id.endsWith(':auto_first_pass'));
  assert.doesNotMatch(cards[0]!.body,/“/);
+});
+
+// ── PROVED CAUSE (26 Sep): a limit PROVED to sit on a worked-out part says it COULD NOT be checked, and why ──
+// `everyLimitProvedUnanchored` (bound-graph.ts) reads the estate's one mirror of PLoT's anchor rule
+// (`collectUnanchoredConstraintTargetIds`) on its refusal side, with the bound run's own options. Served 4c3b512
+// (#70 5843612217): the rerun's summary said "The part of your model it points at is worked out from other parts…
+// it cannot be checked in this model yet", and the card under it still said "not checked or not met"; on the
+// first pass (summary replaced) the user gave churn's current value, re-ran, and the limit stayed unchecked.
+const TODAYS_WORDS = /your limit on “Monthly churn” \(10 percent per month\): it was not checked or not met\./;
+test('PROVED CAUSE — Paul 1a298d6d (served bdd43f4 first pass): the card says the limit COULD NOT be checked and why; the ask carries the cause',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ // The trimmed fixture keeps only option ids and labels. The wire's analysis_ready carries each option's
+ // interventions (served 4c3b512: keep {} · £59 {pro_plan_price: 0.295} · £54 {pro_plan_price: 0.27}), so they are
+ // restored here from the SAME served graph's option nodes (labelled derivation), values as the wire sends them.
+ const optionNode=(id: string)=>(PAUL_GRAPH.nodes as {id: string; interventions?: Record<string, {value: number}>}[]).find(n=>n.id===id);
+ const plain=statelessCapture(c.captured) as CapturedAnalysis & {analysis_ready: {options: {option_id: string}[]}};
+ const opts=plain.analysis_ready.options.map(o=>({...o,interventions:Object.fromEntries(Object.entries(optionNode(o.option_id)?.interventions??{}).map(([k,v])=>[k,v.value]))}));
+ const captured={...plain,analysis_ready:{...plain.analysis_ready,options:opts}} as CapturedAnalysis;
+ // Present controls: churn has a directed link in on the run's graph, and the run's options (non-empty, with
+ // real interventions) never set it.
+ assert.ok((PAUL_GRAPH.edges as {to: string; edge_type?: string}[]).some(e=>e.to==='monthly_churn'&&e.edge_type!=='bidirected'));
+ assert.ok(opts.length>=2);
+ assert.deepEqual(opts.map(o=>o.interventions),[{},{pro_plan_price:0.295},{pro_plan_price:0.27}]);
+ assert.ok(opts.every(o=>!Object.prototype.hasOwnProperty.call(o.interventions,'monthly_churn')));
+ const out=runTurnCoaching(captured,{...c.final,graph:PAUL_GRAPH});
+ assert.deepEqual(out.eligibility,{eligible:true});
+ const cards=runTurnCards(out.blocks);
+ assert.equal(cards.length,1);
+ const card=cards[0]!;
+ assert.equal(card.signal_id,`${LIMIT_CARD}449b882e043ae3e3:2026-09-25T17:27:54.315Z:auto_first_pass:named:unanchored`);
+ assert.equal(card.title,'This model cannot check your limit yet');
+ assert.equal(card.body,'Before relying on this first pass on Olumi\'s estimates, note that it could not check your limit on “Monthly churn” (10 percent per month): Olumi works that out from other parts of your model and cannot yet test a limit on a quantity like that. That is one reason no option is put forward yet.');
+ assert.equal(card.action_label,'What this means for my limit');
+ assert.equal(card.action_prompt,'Olumi could not check my limit on “Monthly churn” (10 percent per month): it works that out from other parts of my model and cannot yet test a limit on a quantity like that. Explain what that means for how far I can rely on this analysis. Don\'t change the model or re-run anything yet.');
+ // It invites nothing the cause rules out (RC #63 5825683899): no value to give, no part to name, no re-run.
+ for (const t of [card.title,card.body,card.action_label,card.action_prompt??'']) assert.doesNotMatch(t,/current value|starting|which part|run (?:it|the analysis) again|—/i);
+ assert.ok(CoachingBlockSchema.safeParse(card).success);
+});
+test('PROVED CAUSE — the explicit Run (pricing, served 06325c6) says the same cause after "This analysis"',()=>{
+ const c=runTurnCase('pricing','t2','explicit_run');
+ const card=runTurnCards(runTurnCoaching(c.captured,{...c.final,graph:PRICING_T2_GRAPH}).blocks)[0]!;
+ assert.ok(card.signal_id.endsWith(':explicit_run:named:unanchored'));
+ assert.match(card.body,/^This analysis could not check your limit on “Monthly churn”[^:]*: Olumi works that out from other parts of your model and cannot yet test a limit on a quantity like that\./);
+});
+test('PROVED CAUSE — two limits, BOTH on worked-out parts: both named, the plural cause, and the body keeps the user\'s figures before "one reason"',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ const row=g.goal_constraints[0];
+ g.goal_constraints=[row,{...row,constraint_id:'agent-lane:mrr:>=',node_id:'mrr',operator:'>='}];
+ const {captured,final}=rebind(c,g);
+ const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ assert.ok(card.signal_id.endsWith(':auto_first_pass:named:unanchored'));
+ assert.equal(card.title,'This model cannot check your limits yet');
+ assert.equal(card.body,'Before relying on this first pass on Olumi\'s estimates, note that it could not check your limits on “Monthly churn” (10 percent per month) and “MRR” (10 percent per month): Olumi works those out from other parts of your model and cannot yet test a limit on quantities like those.');
+ assert.match(card.action_prompt??'',/^Olumi (?:could not|cannot yet) check my limits on “Monthly churn” \(10 percent per month\) and “MRR” \(10 percent per month\): it works those out from other parts of my model/);
+ assert.match(card.action_prompt??'',/Don't change the model or re-run anything yet\.$/);
+});
+test('PROVED CAUSE — a label the gates refuse keeps the CAUSE in the generic words (the cause outranks the names)',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ g.nodes.find((n: {id: string})=>n.id==='monthly_churn').label='Churn at 0.5 per month';
+ const {captured,final}=rebind(c,g);
+ const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ assert.ok(card.signal_id.endsWith(':auto_first_pass:unanchored'));
+ assert.equal(card.title,'This model cannot check the limits yet');
+ assert.match(card.body,/it could not check the limits on the model: they point at parts Olumi works out from other parts of your model, and it cannot yet test a limit on quantities like those\./);
+ assert.doesNotMatch(card.body,/“/);
+});
+test('PROVED CAUSE — CONTROLS: the same served turn keeps today\'s words whenever the proof does not hold',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const cardOf=(captured: CapturedAnalysis, final: RunTurnCoachingFinal)=>runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ const plain=statelessCapture(c.captured) as CapturedAnalysis & {analysis_ready: {options: Record<string, any>[]}};
+ // (a) churn a ROOT (no directed link in).
+ { const {captured,final}=rebind(c,unproved(structuredClone(PAUL_GRAPH) as Record<string, any>));
+   const card=cardOf(captured,final); assert.match(card.body,TODAYS_WORDS,'root'); assert.ok(card.signal_id.endsWith(':named'),'root'); }
+ // (b) EVERY run option sets churn itself (the anchor rule's second test): anchored, so not proved.
+ { const pinned={...plain,analysis_ready:{...plain.analysis_ready,options:plain.analysis_ready.options.map(o=>({...o,interventions:{...(o.interventions??{}),monthly_churn:0.05}}))}};
+   assert.match(cardOf(pinned,{...c.final,graph:PAUL_GRAPH}).body,TODAYS_WORDS,'pinned'); }
+ // …while ONE option setting it is not every option: still proved.
+ { const one={...plain,analysis_ready:{...plain.analysis_ready,options:plain.analysis_ready.options.map((o,i)=>(i===0?{...o,interventions:{...(o.interventions??{}),monthly_churn:0.05}}:o))}};
+   assert.ok(cardOf(one,{...c.final,graph:PAUL_GRAPH}).signal_id.endsWith(':unanchored'),'one pinned'); }
+ // (c) the run's options absent or empty: the second test cannot be read, so nothing is proved.
+ for (const options of [undefined,[]]) {
+  assert.match(cardOf({...plain,analysis_ready:{...plain.analysis_ready,options}} as CapturedAnalysis,{...c.final,graph:PAUL_GRAPH}).body,TODAYS_WORDS,`options ${JSON.stringify(options)}`);
+ }
+ // (d) a limit row with no constraint_id.
+ { const g=structuredClone(PAUL_GRAPH) as Record<string, any>; delete g.goal_constraints[0].constraint_id;
+   // (Without the id the row no longer proves its writer, so the figure is not said either: names-only words.)
+   const {captured,final}=rebind(c,g); const card=cardOf(captured,final);
+   assert.match(card.body,/your limit on “Monthly churn”: it was not checked or not met\./,'no constraint_id'); assert.doesNotMatch(card.signal_id,/:unanchored$/,'no constraint_id'); }
+ // (d') an EMPTY constraint_id: the collector would admit '' as proved, so the card's own guard must refuse it.
+ { const g=structuredClone(PAUL_GRAPH) as Record<string, any>; g.goal_constraints[0].constraint_id='';
+   const {captured,final}=rebind(c,g); const card=cardOf(captured,final);
+   assert.match(card.body,/it was not checked or not met\./,'empty constraint_id'); assert.doesNotMatch(card.signal_id,/:unanchored$/,'empty constraint_id'); }
+ // (e) two limits, one on a worked-out part (churn) and one on a ROOT the options set (price): not EVERY limit.
+ { const g=structuredClone(PAUL_GRAPH) as Record<string, any>; const row=g.goal_constraints[0];
+   g.goal_constraints=[row,{...row,constraint_id:'agent-lane:pro_plan_price:<=',node_id:'pro_plan_price'}];
+   const {captured,final}=rebind(c,g); const card=cardOf(captured,final);
+   assert.match(card.body,/at least one was not checked or not met/,'mixed'); assert.doesNotMatch(card.signal_id,/:unanchored$/,'mixed'); }
+ // (f) no bound graph: no proof and no names.
+ { const card=cardOf(statelessCapture(c.captured),c.final); assert.ok(card.signal_id.endsWith(':auto_first_pass'),'unbound'); assert.doesNotMatch(card.body,/Olumi works/,'unbound'); }
+});
+
+// ── TYPED VERDICT STATE (26 Sep): the run's own verdict state (CEE #1958 carrier) licenses its own words ──
+// `unevaluated` ⇒ "could not check" (one limit) / "at least one of" (more); `identity_unresolved` ⇒ "could not tell
+// whether … was checked"; `evaluated_infeasible`, absent, null or junk ⇒ the proof or today's words. The proved cause
+// speaks only when the state is absent/null or `unevaluated`, so a mirror that drifted from the producer fails closed.
+test('TYPED VERDICT — limitCardArm is the whole truth table',()=>{
+ for (const [proved, state, arm] of [
+  [false,undefined,'today'],[false,null,'today'],[true,undefined,'cause'],[true,null,'cause'],
+  [true,'unevaluated','cause'],[false,'unevaluated','unchecked'],
+  [true,'identity_unresolved','identity'],[false,'identity_unresolved','identity'],
+  [true,'evaluated_infeasible','today'],[false,'evaluated_infeasible','today'],
+  [true,'evaluated_feasible','today'],[true,'not_applicable','today'],[true,'foo','today'],[true,42,'today'],[false,'foo','today'],
+ ] as [boolean, unknown, LimitCardArm][]) assert.equal(limitCardArm(proved,state),arm,`${proved} ${String(state)}`);
+});
+test('TYPED VERDICT — unevaluated on a limit NOT proved (churn a root): "could not check your limit", definite, no cause',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const {captured,final}=rebind(c,unproved(structuredClone(PAUL_GRAPH) as Record<string, any>));
+ const today=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ assert.match(today.body,TODAYS_WORDS);
+ const card=runTurnCards(runTurnCoaching(captured,{...final,constraintVerdictState:'unevaluated'}).blocks)[0]!;
+ assert.ok(card.signal_id.endsWith(':auto_first_pass:named:unchecked'));
+ assert.notEqual(card.block_id,today.block_id);
+ assert.equal(card.title,'Your limit could not be checked');
+ assert.equal(card.body,'Before relying on this first pass on Olumi\'s estimates, note that it could not check your limit on “Monthly churn” (10 percent per month). That is one reason no option is put forward yet.');
+ assert.equal(card.action_prompt,'Olumi could not check my limit on “Monthly churn” (10 percent per month) in this analysis. Explain what that means for how far I can rely on this analysis. Don\'t change the model or re-run anything yet.');
+ assert.doesNotMatch(card.body,/Olumi works|not met/);
+});
+test('TYPED VERDICT — unevaluated on several limits says "at least one of" (the state proves at least one, never all)',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const two=rebind(c,withLimitsOn(['monthly_churn','pro_subscribers']));
+ const card=runTurnCards(runTurnCoaching(two.captured,{...two.final,constraintVerdictState:'unevaluated'}).blocks)[0]!;
+ assert.equal(card.title,'Not every limit could be checked');
+ assert.match(card.body,/could not check at least one of your limits on “Monthly churn” \(10 percent per month\) and “Pro subscribers” \(10 percent per month\)\./);
+ const four=rebind(c,withLimitsOn(['monthly_churn','pro_subscribers','mrr','pro_plan_price']));
+ const generic=runTurnCards(runTurnCoaching(four.captured,{...four.final,constraintVerdictState:'unevaluated'}).blocks)[0]!;
+ assert.ok(generic.signal_id.endsWith(':auto_first_pass:unchecked'));
+ assert.match(generic.body,/could not check at least one of the limits on the model\./);
+});
+test('TYPED VERDICT — identity_unresolved says neither checked nor unchecked: "could not tell whether … was checked", even when proved',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const plain=statelessCapture(c.captured);
+ const card=runTurnCards(runTurnCoaching(plain,{...c.final,graph:PAUL_GRAPH,constraintVerdictState:'identity_unresolved'}).blocks)[0]!;
+ assert.ok(card.signal_id.endsWith(':auto_first_pass:named:identity'));
+ assert.match(card.body,/could not tell whether your limit on “Monthly churn” \(10 percent per month\) was checked\./);
+ assert.doesNotMatch(card.body,/could not check|not met|Olumi works/);
+});
+test('TYPED VERDICT — the proof fails CLOSED against a recorded state that disagrees: evaluated_infeasible or junk → today\'s words',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const plain=statelessCapture(c.captured);
+ // Present control: with no state the same served turn speaks the proved cause.
+ assert.ok(runTurnCards(runTurnCoaching(plain,{...c.final,graph:PAUL_GRAPH}).blocks)[0]!.signal_id.endsWith(':unanchored'));
+ assert.ok(runTurnCards(runTurnCoaching(plain,{...c.final,graph:PAUL_GRAPH,constraintVerdictState:null}).blocks)[0]!.signal_id.endsWith(':unanchored'));
+ assert.ok(runTurnCards(runTurnCoaching(plain,{...c.final,graph:PAUL_GRAPH,constraintVerdictState:'unevaluated'}).blocks)[0]!.signal_id.endsWith(':unanchored'));
+ for (const state of ['evaluated_infeasible','foo']) {
+  const card=runTurnCards(runTurnCoaching(plain,{...c.final,graph:PAUL_GRAPH,constraintVerdictState:state}).blocks)[0]!;
+  assert.ok(card.signal_id.endsWith(':auto_first_pass:named'),state);
+  assert.match(card.body,TODAYS_WORDS,state);
+ }
 });
 
 // ── ASSUMED LINK (PR-3): a link card on a link whose numbers are Olumi's says so ──

@@ -450,9 +450,11 @@ export function assessRouteAdmission(graph: unknown): RouteAdmissionVerdict {
             option_count: admission.plan.option_count,
             // Named, so the offer can disclose its own consequence. An offer whose
             // effect is invisible until after the click is the same defect as a
-            // refusal with no reason.
-            ...(admission.waivedOptionIds.length > 0
-              ? { excluded_option_ids: [...admission.waivedOptionIds] }
+            // refusal with no reason. ONLY what the run leaves out: a HELD option
+            // is waived (its gap is not the user's task) but it is compared, so
+            // it is never named here (served bf-20260926T054503Z, "Status Quo").
+            ...(admission.plan.excluded_option_ids.length > 0
+              ? { excluded_option_ids: [...admission.plan.excluded_option_ids] }
               : {}),
           }
         : {}),
