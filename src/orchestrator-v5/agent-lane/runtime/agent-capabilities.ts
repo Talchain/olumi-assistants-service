@@ -1228,10 +1228,19 @@ export function createAgentCapabilities(
     }
     return readinessViewOf(raw);
   };
-  const stillBlockedNote = (v: ReturnType<typeof readinessViewOf>): string =>
-    v.checked && v.may_run === false
-      ? ` Even after this approval the analysis could still not run: ${v.needs_from_user.map((i) => i.message).join(' ') || 'the model would still be blocked'}. Say so plainly BEFORE asking for approval, and ask the user what this cannot settle (for example, what actually differs between two options that would be identical) — never invent a difference.`
-      : '';
+  /**
+   * What the Agent must say BEFORE the approval when the preview still blocks: the verdict's own words — the
+   * user's demands, else the refusal's `reason` (the run path's `blockedNextStep`) — never an example that may not
+   * fit this model (#1957 review: a one-option model was told to ask about "identical options").
+   */
+  const stillBlockedNote = (v: ReturnType<typeof readinessViewOf>): string => {
+    if (!v.checked || v.may_run !== false) return '';
+    const why = [...v.needs_from_user.map((i) => i.message), ...(v.needs_from_user.length === 0 && v.reason !== undefined ? [v.reason] : [])]
+      .map((m) => m.trim().replace(/\.+$/, ''))
+      .filter((m) => m !== '');
+    return ` Even after this approval the analysis could still not run: ${why.length > 0 ? why.join('. ') : 'the model would still be blocked'}. `
+      + 'Say so plainly BEFORE asking for approval, and ask the user for what this cannot settle — never invent a difference or a figure.';
+  };
   const levelPathsOf = (ps: readonly StructuredProposal[]): Set<string> =>
     new Set(ps.flatMap((p) => p.operations).filter((o) => o.op === 'set_option_intervention').map((o) => o.path));
   /**

@@ -15,6 +15,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { NO_COMPARISON_NEXT_STEP } from '../../tools/handlers/analysis-ready-core.js';
 
 const served = JSON.parse(readFileSync(new URL('./fixtures/served-pre-starting-point-ef99a97.json', import.meta.url), 'utf8')) as unknown;
 const ctx = { scenario_id: '550e8400-e29b-41d4-a716-446655440088', authenticated_user_id: null, request_id: 'r' };
@@ -30,17 +31,46 @@ const levels = (testPrice: number) => [
   { option_label: 'Test £59 with AI release', factor_label: 'Pro plan price', value: testPrice, basis: 'the test price' },
   { option_label: 'Test £59 with AI release', factor_label: 'AI feature availability', value: 100, basis: 'the release makes it available' },
 ];
-type View = { checked: boolean; may_run?: boolean; needs_from_user: { message: string }[] };
+type View = { checked: boolean; may_run?: boolean; needs_from_user: { message: string }[]; reason?: string };
+type G = { nodes: { id: string; kind: string }[]; edges: { from: string; to: string }[] };
+const copy = (): G => JSON.parse(JSON.stringify(served)) as G;
+/** The run path's own next step, without its closing full stop — as the note quotes it. */
+const NEXT_STEP = NO_COMPARISON_NEXT_STEP.replace(/\.+$/, '');
 
 describe('propose_starting_point says whether one approval will make the analysis runnable', () => {
-  it('RED: levels that leave two options identical → readiness_if_approved says it still cannot run, and why', async () => {
+  it('RED: levels that leave two options identical → readiness_if_approved says it still cannot run, and why — in the refusal\'s own words', async () => {
     const r = await capsOver(served).proposeStartingPoint(ctx, { assumptions: [], option_levels: levels(59) });
     expect(r, JSON.stringify(r).slice(0, 600)).toEqual(expect.objectContaining({ ok: true }));
     const v = r.readiness_if_approved as View | undefined;
     expect(v?.checked).toBe(true);
     expect(v?.may_run).toBe(false);
-    expect(JSON.stringify(v?.needs_from_user)).toMatch(/identical/i);
+    expect(v?.reason).toBe(NO_COMPARISON_NEXT_STEP);
     expect(String(r.note)).toMatch(/could still not run/i);
+    expect(String(r.note)).toContain(`could still not run: ${NEXT_STEP}. Say so plainly`);
+  });
+
+  it('RED (#1957 review): ONE option besides the baseline → the note gives the refusal\'s next step, never an "identical options" question that does not fit', async () => {
+    const g = copy();
+    g.nodes = g.nodes.filter((n) => n.id !== 'test_59_with_ai_release');
+    g.edges = g.edges.filter((e) => e.from !== 'test_59_with_ai_release' && e.to !== 'test_59_with_ai_release');
+    const r = await capsOver(g).proposeStartingPoint(ctx, { assumptions: [], option_levels: [levels(59)[0]!] });
+    expect(r, JSON.stringify(r).slice(0, 600)).toEqual(expect.objectContaining({ ok: true }));
+    const v = r.readiness_if_approved as View | undefined;
+    expect(v?.may_run, JSON.stringify(v)).toBe(false);
+    expect(v?.needs_from_user).toEqual([]);
+    expect(String(r.note)).toContain(`could still not run: ${NEXT_STEP}. Say so plainly`);
+    expect(String(r.note)).not.toMatch(/identical|would still be blocked/i);
+  });
+
+  it('a structural blocker is quoted once, with no doubled full stop', async () => {
+    const g = copy();
+    const decision = g.nodes.find((n) => n.kind === 'decision')!.id;
+    g.edges = g.edges.filter((e) => !(e.from === decision && e.to === 'test_59_with_ai_release'));
+    const r = await capsOver(g).proposeStartingPoint(ctx, { assumptions: [], option_levels: levels(54) });
+    const v = r.readiness_if_approved as View | undefined;
+    expect(v?.may_run, JSON.stringify(v)).toBe(false);
+    expect(String(r.note)).toMatch(/not connected from the decision\. Link the decision to it\. Say so plainly/);
+    expect(String(r.note)).not.toMatch(/\.\./);
   });
 
   it('CONTRAST: the same starting point with a different test price → it says the analysis can run after approval', async () => {
