@@ -24,6 +24,10 @@
  * hash of this graph — so the graph the run ANALYSED decides (OpenAI Runtime #70 5843934816). The last block pins
  * Runtime's row on the reload: after an edit the run is not current, nothing new is withheld, and the reply is the
  * one a linear brief's out-of-date run gets.
+ *
+ * ⭐ H1a (Canonical State, #70 5844217159): "the graph the run analysed" is decided by the analysis hash, so that hash
+ * must read the C46 carrier. The last block pins it: a persisted graph that LOST `nonlinear_identity` since the run is
+ * not the analysed graph, and a graph that never carried one hashes to the same bytes as before.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -49,6 +53,7 @@ import { readScenarioAnalysis } from '../../../routes/scenario-graph-analysis-re
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { deriveDecisionContextGraphHash, loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
+import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
 import type { SessionStore } from '../../session/store.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
@@ -319,5 +324,121 @@ describe('Runtime\'s row on the reload: after an edit, the graph the run analyse
     expect(read.analysis_state?.run_state).toMatchObject({ kind: 'complete_stale', cause: 'graph_changed' });
     expect(read.analysis_result).toBeNull();
     expect(read.analysis_state?.leader_claim).toEqual(STALE_REPLY);
+  });
+});
+
+/**
+ * ⛔ H1a (Canonical State, #70 5844217159, CEE #1972 5844218027): `fresh` MUST MEAN THE RUN'S OWN CARRIER.
+ *
+ * H1 judges the C46 cause only when the route's freshness hash of the persisted graph equals the fact's
+ * `graph_hash_at_run`. That hash is the analysis-affecting projection (`context/graph-hash.ts` `projectNode`), and it
+ * did not read `nonlinear_identity`. So a persisted graph that LOST the carrier since the run still read `fresh`, H1
+ * judged the run on a graph it never analysed, and — on a brief that set NO limit — the reload presented a CURRENT
+ * run whose leader was withheld for a limit (EXECUTED at 8b4684ef: `complete_current`, `constraint_verdict_withheld`,
+ * `leaderWithheldForALimit` true).
+ *
+ * With the carrier in the projection, the carrier-less graph is a graph the run never analysed: it is out of date, and
+ * the reply is the one every out-of-date run gets (Runtime's row above). A graph that never carried a declaration —
+ * every graph before #1972 — hashes to the SAME bytes as before (BYTE row), so no stored scenario reads stale and no
+ * model-version identity moves.
+ */
+describe('H1a: the analysis hash covers the C46 carrier — a graph that lost it is not fresh', () => {
+  /** The persisted graph after the carrier is lost (a writer or a round trip that does not keep the field). */
+  const withoutCarrier = (g: Graph): Graph => {
+    const out = structuredClone(g);
+    for (const n of out.nodes) delete n.nonlinear_identity;
+    return out;
+  };
+  const carrierIds = (g: Graph) => g.nodes.filter((n) => n.nonlinear_identity !== undefined).map((n) => n.id);
+  const HEX16 = /^[0-9a-f]{16}$/;
+
+  it('PREMISE: the product graph carries the declaration on the goal, and dropping it MOVES the route\'s hash off the run\'s', async () => {
+    const graph = await build(PRODUCT);
+    expect(carrierIds(graph), 'the construction put the one declaration on MRR').toEqual(['mrr']);
+    const fact = await runOn(graph);
+    const atRun = fact.result.graph_hash_at_run;
+    expect(atRun).toMatch(HEX16);
+    expect(deriveDecisionContextGraphHash(graph), 'the route\'s hash of the analysed graph is the run\'s').toBe(atRun);
+    const lost = deriveDecisionContextGraphHash(withoutCarrier(graph));
+    expect(lost, 'a real hash, not an unhashable graph').toMatch(HEX16);
+    expect(lost, 'the graph without its carrier is not the graph the run analysed').not.toBe(atRun);
+  });
+
+  it('CONTRAST: the hash moves on an analysis field (the goal threshold) and not on a display field (a label)', async () => {
+    const graph = await build(PRODUCT);
+    const base = deriveDecisionContextGraphHash(graph);
+    expect(base).toMatch(HEX16);
+    const goal = graph.nodes.find((n) => n.id === 'mrr')!;
+    expect(goal.goal_threshold, 'premise: the stored threshold').toBe(0.8);
+    const threshold = structuredClone(graph);
+    threshold.nodes.find((n) => n.id === 'mrr')!.goal_threshold = 0.9;
+    expect(deriveDecisionContextGraphHash(threshold)).toMatch(HEX16);
+    expect(deriveDecisionContextGraphHash(threshold)).not.toBe(base);
+    const relabelled = structuredClone(graph);
+    relabelled.nodes.find((n) => n.id === 'mrr')!.label = 'Monthly recurring revenue';
+    expect(deriveDecisionContextGraphHash(relabelled)).toBe(base);
+  });
+
+  it('CONTROL: on the graph the run analysed, H1 names the product and no limit card fires', async () => {
+    const graph = await build(PRODUCT);
+    const read = await reload(graph, await runOn(graph));
+    expect(read.analysis_state?.run_state.kind).toBe('complete_current');
+    expect(read.analysis_state?.leader_claim.withheld_reason).toBe(WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN);
+    expect(leaderWithheldForALimit(read.analysis_state)).toBe(false);
+  });
+
+  it('⭐ RULE: after the persisted graph loses the carrier, no CURRENT run reads "withheld for a limit" on a brief that set none', async () => {
+    const graph = await build(PRODUCT);
+    expect(PRODUCT.constraints, 'premise: the brief set no limit').toEqual([]);
+    const fact = await runOn(graph);
+    const read = await reload(withoutCarrier(graph), fact);
+    const current = read.analysis_state?.run_state.kind === 'complete_current';
+    expect(current && leaderWithheldForALimit(read.analysis_state),
+      'a CURRENT run said to be withheld for a limit, on a brief that set none').toBe(false);
+    // The graph the run analysed is out of reach: the run is out of date and nothing is presented (Runtime's row).
+    expect(read.analysis_state?.run_state).toMatchObject({ kind: 'complete_stale', cause: 'graph_changed' });
+    expect(read.analysis_result).toBeNull();
+    expect(read.analysis_state?.leader_claim.permitted).toBe(false);
+  });
+
+  /**
+   * BYTE: the zero-one-time-cost claim. A carrier-free graph shaped like the pricing model, touching every projected
+   * node family (goal threshold/raw/cap, observed state, prior, intercept, encoding map, option levels with a native
+   * quantity). Both pins were computed at 8b4684ef (BEFORE the carrier entered the projection) by running this row, and
+   * written in by script: the 16-hex freshness token and the 64-hex model-version address.
+   */
+  it('BYTE: a graph that never carried the declaration hashes to the same bytes as before H1a', () => {
+    const graph = {
+      nodes: [
+        { id: 'decision_mrr', kind: 'decision', label: 'Pro plan price decision' },
+        { id: 'mrr', kind: 'goal', label: 'MRR', goal_threshold: 0.8, goal_threshold_raw: 20000, goal_threshold_cap: 25000, goal_threshold_unit: 'GBP' },
+        { id: 'pro_plan_price', kind: 'factor', label: 'Pro plan price', category: 'controllable', factor_type: 'price',
+          observed_state: { value: 0.245, baseline: 0.245, cap: 200, unit: 'GBP', raw_value: 49 } },
+        { id: 'pro_subscribers', kind: 'factor', label: 'Pro subscribers', category: 'observable', intercept: 0.1,
+          observed_state: { value: 0.15, cap: 2000 }, prior: { distribution: 'normal', range_min: 0, range_max: 1 } },
+        { id: 'plan_tier', kind: 'factor', label: 'Plan tier', category: 'external', encoding_map: { basic: 0, pro: 1 } },
+        { id: 'opt_keep', kind: 'option', label: 'Keep Pro at £49', is_baseline: true },
+        { id: 'opt_raise', kind: 'option', label: 'Raise Pro to £59' },
+      ],
+      edges: [
+        { from: 'pro_plan_price', to: 'mrr', strength: { mean: 0.6, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+        { from: 'pro_subscribers', to: 'mrr', strength: { mean: 0.7, std: 0.15 }, exists_probability: 0.95, effect_direction: 'positive' },
+        { from: 'pro_plan_price', to: 'pro_subscribers', strength: { mean: -0.3, std: 0.1 }, exists_probability: 0.8, effect_direction: 'negative' },
+      ],
+      options: [
+        { id: 'opt_keep', status: 'ready', is_baseline: true,
+          interventions: { pro_plan_price: { value: 0.245, raw_value: 49, unit: 'GBP', target_match: { node_id: 'pro_plan_price' } } } },
+        { id: 'opt_raise', status: 'ready',
+          interventions: { pro_plan_price: { value: 0.295, raw_value: '59', unit: 'GBP', target_match: { node_id: 'pro_plan_price' } } } },
+      ],
+      goal_node_id: 'mrr',
+      goal_constraints: [],
+    };
+    expect(JSON.stringify(graph).includes('nonlinear_identity'), 'premise: no carrier anywhere').toBe(false);
+    expect(computeAnalysisAffectingGraphHash(graph as never)).toBe('680e4200b50c20dc');
+    expect(computeAnalysisAffectingGraphHashSha256(graph as never)).toBe('680e4200b50c20dc7e79cc4c710ee1512c20811b53b96897720334aa659bf1d9');
+    // A present-`undefined` carrier (the key survives in memory, never in JSON) is the same graph.
+    const presentUndefined = { ...graph, nodes: graph.nodes.map((n) => ({ ...n, nonlinear_identity: undefined })) };
+    expect(computeAnalysisAffectingGraphHash(presentUndefined as never)).toBe('680e4200b50c20dc');
   });
 });

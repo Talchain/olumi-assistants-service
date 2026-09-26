@@ -556,12 +556,16 @@ describe('(c) precedence: the limit keeps its code and card; the unrequested fir
     }
     // A permitted leader has no withheld cause at all.
     expect(withState(true, 'evaluated_feasible')).toEqual(NONE);
-    // The same fact on a graph with no carrier: no cause. (The carrier is not an analysis-affecting field, so this
-    // graph hashes as the run's own; the cause is refused by the missing carrier, not by the hash.)
+    // The same fact on a graph with no carrier: no cause. Since H1a (Canonical State) the carrier IS an
+    // analysis-affecting field, so this graph no longer hashes as the run's own and the hash refuses it. The missing
+    // carrier refuses it on its own as well: handed the run's own hash, the cause is still none.
     const old = structuredClone(registered);
     for (const n of old.nodes) delete n.nonlinear_identity;
-    expect(deriveDecisionContextGraphHash(old)).toBe(fact.result.graph_hash_at_run);
+    const atRun = fact.result.graph_hash_at_run;
+    expect(atRun).toMatch(/^[0-9a-f]{16}$/);
+    expect(deriveDecisionContextGraphHash(old), 'H1a: a graph that lost its carrier is not the analysed graph').not.toBe(atRun);
     expect(nonlinearIdentityLeaderClaimCause({ graph: old, graphHash: deriveDecisionContextGraphHash(old), result: fact.result, requested: true })).toEqual(NONE);
+    expect(nonlinearIdentityLeaderClaimCause({ graph: old, graphHash: atRun ?? null, result: fact.result, requested: true })).toEqual(NONE);
   });
 
   /**
