@@ -23,17 +23,18 @@
  *   3. FORWARDER — `run-analysis.ts` sends the goal node's attested sense ahead of the
  *      label classifier (provenance `attested_from_goal_operator`).
  *
- * ⛔ AND WHERE THE STAMP IS NOT THE USER'S SENSE, BASE BEHAVIOUR (review 5844286953).
- * The operator is a required enum with no "not stated" value, and "reduce/cut X by
- * at least N" read as `>=` is the known sign-inversion fingerprint (ROADMAP 1.52). A
- * `maximise` there would replace base's correct label-derived `minimise`, invert the
- * ranking and end ISL's `GOAL_DIRECTION_UNATTESTED` disclosure. So:
- *   · STAMP SITE — an "at least" goal whose own label reads as a reduction is NOT
- *     stamped (an attestation contradicted by the user's own words is not attested);
- *   · FORWARDER — a stored stamp is set aside when the label reads the other way, or
- *     when a CURRENT `goal_constraints` row on the goal states the other sense (a
- *     later success-target edit; the persisted stamp is never re-derived), and the
- *     base derivation runs. Each set-aside is a `log.warn`.
+ * ⛔ AND WHERE THE STAMP IS NOT THE USER'S SENSE, BASE BEHAVIOUR (reviews 5844286953
+ * and its mirror 5844849510). The operator is a required enum with no "not stated"
+ * value: "reduce/cut X by at least N" read as `>=` (ROADMAP 1.52) or "grow revenue"
+ * read as `<=` would each invert the ranking against base and end ISL's
+ * `GOAL_DIRECTION_UNATTESTED` disclosure. ONE rule, both directions — a sense the
+ * goal label's own reading contradicts is not attested (`labelContradictsSense`):
+ *   · STAMP SITE — such a goal is NOT stamped, and its operator loss is recorded as on base;
+ *   · FORWARDER — a stored stamp is set aside when the CURRENT label contradicts it
+ *     (a rename), or when a CURRENT `goal_constraints` row on the goal states the
+ *     other sense (a later success-target edit; the persisted stamp is never
+ *     re-derived), and base's value is sent: the label's `minimise` for a
+ *     reduction-worded label, no key for any other. Each set-aside is a `log.warn`.
  *
  * Every assertion reads the payload PLoT RECEIVES, on the real path: strict schema
  * candidate → `buildModelFromBrief` → `/graph/register` body → the production
@@ -44,7 +45,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Ajv } from 'ajv';
-import type { CandidateModel } from '../admit-model.js';
+import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
@@ -375,37 +376,84 @@ describe('the stated goal direction reaches the PLoT /v2/run body', () => {
   // the known sign-inversion fingerprint. It must get base's label-derived `minimise`,
   // never a `maximise` stamp; and neither the "<=" path this PR exists for nor a goal
   // whose label names no reduction may move.
+  //
+  // ── REVIEW 5844849510 — THE MIRROR: an INCREASE-worded goal read as "<=" / "<" ──
+  // The same defect class in the other direction. `admit-model.ts` stamped `minimise`
+  // for any explicit `<=`/`<` with no label check, and the forwarder's guard could not
+  // see it (the old label reading returned nothing for an increase label). Base sends
+  // NOTHING on these (the label classifier never emits `maximise`), so ISL runs its
+  // maximiser and DISCLOSES `GOAL_DIRECTION_UNATTESTED`. One rule now closes both
+  // directions: a stamp is attested only when the operator's sense does not contradict
+  // the goal label's own reading (`readGoalLabelSense`, built on `deriveGoalIntent`).
   type Row = {
-    metric: string; operator: '>=' | '>' | '<='; value: number; unit: string; id: string;
-    sent: 'maximise' | 'minimise'; stamped: 'maximise' | 'minimise' | null;
-    event: 'cee.goal_direction.attested' | 'cee.goal_direction.derived';
+    metric: string; operator: '>=' | '>' | '<=' | '<'; value: number; unit: string; id: string;
+    /** `null` ⇒ the key is ABSENT from the body (base: ISL's unattested maximiser, disclosed). */
+    sent: 'maximise' | 'minimise' | null; stamped: 'maximise' | 'minimise' | null;
+    /** `null` ⇒ no `cee.goal_direction.*` record at all (base). */
+    event: 'cee.goal_direction.attested' | 'cee.goal_direction.derived' | null;
   };
   const TABLE: Row[] = [
     // RED at 10fa86cf: each sent `maximise` (a stamp + a warn only).
     { metric: 'Reduce monthly churn', operator: '>=', value: 2, unit: '%', id: 'reduce_monthly_churn', sent: 'minimise', stamped: null, event: 'cee.goal_direction.derived' },
     { metric: 'Cut costs', operator: '>=', value: 10, unit: '%', id: 'cut_costs', sent: 'minimise', stamped: null, event: 'cee.goal_direction.derived' },
     { metric: 'Lower churn', operator: '>', value: 3, unit: '%', id: 'lower_churn', sent: 'minimise', stamped: null, event: 'cee.goal_direction.derived' },
-    // CONTROLS: the reason for this PR, the served P-S2 maximise, and a label with no reduction word.
+    // RED at f27c2de1 (review 5844849510): each was stamped and sent `minimise`, info only.
+    { metric: 'Maximise profit', operator: '<=', value: 50000, unit: 'GBP', id: 'maximise_profit', sent: null, stamped: null, event: null },
+    { metric: 'Grow revenue', operator: '<=', value: 20, unit: '%', id: 'grow_revenue', sent: null, stamped: null, event: null },
+    { metric: 'Increase MRR', operator: '<=', value: 30000, unit: 'GBP', id: 'increase_mrr', sent: null, stamped: null, event: null },
+    { metric: 'Boost conversion', operator: '<', value: 5, unit: '%', id: 'boost_conversion', sent: null, stamped: null, event: null },
+    // CONTROLS: the reason for this PR, the served P-S2 maximise, and labels with no direction word
+    // (they follow the operator in BOTH senses, including the strict `<` the row above withholds).
     { metric: 'Monthly churn rate', operator: '<=', value: 10, unit: '%', id: 'monthly_churn_rate', sent: 'minimise', stamped: 'minimise', event: 'cee.goal_direction.attested' },
     { metric: 'Pro MRR', operator: '>=', value: 20000, unit: 'GBP', id: 'pro_mrr', sent: 'maximise', stamped: 'maximise', event: 'cee.goal_direction.attested' },
     { metric: 'Monthly churn rate', operator: '>=', value: 2, unit: '%', id: 'monthly_churn_rate', sent: 'maximise', stamped: 'maximise', event: 'cee.goal_direction.attested' },
+    { metric: 'Conversion rate', operator: '<', value: 5, unit: '%', id: 'conversion_rate', sent: 'minimise', stamped: 'minimise', event: 'cee.goal_direction.attested' },
   ];
   for (const row of TABLE) {
-    it(`TABLE: "${row.metric}" ${row.operator} ${row.value} ${row.unit} sends ${row.sent} (${row.stamped === null ? 'not stamped, label-derived' : `stamped ${row.stamped}`})`, async () => {
-      const { registered, body, directionEvents } = await plotBodyFor(
-        candidate({ metric: row.metric, operator: row.operator, value: row.value, unit: row.unit }),
-      );
+    const says = row.sent === null ? 'sends NO goal_direction' : `sends ${row.sent}`;
+    const how = row.stamped === null ? (row.sent === null ? 'not stamped, as base' : 'not stamped, label-derived') : `stamped ${row.stamped}`;
+    it(`TABLE: "${row.metric}" ${row.operator} ${row.value} ${row.unit} ${says} (${how})`, async () => {
+      const model = candidate({ metric: row.metric, operator: row.operator, value: row.value, unit: row.unit });
+      const { registered, body, directionEvents } = await plotBodyFor(model);
       expect(body.goal_node_id).toBe(row.id);
-      expect(body.goal_direction).toBe(row.sent);
+      if (row.sent === null) expect('goal_direction' in body, `sent ${String(body.goal_direction)}`).toBe(false);
+      else expect(body.goal_direction).toBe(row.sent);
       // STAMP SITE, bound by the goal's id and its label.
       const stored = goalIn(registered, row.id);
       expect(stored).toMatchObject({ kind: 'goal', label: row.metric });
       if (row.stamped === null) expect(stored).not.toHaveProperty('goal_direction');
       else expect(stored?.goal_direction).toBe(row.stamped);
-      // One record, at info: nothing was set aside at the forwarder.
-      expect(directionEvents).toEqual([
+      // An unstamped goal's operator loss is recorded, exactly as on base; a stamped one's is not.
+      const operatorLoss = admitCandidateModel(model).loss
+        .filter((l) => l.field_path === `nodes[${row.id}].goal_operator`).map((l) => l.before);
+      expect(operatorLoss).toEqual(row.stamped === null ? [row.operator] : []);
+      // At most one record, at info: nothing was set aside at the forwarder.
+      expect(directionEvents).toEqual(row.event === null ? [] : [
         expect.objectContaining({ level: 'info', event: row.event, goal_direction: row.sent, goal_node_id: row.id }),
       ]);
+    });
+  }
+
+  // ── The contradicted goal's stated current level: withheld, and the reason said
+  // truthfully. With no stamp, nothing tells the engine which tail to score, so the
+  // level cannot be used (as on base). The sentence must name the real reason — the
+  // goal's own words — not "Olumi's reading, not something you stated" (it WAS stated)
+  // and not an "at most N" repair (that would still contradict the words).
+  for (const [operator, phrase] of [['<=', 'stay at or below 20'], ['<', 'stay below 20']] as const) {
+    it(`an increase-worded "${operator}" goal with a stated current level: not stamped, the level withheld, and the reason is its own words`, () => {
+      const m = admitCandidateModel(candidate({
+        metric: 'Grow revenue', operator, value: 20, unit: '%', baseline_known: true, baseline_value: 12, baseline_provenance: 'explicit',
+      }));
+      const goal = m.nodes.find((n) => n.id === 'grow_revenue');
+      expect(goal?.kind).toBe('goal');
+      expect(goal).not.toHaveProperty('goal_direction');
+      expect(goal).not.toHaveProperty('observed_state');
+      const said = m.loss.filter((l) => l.field_path === 'nodes[grow_revenue].observed_state.baseline').map((l) => l.reason);
+      expect(said).toHaveLength(1);
+      expect(said[0]).toContain(phrase);
+      expect(said[0]).toContain('its own words point the other way');
+      expect(said[0]).not.toContain("Olumi's reading");
+      expect(said[0]).not.toContain('at most');
     });
   }
 
@@ -431,8 +479,45 @@ describe('the stated goal direction reaches the PLoT /v2/run body', () => {
       }),
       expect.objectContaining({
         level: 'warn', event: 'cee.goal_direction.label_disagrees', goal_direction: 'minimise',
-        stamped: 'maximise', label_derived: 'minimise', goal_node_id: 'pro_mrr',
+        stamped: 'maximise', label_derived: 'minimise', label_sense: 'minimise', goal_node_id: 'pro_mrr',
       }),
+    ]);
+  });
+
+  // ── FORWARDER GUARD, THE MIRROR (review 5844849510): a STORED minimise beside a label
+  // that now reads as an INCREASE (a "<=" churn goal renamed to a growth goal). Base
+  // sends nothing for an increase label, so the key is ABSENT and ISL keeps its
+  // `GOAL_DIRECTION_UNATTESTED` disclosure; the set-aside is a warn naming the stamp.
+  it('FORWARDER GUARD (mirror): a stored minimise stamp on a goal whose label now reads as an INCREASE is set aside — no key sent (base), and warns', async () => {
+    const { stored, body, directionEvents } = await plotBodyFor(minimise('<='), (g) => {
+      const goal = goalIn(g, 'monthly_churn_rate');
+      if (goal === undefined) throw new Error('fixture: no monthly_churn_rate goal');
+      goal.label = 'Grow Pro MRR';
+      return g;
+    });
+    // Precondition, by identity: the stamp really is on the stored goal beside the new label.
+    expect(goalIn(stored, 'monthly_churn_rate')).toMatchObject({ kind: 'goal', label: 'Grow Pro MRR', goal_direction: 'minimise' });
+    expect(body.goal_node_id).toBe('monthly_churn_rate');
+    expect('goal_direction' in body, `sent ${String(body.goal_direction)}`).toBe(false);
+    expect(directionEvents).toEqual([
+      expect.objectContaining({
+        level: 'warn', event: 'cee.goal_direction.label_disagrees', goal_direction: null,
+        stamped: 'minimise', label_sense: 'maximise', goal_node_id: 'monthly_churn_rate',
+      }),
+    ]);
+  });
+
+  it('FORWARDER CONTROL: a stored minimise on a label renamed to one with NO direction word keeps following the operator', async () => {
+    const { stored, body, directionEvents } = await plotBodyFor(minimise('<='), (g) => {
+      const goal = goalIn(g, 'monthly_churn_rate');
+      if (goal === undefined) throw new Error('fixture: no monthly_churn_rate goal');
+      goal.label = 'Pro plan churn';
+      return g;
+    });
+    expect(goalIn(stored, 'monthly_churn_rate')).toMatchObject({ kind: 'goal', label: 'Pro plan churn', goal_direction: 'minimise' });
+    expect(body.goal_direction).toBe('minimise');
+    expect(directionEvents).toEqual([
+      expect.objectContaining({ level: 'info', event: 'cee.goal_direction.attested', goal_direction: 'minimise', goal_node_id: 'monthly_churn_rate' }),
     ]);
   });
 

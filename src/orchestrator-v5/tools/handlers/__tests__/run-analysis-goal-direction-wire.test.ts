@@ -247,9 +247,33 @@ describe('an attested goal_direction on the goal node reaches the PLoT payload',
       }),
       expect.objectContaining({
         level: 'warn', event: 'cee.goal_direction.label_disagrees', goal_direction: 'minimise',
-        stamped: 'maximise', label_derived: 'minimise', goal_node_id: 'goal_metric',
+        stamped: 'maximise', label_derived: 'minimise', label_sense: 'minimise', goal_node_id: 'goal_metric',
       }),
     ]);
+  });
+
+  // ⛔ THE MIRROR (review 5844849510). A stamped `minimise` over a label that reads as an
+  // INCREASE would invert the ranking the same way. Base sends nothing for an increase
+  // label, so the key stays ABSENT (ISL's disclosure stands) and the set-aside is a warn.
+  it('a stamped minimise over a label that reads as an INCREASE is set aside: no key is sent (base behaviour), and the disagreement is a warn', async () => {
+    const { payload, events } = await withDirectionLog(
+      graphWithGoalLabel('Grow monthly revenue', { goal_direction: 'minimise' }),
+    );
+    expect('goal_direction' in payload, `sent ${String(payload.goal_direction)}`).toBe(false);
+    expect(events).toEqual([
+      expect.objectContaining({
+        level: 'warn', event: 'cee.goal_direction.label_disagrees', goal_direction: null,
+        stamped: 'minimise', label_derived: null, label_sense: 'maximise', goal_node_id: 'goal_metric',
+      }),
+    ]);
+  });
+
+  it('CONTROL: a stamped maximise on a label that reads as an INCREASE agrees — sent, no disagreement', async () => {
+    const { payload, events } = await withDirectionLog(
+      graphWithGoalLabel('Grow monthly revenue', { goal_direction: 'maximise' }),
+    );
+    expect(payload.goal_direction).toBe('maximise');
+    expect(events.map((e) => [e.level, e.event])).toEqual([['info', 'cee.goal_direction.attested']]);
   });
 
   // ── NB2 (review 5844286953): the stamp stands only while the goal's CURRENT

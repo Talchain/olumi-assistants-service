@@ -248,13 +248,16 @@ export const NodeV3 = z.object({
    * ⭐ THE SENSE THE USER STATED FOR THEIR GOAL (goal nodes only) — which way the
    * goal points. CEE-MINTED from the user's own stated goal operator at
    * construction (`agent-lane/admit-model.ts`: `>=`/`>` → `'maximise'`,
-   * `<=`/`<` → `'minimise'`, and ONLY on a goal whose provenance is the user's).
-   * `run_analysis` forwards it as PLoT's REQUEST-level `goal_direction`, ahead of
-   * the goal-label classifier — unless the goal's label reads the other way or a
-   * current `goal_constraints` row on the goal states the other sense, when the
-   * label classifier runs exactly as before (`resolveRequestGoalDirection`). A goal
-   * whose own label reads as a reduction is never stamped `maximise`. PLoT never
-   * reads a node-level sense.
+   * `<=`/`<` → `'minimise'`), ONLY on a goal whose provenance is the user's, and
+   * ONLY when that sense does not contradict the goal label's own reading
+   * (`goal-direction.ts` `labelContradictsSense`: reduction-worded → minimise,
+   * increase-worded → maximise, anything else contradicts nothing). `run_analysis`
+   * forwards it as PLoT's REQUEST-level `goal_direction`, ahead of the goal-label
+   * classifier, under the SAME rule re-checked at request time: when the CURRENT
+   * label contradicts it (a rename) or a current `goal_constraints` row on the goal
+   * states the other sense, it is set aside and the label classifier runs exactly as
+   * before (`resolveRequestGoalDirection`). So a sense the goal's own words contradict
+   * is never stamped and never sent. PLoT never reads a node-level sense.
    *
    * ⚠ THIS DECLARATION IS LOAD-BEARING, NOT DOCUMENTATION — the same warning
    * `goal_threshold_frame` carries above. `NodeV3` is a plain `z.object`, so an

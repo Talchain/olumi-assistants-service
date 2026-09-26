@@ -52,14 +52,31 @@
  * default and is mapped to "send nothing", which reproduces today's behaviour
  * byte-for-byte — so silence is always the safe failure here, never a guess.
  *
- * ## THE STAMP (#1971), AND WHEN IT IS SET ASIDE
+ * ## THE STAMP (#1971), AND THE ONE RULE THAT DECIDES WHETHER IT IS ATTESTED
  *
  * The label derivation above still emits `minimise` and nothing else. A goal the
  * USER stated carries a construction-time stamp (`NodeV3.goal_direction`), which
- * `resolveRequestGoalDirection` sends in either sense — but only while neither the
- * goal's label nor a current `goal_constraints` row on the goal says otherwise.
- * When one does, the label derivation runs exactly as it did before the stamp
- * existed, so the stamp can never send a sense base would not have sent.
+ * `resolveRequestGoalDirection` sends in either sense — but only while it is
+ * ATTESTED, and ONE rule decides that, in BOTH directions, at BOTH seams (reviews
+ * 5844286953 and its mirror 5844849510):
+ *
+ *   A stamp is attested only when its sense does NOT CONTRADICT the goal label's
+ *   own reading (`readGoalLabelSense`: a reduction-worded label reads `minimise`,
+ *   an increase-worded one `maximise`, any other label reads nothing).
+ *
+ *  · CONSTRUCTION (`admit-model.ts` `attestedGoalDirection`) does not stamp a sense
+ *    the label contradicts: "reduce churn" read as `>=`, "grow revenue" read as `<=`.
+ *  · THE FORWARDER re-applies the rule to a STORED stamp against the CURRENT label
+ *    (a goal renamed after construction), and also sets a stamp aside when a current
+ *    `goal_constraints` row on the goal states another sense (a later success-target
+ *    edit). Set aside, it sends exactly what base sent — the label's `minimise` for a
+ *    reduction-worded label, nothing for any other — and warns.
+ *
+ * So a stamp never sends a sense the goal's own words contradict. What it adds over
+ * base is bounded: the stated sense of a label that names NO direction ("Monthly
+ * churn rate" `<=` → `minimise`: the case #1971 exists for), `maximise` on a label
+ * that agrees (ranks as absent does; ends a disclosure that was untrue), or the same
+ * `minimise` base derives from a reduction-worded label.
  */
 
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
@@ -93,13 +110,19 @@ export function readGoalLabel(graph: unknown, goalNodeId: unknown): string | nul
 }
 
 /**
- * `'minimise'` when this goal LABEL attests a REDUCE aim, otherwise `undefined`.
+ * Which way a goal LABEL's own words point, in EITHER sense: `'minimise'` for a
+ * reduction-worded label, `'maximise'` for an increase-worded one, otherwise
+ * `undefined` (no direction word, both, stasis, ambiguity, negation, no subject).
  *
- * The one label reading, shared by the forwarder below and by construction's stamp
- * site (`admit-model.ts` `attestedGoalDirection`), so the two can never disagree
- * about which way a label points.
+ * ⛔ A READING, NEVER A SENSE TO SEND. Nothing puts this value on the wire; it only
+ * JUDGES a stamp (`labelContradictsSense`). What base sends from a label is
+ * `deriveGoalDirectionFromLabel` below — `minimise` only, for the reasons in the header.
+ *
+ * The ONE label reading, shared by construction's stamp site (`admit-model.ts`
+ * `attestedGoalDirection`) and the forwarder (`resolveRequestGoalDirection`), so the
+ * two can never disagree about which way a label points, in either direction.
  */
-export function deriveGoalDirectionFromLabel(label: string | null): EmittedGoalDirection | undefined {
+export function readGoalLabelSense(label: string | null): StampedGoalDirection | undefined {
   if (label === null || label.trim() === '') return undefined;
 
   // ⚠ CONSUMED IN ITS VALIDATED CONJUNCTION, NOT BY `.direction` ALONE.
@@ -112,7 +135,27 @@ export function deriveGoalDirectionFromLabel(label: string | null): EmittedGoalD
   // disagree about which way a goal points, and that includes the gate.
   const intent = deriveGoalIntent(label);
   if (intent.subject === null) return undefined;
-  return intent.direction === 'decrease' ? 'minimise' : undefined;
+  if (intent.direction === 'decrease') return 'minimise';
+  if (intent.direction === 'increase') return 'maximise';
+  return undefined;
+}
+
+/**
+ * `'minimise'` when this goal LABEL attests a REDUCE aim, otherwise `undefined`:
+ * base's label derivation, the only sense a label alone may put on the wire.
+ */
+export function deriveGoalDirectionFromLabel(label: string | null): EmittedGoalDirection | undefined {
+  return readGoalLabelSense(label) === 'minimise' ? 'minimise' : undefined;
+}
+
+/**
+ * ⭐ THE ONE RULE (header): `true` when the goal label's own reading contradicts this
+ * sense. A label that reads no direction contradicts nothing, so the stated operator
+ * stands there. Applied at the stamp site AND to a stored stamp at the forwarder.
+ */
+export function labelContradictsSense(label: string | null, sense: StampedGoalDirection): boolean {
+  const labelSense = readGoalLabelSense(label);
+  return labelSense !== undefined && labelSense !== sense;
 }
 
 /**
@@ -153,7 +196,11 @@ function goalRowOperators(goalConstraints: unknown, goalNodeId: unknown): string
   return operators;
 }
 
-function senseOfOperator(operator: string): StampedGoalDirection | undefined {
+/**
+ * The sense a goal comparator states: `>=`/`>` → `maximise`, `<=`/`<` → `minimise`
+ * (strictness is not a sense). Shared by the stamp site and the goal-row check.
+ */
+export function senseOfGoalOperator(operator: unknown): StampedGoalDirection | undefined {
   if (operator === '>=' || operator === '>') return 'maximise';
   if (operator === '<=' || operator === '<') return 'minimise';
   return undefined;
@@ -166,9 +213,11 @@ export interface RequestGoalDirection {
   readonly provenance: 'attested_from_goal_operator' | 'derived_from_goal_label' | undefined;
   /** The goal node's stamp, whether or not it was sent. */
   readonly stamped: StampedGoalDirection | undefined;
-  /** The goal label's reading (`deriveEmittedGoalDirection`), whether or not it was sent. */
+  /** Base's label derivation (`deriveEmittedGoalDirection`, minimise only), whether or not it was sent. */
   readonly label_derived: EmittedGoalDirection | undefined;
-  /** Set aside: the goal's own label reads the other way from the stamp. */
+  /** The goal label's own reading in EITHER sense (`readGoalLabelSense`). Judges the stamp; never sent. */
+  readonly label_sense: StampedGoalDirection | undefined;
+  /** Set aside: the goal's CURRENT label contradicts the stamp (`labelContradictsSense`), in either direction. */
   readonly label_disagrees: boolean;
   /** Set aside: a current goal row states the other sense (or one that has none). The rows' operators. */
   readonly disagreeing_goal_row_operators: readonly string[];
@@ -184,17 +233,20 @@ export interface RequestGoalDirection {
  *  2. DERIVED — `deriveEmittedGoalDirection`, the label classifier, MINIMISE ONLY
  *     and unchanged, for every goal whose stamp is absent or set aside.
  *
- * ⛔ THE STAMP IS SET ASIDE, AND SOURCE 2 RUNS EXACTLY AS BASE DID, WHEN (review
- * 5844286953):
- *  · the label reads the other way. The label classifier emits only `minimise`, so
- *    this is always a stamped `maximise` on a goal whose words say REDUCE — the
- *    "reduce/cut X by at least N" read as `>=` fingerprint (ROADMAP 1.52). Sending
- *    that `maximise` would invert the ranking AND remove ISL's
- *    `GOAL_DIRECTION_UNATTESTED` disclosure, with only a log line to show for it;
+ * ⛔ THE STAMP IS SET ASIDE, AND SOURCE 2 RUNS EXACTLY AS BASE DID, WHEN:
+ *  · the goal's CURRENT label contradicts it — THE ONE RULE (header), in BOTH
+ *    directions (reviews 5844286953 and 5844849510). A stamped `maximise` on a label
+ *    that reads REDUCE ("reduce/cut X by at least N" read as `>=`, ROADMAP 1.52), or a
+ *    stamped `minimise` on a label that reads INCREASE ("grow revenue" read as `<=`,
+ *    or a `<=` goal renamed to a growth goal): either would invert the ranking AND
+ *    remove ISL's `GOAL_DIRECTION_UNATTESTED` disclosure. Construction already
+ *    refuses to stamp these; this re-check covers a label edited after construction;
  *  · a CURRENT `goal_constraints` row on the goal states the other sense (NB2): the
  *    stamp is a construction-time copy, and a later success-target edit rewrites the
  *    threshold and writes its own operator without touching it.
- * Setting aside can therefore never send a sense base would not have sent.
+ * Set aside, the request carries base's label derivation: `minimise` for a
+ * reduction-worded label, and NO key for any other (ISL's disclosure stands). So a
+ * stamp is never sent where the goal's own words contradict it.
  */
 export function resolveRequestGoalDirection(args: {
   readonly graph: unknown;
@@ -206,17 +258,19 @@ export function resolveRequestGoalDirection(args: {
   );
   const stamped: StampedGoalDirection | undefined =
     goal?.goal_direction === 'maximise' || goal?.goal_direction === 'minimise' ? goal.goal_direction : undefined;
-  const labelDerived = deriveEmittedGoalDirection(args.graph, args.goalNodeId);
+  const label = readGoalLabel(args.graph, args.goalNodeId);
+  const labelDerived = deriveGoalDirectionFromLabel(label);
+  const labelSense = readGoalLabelSense(label);
 
-  const labelDisagrees = stamped !== undefined && labelDerived !== undefined && labelDerived !== stamped;
+  const labelDisagrees = stamped !== undefined && labelContradictsSense(label, stamped);
   const disagreeingRows = stamped === undefined
     ? []
-    : goalRowOperators(args.goalConstraints, args.goalNodeId).filter((op) => senseOfOperator(op) !== stamped);
+    : goalRowOperators(args.goalConstraints, args.goalNodeId).filter((op) => senseOfGoalOperator(op) !== stamped);
 
   if (stamped !== undefined && !labelDisagrees && disagreeingRows.length === 0) {
     return {
       goal_direction: stamped, provenance: 'attested_from_goal_operator', stamped, label_derived: labelDerived,
-      label_disagrees: false, disagreeing_goal_row_operators: [],
+      label_sense: labelSense, label_disagrees: false, disagreeing_goal_row_operators: [],
     };
   }
   return {
@@ -224,6 +278,7 @@ export function resolveRequestGoalDirection(args: {
     provenance: labelDerived !== undefined ? 'derived_from_goal_label' : undefined,
     stamped,
     label_derived: labelDerived,
+    label_sense: labelSense,
     label_disagrees: labelDisagrees,
     disagreeing_goal_row_operators: disagreeingRows,
   };
