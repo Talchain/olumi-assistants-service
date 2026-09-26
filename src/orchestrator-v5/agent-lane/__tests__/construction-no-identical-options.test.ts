@@ -489,7 +489,7 @@ describe('fix round — an open cell can equal at most one level; the status quo
     const base = candidateFromServed(AT_49.brief.draft_graph, { olumi: 'ai_proposed', horizon: null });
     const draft = { ...base, options: base.options.map((o) => (o.is_status_quo === true ? { ...o, changes: ['Pro plan price', 'AI feature availability'] } : o)) } as typeof base;
     // Vacuity: the status quo acts on both factors with no level, as the review's P8 drafted it.
-    expect(draft.options.map((o) => [o.label, o.provenance, o.is_status_quo, o.changes, o.interventions.length])).toEqual([
+    expect(draft.options.map((o) => [o.label, o.provenance, o.is_status_quo, o.changes, (o.interventions ?? []).length])).toEqual([
       ['Current setup', 'ai_proposed', true, ['Pro plan price', 'AI feature availability'], 0],
       ['£59 with AI release', 'explicit', null, [], 2],
       ['£49 with AI release', 'ai_proposed', null, [], 2],
