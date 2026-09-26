@@ -1,9 +1,10 @@
 /**
  * Reuse already-produced coaching only while the final readback binds the same
  * result — and, when a run completed THIS turn, add AT MOST ONE run-bound card
- * (contract `run-turn-coaching/v1`): the fragile-link challenge
- * (`coaching/fragile-link-challenge.ts`) or, only when the run has no fragile
- * row at all, the no-flagged-link card (`coaching/no-flagged-link-card.ts`).
+ * (contract `run-turn-coaching/v1`): the limit card (`coaching/limit-unchecked-card.ts`)
+ * when the readback's typed leader claim is withheld FOR A LIMIT; otherwise the
+ * fragile-link challenge (`coaching/fragile-link-challenge.ts`) or, only when the
+ * run has no fragile row at all, the no-flagged-link card (`coaching/no-flagged-link-card.ts`).
  *
  * The Runtime integrates with one call and one input: it hands the run response
  * to `captureAnalysis` (with the run's `trigger`), then calls
@@ -22,6 +23,7 @@ import {
   type RunTurnTrigger,
 } from '../coaching/fragile-link-challenge.js';
 import { buildNoFlaggedLinkCard } from '../coaching/no-flagged-link-card.js';
+import { buildLimitUncheckedCard, leaderWithheldForALimit } from '../coaching/limit-unchecked-card.js';
 import { WITHHELD_NEAR_TIE } from '../compose/analysis-state-v1.js';
 import { summaryAsksUserToRepairALimit } from '../coaching/constraint-gap-disclosure.js';
 
@@ -185,10 +187,12 @@ function dedupeByBlockId(blocks: readonly CoachingBlock[]): CoachingBlock[] {
 
 /**
  * The run turn's coaching: forwarded upstream cards plus AT MOST ONE run-turn
- * card, and why it is or is not there. The no-flagged-link card is tried ONLY
+ * card, and why it is or is not there. A run whose leader is withheld FOR A
+ * LIMIT gets the limit card and never a link card (one next action; Paul's
+ * manual test 1a298d6d). Otherwise the no-flagged-link card is tried ONLY
  * when the fragile-link challenge found no groundable fragile edge, and it
  * refuses itself whenever any fragile row exists, so the two exclude each other.
- * `eligibility` is `{ eligible: true }` for either card; the card type is read
+ * `eligibility` is `{ eligible: true }` for any card; the card type is read
  * from the signal_id prefix.
  */
 export function runTurnCoaching(
@@ -226,6 +230,17 @@ export function runTurnCoaching(
     freshness: 'fresh',
     optionLabels: optionLabelsFromReady(captured.analysis_ready),
   };
+  // (2c) ONE next action, TYPED: when the READBACK's leader claim is withheld for
+  // a limit, the limit is the decisive caveat — the limit card is the turn's one
+  // card and no link card competes with it. Read from the typed claim, never the
+  // summary: the automatic first pass replaces the prose (unrequested-analysis-
+  // confinement.ts), so the prose gate above is blind there. A refused limit card
+  // fails CLOSED (no card), never back to a link card.
+  if (leaderWithheldForALimit(final.analysisState)) {
+    const limit = buildLimitUncheckedCard(input);
+    if (limit.block === null) return { blocks: upstream, eligibility: { eligible: false, reason: limit.reason } };
+    return { blocks: dedupeByBlockId([...upstream, limit.block]), eligibility: { eligible: true } };
+  }
   const built = buildFragileLinkChallenge(input);
   const chosen = built.block === null && built.reason === 'no_groundable_fragile_edge'
     ? buildNoFlaggedLinkCard(input)

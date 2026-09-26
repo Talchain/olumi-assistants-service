@@ -126,7 +126,13 @@ describe('C2 binding through the actual persisted scenario read', () => {
     readFactsFor.mockResolvedValue([]);
     durablePort.readScenarioRunAnalysisFactsFor = vi.fn().mockResolvedValue({ facts: [], total_count: 0 });
     try {
-      expect((await read()).analysis_state?.run_state.kind).toBe('never_run');
+      // (B): the read route now carries the model's admission verdict, and this
+      // fixture's graph is not admissible — so an AUTHORITATIVELY absent run on a
+      // blocked model reads `blocked`. Still never `unknown_degraded`: that is the
+      // distinction this case pins.
+      const complete = (await read()).analysis_state;
+      expect(complete?.run_state.kind).toBe('blocked');
+      expect(complete?.readiness.status).toBe('blocked');
     } finally {
       delete durablePort.readScenarioRunAnalysisFactsFor;
     }

@@ -139,6 +139,19 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
     // dangling edge is what the contract forbids) and the duplicate check (the
     // edge is already in the very graph the user was looking at, so the hash is
     // perfectly fresh and the add is still destructive).
+    //
+    // 2026-09-24 (schemas 0.59.0 member, writer lands WITH its reader) —
+    // `goal_target_edit` joins, and this is its conscious act. It writes the
+    // goal node's `goal_threshold*` channel and the `goal_constraints` row —
+    // every one of them inside the analysis hash — THROUGH the existing
+    // `add_constraint` handler (`goal-target-edit.ts` is an adapter with no
+    // mutation logic). `'ack_and_commit'` would write a turn row and NO graph,
+    // so the target would vanish on reload; `'reader_only_refusal'` would tell
+    // the user this version cannot set a success target, which is false the
+    // instant this writer exists. Its safety is its own, not this row's: an
+    // analysis-space stale gate, id-exact goal-kind resolution, the atomic CAS
+    // mapped to a typed 409, and field-by-field parity with the typed-chip path
+    // (`tests/integration/orchestrator/route-v2-goal-target-edit.test.ts`).
     expect(mutating).toEqual([
       'factor_value_edit',
       'edge_strength_edit',
@@ -147,6 +160,7 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
       'structural_add_edge',
       'structural_rename',
       'option_intervention_edit',
+      'goal_target_edit',
     ]);
   });
 

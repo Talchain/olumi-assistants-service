@@ -948,11 +948,13 @@ export async function buildModelFromBrief(
       ...admitted.loss
         // `status_quo_held`: the held status quo is a machine-inferred MEANING
         // (`admit-model.ts`, `wireInertStatusQuo`), so it must be said and correctable.
+        // `level_restated` / `frame_widened` / `signed_level_withheld`: how a factor's option levels
+        // were kept in ONE value space (#69 5835137365) — each changes what a number means, so it is said.
         // `observed_state.baseline`: a goal's current level that could not be carried
         // (`admit-model.ts`) — the user is told why, and what would let it count.
         // `loop_withheld` / `loop_kept`: a loop the model could not hold (`admit-model.ts`,
         // `breakLoops`) — which link was left out, or that the user's own loop was kept.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|loop_withheld|loop_kept)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|loop_withheld|loop_kept)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

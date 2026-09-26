@@ -17,8 +17,10 @@
  *     recognises this reason and still returns 200 — the skip is honest,
  *     not a fake success. See src/orchestrator/route-v2.ts for the
  *     skip-reason allowlist.
- *   - factor_value_edit, edge_strength_edit → run the existing canonical D1
- *     handler, then atomically persist graph + fact with a trusted-base CAS.
+ *   - factor_value_edit, edge_strength_edit, goal_target_edit → run the
+ *     existing canonical D1 handler (set_factor_value / adjust_edge_strength /
+ *     add_constraint), then atomically persist graph + fact with a
+ *     trusted-base CAS.
  *
  * Response envelope: acknowledgement kinds retain their prior silent response;
  * value-carrying writers return the canonical handler receipt.
@@ -68,6 +70,7 @@ import {
   type EdgeStrengthEditAuthorityConflict,
 } from './edge-strength-edit.js';
 import { applyFactorValueEdit } from './factor-value-edit.js';
+import { applyGoalTargetEdit } from './goal-target-edit.js';
 import { applyStructuralDelete } from './structural-delete.js';
 import { applyStructuralAdd, findFabricatedLevel } from './structural-add.js';
 import {
@@ -769,6 +772,18 @@ export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, Syst
   // threw its content away. Here the payload IS the record, so an ack would
   // reproduce the empty-ack class on the one field the event exists to carry.
   finding_dissent: 'fact_and_commit',
+  // 0.59.0 — the structured success-target edit. `'mutating'` because it writes
+  // exactly what the typed-chip `add_constraint` path writes — the goal node's
+  // `goal_threshold*` channel and the `goal_constraints` row — THROUGH THAT
+  // SAME HANDLER (`goal-target-edit.ts` is an adapter with no mutation logic).
+  // Every one of those fields is inside the analysis hash, so the write moves
+  // `graph_hash`, a prior analysis goes stale, and the `base_graph_hash` gate
+  // genuinely covers what is written.
+  //
+  // ⚠ NOT `'ack_and_commit'`, for the reason every writer above records: an ack
+  // writes a turn row and NO graph, so the target the user set would vanish on
+  // the next reload.
+  goal_target_edit: 'mutating',
 };
 
 // DERIVED from the map above — not a second list to keep in step. undo/redo are
@@ -1139,6 +1154,12 @@ export async function dispatchSystemEvent(
     payload.event.kind === 'option_intervention_edit'
   ) {
     return await dispatchOptionInterventionEdit(payload, payload.event, requestId);
+  }
+  if (
+    handling === 'mutating' &&
+    payload.event.kind === 'goal_target_edit'
+  ) {
+    return await dispatchGoalTargetEdit(payload, payload.event, requestId, startedAt);
   }
 
   // ── fact_and_commit: the judgement PERSISTS, or the turn fails loud ──────
@@ -3890,6 +3911,219 @@ async function dispatchStructuralAddEdge(
     // to analysable, and that verdict must describe the model the user now has.
     analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForReadiness),
     freshness,
+    graph: graphForReadiness,
+  };
+}
+
+/**
+ * `goal_target_edit` (0.59.0) — the structured success-target writer.
+ *
+ * A MIRROR OF `dispatchFactorValueEdit`, with two differences and no others:
+ *
+ *  1. A STALE-BASE GATE, like `structural_rename`: the event carries
+ *     `base_graph_hash` and every field this writes is inside the analysis
+ *     hash, so a diverged base is answered with a typed 409 refresh-and-
+ *     reconfirm and nothing is appended. The atomic-CAS race (the row moved
+ *     between our read and the append) is mapped to the SAME typed 409, with
+ *     the analysis-space hash from a FRESH read, exactly as the structural
+ *     writers do — never a retryable 500.
+ *
+ *  2. REFUSALS APPEND NOTHING and answer `refused_no_write` (non-retryable
+ *     422), the `option_intervention_edit` posture. The stale gate runs first,
+ *     so any refusal after it (unknown id, non-goal node, a handler refusal) is
+ *     a request that is unhonourable against the very graph the client says it
+ *     is looking at; repeating it cannot succeed.
+ *
+ * Everything else is fve's: one strict graph read (fail closed), prior facts
+ * WITH their read state, the adapter (which reuses `add_constraint` and owns no
+ * mutation logic), ONE atomic commit with the CAS base spread, then the wire
+ * `graph_hash`, `draft_graph`, readiness and freshness all derived from the
+ * bytes the commit actually wrote.
+ */
+async function dispatchGoalTargetEdit(
+  payload: SystemEventTurnPayload,
+  event: Extract<SystemEventTurnPayload['event'], { kind: 'goal_target_edit' }>,
+  requestId: string,
+  startedAt: number,
+): Promise<DispatchSystemEventResult> {
+  let persistedGraph: unknown;
+  try {
+    persistedGraph = await loadPersistedGraphStrict(payload.scenario_id);
+  } catch (err) {
+    // Fail CLOSED: a degraded read gives no trusted base. Retryable 500.
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 goal_target_edit — persisted-graph read failed; refusing the write (fail closed)',
+    );
+    return { response: buildAcknowledgementResponse(payload), commitPerformed: false, graph: null };
+  }
+
+  // The SAME reply-freshness inputs as every other system-event writer (F1:
+  // the durable fact set AND the restore marker, as the reload reads them —
+  // never the 20-row window alone). `hotWindow` is exactly the window this
+  // writer always read, so the handler's `priorFacts` input keeps its meaning.
+  const factsRead = await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId);
+  const priorFactsRead = factsRead.hotWindow;
+
+  let result: Awaited<ReturnType<typeof applyGoalTargetEdit>>;
+  try {
+    result = await applyGoalTargetEdit({
+      payload,
+      event,
+      requestId,
+      persistedGraph,
+      priorFacts: priorFactsRead.facts,
+    });
+  } catch (err) {
+    // A malformed-but-present persisted graph (corruption, not absence) or an
+    // unexpected handler throw. Retryable 500 with no append.
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 goal_target_edit — adapter failed before commit',
+    );
+    return { response: buildAcknowledgementResponse(payload), commitPerformed: false, graph: null };
+  }
+
+  if (result.kind === 'base_hash_diverged') {
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      graph: null,
+      graphConflict: {
+        recovery_action: result.conflict.recovery_action,
+        conflict_category: result.conflict.conflict_category,
+        expected_base_graph_hash: result.conflict.expected_base_graph_hash,
+      },
+    };
+  }
+
+  if (result.kind === 'refused') {
+    log.warn(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        goal_node_id: event.goal_node_id,
+        refusal_reason: result.reason,
+      },
+      'V5 goal_target_edit — refused, nothing written',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      commitSkippedReason: 'refused_no_write',
+      graph: null,
+    };
+  }
+
+  // ── the mutation path: ONE atomic commit, exactly as fve commits ─────────
+  let persistedAnalysisGraphHash: string | null = null;
+  let persistedGraphBytes: unknown = null;
+  let committedResponse: OlumiResponse = result.response;
+  try {
+    const cas = computeExpectedGraphCasHashes(result.baseGraph);
+    const commitResult = await commitDirectAnswer(result.response, {
+      scenario_id: payload.scenario_id,
+      turn_id: payload.turn_id,
+      // A handler ran and produced facts — the same turn shape the typed-chip
+      // `add_constraint` turn commits.
+      turn_class: 'handler',
+      handler_id: 'add_constraint',
+      request_hash: computeRequestHash(payload),
+      llm_calls_used: 0,
+      duration_ms: Date.now() - startedAt,
+      handler_facts: result.handlerFacts,
+      graph: result.mutatedGraph,
+      baseGraphForInvariants: result.baseGraph,
+      // SPREAD, never conditionally omitted — see the fve writer's note: the
+      // store derives the known-base CAS guard from key PRESENCE.
+      ...cas,
+      coaching_state: null,
+    });
+    persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+    persistedGraphBytes = commitResult.persistedGraph;
+    committedResponse = commitResult.response;
+  } catch (err) {
+    if (err instanceof GraphStaleWriteError) {
+      log.warn(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          conflict_category: err.conflict_category,
+        },
+        'V5 goal_target_edit — atomic graph CAS conflict; refresh and reconfirm',
+      );
+      return {
+        response: buildAcknowledgementResponse(payload),
+        commitPerformed: false,
+        graph: null,
+        graphConflict: {
+          recovery_action: 'refresh_and_reconfirm',
+          conflict_category: err.conflict_category,
+          // Analysis-space (16-hex), from a FRESH read — never the 64-hex
+          // identity hash the error carries. See readClientRecoverableBaseHash.
+          expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
+        },
+      };
+    }
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        goal_node_id: event.goal_node_id,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 goal_target_edit — mutation commit failed',
+    );
+    return { response: buildAcknowledgementResponse(payload), commitPerformed: false, graph: null };
+  }
+
+  log.info(
+    {
+      request_id: requestId,
+      event_kind: event.kind,
+      scenario_id: payload.scenario_id,
+      goal_node_id: event.goal_node_id,
+      constraint_type: event.constraint_type,
+    },
+    'V5 goal_target_edit committed — graph written through add_constraint, hash recomputed',
+  );
+
+  // Hash, postimage, readiness and freshness all describe the bytes that
+  // LANDED (`commitResult.persistedGraph`), never our pre-projection copy.
+  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+  const graphForReadiness = committedParse.success ? committedParse.data : result.graph;
+  const response: OlumiResponse = {
+    ...committedResponse,
+    ...(persistedAnalysisGraphHash !== null ? { graph_hash: persistedAnalysisGraphHash } : {}),
+    ...(committedParse.success
+      ? { draft_graph: buildAppliedGraphWireField(committedParse.data) }
+      : {}),
+  };
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash);
+  emitFreshnessTelemetry(freshness, {
+    request_id: requestId,
+    scenario_id: payload.scenario_id,
+    dispatch_path: 'system_event.goal_target_edit',
+  });
+  return {
+    response,
+    commitPerformed: true,
+    analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForReadiness),
+    freshness,
+    // The full graph: the egress id-leak scrub resolves ids against it.
     graph: graphForReadiness,
   };
 }

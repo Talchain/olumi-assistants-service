@@ -83,6 +83,17 @@ export function approvalChipsFor(
   // ⭐ THE CHIP CARRIES THE PROPOSAL'S IDENTITY (fast path 2, RC #63 5803995225). The
   // UI echoes `chip.id` verbatim on the click, so the route applies EXACTLY this
   // proposal with no model call. The id is never rendered (label/message are).
+  /**
+   * A held add-option (C52) carries the product's OWN words for its confirm: its label, and the exact message
+   * the hold was minted with — so if the click ever reaches the product's route directly, the exact copy still
+   * resolves the hold instead of reading as new words for the edit model.
+   */
+  const held = labelSourceFor?.(proposalId)?.result;
+  if (tool === 'propose_new_option' && /^gmh_/.test(proposalId) && held !== undefined) {
+    const label = typeof held.public_label === 'string' && held.public_label.trim() !== '' ? held.public_label : approve.label;
+    const message = typeof held.held_message === 'string' && held.held_message.trim() !== '' ? held.held_message : approve.message;
+    return [{ id: approvalChipIdFor(proposalId), label, message }, AMEND_CHIP];
+  }
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message }, AMEND_CHIP];
 }
 
@@ -173,5 +184,6 @@ export function typedApprovalOf(body: unknown): string | undefined {
   const id = (body as { chip?: { id?: unknown } } | null | undefined)?.chip?.id;
   if (typeof id !== 'string' || !id.startsWith(APPROVE_PREFIX)) return undefined;
   const proposalId = id.slice(APPROVE_PREFIX.length);
-  return /^prop_[0-9a-f]{6,64}$/.test(proposalId) ? proposalId : undefined;
+  // `gmh_…` is a held add-option on the product's own seam (C52): the same typed, zero-call approval.
+  return /^prop_[0-9a-f]{6,64}$/.test(proposalId) || /^gmh_[0-9a-f]{12}$/.test(proposalId) ? proposalId : undefined;
 }

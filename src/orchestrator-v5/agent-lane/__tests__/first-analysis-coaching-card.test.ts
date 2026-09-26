@@ -1,5 +1,7 @@
 /**
- * ⭐ THE AUTOMATIC FIRST ANALYSIS SHOWS THE FRAGILE-LINK COACHING CARD (run-turn coaching contract, #1855).
+ * ⭐ THE AUTOMATIC FIRST ANALYSIS SHOWS ITS ONE RUN-TURN COACHING CARD (run-turn coaching contract, #1855).
+ * Since the limit-first rule (#70, Paul's manual test 1a298d6d), a run whose leader is withheld FOR A LIMIT —
+ * as this fixture's is — shows the limit card (coaching/limit-unchecked-card.ts), never a link card.
  *
  * Paul (24 Sep): a blank first experience is not acceptable. On this lane the automatic run is always
  * leader-withheld and has no decision_review, so the run's own upstream blocks carry no coaching; the
@@ -185,13 +187,18 @@ describe('the automatic first analysis shows the fragile-link coaching card', ()
     ).blocks[0]!;
     expect(card.block_id).toBe(expected.block_id);
     expect(card.signal_id).toBe(expected.signal_id);
+    // The route's egress sanitiser (agent-v1-turn.ts, sanitiseOlumiResponseForEgress) leaves the card's words byte-identical.
+    const words = (b: Record<string, unknown>) => ({ title: b.title, body: b.body, action_label: b.action_label, action_prompt: b.action_prompt });
+    expect(words(card)).toEqual(words(expected as unknown as Record<string, unknown>));
     expect(String(card.signal_id).endsWith(`:${T2.graph_hash}:${COMPUTED_AT}:auto_first_pass`)).toBe(true);
     // Bound to the revision and the run the reply itself shows.
     expect(card.graph_hash_at_generation).toBe(r.graph_hash);
     expect(card.created_at).toBe(r.analysis_state?.run_state?.computed_at);
     // First-pass copy, one conversational action, leader-free on this withheld run.
     expect(String(card.body).startsWith(FIRST_PASS)).toBe(true);
-    expect(card.action_label).toBe('Pressure-test this link');
+    // c19-B t2's leader is withheld FOR A LIMIT, so the one card is the limit card (limit first, #70), never a link card.
+    expect(String(card.signal_id).startsWith('coach:limit_unchecked:')).toBe(true);
+    expect(card.action_label).toBe('What this means for my limits');
     for (const field of ['title', 'body', 'action_label', 'action_prompt'] as const) expect(String(card[field])).not.toMatch(LEADER);
     expect((r.blocks ?? []).filter((b) => b.type === 'analysis_result')).toHaveLength(1);
     expect(r._diagnostic_trace.coaching).toEqual({ eligible: true });
