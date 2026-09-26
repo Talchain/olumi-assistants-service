@@ -1,0 +1,116 @@
+/**
+ * ⭐ A SECTION LABEL THE PANEL CAN RENDER — marked at the SOURCE, because the
+ * renderer deliberately does not guess.
+ *
+ * The Olumi panel renders producer prose through a small markdown subset
+ * (`safeRichText`). It handles bold, bullets, numbered lists and line breaks,
+ * and it does NOT infer structure that was never marked — inventing paragraph
+ * breaks at the render boundary would make the wire and the screen disagree.
+ * So a lead-in like `Limit to confirm:` sent as plain prose renders as an
+ * unbroken run; sent as `**Limit to confirm:**` it gets bold AND an automatic
+ * paragraph gap, with no UI change at all.
+ *
+ * ⛔⛔ THE RULE THAT MAKES THIS SAFE, AND IT IS NOT STYLISTIC. Markup must wrap
+ * a WHOLE label or a WHOLE phrase, never split one. `enforceLeadingOptionClaimsAtWire`
+ * finds a leader claim IN ORDER TO REDACT IT when the claim is withheld, and its
+ * patterns join words with `\s+`. Measured:
+ *
+ *     SEEN    **Leading option:** X           → guard matches
+ *     SEEN    **the lead** is not stable      → guard matches
+ *     BLIND   The **leading** option is X     → NOTHING matches
+ *     BLIND   It **is** ahead of the rest     → NOTHING matches
+ *
+ * A split phrase does not merely render oddly — it makes the product withhold a
+ * claim in its record and name a leader in the prose beside it. `\b` survives
+ * `**`; an interior `\s+` does not. This helper only ever wraps a complete
+ * label, which is why it cannot produce the blind cases.
+ */
+
+/** The panel's bold marker. One definition, so a change here cannot leave half
+ *  the composers on the old spelling (trap 12 — no hand-maintained mirror). */
+const BOLD = '**';
+
+/**
+ * `sectionLabel('Limit to confirm')` → `'**Limit to confirm:**'`
+ *
+ * Takes the label WITHOUT its colon and adds both the colon and the markers, so
+ * no call site can mark up a partial phrase or forget the colon the panel keys
+ * its paragraph gap on.
+ */
+export function sectionLabel(label: string): string {
+  const trimmed = label.trim().replace(/:+$/, '');
+  return `${BOLD}${trimmed}:${BOLD}`;
+}
+
+/**
+ * `sectionHeader('Options on the canvas')` → `'**Options on the canvas**'`
+ *
+ * ⭐ A HEADER, NOT A LEAD-IN — AND THE DIFFERENCE IS THE COPY, NOT THE STYLE.
+ *
+ * `sectionLabel` exists for `Limit to confirm:` — a label that INTRODUCES the
+ * clause after it, where the colon is part of the sentence the author wrote.
+ * "Options on the canvas" and "What the model is weighing" are not that. They
+ * head a section, and `sectionLabel` would render them as
+ * `**Options on the canvas:**` — a colon no author wrote. Marking is supposed
+ * to change how copy renders, never what it says.
+ *
+ * ⚠ THE COLON'S SECOND JOB, AND WHOSE CLAIM THIS RESTS ON. The note at the top
+ * of this file says the panel "keys its paragraph gap" on the marked label. The
+ * panel workstream — who own `safeRichText` and the component — state that a
+ * **bold** lead opens the paragraph gap on its own, so the colon is not doing
+ * that work. That is their component, so their reading of it is the best
+ * evidence available; it is recorded here as THEIR claim rather than something
+ * measured on this side. If it turns out to be wrong the failure is cosmetic (a
+ * bold header with no gap above it) and not a correctness defect — which is why
+ * this ships without blocking on a render witness.
+ *
+ * ⛔ The whole-phrase rule from the top of this file applies UNCHANGED. This
+ * wraps a complete header and never a fragment, so it cannot produce the two
+ * BLIND cases that make the leader-claim guard miss a claim it must redact.
+ * `__tests__/section-label-is-guard-safe.test.ts` runs the real matcher over
+ * headers too, for exactly that reason.
+ */
+export function sectionHeader(header: string): string {
+  const trimmed = header.trim().replace(/:+$/, '');
+  return `${BOLD}${trimmed}${BOLD}`;
+}
+
+/**
+ * ⭐ THE INVERSE, AND IT EXISTS BECAUSE MARKING BROKE THREE READERS.
+ *
+ * Marking a label changes bytes that OTHER code already parses. Measured, not
+ * predicted: `toAssumptionBullet` matches `/^One assumption worth checking:/`
+ * and `stripBulletLabel` matches a four-label alternation — both silently
+ * stopped matching when the markers went in, and the second one let a
+ * duplicate bullet through its dedup (caught by `post-draft-narrative.test.ts
+ * > does not repeat the primary assumption text as the extra check`).
+ *
+ * So any consumer that compares or strips the UNDERLYING text unmarks it first
+ * rather than growing its own `\*\*` literal — which would be a second copy
+ * of the marker, free to drift from `sectionLabel` (trap 12).
+ */
+export function unmarkSectionLabel(text: string): string {
+  return text.split(BOLD).join('');
+}
+
+/**
+ * ⛔ THERE IS DELIBERATELY NO `splitsAPhrase()` HELPER HERE, AND THE REASON IS
+ * THE FINDING.
+ *
+ * I wrote one, then tested it against the four measured cases and it was WRONG:
+ * it rejected `**the lead** is not stable`, which is a WHOLE phrase and must be
+ * allowed. The error was not in the regex — it was in the premise. "Splitting a
+ * phrase" is not a syntactic property of the text at all. `The **leading**
+ * option` is blind because the markers fall INSIDE the span
+ * `/\bleading\s+option/` matches; `**the lead**` is safe because they fall
+ * OUTSIDE the span `/\bthe\s+lead\b/` matches. Which is which depends on the
+ * GUARD'S phrases, and no predicate over the characters can know them.
+ *
+ * So the guarantee is asserted by RUNNING THE REAL MATCHER rather than by a
+ * lookalike predicate: `__tests__/section-label-is-guard-safe.test.ts` feeds
+ * each emitted label-bearing sentence to the live leader-claim patterns and
+ * requires the verdict to be IDENTICAL with and without the markup. A
+ * re-implementation here would be a second copy free to drift from the thing
+ * that actually runs (trap 12), and — worse — it would have shipped agreeing
+ * with itself.
+ */
