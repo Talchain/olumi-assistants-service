@@ -18,7 +18,8 @@ import { censusConfidenceParameters } from '../../admission/analysis-admission.j
 import { earnsAuthorshipCredit, structureProvenance } from '../../../cee/graph-readiness/obligation-provenance.js';
 
 const SCENARIO = '9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a';
-const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-v', request_id: 'r' };
+/** What the user wrote in these rows: a figure is recorded as theirs only when it is here (`stated-by-user.ts`). */
+const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-v', request_id: 'r', user_text: 'Team size is 6 FTE. The monthly budget is 300, or 1,234,564,999, or 1,234,564,999,999.' };
 
 type Node = { id: string; kind: string; label: string; category?: string; observed_state?: Record<string, unknown>; scale_frame?: number };
 const BASE: Node[] = [

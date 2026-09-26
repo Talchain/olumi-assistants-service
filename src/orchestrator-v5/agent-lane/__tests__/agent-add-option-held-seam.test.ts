@@ -197,12 +197,12 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const pendings = (await store.readMostRecentPendingActions(SCENARIO)) as { chip_id: string; expires_at_turn_count: number; action: { kind: string; inline_patch?: { handler_id?: string; operations?: { op: string; path: string }[] } } }[];
     return pendings.filter((p) => p.action.kind === 'apply_proposed_change' && p.action.inline_patch?.handler_id === 'graph_management_held_v1');
   };
-  const proposeOptionC = (level: number | undefined) => {
+  const proposeOptionC = (level: number | undefined, message = 'Add an option: test £54 at release.') => {
     script = [
       () => fnCall('propose_new_option', { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', ...(level !== undefined ? { level: { value: level, unit: 'GBP' } } : {}) }], rationale: 'The user asked for it.' }),
       () => say('I would add "Test £54 at release", linked from the decision and setting the price. Shall I add it?'),
     ];
-    return turn({ message: 'Add an option: test £54 at release.' });
+    return turn({ message });
   };
   const newOption = () => graphNow().nodes.find((x) => x.kind === 'option' && x.label === 'Test £54 at release');
 
@@ -378,12 +378,23 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
 
   it('[p2] RED: a figure outside the factor\'s range (£250 on 0–£200) is refused in plain words — nothing is prepared, nothing is sent, no button', async () => {
     graphOf.set(SCENARIO, seedGraph());
-    const t1 = await proposeOptionC(250);
+    const t1 = await proposeOptionC(250, 'Add an option: test £250 at release.');
     const c = t1._agent.tool_calls.find((x) => x.name === 'propose_new_option');
     expect(c, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, refusal: 'level_out_of_range' }));
     expect(inner.filter((b) => (b['chip'] as { intent?: string } | undefined)?.intent === 'add_option'), 'nothing sent').toEqual([]);
     expect(approveChipOf(t1)).toBeUndefined();
     expect(await heldOnLatestRow()).toEqual([]);
+  }, 120_000);
+
+  it('[p4] RED (served fbb12b8, #70 5843805457 / 5843825647): a level the user never wrote — 0 sent to mean "not set" — is stored UNSET through the real route, never as the user\'s 0', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeOptionC(0);
+    const approve = approveChipOf(t1)!;
+    expect(approve, JSON.stringify(t1._agent.tool_calls)).toBeDefined();
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    const iv = (newOption()?.interventions ?? {})['fac_price'];
+    expect(newOption(), 'the option itself is added').toBeDefined();
+    expect(iv, JSON.stringify(iv)).toBeUndefined();
   }, 120_000);
 
   it('[p3] RED: a factor with no range at all — the user\'s £54 cannot be stored on one, so the level is left UNSET (never a bare 54) and the Agent is told why', async () => {
