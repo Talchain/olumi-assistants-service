@@ -884,3 +884,29 @@ describe('option-intervention transaction — an adopted Olumi level keeps Olumi
     expect(cellOf(persistence.durableGraph())).toMatchObject({ value: 0.3, source: 'user_specified' });
   });
 });
+
+describe('a level brings its link — the real commit (DL #70 5847137399: ONE atomic commit)', () => {
+  it('RED: an unlinked option gets its link AND its level in ONE durable row, ONE fact and ONE read-back, and says so', async () => {
+    const before = clone(canonicalGraph());
+    before.edges = before.edges.filter(e => !(e.from === 'option' && e.to === 'other_factor'));
+    delete (before.nodes.find(n => n.id === 'option')!.interventions as Record<string, unknown>).other_factor;
+    const seeded = projectGraphForPersistence(before) as ReturnType<typeof canonicalGraph>;
+    const persistence = jsonStore(seeded);
+    const result = await executeOptionInterventionEdit(inputFor(seeded, { factorId: 'other_factor', modelValue: 0.4 }), persistence.fresh());
+    expect(result.kind, JSON.stringify(result)).toBe('committed');
+    if (result.kind !== 'committed') return;
+    expect(persistence.attempts).toHaveLength(1);
+    expect(persistence.durableRows()).toHaveLength(1);
+    const stored = persistence.durableRows()[0]!;
+    expect(stored.handler_facts).toHaveLength(1);
+    expect(stored.handler_facts[0]).toMatchObject({ result: { status: 'applied', operations_count: 2 } });
+    const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
+    expect(cold.edges.filter(e => e.from === 'option' && e.to === 'other_factor')).toEqual([
+      expect.objectContaining({ exists_probability: 1, provenance: { source: 'user_specified' } }),
+    ]);
+    expect(cold.nodes.find(n => n.id === 'option')!.interventions).toMatchObject({
+      other_factor: { value: 0.4, source: 'user_specified', target_match: { node_id: 'other_factor' } },
+    });
+    expect(result.response.assistant_text).toContain('is now linked to');
+  });
+});

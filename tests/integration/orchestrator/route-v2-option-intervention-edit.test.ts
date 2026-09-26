@@ -64,11 +64,16 @@ function buildPersistedGraph() {
           },
         },
         { id: 'other_factor', kind: 'factor', label: 'Reach', observed_state: { value: 0.6, source: 'brief_extraction' } },
-        // A factor the option is NOT wired to — the refusal fixture.
+        // A factor joined to the option the REVERSE way (unlinked_factor → option) — the refusal fixture: there is
+        // no forward effect relationship, and a forward link beside the reverse one would make a cycle. (A factor
+        // with NO edge to the option is no longer a refusal: the level brings its link, DL #70 5847137399.)
         { id: 'unlinked_factor', kind: 'factor', label: 'Unrelated', observed_state: { value: 0.3, source: 'brief_extraction' } },
+        // A factor with no edge to the option at all: a level on it brings its option → factor link in the same commit.
+        { id: 'new_factor', kind: 'factor', label: 'Adoption', observed_state: { value: 0.3, source: 'brief_extraction' } },
       ],
       edges: [
         ['option', 'factor'], ['option', 'other_factor'], ['factor', 'goal'], ['other_factor', 'goal'],
+        ['unlinked_factor', 'option'],
       ].map(([from, to]) => ({
         from, to, strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive',
       })),
@@ -264,6 +269,18 @@ describe('POST /orchestrate/v2/turn — option_intervention_edit, at the wire', 
     const body = JSON.parse(res.body);
     expect(body.details.retryable, 'a permanent refusal advertised as retryable').toBe(false);
     expect(rows.size).toBe(0);
+  });
+
+  it('A LEVEL BRINGS ITS LINK — 200: an option with no edge to the factor gets the link AND the level in ONE row (DL #70 5847137399)', async () => {
+    const res = await post(app, {
+      kind: 'option_intervention_edit',
+      option_id: 'option', factor_id: 'new_factor', value: 0.4, base_graph_hash: currentHash(),
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(rows.size, 'ONE commit: the link and the level land together').toBe(1);
+    const written = [...rows.values()][0]!.write.graph as { edges: { from: string; to: string }[]; nodes: { id: string; interventions?: Record<string, { value: number }> }[] };
+    expect(written.edges.filter(e => e.from === 'option' && e.to === 'new_factor')).toHaveLength(1);
+    expect(written.nodes.find(n => n.id === 'option')?.interventions?.new_factor?.value).toBe(0.4);
   });
 
   it('THE SET DISCRIMINATES — the four outcomes are four different answers', async () => {

@@ -68,6 +68,8 @@ import type { FrameFreshness } from '../graph-management/types.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { reconcileTopLevelOptionsFromNodes } from '../reconcile-top-level-options.js';
 import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor } from '../agent-lane/approved-adoption-context.js';
+import { structuralEdgeValue } from '../routing/add-option-transaction.js';
+import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 
 /**
  * Internal preparation for an explicit option→factor edit. This is NOT a wire
@@ -122,6 +124,8 @@ export function optionInterventionPostimageIsScoped(
   before: unknown,
   after: unknown,
   target: Pick<OptionInterventionEditInput, 'optionId' | 'factorId' | 'modelValue' | 'source'>,
+  /** The ONE option → factor topology link this same commit adds (a level brings its link); nothing else may add it. */
+  addedLink?: { readonly from: string; readonly to: string },
 ): boolean {
   if (!isEditableGraph(before) || !isEditableGraph(after)) return false;
   if (!isDeepStrictEqual(projectGraphForPersistence(before), before)) return false;
@@ -145,6 +149,17 @@ export function optionInterventionPostimageIsScoped(
   } else {
     delete restoredNode.interventions![target.factorId];
   }
+  if (addedLink !== undefined) {
+    // Exactly one new edge for exactly this pair, absent before, with the topology constants and the level's source.
+    const isLink = (e: { from: string; to: string }) => e.from === addedLink.from && e.to === addedLink.to;
+    const added = restored.edges.filter(isLink);
+    const link = added[0] as (typeof added)[number] & { provenance?: { source?: unknown } } | undefined;
+    if (before.edges.some(isLink) || added.length !== 1 || link === undefined
+      || link.strength.mean !== STRUCTURAL_EDGE_DEFAULTS.strength.mean
+      || link.exists_probability !== STRUCTURAL_EDGE_DEFAULTS.exists_probability
+      || link.provenance?.source !== (target.source ?? 'user_specified')) return false;
+    restored.edges = restored.edges.filter(e => !isLink(e));
+  }
 
   // Derive the options[] mirror through its existing owner, never a copied
   // list of status/raw-intervention/provenance reconciliation rules.
@@ -165,6 +180,8 @@ export type OptionInterventionCandidate = {
   readonly operations: PatchOperation[];
   readonly handlerFact: NonNullable<ReturnType<typeof buildEditGraphHandlerFact>>;
   readonly analysisGraphHash: string;
+  /** This commit also added the option → factor link the level needs. */
+  readonly linkAdded: boolean;
 };
 
 /** Existing edit machinery prepares the candidate; this function does no I/O. */
@@ -181,12 +198,20 @@ export function applyOptionInterventionEdit(input: OptionInterventionTransaction
     return refuse('unrelated_canonical_repair_required');
   }
   try {
-    const raw = parseEditGraphResponse(JSON.stringify({ operations: [prepared.operation],
+    // ⭐ A level brings its link: the link FIRST, then the level, in this ONE validate → apply → commit.
+    const rawOps = prepared.linkOperation !== undefined ? [prepared.linkOperation, prepared.operation] : [prepared.operation];
+    const raw = parseEditGraphResponse(JSON.stringify({ operations: rawOps,
       removed_edges: [], warnings: [], coaching: null })).operations;
     const validated = validatePatchOperations(raw, before);
-    if (!validated.valid || validated.operations.length !== 1) return refuse('operation_invalid');
+    if (!validated.valid || validated.operations.length !== rawOps.length) return refuse('operation_invalid');
     const operations = validated.operations;
-    const decision = evaluateEditGraphMutations({ mode: 'live', operations,
+    // The link, when present, is exactly one leading `add_edge` for exactly this pair. It is NOT refereed: it is the
+    // topology link the level implies (the product's own link writer, `structural_add_edge`, is not refereed either),
+    // and `optionInterventionPostimageIsScoped` below pins it to one topology edge with the level's source.
+    if (prepared.linkOperation !== undefined
+      && (operations[0]?.op !== 'add_edge' || operations[0]?.path !== `${input.optionId}::${input.factorId}`)) return refuse('operation_invalid');
+    const levelOperations = prepared.linkOperation !== undefined ? operations.slice(1) : operations;
+    const decision = evaluateEditGraphMutations({ mode: 'live', operations: levelOperations,
       currentGraph: before, currentGraphHash: input.expectedGraphHash,
       baseGraphHash: input.expectedGraphHash, freshness: input.freshness,
       scenarioId: input.scenarioId, turnId: input.turnId, requestId: input.requestId });
@@ -198,7 +223,8 @@ export function applyOptionInterventionEdit(input: OptionInterventionTransaction
       appliedGraph: encoded.graph, persistedBase: before, ingressBase: before,
       scenarioId: input.scenarioId, requestId: input.requestId,
     }));
-    if (!isEditableGraph(graph) || !optionInterventionPostimageIsScoped(before, graph, input)) {
+    const addedLink = prepared.linkOperation !== undefined ? { from: input.optionId, to: input.factorId } : undefined;
+    if (!isEditableGraph(graph) || !optionInterventionPostimageIsScoped(before, graph, input, addedLink)) {
       return refuse('mutation_scope_mismatch');
     }
     const analysisGraphHash = computeAnalysisAffectingGraphHash(graph);
@@ -210,7 +236,7 @@ export function applyOptionInterventionEdit(input: OptionInterventionTransaction
       preEditGraph: before, hasExistingAnalysis: input.hasExistingAnalysis,
     });
     if (handlerFact === null) return refuse('mutation_fact_unavailable');
-    return { kind: 'candidate', graph, operations, handlerFact, analysisGraphHash };
+    return { kind: 'candidate', graph, operations, handlerFact, analysisGraphHash, linkAdded: addedLink !== undefined };
   } catch {
     return refuse('mutation_preparation_failed');
   }
@@ -256,7 +282,8 @@ export async function executeOptionInterventionEdit(input: OptionInterventionExe
     appliedOperations: candidate.operations, nowMs: Date.now(),
     scenarioId: input.scenarioId, turnId: input.turnId, requestId: input.requestId });
   const acknowledgment = formatOptionEffectWriteAck({ optionLabel: option.label,
-    factorLabel: factor.label, committedValue: input.modelValue });
+    factorLabel: factor.label, committedValue: input.modelValue })
+    + (candidate.linkAdded ? ` ${option.label} is now linked to ${factor.label}, in the same change.` : '');
   const response: OlumiResponse = { response_version: 2,
     assistant_text: holds.notice ? `${acknowledgment}\n\n${holds.notice}` : acknowledgment,
     blocks: [], suggested_actions: [], insights: [], stage_indicator: input.stage };
@@ -314,7 +341,7 @@ export async function executeOptionInterventionEdit(input: OptionInterventionExe
 }
 
 export function prepareOptionInterventionEdit(input: OptionInterventionEditInput):
-  | { readonly kind: 'prepared'; readonly operation: Record<string, unknown> }
+  | { readonly kind: 'prepared'; readonly operation: Record<string, unknown>; readonly linkOperation?: Record<string, unknown> }
   | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly reason: string } {
   const refuse = (reason: string) => ({ kind: 'refused' as const, reason });
@@ -347,9 +374,26 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
   // Reuse the conversational writer's identity-link question, not a new
   // topology/science admission policy. Unique endpoint identity is checked
   // above; the established reader owns which factor IDs an option addresses.
+  //
+  // ⭐ A LEVEL BRINGS ITS LINK (DL #70 5847137399: one user operation → one approval → ONE atomic commit). An option
+  // not yet linked to this factor gets the option → factor TOPOLOGY link in this same commit, stamped with the
+  // level's own source (#1992), so a refusal or a concurrent edit can never leave a link without its level.
+  // Still refused: a pair already joined another way (a reversed edge — a forward one beside it would be a cycle),
+  // and an orphan cell on an unlinked factor (never silently re-stamped).
+  let linkOperation: Record<string, unknown> | undefined;
   if (!linkedFactorsOf(graph, option.id).some(linked => linked.id === factor.id)) {
-    return refuse('unresolved_effect_relationship');
+    const joined = graph.edges.some(e => (e.from === option.id && e.to === factor.id) || (e.from === factor.id && e.to === option.id));
+    const orphanCell = option.interventions !== undefined && option.interventions !== null
+      && typeof option.interventions === 'object' && Object.hasOwn(option.interventions, factor.id);
+    if (joined || orphanCell) return refuse('unresolved_effect_relationship');
+    linkOperation = {
+      op: 'add_edge', path: `${option.id}::${factor.id}`,
+      value: structuralEdgeValue(option.id, factor.id, input.source ?? 'user_specified'),
+      old_value: null, impact: 'moderate',
+      rationale: `Links ${option.label} to ${factor.label}, which the level set on it needs.`,
+    };
   }
+  const withLink = linkOperation !== undefined ? { linkOperation } : {};
 
   const interventions = option.interventions;
   if (interventions !== undefined && (interventions === null || typeof interventions !== 'object'
@@ -418,7 +462,7 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     optionId: option.id, optionLabel: option.label,
     factorId: factor.id, factorLabel: factor.label, value: input.modelValue,
   });
-  if (input.source === undefined) return { kind: 'prepared', operation };
+  if (input.source === undefined) return { kind: 'prepared', operation, ...withLink };
   // An adopted Olumi level: the encoder PRESERVES this member (`PRESERVED_INTERVENTION_SOURCES`)
   // instead of defaulting the cell to `user_specified`, and the rationale says whose it is.
   return {
@@ -428,5 +472,6 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
       value: { ...(operation.value as Record<string, unknown>), source: input.source },
       rationale: `Records the level Olumi proposed, and the user approved, for ${option.label} on ${factor.label}.`,
     },
+    ...withLink,
   };
 }
