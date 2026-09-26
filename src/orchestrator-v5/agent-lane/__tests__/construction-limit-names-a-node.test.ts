@@ -33,10 +33,12 @@ function candidate(limitMetric: string, extra = 0) {
     goal: { metric: 'Billing capability', operator: '>', target_stated: false, value: null, unit: null, horizon_months: 12, provenance: 'inferred' },
     constraints: [{ metric: limitMetric, operator: '<', value: 250000, unit: 'GBP', provenance: 'explicit' }],
     options: [
-      { label: 'Build in-house', provenance: 'explicit', changes: ['Engineering spend'], interventions: [], is_status_quo: false },
-      { label: 'Buy a platform', provenance: 'explicit', changes: ['Platform fees'], interventions: [], is_status_quo: false },
+      // Each option LEVELS the factor it acts on, on a factor with a baseline: a `changes`-only pair or an unset
+      // acted-on baseline is a repair issue since #1891 and would spend a coverage retry this file does not measure.
+      { label: 'Build in-house', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Engineering spend', value: 60, value_kind: 'absolute', unit: '', provenance: 'ai_proposed' }], is_status_quo: false },
+      { label: 'Buy a platform', provenance: 'explicit', changes: [], interventions: [{ factor_label: 'Platform fees', value: 40, value_kind: 'absolute', unit: '', provenance: 'ai_proposed' }], is_status_quo: false },
     ],
-    factors: [factor('Engineering spend'), factor('Platform fees'), ...names.map((n) => factor(n, 'ai_proposed'))],
+    factors: [{ ...factor('Engineering spend'), baseline_value: 50 }, { ...factor('Platform fees'), baseline_value: 50 }, ...names.map((n) => factor(n, 'ai_proposed'))],
     risks: [],
     outcomes: [{ label: 'Total first-year cost', provenance: 'inferred' }],
     links: [
