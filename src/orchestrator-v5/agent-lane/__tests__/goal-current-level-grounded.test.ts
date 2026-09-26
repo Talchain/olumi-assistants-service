@@ -191,6 +191,25 @@ describe('RED — a percent goal: the user typed "3%", the Agent passes 0.03 →
   });
 });
 
+/**
+ * KEPT, AND STILL LOAD-BEARING: `figureTheUserWrote` holds a line the brief rule does not. `readUnit` reads a count unit
+ * ("users") as plain, and plain accepts a written percentage, so "12%" would ground 12 users on the brief rule alone;
+ * the family rule (a count is never a percentage) refuses it. Passes before and after the fix — it fails only if the
+ * `figureTheUserWrote` clause is dropped.
+ */
+describe('CONTRAST — a percentage the user wrote never grounds a count goal (figureTheUserWrote\'s own line)', () => {
+  it('"Churn is 12% a month", the Agent passes {12, "users"} for a goal in users → refused', async () => {
+    const usersGoal = clone(paulGraph);
+    usersGoal.nodes = usersGoal.nodes.map((n) => (n.id === GOAL
+      ? { ...n, label: 'Active users', goal_threshold: 0.8, goal_threshold_raw: 2000, goal_threshold_unit: 'users', goal_threshold_cap: 2500 }
+      : n));
+    await refusedAsNotWritten(
+      { goal_label: 'Active users', value: 12, unit: 'users', goal_is: 'at_least', user_stated: true },
+      'Churn is 12% a month.', usersGoal, 'Active users',
+    );
+  });
+});
+
 describe('CONTROLS — a figure the user typed is proposed, and recorded as theirs', () => {
   it('"our MRR is £12,000 today" → proposed, and recorded as raw 12000 with the user\'s stamp', async () => {
     await proposedAndRecorded(T2, 'our MRR is £12,000 today', 12000);
