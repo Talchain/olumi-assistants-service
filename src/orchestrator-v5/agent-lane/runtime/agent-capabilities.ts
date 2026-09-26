@@ -46,6 +46,16 @@ const UNIT_MISMATCH_NOTE =
   'Left out because the figure is in a different kind of unit from the factor (for example a price given for a rate). '
   + 'Never record a figure the user gave for something else as this factor\u2019s value; ask for its own figure if needed.';
 
+/** What the Agent says about a level it marked as the user's that the user never wrote (`stated-by-user.ts`). */
+const NOT_THE_USERS_FIGURE_NOTE =
+  'The user did not write these figures, so they are proposed as Olumi\u2019s estimates, not as the user\u2019s own. '
+  + 'Say so plainly; never call a figure the user\u2019s unless they wrote it.';
+
+/** Why a level the user never wrote is left unset (`stated-by-user.ts`). */
+const notWrittenReason = (value: number, factor: string): string =>
+  `${value} is not a figure the user gave for ${factor}, so this change leaves that level unset. Say plainly it has no level yet, `
+  + `and ask for ${factor}\u2019s figure only if the user wants to set it. Never send 0 or any placeholder to mean "not set": leave level out.`;
+
 /** What the Agent is told to say about a named input that cannot hold a value. */
 const NOT_A_FACTOR_NOTE =
   'These were named but are not factors (for example a risk), so no starting value can be set on them and they are ' +
@@ -107,6 +117,7 @@ import { bandFromMagnitude, INFLUENCE_BAND_THRESHOLDS, type InfluenceBand } from
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
+import { figureTheUserWrote } from '../stated-by-user.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel } from './build-model.js';
@@ -1507,7 +1518,7 @@ export function createAgentCapabilities(
       const occupied: { label: string; current_value: number }[] = [];
       const unitMismatch: { label: string; value: unknown; unit: string; factor_unit: string }[] = [];
       const seen = new Set<string>();
-      const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number }[] = [];
+      const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number; userWrote: boolean }[] = [];
 
       for (const a of input) {
         const requested = String(a?.factor_label ?? '');
@@ -1569,6 +1580,8 @@ export function createAgentCapabilities(
           id: node.id, label: node.label,
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
           ...(typeof existing === 'number' ? { replaces: existing } : {}),
+          // ⛔ A revision is the user's only when they WROTE the figure (`stated-by-user.ts`); else it is Olumi's.
+          userWrote: figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text),
         });
       }
 
@@ -1591,8 +1604,8 @@ export function createAgentCapabilities(
       const operations: ProposalOperation[] = ordered.map((a) => ({
         op: 'set_factor_value',
         path: a.id,
-        // A revision the user named is theirs; a fresh figure is Olumi's (`valueOpAuthor`).
-        value: { value: a.value, unit: a.unit, basis: a.basis, authored_by: typeof a.replaces === 'number' ? 'user_stated' : 'model_proposed' },
+        // A revision the user named AND wrote is theirs; anything else is Olumi's (`valueOpAuthor`).
+        value: { value: a.value, unit: a.unit, basis: a.basis, authored_by: typeof a.replaces === 'number' && a.userWrote ? 'user_stated' : 'model_proposed' },
       }));
       /**
        * ⛔ THE APPROVAL MUST SAY WHAT IT REPLACES.
@@ -1604,6 +1617,7 @@ export function createAgentCapabilities(
        */
       const revisions = ordered.filter((a) => typeof a.replaces === 'number');
       const fresh = ordered.filter((a) => typeof a.replaces !== 'number');
+      const notWritten = revisions.filter((a) => !a.userWrote);
       const withUnit = (a: { value: number; unit: string }) => `${a.value}${a.unit !== '' ? ' ' + a.unit : ''}`;
       const describe = (a: { label: string; value: number; unit: string; replaces?: number }) =>
         typeof a.replaces === 'number'
@@ -1623,9 +1637,9 @@ export function createAgentCapabilities(
         provenance: {
           // A revision the user named is theirs, not the model's. Only a proposal
           // made entirely of those may claim it.
-          authored_by: fresh.length === 0 && revisions.length > 0 ? 'user_stated' : 'model_proposed',
+          authored_by: fresh.length === 0 && revisions.length > 0 && notWritten.length === 0 ? 'user_stated' : 'model_proposed',
           basis:
-            revisions.length > 0 && fresh.length === 0
+            revisions.length > 0 && fresh.length === 0 && notWritten.length === 0
               ? 'values the user asked to change, at the figures they gave'
               : 'starting assumptions offered for the user to adopt or correct',
         },
@@ -1653,6 +1667,10 @@ export function createAgentCapabilities(
         ...(notAFactor.length > 0 ? { not_a_factor: notAFactor, not_a_factor_note: NOT_A_FACTOR_NOTE } : {}),
         ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
         ...(unitMismatch.length > 0 ? { unit_mismatch: unitMismatch, unit_mismatch_note: UNIT_MISMATCH_NOTE } : {}),
+        ...(notWritten.length > 0 ? {
+          not_the_users_figure: notWritten.map((a) => ({ factor: a.label, value: a.value })),
+          not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE,
+        } : {}),
         note:
           'Nothing has changed. Show the user each value and what it rests on, say plainly that these are ' +
           'assumptions to adopt or correct and NOT measurements, and call authorise_change with this ' +
@@ -1774,6 +1792,7 @@ export function createAgentCapabilities(
         // factor — the Agent must say so and offer a level it CAN record.
         ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked, not_linked_note: b.not_linked_note } : {}),
         ...(b !== null && Array.isArray(b.levels_not_accepted) ? { levels_not_accepted: b.levels_not_accepted } : {}),
+        ...(b !== null && Array.isArray(b.not_the_users_figure) ? { not_the_users_figure: b.not_the_users_figure, not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE } : {}),
         // ⛔ What the user NAMED but this proposal leaves out, carried to the joined result (independent
         // review of #1800, 5806926323): when both halves succeed, the value half's omission otherwise
         // never reached the Agent, and the starting point looked complete at the moment of consent.
@@ -1817,6 +1836,8 @@ export function createAgentCapabilities(
        * with the pair, so the next attempt can correct it.
        */
       const notAccepted: { option: string; factor: string; value: unknown; reason: string }[] = [];
+      /** Levels the Agent marked `user_stated` that the user never wrote: recorded as Olumi's, never as theirs. */
+      const notWrittenByUser: { option: string; factor: string; value: unknown }[] = [];
       const seen = new Set<string>();
       const set: {
         option: { id: string; label: string }; factor: { id: string; label: string };
@@ -1887,10 +1908,19 @@ export function createAgentCapabilities(
         // recordable. `user_stated` is opt-in per level, on the same terms as
         // `revise` — only when the user said it and gave the level — and it still
         // reaches the user as a proposal to approve, never a write.
-        if (held.has(`${option.id}::${factor.id}`) && i?.user_stated !== true) {
+        /**
+         * ⛔ `user_stated` is the Agent's claim; it stands only when the user WROTE the figure (`stated-by-user.ts`).
+         * Unwritten, the level is Olumi's estimate (recorded as such, and said), and on a held pair it is not a level.
+         */
+        const claimedByUser = i?.user_stated === true;
+        const userWrote = claimedByUser && figureTheUserWrote(Number(i?.value), factorUnitOf(g.raw, factor), ctx.user_text);
+        if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
+        if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
           notAccepted.push({
             option: option.label, factor: factor.label, value: i?.value,
-            reason: `${option.label} is held at its starting values — carrying on as now sets no level, so none is recorded for ${factor.label}. Leave it out, unless the user themselves said carrying on changes ${factor.label} and gave the level: then send it with user_stated: true.`,
+            reason: claimedByUser
+              ? `${option.label} is held at its starting values, and ${String(i?.value)} is not a figure the user wrote, so no level is recorded for ${factor.label}. Leave it out; never send a figure as the user's unless they wrote it.`
+              : `${option.label} is held at its starting values — carrying on as now sets no level, so none is recorded for ${factor.label}. Leave it out, unless the user themselves said carrying on changes ${factor.label} and gave the level: then send it with user_stated: true.`,
           });
           continue;
         }
@@ -1992,7 +2022,7 @@ export function createAgentCapabilities(
           option: { id: option.id, label: option.label },
           factor: { id: factor.id, label: factor.label },
           raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' ? os.unit : '',
-          basis: String(i?.basis ?? ''), derivedFrame, userStated: i?.user_stated === true,
+          basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote,
         });
       }
 
@@ -2004,6 +2034,7 @@ export function createAgentCapabilities(
           ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
           ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
           ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
+          ...(notWrittenByUser.length > 0 ? { not_the_users_figure: notWrittenByUser, not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE } : {}),
           ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
           detail: 'Nothing could be recorded. Tell the user exactly which of these it was and why.',
         };
@@ -2054,6 +2085,7 @@ export function createAgentCapabilities(
         ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
         ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
         ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
+        ...(notWrittenByUser.length > 0 ? { not_the_users_figure: notWrittenByUser, not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE } : {}),
         ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
         note:
           'Nothing has changed. Show the user the value in THEIR units and what it rests on, then call ' +
@@ -3494,6 +3526,12 @@ export function createAgentCapabilities(
           const factorUnit = factorUnitOf(g.raw, factor);
           if (unitsConflict(lvl.unit, factorUnit) !== null) {
             unitMismatch.push({ option: plan.label, factor: f.label, value: lvl.value, unit: String(lvl.unit), factor_unit: String(factorUnit) });
+            return { factor_id: f.id, value: null };
+          }
+          // ⛔ Every level here is stored as the user's, so it must be a figure the user wrote (`stated-by-user.ts`:
+          // a 0 sent to mean "not set" was stored as the user's 0% churn).
+          if (!figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, ctx.user_text)) {
+            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: notWrittenReason(lvl.value, f.label) });
             return { factor_id: f.id, value: null };
           }
           const frame = levelFrameOf(factor);

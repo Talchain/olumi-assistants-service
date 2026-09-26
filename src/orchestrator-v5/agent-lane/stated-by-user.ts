@@ -1,0 +1,71 @@
+/**
+ * ⛔ A FIGURE IS RECORDED AS THE USER'S ONLY WHEN THE USER WROTE IT.
+ *
+ * Served on CEE fbb12b8 (guest witness, scenario fb2e5613; #70 5843805457): "Add an option: keep the price at £49
+ * and run a win-back offer for churned customers. It reduces Monthly churn." The Agent passed `level: {value: 0}`
+ * for Monthly churn to mean "not set", and one approval stored `{value: 0, unit: "percent per month", source:
+ * "user_specified"}` — a 0% churn level recorded as the user's, who stated none. The tool text already said "a
+ * level ONLY for a figure the user stated"; nothing enforced it, and the unit check (#1966) cannot see it (% on %).
+ *
+ * THE RULE: a figure the Agent attributes to the user must be PRESENT in the user's own words (`user_text`, bound
+ * by the route from the conversation's user messages, never from model output), read by the repo's one scanner
+ * (`findStatedAmounts`). It is a NECESSARY condition, never attestation (see that module): not present ⇒ the
+ * user's claim is withdrawn; present ⇒ there are no grounds to withdraw it.
+ *
+ * KIND: a written amount grounds a figure only in a compatible kind of unit, read by the family classifier #1966
+ * uses (`unitPhraseFamily` — `readUnit` reads "£ per month" and "GBP/month" as plain, so it would disown every
+ * price level). A bare number ("59", "7 engineers") grounds any kind; "£49" grounds only a money figure (never a
+ * churn level); "4%" only a percentage. A unit nobody can classify accepts any written kind.
+ *
+ * A written percentage also grounds its fraction ("40%" → 0.4, a share kept as 0–1), unlike the brief-extraction
+ * claim `stated-amounts.ts` refuses it for: here the Agent is told to pass the factor's own units, and a share factor's
+ * own units are 0–1.
+ *
+ * Every miss fails toward UNDER-claiming (the figure is left unset or recorded as Olumi's, and said): word-form
+ * numerals ("four percent"), a figure the Agent derived ("down a point" → 4), and a magnitude written with a suffix
+ * the Agent dropped (£54k vs 54).
+ */
+import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
+import { unitPhraseFamily } from './unit-conflict.js';
+
+const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+
+/** Whether `value`, in `unit`, is a figure written in `userText`. No text (or none bound) proves nothing: false. */
+export function figureTheUserWrote(value: number, unit: unknown, userText: string | null | undefined): boolean {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+  const family = unitPhraseFamily(unit);
+  return findStatedAmounts(userText).some((a) => {
+    if (a.kind === 'currency') return (family === null || family === 'currency') && same(a.magnitude, value);
+    // "40%" is 40 on a percentage, or 0.4 on a share kept as 0–1: the Agent passes the factor's own units.
+    if (a.kind === 'percent') return (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value));
+    return same(a.magnitude, value);
+  });
+}
+
+/**
+ * Whether this request is something the user TYPED: a composer message. A chip click is not — every chip's text is
+ * Olumi's (an approval replaying the Agent's own labels, a suggestion, a coaching prompt) — and neither is a system
+ * event such as a board edit.
+ */
+export function typedByUser(body: Record<string, unknown>): boolean {
+  const kind = body['kind'];
+  const chip = body['chip'];
+  return (kind === undefined || kind === 'message') && (chip === null || chip === undefined) && body['source'] !== 'chip';
+}
+
+/**
+ * The user's own words in this conversation: what they TYPED earlier in this session (`HistoryStore.typedWords`), then
+ * this turn's message when they typed it. A figure the user gave two turns ago ("test £54 vs £59", then "add those") is
+ * still theirs.
+ *
+ * ⛔ PROVENANCE, NEVER TEXT SHAPE (#1978 reviews 5844589340 B1, 5844805634 B2/B3). The Agent's history carries text
+ * that is not the user's in `role: 'user'` items: Olumi's narration of a board edit, a chip's replay of the Agent's
+ * own labels, and — after a restart, when history is reseeded from the durable conversation — rows Olumi itself
+ * dispatched ("Add the option \u201cTest \u00a354 at release\u201d.", a run's reason). Stripping by punctuation lost
+ * the user's own "Yes, but it's closer to 4%". So the words are recorded as they are typed, by the route, and nothing
+ * else is ever read as the user's. After a restart the earlier words are gone: a figure is then left unset and asked
+ * for — under-claiming, never over.
+ */
+export function userWordsOf(typedEarlier: readonly string[], typedNow: string | null): string {
+  return [...typedEarlier, ...(typedNow !== null ? [typedNow] : [])].join('\n');
+}
