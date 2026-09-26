@@ -120,7 +120,15 @@ export const AddConstraintValueSchema = z.number().finite();
 export const AddConstraintLabelSchema = z.string().min(1);
 export const AddConstraintUnitSchema = z.string().min(1);
 
-const TYPE_TO_OPERATOR: Record<'at_least' | 'at_most', '>=' | '<='> = {
+/**
+ * ⭐ EXPORTED for the offer-side precondition, for the same reason
+ * {@link resolveConstraintUnit} is: a persisted row carries `'>='`/`'<='`,
+ * NEVER the words `'at_least'`/`'at_most'`. `findUnitAmbiguousOffer` matched
+ * the WORDS, so its existing-row lookup could never hit and that whole limb
+ * was dead — and its own fixtures encoded the same wrong vocabulary, so the
+ * suite agreed with it. Import the map; do not spell the operators.
+ */
+export const TYPE_TO_OPERATOR: Record<'at_least' | 'at_most', '>=' | '<='> = {
   at_least: '>=',
   at_most: '<=',
 };
@@ -148,6 +156,47 @@ const TYPE_TO_OPERATOR: Record<'at_least' | 'at_most', '>=' | '<='> = {
 // it through `toEntityKind` and asserts the routing registry's
 // `accepted_entity_kinds` matches exactly, so the registry can no longer
 // drift into refusing a target this handler would have accepted.
+/**
+ * ⭐⭐ THE UNIT PRECEDENCE, DEFINED ONCE AND EXPORTED — because a second copy
+ * of it shipped a FALSE REFUSAL.
+ *
+ * `findUnitAmbiguousOffer` (`compose/warrant-demotion.ts`) decides whether to
+ * CONSTRUCT an offer, and it must refuse exactly when this handler would
+ * refuse — no more. It read only the PARAMETER's unit while this handler
+ * resolves FOUR sources, so an offer was withheld for "raise my ARR floor
+ * 250k → 300k" — a unit the handler would have resolved from the existing row
+ * — and the capability was lost silently.
+ *
+ * ⛔ That is the trade this estate rejects: a disclosed refusal bought with a
+ * silent capability loss. Caught in review, not by my own corpus, and the
+ * corpus could not see it — no fixture carried `observed_state.unit`, and
+ * `UnitLookupNode` did not even declare the field.
+ *
+ * So the precedence lives HERE, beside the handler that owns it, and the offer
+ * side IMPORTS it rather than restating it. Restating is what broke it
+ * (CLAUDE.md trap 12 — derive, never mirror).
+ *
+ * Order is load-bearing and is the handler's own: an explicit parameter beats
+ * the row being changed, which beats a moved row's prior state, which beats
+ * the destination's metadata. `sourceRow` sits where `existing` sits for an
+ * ordinary update — it IS the prior state of the thing being changed — and so
+ * ranks ahead of any destination metadata.
+ */
+export function resolveConstraintUnit(sources: {
+  readonly paramUnit?: string | undefined;
+  readonly existingUnit?: string | undefined;
+  readonly sourceRowUnit?: string | undefined;
+  readonly observedUnit?: string | undefined;
+}): string | undefined {
+  return sources.paramUnit !== undefined
+    ? sources.paramUnit
+    : sources.existingUnit !== undefined
+      ? sources.existingUnit
+      : sources.sourceRowUnit !== undefined
+        ? sources.sourceRowUnit
+        : sources.observedUnit;
+}
+
 export const ALLOWED_TARGET_KINDS: readonly string[] = [
   'factor',
   'outcome',
@@ -167,11 +216,58 @@ const ALLOWED_TARGET_KIND_SET: ReadonlySet<string> = new Set(ALLOWED_TARGET_KIND
  * deliberately absent: unit-less absolute factor thresholds ("at most
  * 30" on a headcount) are legitimate.
  */
-const PROBABILITY_DOMAIN_KIND_SET: ReadonlySet<string> = new Set([
+export const PROBABILITY_DOMAIN_KIND_SET: ReadonlySet<string> = new Set([
   'goal',
   'outcome',
   'risk',
 ]);
+
+/**
+ * ⭐⭐ THE UNIT-AMBIGUITY PRECONDITION, AS ONE EXPRESSION TWO CALLERS SHARE.
+ *
+ * Gate-1 below is the only place that may THROW on it. But the same fact is
+ * knowable one turn earlier, at the moment an offer is composed — and a
+ * product that offers a change this gate will refuse has already failed the
+ * user, whatever the refusal then says.
+ *
+ * ── THE WITNESS (deployed staging, 20 Sep 2026) ───────────────────────────
+ * The product offered "a limit keeping <a risk> at or below 30 … Say the word
+ * and I will make it". The value was 30, the target a `risk`, and the offer
+ * carried no unit — so a bare "yes" would have arrived HERE and thrown. The
+ * user, reading an offer that named no unit, supplied one unprompted ("treat
+ * it as a 0-1 fraction … so 30% is 0.3"); the confirmation gate correctly
+ * refused a message that restates a value, nothing downstream honoured it,
+ * and the held change lapsed. **The user was answering a question the product
+ * had not asked.** Asking it at the offer costs one sentence and no turn.
+ *
+ * ── EXPORTED RATHER THAN RE-SPELLED ───────────────────────────────────────
+ * `findUnitAmbiguousOffer` (`compose/warrant-demotion.ts`) calls THIS, and
+ * the gate below calls it too, so there is one predicate and no second list to
+ * remember (CLAUDE.md trap 12). The sibling precedent is
+ * `SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS`, consumed the same way by
+ * `findUnsupportedOfferTargetKind`.
+ *
+ * ⚠ `capToStamp` is DELIBERATELY NOT A PARAMETER. It depends on machinery only
+ * this handler has, so the gate below keeps it as its own extra conjunct and
+ * the offer-time caller states its own fail-open for the case it cannot
+ * compute. A shared predicate that pretended to know it would be the worse
+ * kind of mirror — one that looks derived.
+ */
+export function isUnitAmbiguousConstraintValue(args: {
+  readonly unit: string | undefined;
+  readonly value: number;
+  readonly targetKind: string;
+  readonly observedCap: unknown;
+  readonly goalThresholdCap: unknown;
+}): boolean {
+  if (args.unit !== undefined) return false;
+  if (args.value >= 0 && args.value <= 1) return false;
+  if (!PROBABILITY_DOMAIN_KIND_SET.has(args.targetKind)) return false;
+  const capExempts = (cap: unknown): boolean =>
+    typeof cap === 'number' && cap > 0 && args.value >= 0 && args.value <= cap;
+  if (capExempts(args.observedCap) || capExempts(args.goalThresholdCap)) return false;
+  return true;
+}
 
 /**
  * User-visible clarify for the unit-ambiguity refusal (Gate-1). Rides
@@ -740,16 +836,14 @@ export function createAddConstraintHandler(): HandlerFn {
       // `sourceRow.unit` sits exactly where `existing.unit` sits for an
       // ordinary update — it IS the prior state of the thing being changed —
       // and therefore AHEAD of any destination metadata.
-      const resolvedUnit =
-        params.unit !== undefined
-          ? params.unit
-          : existing?.unit !== undefined
-            ? existing.unit
-            : sourceRow?.unit !== undefined
-              ? sourceRow.unit
-              : targetNode.observed_state?.unit !== undefined
-                ? targetNode.observed_state.unit
-                : undefined;
+      // ⭐ ONE definition, shared with the offer-side precondition. See
+      // `resolveConstraintUnit`'s header for why this is not inlined here.
+      const resolvedUnit = resolveConstraintUnit({
+        paramUnit: params.unit,
+        existingUnit: existing?.unit,
+        sourceRowUnit: sourceRow?.unit,
+        observedUnit: targetNode.observed_state?.unit,
+      });
 
       if (requestedLimitChange !== undefined && resolvedUnit !== requestedLimitChange.unit) {
         throw new D1HandlerError('PARAMETER_INVALID',
@@ -1068,14 +1162,6 @@ export function createAddConstraintHandler(): HandlerFn {
       // for fraction-frame rows), which would otherwise have widened the
       // exempt-then-clamp cell to every minted node. The exemption survives
       // exactly where it is sane: 0 ≤ value ≤ cap, the unclamped cell.
-      const capExempts = (cap: unknown): boolean =>
-        typeof cap === 'number' &&
-        cap > 0 &&
-        params.value >= 0 &&
-        params.value <= cap;
-      const declaredCap =
-        capExempts(targetNode.observed_state?.cap) ||
-        capExempts(targetNode.goal_threshold_cap);
       const capToStamp = stampGoalThreshold
         ? resolveGoalThresholdCap(
             targetNode.goal_threshold_cap,
@@ -1085,10 +1171,13 @@ export function createAddConstraintHandler(): HandlerFn {
           )
         : null;
       if (
-        newConstraint.unit === undefined &&
-        (params.value > 1 || params.value < 0) &&
-        PROBABILITY_DOMAIN_KIND_SET.has(targetNode.kind) &&
-        !declaredCap &&
+        isUnitAmbiguousConstraintValue({
+          unit: newConstraint.unit,
+          value: params.value,
+          targetKind: targetNode.kind,
+          observedCap: targetNode.observed_state?.cap,
+          goalThresholdCap: targetNode.goal_threshold_cap,
+        }) &&
         capToStamp === null
       ) {
         throw new D1HandlerError(
