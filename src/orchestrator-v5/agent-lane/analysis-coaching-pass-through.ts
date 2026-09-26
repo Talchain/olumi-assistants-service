@@ -1,9 +1,10 @@
 /**
  * Reuse already-produced coaching only while the final readback binds the same
  * result — and, when a run completed THIS turn, add AT MOST ONE run-bound card
- * (contract `run-turn-coaching/v1`): the fragile-link challenge
- * (`coaching/fragile-link-challenge.ts`) or, only when the run has no fragile
- * row at all, the no-flagged-link card (`coaching/no-flagged-link-card.ts`).
+ * (contract `run-turn-coaching/v1`): the limit card (`coaching/limit-unchecked-card.ts`)
+ * when the readback's typed leader claim is withheld FOR A LIMIT; otherwise the
+ * fragile-link challenge (`coaching/fragile-link-challenge.ts`) or, only when the
+ * run has no fragile row at all, the no-flagged-link card (`coaching/no-flagged-link-card.ts`).
  *
  * The Runtime integrates with one call and one input: it hands the run response
  * to `captureAnalysis` (with the run's `trigger`), then calls
@@ -22,6 +23,10 @@ import {
   type RunTurnTrigger,
 } from '../coaching/fragile-link-challenge.js';
 import { buildNoFlaggedLinkCard } from '../coaching/no-flagged-link-card.js';
+import { buildLimitUncheckedCard, leaderWithheldForALimit } from '../coaching/limit-unchecked-card.js';
+import { graphBoundToHash, soleLimitNodeLabel } from '../coaching/bound-graph.js';
+import { WITHHELD_NEAR_TIE } from '../compose/analysis-state-v1.js';
+import { summaryAsksUserToRepairALimit } from '../coaching/constraint-gap-disclosure.js';
 
 export interface CapturedAnalysis {
   scenario_id: string;
@@ -39,6 +44,11 @@ export interface RunTurnCoachingFinal {
   graphHash?: string;
   analysisState?: unknown;
   analysisResult?: unknown;
+  /**
+   * The readback's own graph (the same `readBackState` read as the fields above). A card reads a
+   * fact from it ONLY after `coaching/bound-graph.ts` proves its analysis-affecting hash is `graphHash`.
+   */
+  graph?: unknown;
 }
 
 export interface RunTurnCoachingResult {
@@ -110,7 +120,7 @@ function bindCapturedRun(captured: CapturedAnalysis, final: RunTurnCoachingFinal
     if (typeof record(newState?.leader_claim)?.permitted !== 'boolean') return null;
     if (typeof newRun.computed_at !== 'string' || newRun.computed_at.length === 0) return null;
     if (captured.scenario_id !== final.scenarioId) return null;
-    return { graphHash: final.graphHash, computedAt: newRun.computed_at, analysisResult: newResult, fullIdentity: false };
+    return { graphHash: final.graphHash, computedAt: newRun.computed_at, analysisResult: asTheGateLeavesIt(newResult, newState), fullIdentity: false };
   }
   if (oldRun?.kind !== 'complete_current') return null;
   // SAME RUN: the captured run and the readback's run share scenario, hash and time.
@@ -123,11 +133,38 @@ function bindCapturedRun(captured: CapturedAnalysis, final: RunTurnCoachingFinal
   // provisional summary without readiness; neither difference is a new run.
   if (identity.status !== 'match') return null;
   if (!Object.hasOwn(oldResult, 'leading_option_id') || !Object.hasOwn(newResult, 'leading_option_id')
-    || oldResult.leading_option_id !== newResult.leading_option_id) return null;
+    || !sameLeaderDesignation(oldResult.leading_option_id, newResult.leading_option_id, record(newState?.leader_claim))) return null;
   if (typeof record(oldState?.leader_claim)?.permitted !== 'boolean'
     || typeof record(newState?.leader_claim)?.permitted !== 'boolean'
     || !isDeepStrictEqual(oldState?.leader_claim, newState?.leader_claim)) return null;
-  return { graphHash: final.graphHash, computedAt: identity.identity.computed_at, analysisResult: newResult, fullIdentity: true };
+  return { graphHash: final.graphHash, computedAt: identity.identity.computed_at, analysisResult: asTheGateLeavesIt(newResult, newState), fullIdentity: true };
+}
+
+/**
+ * ONE run's leader designation, compared as the two sides actually carry it. The run
+ * response passes the v2 send-point gate, which nulls `leading_option_id` whenever the
+ * claim is WITHHELD (leading-option-wire-enforcement.ts:659-670); the graph read builds
+ * its block from entitlement alone and keeps the fact's id (compose.ts:1275,1348). So an
+ * entitled near tie reads null vs "<id>" for the same run — served 25 Sep on CEE 7f9a16d,
+ * where the hiring Run got no card (`identity_mismatch`). Accept exactly that edit, and
+ * only for a NEAR TIE — the one withheld reason where entitlement holds and only the
+ * separation half declined. A constraint-withheld claim nulls BOTH sides (no entitlement),
+ * and the "not evaluated" reasons carry no verdict, so any difference there still refuses.
+ */
+function sameLeaderDesignation(captured: unknown, readback: unknown, claim: Record<string, unknown> | undefined): boolean {
+  if (captured === readback) return true;
+  return claim?.permitted === false && claim.withheld_reason === WITHHELD_NEAR_TIE
+    && captured === null && typeof readback === 'string';
+}
+
+/**
+ * The readback result with the designation the user is actually shown: under a withheld
+ * claim the builders must not read the ungated id (the DSK-P-003 badge asserts a clear
+ * winner from it — fragile-link-challenge.ts `runShowsClearWinnerForP003`).
+ */
+function asTheGateLeavesIt(result: Record<string, unknown>, state: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (record(state?.leader_claim)?.permitted === true || typeof result.leading_option_id !== 'string') return result;
+  return { ...result, leading_option_id: null };
 }
 
 /**
@@ -156,10 +193,12 @@ function dedupeByBlockId(blocks: readonly CoachingBlock[]): CoachingBlock[] {
 
 /**
  * The run turn's coaching: forwarded upstream cards plus AT MOST ONE run-turn
- * card, and why it is or is not there. The no-flagged-link card is tried ONLY
+ * card, and why it is or is not there. A run whose leader is withheld FOR A
+ * LIMIT gets the limit card and never a link card (one next action; Paul's
+ * manual test 1a298d6d). Otherwise the no-flagged-link card is tried ONLY
  * when the fragile-link challenge found no groundable fragile edge, and it
  * refuses itself whenever any fragile row exists, so the two exclude each other.
- * `eligibility` is `{ eligible: true }` for either card; the card type is read
+ * `eligibility` is `{ eligible: true }` for any card; the card type is read
  * from the signal_id prefix.
  */
 export function runTurnCoaching(
@@ -181,6 +220,11 @@ export function runTurnCoaching(
   if (bound === null) {
     return { blocks: [], eligibility: { eligible: false, reason: 'identity_mismatch' } };
   }
+  // (2b) ONE next action: when the run's own summary asks the user to repair a
+  // limit, that step IS the turn's next action; no run-turn card competes with it.
+  if (summaryAsksUserToRepairALimit(bound.analysisResult.summary)) {
+    return { blocks: upstream, eligibility: { eligible: false, reason: 'limit_repair_pending' } };
+  }
   // (3)–(5) grounding, claim policy, copy — the producer's gates.
   const input: FragileLinkChallengeInput = {
     analysisResult: bound.analysisResult,
@@ -192,6 +236,19 @@ export function runTurnCoaching(
     freshness: 'fresh',
     optionLabels: optionLabelsFromReady(captured.analysis_ready),
   };
+  // (2c) ONE next action, TYPED: when the READBACK's leader claim is withheld for
+  // a limit, the limit is the decisive caveat — the limit card is the turn's one
+  // card and no link card competes with it. Read from the typed claim, never the
+  // summary: the automatic first pass replaces the prose (unrequested-analysis-
+  // confinement.ts), so the prose gate above is blind there. A refused limit card
+  // fails CLOSED (no card), never back to a link card.
+  if (leaderWithheldForALimit(final.analysisState)) {
+    const boundGraph = graphBoundToHash(final.graph, bound.graphHash);
+    const limitLabel = boundGraph !== null ? soleLimitNodeLabel(boundGraph) ?? undefined : undefined;
+    const limit = buildLimitUncheckedCard(input, limitLabel);
+    if (limit.block === null) return { blocks: upstream, eligibility: { eligible: false, reason: limit.reason } };
+    return { blocks: dedupeByBlockId([...upstream, limit.block]), eligibility: { eligible: true } };
+  }
   const built = buildFragileLinkChallenge(input);
   const chosen = built.block === null && built.reason === 'no_groundable_fragile_edge'
     ? buildNoFlaggedLinkCard(input)

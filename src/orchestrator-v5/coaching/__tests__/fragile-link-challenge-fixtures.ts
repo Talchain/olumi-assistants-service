@@ -15,6 +15,12 @@
  *   · c16 — CEE `fd312b5`: fragile edges on a clear winner (the DSK-P-003 badge's positive control).
  *   · c10 — CEE `d2afc2c`: NO fragile edge, robust_edges present, a near tie (the no-flagged-link card).
  *   · c11 — CEE `0415b19`: NO fragile edge, robust_edges present, not a near tie (the same card).
+ *   · paul    — CEE `bdd43f4`: Paul's manual test 1a298d6d (scenario cbd15f83), the AUTOMATIC first pass,
+ *               leader withheld for a limit that could not be checked. Served a fragile-link card.
+ *   · pricing — CEE `06325c6`: the same brief shape; t1 automatic first pass and t2 explicit Run, both
+ *               withheld for the limit. Both served a fragile-link card.
+ *   · hiring  — CEE `4809203`: NO limit problem; t1 automatic pass withheld only because nobody asked,
+ *               t2 explicit near tie. Both served a fragile-link card (controls that must keep it).
  */
 import { readFileSync } from 'node:fs';
 
@@ -36,6 +42,8 @@ export interface TrimmedRunTurn {
     readonly computed_against_hash: string;
     readonly enrichment: { readonly robustness: { readonly fragile_edges: readonly Record<string, unknown>[] } & Record<string, unknown> } & Record<string, unknown>;
   } & Record<string, unknown>;
+  /** The run-turn card signal_ids the SERVED build emitted on this turn (newer fixtures only). */
+  readonly served_run_turn_cards?: readonly string[];
 }
 
 export interface TrimmedRunTurnFixture {
@@ -44,7 +52,7 @@ export interface TrimmedRunTurnFixture {
   readonly turns: Readonly<Record<string, TrimmedRunTurn>>;
 }
 
-export type FixtureLetter = 'A' | 'B' | 'C' | 'c16' | 'c10' | 'c11';
+export type FixtureLetter = 'A' | 'B' | 'C' | 'c16' | 'c10' | 'c11' | 'paul' | 'pricing' | 'hiring';
 
 export const FIXTURE_FILES: Readonly<Record<FixtureLetter, string>> = {
   A: 'c19-8428207-A.run-turns.trimmed.json',
@@ -53,6 +61,9 @@ export const FIXTURE_FILES: Readonly<Record<FixtureLetter, string>> = {
   c16: 'c16-fd312b5-A.run-turns.trimmed.json',
   c10: 'c10-d2afc2c-A.run-turns.trimmed.json',
   c11: 'c11-0415b19-A.run-turns.trimmed.json',
+  paul: 'cbd15f83-bdd43f4-paul.run-turns.trimmed.json',
+  pricing: 'pricing-7212945c-06325c6.run-turns.trimmed.json',
+  hiring: 'hiring-fc9312a3-4809203.run-turns.trimmed.json',
 };
 
 export const PAYLOAD_FILE = 'fragile-link-challenge.payload.json';

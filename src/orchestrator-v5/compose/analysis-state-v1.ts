@@ -204,6 +204,15 @@ export const WITHHELD_NEAR_TIE = 'options_do_not_separate';
 export const WITHHELD_SEPARATION_UNAVAILABLE = 'separation_unavailable';
 export const WITHHELD_RUN_IDENTITY_UNCONFIRMED = 'analysis_run_identity_unconfirmed';
 export const WITHHELD_RUN_IDENTITY_CONFLICT = 'analysis_run_identity_conflict';
+/**
+ * The run's own constraint verdict PERMITTED a leader, and it was withheld
+ * because nobody asked for this analysis (the unrequested-analysis confinement,
+ * `wasAnalysisRequestedByUser`). Distinct from `constraint_verdict_withheld`,
+ * which a consumer renders as "the check against your limits declined": served
+ * c673223 showed that sentence on a brief that set no limits (#63 5825404689).
+ * WE LOOKED AND DECLINED, by policy — so it classifies `withheld`.
+ */
+export const WITHHELD_UNREQUESTED_ANALYSIS = 'unrequested_analysis_withheld';
 
 /**
  * ⭐ TWO DIFFERENT FACTS WEAR THE SAME `withheld_reason` FIELD (S6, 2026-08-26).
@@ -265,6 +274,7 @@ export const LEADER_CLAIM_REASON_KINDS: Readonly<
   Record<string, Exclude<LeaderClaimReasonKind, 'unknown'>>
 > = {
   [WITHHELD_CONSTRAINT_VERDICT]: 'withheld',
+  [WITHHELD_UNREQUESTED_ANALYSIS]: 'withheld',
   [WITHHELD_NEAR_TIE]: 'withheld',
   [WITHHELD_SEPARATION_UNAVAILABLE]: 'not_evaluated',
   [WITHHELD_RUN_IDENTITY_UNCONFIRMED]: 'not_evaluated',
@@ -459,6 +469,15 @@ export interface AnalysisStateComposeInput {
    * explicit `true` is read as "not entitled".
    */
   readonly mayNameLeadingOption?: boolean;
+  /**
+   * OPTIONAL CAUSE for a `mayNameLeadingOption: false` verdict: the fact's own
+   * constraint verdict permitted a leader, and the claim was withheld only
+   * because the analysis was not requested by the user. Only read when the turn
+   * is not entitled; absent or false keeps `constraint_verdict_withheld`, so no
+   * existing caller changes. The caller that holds the fact decides it — this
+   * composer never re-derives it (one authority per question).
+   */
+  readonly withheldBecauseUnrequested?: boolean;
   /** The engine's own robustness signals as they appear on this turn's wire. */
   readonly rawRobustness: RawRobustnessSignals | null;
   /**
@@ -667,7 +686,25 @@ function composeRunState(input: AnalysisStateComposeInput): AnalysisRunState {
 
   // 2. The MODEL is unanalysable — a statement about the model, not a failure
   //    of the engine.
-  if (canonical.status === 'blocked') {
+  // (B) — `blocked` names the RUN only when there is no run record to describe
+  // on this exit: KNOWN absent (`freshness === 'none'`), or NOT CONSULTED — a
+  // graph-less exit that threads readiness without a fact read
+  // (`current_graph_hash_unavailable`), where `blocked` is the pre-(B) answer
+  // and the one the UI's "the model needs a change" note reads. With a selected
+  // prior fact the kind stays `complete_current` / `complete_stale` below, and
+  // the blocking admission rides in `readiness` (status + blockers). A record
+  // that was READ AND FAILED (`derivation_failed`, `invariant_failed`, a legacy
+  // fact) keeps `unknown_degraded`: masking it as `blocked` would hide that a
+  // run may exist behind the failed read.
+  const runRecordAbsentOrUnconsulted =
+    canonical.freshness === 'none' ||
+    (canonical.freshness === 'unknown' &&
+      canonical.freshness_reason === 'current_graph_hash_unavailable');
+  if (
+    canonical.status === 'blocked' &&
+    canonical.selected_fact_index === null &&
+    runRecordAbsentOrUnconsulted
+  ) {
     return {
       kind: 'blocked',
       reason_code:
@@ -829,7 +866,9 @@ function composeLeaderClaim(input: AnalysisStateComposeInput): AnalysisLeaderCla
     // `permitted === false`, and with `entitled === true` that forces
     // `separates === false`, which is exactly when the helper returns non-null.
     claim.withheld_reason = !entitled
-      ? WITHHELD_CONSTRAINT_VERDICT
+      ? input.withheldBecauseUnrequested === true
+        ? WITHHELD_UNREQUESTED_ANALYSIS
+        : WITHHELD_CONSTRAINT_VERDICT
       : separationWithholdFromRobustness(raw)!;
   }
   // ABSENCE IS DISTINCT: omitted means no separation statement was computed,

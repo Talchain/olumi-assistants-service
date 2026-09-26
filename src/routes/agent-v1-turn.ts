@@ -54,14 +54,16 @@ import { narrateWriteOutcome, notAdoptedLine, withWriteOutcome } from '../orches
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
-import { AMEND_CHIP, approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, typedApprovalOf } from '../orchestrator-v5/agent-lane/approval-chips.js';
 import { CarriedProposals, carrierForAnswerRow, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
-import { isPendingActionExpired } from '../orchestrator-v5/session/pending-action.js';
+import { isPendingActionExpired, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
+import { computeSurvivingPriorPendingsDetailed } from '../orchestrator-v5/commit.js';
+import { GM_HELD_HANDLER_ID } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
 import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
-import { enforceLeadingOptionClaimsAtWire } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
+import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runTurnCoaching, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import {
@@ -72,6 +74,7 @@ import {
   type FirstAnalysisOutcome,
 } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
+import { deriveAnswerTextFromShape, synthesiseAnswerShapeFromText, warrantsProgressiveDisclosure } from '../orchestrator-v5/routing/answer-shape.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 /** The egress sanitiser resolves labels against a PARSED graph; an unparseable read gives it none. */
@@ -207,9 +210,10 @@ export function stillValidOffers(
   const runKind = (now.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
   const run = offered.some((a) => a.id === RUN_OFFER_CHIP.id)
     && admitsRunOffer(now.analysisReady) && runKind !== 'complete_current';
-  // The next step after a blocked Run stays offered while the model still cannot run (process-local,
-  // like the approve chip: after a restart the replay carries the words only).
-  const nextStep = offered.some((a) => a.id === NEXT_STEP_AFTER_BLOCKED_RUN_CHIP.id) && !admitsRunOffer(now.analysisReady);
+  // The next step after a blocked Run stays offered while the model is KNOWN not to run (process-local,
+  // like the approve chip: after a restart the replay carries the words only). A replay whose state read
+  // failed is unknown, and an unknown state is never re-advertised as a refusal (#1885 pre-review 5827131835).
+  const nextStep = offered.some((a) => a.id === NEXT_STEP_AFTER_BLOCKED_RUN_CHIP.id) && knownNotRunnable(now.analysisReady);
   // A rebuild stays offered only while there is still no model to build over.
   const rebuild = offered.some((a) => a.id === REBUILD_AFTER_TOO_LARGE_CHIP.id) && !now.modelExists;
   return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : [])];
@@ -277,7 +281,7 @@ const AGENT_INSTRUCTIONS = [
    * be applied from one "yes". The build turn now ends with ONE exact starting
    * point the user can adopt in a single approval.
    */
-  'In that same reply, if any factor has no value or any option sets nothing, call propose_starting_point ONCE with a reasoned starting value for each such factor and the level each option sets, in the user\u2019s own units. An option in `status_quo_held` does not count: it is held at its starting values and is never given levels. Show every figure and what it rests on, say they are your assumptions to adopt or correct, and ask for one approval.',
+  'In that same reply, if any factor has no value or any option sets nothing, call propose_starting_point ONCE with a reasoned starting value for each such factor and a level for each option and factor that has none yet, in the user\u2019s own units. get_canonical_state lists the levels each option already sets (`levels`): quote those as stored, and never propose again a level that is already stored unless the user asks to change it. An option in `status_quo_held` does not count: it is held at its starting values and is never given levels. Show every figure and what it rests on, say they are your assumptions to adopt or correct, and ask for one approval.',
   'If propose_starting_point refuses with incomplete_starting_point, NOTHING is awaiting approval: call it again with a level for every pair in options_missing_levels before you reply. Never ask the user to approve an incomplete starting point.',
   'Discussion, ideation and research are not mutation requests.',
   /*
@@ -329,13 +333,19 @@ const AGENT_INSTRUCTIONS = [
   'An option that connects to a factor but states no level for it blocks the comparison for EVERY option, not only itself. run_analysis names each one. Offer a level in the user\u2019s own units with propose_option_interventions, exactly as you would a starting assumption, and say it is an assumption to correct.',
   'Give propose_option_interventions the number the USER would say (54, not 0.27). If it answers `no_stated_range`, that factor has no range to read the number against \u2014 say so plainly and do not invent one.',
   /*
+   * ⛔ ONE FIGURE, TWO THINGS (Paul's test on served d5d5839, #69 5832088673). The user said the
+   * £50,000 included a recruitment consultant; the Agent proposed "Hire PA sets annual PA salary
+   * to £50,000/year", recording a one-off fee as a recurring salary.
+   */
+  'When a figure the user gives bundles a one-off cost with a recurring one (a salary that includes a recruitment fee, say) or two different quantities, ask which part is which before you propose it, and never record the bundle as the recurring figure.',
+  /*
    * ⭐ THE BLOCKER THAT SURVIVES EVERY VALUE BEING FILLED IN.
    * Measured live at served 877ae800: eight assumptions adopted, ZERO factors
    * left without a value — and the analysis still refused, because one option
    * of three carried `interventions: null`. An option that sets nothing cannot
    * be compared with one that does.
    */
-  'get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model \u2014 do not wait for the analysis to refuse \u2014 ask what that option would actually change, and record the answer with propose_option_interventions. An option in `status_quo_held` is not in that list and is never given levels: say, in one short clause, that carrying on as now holds today\u2019s values, and that the user can say what would change if that is wrong. If they do, record exactly what they said with propose_option_interventions and user_stated: true on that level.',
+  'get_canonical_state also reports `options_that_change_nothing`. An option in that list sets no factor, so it cannot be compared and it blocks the whole analysis. Raise it when you describe the model \u2014 do not wait for the analysis to refuse \u2014 ask what that option would actually change, and record the answer with propose_option_interventions, with user_stated: true on each level the user gave. An option in `status_quo_held` is not in that list and is never given levels: say, in one short clause, that carrying on as now holds today\u2019s values, and that the user can say what would change if that is wrong. If they do, record exactly what they said with propose_option_interventions and user_stated: true on that level.',
   /*
    * ⛔ ANALYSIS IS MODEL-RELATIVE, NEVER A RECOMMENDATION (Paul, 23 Sep: "Olumi is a
    * reasoning-enhancement system, not an answer or decision engine"). Measured on
@@ -344,8 +354,8 @@ const AGENT_INSTRUCTIONS = [
    * the vocabulary itself casts the finding as picking an answer. The useful move is the one the science supports: point at what the
    * ordering is sensitive to, and let the user change it and see how much it matters.
    */
-  'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one. Name a leading option ONLY when the result you are reporting carries `claim_permissions.leader_may_be_named: true`; an earlier analysis read from get_canonical_state carries no such permission, so never name a leader from it. Otherwise do not name, rank or hint at one, and do not quote win percentages as a ranking, whatever else the result contains \u2014 say in plain words why no option can be put forward yet. When `leader_may_be_named` is false, the finding you lead with is why no option can be put forward \u2014 not which option the comparison favours. Do not say, even hedged or \u201con current assumptions\u201d, that any option leads, is favoured, scores or comes out highest, strongest or best, is ahead, or wins in any share of runs; describe robustness and sensitivity without saying which option they favour. When the result reports sensitivity, name the one assumption the ordering is most sensitive to, say whether it comes from the user or is Olumi\u2019s estimate (or that its source is not recorded), and offer to change it. When the result is fragile or a near tie, say that this uncertainty is itself the finding.',
-  'When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each — then authorise_change once they confirm. It adds the option and its links ONLY: say plainly that it cannot be compared until it states what it does to each factor, and offer propose_option_interventions for that. Never invent the direction; if you are not sure which way it pushes a factor, ask.',
+  'When you report an analysis, describe what the CURRENT model implies given its assumptions \u2014 a finding to reason with, never a recommendation. Never call an option the winner, the best option or the recommended one. Name a leading option ONLY when the result you are reporting carries `claim_permissions.leader_may_be_named: true`; an earlier analysis read from get_canonical_state carries no such permission, so never name a leader from it. Otherwise do not name, rank or hint at one, and do not quote win percentages as a ranking, whatever else the result contains \u2014 say in plain words why no option can be put forward yet. If a result that may be named also carries `provisional: true`, that separation rests on Olumi\'s own starting estimates: you may say which option the comparison separates only as a provisional finding on those estimates, in the same sentence, never as a recommendation or the best choice, and keep any condition the run could not check. When `leader_may_be_named` is false, the finding you lead with is why no option can be put forward \u2014 not which option the comparison favours. Do not say, even hedged or \u201con current assumptions\u201d, that any option leads, is favoured, scores or comes out highest, strongest or best, is ahead, or wins in any share of runs; describe robustness and sensitivity without saying which option they favour. When the result reports sensitivity, name the one assumption the ordering is most sensitive to, say whether it comes from the user or is Olumi\u2019s estimate (or that its source is not recorded), and offer to change it. When the result is fragile or a near tie, say that this uncertainty is itself the finding. When the run says a limit cannot be checked in this model yet, say so plainly and do not suggest any step, input or model change to make it checkable.',
+  'When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each, and — ONLY for a figure the user stated — the level it sets each factor to; it is linked from the decision automatically. Then call authorise_change once they confirm. A factor with no stated level is added with no level: say plainly which, and ask for the figure. Never invent a level or a direction; if you are not sure, ask.',
   /*
    * \u26d4 NO AUTOMATIC RUN AFTER A REVISION (Codex 5810763729, 24 Sep). This
    * instruction used to end "after it applies, run_analysis in the same turn and
@@ -430,6 +440,102 @@ export const RUN_OFFER_CHIP = {
 export function admitsRunOffer(analysisReady: unknown): boolean {
   const ar = (analysisReady ?? {}) as { may_run?: unknown; status?: unknown };
   return typeof ar.may_run === 'boolean' ? ar.may_run : ar.status === 'ready';
+}
+
+/**
+ * A KNOWN refusal to run: the readiness was read and says no (`may_run: false`, or, when `may_run` is absent,
+ * a stated status other than `ready`). NOT the negation of {@link admitsRunOffer}: a failed or empty readback is
+ * unknown, and an unknown state is never presented as a refusal (#1885 pre-review, #69 5826878223).
+ */
+export function knownNotRunnable(analysisReady: unknown): boolean {
+  if (analysisReady === null || typeof analysisReady !== 'object') return false;
+  const ar = analysisReady as { may_run?: unknown; status?: unknown };
+  return typeof ar.may_run === 'boolean' ? ar.may_run === false : typeof ar.status === 'string' && ar.status !== 'ready';
+}
+
+/** The approve chip's id prefix, taken from the chip's own producer — never a copy of its string. */
+const APPROVE_CHIP_ID_PREFIX = approvalChipIdFor('');
+
+/** Does this response offer an approval: is the approve chip among its `suggested_actions`? */
+export function offersApproval(body: { suggested_actions?: unknown }): boolean {
+  const actions = body.suggested_actions;
+  return Array.isArray(actions) && actions.some((a) => {
+    const id = a !== null && typeof a === 'object' ? (a as { id?: unknown }).id : undefined;
+    return typeof id === 'string' && id.startsWith(APPROVE_CHIP_ID_PREFIX);
+  });
+}
+
+/**
+ * Did this turn's calls leave a proposal awaiting the user's yes, WHETHER OR NOT a chip names it?
+ * `approvalChipsFor` is the rule (a proposing tool that succeeded, after the turn's last model change, not
+ * consumed by an authorisation), but it offers a chip only when exactly ONE proposal qualifies: with two
+ * pending it offers none and the Agent asks in words. So it is asked about each proposal ALONE — every other
+ * proposal's id hidden, every call kept in place so order and mutation still count — and never re-derived.
+ */
+export function leavesProposalAwaitingApproval(
+  calls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[],
+): boolean {
+  return calls.some((c, j) => c.name !== 'authorise_change' && typeof c.proposal_id === 'string'
+    && approvalChipsFor(calls.map((d, i) => {
+      if (i === j || d.name === 'authorise_change') return d;
+      const { proposal_id: _hidden, ...rest } = d;
+      return rest;
+    })).length > 0);
+}
+
+/**
+ * ⭐ AN ANALYSIS REPLY ARRIVES HEADLINE FIRST (UI contract UI-SEM-090; agreed design #69 5831886008).
+ * A Run reply on this route is a finding, a few bullets and often a closing line, and with no sidecar
+ * the UI renders it whole as free text. The product's own `_answer_shape` sidecar makes it headline + at
+ * most three bullets, with the rest behind "Show more" — the SAME synthesiser and derivation route-v2's
+ * egress uses (`routing/answer-shape.ts`), never a second one.
+ *
+ * ⛔ THE TIE HOLDS BY IDENTITY: `assistant_text` is SET to `deriveAnswerTextFromShape(shape)` in the same
+ * object that carries the shape, so the text and its sidecar cannot describe different answers.
+ *
+ * SCOPE: only a response that carries an `analysis_result` block — the explicit Run, the automatic first
+ * pass on a build turn, and any turn answered over a current result. A response with no result block
+ * (a blocked Run, a turn on a model with no current result) is returned by reference, byte-identical. So
+ * is one that already carries a shape, one the synthesiser declines (a single sentence, or nothing after
+ * the bullets to put behind the toggle), and one below the floor with no bullet.
+ *
+ * ⚠ A DELIBERATE DIFFERENCE FROM ROUTE-V2'S GATE. Route-v2 shapes only above the collapse floor
+ * (`warrantsProgressiveDisclosure`), because below it a shape could turn "the user reads all of it"
+ * into "the user reads one sentence". Here a reply below the floor is shaped too, but ONLY when the shape
+ * keeps at least one bullet on the face, so what shows is headline + bullets, never a lone sentence.
+ * Above the floor it is shaped exactly as route-v2 would shape it.
+ *
+ * ⛔ CALL IT ON THE FINAL PROSE — after the withheld-leader gate and every other rewrite of
+ * `assistant_text` on this route — so a headline or bullet can never carry a sentence a gate removed.
+ *
+ * ⛔ CONSENT BEFORE BREVITY: A TURN THAT ASKS FOR AN APPROVAL IS NEVER SHAPED. The build turn's first pass
+ * with a four-figure starting point, or a proposal made over a current result, would put figure four behind
+ * "Show more" beside the chip that approves all four. So a response whose `suggested_actions` carry the
+ * approve chip (`offersApproval`), or a turn the route says left a proposal awaiting a yes whether or not a
+ * chip names it (`turn.proposalAwaitingApproval`, from `approvalChipsFor`'s own rule), is returned by
+ * reference, byte-identical.
+ */
+export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; blocks?: unknown; suggested_actions?: unknown }>(
+  body: T,
+  turn: { proposalAwaitingApproval?: boolean; leaderGateEditedText?: boolean } = {},
+): T {
+  if ('_answer_shape' in body) return body;
+  if (turn.proposalAwaitingApproval === true || offersApproval(body)) return body;
+  // ⛔ The leader gate rewrote this text: its no-leader sentence and next action close the reply, and a
+  // shape would put them behind "Show more" (independent review of #1914, 5832549611). Ship it whole, as
+  // route-v2 does when its gate edits the text.
+  if (turn.leaderGateEditedText === true) return body;
+  const blocks = body.blocks;
+  const carriesResult = Array.isArray(blocks)
+    && blocks.some((b) => b !== null && typeof b === 'object' && (b as { type?: unknown }).type === 'analysis_result');
+  if (!carriesResult) return body;
+  const text = body.assistant_text;
+  if (typeof text !== 'string' || text.trim().length === 0) return body;
+  const shape = synthesiseAnswerShapeFromText(text);
+  if (shape === null) return body;
+  const derived = deriveAnswerTextFromShape(shape);
+  if (!warrantsProgressiveDisclosure(derived) && shape.bullets.length === 0) return body;
+  return { ...body, assistant_text: derived, _answer_shape: shape };
 }
 
 /**
@@ -1065,6 +1171,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const approvedProposal = typedApprovalOf(body);
     const requestHash = agentTurnRequestHash(scenarioId, userId, message, approvedProposal !== undefined ? `approve:${approvedProposal}` : undefined);
     /** The response a replay returns: the ORIGINAL words, on today's state, with no model call. */
+    /** The `gmh_` handles of the product's held add-options still live on the latest answer row (C52). A failed read is none. */
+    const liveHeldRefs = async (sid: string): Promise<string[]> => {
+      if (typeof store.readMostRecentPendingActions !== 'function') return [];
+      try {
+        return (await store.readMostRecentPendingActions(sid))
+          .filter((pa) => pa.action.kind === 'apply_proposed_change'
+            && (pa.action as { inline_patch?: { handler_id?: unknown } }).inline_patch?.handler_id === GM_HELD_HANDLER_ID
+            && !isPendingActionExpired(pa, Date.now()))
+          .map((pa) => pa.chip_id);
+      } catch {
+        return [];
+      }
+    };
     const replayed = async (prior: CommittedTurnRecord) => {
       const state = await readBackState(dispatch, scenarioId);
       const remembered = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) ?? [] : [];
@@ -1088,7 +1207,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         stage: 'frame',
         answerKind: 'substantive',
         suggested_actions: stillValidOffers(offered, {
-          outstandingProposalIds: ((id) => new Set(id !== undefined ? [id] : []))(executableWaitingProposal(scenarioId, userId, state.graphHash)),
+          outstandingProposalIds: new Set([
+            ...((id) => (id !== undefined ? [id] : []))(executableWaitingProposal(scenarioId, userId, state.graphHash)),
+            ...(await liveHeldRefs(scenarioId)),
+          ]),
           analysisReady: state.analysisReady,
           analysisState: state.analysisState,
           // `draft_graph` is read back only when the graph has content.
@@ -1251,7 +1373,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const capabilities = createAgentCapabilities(
       countingDispatch, proposals, callStructured, mode,
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
-      { firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }) },
+      {
+        firstAnalysis: (input) => runFirstAnalysis({ ...input, deadlineAt: firstAnalysisDeadlineAt }),
+        // The held add-option (C52) is confirmed against the store's LATEST answer row — the row route-v2 reads.
+        ...(typeof store.readMostRecentPendingActions === 'function'
+          ? { readPendingActions: (sid: string) => store.readMostRecentPendingActions!(sid) }
+          : {}),
+      },
     );
     // A session whose in-process history holds no user message (a restart, a
     // deploy, an eviction — or only a board-edit note appended since) is seeded
@@ -1558,16 +1686,32 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     })();
     // A withheld call consumed no proposal and moved nothing: it is not an authorisation, and
     // counting one (it has no proposal id) would strand the proposal it named without its chip.
-    const approvals = approvalChipsFor(result.tool_calls.filter((c) => c.refusal !== WITHHELD_ON_CHIP_TURN));
+    const approvalCalls = result.tool_calls.filter((c) => c.refusal !== WITHHELD_ON_CHIP_TURN);
+    // The chip's words come from the STORED proposal it approves and its proposer's own result, never the Agent's prose.
+    const approvals = approvalChipsFor(
+      approvalCalls,
+      (id) => ({ proposal: proposals.get(id), result: result.tool_results.find((r) => r.proposal_id === id) }),
+    );
     // A first analysis the model could not run offers its repair: the approve chip when the Agent
     // proposed the missing values this turn, otherwise the next-step chip.
     const firstAnalysisBlocked = fa !== undefined && !fa.ran && (fa.reason === 'not_admissible' || fa.reason === 'refused')
       && approvals.length === 0;
+    /**
+     * ⛔ AN APPROVAL THAT LEAVES THE MODEL UN-RUNNABLE STILL OFFERS A NEXT STEP (P0, 25 Sep; RC #69 5826744045 §2).
+     * Served `21e3b38`, hiring: "Use as starting assumptions" applied (`authorise_change` mutated), the model
+     * stayed `blocked` with `blockers: null` and `may_run: false`, and the reply was "Saved." with NO chip: the
+     * user had nothing to press. The Run offer above correctly declines, so the next-step chip stands in. The
+     * Run turn that followed named the gap and offered this same chip. Not when another approval is waiting,
+     * and only on a KNOWN refusal: a failed readback is unknown and offers nothing (see `knownNotRunnable`).
+     */
+    const approvalLeftBlocked = result.tool_calls.some((c) => c.name === 'authorise_change' && c.mutated === true)
+      && knownNotRunnable(analysisReady)
+      && approvals.length === 0 && carriedApproval.length === 0;
     const offeredNow: OfferedAction[] = [
       ...approvals,
       ...carriedApproval,
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
-      ...(runBlocked || firstAnalysisBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
+      ...(runBlocked || firstAnalysisBlocked || approvalLeftBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
       ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
     ];
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
@@ -1586,10 +1730,41 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       currentGraphHash: graphHash,
       emittedAtIso,
     });
-    const durablePending = [
-      ...(offerRun ? derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: emittedAtIso, ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) : []),
+    /**
+     * ⛔ THIS ROW MUST CARRY THE PRODUCT'S HELD ADD-OPTION FORWARD (C52). Pending actions are read from the
+     * LATEST answer row only (`supabase-store.ts` readMostRecentPendingActions: `.limit(1)`), and this row is
+     * written AFTER route-v2's row that minted the hold — so a row that carries only the Agent's own items drops
+     * the hold, and the user's approval then finds nothing to confirm. Read at the END of the turn, after every
+     * inner write: a hold this turn confirmed is already consumed and is not carried. Holds go first; the row
+     * holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK). A failed read carries none, loudly.
+     */
+    let liveHolds: readonly PendingAction[] = [];
+    if (typeof store.readMostRecentPendingActions === 'function') {
+      try {
+        const held = (await store.readMostRecentPendingActions(scenarioId)).filter((pa) => pa.action.kind === 'apply_proposed_change'
+          && (pa.action as { inline_patch?: { handler_id?: unknown } }).inline_patch?.handler_id === GM_HELD_HANDLER_ID);
+        /*
+         * ⛔ CARRIED BY THE PRODUCT'S OWN SURVIVAL RULE, never copied verbatim (Canonical, #70 5841421182,
+         * condition 2): a hold whose pinned model has moved (this turn's write, or anyone's) could only be refused,
+         * so it is not carried to be offered as a dead button; the turn count runs down once per answer row; the
+         * wall clock bounds it. Same function, same order, as every route-v2 commit (`commit.ts`).
+         */
+        liveHolds = computeSurvivingPriorPendingsDetailed(held, [], [], graphHash, Date.now()).survivors;
+      } catch (err) {
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: live held proposals could not be read — this answer row carries none');
+      }
+    }
+    const pendingCandidates = [
+      ...liveHolds,
       ...(approvalCarrier !== undefined ? [approvalCarrier] : []),
+      ...(offerRun ? derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: emittedAtIso, ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) : []),
     ];
+    // The row holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK). Holds go first; what does not fit is said, never silent.
+    if (pendingCandidates.length > PENDING_ACTIONS_PER_TURN_CAP) {
+      log.warn({ scenario_id: scenarioId, dropped: pendingCandidates.slice(PENDING_ACTIONS_PER_TURN_CAP).map((pa) => pa.action.kind) },
+        'agent-lane: pending actions over the per-row cap — the lowest-priority items are not carried');
+    }
+    const durablePending = pendingCandidates.slice(0, PENDING_ACTIONS_PER_TURN_CAP);
 
     const lastRunBlocks = Array.isArray(lastRun?.blocks) ? lastRun.blocks : [];
     const runBound = bindRunBlocksToReadback(lastRunBlocks, { graphHash, analysisState, analysisResult });
@@ -1599,7 +1774,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * without it the first pass is blank. Only the blocks the contract BUILDS are added: the run's own
      * blocks stay under `bindRunBlocksToReadback`'s rule above.
      */
-    const runCoaching = runTurnCoaching(lastRun, { scenarioId, graphHash, analysisState, analysisResult });
+    const runCoaching = runTurnCoaching(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph });
     const coachingBound = [...runBound, ...runCoaching.blocks.filter((b) => !lastRunBlocks.includes(b))];
     const coachingBlocks: unknown[] = coachingBound.length === 0
       ? []
@@ -1665,14 +1840,21 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * analysis, `leader_claim.permitted` from the SAME readback is the entitlement, conjoined inside
      * the gate with the admission's `permitted_analysis_mode`. PERMIT-WINS: a permitted turn is
      * returned by reference, byte-identical.
+     *
+     * ⛔ FAIL-CLOSED ON A WITHHELD TURN (AI Quality corpus #63 5823028488; Codex 5823210765): the
+     * shared gate needs the EXACT option label and caught 1 of 13 real paraphrased leaks. So on a
+     * withheld turn every sentence that ranks options is dropped first, whatever it calls the
+     * option, and one deterministic no-leader sentence is appended; then the shared gate runs on
+     * what remains. See `agent-lane/withheld-leader-fail-closed.ts`.
      */
     const analysisBearing = analysisResult !== undefined
       || fa !== undefined
       || result.tool_calls.some((c) => c.name === 'run_analysis');
     let leaderClaimEnforced = false;
+    let leaderGateEditedText = false;
     if (analysisBearing) {
       const claim = (analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
-      const enforced = enforceLeadingOptionClaimsAtWire(wireBody, {
+      const enforced = enforceAgentLaneLeaderClaimsAtWire(wireBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1',
         mayNameLeadingOption: claim?.permitted === true,
@@ -1683,11 +1865,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       if (enforced.changed) {
         leaderClaimEnforced = true;
+        leaderGateEditedText = enforced.editedFields.includes('assistant_text');
         // A shape sidecar describes the text it was built from; it goes with an edit to that text.
         const { _answer_shape: _dropped, ...withoutShape } = enforced.response as OlumiResponse & { _answer_shape?: unknown };
         wireBody = (enforced.editedFields.includes('assistant_text') ? withoutShape : enforced.response) as OlumiResponse & Record<string, unknown>;
       }
     }
+    /**
+     * ⭐ HEADLINE FIRST ON AN ANALYSIS REPLY — see `withAnalysisAnswerShape`. HERE, and nowhere earlier:
+     * this is after the last rewrite of `assistant_text` on this route (write-claim removal, disclosures,
+     * proposal-id scrub, the leader gate above), so the shape is built from the prose the user receives,
+     * and before the answer row is written, so a replay returns the same words. Never on a turn that asks
+     * for an approval: the route's own offer, or a proposal the chip rule left without a chip. Never on
+     * a turn whose text the leader gate rewrote: its disclosure stays on the face.
+     */
+    wireBody = withAnalysisAnswerShape(wireBody, {
+      proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
+      leaderGateEditedText,
+    });
 
     /**
      * ⭐ PERSIST THE TURN BEFORE ANSWERING — the row a lost-response retry is
@@ -1696,7 +1891,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * text returned, disclosures included, so a replay is word-for-word.
      */
     let durability: 'recorded' | 'not_recorded' | 'no_turn_id' = 'no_turn_id';
-    if (turnId !== undefined) {
+    /**
+     * ⛔ AN OFFER IS DURABLE EVEN WHEN THE CLIENT NAMED NO TURN (Canonical State's deploy-survival witness,
+     * #69 5833516415 / 5833557327): its turns sent no `turn_id`, so the answer row that carries the offer was
+     * never written, and after a real CEE deploy "Use as starting assumptions" met `unknown_proposal`. The
+     * UI always names its turns (DecisionGuideAI `buildPayload.ts:202`); an API caller need not. So a turn
+     * with no id that has an offer to carry writes its answer row under an id minted HERE, at the end —
+     * no claim, no replay, no fence, exactly as before for everything else about an unnamed turn.
+     */
+    const rowTurnId = turnId ?? (durablePending.length > 0 ? randomUUID() : undefined);
+    if (rowTurnId !== undefined) {
       try {
         // Through the SHARED persistence floor, like every turn row: the one
         // `store.append` stays inside it (C8). No graph rides on this row.
@@ -1706,9 +1910,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           source: 'agent_turn',
           write: {
           scenario_id: scenarioId,
-          // The ANSWER row, under the client's own turn_id; the claim
-          // (`<turn_id>:claim`) was taken before the run.
-          turn_id: turnId,
+          // The ANSWER row, under the client's own turn_id (the claim `<turn_id>:claim` was taken before
+          // the run), or under the id minted above for an unnamed turn that carries an offer.
+          turn_id: rowTurnId,
           // DB CHECK: (turn_class = 'handler') = (handler_id IS NOT NULL) —
           // the graph-register precedent for a turn with no handler.
           turn_class: 'direct_answer',
@@ -1728,10 +1932,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         if (outcome.priorTurnConflict === true) {
           // A concurrent request with the SAME id and a DIFFERENT message won the
           // row. This answer is not the recorded one; say so rather than return it.
-          log.warn({ scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: turn id taken by a different concurrent message');
+          log.warn({ scenario_id: scenarioId, turn_id: rowTurnId }, 'agent-lane: turn id taken by a different concurrent message');
           return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. This reply was not recorded.' });
         }
-        if (outcome.replayedPriorTurn === true && typeof store.readCommittedTurn === 'function') {
+        if (outcome.replayedPriorTurn === true && turnId !== undefined && typeof store.readCommittedTurn === 'function') {
           // An identical concurrent request committed first: ITS answer is the
           // record, so it is the one returned.
           const first = await store.readCommittedTurn(scenarioId, turnId);
@@ -1743,7 +1947,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       } catch (err) {
         // The answer is real and the writes already happened; hiding it would be
         // worse. It is returned, flagged as not durable, and logged loudly.
-        log.error({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: answer could not be recorded — the claim stands, so a retry reports an unknown outcome and never re-runs');
+        log.error({ err: String(err), scenario_id: scenarioId, turn_id: rowTurnId }, 'agent-lane: answer could not be recorded — the claim stands, so a retry reports an unknown outcome and never re-runs');
         durability = 'not_recorded';
       }
     }
@@ -1801,7 +2005,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         mutated: result.mutated,
         hops: result.hops,
         stopped_reason: result.stopped_reason,
-        ...(turnId !== undefined ? { turn_id: turnId, durability } : {}),
+        // An unnamed turn that carried an offer reports its durability too; its minted id is no retry key, so it is not echoed.
+        ...(turnId !== undefined ? { turn_id: turnId, durability } : rowTurnId !== undefined ? { durability } : {}),
         /**
          * ⭐ WHICH VERSION THIS TURN PRODUCED, so a surface can reconcile what it
          * is showing against what was actually saved. `mutated: true` said the

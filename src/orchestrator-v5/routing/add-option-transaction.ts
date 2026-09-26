@@ -211,7 +211,7 @@ function deriveOptionId(label: string, graph: AddOptionGraphView): string {
  * truthful `user_specified` provenance. Full canonical value because the
  * confirm-side apply does not run `enforceStructuralEdgeDefaults`.
  */
-function structuralEdgeValue(from: string, to: string): Record<string, unknown> {
+export function structuralEdgeValue(from: string, to: string): Record<string, unknown> {
   return {
     from,
     to,

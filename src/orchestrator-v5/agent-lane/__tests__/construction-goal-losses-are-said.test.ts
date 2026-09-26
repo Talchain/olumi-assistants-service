@@ -58,9 +58,10 @@ const GTM = (goal: Record<string, unknown>) => ({
 
 // `target_stated: true` — both briefs here DO name £3m, and the field is now required
 // by `buildCandidateSchema`. The live-schema guard below is what caught its absence,
-// which is the one part of that guard this change can vouch for.
-const WITH_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, value: 3000000, unit: 'GBP', horizon_months: 18, provenance: 'explicit' });
-const NO_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, value: 3000000, unit: 'GBP', horizon_months: null, provenance: 'explicit' });
+// which is the one part of that guard this change can vouch for. The goal's current
+// level (`baseline_*`, #1840) is required the same way; neither brief states one.
+const WITH_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, value: 3000000, unit: 'GBP', horizon_months: 18, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit' });
+const NO_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, value: 3000000, unit: 'GBP', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit' });
 
 /**
  * ⭐ THE FIXTURE MUST BE ONE THE REAL SCHEMA WOULD ACCEPT. A test in this area once
@@ -119,7 +120,7 @@ async function build(payload: Record<string, unknown>) {
     brief: 'We are choosing between three go-to-market moves for next year. Budget is £900k either way and we want to add £3m of new ARR within eighteen months.',
   });
   expect(r.ok, JSON.stringify(r)).toBe(true);
-  return r as { ok: boolean; not_represented?: string[]; projected_field_count?: number };
+  return r as { ok: boolean; not_represented?: string[]; open_questions?: string[]; projected_field_count?: number };
 }
 
 describe('a construction says WHICH goal facts the model could not carry', () => {
@@ -143,5 +144,31 @@ describe('a construction says WHICH goal facts the model could not carry', () =>
     const said = (r.not_represented ?? []).join(' · ');
     expect(said, `not_represented was: ${JSON.stringify(r.not_represented)}`).not.toMatch(/horizon/i);
     expect(said, `not_represented was: ${JSON.stringify(r.not_represented)}`).toMatch(/floor from a ceiling/);
+  });
+});
+
+/**
+ * ⛔ THE DEADLINE MUST REACH THE USER, NOT ONLY THE AGENT (MG fidelity scorecard, served CEE `85ce874`,
+ * 26 Sep 00:16Z: Paul's "£20k MRR within 12 months" brief built a model with no horizon, and the reply
+ * never mentioned the deadline). `not_represented` is read only by the Agent's model, which may skip it;
+ * `open_questions` is appended to the user's reply by the server every time (`write-outcome.ts`
+ * `openQuestionsLine`). A stated deadline the model cannot hold is therefore ASKED there, first, so it is
+ * never cut by the five-question cap.
+ */
+describe('a deadline the model cannot hold is asked where the user always sees it', () => {
+  it('RED: an 18-month deadline becomes the FIRST open question, naming the goal and the months', async () => {
+    // Six parked questions: more than the five the reply shows, so "first" is what keeps the deadline visible.
+    const parked = ['Which channel converts best?', 'What does a lost deal cost?', 'Who owns pricing?', 'How long is the sales cycle?', 'What is churn today?', 'Which segment grows fastest?'];
+    const r = await build({ ...WITH_DEADLINE, unknowns: parked });
+    const qs = r.open_questions ?? [];
+    expect(qs.slice(1), 'the drafter\'s own questions follow, unchanged and in order').toEqual(parked);
+    expect(qs[0], JSON.stringify(qs)).toBe('Does "New ARR" get there within 18 months? The model holds no deadline yet, so no result answers that.');
+    // Stated exactly once, whatever else the drafter parked.
+    expect(qs.filter((q) => /within 18 months/.test(q))).toHaveLength(1);
+  });
+
+  it('CONTROL: a goal with no deadline adds no deadline question', async () => {
+    const r = await build(NO_DEADLINE);
+    expect((r.open_questions ?? []).filter((q) => /within \d+ months|no deadline/.test(q))).toHaveLength(0);
   });
 });

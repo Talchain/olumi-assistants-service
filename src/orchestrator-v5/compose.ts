@@ -1653,6 +1653,15 @@ function rebuildPhase3BlocksFresh(
  * Scanned with the SHARED vocabulary (`textNamesLeadingOption`), so this gate
  * and the alarm that measures the residue cannot drift apart.
  */
+/**
+ * The ONE definition of a block that presumes a leading option, for any route that must drop such blocks on a
+ * turn whose leader is withheld — the Agent lane's run blocks read it (`bindRunBlocksToReadback`), so the two
+ * routes cannot disagree about which cards say "the leading option is ahead".
+ */
+export function blockPresumesLeadingOption(block: OlumiResponse['blocks'][number]): boolean {
+  return presumesLeadingOption(block) || evidenceGapPresumesLeadingOption(block);
+}
+
 function evidenceGapPresumesLeadingOption(block: OlumiResponse['blocks'][number]): boolean {
   const candidate = block as { type?: unknown; evidence_gap?: unknown };
   return (

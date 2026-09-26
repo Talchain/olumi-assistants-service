@@ -150,20 +150,3 @@ export function planNewOption(
     publicLabel: `Add the option "${label}", acting on ${actsOn.map((a) => a.label).join(', ')}`,
   };
 }
-
-/**
- * What the Agent must tell the user after this applies.
- *
- * ⚠ Deliberately NOT optimistic. The option exists and is linked, and it still
- * cannot be compared until each link carries a level — so the copy says that
- * rather than implying the model is ready.
- */
-export function newOptionFollowUp(plan: NewOptionPlan): string {
-  const one = plan.actsOn.length === 1;
-  return (
-    `"${plan.label}" is in the model and linked to ${plan.actsOn.map((a) => a.label).join(', ')}. `
-    + `It does not yet say what it does to ${one ? 'that factor' : 'those factors'}, so it cannot be compared yet `
-    + '— and until it can, it holds up the comparison for every option. '
-    + 'Say what it would change and by how much, in your own units, and it can be set.'
-  );
-}

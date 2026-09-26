@@ -105,8 +105,12 @@ import {
   readRawRobustnessFromResponseBody,
   projectAnalysisBlocksForRunBinding,
 } from '../orchestrator-v5/compose/analysis-state-v1.js';
-import { mayPresentLeaderClaimForFact } from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
+import {
+  leaderWithheldOnlyBecauseUnrequested,
+  mayPresentLeaderClaimForFact,
+} from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { deriveAnalysisFreshness, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
 import { isScenarioAnalysisReasoningAuthority } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
@@ -228,11 +232,18 @@ export async function readScenarioAnalysis(
     // "no success in that page" as `none` would be a positive "never analysed"
     // claim, so under `capped` an empty selection stays `unknown`. This is the
     // turn path's own rule (`build-turn-context.ts`, `scenarioAnalysisFactsReadOk`).
+    //
+    // ⚠ AND NEVER FOR THE WINDOW FALLBACK. When the durable read is `degraded`
+    // the hot window is still read — a success in it is positive evidence and is
+    // compared by hash as before — but an EMPTY window is 20 rows, not the
+    // record: a run can sit behind it. So absence there is never authoritative
+    // and an empty selection reads `unknown / derivation_failed`, not
+    // `none / never_run` (Codex pre-review finding 5824695259). `readOk` is
+    // consulted only when no fact is selected, so this changes nothing else.
+    // Same rule as the turn path: only `complete` licenses "never analysed".
     const durableAuthority = isScenarioAnalysisReasoningAuthority(factSet);
     const facts = durableAuthority ? factSet.facts : hotWindow.facts;
-    const factsReadOk = durableAuthority
-      ? factSet.status === 'complete'
-      : hotWindow.status === 'ok';
+    const factsReadOk = factSet.status === 'complete';
     const derivation = deriveAnalysisFreshness(facts, currentGraphHash, undefined, {
       priorFactsReadOk: factsReadOk,
       analysisInvalidatedAt,
@@ -252,10 +263,37 @@ export async function readScenarioAnalysis(
         : null;
     const analysisResult = fact !== null ? buildAnalysisResultBlock(fact) : null;
 
+    // ⭐ (B) THE ONE ADMISSION VERDICT — the SAME authority and the SAME
+    // threading the turn replies use (`route-v2.ts` passes
+    // `{ readiness: ctx.analysisReady }`; the finaliser passes it to both
+    // composers). Before (B) this leg passed `{}`, so every reload read
+    // readiness `{unknown, []}` beside a model the Run control refused.
+    // FAIL-SOFT: a throw here keeps the unsupplied verdict (the pre-(B)
+    // behaviour) instead of losing the whole additive analysis read.
+    let analysisReady: ReturnType<typeof buildCanonicalAnalysisReadyFromGraph>;
+    try {
+      analysisReady = buildCanonicalAnalysisReadyFromGraph(params.graph);
+    } catch (err) {
+      analysisReady = undefined;
+      log.warn(
+        {
+          event: 'v5.scenario_graph.analysis_read_admission_failed',
+          request_id: params.requestId,
+          scenario_id: params.scenarioId,
+          err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+        },
+        'Scenario graph read — admission verdict unavailable; readiness stays unsupplied',
+      );
+    }
+
     const analysisState =
       composeAnalysisStateV1({
-        canonical: canonicalStateFromFreshness(derivation, {}),
+        canonical: canonicalStateFromFreshness(
+          derivation,
+          analysisReady !== undefined ? { readiness: analysisReady } : {},
+        ),
         freshness: derivation,
+        ...(analysisReady !== undefined ? { readiness: analysisReady } : {}),
         ...(historical === null ? {} : {
           runFactBinding: {
             scenarioId: params.scenarioId,
@@ -281,6 +319,10 @@ export async function readScenarioAnalysis(
         // answers. The shared admission is the fix; copying the conjunction here
         // would have been the mirror.
         mayNameLeadingOption: fact !== null ? mayPresentLeaderClaimForFact(fact) : false,
+        // WHY it is withheld, when the fact can prove it: its own constraint verdict
+        // permitted a leader and nobody asked for this run (the automatic first
+        // pass). Otherwise the constraint token stands (#63 5825404689).
+        withheldBecauseUnrequested: fact !== null && leaderWithheldOnlyBecauseUnrequested(fact),
         rawRobustness:
           analysisResult !== null
             ? readRawRobustnessFromResponseBody({ blocks: [analysisResult] })

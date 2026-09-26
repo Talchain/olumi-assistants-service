@@ -120,11 +120,11 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     name: 'propose_new_option',
     description:
       'Add an option the user has just asked for, when the model does NOT already have it. '
-      + 'This does NOT change anything: it records an exact proposal and returns its id, which you keep for '
+      + 'This does NOT change anything: it prepares ONE complete change and returns its id, which you keep for '
       + 'authorise_change: show the user the option and what it will be linked to, never the id, before asking them to approve. '
-      + 'Name the factors it would change, using the labels get_canonical_state returned — an option linked to nothing '
-      + 'cannot be compared and blocks the comparison for every other option. '
-      + 'It adds the option and its links ONLY; say what it does to each factor afterwards with propose_option_interventions.',
+      + 'The option is linked from the decision automatically. Name the factors it would change, using the labels '
+      + 'get_canonical_state returned. Give a level ONLY for a figure the user stated, in their own units; never invent one. '
+      + 'A factor with no stated level is added with no level, and you say plainly what is still needed.',
     parameters: obj({
       label: { type: 'string', description: 'The option in the user\u2019s own words.' },
       acts_on: {
@@ -136,6 +136,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
             type: 'string', enum: ['positive', 'negative'],
             description: 'Whether this option pushes the factor up or down. State it; never guess it for the user.',
           },
+          level: obj({
+            value: { type: 'number', description: 'The figure the user stated, in the factor\u2019s own units (e.g. 54 for \u00a354).' },
+            unit: { type: 'string', description: 'The unit the user stated, if any.' },
+          }, ['value']),
         }, ['factor_label', 'direction']),
       },
       rationale: { type: 'string', description: 'Why this option is worth comparing, in the user\u2019s terms.' },
@@ -162,9 +166,11 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           user_stated: {
             type: 'boolean',
             description:
-              'Set true ONLY when the user has just said that carrying on as now would itself change this ' +
-              'factor, and gave the level. It permits a level on an option in `status_quo_held`; the user ' +
-              'still approves it. Omit it in every other case.',
+              'Set true ONLY when the USER gave this level \u2014 their own number, for this option and factor. ' +
+              'It records the level as theirs; without it the level is recorded as Olumi\u2019s estimate, so never ' +
+              'set it on a figure you proposed. On an option in `status_quo_held` it is also what permits a level ' +
+              'at all (the user said carrying on changes this factor), and never to restate the factor\u2019s ' +
+              'starting value: carrying on as now already keeps that, so such a level is not recorded.',
           },
         }, ['option_label', 'factor_label', 'value', 'basis']),
       },
@@ -202,9 +208,11 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           user_stated: {
             type: 'boolean',
             description:
-              'Set true ONLY when the user has just said that carrying on as now would itself change this ' +
-              'factor, and gave the level. It permits a level on an option in `status_quo_held`; the user ' +
-              'still approves it. Omit it in every other case.',
+              'Set true ONLY when the USER gave this level \u2014 their own number, for this option and factor. ' +
+              'It records the level as theirs; without it the level is recorded as Olumi\u2019s estimate, so never ' +
+              'set it on a figure you proposed. On an option in `status_quo_held` it is also what permits a level ' +
+              'at all (the user said carrying on changes this factor), and never to restate the factor\u2019s ' +
+              'starting value: carrying on as now already keeps that, so such a level is not recorded.',
           },
         }, ['option_label', 'factor_label', 'value', 'basis']),
       },
@@ -244,6 +252,16 @@ export interface ToolResult {
   readonly [k: string]: unknown;
 }
 
+/**
+ * Server-internal input to the level proposer — never read from tool arguments
+ * (`dispatchTool` passes two). `startingValues`: factor id → the native figure
+ * the SAME starting point proposes for it, so a held status-quo level that only
+ * restates that figure is recognised before anyone is asked to approve it.
+ */
+export interface ProposeLevelsInternal {
+  readonly startingValues?: ReadonlyMap<string, number>;
+}
+
 export interface AgentCapabilities {
   getCanonicalState(ctx: AgentToolContext): Promise<ToolResult>;
   proposeModelChange(ctx: AgentToolContext, args: {
@@ -253,14 +271,15 @@ export interface AgentCapabilities {
   runAnalysis(ctx: AgentToolContext, args: { reason: string }): Promise<ToolResult>;
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
-    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
+    // `revise` is in the tool's schema (above) and read by the capability (`a?.revise === true`); the type now says so.
+    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string; revise?: boolean }[];
   }): Promise<ToolResult>;
   proposeNewOption(ctx: AgentToolContext, args: {
     label: string; acts_on: { factor_label: string; direction: 'positive' | 'negative' }[]; rationale: string;
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
     interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
-  }): Promise<ToolResult>;  proposeStartingPoint(ctx: AgentToolContext, args: {
+  }, internal?: ProposeLevelsInternal): Promise<ToolResult>;  proposeStartingPoint(ctx: AgentToolContext, args: {
     assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
     option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
   }): Promise<ToolResult>;

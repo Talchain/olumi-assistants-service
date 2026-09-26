@@ -78,7 +78,15 @@ export function buildCandidateSchema(): Record<string, unknown> {
       target_stated: { type: 'boolean' },
       value: { anyOf: [{ type: 'number' }, { type: 'null' }] }, unit: { type: 'string' },
       horizon_months: { anyOf: [{ type: 'integer' }, { type: 'null' }] }, provenance,
-    }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance']),
+      // ⭐ THE GOAL'S CURRENT LEVEL, in the factor pattern (`baseline_known` beside a
+      // nullable value). Without it a level-framed goal has no baseline and ISL
+      // refuses Goal fit (`missing_goal_baseline`). REQUIRED so strict output must
+      // say "not given" (null) rather than omit it — an absent key is how silent
+      // defaults happen. `admit-model.ts` writes it; nothing is derived from the target.
+      baseline_known: { type: 'boolean', description: 'True only when the brief states the goal metric\u2019s CURRENT level.' },
+      baseline_value: { anyOf: [{ type: 'number' }, { type: 'null' }], description: 'The goal metric\u2019s current level in the goal unit, exactly as the brief states it; null when the brief does not. Never an estimate, never the target.' },
+      baseline_provenance: provenance,
+    }, ['metric', 'operator', 'target_stated', 'value', 'unit', 'horizon_months', 'provenance', 'baseline_known', 'baseline_value', 'baseline_provenance']),
     constraints: { type: 'array', items: obj({
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
       value: { type: 'number' }, unit: { type: 'string' }, provenance,
@@ -144,6 +152,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
 export const BUILD_INSTRUCTIONS = [
   'Produce a complete causal decision model from the brief in ONE pass.',
   'Preserve exact user facts, numbers, constraint semantics and time horizon. The first model must support a PROVISIONAL calculation before user adoption: provide defensible starting estimates where the brief gives no baseline, mark those factors ai_proposed with baseline_known:false, and explain the uncertainty in unknowns. These are modelling assumptions, never measurements or user-validated facts. If no defensible estimate is possible, leave it null and name the specific unresolved input.',
+  'Record the goal metric\u2019s CURRENT level in goal.baseline_value, in the goal unit. When the brief states it: baseline_known true, baseline_provenance "explicit". When it does not, leave baseline_value null with baseline_known false. Do not estimate it: a guessed current level would set the chance of reaching the target on a guess. It is where things stand today, never the target.',
   'For each option fill `interventions` with its factor settings. value_kind:"absolute" means the resulting total or level; value_kind:"additional" means a signed change from the same factor baseline. For hiring, adding two to a proposed baseline of five means total seven, never total two. Record the user-stated addition as explicit but keep an estimated resulting level ai_proposed. Keep one unit and plausible_max frame per factor across all baselines and options.',
   'Mark the option that keeps things as they are now with is_status_quo:true \u2014 at most one option, whatever it is called \u2014 and give it no levels; every other option has is_status_quo:null.',
   'Connect options to the controllable factors they change, then through supported causal mechanisms to risks and the goal. Never emit a direct option-to-risk link: it cannot be interpreted as an option setting a risk value. Retain each meaningful risk hypothesis, its sign and its downstream path; express its exposure through a causal factor or mediator, rather than deleting the risk or claiming equal exposure.',
@@ -181,6 +190,7 @@ export const BUILD_INSTRUCTIONS = [
    */
   'A GOAL TARGET THE BRIEF DOES NOT STATE MUST BE LEFT UNSTATED. If the user named a number to reach \u2014 "to 40%", "by \u00a33m", "under 4 weeks" \u2014 set `target_stated: true` and put that number in `goal.value`. If they only named a DIRECTION \u2014 "increase productivity", "cut churn", "improve velocity" \u2014 then set `target_stated: false` and `goal.value: null`. Never substitute 0, never invent a plausible target, and never treat the absence of a number as a target of zero: a direction with no number is a complete and ordinary goal, and the analysis compares options against it perfectly well. Getting this wrong tells the user they asked for something they did not ask for.',
   'THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like "X Improvement" for a goal called "X change", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all.',
+  'EVERY LIMIT MUST NAME A NODE THE ANALYSIS CAN CHECK. Each `constraints[].metric` must be the EXACT label of a factor or outcome you keep in this model \u2014 a limit whose metric names no node is withheld from the model, and the analysis cannot check it. If the user limits a total such as cost, budget or spend, keep that total in the model as a factor the options set or an outcome their factors feed, wired toward the goal like every other factor, and use its exact label as the metric. Keep the direction the user stated: a budget, cost or spend cap is an upper bound ("<=") and a floor such as a minimum margin is a lower bound (">="); never add the opposite bound to the same limit.',
   // ⛔ THE LINK CONTRACT (#63 ruling 5793252993). There is NO default-positive
   // factor->goal repair in admission, by ruling: a sign nobody stated would be a
   // fabricated belief. So the drafter itself must state every link toward the
@@ -316,6 +326,13 @@ export function retrySchemaPinningGoal(goal: CandidateModel['goal']): Record<str
     unit: { type: 'string', enum: [goal.unit] },
     horizon_months: goal.horizon_months === null ? { type: 'null' } : { type: 'integer', enum: [goal.horizon_months] },
     provenance: { type: 'string', enum: [goal.provenance] },
+    // The current level is part of the goal, so it is pinned too; an absent value
+    // (a candidate from before the field) pins to "not given".
+    baseline_known: { type: 'boolean', enum: [goal.baseline_known === true] },
+    baseline_value: typeof goal.baseline_value === 'number'
+      ? { type: 'number', enum: [goal.baseline_value] }
+      : { type: 'null' },
+    baseline_provenance: { type: 'string', enum: [goal.baseline_provenance ?? goal.provenance] },
   };
   return schema;
 }
@@ -364,6 +381,41 @@ export interface AdditionWithoutTotal {
   readonly factor_unit?: string;
 }
 export interface DemotedProvenance { readonly option: string; readonly factor: string; readonly value: number }
+/**
+ * ⛔ A LIMIT THE USER STATED IS NEVER DROPPED UNSEEN.
+ *
+ * `admit-constraint.ts` withholds a limit whose metric names no node in the admitted model, rather
+ * than attach it to a guessed target — right — and records a warn-level loss. Until now only horizon,
+ * goal_operator, mechanism and status-quo losses reached `not_represented`, so a build that drafted
+ * "under 15% net margin" as a "Net-margin breach" RISK (no "Net margin" node; 1 of 15 live builds on
+ * served 9417228) registered a model with no limit and said nothing: `goal_constraints_carried: 0` is a
+ * count, not a sentence. Named here from the candidate's own words, so the Agent can tell the user
+ * exactly which limit the analysis will not check. No remedy is offered: the withheld limit is not kept.
+ */
+const OPERATOR_WORDS: Readonly<Record<string, string>> = { '>=': 'at least', '<=': 'at most', '>': 'more than', '<': 'less than' };
+function unattachedLimitLines(model: CandidateModel, loss: readonly { readonly field_path: string; readonly before?: unknown }[]): string[] {
+  // Admission withholds BY METRIC (`admit-constraint.ts` resolves `c.metric` to a node, or not), so every
+  // bound on an unattached metric shares that fate. Iterate the BOUNDS, not the loss entries: a loss entry
+  // carries only the metric, and mapping it back by first match repeats one bound and hides the rest, with
+  // the wrong author (pre-review 5828829492: ">= 15%" said twice, Olumi's "<= 30%" never said, and called the user's).
+  const unattached = new Set(loss.filter((l) => /^goal_constraints\[.*\]\.node_id$/.test(l.field_path)).map((l) => String(l.before ?? '')));
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const c of model.constraints ?? []) {
+    if (!unattached.has(c.metric)) continue;
+    // Words, never symbols: this sentence reaches the user (RC 5828938080 §3, Runtime's copy point).
+    const bound = OPERATOR_WORDS[c.operator] ?? c.operator;
+    const unit = c.unit === undefined || c.unit === '' ? '' : c.unit.startsWith('%') ? c.unit : ` ${c.unit}`;
+    const limit = `${c.metric} of ${bound} ${c.value}${unit}`;
+    // The same rule as `admit-constraint.ts` `isUserAuthored`: only a bound the user stated is called theirs.
+    const users = c.provenance === 'explicit';
+    const key = `${users ? 'user' : 'olumi'}\u0000${limit}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push(`${users ? `Your limit "${limit}"` : `The limit Olumi proposed ("${limit}")`} is not in the model: no part of the model is "${c.metric}", so the analysis cannot check it.`);
+  }
+  return lines;
+}
 /** The user-facing sentence for an addition kept with no total: what is missing, and how to supply it. */
 function sayAdditionWithoutTotal(a: AdditionWithoutTotal): string {
   const amount = `${a.value}${a.unit ? ` ${a.unit}` : ''}`;
@@ -658,6 +710,11 @@ function retainsRiskHypotheses(before: CandidateModel, after: CandidateModel): b
   return before.options.every((o) => after.options.some((kept) => kept.label === o.label));
 }
 
+/** The size-only retry's edit rule (measured: `construction-size-retry-edits-first-draft.test.ts`). */
+const SIZE_RETRY_EDITS_FIRST_DRAFT =
+  'Return your previous model with only the items you ADDED beyond the brief removed. Copy every item you keep EXACTLY '
+  + 'as it is in your previous model: the same label, wording, provenance and relationships. Do not rename, merge, reword or re-add anything.';
+
 export async function buildModelFromBrief(
   scenarioId: string,
   brief: string,
@@ -739,10 +796,16 @@ export async function buildModelFromBrief(
         model: budget.model,
         // The delta is APPENDED, so every rule the first pass obeyed still holds —
         // provenance, wiring, plausible_max and clearly labelled estimates.
-        instructions: `${BUILD_INSTRUCTIONS} ${needsSizeRetry ? retryInstruction(size) : ''} Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
+        // ⛔ A SIZE-ONLY RETRY EDITS ITS OWN FIRST DRAFT. Regenerated from the brief alone it renamed the user's
+        // options ("Hire two senior engineers" → "hire 2 senior engineers"), so `keepsEveryUserStatedIdentity`
+        // rejected it every time: measured 0/8 adoptable vs 8/8 when the retry is handed its draft to edit
+        // (construction-size-retry-edits-first-draft.test.ts). A retry with construction issues is unchanged.
+        instructions: repairIssues(preparation).length === 0 && needsSizeRetry
+          ? `${BUILD_INSTRUCTIONS} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT}`
+          : `${BUILD_INSTRUCTIONS} ${needsSizeRetry ? retryInstruction(size) : ''} Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
         input: repairIssues(preparation).length > 0
           ? `${brief}\n\nConstruction issues: ${JSON.stringify(repairIssues(preparation))}\nCandidate to repair: ${JSON.stringify(firstCandidate)}`
-          : brief,
+          : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(firstCandidate)}`,
         max_output_tokens: budget.max_output_tokens,
         reasoning_effort: budget.reasoning_effort,
         schema: retrySchemaPinningGoal(candidate.goal),
@@ -831,6 +894,17 @@ export async function buildModelFromBrief(
    */
   const parked = (candidate as { unknowns?: unknown }).unknowns;
   const openQuestions = Array.isArray(parked) ? parked.filter((q): q is string => typeof q === 'string' && q.trim() !== '') : [];
+  /**
+   * ⛔ A DEADLINE THE MODEL CANNOT HOLD IS ASKED WHERE THE USER ALWAYS SEES IT. GraphV3 has no carrier for
+   * `horizon_months`, so admission records the loss in `not_represented` — but only the Agent's model reads
+   * that, and on served CEE `85ce874` (MG fidelity scorecard, 26 Sep) Paul's "£20k MRR within 12 months"
+   * reply never mentioned the deadline. `open_questions` is appended to the reply by the server every time
+   * (`write-outcome.ts` `openQuestionsLine`), so the deadline goes FIRST there, ahead of the five-question cap.
+   */
+  const horizon = candidate.goal?.horizon_months;
+  if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0) {
+    openQuestions.unshift(`Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds no deadline yet, so no result answers that.`);
+  }
 
   const graph = {
     nodes: admitted.nodes,
@@ -864,17 +938,11 @@ export async function buildModelFromBrief(
    * registration happens inside this function. A check after the write cannot
    * prevent the write.
    *
-   * ⚠ THIS NARROWS THE WINDOW; IT DOES NOT CLOSE IT. What remains is this read to
-   * the route's own read — milliseconds — instead of a person's think-time plus a
-   * model call. Said plainly, because a re-read presented as a fix is how a race
-   * gets forgotten.
-   *
-   * ⛔ AND IT CANNOT BE CLOSED CAS-STYLE FROM A CALLER, measured not assumed:
-   * `computeExpectedGraphCasHashes` returns `analysis=null` for `null`,
-   * `undefined` AND `{nodes:[],edges:[]}`, so a caller cannot express "I expect no
-   * graph" — any expectation on a creation write would 409 every construction.
-   * Closing it needs an assert-absent convention or create-only semantics at the
-   * write boundary: the atomic-writer lease, not this file.
+   * ⚠ THIS RE-READ ALONE NARROWED THE WINDOW; IT DID NOT CLOSE IT. What remained was
+   * this read to the route's own read. The route has since gained an assert-absent
+   * convention (explicit `null` `expected_graph_identity_hash`), and the
+   * registration below now sends it — see "CREATE-ONLY". This re-read stays: it
+   * refuses before a register call is spent, with the same words.
    *
    * ⭐ A FAILED READ DOES NOT REFUSE. Degrading to today's behaviour is right —
    * throwing away a build we have already paid for because a READ failed would
@@ -894,12 +962,38 @@ export async function buildModelFromBrief(
     }
   }
 
+  /**
+   * ⛔ CREATE-ONLY: THE REGISTRATION ASSERTS THE MODEL IS STILL EMPTY (ChatGPT #69 5834761926 item 1).
+   *
+   * The re-read above leaves the gap from that read to the route's own read. An explicit `null`
+   * `expected_graph_identity_hash` closes it with the route's existing absence contract
+   * (`assist.v1.scenario-graph-register.ts`, "explicit `null` now asserts absence"): the route refuses 409
+   * `GRAPH_STALE` if a graph exists at ITS read, and hands its own read to the atomic writer as a KNOWN-absent
+   * base (`p_expected_base_known`, `append_turn_atomic_v5`), which refuses the same way in CAS `enforce` mode.
+   *
+   * ⚠ THE ROUTE CHECKS ABSENCE BEFORE THE ATOMIC RPC DECIDES A REPLAY, so a retry of THIS construction, already
+   * committed, now meets `GRAPH_STALE` rather than a replayed receipt. It is recovered below exactly as the
+   * `OPERATION_ID_REUSED` loser is: the versions read finds this construction's own version, or it is not ours.
+   */
   const reg = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
     graph,
     brief_text: brief,
     operation_id: constructionOperationId(scenarioId, brief),
+    expected_graph_identity_hash: null,
   });
-  if (reg.status === 409 && (reg.json.details as { code?: unknown } | undefined)?.code === 'OPERATION_ID_REUSED') {
+  const regCode = (reg.json.details as { code?: unknown } | undefined)?.code;
+  if (reg.status === 409 && regCode === 'GRAPH_STALE') {
+    const prior = await findConstructionVersion(dispatch, scenarioId, brief);
+    if (prior !== null) return { ok: true, mutated: false, replayed: true, model_version: prior };
+    return {
+      ok: false,
+      mutated: false,
+      refusal: 'model_already_exists',
+      detail: 'While that model was being built, something was added to this one — so nothing was written, and '
+        + 'your own change is untouched. Ask me to propose a change to the model you now have.',
+    };
+  }
+  if (reg.status === 409 && regCode === 'OPERATION_ID_REUSED') {
     /**
      * ⭐ A CONCURRENT BUILD OF THE SAME CONSTRUCTION ALREADY WON. Both calls passed
      * the empty-graph guard and generated a model — generation is not
@@ -962,6 +1056,7 @@ export async function buildModelFromBrief(
     ...(preparation.additions_without_total.length > 0 ? { additions_without_total: preparation.additions_without_total } : {}),
     ...(preparation.provenance_demoted.length > 0 ? { provenance_demoted: preparation.provenance_demoted } : {}),
     not_represented: [
+      ...unattachedLimitLines(candidate, admitted.loss),
       ...preparation.additions_without_total.map(sayAdditionWithoutTotal),
       ...preparation.provenance_demoted.map((d) =>
         `I've treated your ${d.value} for "${d.factor}" in "${d.option}" as a working figure because the current ` +
@@ -988,7 +1083,11 @@ export async function buildModelFromBrief(
       ...admitted.loss
         // `status_quo_held`: the held status quo is a machine-inferred MEANING
         // (`admit-model.ts`, `wireInertStatusQuo`), so it must be said and correctable.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held)$/.test(l.field_path))
+        // `level_restated` / `frame_widened` / `signed_level_withheld`: how a factor's option levels
+        // were kept in ONE value space (#69 5835137365) — each changes what a number means, so it is said.
+        // `observed_state.baseline`: a goal's current level that could not be carried
+        // (`admit-model.ts`) — the user is told why, and what would let it count.
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

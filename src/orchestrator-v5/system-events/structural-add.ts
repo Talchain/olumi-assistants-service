@@ -88,9 +88,19 @@
  * a second owner for one concept. The postcondition below ASSERTS the roster
  * agrees, so the reliance is checked rather than trusted.
  *
- * ⚠ WHAT THIS WRITER DOES NOT FIX, NAMED: a node added with no edges is not yet
- * connected to anything, so an added OPTION can leave the model unanalysable and
- * an added FACTOR reaches no goal. The contract already ruled on this — *"the
+ * ⭐ EXCEPT ONE DETERMINATE LINK (C32, Delivery Lead ruling #70 5841216898): an
+ * OPTION added to a model with EXACTLY ONE decision is written WITH its
+ * `decision → option` edge, in the same write. That edge is topology, not a
+ * belief — the option can belong to no other decision — and it is the ONE value
+ * the typed add-option transaction writes (`structuralEdgeValue`), so the two
+ * writers cannot disagree about it. Before this, Canvas's follow-up link event
+ * carried the pre-add hash, was refused as stale, and the option landed unlinked
+ * (`OPTION_NOT_LINKED_TO_DECISION` blocked the whole model). With zero decisions
+ * or several, no edge is written: there the link would be a guess.
+ *
+ * ⚠ WHAT THIS WRITER DOES NOT FIX, NAMED: apart from that one link, a node added
+ * with no edges is not yet connected to anything, so an added OPTION can leave
+ * the model unanalysable and an added FACTOR reaches no goal. The contract already ruled on this — *"the
  * adjacent readiness problem … is a different seam from transport and is not
  * fixed by widening this member"* — so this module does not invent an edge, a
  * value or a category to paper over it. It TELLS THE USER instead, in the
@@ -147,6 +157,7 @@ import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { mergeAppliedGraphForPersistence } from '../handlers/edit-graph-dispatch.js';
 import { applyPatchOperations, PatchApplyError } from '../../orchestrator/patch-applier.js';
 import { buildUnquantifiedPrior } from '../../cee/provenance/unquantified-factor.js';
+import { structuralEdgeValue } from '../routing/add-option-transaction.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
 
 type StructuralAddEvent = Extract<
@@ -358,6 +369,7 @@ export function buildAddConfirmationText(
   nodeKind: string,
   label: string,
   leftUnquantified: boolean,
+  linkedDecisionLabel?: string,
 ): string {
   const head = `Added '${label}' to your model. That's saved, so it stays when you reload.`;
   if (leftUnquantified) {
@@ -365,6 +377,12 @@ export function buildAddConfirmationText(
       `${head} I haven't given it a value — you haven't told me one, and I won't ` +
       `invent a number. Connect it to what it affects, then tell me its level, and ` +
       `I'll put both in.`
+    );
+  }
+  if (nodeKind === 'option' && linkedDecisionLabel !== undefined) {
+    return (
+      `${head} I've linked it to your decision '${linkedDecisionLabel}'. It can't be ` +
+      `compared with your other choices until you link it to the factors it changes.`
     );
   }
   if (nodeKind === 'option') {
@@ -490,9 +508,25 @@ export function applyStructuralAdd(params: ApplyStructuralAddParams): Structural
   // value; it also refuses an existing id, which step 3 has already resolved
   // with a better sentence.
   const addedNode = buildAddedNode(event.node_id, event.node_kind, event.label);
+  // ⭐ C32: the one determinate link — see the header. EXACTLY one decision, or
+  // none is written.
+  const decisions = baseGraph.nodes.filter((n) => n.kind === 'decision');
+  const linkedDecision =
+    event.node_kind === 'option' && decisions.length === 1 ? decisions[0] : undefined;
   const operations: PatchOperation[] = [
     { op: 'add_node', path: event.node_id, value: addedNode },
+    ...(linkedDecision !== undefined
+      ? [
+          {
+            op: 'add_edge' as const,
+            path: `${linkedDecision.id}::${event.node_id}`,
+            value: structuralEdgeValue(linkedDecision.id, event.node_id),
+          },
+        ]
+      : []),
   ];
+  const expectedNewEdgeKeys =
+    linkedDecision !== undefined ? [`${linkedDecision.id}::${event.node_id}`] : [];
 
   let candidate: GraphV3T;
   try {
@@ -650,15 +684,15 @@ export function applyStructuralAdd(params: ApplyStructuralAddParams): Structural
     );
   }
 
-  // 7d. NOTHING ELSE MOVED. An add adds exactly one node and no edges — a new
-  //     node has no incident edges by construction, which is the contract's own
-  //     stated reason this member is SINGULAR.
+  // 7d. NOTHING ELSE MOVED. An add adds exactly one node, and no edge other than
+  //     the one determinate decision link (C32) — the contract's own stated
+  //     reason this member is SINGULAR.
   const baseIds = new Set(baseGraph.nodes.map((n) => n.id));
   const addedIds = projectedParse.data.nodes.map((n) => n.id).filter((id) => !baseIds.has(id));
   const projectedIds = new Set(projectedParse.data.nodes.map((n) => n.id));
   const lostIds = baseGraph.nodes.map((n) => n.id).filter((id) => !projectedIds.has(id));
   const edgeKey = (e: { from: string; to: string }): string => `${e.from}::${e.to}`;
-  const baseEdges = baseGraph.edges.map(edgeKey).sort();
+  const baseEdges = [...baseGraph.edges.map(edgeKey), ...expectedNewEdgeKeys].sort();
   const projectedEdges = projectedParse.data.edges.map(edgeKey).sort();
   const edgesChanged =
     baseEdges.length !== projectedEdges.length ||
@@ -717,7 +751,7 @@ export function applyStructuralAdd(params: ApplyStructuralAddParams): Structural
   // sibling's: `nodes` and `options[]` are both inside the analysis-hash
   // projection, so an add moves the hash by construction and any prior analysis
   // is out of date. `impact: 'moderate'` rather than `'high'`: the new entry has
-  // no edges, so it changes what the model CONTAINS without yet changing any
+  // no CAUSAL edges (the C32 decision link is topology), so it changes what the model CONTAINS without yet changing any
   // causal path the analysis follows.
   const leftUnquantified = event.node_kind === 'factor';
   const fact = {
@@ -758,7 +792,12 @@ export function applyStructuralAdd(params: ApplyStructuralAddParams): Structural
     kind: 'mutated',
     response: {
       response_version: 2,
-      assistant_text: buildAddConfirmationText(event.node_kind, event.label, leftUnquantified),
+      assistant_text: buildAddConfirmationText(
+        event.node_kind,
+        event.label,
+        leftUnquantified,
+        linkedDecision?.label,
+      ),
       blocks: [],
       suggested_actions: [],
       insights: [],

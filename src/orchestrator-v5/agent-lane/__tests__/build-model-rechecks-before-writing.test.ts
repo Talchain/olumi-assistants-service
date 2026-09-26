@@ -21,7 +21,8 @@
  * construction. That closure belongs at the write boundary.
  */
 import { describe, expect, it } from 'vitest';
-import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import { buildModelFromBrief, constructionOperationId, type CallStructuredModel } from '../runtime/build-model.js';
+import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440000';
@@ -129,5 +130,87 @@ describe('a construction re-checks the model immediately before it writes', () =
     const regAt = p.calls.indexOf('REGISTER');
     const readsBefore = p.calls.slice(0, regAt).filter((c) => c.startsWith('READ')).length;
     expect(readsBefore, 'no re-read happened before the register').toBeGreaterThanOrEqual(1);
+  });
+});
+
+/**
+ * ⛔ CREATE-ONLY (ChatGPT #69 5834761926 item 1): the re-read above left the gap from that read to the route's own
+ * read. The registration now sends an explicit `null` `expected_graph_identity_hash`, the route's existing absence
+ * contract, which refuses 409 `GRAPH_STALE` when a graph exists at the route's read. This fake route honours the
+ * assertion exactly as the real one does: with the key present and null it refuses a present graph; WITHOUT the key
+ * it overwrites, which is today's defect and what makes the rows below RED at the base.
+ */
+
+function route(opts: { editLandsBeforeRegister?: boolean; ownConstructionCommitted?: boolean; foreignVersion?: boolean } = {}) {
+  const writes: string[] = [];
+  const bodies: Record<string, unknown>[] = [];
+  const present = opts.editLandsBeforeRegister === true || opts.ownConstructionCommitted === true;
+  const ours = registrationTurnId(SCENARIO, constructionOperationId(SCENARIO, BRIEF));
+  const d: InternalDispatch = async (path, body) => {
+    if (path.endsWith('/graph/register')) {
+      const b = (body ?? {}) as Record<string, unknown>;
+      bodies.push(b);
+      const assertsAbsent = Object.prototype.hasOwnProperty.call(b, 'expected_graph_identity_hash') && b.expected_graph_identity_hash === null;
+      if (present && assertsAbsent) return { status: 409, json: { code: 'BAD_INPUT', details: { code: 'GRAPH_STALE', failed_expectation: 'absence' } } };
+      writes.push(present ? 'OVERWRITE' : 'CREATE');
+      return { status: 200, json: { model_version: { version_number: 1, version_id: 'v-new', mutation_id: 'm-new' } } };
+    }
+    if (path.endsWith('/versions')) {
+      const versions = opts.ownConstructionCommitted === true
+        ? [{ version_id: 'v-ours', sequence: 1, creation: { kind: 'initial', mutation_id: 'm-ours', source_turn_id: ours } }]
+        : opts.foreignVersion === true
+          ? [{ version_id: 'v-theirs', sequence: 1, creation: { kind: 'initial', mutation_id: 'm-theirs', source_turn_id: 'someone-else' } }]
+          : [];
+      return { status: 200, json: { versions, next_cursor: null } };
+    }
+    // Every READ sees the scenario empty: the edit (or our own earlier commit) lands after the re-read.
+    return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'empty' } };
+  };
+  return { d, writes, bodies };
+}
+
+describe('a construction registers create-only — it asserts the model is still empty', () => {
+  it('RED: the registration carries an explicit null expected_graph_identity_hash', async () => {
+    const r = route();
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, r.d, structured);
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(r.bodies).toHaveLength(1);
+    expect(Object.prototype.hasOwnProperty.call(r.bodies[0], 'expected_graph_identity_hash')).toBe(true);
+    expect(r.bodies[0]!.expected_graph_identity_hash).toBeNull();
+  });
+
+  it('⛔⛔ RED: an edit that lands between the re-read and the register SURVIVES — refused, nothing overwritten', async () => {
+    const r = route({ editLandsBeforeRegister: true });
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, r.d, structured);
+    expect(r.writes, 'the construction overwrote a model that was no longer empty').toEqual([]);
+    expect(out.ok).toBe(false);
+    expect(out.mutated).toBe(false);
+    expect(out.refusal).toBe('model_already_exists');
+    expect(String(out.detail)).toContain('untouched');
+  });
+
+  it('RED: a retry of THIS construction, already committed, recovers its receipt and writes nothing again', async () => {
+    const r = route({ ownConstructionCommitted: true });
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, r.d, structured) as { ok: boolean; mutated: boolean; replayed?: boolean; model_version?: { version_id: string } };
+    expect(r.writes).toEqual([]);
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(out.mutated).toBe(false);
+    expect(out.replayed).toBe(true);
+    expect(out.model_version?.version_id).toBe('v-ours');
+  });
+
+  it('CONTRAST: a present graph whose version is NOT this construction is refused, never claimed as ours', async () => {
+    const r = route({ editLandsBeforeRegister: true, foreignVersion: true });
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, r.d, structured);
+    expect(r.writes).toEqual([]);
+    expect(out.ok).toBe(false);
+    expect(out.refusal).toBe('model_already_exists');
+  });
+
+  it('POSITIVE CONTROL: an empty scenario is created exactly once', async () => {
+    const r = route();
+    const out = await buildModelFromBrief(SCENARIO, BRIEF, r.d, structured);
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(r.writes).toEqual(['CREATE']);
   });
 });

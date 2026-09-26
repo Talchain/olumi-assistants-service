@@ -120,7 +120,11 @@ export function admitCandidateConstraints(
       operator,
       // Verbatim. The user's number is never adjusted to compensate for the operator.
       value: c.value,
-      label: `${c.metric} ${c.operator} ${c.value}${c.unit ?? ''}`,
+      // ⛔ THE LABEL IS THE LIMIT'S NAME, NOT THE LIMIT (`GoalConstraintSchema.label`: "Human-readable label, e.g.
+      // 'First-year budget cap'"). The bound lives in `operator`/`value`/`unit`, which every consumer renders itself: a
+      // label carrying "< 40000GBP/year" rendered on the canvas as "Annual PA salary < 40000GBP/year ≤ 40,000 GBP/year"
+      // (Canvas D2, 5832368556) and quoted the drafter's strict symbol against the stored "<=".
+      label: c.metric,
       ...(c.unit !== undefined ? { unit: c.unit } : {}),
       provenance: canonicalProvenance(c.provenance),
     };
@@ -146,5 +150,41 @@ export function admitCandidateConstraints(
     constraints.push(admitted);
   }
 
-  return { constraints, loss };
+  // ⛔ A LIMIT READ BOTH WAYS IS NOT A LIMIT (review 5831251158, saved draw cap-attach/L/B2/draw-4): "Budget is
+  // £900k either way" was drafted as BOTH "at least 900000" and "at most 900000" on one node. Attached, the lower
+  // half turned the user's ceiling into a floor. When a node's lower bound meets or exceeds its upper bound, both
+  // are withheld together and the loss is said in words; neither side is guessed. A genuine range still attaches.
+  const contradicted = new Set<string>();
+  for (const lower of constraints) {
+    if (lower.operator !== '>=') continue;
+    const upper = constraints.find((u) => u.node_id === lower.node_id && u.operator === '<=' && lower.value >= u.value);
+    if (upper === undefined || contradicted.has(lower.node_id)) continue;
+    contradicted.add(lower.node_id);
+    const metric = candidates.find((c) => nodeIdFor(c.metric) === lower.node_id)?.metric ?? lower.node_id;
+    const authored = lower.provenance === 'explicit' || upper.provenance === 'explicit';
+    loss.push({
+      code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
+      layer: 'cee',
+      field_path: `goal_constraints[${lower.node_id}].bound_direction`,
+      before: `${metric}: at least ${lower.value}${lower.unit ?? ''} and at most ${upper.value}${upper.unit ?? ''}`,
+      after: null,
+      reason:
+        `${authored ? 'Your limit' : 'The limit Olumi proposed'} on "${metric}" was drafted both as at least ` +
+        `${lower.value}${lower.unit ?? ''} and as at most ${upper.value}${upper.unit ?? ''}, which would count every ` +
+        `option on one side of it as breaking it. Neither was attached, so the analysis will not check this limit ` +
+        `until you say which way it runs (a budget is usually at most).`,
+      severity: 'warn',
+    });
+  }
+
+  // ⛔ A RANGE ON ONE METRIC NEEDS TWO NAMES (review 5833797482). The label is the limit's NAME, so a floor and a cap on
+  // the same node would both read "Gross margin" in the "could not be checked" card. On that collision only, the lower
+  // bound is named "<metric> floor" and the upper "<metric> cap" (structural-reconciliation strips both suffixes).
+  const kept = constraints.filter((c) => !contradicted.has(c.node_id));
+  const directions = new Map<string, Set<CanonicalOperator>>();
+  for (const c of kept) directions.set(c.node_id, (directions.get(c.node_id) ?? new Set<CanonicalOperator>()).add(c.operator));
+  const named = kept.map((c) => ((directions.get(c.node_id)?.size ?? 0) > 1 && c.label !== undefined
+    ? { ...c, label: `${c.label} ${c.operator === '>=' ? 'floor' : 'cap'}` }
+    : c));
+  return { constraints: named, loss };
 }

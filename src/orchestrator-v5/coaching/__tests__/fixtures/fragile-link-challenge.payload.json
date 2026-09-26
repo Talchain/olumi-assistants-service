@@ -40,27 +40,21 @@
   "explicit_run": {
     "blocks": [
       {
-        "block_id": "23150107-6583-5c5a-92d4-548775ea50da",
-        "signal_id": "coach:fragile_link:pro_subscriber_base→mrr:2cac03f2a47449be:2026-09-24T16:47:26.848Z:explicit_run",
+        "block_id": "35c54bb5-5b7e-5444-a3fc-4858a8ad8057",
+        "signal_id": "coach:limit_unchecked:2cac03f2a47449be:2026-09-24T16:47:26.848Z:explicit_run",
         "created_at": "2026-09-24T16:47:26.848Z",
         "source_handler": "run_analysis",
         "graph_hash_at_generation": "2cac03f2a47449be",
         "freshness": "fresh",
         "type": "coaching",
         "coaching_kind": "assumption_check",
-        "title": "Pressure-test a sensitive link",
-        "body": "The robustness check flagged the link from Pro subscriber base to MRR as sensitive — worth checking what the estimate of how strongly Pro subscriber base drives MRR rests on.",
+        "title": "Check the limits before relying on this",
+        "body": "This analysis could not confirm that the options stay within the limits on the model: at least one was not checked or not met. That is why no option is put forward yet.",
         "source": "deterministic_signal",
-        "target_refs": [
-          {
-            "id": "pro_subscriber_base→mrr",
-            "label": "Pro subscriber base → MRR",
-            "kind": "edge"
-          }
-        ],
+        "target_refs": [],
         "priority_rank": 15,
-        "action_label": "Pressure-test this link",
-        "action_prompt": "Talk me through what would change if the link from Pro subscriber base to MRR were weaker or stronger. Don't change the model or re-run anything yet."
+        "action_label": "What this means for my limits",
+        "action_prompt": "Olumi could not confirm the options stay within the limits on my model: at least one was not checked or was not met, so no option is put forward yet. Explain what that means for how far I can rely on this analysis. Don't change the model or re-run anything yet."
       }
     ],
     "eligibility": {
@@ -70,27 +64,21 @@
   "auto_first_pass": {
     "blocks": [
       {
-        "block_id": "31365171-6695-5cbb-83ad-13da141e47c5",
-        "signal_id": "coach:fragile_link:pro_subscriber_base→mrr:2cac03f2a47449be:2026-09-24T16:47:26.848Z:auto_first_pass",
+        "block_id": "3be08592-70b4-5c49-8f5f-75fdfb665261",
+        "signal_id": "coach:limit_unchecked:2cac03f2a47449be:2026-09-24T16:47:26.848Z:auto_first_pass",
         "created_at": "2026-09-24T16:47:26.848Z",
         "source_handler": "run_analysis",
         "graph_hash_at_generation": "2cac03f2a47449be",
         "freshness": "fresh",
         "type": "coaching",
         "coaching_kind": "assumption_check",
-        "title": "Pressure-test a sensitive link",
-        "body": "Before relying on this first pass on Olumi's estimates, note that the robustness check flagged the link from Pro subscriber base to MRR as sensitive — worth checking what the estimate of how strongly Pro subscriber base drives MRR rests on.",
+        "title": "Check the limits before relying on this",
+        "body": "Before relying on this first pass on Olumi's estimates, note that it could not confirm that the options stay within the limits on the model: at least one was not checked or not met. That is why no option is put forward yet.",
         "source": "deterministic_signal",
-        "target_refs": [
-          {
-            "id": "pro_subscriber_base→mrr",
-            "label": "Pro subscriber base → MRR",
-            "kind": "edge"
-          }
-        ],
+        "target_refs": [],
         "priority_rank": 15,
-        "action_label": "Pressure-test this link",
-        "action_prompt": "Talk me through what would change if the link from Pro subscriber base to MRR were weaker or stronger. Don't change the model or re-run anything yet."
+        "action_label": "What this means for my limits",
+        "action_prompt": "Olumi could not confirm the options stay within the limits on my model: at least one was not checked or was not met, so no option is put forward yet. Explain what that means for how far I can rely on this analysis. Don't change the model or re-run anything yet."
       }
     ],
     "eligibility": {

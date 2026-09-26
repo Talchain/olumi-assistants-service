@@ -140,3 +140,58 @@ describe('the reload keeps an analysis its turn has aged out of', () => {
     expect(result.analysis_result, 'a stale run must not be served as the current result').toBeNull();
   });
 });
+
+describe('a DEGRADED durable read cannot prove a run never happened (the hot window is 20 rows, not the record)', () => {
+  // Found pre-review on #1860 (Codex source finding 5824695259): with the durable
+  // read failed, a healthy window holding no run was read as proof of absence and
+  // the reload said never_run while an older successful run existed. Absence is
+  // authoritative only in a COMPLETE durable record; a success in the window is
+  // still positive evidence.
+
+  it('DEGRADED ABSENCE: durable read fails, the run aged out of the window — unknown, never never_run', async () => {
+    readScenarioRunAnalysisFactsFor.mockRejectedValue(new Error('durable read unavailable'));
+    const window = newerRows(SESSION_READ_WINDOW_DEFAULT);
+    expect(window.some((row) => row.id === RUN_TURN), 'premise: the run turn is outside the window').toBe(false);
+    readRecent.mockResolvedValue(window);
+    readFactsFor.mockResolvedValue([]);
+    readFactsWithTurnFor.mockResolvedValue([]);
+
+    const result = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: GRAPH, requestId: 'deg-absence' });
+
+    expect(readScenarioRunAnalysisFactsFor, 'premise: the durable port was consulted').toHaveBeenCalled();
+    expect(result.analysis_state?.run_state.kind, 'an incomplete window cannot prove no run exists').toBe('unknown_degraded');
+    expect(result.analysis_result).toBeNull();
+  });
+
+  it('DEGRADED, RUN IN WINDOW: durable read fails but the window holds the run — positive evidence still decides: current', async () => {
+    readScenarioRunAnalysisFactsFor.mockRejectedValue(new Error('durable read unavailable'));
+    readRecent.mockResolvedValue([...newerRows(SESSION_READ_WINDOW_DEFAULT - 1), { id: RUN_TURN }]);
+    readFactsFor.mockResolvedValue([RUN]);
+    readFactsWithTurnFor.mockResolvedValue([
+      { fact: RUN, fact_row_id: RUN_ROW, fact_created_at: RUN_AT, turn_id: RUN_TURN },
+    ]);
+
+    const result = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: GRAPH, requestId: 'deg-in-window' });
+
+    expect(result.analysis_state?.run_state.kind).toBe('complete_current');
+    expect(JSON.stringify(result.analysis_result)).toContain(HASH);
+  });
+
+  it('COMPLETE AND EMPTY: the durable record is complete and holds no run — absence is authoritative: never_run', async () => {
+    readScenarioRunAnalysisFactsFor.mockResolvedValue({ facts: [], total_count: 0 });
+    readRecent.mockResolvedValue(newerRows(SESSION_READ_WINDOW_DEFAULT));
+    readFactsFor.mockResolvedValue([]);
+    readFactsWithTurnFor.mockResolvedValue([]);
+
+    const result = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: GRAPH, requestId: 'complete-empty' });
+
+    // (B): the read route carries the model's admission verdict, and GRAPH is not
+    // admissible — so an AUTHORITATIVE absence on a blocked model reads `blocked`
+    // (which requires `freshness === 'none'`). The DEGRADED ABSENCE case above
+    // reads `unknown_degraded` on the same graph: absence is still decided only
+    // by a complete durable record.
+    expect(result.analysis_state?.run_state.kind).toBe('blocked');
+    expect(result.analysis_state?.readiness.status).toBe('blocked');
+    expect(result.analysis_result).toBeNull();
+  });
+});
