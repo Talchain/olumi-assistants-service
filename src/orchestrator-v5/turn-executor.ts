@@ -9700,6 +9700,10 @@ export async function runTurnExecutor(
       // ⛔ MEASURED, deployed staging 23 Sep, scenario `399c2814`. Readiness
       // held exactly ONE issue for thirty-seven minutes — OPTION_NEEDS_MAPPING,
       // "How does Two Developers change Coordination Overhead Risk?" — while
+      // (⚠ THE QUOTE IS THE SESSION'S, AND IS KEPT VERBATIM. That ask was
+      // repaired later on 23 Sep because it was unanswerable — a risk is a
+      // consequence, not something an option sets. The copy has changed; the
+      // record of what the user was shown must not.)
       // the other option was `ready` throughout. The user wrote "just help me
       // fix what's stopping me from running the analysis". `tryNoAnalysisGuard`
       // correctly declined (`no_analytical_signal`: its remedy is "run analysis
