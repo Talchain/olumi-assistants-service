@@ -756,7 +756,7 @@ describe('the next-action cards state no cause they cannot stand behind, and say
     // A first pass's summary gives its own cause ("Nothing in it is confirmed yet, so no option is put forward"),
     // and a withheld leader is a conjunction (the limit AND separation); "That is why" would claim the sole cause.
     for (const firstPass of [true, false]) {
-      for (const label of [undefined, 'Monthly churn rate']) {
+      for (const label of [undefined, 'Monthly churn rate', ['Monthly churn', 'MRR'] as const]) {
         const copy = composeLimitUncheckedCard(firstPass, label);
         expect(copy.body, `${firstPass}/${label}`).toMatch(/That is one reason no option is put forward yet\.$/);
         expect(copy.action_prompt, `${firstPass}/${label}`).toMatch(/which is one reason no option is put forward yet\./);
