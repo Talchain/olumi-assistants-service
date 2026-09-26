@@ -228,7 +228,8 @@ describe('refusals are loud, and nothing is held', () => {
       .toMatchObject({ matched: false, reason: 'new_factor_not_found' });
   });
   it('a new factor no option changes → new_factor_unused', () => {
-    expect(refuse((s) => { s.interventions = [{ factor_id: 'pro_plan_price', value: 0.245 }]; }))
+    // £50, not £49: an option at exactly £49 would repeat "£49 AI Release" and be refused for that first.
+    expect(refuse((s) => { s.interventions = [{ factor_id: 'pro_plan_price', value: 0.25 }]; }))
       .toMatchObject({ matched: false, reason: 'new_factor_unused' });
   });
   it('an empty affects, a duplicate key, or an unknown key (a unit with no value carrier) → parameters_invalid', () => {
@@ -276,7 +277,8 @@ describe('B1 — a held change the user approves ALWAYS lands (the class, not th
     ['a given factor_id', (s) => { s.new_factors[0].factor_id = 'ai_addon'; }],
     ['two options, only the second sets the new factor', (s) => {
       const second = { label: 'Raise to £59 with the add-on', interventions: [{ factor_id: 'pro_plan_price', value: 0.295 }, { factor_key: 'addon', value: null }] };
-      const first = { label: 'Raise to £54', interventions: [{ factor_id: 'pro_plan_price', value: 0.27 }] };
+      // £52, not £54: the stored graph already has "Raise Pro to £54", and a repeat of its levels is refused.
+      const first = { label: 'Raise to £52', interventions: [{ factor_id: 'pro_plan_price', value: 0.26 }] };
       delete s.label; delete s.interventions;
       s.options = [first, second];
     }],
