@@ -230,21 +230,19 @@ describe('propose_starting_point', () => {
     expect(store.outstanding(SCENARIO, USER).map((w) => w.proposal_id)).toEqual([id]);
   });
 
-  it('(B) an UNRELATED edit after the values, before the levels → values landed, ZERO level writes, partially_applied', async () => {
-    const { p, store, caps, id } = await proposed({ foreignEditAfterRegister: true });
+  it('(B) another writer moves the model while the ONE commit is in flight → nothing is reported written, never partially_applied', async () => {
+    // One approval is ONE commit (Canonical #70 5849037691): a stale base refuses all of it. This fake is not atomic (it
+    // registers the values before its per-event levels); the REAL door's all-or-nothing is pinned in
+    // tests/integration/orchestrator/agent-compound-is-one-commit.test.ts. Here: what the Agent REPORTS.
+    const { store, caps, id } = await proposed({ foreignEditAfterRegister: true });
     const out = await caps.authoriseChange(ctx, { proposal_id: id });
     expect(out.ok).toBe(false);
     expect(out.applied).toBe(false);
-    expect(out.mutated).toBe(true);
-    expect(out.refusal).toBe('partially_applied');
+    expect(out.mutated).toBe(false);
+    expect(out.refusal).toBe('not_applied');
     const parts = out.parts as { part: string; ok: boolean; recorded_count: number }[];
-    expect(parts.map((x) => [x.part, x.ok, x.recorded_count])).toEqual([['values', true, 1], ['option_levels', false, 0]]);
-    // The first level was sent on OUR revision (h1), found the model moved (h2), and was refused — no level landed.
-    const levels = p.posted.filter((x) => x.kind === 'option_intervention_edit');
-    expect(levels.map((x) => x.base)).toEqual(['h1']);
-    const byId = Object.fromEntries(p.read().map((n) => [n.id, n]));
-    expect(byId.hire_two.interventions ?? undefined).toBeUndefined();
-    expect(byId.hire_lead.interventions ?? undefined).toBeUndefined();
+    expect(parts.map((x) => [x.part, x.ok, x.recorded_count])).toEqual([['values', false, 0], ['option_levels', false, 0]]);
+    expect(String(out.detail)).toMatch(/nothing in this change was written/);
     // Never listed as done; only the object the user was shown can await approval.
     expect(store.outstanding(SCENARIO, USER).map((w) => w.proposal_id)).toEqual([id]);
   });
@@ -286,15 +284,16 @@ describe('propose_starting_point', () => {
     expect(byId.tech_leads.observed_state).toBeUndefined();
   });
 
-  it('a level that refuses → NONE of the levels is recorded (one commit or none); the values stay saved, and it is never listed as a second thing to approve', async () => {
-    // Values commit on their own (DL #70 5847364946: the named values gap); the levels are ONE commit, and the SECOND refuses.
+  it('a level that refuses → NOTHING of the approval is recorded, the values included (one commit or none), and it is never listed as a second thing to approve', async () => {
+    // The values ride the SAME commit as the levels now (Canonical #70 5849037691 closed DL's named values gap).
     const { store, caps, id } = await proposed({ failOn: ['hire_two::team_size'] });
     const out = await caps.authoriseChange(ctx, { proposal_id: id });
     expect(out.ok).toBe(false);
-    expect(out.refusal).toBe('partially_applied');
+    expect(out.mutated).toBe(false);
+    expect(out.refusal).toBe('not_applied');
     const parts = out.parts as { part: string; ok: boolean; recorded_count: number }[];
-    expect(parts.map((x) => [x.part, x.ok, x.recorded_count])).toEqual([['values', true, 1], ['option_levels', false, 0]]);
-    expect(String(out.detail)).toMatch(/no link or option level was written/);
+    expect(parts.map((x) => [x.part, x.ok, x.recorded_count])).toEqual([['values', false, 0], ['option_levels', false, 0]]);
+    expect(String(out.detail)).toMatch(/nothing in this change was written/);
     expect(store.outstanding(SCENARIO, USER).map((w) => w.proposal_id)).toEqual([id]);
   });
 
@@ -302,11 +301,11 @@ describe('propose_starting_point', () => {
    * ⛔ ROUND-2 REVIEW, BLOCKER 1, ON THE REAL CAPABILITY: the second level refuses, so 1 of the 2 levels WAS saved.
    * The user read "Not saved: 1 of 2 option levels." — the count of what landed, printed under "Not saved".
    */
-  it('the second level refuses → the user reads that NONE of the 2 levels was saved — never "1 of 2" (one commit or none)', async () => {
+  it('the second level refuses → the user reads that NOTHING was saved — never "1 of 2", never the value alone (one commit or none)', async () => {
     const { caps, id } = await proposed({ failOn: ['hire_two::team_size'] });
     const out = await caps.authoriseChange(ctx, { proposal_id: id });
     expect(narrateWriteOutcome('', [{ name: 'authorise_change' }], [out]).status)
-      .toBe('Saved 1 of 1 starting values. Not saved: none of the 2 option levels.');
+      .toBe('Not saved: the starting value. Not saved: none of the 2 option levels.');
   });
 
   /**

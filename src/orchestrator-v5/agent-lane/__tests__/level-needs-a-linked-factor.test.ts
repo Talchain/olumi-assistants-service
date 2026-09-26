@@ -152,7 +152,7 @@ describe('a level brings its link: ONE proposal, the link written before the lev
       { part: 'links', ok: false, recorded_count: 0, requested_count: 1 },
       { part: 'option_levels', ok: false, recorded_count: 0, requested_count: 1 },
     ]);
-    expect(String(out.detail)).toContain('the level for Internal Lead Trial \u2192 Team size was refused, so no link or option level was written');
+    expect(String(out.detail)).toContain('the level for Internal Lead Trial \u2192 Team size was refused, so nothing in this change was written');
   });
 
   it('RED: a starting point with a level on an unlinked factor lands EVERY level it carries, the link first', async () => {
