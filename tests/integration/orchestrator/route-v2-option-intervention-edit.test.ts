@@ -491,6 +491,74 @@ describe('the Agent\'s in-process batch door — ONE user operation → ONE atom
       expect(JSON.stringify(persisted)).toBe(before);
     });
 
+    it('RED (Canonical #70 5850018984): a VALUES-ONLY approval (Olumi\'s starting point) is ONE commit — every value, one row, one receipt', async () => {
+      const r = await callWith([{ factor_id: 'factor', value: 60, unit: '%', author: 'model_proposed' },
+        { factor_id: 'amount_factor', value: 10, unit: 'seats', author: 'model_proposed' }], [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccca5',
+      [{ factor_id: 'amount_factor', cap: 100 }]);
+      expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false, committed_levels: [] });
+      expect(rows.size, 'every value of the approval: ONE append').toBe(1);
+      expect(factorOs('factor')).toMatchObject({ value: 0.6, raw_value: 60, source: 'user_assumption' });
+      expect(factorOs('amount_factor')).toMatchObject({ value: 0.1, raw_value: 10, cap: 100, source: 'user_assumption' });
+      expect(([...rows.values()][0]!.write.handler_facts as { fact_type: string }[]).map(f => f.fact_type)).toEqual(['set_factor_value', 'set_factor_value']);
+    });
+
+    it('RED (DL 5850026671, served F1s shape): Olumi\'s 3 starting values on the served graph → ONE commit, and churn\'s links follow its level', async () => {
+      const served = JSON.parse(readFileSync('tests/fixtures/magnitude/c-run1-served-graphs.json', 'utf-8')).run1_step01;
+      persisted = projectGraphForPersistence(structuredClone(served));
+      const START = [
+        { factor_id: 'monthly_churn', value: 5, unit: '% of Pro subscribers per month', author: 'model_proposed' as const },
+        { factor_id: 'active_pro_subscribers', value: 250, unit: 'Pro subscribers', author: 'model_proposed' as const },
+        { factor_id: 'new_pro_subscriber_acquisition', value: 30, unit: 'new Pro subscribers per month', author: 'model_proposed' as const },
+      ];
+      const r = await callWith(START, [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccc10');
+      expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false });
+      expect(rows.size, 'the served 3 commits are ONE').toBe(1);
+      expect(([...rows.values()][0]!.write.handler_facts as { fact_type: string }[]).filter(f => f.fact_type === 'set_factor_value')).toHaveLength(3);
+      for (const v of START) expect(factorOs(v.factor_id), v.factor_id).toMatchObject({ raw_value: v.value, source: 'user_assumption' });
+      const into = (from: string) => (graphNow().edges as { from: string; to: string; strength: { mean: number } }[]).find(e => e.from === from && e.to === 'monthly_churn')!;
+      expect(into('price_sensitivity').strength.mean).toBe(0.0125);
+      // A retry of the same approval adds no version.
+      const retry = await callWith(START, [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccc11');
+      expect(retry, JSON.stringify(retry)).toMatchObject({ status: 'committed', already_applied: true, receipt: null });
+      expect(rows.size).toBe(1);
+    });
+
+    it('served F1s shape with ONE value refused → NONE of the starting values is written (persisted byte-identical)', async () => {
+      const served = JSON.parse(readFileSync('tests/fixtures/magnitude/c-run1-served-graphs.json', 'utf-8')).run1_step01;
+      persisted = projectGraphForPersistence(structuredClone(served));
+      const before = JSON.stringify(persisted);
+      const r = await callWith([
+        { factor_id: 'monthly_churn', value: 5, unit: '% of Pro subscribers per month', author: 'model_proposed' },
+        { factor_id: 'raise_to_59_at_release', value: 3, author: 'model_proposed' },
+      ], [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccc12');
+      expect(r).toEqual({ status: 'refused', reason: 'value_target_not_factor', value: { factor_id: 'raise_to_59_at_release' } });
+      expect(rows.size).toBe(0);
+      expect(JSON.stringify(persisted)).toBe(before);
+    });
+
+    it('a values-only approval with ONE value refused → nothing written, the other value included (persisted byte-identical)', async () => {
+      const before = JSON.stringify(persisted);
+      const r = await callWith([{ factor_id: 'factor', value: 60, unit: '%', author: 'model_proposed' }, { factor_id: 'option', value: 3, author: 'model_proposed' }], [], [],
+        'cccccccc-cccc-4ccc-8ccc-cccccccccca6');
+      expect(r).toEqual({ status: 'refused', reason: 'value_target_not_factor', value: { factor_id: 'option' } });
+      expect(rows.size).toBe(0);
+      expect(JSON.stringify(persisted)).toBe(before);
+    });
+
+    it('a retry of a committed values-only approval writes nothing more — already applied', async () => {
+      const V = [{ factor_id: 'factor', value: 60, unit: '%', author: 'model_proposed' as const }];
+      expect((await callWith(V, [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccca7')).status).toBe('committed');
+      const retry = await callWith(V, [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccca8');
+      expect(retry, JSON.stringify(retry)).toMatchObject({ status: 'committed', already_applied: true, receipt: null });
+      expect(rows.size).toBe(1);
+    });
+
+    it('an EMPTY approval (no level, no value, no range) is still refused — nothing to write', async () => {
+      const r = await callWith([], [], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccca9');
+      expect(r).toMatchObject({ status: 'refused', reason: 'no_targets' });
+      expect(rows.size).toBe(0);
+    });
+
     it('a stale base → stale, and the value is not applied (the persisted model is byte-identical)', async () => {
       const before = JSON.stringify(persisted);
       const r = await commitOptionLevelsInProcess({ scenario_id: SCENARIO_ID, turn_id: 'abababab-abab-4bab-8bab-abababababac',

@@ -563,7 +563,12 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     valueConfirmations = applied.confirmations;
   }
   const valuesChanged = values.length + frames.length > 0 && !isDeepStrictEqual(levelBase, before);
-  const candidate = applyOptionInterventionBatch({ ...common, expectedGraphHash: levelBaseHash, persistedGraph: levelBase, targets });
+  // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
+  // with no level, and wrote each value as its own commit. With no level to prepare, the values (and their ranges)
+  // are the whole plan: the same writer, adoption authority, scope guard, ONE append and ONE read-back.
+  const candidate = targets.length === 0 && values.length + frames.length > 0
+    ? ({ kind: 'unchanged' } as const)
+    : applyOptionInterventionBatch({ ...common, expectedGraphHash: levelBaseHash, persistedGraph: levelBase, targets });
   if (candidate.kind === 'refused') return candidate;
   if (candidate.kind === 'unchanged' && !valuesChanged) return candidate;
   // Every level already held (a compound whose values alone change): the values commit on their own, still ONE append.
