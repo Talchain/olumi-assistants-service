@@ -897,6 +897,57 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
     expect(said(out)).toBe(1);
   });
 
+  /**
+   * THE COUNT STILL MATTERS WHERE STRICT-MORE IS WAIVED (13d0cd3f's retry-side exclusion, kept). Within the limit, a loop
+   * asked beside £54's gap waives "strictly more", but #1891's "never cover LESS" still holds — and it is counted on what
+   * the first draft registered. Mutant Ma (the retry's own `options_withheld`, unfiltered) reads 1 ≤ 1 for a retry that
+   * withholds £54 and opens £64's gap, adopts it, and £54 drops out of the registered model.
+   */
+  const LOOP_BACK = { from: 'Pro plan subscribers', to: 'Monthly churn', direction: 'positive', provenance: 'inferred' };
+  const LOOP_ISSUE = '"Monthly churn" -> "Pro plan subscribers" -> "Monthly churn" is a loop: a model cannot hold one. Keep the direction that carries the '
+    + 'cause toward the goal metric, remove the link that points back, and keep every option and risk connected to the goal through links whose direction you state.';
+  const withLoop = <D extends { links: unknown[] }>(d: D): D => ({ ...d, links: [...d.links, LOOP_BACK] }) as D;
+  /** `out.withheld`'s loop entries: the first draft's loop link is withheld by admission; a retry that broke the loop has none. */
+  const loopWithheld = (out: Record<string, unknown>) => ((out.withheld ?? []) as { from: string; to: string; reason: string }[])
+    .filter((w) => w.reason === 'loop_closing_link').map((w) => `${w.from}->${w.to}`);
+  const NEW_64_GAP = { label: '£64 with AI release', provenance: 'ai_proposed', changes: ['AI feature availability'], is_status_quo: null, interventions: [{ ...PRICE_54, value: 64 }] } as unknown as Opt;
+
+  it('CONTROL (row 2k, loop + gap): a retry that breaks the loop and leaves £54 as drafted is adopted — strict-more is waived, nothing covers less', async () => {
+    const { out, graph, reqs } = await construct(withLoop(with54(true)), with54(true));
+    expect(reqs).toHaveLength(2);
+    expect(issues(reqs[1]!.input)).toEqual([GAP_54, LOOP_ISSUE]);
+    expect([out.ok, out.size_retried]).toEqual([true, false]);
+    expect(loopWithheld(out)).toEqual([]);
+    expect(optionIds(graph!)).toEqual(['keep_current_pricing', '59_with_ai_release', '54_with_ai_release']);
+    expect(levelsById(graph!)['54_with_ai_release']).toEqual({ pro_plan_price: 0.27 });
+    expect(blocking(graph!)).toEqual(ASK_54_AI);
+  });
+
+  it('CONTRAST (row 2k, covers less): a retry that breaks the loop and opens £64\'s gap is refused — the first draft registers, its loop link withheld', async () => {
+    const { out, graph } = await construct(withLoop(with54(true)), { ...with54(true), options: [...with54(true).options, NEW_64_GAP] });
+    expect([out.ok, out.size_retried]).toEqual([true, false]);
+    expect(loopWithheld(out)).toEqual(['pro_plan_subscribers->monthly_churn']);
+    expect(optionIds(graph!)).toEqual(['keep_current_pricing', '59_with_ai_release', '54_with_ai_release']);
+  });
+
+  it('RED vs mutant Ma (row 2k): a retry that breaks the loop, withholds £54 and opens £64\'s gap covers LESS of what registered — refused; £54 stays', async () => {
+    const base = with54(true, { interventions: [{ ...PRICE_54, value: 59 }] });
+    const retry = { ...base, options: [...base.options, NEW_64_GAP] } as typeof base;
+    // Vacuity: the retry withholds £54; its own registered model has one gap (£64), the first draft's one (£54): 1 ≤ 1 by that count.
+    expect(withheldBy(retry)).toEqual(['Test £59 with AI release', '£54 with AI release']);
+    expect(gapsOnRegistered(retry).filter((g) => g.option !== '£54 with AI release')).toEqual([{ option: '£64 with AI release', factor: 'AI feature availability' }]);
+    const { out, graph, reqs } = await construct(withLoop(with54(true)), retry);
+    expect(reqs).toHaveLength(2);
+    expect(issues(reqs[1]!.input)).toEqual([GAP_54, LOOP_ISSUE]);
+    expect([out.ok, out.size_retried]).toEqual([true, false]);
+    expect(loopWithheld(out)).toEqual(['pro_plan_subscribers->monthly_churn']);
+    expect(optionIds(graph!)).toEqual(['keep_current_pricing', '59_with_ai_release', '54_with_ai_release']);
+    expect(levelsById(graph!)['54_with_ai_release']).toEqual({ pro_plan_price: 0.27 });
+    expect(blocking(graph!)).toEqual(ASK_54_AI);
+    expect(withheldOptions(out)).toEqual(ONLY_TEST_WITHHELD);
+    expect(questions(out).filter((q) => q.startsWith('I left out "£54 with AI release"'))).toEqual([]);
+  });
+
   it('CONTROL (row 2j, a duplicate only the RETRY adds): the first draft withholds nothing; a retry that levels £54 and adds the duplicate is adopted', async () => {
     // The rule is about options the first draft REGISTERED: a new duplicate is the retry's own to withhold and say, and its
     // pairs are no gap (0 < 1). Counted, 2 < 1 fails; refused for withholding anything, £54 never gets its level.
