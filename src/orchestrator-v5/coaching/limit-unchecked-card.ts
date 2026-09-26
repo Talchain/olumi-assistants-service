@@ -27,10 +27,11 @@
  * `not_applicable`, the state with no ratified limit, permits). So "at least
  * one limit was not checked or not met" is true in every state it fires on.
  * Olumi's own words name no threshold or number of their own. Beside a named limit
- * they say back the USER'S stated threshold ("at most 10% per month") only when
+ * they say back the USER'S stated threshold ("10% per month") only when
  * `coaching/bound-graph.ts` `statedThreshold` proves it is the user's own (an
- * explicit row, a level frame, the user's units, the node's only row); a form
- * the copy gates refuse drops the threshold and keeps the name. They name the limits only when the
+ * explicit row, a level frame, a scale the row itself proves — never inferred
+ * from magnitude — and the node's only row); a form the copy gates refuse
+ * drops the threshold and keeps the name. They name the limits only when the
  * caller proved the graph is the run's own (`coaching/bound-graph.ts`: hash
  * bound), joined by `goal_constraints[].node_id` → each node's label: one node
  * reads "your limit on “A”", two or three read "your limits on “A” and “B”"

@@ -33,23 +33,36 @@ export const MAX_NAMED_LIMITS = 3;
 /** One limit the card may name: its node's label and, when provably the user's own, the stated threshold. */
 export interface NamedLimit {
   readonly label: string;
-  /** e.g. "at most 10% per month"; null when the row cannot be said back as the user stated it. */
+  /** e.g. "10% per month"; null when the row cannot be said back as the user stated it. */
   readonly stated: string | null;
 }
 
-const OPERATOR_WORDS: Readonly<Record<string, string>> = Object.freeze({ '<=': 'at most', '>=': 'at least' });
+/**
+ * The writers whose contract is "the value is the user's own number, in the user's units", by the
+ * row identity each one mints: the agent lane (`agent-lane/admit-constraint.ts`: "Verbatim. The
+ * user's number is never adjusted") and `add_constraint` (`tools/handlers/add-constraint.ts`:
+ * "stored in USER UNITS … `{ value: 5, unit: '%' }`, NOT 0.05"; it mints `gc-…` or keeps the row's
+ * id). The compound-goal extractor is NOT one: it stores a percent as a fraction (`num / 100`) and
+ * keeps `unit: '%'` for 100% and over, so "at least 200%" is stored as `2` (#1948 review 5841979260).
+ */
+const USER_UNIT_WRITER_ID = /^(?:agent-lane:|gc-)/;
+/** Units whose scale is ambiguous on the wire (percent vs fraction; points; basis points). */
+const PERCENT_LIKE_UNIT = /%|\bpercent\b|\bpp\b|\bbps\b|basis point/i;
 
 /**
  * THE USER'S OWN THRESHOLD, said back — or null. Only for a row the user stated
- * (`provenance: 'explicit'`) in a LEVEL frame (absent or `'level'`; a `'delta'` threshold is
- * a change from the baseline and is not said as a level). `value` is "in the user's units"
- * (DraftGoalConstraintSchema) unless CEE rewrote percent → fraction, whose audit trail
- * (`provenance_unit_normalised`) carries the user's original, which is preferred. A bare
- * `fraction` unit with no audit trail is not the user's wording, so it is not said.
+ * (`provenance: 'explicit'`) with a canonical operator, in a LEVEL frame (absent or `'level'`; a
+ * `'delta'` threshold is a change from the baseline). A bare `fraction` is never the user's wording.
+ * A PERCENT-LIKE unit is said back only when the row proves its scale: an audit trail naming the
+ * user's original (`provenance_unit_normalised`, preferred), or a row minted by a user-units writer
+ * ({@link USER_UNIT_WRITER_ID}). Scale is never inferred from magnitude.
+ *
+ * No operator words: the agent lane widens a strict "under 10%" to `<=` and records that as a loss,
+ * so "at most 10%" would put the widened bound in the user's mouth. "(10% per month)" is true either way.
  */
 export function statedThreshold(row: Record<string, unknown>): string | null {
-  const op = typeof row.operator === 'string' ? OPERATOR_WORDS[row.operator] : undefined;
-  if (op === undefined || row.provenance !== 'explicit') return null;
+  if (row.operator !== '<=' && row.operator !== '>=') return null;
+  if (row.provenance !== 'explicit') return null;
   if (row.value_frame !== undefined && row.value_frame !== 'level') return null;
   const audit = readRecord(row.provenance_unit_normalised);
   const value = audit !== null ? audit.original_value : row.value;
@@ -57,11 +70,13 @@ export function statedThreshold(row: Record<string, unknown>): string | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   const unit = typeof unitRaw === 'string' ? unitRaw.trim() : '';
   if (/^fraction$/i.test(unit)) return null;
+  if (PERCENT_LIKE_UNIT.test(unit) && audit === null
+    && !(typeof row.constraint_id === 'string' && USER_UNIT_WRITER_ID.test(row.constraint_id))) return null;
   const n = value.toLocaleString('en-GB', { maximumFractionDigits: 2 });
-  if (unit === '') return `${op} ${n}`;
-  if (unit.startsWith('%')) return `${op} ${n}${unit}`;
-  if (/^[£$€]$/.test(unit)) return `${op} ${unit}${n}`;
-  return `${op} ${n} ${unit}`;
+  if (unit === '') return n;
+  if (unit.startsWith('%')) return `${n}${unit}`;
+  if (/^[£$€]$/.test(unit)) return `${unit}${n}`;
+  return `${n} ${unit}`;
 }
 
 /**
