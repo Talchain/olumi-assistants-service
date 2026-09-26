@@ -97,26 +97,28 @@ export function leaderWithheldForALimit(analysisState: unknown): boolean {
 export function composeLimitUncheckedCard(firstPass: boolean, limitLabel?: string): FragileLinkChallengeCopy {
   if (limitLabel !== undefined) {
     const finding = `could not confirm that the options stay within your limit on “${limitLabel}”: it was not `
-      + 'checked or not met. That is why no option is put forward yet.';
+      + 'checked or not met. That is one reason no option is put forward yet.';
     return {
       title: 'Check your limit before relying on this',
       body: firstPass ? `${FIRST_PASS_PREFIX}it ${finding}` : `This analysis ${finding}`,
       action_label: 'What this means for my limit',
       action_prompt:
         `Olumi could not confirm the options stay within my limit on “${limitLabel}”: it was not checked or was not `
-        + 'met, so no option is put forward yet. Explain what that means for how far I can rely on this analysis. '
+        + 'met, which is one reason no option is put forward yet. Explain what that means for how far I can rely on '
+        + 'this analysis. '
         + 'Don\'t change the model or re-run anything yet.',
     };
   }
   const finding = 'could not confirm that the options stay within the limits on the model: at least one was not '
-    + 'checked or not met. That is why no option is put forward yet.';
+    + 'checked or not met. That is one reason no option is put forward yet.';
   return {
     title: 'Check the limits before relying on this',
     body: firstPass ? `${FIRST_PASS_PREFIX}it ${finding}` : `This analysis ${finding}`,
     action_label: 'What this means for my limits',
     action_prompt:
       'Olumi could not confirm the options stay within the limits on my model: at least one was not checked or was '
-      + 'not met, so no option is put forward yet. Explain what that means for how far I can rely on this analysis. '
+      + 'not met, which is one reason no option is put forward yet. Explain what that means for how far I can rely '
+      + 'on this analysis. '
       + 'Don\'t change the model or re-run anything yet.',
   };
 }
