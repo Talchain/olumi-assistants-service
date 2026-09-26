@@ -105,9 +105,15 @@ const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 /** The first draft's size verdict, as the builder measures it (prepared, then admitted) — for byte pins of the retry prompt. */
 const firstVerdict = (d: Draft) => assessConstructionSize(admitCandidateModel(prepareProvisionalCandidate(d as unknown as CandidateModel).candidate, {}));
 
-/** B1 (5842265540): the COMBINED size+repair retry's repair rule — which options may go, and never "Preserve every option". */
+/**
+ * B1 (5842265540): the COMBINED size+repair retry's repair rule — which options may go, and never "Preserve every option".
+ * B1 at the RISK position (verifier at 5d985e75): nor "Preserve every risk hypothesis" — beside `retryInstruction`'s "Remove
+ * what you ADDED … risks and outcomes" that was the same two orders at the risk position. A risk the brief states is kept;
+ * one Olumi added may go; every risk that is kept keeps its direction and its path to the goal.
+ */
 const COMPACTION_REPAIR_RULE = 'Repair only the listed construction issues. Keep every option the brief states, and every other option in your previous model unless you ADDED it beyond the brief: an option you added is the only kind that may go. '
-  + 'Every option you keep still acts on each factor it acted on that you keep. Preserve every risk hypothesis, its causal direction and path to the goal; do not delete an option the brief states, or a risk hypothesis, to clear validation.';
+  + 'Every option you keep still acts on each factor it acted on that you keep. Keep every risk the brief states; a risk you added may go. '
+  + 'Every risk you keep keeps its causal direction and its path to the goal; do not delete an option or a risk the brief states to clear validation.';
 
 type Graph = { nodes: Array<Record<string, unknown> & { id: string; kind: string }>; edges: Array<{ from: string; to: string }> };
 type Req = { instructions: string; input: string };
@@ -342,6 +348,9 @@ describe('(2) an OVERSIZED draft with a repair issue gets the repair instruction
     // which options may go (only ones Olumi added), and never "Preserve every option".
     expect(retry.instructions).not.toMatch(REPAIR_RULE);
     expect(retry.instructions).not.toContain('Preserve every option');
+    // ⛔ …and the same at the risk position (verifier at 5d985e75): the retry may shed a risk Olumi added, never one the brief states.
+    expect(retry.instructions).not.toContain('Preserve every risk hypothesis');
+    expect(retry.instructions).toContain('Keep every risk the brief states; a risk you added may go.');
     // Byte for byte: the base rules, the budget, the copy rule, its one exception, then the compaction's repair rule.
     expect(retry.instructions).toBe(`${BUILD_INSTRUCTIONS} ${retryInstruction(firstVerdict(first))} ${COPY_RULE_TEXT} ${ONLY_REPAIRS} ${COMPACTION_REPAIR_RULE}`);
     expect(retry.input.startsWith(BRIEF)).toBe(true);
@@ -384,7 +393,7 @@ describe('(2) an OVERSIZED draft with a repair issue gets the repair instruction
  * On a size retry, option retention belongs to `keepsEveryUserStatedIdentity` (the user's options) and
  * `compactionKeepsWhatOptionsDo` (what every kept option does); a within-size repair retry is unchanged.
  */
-describe('(3) B1: the combined size+repair retry may shed an option Olumi added — and nothing else', () => {
+describe('(3) B1: the combined size+repair retry may shed an option or a risk Olumi added — and nothing of the user\'s', () => {
   const optionIds = (g: Graph) => g.nodes.filter((n) => n.kind === 'option').map((n) => n.id).sort();
   const levels = (g: Graph, id: string) => Object.keys((g.nodes.find((n) => n.id === id) as { interventions?: object }).interventions ?? {}).sort();
   const without = (d: Draft, label: string): Draft => ({ ...d, options: d.options.filter((o) => o.label !== label) });
@@ -492,5 +501,177 @@ describe('(3) B1: the combined size+repair retry may shed an option Olumi added 
     // … and exempt only on a compaction, where option retention is owned by the identity and compaction guards.
     expect(retainsRiskHypotheses(first, prep(without(withRisk(covered(), []), 'Hire Both')), true)).toBe(true);
     expect(retainsRiskHypotheses(prep(c22()), prep(without(covered(), 'Hire Both')), true)).toBe(true);
+  });
+
+  // ── B1 AT THE RISK POSITION (adversarial verifier at 5d985e75, blocking) ─────────────────────────────────────────
+  // `retainsRiskHypotheses` still refused ANY first-draft risk missing from the retry, compaction included, while the
+  // size instruction asks the retry to "Remove what you ADDED beyond the brief: … risks and outcomes". So an oversized
+  // c22 draft carrying an Olumi risk, whose retry shed that risk and levelled every lever, was refused `model_too_large`
+  // and nothing registered — base staging ef99a97 adopted the same pair (11 nodes). On a compaction an Olumi risk may
+  // go (a user's risk is kept by `keepsEveryUserStatedIdentity`); every risk the retry KEEPS keeps every check.
+  // The same guard, same class, identity position: a compaction judges "kept" by admission's identity (`canonicalLabel`),
+  // like its sibling `compactionKeepsWhatOptionsDo`; a within-size repair keeps exact labels, like `keepsEveryAction`.
+
+  const riskIds = (g: Graph) => g.nodes.filter((n) => n.kind === 'risk').map((n) => n.id).sort();
+  const leftOutLabels = (r: Record<string, unknown>) => ((r.left_out_to_stay_compact ?? []) as { label: string }[]).map((x) => x.label).sort();
+  /** "Delivery slip" stamped `explicit`: a risk the USER stated. */
+  const userRisk = (d: Draft): Draft => ({ ...d, risks: d.risks.map((r) => (r.label === 'Delivery slip' ? { ...r, provenance: 'explicit' } : r)) });
+  /** Every occurrence of one exact label (a JSON string), respelled. */
+  const respell = (d: Draft, from: string, to: string): Draft => JSON.parse(JSON.stringify(d).replaceAll(`"${from}"`, `"${to}"`)) as Draft;
+  /** The risk's own direction into the goal, reversed ("Delivery slip" RAISES delivery velocity). */
+  const flipRiskToGoal = (d: Draft): Draft => ({
+    ...d,
+    links: d.links.map((l) => (l.to === GOAL && l.from.toLowerCase().replace(/\s+/g, ' ') === 'delivery slip' ? { ...l, direction: 'positive' as const } : l)),
+  });
+  /** An oversized c22 draft whose Olumi risk has a DIRECT option→risk link: a mechanism issue as well as coverage gaps. */
+  const withRiskMechanismIssue = (): Draft => {
+    const d = oversized(c22());
+    d.risks.push({ label: 'Delivery slip', provenance: 'ai_proposed' });
+    d.links.push(
+      { from: 'Hire Two Developers', to: 'Delivery slip', direction: 'positive', provenance: 'ai_proposed' },
+      { from: 'Delivery slip', to: GOAL, direction: 'negative', provenance: 'ai_proposed' },
+    );
+    return d;
+  };
+
+  it('RED (B1, risk position — the verifier\'s P1a): a compaction that sheds the Olumi-added risk and levels every lever IS adopted, and the shed risk is said', async () => {
+    const first = withRisk(oversized(c22()), []);
+    const prep = prepareProvisionalCandidate(first as unknown as CandidateModel);
+    expect(prep.mechanism_issues, 'PRECONDITION: retried for coverage, not for a mechanism').toEqual([]);
+    expect(prep.level_gaps.length, 'PRECONDITION: the combined branch').toBeGreaterThan(0);
+    expect(first.risks, 'PRECONDITION: the risk is Olumi\'s').toEqual([{ label: 'Delivery slip', provenance: 'ai_proposed' }]);
+    const { result, graph, reqs, registered } = await construct(first, covered());
+    expect(reqs).toHaveLength(2);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result.size_retried).toBe(true);
+    expect(result.within_compact_limits).toBe(true);
+    expect(registered).toHaveLength(1);
+    // The registered model is the RETRY: no risk node at all; every option kept, by id; every lever levelled, by id.
+    expect(riskIds(graph!)).toEqual([]);
+    expect(optionIds(graph!)).toEqual(['continue_current_staffing', 'hire_a_tech_lead', 'hire_both', 'hire_two_developers']);
+    expect(levels(graph!, 'hire_two_developers')).toEqual(['engineering_delivery_capacity', 'hiring_cost']);
+    expect(levels(graph!, 'hire_a_tech_lead')).toEqual(['hiring_cost', 'technical_leadership_capacity']);
+    expect(levels(graph!, 'hire_both')).toEqual(['engineering_delivery_capacity', 'hiring_cost', 'technical_leadership_capacity']);
+    expect(missingValues(graph!)).toEqual([]);
+    // Never silently.
+    expect(leftOutLabels(result)).toContain('Delivery slip');
+  });
+
+  it('RED (B1, risk position — the verifier\'s P1c): shedding the Olumi risk AND the Olumi option that reached it IS adopted; both are said', async () => {
+    const { result, graph, registered } = await construct(withRisk(oversized(c22()), ['Hire Both']), without(covered(), 'Hire Both'));
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result.size_retried).toBe(true);
+    expect(registered).toHaveLength(1);
+    expect(riskIds(graph!)).toEqual([]);
+    expect(optionIds(graph!)).toEqual(['continue_current_staffing', 'hire_a_tech_lead', 'hire_two_developers']);
+    expect(levels(graph!, 'hire_two_developers')).toEqual(['engineering_delivery_capacity', 'hiring_cost']);
+    expect(levels(graph!, 'hire_a_tech_lead')).toEqual(['hiring_cost', 'technical_leadership_capacity']);
+    expect(missingValues(graph!)).toEqual([]);
+    expect(leftOutLabels(result)).toEqual(expect.arrayContaining(['Delivery slip', 'Hire Both']));
+  });
+
+  it('RED (B1, risk position, mechanism arm): when the retry was ALSO asked to repair that Olumi risk\'s mechanism, shedding the risk whole IS adopted', async () => {
+    const first = withRiskMechanismIssue();
+    expect(prepareProvisionalCandidate(first as unknown as CandidateModel).mechanism_issues).toEqual([
+      'Hire Two Developers -> Delivery slip: retain this risk hypothesis through a causal factor or mediator, not a direct option-risk setting',
+    ]);
+    const { result, graph, registered } = await construct(first, covered());
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result.size_retried).toBe(true);
+    expect(registered).toHaveLength(1);
+    expect(riskIds(graph!)).toEqual([]);
+    expect(optionIds(graph!)).toEqual(['continue_current_staffing', 'hire_a_tech_lead', 'hire_both', 'hire_two_developers']);
+    expect(leftOutLabels(result)).toContain('Delivery slip');
+  });
+
+  it('CONTROL (keepsEveryUserStatedIdentity — the verifier\'s P1d): a compaction that sheds a USER-stated risk is NOT adopted, on both arms; keeping it IS', async () => {
+    for (const first of [userRisk(withRisk(oversized(c22()), [])), userRisk(withRiskMechanismIssue())]) {
+      expect(firstVerdict(first).brief_stated_keys.nodes, 'PRECONDITION: the risk is the user\'s, by identity').toContain('risk:delivery slip');
+      expectRefusedNotAdopted(await construct(first, covered()));
+    }
+    // Contrast, same first draft: the retry that KEEPS the user's risk (on its path) is adopted, the risk by id.
+    const kept = await construct(userRisk(withRisk(oversized(c22()), [])), userRisk(withRisk(covered(), [])));
+    expect(kept.result.ok, JSON.stringify(kept.result)).toBe(true);
+    expect(riskIds(kept.graph!)).toEqual(['delivery_slip']);
+  });
+
+  it('CONTROL (within-size repair, unchanged): a retry that sheds the Olumi risk is NOT adopted — the first draft is registered, risk and all; keeping it IS adopted', async () => {
+    const first = withRisk(c22(), []);
+    expect(firstVerdict(first).within, 'PRECONDITION: within size, so not a compaction').toBe(true);
+    const shed = await construct(first, covered());
+    expect(shed.reqs).toHaveLength(2);
+    expect(shed.result.size_retried).toBe(false);
+    expect(shed.registered).toHaveLength(1);
+    expect(riskIds(shed.graph!)).toEqual(['delivery_slip']);
+    expect(levels(shed.graph!, 'hire_two_developers'), 'the FIRST draft (no levels) was registered').toEqual([]);
+    // Contrast: the same retry keeping the risk on its path is adopted — so the refusal above is the risk alone.
+    const keep = await construct(first, withRisk(covered(), []));
+    expect(keep.registered).toHaveLength(1);
+    expect(riskIds(keep.graph!)).toEqual(['delivery_slip']);
+    expect(levels(keep.graph!, 'hire_two_developers')).toEqual(['engineering_delivery_capacity', 'hiring_cost']);
+  });
+
+  it('CONTROL (compaction, every KEPT risk still checked): a retry that keeps the Olumi risk but reverses its direction into the goal is NOT adopted; unreversed IS', async () => {
+    const first = withRisk(oversized(c22()), []);
+    expectRefusedNotAdopted(await construct(first, flipRiskToGoal(withRisk(covered(), []))));
+    const same = await construct(first, withRisk(covered(), []));
+    expect(same.result.ok, JSON.stringify(same.result)).toBe(true);
+    expect(riskIds(same.graph!)).toEqual(['delivery_slip']);
+    expect(leftOutLabels(same.result)).not.toContain('Delivery slip');
+  });
+
+  it('RED (identity, compaction): the Olumi risk kept under an admission-equal spelling ("delivery  SLIP") is KEPT, not shed — adopted with the risk, by id', async () => {
+    const { result, graph } = await construct(withRisk(oversized(c22()), []), respell(withRisk(covered(), []), 'Delivery slip', 'delivery  SLIP'));
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result.size_retried).toBe(true);
+    expect(riskIds(graph!)).toEqual(['delivery_slip']);
+    expect(leftOutLabels(result)).not.toContain('Delivery slip');
+  });
+
+  it('CONTROL (identity, compaction): because a respelled risk is KEPT, it keeps every check — respelled AND reversed into the goal is NOT adopted', async () => {
+    expectRefusedNotAdopted(await construct(
+      withRisk(oversized(c22()), []),
+      flipRiskToGoal(respell(withRisk(covered(), []), 'Delivery slip', 'delivery  SLIP')),
+    ));
+  });
+
+  /** A compaction that keeps Olumi's "Hire Both" under an admission-equal spelling, levelled on every factor it acted on (incl. "Onboarding load"). */
+  const respelledHireBoth = (): Draft => {
+    const d = withRisk(covered(), []);
+    d.options[2] = { ...d.options[2]!, label: 'hire  BOTH', interventions: [...d.options[2]!.interventions, est('Onboarding load', 2, 'score')] };
+    return d;
+  };
+
+  it('RED (identity, compaction — the verifier\'s P6a): "Hire Both" kept as "hire  BOTH" with its path to the risk intact IS adopted — kept, not shed, by id', async () => {
+    const { result, graph } = await construct(withRisk(oversized(c22()), ['Hire Both']), respelledHireBoth());
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result.size_retried).toBe(true);
+    expect(optionIds(graph!)).toEqual(['continue_current_staffing', 'hire_a_tech_lead', 'hire_both', 'hire_two_developers']);
+    expect(levels(graph!, 'hire_both')).toEqual(['engineering_delivery_capacity', 'hiring_cost', 'onboarding_load', 'technical_leadership_capacity']);
+    expect(riskIds(graph!)).toEqual(['delivery_slip']);
+    expect(missingValues(graph!)).toEqual([]);
+  });
+
+  it('CONTROL (identity, compaction): because "hire  BOTH" is KEPT, its path to the risk is still required — respelled and cut off from the risk is NOT adopted', async () => {
+    const retry = respelledHireBoth();
+    // It still acts on "Onboarding load" (so the compaction guard is satisfied), but that factor no longer reaches the
+    // risk: the risk is re-fed from "Team morale", which no option acts on.
+    retry.links = retry.links.filter((l) => !(l.from === 'Onboarding load' && l.to === 'Delivery slip'));
+    retry.links.push({ from: 'Team morale', to: 'Delivery slip', direction: 'positive', provenance: 'ai_proposed' });
+    expect(retry.options.some((o) => [...o.changes, ...o.interventions.map((i) => i.factor_label)].includes('Team morale')), 'PRECONDITION: no option acts on the new feeder').toBe(false);
+    expectRefusedNotAdopted(await construct(withRisk(oversized(c22()), ['Hire Both']), retry));
+  });
+
+  it('GUARD (retainsRiskHypotheses): on a compaction an absent Olumi risk is skipped and "kept" is admission\'s identity; outside one, both are unchanged', () => {
+    const prep = (d: Draft) => prepareProvisionalCandidate(d as unknown as CandidateModel).candidate;
+    const first = prep(withRisk(oversized(c22()), []));
+    expect(retainsRiskHypotheses(first, prep(covered()), true)).toBe(true);
+    expect(retainsRiskHypotheses(first, prep(covered()), false)).toBe(false);
+    const inSize = prep(withRisk(c22(), []));
+    const respelled = prep(respell(withRisk(covered(), []), 'Delivery slip', 'delivery  SLIP'));
+    expect(retainsRiskHypotheses(inSize, respelled, true)).toBe(true);
+    // Within size: exact labels, as its sibling `keepsEveryAction` judges them — byte-for-byte the rule before this delta.
+    expect(retainsRiskHypotheses(inSize, respelled, false)).toBe(false);
+    expect(retainsRiskHypotheses(inSize, prep(withRisk(covered(), [])), false)).toBe(true);
   });
 });

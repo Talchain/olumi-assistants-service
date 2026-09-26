@@ -728,40 +728,59 @@ function keepsEveryUserNumber(firstRaw: CandidateModel, firstPrepared: Candidate
  * `keepsEveryUserStatedIdentity` (a user's option may not go) and `compactionKeepsWhatOptionsDo` (what every kept
  * option does), so here it is exempt twice over: from the every-option clause, and from the per-risk path check —
  * a shed option has no path, and requiring one would be requiring the option. Every risk's own checks, and every
- * KEPT option's path to every risk, still hold. "Shed" is judged by admission's identity (`canonicalLabel`), so an
- * option kept under another spelling is not exempt. A within-size repair (`compaction` false) is unchanged.
+ * KEPT option's path to every risk, still hold. A within-size repair (`compaction` false) is unchanged.
+ *
+ * ⛔ AND ON A COMPACTION IT DOES NOT OWN RISK RETENTION EITHER (B1 at the risk position, verifier at 5d985e75). It still
+ * refused ANY first-draft risk missing from the retry, while `retryInstruction` asks the retry to "Remove what you
+ * ADDED beyond the brief: … risks and outcomes" — so an oversized c22 draft carrying an Olumi risk, whose retry shed
+ * that risk and levelled every lever, was refused `model_too_large` and nothing registered, where staging ef99a97
+ * adopted it. On a compaction a first-draft risk ABSENT from the retry is skipped: a risk the user stated is kept by
+ * `keepsEveryUserStatedIdentity` (brief-stated nodes by identity), and the shed risk is said in
+ * `left_out_to_stay_compact`. Every risk the retry KEEPS keeps every check below — its own path and signs to the goal,
+ * and every kept option's path and signs to it.
+ *
+ * ⛔ ONE IDENTITY RULE PER BRANCH, THE SAME AS ITS SIBLING GUARD. A compaction judges "kept" — options, risks, and every
+ * node a path walks through — by admission's identity (`canonicalLabel`), as `compactionKeepsWhatOptionsDo` does: two
+ * labels admission folds into one node are one item, so an option or risk kept under an admission-equal spelling is
+ * neither exempt as "shed" nor refused for a path the walk could not follow (the verifier's P6a: "hire  BOTH" with its
+ * risk path intact was refused, where staging adopted it). A within-size repair keeps exact labels, as
+ * `keepsEveryAction` does — byte-for-byte the rule before this delta.
  */
 export function retainsRiskHypotheses(before: CandidateModel, after: CandidateModel, compaction: boolean): boolean {
-  const shedWhole = (option: CandidateModel['options'][number]): boolean =>
-    compaction && !after.options.some((kept) => canonicalLabel(kept.label) === canonicalLabel(option.label));
+  const id = compaction ? canonicalLabel : (label: string): string => label;
+  const keeps = (items: ReadonlyArray<{ label: string }>, label: string): boolean => items.some((kept) => id(kept.label) === id(label));
   const paths = (model: CandidateModel, from: string, to: string): Set<number> => {
     const links = [
-      ...model.links.filter((l) => l.direction !== 'unknown').map((l) => ({ from: l.from, to: l.to, sign: l.direction === 'negative' ? -1 : 1 })),
+      ...model.links.filter((l) => l.direction !== 'unknown').map((l) => ({ from: id(l.from), to: id(l.to), sign: l.direction === 'negative' ? -1 : 1 })),
       ...model.options.flatMap((o) => [...(o.changes ?? []), ...(o.interventions ?? []).map((i) => i.factor_label)]
-        .map((factor) => ({ from: o.label, to: factor, sign: 1 }))),
+        .map((factor) => ({ from: id(o.label), to: id(factor), sign: 1 }))),
     ];
+    const target = id(to);
     const signs = new Set<number>();
     const walk = (at: string, sign: number, seen: Set<string>): void => {
-      if (at === to) { signs.add(sign); return; }
+      if (at === target) { signs.add(sign); return; }
       for (const link of links.filter((l) => l.from === at && !seen.has(l.to))) {
         walk(link.to, sign * link.sign, new Set([...seen, link.to]));
       }
     };
-    walk(from, 1, new Set([from]));
+    walk(id(from), 1, new Set([id(from)]));
     return signs;
   };
   for (const risk of before.risks) {
-    if (!after.risks.some((r) => r.label === risk.label)) return false;
+    if (!keeps(after.risks, risk.label)) {
+      if (compaction) continue;
+      return false;
+    }
     const downstream = paths(after, risk.label, after.goal.metric);
     if (downstream.size === 0 || [...paths(before, risk.label, before.goal.metric)].some((s) => !downstream.has(s))) return false;
     for (const option of before.options) {
-      if (shedWhole(option)) continue;
+      if (compaction && !keeps(after.options, option.label)) continue;
       const prior = paths(before, option.label, risk.label);
       const repaired = paths(after, option.label, risk.label);
       if ([...prior].some((s) => !repaired.has(s))) return false;
     }
   }
-  return compaction || before.options.every((o) => after.options.some((kept) => kept.label === o.label));
+  return compaction || before.options.every((o) => keeps(after.options, o.label));
 }
 
 /** The size retry's edit rule (measured: `construction-size-retry-edits-first-draft.test.ts`). */
@@ -782,11 +801,16 @@ const REPAIRS_ARE_THE_ONLY_EDITS =
  * size+repair retry was also told "Preserve every option" — two orders that cannot both be obeyed. It now says which
  * options may go (only ones Olumi added), matching what adoption enforces: `keepsEveryUserStatedIdentity` (every option
  * the brief states), `compactionKeepsWhatOptionsDo` (what every kept option does), and `retainsRiskHypotheses` (every
- * risk hypothesis, and every kept option's path to it). A within-size repair retry keeps its own rule, byte for byte.
+ * kept risk hypothesis, and every kept option's path to it). A within-size repair retry keeps its own rule, byte for byte.
+ * ⛔ NOR "PRESERVE EVERY RISK HYPOTHESIS" (B1 at the risk position, verifier at 5d985e75): beside "Remove what you ADDED
+ * … risks and outcomes" that was the same two orders at the risk position. It says which risks may go (only ones Olumi
+ * added), matching `keepsEveryUserStatedIdentity` (every risk the brief states) and `retainsRiskHypotheses` (every risk
+ * the retry keeps keeps its direction and its path to the goal).
  */
 const COMPACTION_REPAIR_RULE =
   'Repair only the listed construction issues. Keep every option the brief states, and every other option in your previous model unless you ADDED it beyond the brief: an option you added is the only kind that may go. '
-  + 'Every option you keep still acts on each factor it acted on that you keep. Preserve every risk hypothesis, its causal direction and path to the goal; do not delete an option the brief states, or a risk hypothesis, to clear validation.';
+  + 'Every option you keep still acts on each factor it acted on that you keep. Keep every risk the brief states; a risk you added may go. '
+  + 'Every risk you keep keeps its causal direction and its path to the goal; do not delete an option or a risk the brief states to clear validation.';
 
 export async function buildModelFromBrief(
   scenarioId: string,
