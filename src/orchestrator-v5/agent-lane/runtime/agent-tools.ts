@@ -30,6 +30,24 @@ const obj = (props: Record<string, unknown>, required: string[]): Record<string,
   type: 'object', additionalProperties: false, properties: props, required,
 });
 
+
+/** The factors ONE option would change — shared by the single and the several-option forms of propose_new_option. */
+const ACTS_ON = {
+  type: 'array',
+  description: 'The factors this option would change, and which way. At least one.',
+  items: obj({
+    factor_label: { type: 'string' },
+    direction: {
+      type: 'string', enum: ['positive', 'negative'],
+      description: 'Whether this option pushes the factor up or down. State it; never guess it for the user.',
+    },
+    level: obj({
+      value: { type: 'number', description: 'The figure the user stated, in the factor\u2019s own units (e.g. 54 for \u00a354).' },
+      unit: { type: 'string', description: 'The unit the user stated, if any.' },
+    }, ['value']),
+  }, ['factor_label', 'direction']),
+};
+
 export const AGENT_TOOLS: readonly ToolDefinition[] = [
   {
     type: 'function',
@@ -124,26 +142,22 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'authorise_change: show the user the option and what it will be linked to, never the id, before asking them to approve. '
       + 'The option is linked from the decision automatically. Name the factors it would change, using the labels '
       + 'get_canonical_state returned. Give a level ONLY for a figure the user stated, in their own units; never invent one. '
-      + 'A factor with no stated level is added with no level, and you say plainly what is still needed.',
+      + 'A factor with no stated level is added with no level, and you say plainly what is still needed. '
+      + 'When the user asks for SEVERAL options (up to 4), put them ALL in `options` in ONE call: they become ONE change the '
+      + 'user approves once, and it lands whole or not at all. Never call this twice in one reply.',
     parameters: obj({
-      label: { type: 'string', description: 'The option in the user\u2019s own words.' },
-      acts_on: {
+      label: { type: 'string', description: 'ONE option in the user\u2019s own words. For several, use `options` instead.' },
+      acts_on: ACTS_ON,
+      options: {
         type: 'array',
-        description: 'The factors this option would change, and which way. At least one.',
+        description: 'Several options the user asked for (2 to 4), each with its own label and factors. One change, one approval.',
         items: obj({
-          factor_label: { type: 'string' },
-          direction: {
-            type: 'string', enum: ['positive', 'negative'],
-            description: 'Whether this option pushes the factor up or down. State it; never guess it for the user.',
-          },
-          level: obj({
-            value: { type: 'number', description: 'The figure the user stated, in the factor\u2019s own units (e.g. 54 for \u00a354).' },
-            unit: { type: 'string', description: 'The unit the user stated, if any.' },
-          }, ['value']),
-        }, ['factor_label', 'direction']),
+          label: { type: 'string', description: 'The option in the user\u2019s own words.' },
+          acts_on: ACTS_ON,
+        }, ['label', 'acts_on']),
       },
       rationale: { type: 'string', description: 'Why this option is worth comparing, in the user\u2019s terms.' },
-    }, ['label', 'acts_on', 'rationale']),
+    }, ['rationale']),
   },
   {
     type: 'function',
@@ -275,7 +289,9 @@ export interface AgentCapabilities {
     assumptions: readonly { factor_label: string; value: number; unit: string; basis: string; revise?: boolean }[];
   }): Promise<ToolResult>;
   proposeNewOption(ctx: AgentToolContext, args: {
-    label: string; acts_on: { factor_label: string; direction: 'positive' | 'negative' }[]; rationale: string;
+    label?: string; acts_on?: { factor_label: string; direction: 'positive' | 'negative' }[]; rationale: string;
+    /** Several options as ONE change (F4): each `{label, acts_on}`, up to 4. */
+    options?: { label: string; acts_on: { factor_label: string; direction: 'positive' | 'negative' }[] }[];
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
     interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];

@@ -123,6 +123,12 @@ const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route
 const { GM_HELD_HANDLER_ID } = await import(
   '../../../src/orchestrator-v5/handlers/edit-graph-referee-gate.js'
 );
+const { TYPED_TRANSACTION_ENVELOPE_CAP } = await import(
+  '../../../src/orchestrator-v5/graph-management/types.js'
+);
+const { MAX_OPTIONS_PER_TRANSACTION } = await import(
+  '../../../src/orchestrator-v5/routing/add-option-transaction.js'
+);
 
 const SCENARIO_ID = '77777777-7777-4777-8777-777777777777';
 
@@ -242,5 +248,55 @@ describe('route-v2 — typed add-option transaction pre-route (C2)', () => {
     expect(status).toBe(200);
     expect(addOptionEvents(emitSpy).some((e) => e.outcome === 'fell_through:parent_not_decision')).toBe(true);
     expect(commitCalls).toHaveLength(0);
+  });
+
+  // ── (A) several options, ONE hold (Canonical CONTRACT #70 5841241418) ──────
+  const opt = (label: string) => ({ label, interventions: [{ factor_id: 'fac_effort', value: 0.5 }] });
+
+  it('(c) options:[…] → ONE held pending carrying every option, with the typed cap recorded', async () => {
+    const { status, body } = await post(
+      app,
+      addOptionPayload(randomUUID(), {
+        parent_decision_id: 'dec_choice',
+        options: [opt('Outsource'), opt('Hire in-house'), opt('Partner')],
+      }),
+    );
+    expect(status).toBe(200);
+    expect(body.assistant_text).not.toContain('FALLTHROUGH_SENTINEL');
+    expect(commitCalls).toHaveLength(1);
+    const pendings = commitCalls[0]!.meta.pending_actions;
+    expect(pendings).toHaveLength(1);
+    const patch = pendings[0].action.inline_patch;
+    expect(patch.handler_id).toBe(GM_HELD_HANDLER_ID);
+    // 3 × (option + decision link + 1 factor link) = 9 > the model-batch cap of 8.
+    expect(patch.operations).toHaveLength(9);
+    expect(patch.envelope_cap).toBe(TYPED_TRANSACTION_ENVELOPE_CAP);
+  });
+
+  it('(d) too many options → ANSWERED with a refusal (never the edit lane), no pending, prior holds threaded', async () => {
+    const priorHold: PendingAction = {
+      id: 'pa-prior-2', scenario_id: SCENARIO_ID, chip_id: 'gmh_priorbbbbbb',
+      action: {
+        kind: 'apply_proposed_change', proposal_ref: 'gmh_priorbbbbbb',
+        inline_patch: { handler_id: GM_HELD_HANDLER_ID, params: {}, target_entity_ids: [] },
+        public_label: 'Set migration effort to 0.3', public_message: 'Yes',
+      },
+      preconditions: { graph_hash: 'somepriorhash' },
+      expires_at_turn_count: 4, expires_at_iso: '2099-12-31T23:59:59.000Z',
+      emitted_at_iso: '2026-07-22T11:00:00.000Z',
+    };
+    storeHolder.priorPendings = [priorHold];
+    const many = Array.from({ length: MAX_OPTIONS_PER_TRANSACTION + 1 }, (_, i) => opt(`Route ${i + 1}`));
+    const { status, body } = await post(
+      app,
+      addOptionPayload(randomUUID(), { parent_decision_id: 'dec_choice', options: many }),
+    );
+    expect(status).toBe(200);
+    expect(body.assistant_text).not.toContain('FALLTHROUGH_SENTINEL');
+    expect(body.assistant_text).toContain(String(MAX_OPTIONS_PER_TRANSACTION));
+    expect(commitCalls).toHaveLength(1);
+    expect(commitCalls[0]!.meta.pending_actions).toEqual([]);
+    expect(commitCalls[0]!.meta.priorPendingActions).toEqual([priorHold]);
+    expect(addOptionEvents(emitSpy).some((e) => e.outcome === 'refused:too_many_options')).toBe(true);
   });
 });

@@ -48,6 +48,7 @@ import {
 import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
 import {
   computeScaffoldPlan,
+  gateAnalysableOptions,
   PLOT_MIN_COMPARISON_OPTIONS,
   type ScaffoldPlan,
 } from './analysable-option-gate.js';
@@ -541,6 +542,7 @@ function isWaivableByComputeDiscard(
  */
 function comparisonSurvivesDedup(
   wireOptions: ReadonlyArray<{ interventions?: Record<string, unknown> }>,
+  rawGraph: unknown,
 ): boolean {
   const fingerprint = (o: { interventions?: Record<string, unknown> }): string =>
     Object.entries(o.interventions ?? {})
@@ -553,8 +555,24 @@ function comparisonSurvivesDedup(
       })
       .sort()
       .join('|');
+  /**
+   * ⭐ THE SET THE RUN WILL SUBMIT, NOT THE OPTIONS AS STORED (Delivery Lead 5842717741; MG 5842710702).
+   * A held status quo keeps no copy of its starting values (#1902), so its stored map is empty BY CONTRACT
+   * and this floor used to drop it — "keep £49 vs raise to £59" could never run unless a third option was
+   * invented. The run's own gate (`gateAnalysableOptions`, the projection `run_analysis` submits) holds that
+   * status quo at the factors' CURRENT observed values, and PLoT compares it. Fingerprinting the gate's
+   * output makes this floor answer about exactly what PLoT will receive: a status quo whose values are not
+   * known is excluded by the gate and stays uncounted, never invented. The handler is untouched, so a run
+   * this floor already admitted submits the same bytes.
+   */
+  const submitted = gateAnalysableOptions({
+    options: wireOptions as ReadonlyArray<Record<string, unknown>>,
+    graph: rawGraph,
+    rawPersistedGraph: rawGraph,
+    scaleNetEnabled: true,
+  }).options as ReadonlyArray<{ interventions?: Record<string, unknown> }>;
   const distinctValuedMaps = new Set<string>(
-    wireOptions
+    submitted
       .filter((o) => Object.keys(o.interventions ?? {}).length > 0)
       .map((o) => fingerprint(o)),
   );
@@ -692,7 +710,7 @@ function resolveRunAdmissionTerms(
     // layer. A local refusal is immediate and explicable. This floor can only
     // convert a false admission into a refusal, and every case it converts is one
     // PLoT refuses anyway — so it cannot cost a run that would have succeeded.
-    if (!comparisonSurvivesDedup(assessment.analysisReady?.options ?? [])) {
+    if (!comparisonSurvivesDedup(assessment.analysisReady?.options ?? [], rawGraph)) {
       return {
         strict,
         assessment,
@@ -851,7 +869,7 @@ function resolveRunAdmissionTerms(
     // ⛔ DIRECTION IS WHY THIS IS THE HONEST SIDE: a false admission here dies as
     // an opaque HTTP 422 a network hop away, at the wrong layer, on the
     // two-option minimum. A local refusal is immediate and explicable.
-    const comparisonSurvives = comparisonSurvivesDedup(wireOptions);
+    const comparisonSurvives = comparisonSurvivesDedup(wireOptions, rawGraph);
     const blockers = assessment.blockingIssues;
     const touched = new Set<string>(plan.scaffolded_option_ids);
 

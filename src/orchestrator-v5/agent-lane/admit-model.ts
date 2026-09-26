@@ -28,11 +28,12 @@ import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchai
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
-import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
+import { isPercentScaledUnit, unitPinnedScaleFrame } from '../../cee/draft/records/unit-scale-class.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import {
   admitCandidateConstraints,
+  canonicaliseLimitUnit,
   type CandidateConstraint,
   type AdmittedConstraint,
 } from './admit-constraint.js';
@@ -239,7 +240,12 @@ export interface AdmittedModel {
   readonly edges: readonly AdmittedEdge[];
   readonly goal_constraints: readonly AdmittedConstraint[];
   readonly loss: readonly RepairEntry[];
-  readonly withheld: readonly { from: string; to: string; reason: string; detail: string }[];
+  /**
+   * `loop` is carried only on a `loop_closing_link` entry: the loop that link closed, in the
+   * drafter's own labels, in loop order — so the producer's repair issue names exactly the
+   * loop admission broke (`build-model.ts`, `loopIssues`). Never written to the wire.
+   */
+  readonly withheld: readonly { from: string; to: string; reason: string; detail: string; loop?: readonly string[] }[];
   /** Factors the model called controllable that no option changes — held as context (demoteUnreachedLevers). */
   readonly treated_as_context?: readonly string[];
 }
@@ -593,6 +599,212 @@ export function findMechanismPath(
     }
   }
   return null;
+}
+
+/**
+ * The first directed loop that runs through an edge `mayBreak` accepts, as its
+ * edges in order (that edge first), or null. Pure, deterministic in edge order:
+ * each accepted edge `u -> v` is tried in turn and the loop is closed by the
+ * shortest path `v ~> u`. A self-loop is a loop of one edge.
+ *
+ * Admission's own (`breakLoops`). The producer's repair issue reads admission's
+ * VERDICT (`withheld`, `loop_closing_link`), never a second derivation over the
+ * candidate's raw links (review of f504b8e0, (c)).
+ */
+function findBreakableLoop<E extends { from: string; to: string }>(
+  edges: readonly E[],
+  mayBreak: (e: E) => boolean,
+): E[] | null {
+  const out = new Map<string, E[]>();
+  for (const e of edges) out.set(e.from, [...(out.get(e.from) ?? []), e]);
+  for (const e of edges) {
+    if (!mayBreak(e)) continue;
+    if (e.to === e.from) return [e];
+    const via = new Map<string, E>();
+    const seen = new Set([e.to]);
+    const queue = [e.to];
+    while (queue.length > 0 && !via.has(e.from)) {
+      const at = queue.shift()!;
+      for (const next of out.get(at) ?? []) {
+        if (seen.has(next.to)) continue;
+        seen.add(next.to);
+        via.set(next.to, next);
+        if (next.to === e.from) break;
+        queue.push(next.to);
+      }
+    }
+    if (!via.has(e.from)) continue;
+    const back: E[] = [];
+    for (let at = e.from; at !== e.to;) {
+      const step = via.get(at)!;
+      back.unshift(step);
+      at = step.from;
+    }
+    return [e, ...back];
+  }
+  return null;
+}
+
+/** Where each kind sits on the option -> factor -> risk -> outcome -> goal flow. */
+const FLOW_RANK: Readonly<Record<string, number>> = { decision: 0, option: 1, factor: 2, constraint: 2, risk: 3, outcome: 4, goal: 5 };
+
+/** Nodes that reach `goalId`, with the length of their shortest path to it. */
+function distancesToGoal(edges: readonly { from: string; to: string }[], goalId: string | undefined): Map<string, number> {
+  const d = new Map<string, number>();
+  if (goalId === undefined) return d;
+  const into = new Map<string, string[]>();
+  for (const e of edges) into.set(e.to, [...(into.get(e.to) ?? []), e.from]);
+  d.set(goalId, 0);
+  const queue = [goalId];
+  while (queue.length > 0) {
+    const at = queue.shift()!;
+    for (const from of into.get(at) ?? []) {
+      if (d.has(from)) continue;
+      d.set(from, d.get(at)! + 1);
+      queue.push(from);
+    }
+  }
+  return d;
+}
+
+/**
+ * ⛔ A REGISTERED FIRST MODEL MUST BE A DAG — the one loop-breaking rule.
+ *
+ * SERVED (CEE bdd43f4a, Paul's pricing brief, acceptance run f-20260925T231546Z):
+ * the drafter stated `AI feature availability -> AI release delay` AND the
+ * reverse, both Olumi's hypotheses; both were registered, readiness refused the
+ * whole model on `CYCLE_DETECTED` (its only blocker), and nothing told Paul why.
+ * Readiness's check (`graph-structure-validator.ts` `checkCycles`) walks EVERY
+ * directed edge, so this runs over the whole admitted edge set.
+ *
+ * ⛔ ONE LINK IS ONE (from, to) PAIR, AND ANY USER-STATED INSTANCE MAKES IT THE
+ * USER'S (review of f504b8e0, BLOCKING-2). The drafter restates the user's links as
+ * its own; judged instance by instance, the restatement was "Olumi's link", so it was
+ * withheld and said as Olumi's — while the user's instance of the SAME link stayed in
+ * the graph and its projection entries were deleted with the restatement's. So a pair
+ * may be withheld only when EVERY instance of it may be, and withholding it removes
+ * every instance: the decision and the sentence are about the link, not a copy of it.
+ *
+ * ONE link per loop is withheld, chosen in this order:
+ *  1. never one `mayWithhold` refuses for any instance of its pair (the caller
+ *     refuses the user's own links and the structural option edges) — a loop made
+ *     only of those is KEPT and returned in `kept`, because choosing between the
+ *     user's links is theirs;
+ *  2. the link whose absence leaves every node that reached the goal still
+ *     reaching it — a loop must never be traded for a dead end when another
+ *     choice exists (on the served model the risk's threat to availability is its
+ *     ONLY route to MRR; withholding it would swap CYCLE_DETECTED for
+ *     NO_PATH_TO_GOAL);
+ *  3. the link pointing furthest AWAY from the goal (its target is further from
+ *     the goal than its source) — against the flow toward the goal;
+ *  4. the link pointing furthest back along option -> factor -> risk -> outcome
+ *     -> goal by kind;
+ *  5. the lower `from`/`to` id pair, so the choice never depends on luck.
+ *
+ * ⭐ RULING KEPT (builder's open ruling on f504b8e0): "strands no node" (2) and
+ * "points away from the goal" (3) outrank kind (4); kind is only a tie-break. On
+ * the served model the risk's threat to availability is its ONLY route to MRR —
+ * kind alone would withhold exactly that link.
+ *
+ * Pure: it decides; the caller records and says.
+ */
+export function breakLoops<E extends { from: string; to: string }>(
+  edges: readonly E[],
+  opts: { mayWithhold: (e: E) => boolean; goalId?: string; kindOf: (id: string) => string | undefined },
+): { edges: E[]; withheld: { edge: E; loop: E[] }[]; kept: E[][] } {
+  const pair = (e: { from: string; to: string }): string => `${e.from}\u0000${e.to}`;
+  const rank = (id: string): number => FLOW_RANK[opts.kindOf(id) ?? ''] ?? FLOW_RANK.factor!;
+  // A pair any instance of which may not be withheld is not withheld at all.
+  const protectedPairs = new Set(edges.filter((e) => !opts.mayWithhold(e)).map(pair));
+  const mayWithhold = (e: E): boolean => !protectedPairs.has(pair(e));
+  let current = [...edges];
+  const withheld: { edge: E; loop: E[] }[] = [];
+  for (;;) {
+    const loop = findBreakableLoop(current, mayWithhold);
+    if (loop === null) break;
+    const distance = distancesToGoal(current, opts.goalId);
+    const choices = loop.filter(mayWithhold).map((edge) => {
+      // The same link stated twice is one belief: withheld together.
+      const without = current.filter((x) => pair(x) !== pair(edge));
+      const from = distance.get(edge.from);
+      const to = distance.get(edge.to);
+      return {
+        edge,
+        without,
+        strands: distance.size - distancesToGoal(without, opts.goalId).size,
+        away: from === undefined || to === undefined ? 0 : to - from,
+        backByKind: rank(edge.from) - rank(edge.to),
+        key: pair(edge),
+      };
+    });
+    choices.sort((a, b) =>
+      a.strands - b.strands || b.away - a.away || b.backByKind - a.backByKind || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    const pick = choices[0]!;
+    withheld.push({ edge: pick.edge, loop });
+    current = pick.without;
+  }
+  // What is left can only be loops nobody may break: find each, name it, leave it.
+  const kept: E[][] = [];
+  let probe = current;
+  for (;;) {
+    const loop = findBreakableLoop(probe, () => true);
+    if (loop === null) break;
+    kept.push(loop);
+    const closing = pair(loop[0]!);
+    probe = probe.filter((x) => pair(x) !== closing);
+  }
+  return { edges: current, withheld, kept };
+}
+
+const quoted = (labels: readonly string[]): string =>
+  labels.length === 1 ? `"${labels[0]}"`
+    : `${labels.slice(0, -1).map((l) => `"${l}"`).join(', ')} and "${labels[labels.length - 1]}"`;
+const chain = (labels: readonly string[]): string => [...labels, labels[0]!].map((l) => `"${l}"`).join(' → ');
+
+/** What the user is told when one of Olumi's links was left out of a loop. */
+function sayWithheldLoopLink(from: string, to: string, loopLabels: readonly string[]): string {
+  const whose = "(it was Olumi's reading, not something you said)";
+  if (loopLabels.length === 1) {
+    return `"${from}" was linked to itself; a model cannot hold a loop, so that link was left out ${whose}.`;
+  }
+  if (loopLabels.length === 2) {
+    return `${quoted(loopLabels)} were linked both ways; a model cannot hold a loop, so the link from "${from}" to "${to}" `
+      + `was left out ${whose} — say which way it runs if both matter.`;
+  }
+  return `${quoted(loopLabels)} were linked in a loop (${chain(loopLabels)}); a model cannot hold a loop, so the link from `
+    + `"${from}" to "${to}" was left out ${whose} — say so if that link matters more than another in the loop.`;
+}
+
+/** One link of a kept loop: whether the user stated it, or it is how the model is built (`structural`). */
+interface KeptLoopLink { readonly from: string; readonly to: string; readonly yours: boolean; readonly fromDecision: boolean }
+
+/**
+ * What the user is told when a loop is made only of links that are not Olumi's to drop.
+ *
+ * ⛔ NEVER "YOU LINKED" OLUMI'S PART OF IT (review of f504b8e0, (d)). A kept loop can run
+ * through a STRUCTURAL edge — what an option sets (often Olumi's own `ai_proposed`
+ * level), the held status quo — which is not the user's statement. Only links the user
+ * stated are said to be theirs; a structural edge is named as what it is.
+ */
+function sayKeptLoop(loopLabels: readonly string[], links: readonly KeptLoopLink[]): string {
+  if (links.every((l) => l.yours)) {
+    if (loopLabels.length === 1) {
+      return `You linked "${loopLabels[0]}" to itself. A model cannot hold a loop, and that link is yours, so it was kept `
+        + `and the analysis cannot run yet — say what drives "${loopLabels[0]}" instead, or that the link should go.`;
+    }
+    const shape = loopLabels.length === 2 ? `${quoted(loopLabels)} both ways` : `${quoted(loopLabels)} in a loop`;
+    return `You linked ${shape} (${chain(loopLabels)}). A model cannot hold a loop, and none of these links is Olumi's `
+      + 'to drop, so all were kept and the analysis cannot run yet — say which way it runs, or which link should go.';
+  }
+  const shape = loopLabels.length === 2 ? 'are linked both ways' : 'are linked in a loop';
+  const yours = links.filter((l) => l.yours).map((l) => `"${l.from}" to "${l.to}"`);
+  const built = links.filter((l) => !l.yours).map((l) => l.fromDecision
+    ? `the link from "${l.from}" to "${l.to}" is how the decision holds that option`
+    : `the link from "${l.from}" to "${l.to}" is what that option sets`);
+  const yourPart = yours.length === 0 ? '' : ` You linked ${yours.join(' and ')};`;
+  return `${quoted(loopLabels)} ${shape} (${chain(loopLabels)}).${yourPart} ${built.join('; ')}. A model cannot hold a loop, `
+    + 'and none of these links is one Olumi can drop, so all were kept and the analysis cannot run yet — say which way it '
+    + 'runs, or which link should go.';
 }
 
 /**
@@ -1046,6 +1258,49 @@ export function admitCandidateModel(
     });
   }
 
+  /** The node a limit names: its exact label, else a case-insensitive label match; never a fuzzy guess. */
+  const nodeIdForMetric = (metric: string): string | undefined => {
+    const exact = ids.get(metric);
+    if (exact !== undefined) return exact;
+    const wanted = metric.trim().toLowerCase();
+    for (const [label, id] of ids) if (label.trim().toLowerCase() === wanted) return id;
+    return undefined;
+  };
+
+  /**
+   * ⛔ A LIMIT THE USER STATED ON A LEVEL NAMES A QUANTITY THAT CAN HOLD ONE (R&C 5842795947, DL 5842800634).
+   *
+   * SERVED (CEE 08f6f90, Paul's brief "…keeping monthly churn under 10%…"): in about 2 of 7 first passes the drafter
+   * made "Monthly churn" an OUTCOME. The limit attached, but Paul's "about 4% today, from our billing data" had nowhere
+   * to land — "Monthly churn is currently an outcome, not a factor that can hold a starting value" — because the value
+   * writer takes only a factor (`SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS`). Drafted as a factor, the same journey
+   * reached a proposal 5/5.
+   *
+   * So an OUTCOME named by a limit that (a) the user stated (the brief-stated class, `admit-constraint.ts`
+   * `isUserAuthored`'s rule) and (b) is a percentage LEVEL is admitted as an observable FACTOR: the same id, label,
+   * authorship and links, and exactly the served factor-kind shape. A level here is a unit that pins a frame on its own
+   * (`unitPinnedScaleFrame`) AND that the limit canonicaliser carries as a plain `"%"` on that frame — a percent head
+   * with at most a period ("% per month"), above 1 and up to 100. "percentage points" / "pp" (a change), "% change vs …", a money or
+   * count limit, a goal and a risk are left exactly as they were. The frame is the one the unit pins (a unit of
+   * measurement, which is what the served factor-kind node carries); no starting value is written — the slot stays
+   * empty for the user's own figure. An outcome carries no value or frame to keep (its entity has no `node` payload).
+   */
+  const limitedLevelFrames = new Map<string, number>();
+  for (const c of model.constraints) {
+    if (inferenceClassFor(c.provenance) !== 'brief_stated') continue;
+    const frame = unitPinnedScaleFrame(c.unit, c.value);
+    if (frame === undefined || canonicaliseLimitUnit(c.value, c.unit, { scale_frame: frame }).unit !== '%') continue;
+    const id = nodeIdForMetric(c.metric);
+    if (id !== undefined) limitedLevelFrames.set(id, frame);
+  }
+  for (const n of nodes) {
+    const frame = limitedLevelFrames.get(n.id);
+    if (frame === undefined || n.kind !== 'outcome') continue;
+    n.kind = 'factor';
+    n.category = 'observable';
+    n.scale_frame = frame;
+  }
+
   const allLinks: CandidateLink[] = [...model.links, ...(widened.proposed_links ?? [])];
   const resolvable: CandidateLink[] = [];
   const unresolved: { from: string; to: string; reason: string; detail: string }[] = [];
@@ -1270,14 +1525,7 @@ export function admitCandidateModel(
   const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
   const constraintResult = admitCandidateConstraints(
     model.constraints,
-    (metric) => {
-      const exact = ids.get(metric);
-      if (exact !== undefined) return exact;
-      // Fall back to a case-insensitive label match; never a fuzzy guess.
-      const wanted = metric.trim().toLowerCase();
-      for (const [label, id] of ids) if (label.trim().toLowerCase() === wanted) return id;
-      return undefined;
-    },
+    nodeIdForMetric,
     // A limit's unit is canonicalised against ITS node's scale — the one PLoT will normalise it against.
     (nodeId) => {
       const n = nodeById.get(nodeId);
@@ -1572,15 +1820,89 @@ export function admitCandidateModel(
    * retained (every risk kept), structural blockers 5 -> 0.
    */
   const goalForReach = nodes.find((n) => n.kind === 'goal');
+
+  /**
+   * ⛔ NO LOOP IS REGISTERED THAT ONE OF OLUMI'S OWN LINKS CLOSES (`breakLoops`).
+   *
+   * Run over the edge set readiness checks — every edge admitted, the risk repairs
+   * below included — and BEFORE the reachability pass, so a node a withheld link
+   * leaves unconnected is named there like any other. The structural edges (the
+   * decision's options, what each option sets, the held status quo) and the user's
+   * own links are never withheld; a loop made only of those is kept and said.
+   * Everything withheld travels in `withheld` and is said in `not_represented`,
+   * and the projection entries for a withheld link go with it, as for a fold.
+   *
+   * ⛔ BROKEN FIRST, THEN THE RISK REPAIRS (review of f504b8e0, (a)). The repair list
+   * was read off the edges BEFORE a loop was broken, so a risk whose only link was the
+   * one withheld looked connected, got no repair, and readiness swapped CYCLE_DETECTED
+   * for NO_PATH_TO_GOAL. The repairs are now computed from the broken edge set; a
+   * second pass then breaks any loop a repair itself closes (a repair is Olumi's link).
+   */
+  const structuralEdges = new Set<object>([...topologyEdges, ...heldStatusQuoEdges]);
+  const loopWithheld: { from: string; to: string; reason: string; detail: string; loop: readonly string[] }[] = [];
+  const acyclic = <E extends AdmittedEdge>(edges: readonly E[], reportKept: boolean): E[] => {
+    const labelsOf = (loop: readonly { from: string }[]) => loop.map((e) => labelById.get(e.from) ?? e.from);
+    // The drafter's own words (a shortened label keeps its full text as `description`).
+    const drafterLabel = (id: string): string => {
+      const n = nodes.find((x) => x.id === id);
+      return String((n as { description?: unknown } | undefined)?.description ?? n?.label ?? id);
+    };
+    const isUsers = (e: E): boolean => USER_AUTHORED_EDGE_SOURCES.has(String(e.provenance?.source ?? ''));
+    const pairKey = (e: { from: string; to: string }): string => `${e.from}\u0000${e.to}`;
+    const userPairs = new Set(edges.filter(isUsers).map(pairKey));
+    const result = breakLoops(edges, {
+      mayWithhold: (e) => !structuralEdges.has(e) && !isUsers(e),
+      goalId: goalForReach?.id,
+      kindOf: (id) => kindById.get(id),
+    });
+    for (const { edge, loop } of result.withheld) {
+      const detail = sayWithheldLoopLink(labelById.get(edge.from) ?? edge.from, labelById.get(edge.to) ?? edge.to, labelsOf(loop));
+      for (let i = loss.length - 1; i >= 0; i--) {
+        const fp = String(loss[i]!.field_path ?? '');
+        if (fp.startsWith(`edges[${edge.from}::${edge.to}]`) || fp === `edges[${edge.from}->${edge.to}]`) loss.splice(i, 1);
+      }
+      loss.push({
+        code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
+        layer: 'cee',
+        field_path: `edges[${edge.from}::${edge.to}].loop_withheld`,
+        before: edge.effect_direction ?? null,
+        after: null,
+        reason: detail,
+        severity: 'warn',
+      });
+      loopWithheld.push({ from: edge.from, to: edge.to, reason: 'loop_closing_link', detail, loop: loop.map((e) => drafterLabel(e.from)) });
+    }
+    // A loop left after the second pass was already left (and said) by the first: a repair is breakable.
+    for (const loop of reportKept ? result.kept : []) {
+      loss.push({
+        code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
+        layer: 'cee',
+        field_path: `edges[${loop[0]!.from}::${loop[0]!.to}].loop_kept`,
+        before: null,
+        after: null,
+        reason: sayKeptLoop(labelsOf(loop), loop.map((e) => ({
+          from: labelById.get(e.from) ?? e.from,
+          to: labelById.get(e.to) ?? e.to,
+          yours: userPairs.has(pairKey(e)),
+          fromDecision: kindById.get(e.from) === 'decision',
+        }))),
+        severity: 'warn',
+      });
+    }
+    return result.edges;
+  };
+
   const riskRepairs: AdmittedEdge[] = [];
-  let finalEdges = allEdges;
+  const brokenEdges = acyclic(allEdges, true);
+  let finalEdges: AdmittedEdge[] = brokenEdges;
 
   if (goalForReach !== undefined) {
-    const hasOutgoingNow = new Set(allEdges.map((e) => e.from));
+    const hasOutgoingNow = new Set(brokenEdges.map((e) => e.from));
     // A risk whose own link was withheld as direction-unknown was answered
     // "I cannot say which way" — not left unconnected.
     const directionDeclined = new Set(linkResult.withheld.map((w) => w.from));
     for (const r of nodes.filter((n) => n.kind === 'risk' && !hasOutgoingNow.has(n.id) && !directionDeclined.has(n.id))) {
+      const lostToLoop = loopWithheld.filter((w) => w.from === r.id).map((w) => `"${labelById.get(w.to) ?? w.to}"`);
       riskRepairs.push({
         from: r.id,
         to: goalForReach.id,
@@ -1597,15 +1919,19 @@ export function admitCandidateModel(
         before: null,
         after: 'connected',
         reason:
-          `The risk "${r.label}" was named but never connected to anything, which stops the whole ` +
-          `model being analysed. It has been connected to "${goalForReach.label}" as a negative ` +
+          (lostToLoop.length > 0
+            ? `The risk "${r.label}" led only to ${lostToLoop.join(' and ')}, and ${lostToLoop.length === 1 ? 'that link was' : 'those links were'} left out to break a loop, ` +
+              'so it no longer led anywhere, which stops the whole model being analysed. '
+            : `The risk "${r.label}" was named but never connected to anything, which stops the whole ` +
+              'model being analysed. ') +
+          `It has been connected to "${goalForReach.label}" as a negative ` +
           'influence, with a placeholder strength — that link follows from it being a risk, not ' +
           'from anything you said, and neither it nor its strength is a measurement.',
         severity: 'warn',
       } as RepairEntry);
     }
 
-    const edgesNow = [...allEdges, ...riskRepairs];
+    const edgesNow = riskRepairs.length === 0 ? brokenEdges : acyclic([...brokenEdges, ...riskRepairs], false);
     /**
      * ⛔ REPORTED, NOT ENFORCED — and that is a deliberate reversal.
      *
@@ -1676,6 +2002,6 @@ export function admitCandidateModel(
     loss,
     // `withheld` is a list of LINKS by contract; a withheld NODE is reported
     // through `loss`, which is the channel the build result already surfaces.
-    withheld: [...unresolved, ...linkResult.withheld],
+    withheld: [...unresolved, ...linkResult.withheld, ...loopWithheld],
   };
 }
