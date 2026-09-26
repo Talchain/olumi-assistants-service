@@ -141,7 +141,8 @@ describe('R1–R4: Paul\'s T3 AI -> churn link is sized on churn\'s own frame', 
     expect(e.strength.mean).toBe(-0.01);
     expect(e.strength.std).toBe(0.005);
     expect(e.provenance?.magnitude).toBe('olumi_placeholder');
-    const asked = questions(out).filter((q) => q.includes('"Monthly churn"'));
+    // PR1b: the mediated Price sensitivity -> churn link now asks its own question, so bind to THIS link's pair.
+    const asked = questions(out).filter((q) => q.includes('"Monthly churn"') && q.includes('"AI feature availability"'));
     expect(asked, JSON.stringify(questions(out))).toHaveLength(1);
     expect(asked[0]).toContain('6 points');
     expect(asked[0]).toContain('4% today');
@@ -154,7 +155,8 @@ describe('R1–R4: Paul\'s T3 AI -> churn link is sized on churn\'s own frame', 
     expect(e.strength.std).toBe(0.03);
     expect(e.provenance?.magnitude).toBe('user_stated');
     expect(e.provenance?.source).toBe('brief_extraction');
-    const asked = questions(out).filter((q) => q.includes('"Monthly churn"'));
+    // PR1b: the mediated Price sensitivity -> churn link now asks its own question, so bind to THIS link's pair.
+    const asked = questions(out).filter((q) => q.includes('"Monthly churn"') && q.includes('"AI feature availability"'));
     expect(asked, JSON.stringify(questions(out))).toHaveLength(1);
     expect(asked[0]).toContain('6 points');
     expect(asked[0]).toContain('kept exactly as you said');
@@ -241,7 +243,8 @@ describe('R5: unit-class conversions (design §4)', () => {
     expect(Math.abs(price.strength.mean)).toBeLessThanOrEqual(1);
     expect(price.strength.mean).toBe(0.5);
     expect(price.provenance?.magnitude).toBe('olumi_placeholder');
-    const asked = questions(out).filter((q) => q.includes('"Monthly churn"'));
+    // PR1b: the mediated Price sensitivity -> churn link now asks its own question, so bind to THIS link's pair.
+    const asked = questions(out).filter((q) => q.includes('"Monthly churn"') && q.includes('"Pro plan price"'));
     expect(asked).toHaveLength(1);
     expect(asked[0]).toContain('more than the analysis can represent');
   });
@@ -315,5 +318,16 @@ describe('natural_effect: the size the edge carries, in natural units, keyed to 
     const { graph } = await register(t3({ amount: -6, per: 1, by: 'explicit' }, 'explicit'));
     const e = edge(graph, AI, CHURN);
     expect(natural(e)).toStrictEqual({ amount: -6, amount_unit: 'percentage points', per_source_change: 1, per_source_change_unit: 'switch', strength_mean: -0.06, strength_mean_frame: 'edge_strength' });
+  });
+});
+
+describe('PR1b on the real path: the mediated risk link into churn is sized to churn\'s frame, not ±0.5', () => {
+  it('Price sensitivity (a risk no option moves) -> churn (4% known) is +min(0.5, 0.96/4, 0.04/4) = +0.01, stamped olumi_placeholder, and asked', async () => {
+    const { graph, out } = await register(t3(UNKNOWN));
+    const e = edge(graph, 'price_sensitivity', CHURN);
+    expect(e.strength.mean).toBeCloseTo(0.01, 12);
+    expect(e.provenance?.magnitude).toBe('olumi_placeholder');
+    expect(e.defaulted).toBe(true);
+    expect(questions(out).filter((q) => q.includes('"Price sensitivity"') && q.includes('"Monthly churn"'))).toHaveLength(1);
   });
 });

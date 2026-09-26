@@ -45,6 +45,8 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js'
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import type { SessionStore } from '../../session/store.js';
+import { subtractMagnitudeDelta } from './magnitude-delta.js';
+
 
 type Edge = { from: string; to: string; provenance?: { source?: string }; effect_direction?: string; strength?: { mean: number } };
 type Node = { id: string; kind: string; label: string };
@@ -224,7 +226,10 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
     expect(body.nodes.map(canon)).toEqual(SERVED.draft_graph.nodes.map(canon));
     const withheld = new Set(loopWithheld(out));
     const servedLessWithheld = (SERVED.draft_graph.edges as unknown as Edge[]).filter((e) => !withheld.has(`${e.from}->${e.to}`));
-    expect(body.edges.map(canon)).toEqual(servedLessWithheld.map(canon));
+    // PR1b sizes the served links into bounded targets; subtract that known delta and count it (magnitude-delta.ts).
+    const { edges: unsized, sized } = subtractMagnitudeDelta(body.edges);
+    expect(sized, 'PR1b sized at least one served link into a bounded target').toBeGreaterThan(0);
+    expect(unsized.map(canon)).toEqual(servedLessWithheld.map(canon));
   });
 });
 
@@ -385,7 +390,9 @@ describe('CONTROL: an acyclic model is unchanged', () => {
     expect(saidAbout(out)).toEqual([]);
     const served = (SERVED.draft_graph.edges as unknown as Edge[]).filter((e) => !(e.from === AVAILABILITY && e.to === DELAY));
     expect(body.edges).toHaveLength(served.length);
-    expect(body.edges.map(canon)).toEqual(served.map(canon));
+    const { edges: unsized, sized } = subtractMagnitudeDelta(body.edges);
+    expect(sized).toBeGreaterThan(0);
+    expect(unsized.map(canon)).toEqual(served.map(canon));
   });
 });
 
