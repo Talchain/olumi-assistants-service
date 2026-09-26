@@ -98,6 +98,20 @@ describe('the writer is handed the user\'s figure with each level, in the ONE co
     expect(label).not.toMatch(/^Record/);
   });
 
+  it('RED (Canonical #2025 B1): a unit the MODEL supplies never grounds a figure the user wrote about another entity', async () => {
+    // "6%" is churn's; the Agent claims it as the add-on price's, with a unit that names churn. Grounding reads the
+    // factor's DECLARED unit only (none here), so the claim is withdrawn and the level is Olumi's.
+    const p = product({ addOnLinked: true });
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store, undefined, 'full', undefined, { commitOptionLevels: p.commitOptionLevels });
+    const r = await caps.proposeOptionInterventions({ ...ctx, user_text: 'For "Keep £49 and add a paid AI add-on": it lowers Monthly churn rate to 6%.' }, { interventions: [
+      { option_label: ADD_ON, factor_label: 'Paid AI add-on price', value: 6, unit: '% monthly churn rate', basis: 'the user: 6%', user_stated: true },
+    ] } as never);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const op = store.get(String(r.proposal_id))!.operations.find((o) => o.op === 'set_option_intervention')!;
+    expect((op.value as { authored_by?: string }).authored_by).toBe('model_proposed');
+  });
+
   it('CONTROL: a level already on the model\'s 0–1 scale, with no range, hands the writer no figure (nothing for the door to refuse)', async () => {
     const { level } = await approve(true, { interventions: [
       { option_label: ADD_ON, factor_label: 'Paid AI add-on price', value: 0.4, basis: 'the user: 0.4', user_stated: true },

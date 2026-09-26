@@ -2180,10 +2180,11 @@ export function createAgentCapabilities(
          * Unwritten, the level is Olumi's estimate (recorded as such, and said), and on a held pair it is not a level.
          */
         const claimedByUser = i?.user_stated === true;
-        // The unit the user wrote the figure in (a NEW factor declares none): the factor's own unit wins when it has one.
+        // The unit the user wrote the figure in (a NEW factor declares none) is STORED with the level, never used to
+        // ground it: a model-supplied unit ("% monthly churn rate") would name away the entity the guard reads
+        // (Canonical #2025 B1). Grounding reads only the factor's DECLARED unit; the rate after the figure is skipped anyway.
         const statedUnit = typeof i?.unit === 'string' && i.unit.trim() !== '' ? i.unit.trim() : undefined;
-        const levelUnit = factorUnitOf(g.raw, factor) ?? statedUnit;
-        const userWrote = claimedByUser && figureTheUserWroteFor(Number(i?.value), levelUnit, ctx.user_text, scopeIn(g, factor.label, option.label));
+        const userWrote = claimedByUser && figureTheUserWroteFor(Number(i?.value), factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label));
         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
         if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
           notAccepted.push({
