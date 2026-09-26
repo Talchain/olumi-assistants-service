@@ -674,16 +674,20 @@ export async function buildModelFromBrief(
    * retry is never held to and refused it while any loop was left — so an oversized looped
    * draft that base registered came back `model_too_large`, with no model at all.
    *
-   * So: an oversized draft with no mechanism issue takes the size-only retry exactly as
-   * before, and its loops are left to admission's backstop (`breakLoops`), which withholds
-   * and says one of Olumi's links per loop whichever draft is kept. A retry still carrying a
-   * loop is adopted or not on its other merits: every loop issue is one admission can break,
-   * so refusing a retry for it could only ever cost the user a model. Where a loop IS asked
-   * (a draft within the limit, or beside a mechanism issue), the repair retry keeps every
-   * risk hypothesis as any repair must, and refusing it keeps a first draft that registers.
+   * So: an OVERSIZED draft never has its loops asked, with or without a mechanism issue.
+   * Without one it takes the size-only retry exactly as before; with one, the retry is asked
+   * the mechanism issues only. Either way its loops are left to admission's backstop
+   * (`breakLoops`), which withholds and says one of Olumi's links per loop whichever draft is
+   * kept. (Asking the loop beside a mechanism issue was refused on the size route: a retry that
+   * broke the loop as asked lost the option's signed path through it, failed the risk-retention
+   * gate, and the oversized first draft left the user `model_too_large` with no model —
+   * adversarial verify of ecc7d9eb, probe P-B1M.) A retry still carrying a loop is adopted or
+   * not on its other merits: every loop issue is one admission can break, so refusing a retry
+   * for it could only ever cost the user a model. A loop IS asked only of a draft within the
+   * limit, where refusing the retry keeps a first draft that registers.
    */
   const loops = loopIssues(admitted);
-  const asked = repairIssues(preparation).length > 0 || !needsSizeRetry ? [...repairIssues(preparation), ...loops] : [];
+  const asked = needsSizeRetry ? repairIssues(preparation) : [...repairIssues(preparation), ...loops];
   if (needsSizeRetry || asked.length > 0) {
     sizeRetried = needsSizeRetry;
     constructionRetried = true;
