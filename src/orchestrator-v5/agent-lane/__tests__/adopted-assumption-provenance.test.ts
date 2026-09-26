@@ -24,7 +24,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilitiesWithLevelsPort as createAgentCapabilities } from './fixtures/levels-port.js';
 import { createProposal, ProposalStore } from '../proposal.js';
 import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';

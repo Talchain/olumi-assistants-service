@@ -23,7 +23,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilitiesWithLevelsPort as createAgentCapabilities } from './fixtures/levels-port.js';
 import { ProposalStore } from '../proposal.js';
 import { structuralFacts } from '../structural-facts.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../../graph/repair-authored-edge.js';
@@ -314,7 +315,8 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
       const p = fakeProduct(nodes, edges);
       const store = new ProposalStore();
       const caps = createAgentCapabilities(p.d, store);
-      const r = await caps.proposeOptionInterventions(ctx, {
+      // The user wrote 0 about DEVELOPERS here: ctx's "hires 0 tech leads" is about tech leads (#70 5845853364).
+      const r = await caps.proposeOptionInterventions({ ...ctx, user_text: 'Carrying on hires 0 developers.' }, {
         interventions: [{ option_label: statusQuoLabel, factor_label: 'Developers hired', value: 0, basis: 'carrying on hires nobody', user_stated: true }],
       });
       expect(r.ok, JSON.stringify(r)).toBe(false);
@@ -405,7 +407,7 @@ describe.each(['Maintain current staffing', 'Maintain current team'])('a held st
       const p = fakeProduct(nodes, edges);
       const caps = createAgentCapabilities(p.d, new ProposalStore());
       // Developers hired starts at 0; this starting point revises it to 3, and the user says carrying on stays at 0.
-      const r = await caps.proposeStartingPoint(ctx, {
+      const r = await caps.proposeStartingPoint({ ...ctx, user_text: 'We hire 3 developers this year. Carrying on hires 0 developers.' }, {
         assumptions: [{ factor_label: 'Developers hired', value: 3, unit: 'hires', basis: 'the user: three this year', revise: true } as never],
         option_levels: [...ORDINARY_LEVELS, { option_label: statusQuoLabel, factor_label: 'Developers hired', value: 0, basis: 'the user: carrying on hires nobody', user_stated: true }],
       });

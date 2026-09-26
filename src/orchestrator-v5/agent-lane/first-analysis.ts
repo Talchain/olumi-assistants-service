@@ -23,6 +23,7 @@
  *
  * It never throws: every failure is an outcome the route can say out loud.
  */
+import { withoutStrongestDriverClause } from './decision-sensitivity.js';
 import { randomUUID } from 'node:crypto';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
@@ -297,7 +298,8 @@ export function describeFirstAnalysisForAgent(
 ): Record<string, unknown> {
   const permissions = claimPermissionsFrom(after.analysisState, { analysis_admission: after.analysisAdmission });
   const summary = (after.analysisResult as { summary?: unknown } | undefined)?.summary;
-  const summaryField = typeof summary === 'string' && summary !== '' ? { summary } : {};
+  // The structural "strongest driver" clause is not decision sensitivity (`decision-sensitivity.ts`).
+  const summaryField = typeof summary === 'string' && summary !== '' ? { summary: withoutStrongestDriverClause(summary) } : {};
   if (outcome.ran) {
     return {
       ran: true,

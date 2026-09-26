@@ -18,7 +18,8 @@
  * option. Two declared → none. Assertions name options and pairs by id.
  */
 import { describe, it, expect } from 'vitest';
-import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilitiesWithLevelsPort as createAgentCapabilities } from './fixtures/levels-port.js';
 import { ProposalStore } from '../proposal.js';
 import { structuralFacts } from '../structural-facts.js';
 import { REPAIR_AUTHORED_ORIGIN, isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
