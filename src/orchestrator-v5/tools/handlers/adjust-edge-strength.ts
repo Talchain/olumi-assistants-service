@@ -383,6 +383,13 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
           source: 'user_specified',
         };
         edge.provenance_display = 'user_set';
+        // The same stamp ends Olumi's default: `defaulted: true` says a default
+        // strength was applied (EdgeV3), and this write makes the strength the
+        // user's. Left in place, the Agent's canonical view, admissibility and
+        // coaching read the user's own strength as a placeholder (served (F) F8,
+        // fd4c483). A projected spread or existence probability is not re-marked
+        // separately: the provenance stamp above already claims the whole edge.
+        delete edge.defaulted;
 
         return {
           before: beforeSnapshot as Record<string, unknown>,

@@ -19,6 +19,7 @@ import {
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import { computeGraphIdentityHash } from '../../../src/orchestrator-v5/context/graph-identity.js';
 import { GraphStaleWriteError } from '../../../src/orchestrator-v5/session/store.js';
+import { isProvenanceOnlyEdgeConfirmation } from '../../../src/orchestrator-v5/system-events/edge-strength-edit.js';
 import { log } from '../../../src/utils/telemetry.js';
 
 function buildPersistedGraph() {
@@ -1195,6 +1196,126 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     expect(lastAppend().graph).toBeUndefined();
     expect((JSON.parse(response.body) as Record<string, unknown>).assistant_text)
       .toMatch(/no saved model/i);
+  });
+
+  /**
+   * `defaulted: true` says Olumi applied a default strength (EdgeV3, `schemas/cee-v3.ts`). This writer stamps the
+   * edge `user_specified` in the same write, so a surviving flag contradicts that stamp. Served (F) row F8 on
+   * `fd4c483` measured it twice (`f-20260926T083927Z`, `f-20260926T084243Z`). The Agent's `get_canonical_state`,
+   * admissibility ("a strength this system chose") and coaching then read the user's own strength as a placeholder.
+   */
+  describe('a strength the user sets or confirms is no longer marked defaulted', () => {
+    type LooseGraph = { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> } & Record<string, unknown>;
+    function withDefaultedEdges(): LooseGraph {
+      const graph = buildPersistedGraph() as LooseGraph;
+      graph.edges[0]!.defaulted = true;
+      graph.nodes.push({ id: 'f-price', kind: 'factor', label: 'Price' });
+      graph.edges.push({
+        from: 'f-price',
+        to: 'g-growth',
+        strength: { mean: 0.5, std: 0.125 },
+        exists_probability: 0.8,
+        effect_direction: 'positive',
+        provenance: { source: 'cee_hypothesis', reasoning: 'Projected' },
+        provenance_display: 'ai_inferred',
+        defaulted: true,
+      });
+      return graph;
+    }
+    const edgeOf = (graph: unknown, from: string, to: string) =>
+      ((graph as LooseGraph | undefined)?.edges ?? []).find((e) => e.from === from && e.to === to);
+
+    it('⭐ a SET clears it on the edge it stamps as the user\'s, in the commit and the receipt; the untouched edge keeps it', async () => {
+      persisted = withDefaultedEdges();
+      const response = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: payloadFor(validEvent(), 'a1') });
+
+      expect(response.statusCode).toBe(200);
+      expect(committedEdge()).toMatchObject({ strength: { mean: -0.7 }, provenance: { source: 'user_specified' } });
+      expect(committedEdge()).not.toHaveProperty('defaulted');
+      const body = JSON.parse(response.body) as Record<string, unknown>;
+      expect(edgeOf(body.draft_graph, 'f-demand', 'g-growth')).not.toHaveProperty('defaulted');
+      expect(edgeOf(lastAppend().graph, 'f-price', 'g-growth'), 'contrast: an edge the user did not touch').toMatchObject({ defaulted: true });
+    });
+
+    it('⭐ confirm_current adopts the strength as the user\'s: the flag clears, the analysis hash does not move', async () => {
+      persisted = withDefaultedEdges();
+      const beforeHash = computeAnalysisAffectingGraphHash(persisted as never);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payloadFor(
+          validEvent({ magnitude: 0.4, direction_intent: 'preserve', expected: { mean: -0.4, effect_direction: 'negative' }, intent: 'confirm_current' }),
+          'a2',
+        ),
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.body) as Record<string, unknown>;
+      expect(body.assistant_text).toContain('Confirmed the current strength');
+      expect(committedEdge()).toMatchObject({ strength: { mean: -0.4, std: 0.1 }, provenance: { source: 'user_specified' } });
+      expect(committedEdge()).not.toHaveProperty('defaulted');
+      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).toBe(beforeHash);
+      expect(edgeOf(lastAppend().graph, 'f-price', 'g-growth'), 'contrast: an edge the user did not touch').toMatchObject({ defaulted: true });
+    });
+
+    it('the Agent\'s approval path (the same typed event at stage frame, agent-capabilities.ts) clears it too', async () => {
+      persisted = withDefaultedEdges();
+      const response = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: {
+          kind: 'system_event',
+          turn_id: `${TURN_ID_BASE}a3`,
+          scenario_id: SCENARIO_ID,
+          stage: 'frame',
+          event: { kind: 'edge_strength_edit', from: 'f-demand', to: 'g-growth', intent: 'set', direction_intent: 'preserve', magnitude: 0.7, expected: { mean: -0.4, effect_direction: 'negative' } },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(committedEdge()).toMatchObject({ strength: { mean: -0.7 }, provenance: { source: 'user_specified' } });
+      expect(committedEdge()).not.toHaveProperty('defaulted');
+    });
+
+    describe('the confirmation allowlist admits exactly `defaulted` → absent on the target edge, nothing wider', () => {
+      const stamped = (graph: LooseGraph) => {
+        const after = structuredClone(graph);
+        const target = edgeOf(after, 'f-demand', 'g-growth')!;
+        target.provenance = { ...(target.provenance as Record<string, unknown>), source: 'user_specified' };
+        target.provenance_display = 'user_set';
+        return after;
+      };
+      const confirm = (before: LooseGraph, after: LooseGraph) =>
+        isProvenanceOnlyEdgeConfirmation({ before, after, from: 'f-demand', to: 'g-growth' });
+
+      it('⭐ the target\'s flag removed: admitted', () => {
+        const before = withDefaultedEdges();
+        const after = stamped(before);
+        delete edgeOf(after, 'f-demand', 'g-growth')!.defaulted;
+        expect(confirm(before, after)).toBe(true);
+      });
+
+      it('the flag ADDED to the target: refused', () => {
+        const before = buildPersistedGraph() as LooseGraph;
+        const after = stamped(before);
+        edgeOf(after, 'f-demand', 'g-growth')!.defaulted = true;
+        expect(confirm(before, after)).toBe(false);
+      });
+
+      it('the target\'s flag flipped to false: refused', () => {
+        const before = withDefaultedEdges();
+        const after = stamped(before);
+        edgeOf(after, 'f-demand', 'g-growth')!.defaulted = false;
+        expect(confirm(before, after)).toBe(false);
+      });
+
+      it('ANOTHER edge\'s flag removed: refused', () => {
+        const before = withDefaultedEdges();
+        const after = stamped(before);
+        delete edgeOf(after, 'f-price', 'g-growth')!.defaulted;
+        expect(confirm(before, after)).toBe(false);
+      });
+    });
   });
 
   it.each([
