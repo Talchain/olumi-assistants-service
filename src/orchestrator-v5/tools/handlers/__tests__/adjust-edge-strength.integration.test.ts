@@ -55,7 +55,7 @@ const TOOL_CALL = {
       resolution_method: 'id_match',
     },
     parameters: [
-      { name: 'strength', value: 0.7, operator: 'set', source: 'user_explicit' },
+      { name: 'strength', value: 0.55, operator: 'set', source: 'user_explicit' },
     ],
     cited_context_fields: ['graph.edges'],
   },
@@ -98,6 +98,13 @@ describe('adjust_edge_strength end-to-end via runTurnExecutor', () => {
   it('Sonnet proposal → handler → edge mutated, response carries graph_patch block, commit captures the new edge', async () => {
     const routingAdapter = mockRoutingAdapter(async () => mkToolUseResult(TOOL_CALL));
     const ingressGraph = buildD1Fixture();
+    // ONE EDGE-STRENGTH VOCABULARY (R&C, #70 5846846471): bands are read on the canvas's
+    // table (0.2 / 0.4 / 0.7), where the shared fixture's 0.4 is already "strong". Start
+    // this link at the canvas's Moderate midpoint and set it to its Strong midpoint, so the
+    // confirmation still names a moderate → strong move.
+    const budgetEdge = ingressGraph.edges.find((e) => e.from === 'f-budget' && e.to === 'g-revenue');
+    if (!budgetEdge) throw new Error('fixture: f-budget → g-revenue missing');
+    budgetEdge.strength = { ...budgetEdge.strength, mean: 0.3 };
 
     const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-d1-e-1', {
       routingAdapter,
@@ -126,7 +133,7 @@ describe('adjust_edge_strength end-to-end via runTurnExecutor', () => {
     const committedEdge = committedGraph.edges.find(
       (e) => e.from === 'f-budget' && e.to === 'g-revenue',
     );
-    expect(committedEdge?.strength.mean).toBe(0.7);
+    expect(committedEdge?.strength.mean).toBe(0.55);
     expect(appendCalls[0].handler_id).toBe('adjust_edge_strength');
   });
 });

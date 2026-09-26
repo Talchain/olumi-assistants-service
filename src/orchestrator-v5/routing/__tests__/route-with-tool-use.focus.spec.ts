@@ -296,6 +296,15 @@ describe('buildUserMessage — a turn with no selection remains byte-stable', ()
     ]);
     delete describedNodes[0]!.description;
 
+    // FOURTH SUBTRACTION. ONE EDGE-STRENGTH VOCABULARY (R&C, #70 5846846471): a link's
+    // band is now read on the canvas's own table (`format/edge-strength-bands.ts`), so
+    // this fixture's 0.4 link, the canvas's "Strong", is phrased "strong positive link"
+    // where the pristine source said "moderate positive link". Pin exactly that phrase on
+    // the one link, then restore the pristine phrase for the byte check. Not re-captured.
+    const displayEdges = (pack.display_graph as unknown as { edges: Array<{ relationship?: unknown }> }).edges;
+    expect(displayEdges.map((edge) => edge.relationship)).toEqual(['strong positive link']);
+    displayEdges[0]!.relationship = 'moderate positive link';
+
     const msg = buildUserMessage(pack, USER_MESSAGE);
     expect(msg).not.toContain(ANALYSIS_NOT_CURRENT_NOTE);
     expect(observeSerialisedPack(msg).graph_context).toEqual({ status: 'canonical' });
