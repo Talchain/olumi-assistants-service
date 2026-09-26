@@ -3743,6 +3743,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // derive one fails to compile instead of failing open.
           mayNameLeadingOption: cc.mayNameLeadingOption,
           ...(cc.freshness ? { freshness: cc.freshness } : {}),
+          // D1 — the run-over-run block's input, a passthrough exactly as on the turn_executor exit: present only
+          // when the chip Run completed one (the dispatcher's gate), absent otherwise, never defaulted.
+          ...(cc.priorFacts ? { priorFacts: cc.priorFacts } : {}),
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: thread the chip
           // answer's declared kind, DEFAULTING to 'functional' when the dispatch
           // did not declare one. Post-inversion an omitted kind would SHAPE, so a
