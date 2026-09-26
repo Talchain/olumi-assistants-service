@@ -239,6 +239,34 @@ describe('⛔ a band is recorded as the user\'s only when the user named it (AI 
     expect(bandTheUserWrote('strong', 'Price strongly affects churn.')).toBe(true);
   });
 
+  it('RED (#1984 review N1): denials typed without apostrophes, "cannot", "without", "doubt", "anything but", and an unpunctuated question name no band', () => {
+    for (const text of [
+      'It isnt strong.',
+      'Price doesnt have a strong effect.',
+      'It cannot be strong.',
+      'It is anything but strong.',
+      'Price moves MRR without a strong effect.',
+      'I doubt it is strong.',
+      'is it strong',
+      'Does price strongly affect MRR',
+    ]) {
+      expect(bandTheUserWrote('strong', text), text).toBe(false);
+    }
+    // Contrasts: a polite REQUEST names the band even as a question; "important" is not a denial.
+    expect(bandTheUserWrote('strong', 'Can you record the price link as strong, as my own estimate?')).toBe(true);
+    expect(bandTheUserWrote('strong', 'Could you record it as strong?')).toBe(true);
+    expect(bandTheUserWrote('strong', 'It has an important, strong effect on MRR.')).toBe(true);
+    expect(bandTheUserWrote('strong', 'The important thing is that the effect is strong.')).toBe(true);
+  });
+
+  it('RED (#1984 review N2): with nothing typed THIS turn, the band is never read from the rest of the conversation', async () => {
+    const w = world(graphWith(0.5));
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeLinkStrength!(
+      { ...ctx, user_turn_text: '', user_text: 'The price link is strong.' }, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'x' });
+    expect(p.refusal).toBe('strength_not_stated');
+    expect(w.sent).toEqual([]);
+  });
+
   it('band-exact on the served wording and its near misses', () => {
     // Named: served F8, the prompt's own examples.
     expect(bandTheUserWrote('strong', F8)).toBe(true);

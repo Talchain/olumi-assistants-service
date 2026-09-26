@@ -65,8 +65,9 @@ export function contradictsItsName(value: number, unit: unknown, name: string): 
  *   the whole conversation cannot ground a band; the caller passes the current typed message (`user_turn_text`).
  * - Band-exact, on word boundaries: "stronger" is not "strong"; "very strong" never grounds "strong"; "barely" is weak,
  *   the prompt's own example ("price barely affects churn").
- * - NOT A DENIAL OR A QUESTION (review B2): a band in a question ("Is it strong or weak?"), or with a negator anywhere
- *   earlier in its clause ("doesn't have a strong effect", "not as strong as you think"), grounds nothing.
+ * - NOT A DENIAL OR A QUESTION (review B2, N1): a band in a question ("Is it strong or weak?", or a sentence opened by an
+ *   auxiliary: "is it strong"), or with a negator anywhere earlier in its clause ("doesn't have a strong effect", "not as
+ *   strong as you think", "isnt", "cannot", "without", "I doubt", "anything but"), grounds nothing.
  * - KNOWN LIMIT: the word is not tied to the link. One message naming a band for a DIFFERENT link ("Marketing strongly
  *   drives signups; the price link looks wrong") still grounds it. Every miss makes the Agent ask which band.
  */
@@ -76,7 +77,16 @@ const BAND_WORDS: Record<string, RegExp> = {
   moderate: /\bmoderate(?:ly)?\b/gi,
   weak: /\b(?:weak(?:ly)?|barely)\b/gi,
 };
-const NEGATOR = /(?:^|[^\w'\u2019])(?:not|never|no|nor|neither|hardly|\w+n['\u2019]t)(?![\w'\u2019])/i;
+const NEGATOR = new RegExp(
+  "(?:^|[^\\w'\\u2019])(?:not|never|no|nor|neither|hardly|cannot|without|doubts?|doubtful|\\w+n['\\u2019]t"
+  // A contraction typed without its apostrophe ("isnt", "doesnt") — listed, never \\w+nt ("important", "significant").
+  + "|isnt|arent|wasnt|werent|doesnt|dont|didnt|cant|couldnt|wont|wouldnt|shouldnt|hasnt|havent|hadnt|aint)(?![\\w'\\u2019])",
+  'i',
+);
+/** A sentence opened by an auxiliary ("is it strong", "does price strongly affect churn") asks, even without a "?". */
+const AUXILIARY_FIRST = /^\s*(?:is|are|was|were|am|do|does|did|can|could|would|should|will|shall|has|have|had|might|must)\b/i;
+/** "Can you record it as strong?" is a REQUEST that names the band, not a question about it. */
+const REQUEST_FORM = /^\s*(?:please\s+)?(?:can|could|would|will)\s+you\b/i;
 
 /** Whether `band` is named in `turnText`, neither denied nor asked about. No text (or none bound) proves nothing: false. */
 export function bandTheUserWrote(band: string, turnText: string | null | undefined): boolean {
@@ -87,9 +97,10 @@ export function bandTheUserWrote(band: string, turnText: string | null | undefin
     const start = Math.max(turnText.lastIndexOf('.', m.index), turnText.lastIndexOf('!', m.index), turnText.lastIndexOf('?', m.index), turnText.lastIndexOf('\n', m.index)) + 1;
     const endAt = turnText.slice(m.index).search(/[.!?\n]/);
     const sentenceEnd = endAt < 0 ? '' : turnText.charAt(m.index + endAt);
-    if (sentenceEnd === '?') continue;
     const sentenceBefore = turnText.slice(start, m.index);
-    const clauseBefore = sentenceBefore.split(/[,;:\u2013\u2014]|\s-\s|\bbut\b/i).pop() ?? '';
+    if ((sentenceEnd === '?' || AUXILIARY_FIRST.test(sentenceBefore)) && !REQUEST_FORM.test(sentenceBefore)) continue;
+    // "anything but strong" denies it: read as a negator, never as a clause break.
+    const clauseBefore = sentenceBefore.replace(/\banything\s+but\b/gi, 'not').split(/[,;:\u2013\u2014]|\s-\s|\bbut\b/i).pop() ?? '';
     if (NEGATOR.test(clauseBefore)) continue;
     if (band === 'strong' && /\bvery\s+$/i.test(clauseBefore)) continue;
     return true;
