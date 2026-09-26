@@ -85,8 +85,12 @@ const NEGATOR = new RegExp(
 );
 /** A sentence opened by an auxiliary ("is it strong", "does price strongly affect churn") asks, even without a "?". */
 const AUXILIARY_FIRST = /^\s*(?:is|are|was|were|am|do|does|did|can|could|would|should|will|shall|has|have|had|might|must)\b/i;
-/** "Can you record it as strong?" is a REQUEST that names the band, not a question about it. */
-const REQUEST_FORM = /^\s*(?:please\s+)?(?:can|could|would|will)\s+you\b/i;
+/**
+ * "Can you record it as strong?" is a REQUEST to act on the model, and it names the band. Only an ACTION verb counts
+ * (#1984 review B-RF): "Would you say it's strong?", "Could you tell me whether…", "Can you check if…" ask for
+ * Olumi's opinion, and stay questions.
+ */
+const REQUEST_FORM = /^\s*(?:please\s+)?(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:record|set|make|mark|change|put|update|use|save|keep|treat)\b/i;
 
 /** Whether `band` is named in `turnText`, neither denied nor asked about. No text (or none bound) proves nothing: false. */
 export function bandTheUserWrote(band: string, turnText: string | null | undefined): boolean {

@@ -252,11 +252,24 @@ describe('⛔ a band is recorded as the user\'s only when the user named it (AI 
     ]) {
       expect(bandTheUserWrote('strong', text), text).toBe(false);
     }
-    // Contrasts: a polite REQUEST names the band even as a question; "important" is not a denial.
+    // Contrasts: a polite REQUEST to act on the model names the band even as a question; "important" is not a denial.
     expect(bandTheUserWrote('strong', 'Can you record the price link as strong, as my own estimate?')).toBe(true);
     expect(bandTheUserWrote('strong', 'Could you record it as strong?')).toBe(true);
+    expect(bandTheUserWrote('weak', 'Will you make it weak?')).toBe(true);
     expect(bandTheUserWrote('strong', 'It has an important, strong effect on MRR.')).toBe(true);
     expect(bandTheUserWrote('strong', 'The important thing is that the effect is strong.')).toBe(true);
+  });
+
+  it('RED (#1984 review B-RF): asking for OLUMI\'s opinion names no band — only a request to ACT on the model does', () => {
+    for (const text of [
+      'Would you say it\'s strong?',
+      'Would you say the price link is strong?',
+      'Could you tell me whether it is strong?',
+      'Can you check if the price link is strong?',
+      'Do you think it is strong?',
+    ]) {
+      expect(bandTheUserWrote('strong', text), text).toBe(false);
+    }
   });
 
   it('RED (#1984 review N2): with nothing typed THIS turn, the band is never read from the rest of the conversation', async () => {
