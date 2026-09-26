@@ -97,6 +97,14 @@ describe('set_factor_value: a level that arrives after construction sizes Olumi\
     for (const e of links(result, 'ai_feature_availability', 'monthly_churn')) expect(e.strength).toEqual({ mean: -0.5, std: 0.125 });
   });
 
+  it('CONTROL: an option that sets the limited quantity BELOW ZERO makes it a change, not a level → the links keep the default', async () => {
+    const graph = served('run1_step01');
+    const option = graph.nodes.find((n) => n.id === 'raise_to_59_at_release')!;
+    option.interventions = { ...(option.interventions as Record<string, unknown>), monthly_churn: { value: -0.02, source: 'brief_extraction' } };
+    const result = await setLevel(graph, 'monthly_churn', 5, CHURN_UNIT);
+    for (const e of links(result, 'price_sensitivity', 'monthly_churn')) expect(e.strength).toEqual({ mean: 0.5, std: 0.125 });
+  });
+
   it('CONTROL: a size the USER gave (user_specified) on the same link is never touched', async () => {
     const graph = served('run1_step01');
     const userLink = graph.edges.find((e) => e.from === 'ai_feature_availability' && e.to === 'monthly_churn')!;

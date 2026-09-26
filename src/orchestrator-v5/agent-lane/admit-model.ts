@@ -2617,6 +2617,17 @@ function admitOnce(
   for (const bundle of interventionsByOption.values()) {
     for (const [factorId, level] of Object.entries(bundle)) optionLevelsById.set(factorId, [...(optionLevelsById.get(factorId) ?? []), level.value]);
   }
+  // A node a LEVEL limit in "%" names is a percentage level (`MagnitudeNode.percent_level`): the limit's own unit, read
+  // by the one canonicaliser the limit is admitted with — never the node unit's wording (served Run 1: "% of Pro
+  // subscribers per month" left churn with no domain, so its links kept ±0.5 and no option was decision-grade).
+  const percentLevelIds = new Set<string>();
+  for (const c of model.constraints) {
+    if (c.frame !== 'level') continue;
+    const frame = unitPinnedScaleFrame(c.unit, c.value);
+    if (frame === undefined || canonicaliseLimitUnit(c.value, c.unit, { scale_frame: frame }).unit !== '%') continue;
+    const id = nodeIdForMetric(c.metric);
+    if (id !== undefined) percentLevelIds.add(id);
+  }
   const magnitudeNodeById = new Map<string, MagnitudeNode>(nodes.map((n) => [n.id, {
     label: n.label,
     kind: n.kind,
@@ -2626,6 +2637,7 @@ function admitOnce(
     goal_threshold_unit: n.goal_threshold_unit,
     unit: unitById.get(n.id) ?? null,
     option_levels: optionLevelsById.get(n.id) ?? [],
+    ...(percentLevelIds.has(n.id) ? { percent_level: true } : {}),
   }]));
   const sizing = new Map<string, LinkSizing>();
   for (const l of resolvable) {

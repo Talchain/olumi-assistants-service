@@ -59,6 +59,13 @@ export interface MagnitudeNode {
   /** The unit the drafter gave this quantity, for a node whose graph fields carry none. */
   readonly unit?: string | null;
   readonly option_levels: readonly number[];
+  /**
+   * ⭐ A LEVEL LIMIT IN "%" NAMES THIS NODE (joined verdict #2, DL #70 5849144218; served Run 1, CEE 3fdd9c3). The
+   * user limits its value in percent, so its quantity is a percentage LEVEL whatever its own unit's wording says —
+   * served: "% of Pro subscribers per month", which `isPercentWithPeriod` rightly does not read as a level on words
+   * alone. Set from the admitted limit (a structured field), never from the wording. See `levelDomain`.
+   */
+  readonly percent_level?: boolean;
 }
 
 const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
@@ -103,15 +110,19 @@ const UNIT_INTERVAL: LevelDomain = { lo: 0, hi: 1 };
  *  · a percentage LEVEL (`isPercentWithPeriod`) on a pinned 100 frame (or already a proportion) → [0, 1];
  *  · a currency amount (the estate's one currency vocabulary) → [0, ∞);
  *  · anything else already on frame 1 (a fraction) → [0, 1];
- *  · percentage points, basis points, a "% change" or an unrecognised unit → unbounded (never questioned).
+ *  · percentage points, basis points, a "% change" or an unrecognised unit → unbounded (never questioned);
+ *  · `percentLevel` (a level limit in "%" names the node, `MagnitudeNode.percent_level`): a percent-class unit whose
+ *    wording alone does not read as a level ("% of Pro subscribers per month") is read as one → [0, 1].
  *
  * ⚠ A COUNT READS AS UNBOUNDED HERE. The design puts counts on [0, ∞), but the estate has no count vocabulary
  * and the design forbids an inline list, so a count is left unchecked rather than guessed. The PR says so.
  */
-export function levelDomain(unit: string | undefined, frame: number): LevelDomain | null {
+export function levelDomain(unit: string | undefined, frame: number, percentLevel = false): LevelDomain | null {
   const cls = classifyUnitScaleClass(unit);
   if (cls === 'percentage_points' || cls === 'basis_points') return null;
-  if (cls === 'percent') return unit !== undefined && isPercentWithPeriod(unit) && (frame === 100 || frame === 1) ? UNIT_INTERVAL : null;
+  if (cls === 'percent') {
+    return unit !== undefined && (isPercentWithPeriod(unit) || percentLevel) && (frame === 100 || frame === 1) ? UNIT_INTERVAL : null;
+  }
   if (unit !== undefined && readCurrencyUnitWithQualifiers(unit).kind === 'currency') return { lo: 0, hi: Infinity };
   return frame === 1 ? UNIT_INTERVAL : null;
 }
@@ -362,7 +373,10 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
   };
 
   const baseline = knownBaseline(target);
-  const domain = targetFrame === undefined ? null : levelDomain(unitOf(target), targetFrame);
+  // A percentage level by its limit — unless an option sets it below zero: a quantity that goes negative is a change,
+  // not a level (typed numbers decide it, never the unit's words).
+  const percentLevel = target.percent_level === true && target.option_levels.every((v) => v >= 0);
+  const domain = targetFrame === undefined ? null : levelDomain(unitOf(target), targetFrame, percentLevel);
   const swing = sourceSwing(source);
   const check = baseline !== undefined && domain !== null && swing !== null && withinDomain({ lo: baseline, hi: baseline }, domain)
     ? { baseline, domain, swing, frame: targetFrame as number }

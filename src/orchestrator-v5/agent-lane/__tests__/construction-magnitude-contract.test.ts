@@ -331,3 +331,40 @@ describe('PR1b on the real path: the mediated risk link into churn is sized to c
     expect(questions(out).filter((q) => q.includes('"Price sensitivity"') && q.includes('"Monthly churn"'))).toHaveLength(1);
   });
 });
+
+/**
+ * Joined verdict #2 (DL #70 5849144218), served Run 1: the drafter worded churn "% of Pro subscribers per month". The
+ * wording alone does not read as a percentage level (`isPercentWithPeriod`: a bare percent and a period), so PR1b had no
+ * domain for churn and its links kept ±0.5. The user's own LEVEL limit in % on churn is the structured field that says
+ * the quantity is a percentage level.
+ */
+describe('Run 1 wording: churn as "% of Pro subscribers per month" is a percentage level by its level limit', () => {
+  const run1 = () => {
+    const c = t3(UNKNOWN);
+    c.factors[3] = { ...c.factors[3]!, baseline_known: false, baseline_value: 7, unit: '% of Pro subscribers per month', provenance: 'ai_proposed' };
+    return c;
+  };
+
+  it('RED: Price sensitivity -> churn (Olumi\'s 7% estimate, the served wording) is the frame-aware placeholder, not ±0.5', async () => {
+    const { graph } = await register(run1());
+    const e = edge(graph, 'price_sensitivity', CHURN);
+    expect(e.provenance?.magnitude).toBe('olumi_placeholder');
+    expect(e.strength.mean).toBeCloseTo(0.0175, 12);
+  });
+
+  it('CONTRAST: the same wording with NO limit on churn keeps today\'s ±0.5 / 0.125, unstamped', async () => {
+    const c = run1();
+    c.constraints = [];
+    const { graph } = await register(c);
+    const e = edge(graph, 'price_sensitivity', CHURN);
+    expect(e.strength).toMatchObject({ mean: 0.5, std: 0.125 });
+    expect(e.provenance?.magnitude).toBeUndefined();
+  });
+
+  it('CONTRAST: a DELTA limit in % on churn ("no more than 10% higher") does not make it a level — ±0.5 kept', async () => {
+    const c = run1();
+    c.constraints = [{ ...c.constraints[0]!, frame: 'delta' }];
+    const { graph } = await register(c);
+    expect(edge(graph, 'price_sensitivity', CHURN).strength).toMatchObject({ mean: 0.5, std: 0.125 });
+  });
+});
