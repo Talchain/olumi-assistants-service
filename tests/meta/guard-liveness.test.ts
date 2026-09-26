@@ -36,8 +36,10 @@ import {
   deriveLiveness,
   findFalseEnforcementClaims,
   invocationEdges,
+  parseJobs,
   readRepo,
   requiredGateJob,
+  requiredPathJobs,
   stripComments,
   type Job,
   type Repo,
@@ -158,6 +160,84 @@ describe("guard liveness: positive controls (the classifier must SEE a presence)
     expect(() => requiredGateJob(twin)).toThrow(/BLINDED/);
   });
 
+  // ── The SPLIT gate. The job running `pnpm test:required` is a shard matrix;
+  // the required context is the job that aggregates it. These controls prove
+  // the derivation resolves the aggregator, walks `needs:` for reachability,
+  // and does not mistake a success-only consumer for the gate.
+  const SPLIT_CI = [
+    "jobs:",
+    "  required-static:",
+    "    name: Required — lint, typecheck, guards",
+    "    steps:",
+    "      - run: bash scripts/static-guard.sh",
+    "  required-tests:",
+    "    name: Required — tests ${{ matrix.shard }}/3",
+    "    steps:",
+    "      - run: pnpm test:required --shard=${{ matrix.shard }}/3",
+    "  unit-tests:",
+    "    name: Lint, TypeCheck, Unit Tests",
+    "    needs: [required-static, required-tests]",
+    "    if: ${{ !cancelled() }}",
+    "    steps:",
+    "      - run: node scripts/ci/aggregate-guard.mjs",
+    "  live-tests:",
+    "    name: Paid consumer",
+    "    needs:",
+    "      - unit-tests",
+    "      - required-tests",
+    "    steps:",
+    "      - run: bash scripts/paid-only.sh",
+  ].join("\n");
+  const splitRepo = (text: string): Repo => ({
+    root: REPO_ROOT,
+    scripts: ["scripts/static-guard.sh", "scripts/ci/aggregate-guard.mjs", "scripts/paid-only.sh"],
+    pkgScripts: {},
+    jobs: parseJobs("ci.yml", text),
+    hookInstallers: [],
+  });
+
+  it("parses `needs:` in flow and block form, and a one-line job `if:`", () => {
+    const jobs = parseJobs("ci.yml", SPLIT_CI);
+    const byKey = new Map(jobs.map((j) => [j.key, j]));
+    expect(byKey.get("unit-tests")?.needs).toEqual(["required-static", "required-tests"]);
+    expect(byKey.get("unit-tests")?.if).toBe("${{ !cancelled() }}");
+    expect(byKey.get("live-tests")?.needs).toEqual(["unit-tests", "required-tests"]);
+    expect(byKey.get("required-static")?.needs).toEqual([]);
+  });
+
+  it("resolves a split gate to its aggregator, and walks `needs:` for reachability", () => {
+    const repo = splitRepo(SPLIT_CI);
+    expect(requiredGateJob(repo).name).toBe("Lint, TypeCheck, Unit Tests");
+    expect(requiredPathJobs(repo).map((j) => j.key).sort()).toEqual(["required-static", "required-tests", "unit-tests"]);
+
+    const { required, orphans } = deriveLiveness(repo);
+    // The static job's guard is required-reachable ONLY through `needs:`.
+    expect([...required]).toContain("scripts/static-guard.sh");
+    expect([...required]).toContain("scripts/ci/aggregate-guard.mjs");
+    // A success-only consumer that needs the host is NOT on the required path.
+    expect(orphans.map((o) => o.path)).toEqual(["scripts/paid-only.sh"]);
+  });
+
+  it("does not accept a success-only dependent as the gate (it cannot report a red shard)", () => {
+    // Mutant: the aggregator loses `if: !cancelled()`. A failed shard would then
+    // SKIP it, and GitHub reads a skipped required check as passing.
+    const repo = splitRepo(SPLIT_CI.replace("    if: ${{ !cancelled() }}\n", ""));
+    expect(requiredGateJob(repo).name).toBe("Required — tests ${{ matrix.shard }}/3");
+  });
+
+  it("HARD-FAILS when two jobs claim to aggregate the test host", () => {
+    const twin = SPLIT_CI.replace(
+      "  live-tests:\n    name: Paid consumer\n",
+      "  live-tests:\n    name: Paid consumer\n    if: always()\n",
+    );
+    expect(() => requiredGateJob(splitRepo(twin))).toThrow(/BLINDED: expected at most one job aggregating/);
+  });
+
+  it("HARD-FAILS when the gate needs a job that does not exist", () => {
+    const dangling = SPLIT_CI.replace("needs: [required-static, required-tests]", "needs: [required-static, required-tests, ghost]");
+    expect(() => requiredPathJobs(splitRepo(dangling))).toThrow(/needs `ghost`, which does not exist/);
+  });
+
   it("parses real workflow jobs (the parser is not silently returning nothing)", () => {
     const repo = readRepo(REPO_ROOT);
     expect(repo.jobs.length).toBeGreaterThan(5);
@@ -181,7 +261,10 @@ describe("guard liveness: this repository", () => {
 
   it("the required gate genuinely reaches guards (not a vacuous empty closure)", () => {
     expect(liveness.required.size).toBeGreaterThan(0);
+    // Runs in `required-static`, reachable from the gate only through `needs:`.
     expect([...liveness.required]).toContain("scripts/ci/assert-pnpm-overrides-readable.mjs");
+    // Runs in the gate job itself: the split gate's completeness proof.
+    expect([...liveness.required]).toContain("scripts/ci/assert-required-shards-complete.mjs");
   });
 
   it("the orphaned-guard set EXACTLY equals the acknowledgements file", () => {

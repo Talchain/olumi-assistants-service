@@ -16,6 +16,14 @@
  *   · REQUIRED   is the job that runs `pnpm test:required` — i.e. the job this
  *                very spec executes inside. Self-locating, so moving the gate
  *                moves the guard with it. Zero or many such jobs → hard error.
+ *                When that job is a SPLIT gate's test shard, the required
+ *                context is the one job that `needs` it and runs whatever it
+ *                concluded (`!cancelled()` / `always()`) — the aggregator that
+ *                turns the shards' results into the verdict. Everything that
+ *                aggregator `needs` is part of the required path, so guard
+ *                reachability follows `needs:` from it. A job that needs the
+ *                host but runs only on SUCCESS (e.g. `live-tests`) is a
+ *                consumer, not the gate: it cannot report the host's failure.
  *
  * TWO EDGE RULES, both learned by measurement while building this:
  *
@@ -111,6 +119,39 @@ export interface Job {
   workflow: string;
   name: string;
   runs: string[];
+  /** The job's key under `jobs:`. Defaults to `name` where absent (fixtures). */
+  key?: string;
+  /** The job keys named in `needs:`. */
+  needs?: string[];
+  /** The job-level `if:` when written on one line (block scalars read as absent). */
+  if?: string;
+}
+
+const keyOf = (j: Job): string => j.key ?? j.name;
+
+/** `needs:` as a flow list, a scalar, or a block list of `- key` lines. */
+function parseNeeds(lines: string[]): string[] {
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^ {4}needs:\s*(.*?)\s*$/);
+    if (!m) continue;
+    const inline = m[1].replace(/\s+#.*$/, "");
+    if (inline.startsWith("[")) {
+      return inline
+        .replace(/^\[|\]$/g, "")
+        .split(",")
+        .map((s) => s.trim().replace(/^["']|["']$/g, ""))
+        .filter(Boolean);
+    }
+    if (inline !== "") return [inline.replace(/^["']|["']$/g, "")];
+    const out: string[] = [];
+    for (let j = i + 1; j < lines.length; j++) {
+      const item = lines[j].match(/^ {6}-\s*["']?([A-Za-z0-9_-]+)["']?\s*$/);
+      if (!item) break;
+      out.push(item[1]);
+    }
+    return out;
+  }
+  return [];
 }
 
 /** Every `run:` body in a workflow fragment, block scalars included. */
@@ -158,11 +199,17 @@ export function parseJobs(workflow: string, text: string): Job[] {
     cur.lines.push(lines[i]);
   }
   if (cur) acc.push(cur);
-  return acc.map((j) => ({
-    workflow,
-    name: j.name ?? j.key,
-    runs: runBlocks(j.lines.join("\n")),
-  }));
+  return acc.map((j) => {
+    const cond = j.lines.map((l) => l.match(/^ {4}if:\s*(.+?)\s*$/)).find(Boolean)?.[1];
+    return {
+      workflow,
+      name: j.name ?? j.key,
+      runs: runBlocks(j.lines.join("\n")),
+      key: j.key,
+      needs: parseNeeds(j.lines),
+      ...(cond !== undefined && !/^[|>]/.test(cond) ? { if: cond } : {}),
+    };
+  });
 }
 
 export interface Repo {
@@ -213,7 +260,47 @@ export function requiredGateJob(repo: Repo): Job {
         ` (${hosts.map((h) => `${h.workflow}::${h.name}`).join(", ")})`,
     );
   }
-  return hosts[0];
+  const host = hosts[0];
+  // A split gate: the host is a test shard, and the job reporting the required
+  // context is the one that needs it AND runs whatever it concluded. A
+  // success-only dependent cannot report the host's failure, so it is excluded.
+  const aggregators = repo.jobs.filter(
+    (j) =>
+      j.workflow === host.workflow &&
+      (j.needs ?? []).includes(keyOf(host)) &&
+      /(!\s*cancelled\(\)|\balways\(\))/.test(j.if ?? ""),
+  );
+  if (aggregators.length > 1) {
+    throw new Error(
+      `BLINDED: expected at most one job aggregating \`${host.workflow}::${host.name}\` ` +
+        `(needs it, runs on !cancelled()/always()), found ${aggregators.length}` +
+        ` (${aggregators.map((a) => a.name).join(", ")})`,
+    );
+  }
+  return aggregators[0] ?? host;
+}
+
+/**
+ * Every job on the required path: the gate plus everything it `needs`,
+ * transitively, within its workflow. For an unsplit gate that is just the gate.
+ */
+export function requiredPathJobs(repo: Repo): Job[] {
+  const gate = requiredGateJob(repo);
+  const inWorkflow = new Map(repo.jobs.filter((j) => j.workflow === gate.workflow).map((j) => [keyOf(j), j]));
+  const seen = new Map<string, Job>([[keyOf(gate), gate]]);
+  const queue = [gate];
+  while (queue.length) {
+    for (const k of (queue.pop() as Job).needs ?? []) {
+      const dep = inWorkflow.get(k);
+      if (!dep) {
+        throw new Error(`BLINDED: required job \`${gate.workflow}::${gate.name}\` needs \`${k}\`, which does not exist`);
+      }
+      if (seen.has(k)) continue;
+      seen.set(k, dep);
+      queue.push(dep);
+    }
+  }
+  return [...seen.values()];
 }
 
 type Seed = { t: string; k: Kind };
@@ -256,17 +343,17 @@ export interface Liveness {
 
 export function deriveLiveness(repo: Repo): Liveness {
   const boundary = new Set(repo.hookInstallers);
-  const gate = requiredGateJob(repo);
+  const requiredJobs = requiredPathJobs(repo);
 
   const required = closure(
     repo,
-    gate.runs.map((t) => ({ t, k: "sh" as Kind })),
+    requiredJobs.flatMap((j) => j.runs.map((t) => ({ t, k: "sh" as Kind }))),
     boundary,
   );
 
   const nonRequiredSeeds: Seed[] = [];
   for (const j of repo.jobs) {
-    if (j.workflow === gate.workflow && j.name === gate.name) continue;
+    if (requiredJobs.includes(j)) continue;
     for (const r of j.runs) nonRequiredSeeds.push({ t: r, k: "sh" });
   }
   const nonRequired = closure(repo, nonRequiredSeeds, boundary);
