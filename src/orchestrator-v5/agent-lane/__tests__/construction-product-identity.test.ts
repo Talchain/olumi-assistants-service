@@ -68,7 +68,7 @@ function pricing(identities: Identity[] | undefined): Record<string, unknown> {
       metric: 'MRR', operator: '>=', target_stated: true, value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
       baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
     },
-    constraints: [{ metric: 'Monthly churn', operator: '<=', value: 10, unit: '%', provenance: 'explicit' }],
+    constraints: [{ metric: 'Monthly churn', operator: '<=', value: 10, unit: '%', provenance: 'explicit', frame: 'level' }],
     options: [
       { label: 'Keep Pro at £49', provenance: 'explicit', is_status_quo: true, changes: [], interventions: [] },
       { label: 'Raise Pro to £59', provenance: 'explicit', is_status_quo: null, changes: [],
@@ -734,7 +734,7 @@ function served({ without }: { without?: [string, string] } = {}): Record<string
       metric: 'MRR', operator: '>=', target_stated: true, value: 20000, unit: 'GBP/month', horizon_months: 12, provenance: 'explicit',
       baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null,
     },
-    constraints: [{ metric: 'Monthly churn', operator: '<=', value: 10, unit: '%', provenance: 'explicit' }],
+    constraints: [{ metric: 'Monthly churn', operator: '<=', value: 10, unit: '%', provenance: 'explicit', frame: 'level' }],
     options: [
       { label: 'Keep £49 Price', provenance: 'ai_proposed', is_status_quo: true, changes: [], interventions: [] },
       { label: 'Raise to £59', provenance: 'explicit', is_status_quo: null, changes: [],
