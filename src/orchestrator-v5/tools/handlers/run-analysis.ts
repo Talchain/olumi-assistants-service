@@ -48,6 +48,7 @@ import type {
 
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import {
+  collectLeaderEstimatedTargetIds,
   deriveConstraintVerdict,
   readRatifiedConstraints,
   projectClaimSafety,
@@ -1736,10 +1737,33 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     //
     // Pinned by `__tests__/run-analysis-derived-constraint-target.test.ts`,
     // which executes this handler and reads the verdict off the persisted fact.
+    // ⛔ The leader's result on a limit whose target it SETS at a level that is not the user's own is that level
+    // restated, not a check (AI Quality, #70 5844226031): read off the options PLoT received, and passed as the FIFTH
+    // argument — the fourth stays deliberately omitted (see above).
+    // WIRE, not graph (review 5844327116): a status quo the gate HELD sets the target on the wire only.
+    const leaderEstimatedTargetIds = collectLeaderEstimatedTargetIds(
+      graphForAnalysis,
+      ratifiedConstraints,
+      leadingOptionId ?? null,
+      { options: submittedOptions, held: gate.held },
+    );
+    if (leaderEstimatedTargetIds.size > 0) {
+      log.info(
+        {
+          event: 'run_analysis.limit_rests_on_olumi_estimate',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          constraint_ids: [...leaderEstimatedTargetIds],
+        },
+        'run_analysis: a limit on a quantity the leading option sets at Olumi\'s estimate is not counted as checked',
+      );
+    }
     const constraintVerdict = deriveConstraintVerdict(
       response as Record<string, unknown>,
       ratifiedConstraints,
       leadingOptionId ?? null,
+      undefined,
+      leaderEstimatedTargetIds,
     );
     // ⚠ NO TELEMETRY EVENT FOR THE UNMEASURED-TARGET PARTITION, AND THAT IS A
     // DISCLOSED GAP RATHER THAN AN OVERSIGHT — the same call, for the same
