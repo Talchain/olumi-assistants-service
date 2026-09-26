@@ -536,6 +536,34 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(approveChipOf(t1)).toBeUndefined();
   }, 120_000);
 
+  it('[q5] RED (DL #70 5846812818, served F4/F4e): TWO options in one request, one a twin of "Raise to £59" → the valid one is still proposed as ONE change with ONE chip, the twin is named as not added, and approving adds only the valid one', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    let toolOutput: { ok?: boolean; refusal?: string; not_added?: { option: string; same_levels_as: string }[]; not_added_note?: string; options?: unknown; option?: { label?: string } } = {};
+    script = [
+      () => fnCall('propose_new_option', { options: [
+        { label: 'Test £59 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 59, unit: 'GBP' } }] },
+        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }] },
+      ], rationale: 'The user asked for both.' }),
+      (body) => {
+        const out = (body['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
+        toolOutput = JSON.parse(String(out?.output ?? '{}')) as typeof toolOutput;
+        return say('I can add "Test £54 at release"; "Test £59 at release" would repeat "Raise to £59". Add the £54 one?');
+      },
+    ];
+    const t1 = await turn({ message: 'Add two options: test £59 at release, and test £54 at release.' });
+    expect(toolOutput.ok, JSON.stringify(toolOutput)).toBe(true);
+    expect(toolOutput.not_added).toEqual([{ option: 'Test £59 at release', same_levels_as: 'Raise to £59' }]);
+    expect(toolOutput.not_added_note).toMatch(/Never promise to add it later/);
+    expect(toolOutput.option?.label).toBe('Test £54 at release');
+    const approve = approveChipOf(t1);
+    expect(approve, 'ONE approve chip for the valid option').toBeDefined();
+    await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    const labels = graphNow().nodes.filter((x) => x.kind === 'option').map((x) => x.label);
+    expect(labels).toContain('Test £54 at release');
+    expect(labels).not.toContain('Test £59 at release');
+    expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id), 'linked from the decision').toBe(true);
+  }, 120_000);
+
   it('[p3] RED: a factor with no range at all — the user\'s £54 cannot be stored on one, so the level is left UNSET (never a bare 54) and the Agent is told why', async () => {
     graphOf.set(SCENARIO, seedGraph(1, 1, 'none'));
     let proposed = '';
