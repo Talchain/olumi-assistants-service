@@ -22,7 +22,6 @@ import {
 } from '../constraint-feasibility.js';
 
 const CHURN: RatifiedConstraint = { constraint_id: 'gc_churn', label: 'Monthly churn' };
-const COST: RatifiedConstraint = { constraint_id: 'gc_cost', label: 'Total cost' };
 
 function envelope(opts: {
   filtered: ReadonlyArray<Record<string, unknown>>;
