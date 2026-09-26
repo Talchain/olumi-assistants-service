@@ -166,6 +166,8 @@ export function withoutAgentDirections(text: string): { readonly text: string; r
 const PART_NAMES: Record<string, readonly [string, string]> = {
   values: ['starting value', 'starting values'],
   option_levels: ['option level', 'option levels'],
+  // The option → factor links a level needs (#2004): named, never "changes".
+  links: ['link', 'links'],
 };
 const UNNAMED_PART: readonly [string, string] = ['change', 'changes'];
 
