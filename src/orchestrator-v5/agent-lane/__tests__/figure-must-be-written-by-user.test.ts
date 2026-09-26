@@ -83,11 +83,18 @@ describe('figureTheUserWrote — present in the user\'s words, in a compatible k
 describe('⛔ the user\'s words are what they TYPED — by provenance, never by text shape (#1978 reviews 5844589340 B1, 5844805634 B2/B3)', () => {
   it('typedByUser: a composer message is typed; a chip click, a board edit or any system event is not', () => {
     expect(typedByUser({ kind: 'message', message: 'Test £54 at release.' })).toBe(true);
-    expect(typedByUser({ message: 'Test £54 at release.', source: 'user' })).toBe(true);
+    expect(typedByUser({ message: 'Test £54 at release.', source: 'composer' })).toBe(true);
     expect(typedByUser({ kind: 'message', source: 'chip', chip: { id: 'agent-approve-proposal:gmh_1' }, message: "Yes, add option 'Test £54 at release'." })).toBe(false);
     expect(typedByUser({ kind: 'message', chip: { id: 'agent-run-offer' }, message: 'Run analysis.' })).toBe(false);
     expect(typedByUser({ kind: 'message', source: 'chip', message: 'Talk me through Price.' })).toBe(false);
     expect(typedByUser({ kind: 'system_event', event: { kind: 'factor_value_edit' } })).toBe(false);
+  });
+
+  it('RED (#1978 review N1): only a composer message is typed — a chip_click with no chip object, a retry, or any unknown source is not', () => {
+    expect(typedByUser({ kind: 'message', source: 'chip_click', message: "Yes, add option 'Test £54 at release'." })).toBe(false);
+    expect(typedByUser({ kind: 'message', source: 'retry', message: 'Test £54 at release.' })).toBe(false);
+    expect(typedByUser({ kind: 'message', source: 'coaching', message: 'Talk me through Price at £54.' })).toBe(false);
+    expect(typedByUser({ kind: 'message', source: 'composer', message: 'Test £54 at release.' })).toBe(true);
   });
 
   it('RED (B2): a natural "Yes, …" reply keeps the user\'s own figure — contractions never cut it out', () => {
