@@ -101,6 +101,24 @@ function currencyPrefix(unit: string): string | undefined {
   return undefined;
 }
 
+/**
+ * ⭐ A CURRENCY RATE IS SAID AS "£59/month" (served-claim audit UF-3, #70 5850056041).
+ *
+ * ⚠ SERVED (CEE staging, DL acceptance runs 26 Sep): the option cards read "59 GBP/month", "59 GBP per month", "54 £/month"
+ * and "59 £ per month" — the amount before its own currency sign, beside the UI's "£49/month" on the same line. A unit
+ * that is a currency this module already prefixes (`currencyPrefix`, unchanged), then "/" or " per ", then anything, is a
+ * rate: the sign leads and the denominator follows as written ("£ per user" → "£59/user"). Anything else: `undefined`,
+ * and the unit renders exactly as before.
+ */
+const RATE_UNIT = /^(.+?)\s*(?:\/|\s+per\s+)\s*(.+)$/i;
+function currencyRate(unit: string): { prefix: string; per: string } | undefined {
+  const m = RATE_UNIT.exec(unit.trim());
+  if (m === null) return undefined;
+  const prefix = currencyPrefix(m[1].trim());
+  const per = m[2].trim();
+  return prefix !== undefined && per.length > 0 ? { prefix, per } : undefined;
+}
+
 function isCurrencyUnit(unit: string | undefined): boolean {
   if (!unit) return false;
   return CURRENCY_SYMBOLS.has(unit) || unit === "GBP" || unit === "USD" || unit === "EUR";
@@ -236,10 +254,14 @@ export function synthesiseDisplayValue(data: DisplayValueInput): string | undefi
   // ── Priority 1–4: raw_value is available ─────────────────────────────────
   if (rawValue !== undefined && typeof rawValue === "number" && !Number.isNaN(rawValue)) {
     const prefix = unit ? currencyPrefix(unit) : undefined;
+    const rate = unit && prefix === undefined ? currencyRate(unit) : undefined;
 
     if (prefix) {
       // Priority 1: currency
       result = `${prefix}${formatCurrencyAmount(rawValue)}`;
+    } else if (rate) {
+      // Priority 1b: a currency rate ("£59/month")
+      result = `${rate.prefix}${formatCurrencyAmount(rawValue)}/${rate.per}`;
     } else if (unit === "%") {
       // Priority 2: percentage — raw_value is already the display percentage
       const pct = parseFloat(rawValue.toFixed(2));
