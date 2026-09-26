@@ -701,3 +701,48 @@ describe('DSK-P-003 badge — kept only where the run positively shows a clear w
     }
   });
 });
+
+describe('ASSUMED LINK variant (#70, R&C PR-3) — builder level', () => {
+  const inputOf = (c: RunTurnCase, authorship: 'olumi_assumed' | 'not_olumi_assumed' | 'not_tested') => ({
+    analysisResult: c.final.analysisResult,
+    graphHash: c.final.graphHash!,
+    computedAt: (c.final.analysisState as Record<string, any>).run_state.computed_at as string,
+    trigger: c.captured.trigger!,
+    freshness: 'fresh' as const,
+    optionLabels: c.turn.analysis_ready.options.map((o) => o.label),
+    edgeAuthorship: () => authorship,
+  });
+
+  it('a clear winner (c16) on an Olumi-assumed link ships the assumed words WITHOUT the DSK-P-003 badge; on a stated link the same run keeps it', () => {
+    const c = runTurnCase('c16', 't5', 'explicit_run');
+    const assumed = buildFragileLinkChallenge(inputOf(c, 'olumi_assumed')).block!;
+    expect(assumed.signal_id.endsWith(':explicit_run:assumed')).toBe(true);
+    expect(assumed.title).toBe('Check an assumption Olumi made');
+    expect(assumed.body).toMatch(/some of its numbers are Olumi's starting assumptions/);
+    expect(Object.hasOwn(assumed, 'dsk_claim_provenance')).toBe(false);
+    const stated = buildFragileLinkChallenge(inputOf(c, 'not_olumi_assumed')).block!;
+    expect(stated.signal_id.endsWith(':explicit_run')).toBe(true);
+    expect(stated.dsk_claim_provenance).toEqual(dskClaimFromBundle());
+    // not_tested (no bound graph) is the neutral card, byte-identical to the stated one.
+    expect(buildFragileLinkChallenge(inputOf(c, 'not_tested')).block).toEqual(stated);
+  });
+
+  it('every label pair the selector admits still yields ONE card when the link is assumed (the assumed words, or the neutral words when they do not fit)', () => {
+    let tested = 0;
+    for (const total of [20, 60, 87]) {
+      const from = 'A'.repeat(Math.ceil(total / 2));
+      const to = 'B'.repeat(Math.floor(total / 2));
+      for (const trigger of ['explicit_run', 'auto_first_pass'] as const) {
+        const c = withGroundedLabels(runTurnCase('A', 't5', trigger), from, to);
+        if (selectGroundedCounterCase((c.final.analysisResult as Record<string, any>).enrichment).grounded === null) continue;
+        const built = buildFragileLinkChallenge(inputOf(c, 'olumi_assumed'));
+        expect(built.reason, `${total}/${trigger}`).toBeNull();
+        expect(built.block!.body.length).toBeLessThanOrEqual(300);
+        expect((built.block!.action_prompt ?? '').length).toBeLessThanOrEqual(300);
+        tested += 1;
+      }
+    }
+    // Present control: the loop tested real, groundable pairs (not a vacuous pass).
+    expect(tested).toBeGreaterThanOrEqual(4);
+  });
+});

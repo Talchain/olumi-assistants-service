@@ -365,3 +365,78 @@ test('NAMED LIMIT — a node label the copy gates refuse (a raw decimal) ships t
  assert.ok(cards[0]!.signal_id.endsWith(':auto_first_pass'));
  assert.doesNotMatch(cards[0]!.body,/“/);
 });
+
+// ── ASSUMED LINK (PR-3): a link card on a link whose numbers are Olumi's says so ──
+// Construction stamps a link `defaulted: true` when any of its numbers were projected, with provenance
+// `cee_hypothesis` (Olumi proposed the link) or `brief_extraction` (the brief stated the link; its numbers were
+// projected) — agent-lane/admit-candidate.ts. On such a link the card says "some of its numbers are Olumi's starting
+// assumptions" and asks what the user believes, instead of pressure-testing "the estimate" as if it were theirs.
+// Any other or unknown source keeps the neutral card: unknown provenance never becomes an asserted origin.
+const HIRING_GRAPH = graphFixture('hiring-fc9312a3-4809203.draft-graph.json');
+const ASSUMED = /Olumi's starting assumptions/;
+for (const [turn, trigger] of [['t1','auto_first_pass'],['t2','explicit_run']] as const) test(`ASSUMED LINK — hiring (served 4809203), ${trigger}: the link card on an Olumi-assumed link says so, with no science badge`,()=>{
+ const c=runTurnCase('hiring',turn,trigger);
+ // Present control from the SAME graph: the grounded link is defaulted and Olumi-proposed.
+ const edge=(HIRING_GRAPH.edges as {from: string; to: string; defaulted?: boolean; provenance?: {source?: string}}[]).find(e=>e.from==='effective_delivery_capacity'&&e.to==='development_velocity')!;
+ assert.equal(edge.defaulted,true); assert.equal(edge.provenance?.source,'cee_hypothesis');
+ const out=runTurnCoaching(trigger==='auto_first_pass'?statelessCapture(c.captured):c.captured,{...c.final,graph:HIRING_GRAPH});
+ assert.deepEqual(out.eligibility,{eligible:true});
+ const cards=runTurnCards(out.blocks);
+ assert.equal(cards.length,1);
+ assert.ok(cards[0]!.signal_id.startsWith('coach:fragile_link:effective_delivery_capacity→development_velocity:d06fe842d1150682:'));
+ assert.ok(cards[0]!.signal_id.endsWith(`:${trigger}:assumed`));
+ assert.match(cards[0]!.body,ASSUMED);
+ assert.match(cards[0]!.action_prompt??'',ASSUMED);
+ assert.equal(Object.hasOwn(cards[0]!,'dsk_claim_provenance'),false);
+ for (const text of [cards[0]!.title,cards[0]!.body,cards[0]!.action_label??'',cards[0]!.action_prompt??'']) {
+  assert.doesNotMatch(text,/option in front|winner|recommend|best option|leading option/i);
+  assert.doesNotMatch(text,/options compare|could change|could shift|which option|modest|small change|slight|likely|overturn|flip|swap|switch|reverse|tip/i);
+ }
+});
+test('ASSUMED LINK — no graph, or ANOTHER turn\'s graph → the neutral link card (unchanged)',()=>{
+ const c=runTurnCase('hiring','t1','auto_first_pass');
+ const neutral=runTurnCards(runTurnCoaching(statelessCapture(c.captured),c.final).blocks)[0]!;
+ assert.ok(neutral.signal_id.endsWith(':auto_first_pass'));
+ assert.doesNotMatch(neutral.body,ASSUMED);
+ const other=runTurnCards(runTurnCoaching(statelessCapture(c.captured),{...c.final,graph:PAUL_GRAPH}).blocks)[0]!;
+ assert.equal(other.signal_id,neutral.signal_id);
+ assert.equal(other.body,neutral.body);
+});
+// DERIVED mutations of the served hiring graph (labelled), re-hashed through the real hash function.
+const hiringWith = (mutateEdge: (e: Record<string, any>) => void, extra: (g: Record<string, any>) => void = () => {}) => {
+ const c=runTurnCase('hiring','t1','auto_first_pass');
+ const g=structuredClone(HIRING_GRAPH) as Record<string, any>;
+ mutateEdge(g.edges.find((e: any)=>e.from==='effective_delivery_capacity'&&e.to==='development_velocity'));
+ extra(g);
+ const {captured,final}=rebind(c,g);
+ return runTurnCards(runTurnCoaching(captured,final).blocks);
+};
+for (const [why, mutate, assumed] of [
+ ['a link the user set (user_specified), even still stamped defaulted', (e: any)=>{ e.provenance={source:'user_specified'}; }, false],
+ ['a user override', (e: any)=>{ e.provenance={source:'user_override'}; }, false],
+ ['an UNKNOWN source (never asserted as Olumi\'s)', (e: any)=>{ e.provenance={source:'composer'}; }, false],
+ ['no provenance at all', (e: any)=>{ delete e.provenance; }, false],
+ ['not defaulted (every number stated)', (e: any)=>{ delete e.defaulted; }, false],
+ ['defaulted:false', (e: any)=>{ e.defaulted=false; }, false],
+ ['a brief-stated link whose numbers Olumi projected (brief_extraction + defaulted)', (e: any)=>{ e.provenance={source:'brief_extraction'}; }, true],
+] as [string, (e: any)=>void, boolean][]) test(`ASSUMED LINK — ${why} → ${assumed?'the assumed card':'the neutral card'}`,()=>{
+ const cards=hiringWith(mutate);
+ assert.equal(cards.length,1);
+ assert.equal(cards[0]!.signal_id.endsWith(':assumed'),assumed);
+ assert.equal(ASSUMED.test(cards[0]!.body),assumed);
+});
+test('ASSUMED LINK — two graph links with the same endpoints → the neutral card (join by identity, exactly one)',()=>{
+ const cards=hiringWith(()=>{},(g)=>{ const e=g.edges.find((x: any)=>x.from==='effective_delivery_capacity'&&x.to==='development_velocity'); g.edges.push({...structuredClone(e),id:'dup-edge'}); });
+ assert.equal(cards.length,1);
+ assert.equal(cards[0]!.signal_id.endsWith(':assumed'),false);
+});
+test('ASSUMED LINK — a graph that is NOT the run\'s (an extra link, hash differs) is never read: the neutral card',()=>{
+ const c=runTurnCase('hiring','t1','auto_first_pass');
+ const g=structuredClone(HIRING_GRAPH) as Record<string, any>;
+ g.edges.push({...structuredClone(g.edges[0]),id:'extra-edge',from:'effective_delivery_capacity',to:g.edges[0].from});
+ // Present control: the changed graph really has a different analysis-affecting hash, and still carries the assumed link.
+ assert.notEqual(computeAnalysisAffectingGraphHash(g as never),c.final.graphHash);
+ const cards=runTurnCards(runTurnCoaching(statelessCapture(c.captured),{...c.final,graph:g}).blocks);
+ assert.equal(cards.length,1);
+ assert.equal(cards[0]!.signal_id.endsWith(':assumed'),false);
+});
