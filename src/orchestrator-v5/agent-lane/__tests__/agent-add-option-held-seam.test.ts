@@ -247,6 +247,8 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     // [g] the user's £54 on a 0–£200 scale is stored normalised, with its raw figure.
     expect(JSON.stringify(opt!.interventions)).toMatch(/0\.27/);
     expect((await readiness())?.may_run, 'runnable after the add').toBe(true);
+    // (B) Olumi says so beneath the reply, from the same verdict as the Run control.
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/The analysis can run now\./);
     expect(await heldOnLatestRow(), 'the hold is consumed').toEqual([]);
     // [e] OpenAI only; route-v2's router untouched on both turns.
     expect(routerCalls).toEqual([]);
@@ -270,6 +272,8 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
       expect.objectContaining({ code: 'MISSING_OPTION_VALUE', option_id: opt.id, factor_id: 'fac_price', repairability: 'human_input_required' }),
     ]));
     expect(t2.assistant_text, 'the completion step is named, in plain words').toMatch(/does not yet set a level for Price/);
+    // (B) and whether it can run NOW, from the one verdict: it can, leaving this option out until its level is set.
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/The analysis can run now; it will leave out "Test £54 at release" until its levels are set\./);
     expect(t2.assistant_text, 'no raw codes in user prose').not.toMatch(/\b[A-Z]+(?:_[A-Z]+){2,}\b/);
   }, 120_000);
 
@@ -292,8 +296,12 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const t1 = await proposeOptionC(54);
     const ref = t1._agent.tool_calls.find((c) => c.name === 'propose_new_option')?.proposal_id;
     expect(ref).toMatch(/^gmh_[0-9a-f]{12}$/);
-    script = [() => fnCall('authorise_change', { proposal_id: ref }), () => say('Added.')];
+    let seenByModel = '';
+    script = [() => fnCall('authorise_change', { proposal_id: ref }), (body) => { seenByModel = JSON.stringify(body['input']); return say('Added.'); }];
     const t2 = await turn({ message: 'Yes, add it.' });
+    // (B) the Agent is told what the model needs NOW, from the stored graph after the write — in plain words.
+    expect(seenByModel, seenByModel.slice(-1500)).toMatch(/readiness_after/);
+    expect(seenByModel).toMatch(/\\"may_run\\":true/);
     expect(t2._agent.tool_calls.find((c) => c.name === 'authorise_change'), JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: true }));
     expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id)).toBe(true);
   }, 120_000);
@@ -309,6 +317,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(t2._agent.tool_calls[0], JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: false }));
     expect(newOption(), 'nothing was added').toBeUndefined();
     expect(t2.assistant_text).not.toMatch(/^Added\b/);
+    expect(t2.assistant_text, 'nothing was written, so no readiness line').not.toMatch(/The analysis can/);
   }, 120_000);
 
   it('[c2] the model moves after the offer → the next answer row does NOT carry the stale hold (it could only be refused)', async () => {
