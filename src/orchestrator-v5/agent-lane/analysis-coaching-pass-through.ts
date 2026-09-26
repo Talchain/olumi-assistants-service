@@ -24,6 +24,7 @@ import {
 } from '../coaching/fragile-link-challenge.js';
 import { buildNoFlaggedLinkCard } from '../coaching/no-flagged-link-card.js';
 import { buildLimitUncheckedCard, leaderWithheldForALimit } from '../coaching/limit-unchecked-card.js';
+import { graphBoundToHash, soleLimitNodeLabel } from '../coaching/bound-graph.js';
 import { WITHHELD_NEAR_TIE } from '../compose/analysis-state-v1.js';
 import { summaryAsksUserToRepairALimit } from '../coaching/constraint-gap-disclosure.js';
 
@@ -43,6 +44,13 @@ export interface RunTurnCoachingFinal {
   graphHash?: string;
   analysisState?: unknown;
   analysisResult?: unknown;
+  /**
+   * The readback's own graph (the same `readBackState` read as the fields above). A card reads a
+   * fact from it ONLY after `coaching/bound-graph.ts` proves its analysis-affecting hash is `graphHash`.
+   */
+  graph?: unknown;
+  /** The readback's `analysis_ready` (same read). Carried for the run-turn cards; optional. */
+  analysisReady?: unknown;
 }
 
 export interface RunTurnCoachingResult {
@@ -237,7 +245,9 @@ export function runTurnCoaching(
   // confinement.ts), so the prose gate above is blind there. A refused limit card
   // fails CLOSED (no card), never back to a link card.
   if (leaderWithheldForALimit(final.analysisState)) {
-    const limit = buildLimitUncheckedCard(input);
+    const boundGraph = graphBoundToHash(final.graph, bound.graphHash);
+    const limitLabel = boundGraph !== null ? soleLimitNodeLabel(boundGraph) ?? undefined : undefined;
+    const limit = buildLimitUncheckedCard(input, limitLabel);
     if (limit.block === null) return { blocks: upstream, eligibility: { eligible: false, reason: limit.reason } };
     return { blocks: dedupeByBlockId([...upstream, limit.block]), eligibility: { eligible: true } };
   }
