@@ -162,6 +162,14 @@ describe('the rewrite is decided by the TARGET NODE\'s scale, never by the limit
     expect(stampKeys(c)).toEqual([]);
   });
 
+  it('the SAME spelling on a node capped at 100 stays verbatim — PLoT already reconciles it (explicit_cap 0.1); no pointless "%" stamp', () => {
+    for (const spelling of ['percent per month', 'Percent per month ']) {
+      const c = admit1(10, spelling, { unit: 'percent per month', cap: 100, value: 0.07, raw_value: 7 });
+      expect(c).toMatchObject({ unit: spelling, value: 10 });
+      expect(stampKeys(c)).toEqual([]);
+    }
+  });
+
   it('BLOCKING 2: "£k" 250 on a {£k, cap 1000} node stays verbatim (PLoT: explicit_cap → 0.25, reconciled)', () => {
     const c = admit1(250, '£k', { unit: '£k', cap: 1000, value: 0.4, raw_value: 400 });
     expect(c).toMatchObject({ unit: '£k', value: 250 });
@@ -187,6 +195,7 @@ describe('the rewrite is decided by the TARGET NODE\'s scale, never by the limit
     ['a capless 0.07 in a PERCENT spelling (0.07% or 7%? not provable — review 5841746528)', { unit: 'percent per month', value: 0.07 }],
     ['an estimate framed on 20 (level = raw/20)', { unit: '%', value: 0.35, raw_value: 7, scale_frame: 20 }],
     ['a level carrying a separate raw figure but no frame (not provably a proportion)', { unit: '%', value: 0.35, raw_value: 7 }],
+    ['a UNITLESS level carrying a separate raw figure but no frame (not provably a proportion)', { value: 0.35, raw_value: 7 }],
     ['a node that is not a percent at all', { unit: 'customers', cap: 1000, value: 0.2, raw_value: 200 }],
     ['a node with no scale at all', {}],
     ['no node scale supplied', undefined],
@@ -210,6 +219,12 @@ describe('the rewrite is decided by the TARGET NODE\'s scale, never by the limit
       expect(stampKeys(c)).toEqual([]);
     });
   }
+
+  it('a NON-currency head is never rescaled, even when the node carries that same unit ("itemk" on an "item" node)', () => {
+    const c = admit1(250, 'itemk', { unit: 'item', cap: 1000 });
+    expect(c).toMatchObject({ unit: 'itemk', value: 250 });
+    expect(stampKeys(c)).toEqual([]);
+  });
 
   it('"£k" 250 on a "GBP" node is "GBP" 250000 — the node\'s own spelling, so PLoT reads them as one unit', () => {
     expect(admit1(250, '£k', { unit: 'GBP', cap: 1_000_000 })).toMatchObject({ unit: 'GBP', value: 250000 });

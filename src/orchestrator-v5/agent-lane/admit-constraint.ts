@@ -186,7 +186,7 @@ export function canonicaliseLimitUnit(value: number, unit: string | undefined, t
   // node's own spelling is emitted, so PLoT reads a single unit.
   const m = MAGNITUDE_SUFFIX.exec(unit.trim());
   const currencyNode = target?.unit;
-  if (m !== null && currencyNode !== undefined && isCurrencyUnit(m[1]) && isCurrencyUnit(currencyNode) && sameUnit(currencyNode, m[1])) {
+  if (m !== null && currencyNode !== undefined && isCurrencyUnit(currencyNode) && sameUnit(currencyNode, m[1])) {
     const scaled = Number(`${value}e${m[2].toLowerCase() === 'k' ? 3 : 6}`);
     if (Number.isFinite(scaled)) {
       return {
