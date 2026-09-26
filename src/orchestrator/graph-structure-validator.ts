@@ -106,6 +106,25 @@ export interface StructuralViolation {
    *  readiness blocker can name it by id instead of only in `detail` prose. */
   option_id?: string;
   option_label?: string;
+  /** (B4, the whole class) The factor a per-node violation is about. */
+  factor_id?: string;
+  factor_label?: string;
+}
+
+/**
+ * (B4, the whole class) — the id-scope of a per-NODE violation: an option names
+ * `option_id`, a factor names `factor_id`, and any other kind names nothing
+ * (never an invented scope). Every per-node check spreads this, so a new check
+ * cannot name its node in prose only.
+ */
+function elementScope(node: { id: string; kind: string; label?: string }): Partial<StructuralViolation> {
+  if (node.kind === 'option') {
+    return { option_id: node.id, ...(node.label ? { option_label: node.label } : {}) };
+  }
+  if (node.kind === 'factor') {
+    return { factor_id: node.id, ...(node.label ? { factor_label: node.label } : {}) };
+  }
+  return {};
 }
 
 export interface StructuralValidationResult {
@@ -404,6 +423,7 @@ function checkOrphanNodes(graph: GraphV3T, violations: StructuralViolation[]): v
       violations.push({
         code: 'ORPHAN_NODE',
         detail: `Node "${node.id}" (${node.label}) has no edges`,
+        ...elementScope(node),
       });
     }
   }
@@ -440,6 +460,7 @@ function checkOptionFactorEdges(graph: GraphV3T, violations: StructuralViolation
       violations.push({
         code: 'OPTION_NO_FACTOR_EDGES',
         detail: `Option "${node.id}" (${node.label}) has no outbound edge to a factor — it cannot be analysed. Add at least one option → factor edge.`,
+        ...elementScope(node),
       });
     }
   }
@@ -472,8 +493,7 @@ function checkOptionDecisionEdges(graph: GraphV3T, violations: StructuralViolati
       violations.push({
         code: 'OPTION_NOT_LINKED_TO_DECISION',
         detail: `Option "${node.id}" (${node.label}) has no inbound edge from a decision — nothing selects it. Add a decision → option edge.`,
-        option_id: node.id,
-        ...(node.label ? { option_label: node.label } : {}),
+        ...elementScope(node),
       });
     }
   }
@@ -618,6 +638,7 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
       violations.push({
         code: 'NO_PATH_TO_GOAL',
         detail: `Node "${node.id}" (${node.label}) cannot reach the goal via directed paths`,
+        ...elementScope(node),
       });
     }
   }

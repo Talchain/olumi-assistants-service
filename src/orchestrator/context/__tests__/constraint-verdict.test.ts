@@ -238,17 +238,21 @@ describe('MATCHED IDENTITY: a healthy evaluated run keeps its recommendation', (
     // scored (live doctrine-B wire — see
     // tests/fixtures/cross-service/plot-to-cee.doctrine-b.code-derived.json).
     // Reading only the per-option map threw that evidence away.
-    const env = envelope([], {
-      constraint_results: [
-        {
-          constraint_id: 'constraint_out_total_cost_max',
-          node_id: 'out_total_cost',
-          operator: '<=',
-          probability: 0.91,
-        },
-      ],
-    });
-    expect(stateOf(env)).toBe('evaluated_feasible');
+    //
+    // Since the scale-provenance change a row alone no longer NAMES a leader:
+    // PLoT b09c0f2 derives the row from the FIRST option (row.option_id), so the
+    // leader needs its own per-option score, and the row needs its marker. The
+    // row still counts as evaluation EVIDENCE — a row-only envelope is
+    // `unevaluated`, never `identity_unresolved`.
+    const row = {
+      constraint_id: 'constraint_out_total_cost_max',
+      node_id: 'out_total_cost',
+      operator: '<=',
+      probability: 0.91,
+      scale_provenance: { source: 'explicit_cap', range_unified: true, decision_grade: true },
+    };
+    expect(stateOf(envelope(['constraint_out_total_cost_max'], { constraint_results: [row] }))).toBe('evaluated_feasible');
+    expect(stateOf(envelope([], { constraint_results: [row] }))).toBe('unevaluated');
   });
 });
 

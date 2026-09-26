@@ -4,6 +4,9 @@ import { currentAnalysisCoaching, runTurnCoaching, type CapturedAnalysis, type R
 import { RUN_TURN_COACHING_REASONS } from '../../coaching/fragile-link-challenge.js';
 import { runTurnCase } from '../../coaching/__tests__/fragile-link-challenge-fixtures.js';
 import { buildConstraintDisclosureFromState } from '../../coaching/constraint-gap-disclosure.js';
+import { readFileSync } from 'node:fs';
+import { fixtureUrl } from '../../coaching/__tests__/fragile-link-challenge-fixtures.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 const hash = '0123456789abcdef';
 const time = '2026-09-24T10:00:00.000Z';
 const state = {run_state: {kind: 'complete_current', computed_at: time}, leader_claim: {permitted: false, withheld_reason: 'constraint_verdict_withheld'}};
@@ -268,4 +271,97 @@ test('LIMIT FIRST — the prose repair step still wins: a summary asking the use
  const out=runTurnCoaching(captured,final);
  assert.deepEqual(out.eligibility,{eligible:false,reason:'limit_repair_pending'});
  assert.equal(runTurnCards(out.blocks).length,0);
+});
+
+// ── NAMED LIMIT (PR-2a): the limit card names THE limit, from the readback graph bound by hash ──
+// The route hands `final.graph` (the readback's own graph, agent-v1-turn.ts:1628). The card uses it ONLY when
+// computeAnalysisAffectingGraphHash(graph) === final.graphHash, and names a limit ONLY when exactly one limit
+// node is on the model — joined by `goal_constraints[].node_id` → that NODE's label, never by free text.
+// Otherwise the PR-1 generic words ship. Both graphs below are the WHOLE served draft graphs, byte-identical.
+const graphFixture = (name: string) => (JSON.parse(readFileSync(fixtureUrl(name), 'utf8')) as {graph: Record<string, unknown>}).graph;
+const PAUL_GRAPH = graphFixture('cbd15f83-bdd43f4-paul.draft-graph.json');
+const PRICING_T2_GRAPH = graphFixture('pricing-7212945c-06325c6.t2.draft-graph.json');
+test('NAMED LIMIT — Paul 1a298d6d: with its own hash-bound graph the one card names "Monthly churn" (card and prompt)',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ // Present control: the graph's one limit row joins to the node "Monthly churn".
+ assert.deepEqual((PAUL_GRAPH.goal_constraints as {node_id: string}[]).map(r=>r.node_id),['monthly_churn']);
+ const out=runTurnCoaching(statelessCapture(c.captured),{...c.final,graph:PAUL_GRAPH});
+ assert.deepEqual(out.eligibility,{eligible:true});
+ const cards=runTurnCards(out.blocks);
+ assert.equal(cards.length,1);
+ assert.equal(cards[0]!.signal_id,`${LIMIT_CARD}449b882e043ae3e3:2026-09-25T17:27:54.315Z:auto_first_pass:named`);
+ assert.match(cards[0]!.body,/your limit on “Monthly churn”/);
+ assert.match(cards[0]!.action_prompt??'',/my limit on “Monthly churn”/);
+ assert.doesNotMatch(cards[0]!.body+(cards[0]!.action_prompt??''),/\d/);
+});
+test('NAMED LIMIT — the second brief (pricing explicit Run, served 06325c6) names its limit too',()=>{
+ const c=runTurnCase('pricing','t2','explicit_run');
+ const cards=runTurnCards(runTurnCoaching(c.captured,{...c.final,graph:PRICING_T2_GRAPH}).blocks);
+ assert.equal(cards.length,1);
+ assert.ok(cards[0]!.signal_id.endsWith(':explicit_run:named'));
+ assert.match(cards[0]!.body,/^This analysis could not confirm that the options stay within your limit on “Monthly churn”/);
+});
+test('NAMED LIMIT — no graph, ANOTHER turn\'s graph, or an unbindable graph → the generic words, never a guessed name',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const generic=runTurnCards(runTurnCoaching(statelessCapture(c.captured),c.final).blocks)[0]!;
+ assert.ok(generic.signal_id.endsWith(':auto_first_pass'));
+ for (const [why, graph] of [['another turn\'s graph (pricing, hash c247337beab725ed)',PRICING_T2_GRAPH],['not a graph',{nodes:'x'}],['empty',{}]] as [string, unknown][]) {
+  const cards=runTurnCards(runTurnCoaching(statelessCapture(c.captured),{...c.final,graph}).blocks);
+  assert.equal(cards.length,1,why);
+  assert.equal(cards[0]!.signal_id,generic.signal_id,why);
+  assert.equal(cards[0]!.body,generic.body,why);
+ }
+});
+test('NAMED LIMIT — two different limit nodes → the generic words (one next action names at most one limit)',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const two=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ // A DERIVED mutation of the served graph (labelled): a second limit on another node. The hash no longer
+ // matches, so the test re-points the readback hash at the mutated graph through the real hash function.
+ two.goal_constraints=[...two.goal_constraints,{...two.goal_constraints[0],constraint_id:'agent-lane:mrr:>=',node_id:'mrr',operator:'>=',label:'MRR'}];
+ const hash=computeAnalysisAffectingGraphHash(two as never)!;
+ const result={...(c.final.analysisResult as object),computed_against_hash:hash};
+ const cards=runTurnCards(runTurnCoaching({...statelessCapture(c.captured),blocks:[result]},{...c.final,graphHash:hash,analysisResult:result,graph:two}).blocks);
+ assert.equal(cards.length,1);
+ assert.ok(cards[0]!.signal_id.endsWith(':auto_first_pass'));
+ assert.doesNotMatch(cards[0]!.body,/“/);
+});
+// DERIVED mutations of the served graph (labelled), re-hashed through the real hash function so the bind holds.
+const rebind = (c: ReturnType<typeof runTurnCase>, graph: Record<string, unknown>) => {
+ const hash=computeAnalysisAffectingGraphHash(graph as never)!;
+ const result={...(c.final.analysisResult as object),computed_against_hash:hash};
+ return {captured:{...statelessCapture(c.captured),blocks:[result]} as CapturedAnalysis, final:{...c.final,graphHash:hash,analysisResult:result,graph}};
+};
+test('NAMED LIMIT — the name is the NODE\'s label (joined by node_id), never the limit row\'s free text',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ g.goal_constraints=[{...g.goal_constraints[0],label:'Churn ceiling I typed'}];
+ const {captured,final}=rebind(c,g);
+ const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ assert.match(card.body,/“Monthly churn”/);
+ assert.doesNotMatch(card.body,/Churn ceiling I typed/);
+});
+test('NAMED LIMIT — a user\'s own figure in the label ("Churn ≤ 4%") is quoted verbatim; the card adds no figure of its own',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ const node=g.nodes.find((n: {id: string})=>n.id==='monthly_churn'); node.label='Churn ≤ 4%';
+ const {captured,final}=rebind(c,g);
+ const card=runTurnCards(runTurnCoaching(captured,final).blocks)[0]!;
+ assert.ok(card.signal_id.endsWith(':auto_first_pass:named'));
+ for (const words of [card.body, card.action_prompt??'']) {
+  assert.match(words,/“Churn ≤ 4%”/);
+  // Every digit sits inside the user's quoted label.
+  assert.doesNotMatch(words.split('“Churn ≤ 4%”').join(''),/\d/);
+ }
+});
+test('NAMED LIMIT — a node label the copy gates refuse (a raw decimal) ships the generic words, still ONE limit card',()=>{
+ const c=runTurnCase('paul','t1','auto_first_pass');
+ const g=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ const node=g.nodes.find((n: {id: string})=>n.id==='monthly_churn'); node.label='Churn at 0.5 per month';
+ const {captured,final}=rebind(c,g);
+ const out=runTurnCoaching(captured,final);
+ assert.deepEqual(out.eligibility,{eligible:true});
+ const cards=runTurnCards(out.blocks);
+ assert.equal(cards.length,1);
+ assert.ok(cards[0]!.signal_id.endsWith(':auto_first_pass'));
+ assert.doesNotMatch(cards[0]!.body,/“/);
 });
