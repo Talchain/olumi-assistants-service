@@ -639,7 +639,7 @@ export function withheldToolsOf(body: Record<string, unknown>): readonly string[
   return typedApprovalOf(body) === undefined && !typedRunOf(body) ? CHIP_TURN_WITHHELD_TOOLS : [];
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -664,6 +664,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
    * Unavailable readback → no result: never manufacture currentness.
    */
   let analysisResult: unknown;
+  /** The selected run's constraint verdict state, carried with `analysisResult` (same fact); `null` = not recorded. */
+  let constraintVerdictState: string | null | undefined;
   /**
    * ⛔ THE CANVAS RENDERS FROM `draft_graph`, NOT FROM `graph_hash`.
    *
@@ -692,6 +694,10 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       analysisReady = after.json.analysis_ready;
       if (typeof after.json.analysis_state === 'object' && after.json.analysis_state !== null) analysisState = after.json.analysis_state;
       if (typeof after.json.analysis_result === 'object' && after.json.analysis_result !== null) analysisResult = after.json.analysis_result;
+      // The selected run's own constraint verdict state, bound to the SAME fact as
+      // `analysis_result` by the graph read (R&C #70 5842182272). `null` = not recorded.
+      const cvs = after.json.analysis_constraint_verdict_state;
+      if (cvs === null || typeof cvs === 'string') constraintVerdictState = cvs;
       /**
        * ⭐ READINESS FROM THE MOMENT THE MODEL EXISTS, not from the moment
        * someone runs an analysis.
@@ -818,7 +824,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
