@@ -89,6 +89,14 @@ describe('set_factor_value: a level that arrives after construction sizes Olumi\
     }
   });
 
+  it('CONTROL: a DELTA limit in % gives no domain (only a LEVEL limit is judged on [0,1]) → the links keep the default', async () => {
+    const graph = served('run1_step01');
+    const limit = (graph.goal_constraints as Array<Record<string, unknown>>).find((c) => c.node_id === 'monthly_churn')!;
+    limit.value_frame = 'delta';
+    const result = await setLevel(graph, 'monthly_churn', 5, CHURN_UNIT);
+    for (const e of links(result, 'ai_feature_availability', 'monthly_churn')) expect(e.strength).toEqual({ mean: -0.5, std: 0.125 });
+  });
+
   it('CONTROL: a size the USER gave (user_specified) on the same link is never touched', async () => {
     const graph = served('run1_step01');
     const userLink = graph.edges.find((e) => e.from === 'ai_feature_availability' && e.to === 'monthly_churn')!;
