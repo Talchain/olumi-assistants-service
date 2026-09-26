@@ -162,7 +162,7 @@ function awaitingApproval(toolCalls: readonly { name: string }[], toolResults: r
 }
 
 /** One authoritative line per write the turn attempted. */
-function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null): string {
+function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true): string {
   if (name === 'build_model_from_brief') {
     const v = (r.model_version as { version_number?: unknown } | undefined)?.version_number;
     const vs = typeof v === 'number' ? ` (version ${v})` : '';
@@ -185,7 +185,10 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
   if (r.ok === true && r.applied === true) {
     const vs = versionsOf(r);
     const partial = Array.isArray(r.failures) && r.failures.length > 0;
-    const head = vs.length > 0 ? `Saved${versionPhrase(vs)}.` : 'Saved. No version number was recorded for it.';
+    // ⛔ A GUEST'S SAVE IS NEVER VERSIONED (the guest store policy), so "no version number was recorded" read as a
+    // fault on every guest approval (Paul's test 1a298d6d; matrix C14). For a guest the confirmed save is the whole
+    // truth; for a signed-in user a missing version is still worth saying.
+    const head = vs.length > 0 ? `Saved${versionPhrase(vs)}.` : versioned ? 'Saved. No version number was recorded for it.' : 'Saved.';
     return partial ? `${head} Some of it was not recorded — see above.` : head;
   }
   /**
@@ -221,6 +224,8 @@ export function narrateWriteOutcome(
   text: string,
   toolCalls: readonly { name: string }[],
   toolResults: readonly ToolResult[],
+  /** False for a guest, whose saves are never versioned: a save without a version is then not an anomaly. */
+  opts: { readonly versioned?: boolean } = {},
 ): WriteOutcomeNarration {
   const writes = toolCalls
     .map((c, i) => ({ name: c.name, result: toolResults[i] }))
@@ -254,7 +259,7 @@ export function narrateWriteOutcome(
   }
 
   const pending = awaitingApproval(toolCalls, toolResults);
-  const lines = writes.map((w) => statusLine(w.name, w.result, pending));
+  const lines = writes.map((w) => statusLine(w.name, w.result, pending, opts.versioned ?? true));
   const status = lines.length > 0
     ? lines.join(' ')
     : stripped.length > 0 ? 'Nothing was saved this turn.' : null;
@@ -299,4 +304,21 @@ export function notAdoptedLine(
 export function withWriteOutcome(body: string, status: string | null): string {
   if (status === null) return body;
   return body.trim().length > 0 ? `${body}\n\n${status}` : status;
+}
+
+/**
+ * ⭐ AN AUTHORISED REVISION SAYS WHAT IT DID TO THE RESULT ON SCREEN (R&C 5842738466; Delivery Lead 5842745019).
+ * Served on e3b0844: the user approved "Monthly churn 5% → 4%", and the reply was "Saved. … The analysis can run
+ * now." — never that the analysis on screen predates the change. Deterministic from THIS turn's typed readback only:
+ * `run_state` stale because the graph changed, and `requires_rerun`. "Run it again" only when the same verdict the
+ * Run control reads admits a run; otherwise the readiness sentence says why it cannot. Nothing about what a re-run
+ * will check (a limit may still be unchecked), and no figure.
+ */
+export function staleResultLine(analysisState: unknown, analysisReady: unknown): string | null {
+  const s = analysisState as { run_state?: { kind?: unknown; cause?: unknown }; requires_rerun?: unknown } | undefined;
+  if (s?.run_state?.kind !== 'complete_stale' || s.run_state.cause !== 'graph_changed' || s.requires_rerun !== true) return null;
+  const mayRun = (analysisReady as { may_run?: unknown } | undefined)?.may_run === true;
+  return mayRun
+    ? 'The analysis on screen was computed before this change; run it again to see the comparison with this change.'
+    : 'The analysis on screen was computed before this change.';
 }

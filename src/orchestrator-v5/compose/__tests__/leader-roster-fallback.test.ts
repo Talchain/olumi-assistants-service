@@ -452,7 +452,25 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
       //        ranks nothing and crowns nothing.
       //    Net: the 29th exit changes the SIZE of the population and not its
       //    shape, which is why the number below moves and nothing else does.
-      expect(calls.length).toBe(29);
+      //
+      // 2026-09-26, 29 -> 30: the add-option CHIP leg's REFUSAL exit
+      // (`'add_option_transaction'`, route-v2 — (A) #1940). A typed batch the
+      // hold cannot carry (too many options, too many changes, or past the hold
+      // payload cap) is ANSWERED instead of falling to the free-text edit lane.
+      // LOOKED AT, not assumed:
+      //  · it funnels through `sendFinalised200`, so it inherits the single
+      //    `enforceLeadingOptionClaimsAtWire` call pinned above, with both
+      //    roster sources threaded;
+      //  · it ships `graph: null` and `claimSafety.forExit()`, exactly like the
+      //    held add-option exit beside it, so it adds no new claim authority —
+      //    and nothing was written: it commits a direct answer with no pending
+      //    and no graph;
+      //  · its copy is a REFUSAL composed in `add-option-dispatch.ts` from a
+      //    count and a fixed sentence. No analysis result, no value, no candidate
+      //    list and no option ordering is in scope, so there is nothing to rank
+      //    or crown. `answerKind: 'functional'` keeps it out of the prose lane,
+      //    and it ships ZERO chips.
+      expect(calls.length).toBe(30);
       // #1246's additional exit is a functional recorded-answer refusal, not
       // a new claim authority. It still funnels through the shared finalizer,
       // forwards claim safety, and uses only the canonical repair graph roster.

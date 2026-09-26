@@ -34,7 +34,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { admitCandidateModel, findMechanismPath, type CandidateModel } from '../admit-model.js';
+import { admitCandidateModel, carryWithheldOptions, findMechanismPath, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -181,6 +181,12 @@ export const BUILD_INSTRUCTIONS = [
   + 'A model below this envelope cannot carry the reasoning; a model above it buries it. Do NOT widen beyond it on this turn: no speculative options, secondary factors, or decorative risks and outcomes. '
   + 'Anything you judge material but that does not meet that bar belongs in `unknowns` as a question, NOT as a node \u2014 it can become a proposal later. '
   + `Stay within ${COMPACT_LIMITS.maxNodes} nodes and ${COMPACT_LIMITS.maxEdges} links in total, counting one link from the decision to each option. Correct, connected items beat a comprehensive map: an oversized first model is refused before it reaches the canvas.`,
+  // ⛔ AN ADDED OPTION THE MODEL CANNOT TELL APART IS A DEAD START (DL #70 5842361028 / 5842400604). Served ef99a97 and
+  // cb1778b added "Test £59 with AI release" beside the user's £59 option; the fill made them identical and the run
+  // refused NOTHING_TO_COMPARE. Admission withholds such an option and says so (`admit-model.ts`), but withholding
+  // alone leaves one valued option, which still cannot run (measured: `construction-no-identical-options.test.ts`,
+  // RECORDED LIMIT) — so the drafter is told the shape to add instead.
+  'Every option you add must differ from every other option in at least one factor level; a test, pilot or phased rollout of another option is not a separate option unless it sets a factor the model holds to a different level, such as the share of customers it reaches.',
   'Mark provenance honestly on EVERY item: "explicit" only for what the user stated, "inferred" for what you read out of the brief, "ai_proposed" for anything you added beyond it.',
   /*
    * ⛔ THE COMPANION INSTRUCTION TO `target_stated`. The schema now lets the model say
@@ -362,6 +368,7 @@ export function retrySchemaPinningGoal(goal: CandidateModel['goal']): Record<str
  *   mechanism test is admission's own (`findMechanismPath`), over the same edges
  *   admission searches: option→factor from `changes`/`interventions`, every
  *   directed link, and no machine shortcut.
+ *   A LOOP is not found here: it is admission's verdict (`loopIssues`, below).
  *
  * ⛔ An EXPLICIT `value_kind:"absolute"` level on a factor whose baseline is NOT
  * known is demoted to `ai_proposed`: with no known starting point it may be an
@@ -546,6 +553,23 @@ export function prepareProvisionalCandidate(model: CandidateModel): {
   return { candidate: { ...model, options }, mechanism_issues, additions_without_total, provenance_demoted };
 }
 
+/**
+ * ⛔ A LOOP CLOSED BY ONE OF OLUMI'S OWN LINKS, as a construction issue for the one repair retry (served
+ * bdd43f4a: "AI feature availability" and "AI release delay" linked both ways; readiness refused the whole
+ * model on CYCLE_DETECTED). ADMISSION'S VERDICT, not a second derivation (review of f504b8e0, (c)): each
+ * loop `breakLoops` had to break in the admitted model, over exactly the edges admission registers — so a
+ * "loop" through a label the draft never declared, a direction-unknown link or a folded shortcut, which
+ * admission never registers, costs no retry call. A loop made only of the user's links and the structural
+ * edges is kept and said by admission, and is never an issue: it is theirs to resolve.
+ */
+export function loopIssues(admitted: Pick<AdmittedModel, 'withheld'>): string[] {
+  return admitted.withheld
+    .filter((w) => w.reason === 'loop_closing_link' && w.loop !== undefined && w.loop.length > 0)
+    .map((w) => `${[...w.loop!, w.loop![0]!].map((l) => `"${l}"`).join(' -> ')} is a loop: a model cannot hold one. `
+      + 'Keep the direction that carries the cause toward the goal metric, remove the link that points back, and keep every '
+      + 'option and risk connected to the goal through links whose direction you state.');
+}
+
 /** A repair may replace an invalid direct edge, but must preserve its signed path. */
 function retainsRiskHypotheses(before: CandidateModel, after: CandidateModel): boolean {
   const paths = (model: CandidateModel, from: string, to: string): Set<number> => {
@@ -642,11 +666,37 @@ export async function buildModelFromBrief(
   // questions it parked in `unknowns`, travel with the result so the Agent can say
   // them — otherwise an option the model mislabelled as its own vanishes unseen.
   let leftOut: { kind: string; label: string }[] = [];
+  // An option the FIRST draft had withheld as indistinct, which an adopted retry then dropped: still said.
+  let carriedWithheld: readonly WithheldOption[] = [];
   const needsSizeRetry = !size.within && !size.user_material_exceeds_limit;
-  // Only a missing risk mechanism asks the retry to repair. An addition with no total
+  // A missing risk mechanism asks the retry to repair. An addition with no total
   // DEGRADES instead (see `prepareProvisionalCandidate`): the figure is the user's to give.
   const repairIssues = (p: typeof preparation): string[] => p.mechanism_issues;
-  if (needsSizeRetry || repairIssues(preparation).length > 0) {
+  /**
+   * ⛔ A LOOP NEVER COSTS THE USER THEIR MODEL (review of f504b8e0, BLOCKING-1).
+   *
+   * A loop is asked of the retry only when that changes nothing else about the retry. Pushed
+   * in beside the mechanism issues, a loop alone moved an OVERSIZED draft off #1898's
+   * size-only retry (the one that edits its own draft: measured 8/8 adoptable, against 0/8
+   * regenerated) onto the repair route, then held the retry to a risk-retention gate a size
+   * retry is never held to and refused it while any loop was left — so an oversized looped
+   * draft that base registered came back `model_too_large`, with no model at all.
+   *
+   * So: an OVERSIZED draft never has its loops asked, with or without a mechanism issue.
+   * Without one it takes the size-only retry exactly as before; with one, the retry is asked
+   * the mechanism issues only. Either way its loops are left to admission's backstop
+   * (`breakLoops`), which withholds and says one of Olumi's links per loop whichever draft is
+   * kept. (Asking the loop beside a mechanism issue was refused on the size route: a retry that
+   * broke the loop as asked lost the option's signed path through it, failed the risk-retention
+   * gate, and the oversized first draft left the user `model_too_large` with no model —
+   * adversarial verify of ecc7d9eb, probe P-B1M.) A retry still carrying a loop is adopted or
+   * not on its other merits: every loop issue is one admission can break, so refusing a retry
+   * for it could only ever cost the user a model. A loop IS asked only of a draft within the
+   * limit, where refusing the retry keeps a first draft that registers.
+   */
+  const loops = loopIssues(admitted);
+  const asked = needsSizeRetry ? repairIssues(preparation) : [...repairIssues(preparation), ...loops];
+  if (needsSizeRetry || asked.length > 0) {
     sizeRetried = needsSizeRetry;
     constructionRetried = true;
     try {
@@ -658,11 +708,11 @@ export async function buildModelFromBrief(
         // options ("Hire two senior engineers" → "hire 2 senior engineers"), so `keepsEveryUserStatedIdentity`
         // rejected it every time: measured 0/8 adoptable vs 8/8 when the retry is handed its draft to edit
         // (construction-size-retry-edits-first-draft.test.ts). A retry with construction issues is unchanged.
-        instructions: repairIssues(preparation).length === 0 && needsSizeRetry
+        instructions: asked.length === 0 && needsSizeRetry
           ? `${BUILD_INSTRUCTIONS} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT}`
           : `${BUILD_INSTRUCTIONS} ${needsSizeRetry ? retryInstruction(size) : ''} Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
-        input: repairIssues(preparation).length > 0
-          ? `${brief}\n\nConstruction issues: ${JSON.stringify(repairIssues(preparation))}\nCandidate to repair: ${JSON.stringify(firstCandidate)}`
+        input: asked.length > 0
+          ? `${brief}\n\nConstruction issues: ${JSON.stringify(asked)}\nCandidate to repair: ${JSON.stringify(firstCandidate)}`
           : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(firstCandidate)}`,
         max_output_tokens: budget.max_output_tokens,
         reasoning_effort: budget.reasoning_effort,
@@ -688,9 +738,10 @@ export async function buildModelFromBrief(
         if (
           (needsSizeRetry ? retrySize.nodes <= size.nodes && retrySize.edges <= size.edges : retrySize.within || retrySize.user_material_exceeds_limit) &&
           keepsUserMaterial && repairIssues(retryPreparation).length === 0 &&
-          (repairIssues(preparation).length === 0 || retainsRiskHypotheses(candidate, retryCandidate))
+          (asked.length === 0 || retainsRiskHypotheses(candidate, retryCandidate))
         ) {
           const kept = new Set(retryAdmitted.nodes.map(nodeIdentity));
+          carriedWithheld = carryWithheldOptions(admitted, retryAdmitted);
           leftOut = admitted.nodes
             .filter((n) => !kept.has(nodeIdentity(n)))
             .map((n) => ({ kind: String(n.kind), label: String((n as { description?: unknown }).description ?? n.label) }));
@@ -744,6 +795,17 @@ export async function buildModelFromBrief(
    */
   const parked = (candidate as { unknowns?: unknown }).unknowns;
   const openQuestions = Array.isArray(parked) ? parked.filter((q): q is string => typeof q === 'string' && q.trim() !== '') : [];
+  /**
+   * ⛔ AN OPTION WITHHELD AS INDISTINCT IS SAID WHERE THE USER ALWAYS SEES IT (DL #70 5842400604: "never a
+   * silent duplicate"). `not_represented` reaches only the Agent's model; `open_questions` is appended to the
+   * reply by the server every time. Placed after the deadline and ahead of the drafter's own questions, so the
+   * five-question cap cannot hide it. A group of USER options nothing tells apart is asked about here, once.
+   */
+  const withheldOptions = [...(admitted.options_withheld ?? []), ...carriedWithheld];
+  openQuestions.unshift(
+    ...withheldOptions.map((w) => w.sentence),
+    ...(admitted.indistinct_stated_options ?? []).map((g) => g.question),
+  );
   /**
    * ⛔ A DEADLINE THE MODEL CANNOT HOLD IS ASKED WHERE THE USER ALWAYS SEES IT. GraphV3 has no carrier for
    * `horizon_months`, so admission records the loss in `not_represented` — but only the Agent's model reads
@@ -867,6 +929,8 @@ export async function buildModelFromBrief(
   // True only when this construction had ALREADY been committed and the route
   // handed back the original version rather than writing another.
   const replayed = (reg.json as { replayed?: unknown }).replayed === true;
+  // A link left out of a loop has its own sentence (`loop_withheld`, below), and its direction WAS stated.
+  const directionless = admitted.withheld.filter((w) => w.reason !== 'loop_closing_link');
 
   return {
     ok: true,
@@ -894,6 +958,10 @@ export async function buildModelFromBrief(
     options_that_change_nothing: admitted.withheld
       .filter((w) => w.reason === 'option_changes_nothing')
       .map((w) => w.from),
+    // Olumi's options withheld as identical by construction — the reason, beside the sentence in `open_questions`.
+    ...(withheldOptions.length > 0
+      ? { options_withheld: withheldOptions.map((w) => ({ option: w.option, like: w.like, reason: w.reason })) }
+      : {}),
     // Carried WITH the graph (GraphV3 declares `goal_constraints`), verified
     // surviving registration on deployed staging.
     goal_constraints_carried: admitted.goal_constraints.length,
@@ -911,8 +979,8 @@ export async function buildModelFromBrief(
       ...preparation.provenance_demoted.map((d) =>
         `I've treated your ${d.value} for "${d.factor}" in "${d.option}" as a working figure because the current ` +
         `level of "${d.factor}" is unknown \u2014 confirm it and I'll mark it as yours.`),
-      admitted.withheld.length > 0
-        ? `${admitted.withheld.length} relationship(s) were left out because nobody has stated which way they run.`
+      directionless.length > 0
+        ? `${directionless.length} relationship(s) were left out because nobody has stated which way they run.`
         : undefined,
       leftOut.length > 0
         ? `${leftOut.length} item(s) from the first draft were left out to keep the model compact: ${leftOut.map((x) => x.label).join('; ')}.`
@@ -937,7 +1005,9 @@ export async function buildModelFromBrief(
         // were kept in ONE value space (#69 5835137365) — each changes what a number means, so it is said.
         // `observed_state.baseline`: a goal's current level that could not be carried
         // (`admit-model.ts`) — the user is told why, and what would let it count.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld)$|\.observed_state\.baseline$/.test(l.field_path))
+        // `loop_withheld` / `loop_kept`: a loop the model could not hold (`admit-model.ts`,
+        // `breakLoops`) — which link was left out, or that the user's own loop was kept.
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|loop_withheld|loop_kept)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

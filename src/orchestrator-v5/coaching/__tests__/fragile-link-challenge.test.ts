@@ -26,10 +26,13 @@ import { buildAutoRunProvenance } from '../../context/run-initiator.js';
 import { RUN_OFFER_CHIP, typedRunOf } from '../../../routes/agent-v1-turn.js';
 import {
   RUN_TURN_COACHING_CONTRACT,
+  assumedLinkBodyForms,
   buildFragileLinkChallenge,
+  composeAssumedLinkChallenge,
   composeFragileLinkChallenge,
   fragileLinkBodyForms,
 } from '../fragile-link-challenge.js';
+import { composeLimitUncheckedCard } from '../limit-unchecked-card.js';
 import { selectGroundedCounterCase } from '../grounded-counter-case.js';
 import { buildNoFlaggedLinkCard } from '../no-flagged-link-card.js';
 import {
@@ -699,5 +702,82 @@ describe('DSK-P-003 badge — kept only where the run positively shows a clear w
       expect(Object.hasOwn(card, 'dsk_claim_provenance'), name).toBe(false);
       expect(card.title, name).toBe('Pressure-test a sensitive link');
     }
+  });
+});
+
+describe('ASSUMED LINK variant (#70, R&C PR-3) — builder level', () => {
+  const inputOf = (c: RunTurnCase, authorship: 'olumi_assumed' | 'not_olumi_assumed' | 'not_tested') => ({
+    analysisResult: c.final.analysisResult,
+    graphHash: c.final.graphHash!,
+    computedAt: (c.final.analysisState as Record<string, any>).run_state.computed_at as string,
+    trigger: c.captured.trigger!,
+    freshness: 'fresh' as const,
+    optionLabels: c.turn.analysis_ready.options.map((o) => o.label),
+    edgeAuthorship: () => authorship,
+  });
+
+  it('a clear winner (c16) on an Olumi-assumed link ships the assumed words WITHOUT the DSK-P-003 badge; on a stated link the same run keeps it', () => {
+    const c = runTurnCase('c16', 't5', 'explicit_run');
+    const assumed = buildFragileLinkChallenge(inputOf(c, 'olumi_assumed')).block!;
+    expect(assumed.signal_id.endsWith(':explicit_run:assumed')).toBe(true);
+    expect(assumed.title).toBe('Check an assumption Olumi made');
+    expect(assumed.body).toMatch(/some of its numbers are Olumi's starting assumptions/);
+    expect(Object.hasOwn(assumed, 'dsk_claim_provenance')).toBe(false);
+    const stated = buildFragileLinkChallenge(inputOf(c, 'not_olumi_assumed')).block!;
+    expect(stated.signal_id.endsWith(':explicit_run')).toBe(true);
+    expect(stated.dsk_claim_provenance).toEqual(dskClaimFromBundle());
+    // not_tested (no bound graph) is the neutral card, byte-identical to the stated one.
+    expect(buildFragileLinkChallenge(inputOf(c, 'not_tested')).block).toEqual(stated);
+  });
+
+  it('every label pair the selector admits still yields ONE card when the link is assumed (the assumed words, or the neutral words when they do not fit)', () => {
+    let tested = 0;
+    for (const total of [20, 60, 87]) {
+      const from = 'A'.repeat(Math.ceil(total / 2));
+      const to = 'B'.repeat(Math.floor(total / 2));
+      for (const trigger of ['explicit_run', 'auto_first_pass'] as const) {
+        const c = withGroundedLabels(runTurnCase('A', 't5', trigger), from, to);
+        if (selectGroundedCounterCase((c.final.analysisResult as Record<string, any>).enrichment).grounded === null) continue;
+        const built = buildFragileLinkChallenge(inputOf(c, 'olumi_assumed'));
+        expect(built.reason, `${total}/${trigger}`).toBeNull();
+        expect(built.block!.body.length).toBeLessThanOrEqual(300);
+        expect((built.block!.action_prompt ?? '').length).toBeLessThanOrEqual(300);
+        tested += 1;
+      }
+    }
+    // Present control: the loop tested real, groundable pairs (not a vacuous pass).
+    expect(tested).toBeGreaterThanOrEqual(4);
+  });
+});
+
+// ── COPY PASS (#1932 review 5841552257 obs 2; #1938 review 5841557936 N1/N2) ──
+describe('the next-action cards state no cause they cannot stand behind, and say each thing once', () => {
+  it('the limit card calls the limit ONE reason no option is put forward — never THE reason — in every form', () => {
+    // A first pass's summary gives its own cause ("Nothing in it is confirmed yet, so no option is put forward"),
+    // and a withheld leader is a conjunction (the limit AND separation); "That is why" would claim the sole cause.
+    for (const firstPass of [true, false]) {
+      for (const label of [undefined, 'Monthly churn rate', ['Monthly churn', 'MRR'] as const]) {
+        const copy = composeLimitUncheckedCard(firstPass, label);
+        expect(copy.body, `${firstPass}/${label}`).toMatch(/That is one reason no option is put forward yet\.$/);
+        expect(copy.action_prompt, `${firstPass}/${label}`).toMatch(/which is one reason no option is put forward yet\./);
+        for (const words of [copy.body, copy.action_prompt ?? '']) expect(words).not.toMatch(/That is why|so no option is put forward/);
+      }
+    }
+  });
+
+  it('the assumed-link card never says "not figures you gave" (a brief-stated link may carry the user\'s mean)', () => {
+    for (const firstPass of [true, false]) {
+      for (const body of assumedLinkBodyForms('Pro plan price', 'MRR', firstPass)) expect(body).not.toMatch(/figures you gave/);
+      expect(composeAssumedLinkChallenge('Pro plan price', 'MRR', firstPass).body).not.toMatch(/figures you gave/);
+    }
+  });
+
+  it('the assumed-link body names Olumi ONCE on a first pass (its prefix already does) and once on an explicit Run', () => {
+    const first = composeAssumedLinkChallenge('Pro plan price', 'MRR', true).body;
+    const explicit = composeAssumedLinkChallenge('Pro plan price', 'MRR', false).body;
+    expect(first.match(/Olumi/g)).toHaveLength(1);
+    expect(first).toMatch(/some of its numbers are starting assumptions — worth saying what you believe about it\.$/);
+    expect(explicit.match(/Olumi/g)).toHaveLength(1);
+    expect(explicit).toMatch(/some of its numbers are Olumi's starting assumptions — worth saying what you believe about it\.$/);
   });
 });
