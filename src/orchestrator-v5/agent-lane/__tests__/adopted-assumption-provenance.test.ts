@@ -284,6 +284,9 @@ describe('values-only: a revision the USER named keeps the writer’s path and s
     const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
     expect(applied.ok, JSON.stringify(applied)).toBe(true);
     expect(p.byId().team_size.observed_state?.source).toBe('user_override');
-    expect(p.registered, 'the writer path, not a register').toHaveLength(0);
+    // Since A's values-only fix (Canonical 5850018984) the value reaches the writer through the door, and this fake door
+    // persists with a whole-graph write — so a register count no longer tells the paths apart. The stamp does: the
+    // user's own figure is never relabelled as Olumi's adopted assumption.
+    expect(p.byId().team_size.observed_state?.source).not.toBe('user_assumption');
   });
 });

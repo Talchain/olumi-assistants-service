@@ -2526,6 +2526,16 @@ export function createAgentCapabilities(
 
       // A starting point mixes kinds; each single-kind path below handles one.
       if (new Set(ops.map((o) => o.op)).size > 1) return applyCompound(ctx, decision.proposal, before);
+      /**
+       * ⛔ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984; DL GO 5850026671; ChatGPT 5850029446). Olumi's
+       * starting point with no levels is single-kind, so it fell to the per-value path below: DL's joined run F1s approved
+       * three figures and the model gained THREE versions, each value its own `factor_value_edit` commit — a refusal
+       * part-way left some written. Through the door it is ONE port call: every value and the range it needs, or none.
+       * The per-value path stays only where no door is wired (never in the route, which always wires it).
+       */
+      if (opts.commitOptionLevels !== undefined && ops.length > 0 && ops.every((o) => o.op === 'set_factor_value')) {
+        return applyCompound(ctx, decision.proposal, before);
+      }
 
       // The goal's current level, as the user stated it (`../goal-current-level.ts`): one CAS-gated write.
       if (isGoalCurrentLevelProposal(decision.proposal)) {
