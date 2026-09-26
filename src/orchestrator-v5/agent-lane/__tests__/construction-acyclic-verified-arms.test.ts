@@ -17,7 +17,6 @@ import { buildModelFromBrief, prepareProvisionalCandidate, type CallStructuredMo
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
-import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -100,7 +99,6 @@ async function build(...drafts: CandidateModel[]) {
   return { out, graph: body === null ? null : (GraphV3.parse(body) as unknown as Graph), calls: inputs.length, inputs };
 }
 const cycleFree = (g: Graph) => !validateGraphStructure(GraphV3.parse(g)).violations.some((v) => v.code === 'CYCLE_DETECTED');
-const blockers = (g: Graph) => resolveRunAdmission(g).assessment.blockingIssues.map((i) => i.code).sort();
 const loopWithheld = (out: Record<string, unknown>) =>
   ((out.withheld as { from: string; to: string; reason: string }[]) ?? []).filter((w) => w.reason === 'loop_closing_link').map((w) => `${w.from}->${w.to}`);
 const loopSaid = (out: Record<string, unknown>) => ((out.not_represented as string[]) ?? []).filter((s) => /loop/i.test(s));
@@ -117,8 +115,6 @@ describe('acyclic: arms a surviving mutant could not see (verifier rows)', () =>
 
   it('P-M11: a link FROM the goal onto an unconnected risk — the model registers and is acyclic even when a risk repair closes a loop', async () => {
     const c = servedCandidate([...SERVED_LINKS, L('MRR', 'Goal risk', 'negative')], { risks: ['Goal risk'] });
-    const a = admitCandidateModel(prepareProvisionalCandidate(c).candidate, {});
-    const fromGoal = a.edges.filter((e) => e.from === 'mrr');
     const r = await build(c);
     expect(r.out.ok).toBe(true);
     expect(r.graph).not.toBeNull();
