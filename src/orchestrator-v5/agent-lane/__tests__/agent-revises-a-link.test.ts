@@ -98,6 +98,25 @@ describe('the Agent records a link\'s strength as the user\'s own, through the p
     expect(w.graph().edges[0]!.strength.mean).toBe(0.5);
   });
 
+  it('RED (served 26 Sep, witness post2132-3): a confirm on a float-noisy mean quotes the figure clean and labelled, never "0.049999999999999996"', async () => {
+    // The served link: Olumi sized it at -0.05, stored as -0.049999999999999996; the user said "slight".
+    const SLIGHT = 'The link from Pro plan price to MRR is slight.';
+    const c = { ...ctx, user_text: SLIGHT, user_turn_text: SLIGHT };
+    const w = world(graphWith(-0.049999999999999996, 'negative'));
+    const caps = createAgentCapabilities(w.d, new ProposalStore());
+    const p = await caps.proposeLinkStrength!(c, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'weak', rationale: 'x' });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    const label = String(p.public_label);
+    expect(label).toContain("as slight, as your own estimate (strength kept at 0.05 on Olumi's 0\u20131 scale)");
+    expect(label).not.toMatch(/0\.0499|9999/);
+    const link = (p as unknown as { link: { was: { strength: number }; becomes: { strength: number } } }).link;
+    expect(link.was.strength).toBe(0.05);
+    expect(link.becomes.strength).toBe(0.05);
+    // The WRITE keeps the exact stored figure: a confirm must match what the model holds.
+    await caps.authoriseChange(c, { proposal_id: String(p.proposal_id) });
+    expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ intent: 'confirm_current', magnitude: 0.049999999999999996 }));
+  });
+
   it('a stated reversal of direction is carried as the user said it; a negative link keeps its sign on the wire', async () => {
     const w = world(graphWith(-0.4, 'negative'));
     const caps = createAgentCapabilities(w.d, new ProposalStore());
