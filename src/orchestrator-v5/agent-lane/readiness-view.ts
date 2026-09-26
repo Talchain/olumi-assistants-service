@@ -71,6 +71,18 @@ export function readinessViewOf(rawGraph: unknown): ReadinessView {
     if (isDemand) needs.push(item);
     else if (issue.obligation === 'offered') offers.push(item);
   }
+  /**
+   * ⛔ A BLOCK WITH NO DEMAND STILL HAS A REASON (served f-20260926T020217Z, CEE ef99a97): two options set identical
+   * levels, so the verdict is `may_run: false` — and its reason rides only as a critique
+   * (`IDENTICAL_OPTION_INTERVENTIONS`), not a readiness issue. Reading issues alone handed the Agent "can't run" with
+   * no why. When the verdict blocks and names no demand, its own critiques are the reason, in its own words.
+   */
+  if (verdict.may_run === false && needs.length === 0) {
+    for (const c of (verdict as { critiques?: readonly { message?: unknown }[] }).critiques ?? []) {
+      const item = itemOf({ message: String(c?.message ?? '') });
+      if (item !== undefined) needs.push(item);
+    }
+  }
   const labelOf = new Map<string, string>();
   for (const n of ((rawGraph as { nodes?: unknown }).nodes as { id?: unknown; label?: unknown }[] | undefined) ?? []) {
     if (typeof n?.id === 'string') labelOf.set(n.id, typeof n.label === 'string' && n.label !== '' ? n.label : n.id);
