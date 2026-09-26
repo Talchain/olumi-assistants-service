@@ -29,6 +29,7 @@
  * path whose whole point is that we do not know what happened.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
@@ -560,6 +561,20 @@ describe('the Agent\'s in-process batch door — ONE user operation → ONE atom
         'cccccccc-cccc-4ccc-8ccc-cccccccccca1', [{ factor_id: 'amount_factor', cap: 100 }]);
       expect(r.status, JSON.stringify(r)).toBe('committed');
       expect(factorOs('amount_factor'), JSON.stringify(factorOs('amount_factor'))).toMatchObject({ value: 0.1, raw_value: 10, cap: 100, source: 'user_assumption' });
+    });
+
+    it('RED (MG 5849417275, served F1 starting point): Olumi\'s churn 5% + a level → ONE commit, and the 2 links into churn follow the level', async () => {
+      const served = JSON.parse(readFileSync('tests/fixtures/magnitude/c-run1-served-graphs.json', 'utf-8')).run1_step01;
+      persisted = projectGraphForPersistence(structuredClone(served));
+      const r = await callWith([{ factor_id: 'monthly_churn', value: 5, unit: '% of Pro subscribers per month', author: 'model_proposed' }],
+        [{ option_id: 'keep_current_setup', factor_id: 'pro_plan_price', value: 0.245, author: 'user_specified' }], [], 'cccccccc-cccc-4ccc-8ccc-cccccccccca3');
+      expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false });
+      expect(rows.size, 'the value, its links\' re-size and the level: ONE append').toBe(1);
+      expect(factorOs('monthly_churn')).toMatchObject({ value: 0.05, raw_value: 5, source: 'user_assumption' });
+      const into = (from: string) => (graphNow().edges as { from: string; to: string; strength: { mean: number }; provenance?: { magnitude?: string } }[])
+        .find(e => e.from === from && e.to === 'monthly_churn')!;
+      expect([into('price_sensitivity').strength.mean, into('ai_feature_availability').strength.mean]).toEqual([0.0125, -0.0125]);
+      expect(into('price_sensitivity').provenance?.magnitude).toBe('olumi_placeholder');
     });
 
     it('a retry of the committed compound writes nothing more — already applied', async () => {
