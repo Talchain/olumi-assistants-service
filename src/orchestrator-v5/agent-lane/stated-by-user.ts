@@ -46,11 +46,18 @@ export function figureTheUserWrote(value: number, unit: unknown, userText: strin
  * Whether this request is something the user TYPED: a composer message. A chip click is not — every chip's text is
  * Olumi's (an approval replaying the Agent's own labels, a suggestion, a coaching prompt) — and neither is a system
  * event such as a board edit.
+ *
+ * An ALLOWLIST of sources (#1978 review 5845079924 N1): the UI sends `composer`, `chip`, `chip_click` or `retry`
+ * (`buildPayload.ts` `normaliseMessageSource`), and a `chip_click` can arrive without a `chip` object. Only `composer`
+ * — or no source at all, an API caller — is typed. A `retry` re-sends an earlier message whose words were recorded
+ * when it was first sent, if they were typed; any other source fails toward under-claiming.
  */
 export function typedByUser(body: Record<string, unknown>): boolean {
   const kind = body['kind'];
   const chip = body['chip'];
-  return (kind === undefined || kind === 'message') && (chip === null || chip === undefined) && body['source'] !== 'chip';
+  const source = body['source'];
+  return (kind === undefined || kind === 'message') && (chip === null || chip === undefined)
+    && (source === undefined || source === 'composer');
 }
 
 /**
