@@ -116,6 +116,12 @@ import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
 import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { type InfluenceBand } from '../../format/influence-bands.js';
 import { edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
+
+/**
+ * The band as the user reads it on the canvas: its lowest pill says "Slight", never "weak" (Canvas #70 5847910497,
+ * served on CEE `93ad2f6`: "This replaces Olumi's default strength with weak (0.1 …)"). The enum value stays `weak`.
+ */
+const bandWord = (band: InfluenceBand): string => (band === 'weak' ? 'slight' : band);
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
@@ -1505,7 +1511,7 @@ export function createAgentCapabilities(
       // ⛔ Recorded as the user's only when the user named the band (`bandTheUserWrote`); the writer stamps it as theirs.
       if (!bandTheUserWrote(band, ctx.user_turn_text)) {
         return { ok: false, mutated: false, refusal: 'strength_not_stated',
-          detail: `The user has not called this link ${band} in this message, in their own words, so nothing was prepared: it would be recorded as their estimate. `
+          detail: `The user has not called this link ${bandWord(band)} in this message, in their own words, so nothing was prepared: it would be recorded as their estimate. `
             + 'Ask them how strong they think it is \u2014 slight, moderate, strong or very strong \u2014 and never offer a band as theirs.' };
       }
       const g = await readGraph(ctx.scenario_id);
@@ -1557,8 +1563,8 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: confirm
-          ? `Record "${from.label}" \u2192 "${to.label}" as ${band}, as your own estimate (strength kept at ${Math.abs(mean)})`
-          : `Record "${from.label}" \u2192 "${to.label}" as ${band} (${magnitude} on Olumi's 0\u20131 scale), as your own estimate${wanted !== current ? `, pushing ${wanted === 'positive' ? 'up' : 'down'}` : ''}`,
+          ? `Record "${from.label}" \u2192 "${to.label}" as ${bandWord(band)}, as your own estimate (strength kept at ${Math.abs(mean)})`
+          : `Record "${from.label}" \u2192 "${to.label}" as ${bandWord(band)} (${magnitude} on Olumi's 0\u20131 scale), as your own estimate${wanted !== current ? `, pushing ${wanted === 'positive' ? 'up' : 'down'}` : ''}`,
       });
       proposals.put(proposal);
       return {
@@ -1570,7 +1576,7 @@ export function createAgentCapabilities(
           becomes: { band, strength: magnitude, direction: wanted }, keeps_current_strength: confirm },
         note: confirm
           ? 'Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree.'
-          : `Nothing has changed yet. Tell the user it will be recorded as ${band}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree.`,
+          : `Nothing has changed yet. Tell the user it will be recorded as ${bandWord(band)}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree.`,
       };
     },
 
@@ -1703,7 +1709,7 @@ export function createAgentCapabilities(
           detail: band === undefined
             ? `${args?.strength === undefined ? 'No strength was given' : 'The strength given is not one of weak (the canvas\u2019s Slight), moderate, strong or very strong'}, so nothing was prepared. `
               + `If the user named one of those bands for this link in this message, call again with it as strength; otherwise ${ask}`
-            : `The user has not called the link from "${from.label}" to "${to.label}" ${band} in this message, in their own words, so nothing was prepared: `
+            : `The user has not called the link from "${from.label}" to "${to.label}" ${bandWord(band)} in this message, in their own words, so nothing was prepared: `
               + `it would be recorded as their estimate. Instead, ${ask}` };
       }
       const magnitude = bandMidpoint(band);
@@ -1717,7 +1723,7 @@ export function createAgentCapabilities(
         operations,
         provenance: { authored_by: 'model_proposed', basis: args.rationale },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Connect "${from.label}" to "${to.label}" (${args.direction}) as ${band}, your own estimate`,
+        public_label: `Connect "${from.label}" to "${to.label}" (${args.direction}) as ${bandWord(band)}, your own estimate`,
       });
       proposals.put(proposal);
       return {
@@ -1726,7 +1732,7 @@ export function createAgentCapabilities(
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
         link: { from: from.label, to: to.label, direction: args.direction, band, strength: magnitude },
-        note: `Nothing has changed. Tell the user the link will be recorded as ${band}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and ask them to approve it before calling authorise_change.`,
+        note: `Nothing has changed. Tell the user the link will be recorded as ${bandWord(band)}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and ask them to approve it before calling authorise_change.`,
       };
     },
 
