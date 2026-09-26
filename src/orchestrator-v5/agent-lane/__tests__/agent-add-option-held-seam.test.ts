@@ -438,6 +438,30 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     for (const b of [t1, t2]) for (const pc of b._provider_calls ?? []) expect(pc.provider).toBe('openai');
   }, 120_000);
 
+  it('[F4] the hold the store keeps must add EVERY option asked for — a hold missing one is never offered', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    // After route-v2 answers the propose, the stored hold loses the second option (its node and every op after it).
+    onInnerSent = (b) => {
+      if ((b['chip'] as { intent?: string } | undefined)?.intent !== 'add_option') return;
+      const row = latestRow();
+      const pa = (row?.pending_actions ?? [])[0] as { action?: { inline_patch?: { operations?: { op: string }[] } } } | undefined;
+      const ops = pa?.action?.inline_patch?.operations;
+      if (ops === undefined) return;
+      const second = ops.findIndex((o, i) => i > 0 && o.op === 'add_node');
+      if (second > 0) pa!.action!.inline_patch!.operations = ops.slice(0, second);
+    };
+    script = [
+      () => fnCall('propose_new_option', { options: [
+        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }] },
+        { label: 'Raise to £64 for new customers', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 64, unit: 'GBP' } }] },
+      ], rationale: 'x' }),
+      () => say('That could not be prepared.'),
+    ];
+    const t1 = await turn({ message: 'Add both.' });
+    expect(t1._agent.tool_calls.find((c) => c.name === 'propose_new_option'), JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, refusal: 'not_prepared' }));
+    expect(approveChipOf(t1)).toBeUndefined();
+  }, 120_000);
+
   it('[F4] all or nothing: one option in the batch cannot be prepared (it names a factor the model does not have) → NOTHING is prepared or sent', async () => {
     graphOf.set(SCENARIO, seedGraph());
     script = [
