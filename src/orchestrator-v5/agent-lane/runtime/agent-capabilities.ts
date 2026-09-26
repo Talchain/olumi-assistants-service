@@ -114,7 +114,7 @@ import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
 import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
 import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { type InfluenceBand } from '../../format/influence-bands.js';
-import { edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
+import { CANVAS_BAND_WORD, edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
@@ -600,9 +600,10 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
       ...(str(source) ? { source } : {}),
       ...(str(e.effect_direction) ? { direction: e.effect_direction } : {}),
       ...(st !== undefined && num(st.mean) ? { strength: { mean: st.mean, ...(num(st.std) ? { std: st.std } : {}) } } : {}),
-      // ⭐ The band word, on the canvas's own table (`format/edge-strength-bands.ts`, #2003): without it the Agent named
-      // bands from its own priors — served e13eda8 called a 0.5 link (the canvas's "Strong") "moderate".
-      ...(st !== undefined && num(st.mean) ? { band: edgeBandFromMagnitude(Math.abs(st.mean)) } : {}),
+      // ⭐ The band, in the canvas's own WORD (`format/edge-strength-bands.ts`, #2003): without it the Agent named
+      // bands from its own priors — served e13eda8 called a 0.5 link (the canvas's "Strong") "moderate". The lowest is
+      // "slight" as on the pill, never the enum's `weak` (the model relays what it reads; tool calls still pass `weak`, #2017).
+      ...(st !== undefined && num(st.mean) ? { band: CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(st.mean))] } : {}),
       ...(num(e.exists_probability) ? { exists_probability: e.exists_probability } : {}),
       ...(e.defaulted === true ? { defaulted: true } : {}),
       ...(str(e.origin) ? { origin: e.origin } : {}),

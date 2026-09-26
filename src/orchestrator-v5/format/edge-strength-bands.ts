@@ -53,6 +53,18 @@ export const EDGE_STRENGTH_MIDPOINTS: Readonly<Record<InfluenceBand, number>> = 
   'very strong': 0.85,
 };
 
+/**
+ * The WORD the canvas shows for each band. Only the lowest differs: the enum keeps `weak` (the tool value), and the
+ * canvas's pill says "Slight". Anything the Agent reads as a description of a link uses this word, because the model
+ * relays what it reads (Canvas, #2021 review: served "replaces … with weak (0.1 …)").
+ */
+export const CANVAS_BAND_WORD: Readonly<Record<InfluenceBand, string>> = {
+  weak: 'slight',
+  moderate: 'moderate',
+  strong: 'strong',
+  'very strong': 'very strong',
+};
+
 /** The band a link's |β| falls in. */
 export function edgeBandFromMagnitude(absValue: number): InfluenceBand {
   if (absValue >= EDGE_STRENGTH_CUTS.veryStrong) return 'very strong';
