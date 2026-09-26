@@ -1,0 +1,859 @@
+{
+ "_source": "AI Conversation witness levelless-reason-PIN2-5e984a1d-0dab877-1503 turn 3 (served UI 5e984a1d / CEE 0dab877), analysis_result block verbatim; Canonical #70 5847574837",
+ "analysis_result": {
+  "type": "analysis_result",
+  "summary": "Ran analysis on your current scenario. 'Continue as now' was analysed as no change — the factors it compares against were held at the values your model records today. 'Keep £49 and add a paid AI add-on' was left out of this comparison because it has no values set. To include it, say 'Help me configure Keep £49 and add a paid AI add-on.' One limit on your model could not be checked: “Monthly churn”. We could not line it up with anything this analysis measures, so it was not part of the comparison. The part of your model it points at is worked out from other parts, and Olumi cannot yet test a limit on a quantity like that, so it cannot be checked in this model yet; this one stays on the model unchecked. I supplied 4 of the values behind this, because your brief did not state them. They are mine rather than yours. Changing any of them changes what this model implies.",
+  "leading_option_id": null,
+  "win_probabilities": {
+   "Continue as now": 0.0213,
+   "Hold £49 with release": 0.10890000000000055,
+   "Phased £54 with release": 0.03424999999999987,
+   "Raise to £59 with release": 0.8355499999999941
+  },
+  "enrichment": {
+   "option_comparison": [
+    {
+     "id": "raise_to_59_with_release",
+     "label": "Raise to £59 with release",
+     "status": "computed",
+     "outcome": {
+      "p10": 0.0632575344891302,
+      "p50": 0.20308576774205178,
+      "p90": 0.3821166314998894,
+      "std": 0.12467132828485346,
+      "mean": 0.21551979922646425,
+      "n_samples": 10000,
+      "validity_ratio": 1,
+      "n_valid_samples": 10000,
+      "percentiles_source": "samples"
+     },
+     "downside": {
+      "p05": 0,
+      "cvar_10": 0.012035450606424738,
+      "expected_regret": 0.0002498230591286743
+     },
+     "option_id": "raise_to_59_with_release",
+     "option_label": "Raise to £59 with release",
+     "win_probability": 0.8355499999999941
+    },
+    {
+     "id": "hold_49_with_release",
+     "label": "Hold £49 with release",
+     "status": "computed",
+     "outcome": {
+      "p10": 0.05838954490239708,
+      "p50": 0.1806044118404579,
+      "p90": 0.3571064072870518,
+      "std": 0.11896925356355877,
+      "mean": 0.19670867500287373,
+      "n_samples": 10000,
+      "validity_ratio": 1,
+      "n_valid_samples": 10000,
+      "percentiles_source": "samples"
+     },
+     "downside": {
+      "p05": 0,
+      "cvar_10": 0.011321623725294844,
+      "expected_regret": 0.019060947282719173
+     },
+     "option_id": "hold_49_with_release",
+     "option_label": "Hold £49 with release",
+     "win_probability": 0.10890000000000055
+    },
+    {
+     "id": "phased_54_with_release",
+     "label": "Phased £54 with release",
+     "status": "computed",
+     "outcome": {
+      "p10": 0.06125279772685715,
+      "p50": 0.19151697277612287,
+      "p90": 0.3696210899057694,
+      "std": 0.12171462349065512,
+      "mean": 0.206114237114669,
+      "n_samples": 10000,
+      "validity_ratio": 1,
+      "n_valid_samples": 10000,
+      "percentiles_source": "samples"
+     },
+     "downside": {
+      "p05": 0,
+      "cvar_10": 0.011744654428199863,
+      "expected_regret": 0.009655385170923915
+     },
+     "option_id": "phased_54_with_release",
+     "option_label": "Phased £54 with release",
+     "win_probability": 0.03424999999999987
+    },
+    {
+     "id": "continue_as_now",
+     "label": "Continue as now",
+     "status": "computed",
+     "outcome": {
+      "p10": 0.03488857949475826,
+      "p50": 0.15026684415589617,
+      "p90": 0.2651723264605924,
+      "std": 0.08680491996901257,
+      "mean": 0.1534005929493405,
+      "n_samples": 10000,
+      "validity_ratio": 1,
+      "n_valid_samples": 10000,
+      "percentiles_source": "samples"
+     },
+     "downside": {
+      "p05": 0,
+      "cvar_10": 0.002982259782866376,
+      "expected_regret": 0.06236902933625238
+     },
+     "option_id": "continue_as_now",
+     "option_label": "Continue as now",
+     "win_probability": 0.0213
+    }
+   ],
+   "factor_sensitivity": [
+    {
+     "source": "graph",
+     "direction": "positive",
+     "factor_id": "fac_paid_ai_add_on_revenue",
+     "confidence": 0.5,
+     "elasticity": 1,
+     "evpi_method": "heuristic",
+     "driver_label": "biggest",
+     "factor_label": "Paid AI add-on revenue",
+     "evidence_hint": false,
+     "influence_rank": 1,
+     "importance_rank": 1,
+     "influence_score": 1,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_graph",
+     "sensitivity_score": 0.5,
+     "flip_risk_category": "negligible",
+     "value_of_information": 0,
+     "confidence_components": {
+      "sampling_stability": null,
+      "structural_certainty": 0.5
+     },
+     "confidence_provenance": {
+      "input_quality": "degenerate_fallback",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v2",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_graph"
+     },
+     "evpi_percentage_points": 0
+    },
+    {
+     "source": "graph",
+     "direction": "positive",
+     "factor_id": "perceived_pro_value",
+     "confidence": 0.58275,
+     "elasticity": 0.5,
+     "evpi_method": "heuristic",
+     "driver_label": "strong",
+     "factor_label": "Perceived Pro value",
+     "value_source": "cee_inference",
+     "evidence_hint": false,
+     "influence_rank": 3,
+     "rank_flip_rate": 0.2,
+     "importance_rank": 2,
+     "influence_score": 0.5,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": 0.25,
+     "flip_risk_category": "correlated",
+     "value_of_information": 0,
+     "attribution_stability": "low",
+     "confidence_components": {
+      "sampling_stability": 0.25,
+      "structural_certainty": 0.8
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "value_extraction_type": "inferred",
+     "evpi_percentage_points": 0
+    },
+    {
+     "source": "graph",
+     "direction": "positive",
+     "factor_id": "pro_plan_conversion_rate",
+     "confidence": 0.58175,
+     "elasticity": 0.5,
+     "evpi_method": "heuristic",
+     "driver_label": "strong",
+     "factor_label": "Pro plan conversion rate",
+     "value_source": "cee_inference",
+     "evidence_hint": false,
+     "influence_rank": 4,
+     "rank_flip_rate": 0.25,
+     "importance_rank": 3,
+     "influence_score": 0.5,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": 0.25,
+     "flip_risk_category": "negligible",
+     "value_of_information": 0,
+     "attribution_stability": "low",
+     "confidence_components": {
+      "sampling_stability": 0.25,
+      "structural_certainty": 0.8
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "value_extraction_type": "inferred",
+     "evpi_percentage_points": 0
+    },
+    {
+     "source": "graph",
+     "direction": "negative",
+     "factor_id": "monthly_churn",
+     "confidence": 0.5787,
+     "elasticity": 0.5,
+     "evpi_method": "heuristic",
+     "driver_label": "strong",
+     "factor_label": "Monthly churn",
+     "value_source": "cee_inference",
+     "evidence_hint": false,
+     "influence_rank": 5,
+     "rank_flip_rate": 0.2,
+     "importance_rank": 4,
+     "influence_score": 0.5,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": -0.25,
+     "flip_risk_category": "correlated",
+     "value_of_information": 0,
+     "attribution_stability": "low",
+     "confidence_components": {
+      "sampling_stability": 0.25,
+      "structural_certainty": 0.8
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "value_extraction_type": "inferred",
+     "evpi_percentage_points": 0
+    },
+    {
+     "source": "graph",
+     "direction": "positive",
+     "factor_id": "pro_plan_price",
+     "confidence": 0.3,
+     "elasticity": 0,
+     "zero_reason": "intervention_override",
+     "driver_label": "strong",
+     "factor_label": "Pro plan price",
+     "value_source": "brief_extraction",
+     "influence_rank": 2,
+     "rank_flip_rate": 0.2,
+     "importance_rank": 5,
+     "influence_score": 0.875,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": 0,
+     "flip_risk_category": "isolated",
+     "value_of_information": 0,
+     "attribution_stability": "negligible",
+     "confidence_components": {
+      "sampling_stability": 0,
+      "structural_certainty": 0.5
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "range_derivation_source": "default"
+    },
+    {
+     "source": "graph",
+     "direction": "positive",
+     "factor_id": "ai_feature_adoption",
+     "confidence": 0.3,
+     "elasticity": 0,
+     "zero_reason": "intervention_override",
+     "driver_label": "moderate",
+     "factor_label": "AI feature adoption",
+     "value_source": "cee_inference",
+     "influence_rank": 6,
+     "rank_flip_rate": 0.2,
+     "importance_rank": 6,
+     "influence_score": 0.375,
+     "importance_basis": "graph_structural",
+     "confidence_source": "plot_unified_from_isl_bootstrap",
+     "sensitivity_score": 0,
+     "flip_risk_category": "correlated",
+     "value_of_information": 0,
+     "attribution_stability": "negligible",
+     "confidence_components": {
+      "sampling_stability": 0,
+      "structural_certainty": 0.5
+     },
+     "confidence_provenance": {
+      "input_quality": "standard",
+      "is_provisional": true,
+      "formula_version": "plot_unified_v3",
+      "calibration_status": "provisional_pending_pilot_calibration",
+      "computation_source": "plot_unified_from_isl_bootstrap"
+     },
+     "value_extraction_type": "inferred",
+     "range_derivation_source": "default"
+    }
+   ],
+   "robustness": {
+    "level": "moderate",
+    "near_tie": {
+     "gap": 0.7266499999999936,
+     "is_tie": false,
+     "threshold": 0.1
+    },
+    "is_robust": true,
+    "confidence": 0.7937724999999944,
+    "robust_edges": [
+     {
+      "to_id": "feature_adoption_shortfall",
+      "edge_id": "ai_feature_adoption->feature_adoption_shortfall",
+      "from_id": "ai_feature_adoption",
+      "to_label": "Feature adoption shortfall",
+      "from_label": "AI feature adoption",
+      "alternative_winner_id": null,
+      "alternative_winner_label": null
+     },
+     {
+      "to_id": "mrr",
+      "edge_id": "fac_paid_ai_add_on_revenue->mrr",
+      "from_id": "fac_paid_ai_add_on_revenue",
+      "to_label": "MRR",
+      "from_label": "Paid AI add-on revenue",
+      "alternative_winner_id": null,
+      "alternative_winner_label": null
+     },
+     {
+      "to_id": "pro_plan_conversion_rate",
+      "edge_id": "price_resistance->pro_plan_conversion_rate",
+      "from_id": "price_resistance",
+      "to_label": "Pro plan conversion rate",
+      "from_label": "Price resistance",
+      "alternative_winner_id": null,
+      "alternative_winner_label": null
+     },
+     {
+      "to_id": "net_pro_subscriber_growth",
+      "edge_id": "pro_plan_conversion_rate->net_pro_subscriber_growth",
+      "from_id": "pro_plan_conversion_rate",
+      "to_label": "Net Pro subscriber growth",
+      "from_label": "Pro plan conversion rate",
+      "alternative_winner_id": null,
+      "alternative_winner_label": null
+     }
+    ],
+    "fragile_edges": [
+     {
+      "to_id": "mrr",
+      "edge_id": "pro_plan_price->mrr",
+      "from_id": "pro_plan_price",
+      "visible": true,
+      "severity": "warning",
+      "to_label": "MRR",
+      "from_label": "Pro plan price",
+      "switch_probability": 0.4384,
+      "alternative_winner_id": "hold_49_with_release",
+      "alternative_winner_label": "Hold £49 with release",
+      "marginal_switch_probability": 0.22
+     },
+     {
+      "to_id": "perceived_pro_value",
+      "edge_id": "ai_feature_adoption->perceived_pro_value",
+      "from_id": "ai_feature_adoption",
+      "visible": false,
+      "severity": "warning",
+      "to_label": "Perceived Pro value",
+      "from_label": "AI feature adoption",
+      "switch_probability": 0.1128,
+      "alternative_winner_id": "hold_49_with_release",
+      "alternative_winner_label": "Hold £49 with release",
+      "marginal_switch_probability": 0
+     },
+     {
+      "to_id": "monthly_churn",
+      "edge_id": "perceived_pro_value->monthly_churn",
+      "from_id": "perceived_pro_value",
+      "visible": false,
+      "severity": "warning",
+      "to_label": "Monthly churn",
+      "from_label": "Perceived Pro value",
+      "switch_probability": 0.108,
+      "alternative_winner_id": "hold_49_with_release",
+      "alternative_winner_label": "Hold £49 with release",
+      "marginal_switch_probability": 0
+     },
+     {
+      "to_id": "perceived_pro_value",
+      "edge_id": "feature_adoption_shortfall->perceived_pro_value",
+      "from_id": "feature_adoption_shortfall",
+      "visible": false,
+      "severity": "warning",
+      "to_label": "Perceived Pro value",
+      "from_label": "Feature adoption shortfall",
+      "switch_probability": 0.1064,
+      "alternative_winner_id": "hold_49_with_release",
+      "alternative_winner_label": "Hold £49 with release",
+      "marginal_switch_probability": 0
+     },
+     {
+      "to_id": "net_pro_subscriber_growth",
+      "edge_id": "monthly_churn->net_pro_subscriber_growth",
+      "from_id": "monthly_churn",
+      "visible": false,
+      "severity": "warning",
+      "to_label": "Net Pro subscriber growth",
+      "from_label": "Monthly churn",
+      "switch_probability": 0.0904,
+      "alternative_winner_id": "hold_49_with_release",
+      "alternative_winner_label": "Hold £49 with release",
+      "marginal_switch_probability": 0
+     }
+    ],
+    "display_verdict": "moderate",
+    "confidence_basis": "recommendation_stability_uncalibrated",
+    "display_verdict_reason": "varying any one of the factors we could test did not change which option is most likely to achieve your goal, and this run mostly held up under the other changes we tested",
+    "recommended_option_compliance": "not_assessed",
+    "recommended_option_compliance_reason": "we could not check every limit you set on this run"
+   },
+   "option_comparison_status": "computed",
+   "edge_e_values": [
+    {
+     "to_id": "mrr",
+     "e_value": 1,
+     "edge_id": "pro_plan_price::mrr",
+     "from_id": "pro_plan_price",
+     "to_label": "MRR",
+     "flip_mean": 0.032,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": 0.088934,
+      "band_min": -1e-06,
+      "band_width": 0.088935,
+      "band_median": -1e-06,
+      "n_seeds_flipped": 10,
+      "seed_flip_means": [
+       -1e-06,
+       0.084398,
+       0.064067,
+       -1e-06,
+       -1e-06,
+       -1e-06,
+       0.088934,
+       0.055387,
+       -1e-06,
+       -1e-06
+      ]
+     },
+     "from_label": "Pro plan price",
+     "current_mean": 0.5,
+     "flip_direction": "decrease"
+    },
+    {
+     "to_id": "perceived_pro_value",
+     "e_value": 1.0094,
+     "edge_id": "ai_feature_adoption::perceived_pro_value",
+     "from_id": "ai_feature_adoption",
+     "to_label": "Perceived Pro value",
+     "flip_mean": -0.504688,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": -0.274663,
+      "band_min": -0.71024,
+      "band_width": 0.435577,
+      "band_median": -0.396682,
+      "n_seeds_flipped": 5,
+      "seed_flip_means": [
+       -0.274663,
+       -0.351157,
+       -0.509848,
+       null,
+       -0.396682,
+       null,
+       -0.71024,
+       null,
+       null,
+       null
+      ]
+     },
+     "from_label": "AI feature adoption",
+     "current_mean": 0.5,
+     "flip_direction": "decrease"
+    },
+    {
+     "to_id": "pro_plan_conversion_rate",
+     "e_value": 1.8705,
+     "edge_id": "perceived_pro_value::pro_plan_conversion_rate",
+     "from_id": "perceived_pro_value",
+     "to_label": "Pro plan conversion rate",
+     "flip_mean": -0.935268,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": -0.370988,
+      "band_min": -0.924264,
+      "band_width": 0.553276,
+      "band_median": -0.458875,
+      "n_seeds_flipped": 3,
+      "seed_flip_means": [
+       null,
+       null,
+       -0.370988,
+       -0.924264,
+       null,
+       null,
+       -0.458875,
+       null,
+       null,
+       null
+      ]
+     },
+     "from_label": "Perceived Pro value",
+     "current_mean": 0.5,
+     "flip_direction": "decrease"
+    },
+    {
+     "to_id": "monthly_churn",
+     "e_value": 1.8705,
+     "edge_id": "perceived_pro_value::monthly_churn",
+     "from_id": "perceived_pro_value",
+     "to_label": "Monthly churn",
+     "flip_mean": 0.935268,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": 0.790431,
+      "band_min": 1e-06,
+      "band_width": 0.79043,
+      "band_median": 0.300523,
+      "n_seeds_flipped": 4,
+      "seed_flip_means": [
+       1e-06,
+       null,
+       null,
+       0.790431,
+       null,
+       null,
+       0.256975,
+       0.344072,
+       null,
+       null
+      ]
+     },
+     "from_label": "Perceived Pro value",
+     "current_mean": -0.5,
+     "flip_direction": "increase"
+    },
+    {
+     "to_id": "net_pro_subscriber_growth",
+     "e_value": 1.8705,
+     "edge_id": "monthly_churn::net_pro_subscriber_growth",
+     "from_id": "monthly_churn",
+     "to_label": "Net Pro subscriber growth",
+     "flip_mean": 0.935268,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": 0.433413,
+      "band_min": 1e-06,
+      "band_width": 0.433412,
+      "band_median": 0.135068,
+      "n_seeds_flipped": 5,
+      "seed_flip_means": [
+       1e-06,
+       null,
+       0.403115,
+       null,
+       null,
+       null,
+       0.135068,
+       0.433413,
+       1e-06,
+       null
+      ]
+     },
+     "from_label": "Monthly churn",
+     "current_mean": -0.5,
+     "flip_direction": "increase"
+    },
+    {
+     "to_id": "mrr",
+     "e_value": 1,
+     "edge_id": "net_pro_subscriber_growth::mrr",
+     "from_id": "net_pro_subscriber_growth",
+     "to_label": "MRR",
+     "flip_mean": -0.239647,
+     "stability": {
+      "n_seeds": 10,
+      "band_max": -1e-06,
+      "band_min": -0.811142,
+      "band_width": 0.811141,
+      "band_median": -0.384207,
+      "n_seeds_flipped": 4,
+      "seed_flip_means": [
+       -1e-06,
+       null,
+       null,
+       -0.811142,
+       null,
+       null,
+       -0.363724,
+       -0.40469,
+       null,
+       null
+      ]
+     },
+     "from_label": "Net Pro subscriber growth",
+     "current_mean": 0.5,
+     "flip_direction": "decrease"
+    }
+   ],
+   "inference_warnings": [
+    {
+     "code": "CONSTRAINT_TARGET_UNRELIABLE",
+     "message": "The target on \"Monthly churn\" can't be scored against this model: \"Monthly churn\" is calculated from the factors feeding into it, so the analysis produces a modelled change for it, not a reading on the same scale as your target. Comparing the two would report a near-zero chance for every option no matter how good the options are, so goal-fit probabilities were withheld for this run rather than shown. Setting a current value for \"Monthly churn\" would not change that — it is calculated from its inputs, so it has no measured starting point of its own to anchor to. Your limit is recorded and was left unscored rather than scored against the wrong number.",
+     "severity": "warning"
+    },
+    {
+     "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+     "message": "6 edge E-value entries were omitted from edge_e_values: 6 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+     "severity": "info"
+    },
+    {
+     "code": "ROOT_NODE_DEFAULT_VALUE",
+     "field": "nodes[fac_paid_ai_add_on_revenue].observed_state.value",
+     "message": "No starting value was provided for \"Paid AI add-on revenue\", so the analysis used a default of 0.0. Results for downstream nodes may be unreliable until a real value or range is set.",
+     "severity": "info",
+     "node_label": "Paid AI add-on revenue"
+    },
+    {
+     "code": "CONSTRAINT_FRAME_UNSPECIFIED",
+     "field": "goal_constraints[0].value_frame",
+     "message": "constraint value=0.1 was supplied without goal_constraints[0].value_frame, so the frame it is expressed in is unknown. A level threshold compared against the target's change-from-origin samples yields a structurally impossible probability, so constraint_analysis is omitted rather than guessed. Stamp 'level' or 'delta'.",
+     "severity": "warning"
+    },
+    {
+     "code": "GOAL_DIRECTION_UNATTESTED",
+     "field": "goal_direction",
+     "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+     "severity": "warning"
+    },
+    {
+     "code": "GOAL_ANCESTOR_DATA_GAP",
+     "field": "nodes[mrr]",
+     "message": "Goal node 'mrr' is scored from its forward-propagated outcome distribution, but root ancestor(s) 'fac_paid_ai_add_on_revenue' carry no observed value or ParameterUncertainty and defaulted to 0.0 — goal-level probabilities partially rest on placeholder zeros (insufficient data).",
+     "severity": "info"
+    },
+    {
+     "code": "GOAL_THRESHOLD_NOT_CONVERTIBLE",
+     "field": "nodes[mrr].observed_state.baseline",
+     "message": "A 'level' frame requires goal node 'mrr' to carry observed_state.baseline to convert the level into the samples' frame, but it carries no observed_state at all.",
+     "severity": "warning"
+    },
+    {
+     "code": "EVPI_UNAVAILABLE",
+     "field": "p_win_sensitivity",
+     "message": "Win-probability sensitivity (p_win_sensitivity) was skipped: its metric is P(joint_goal) and at least one goal constraint could not be resolved into its target's sample frame. Base analysis is unaffected.",
+     "severity": "warning",
+     "elapsed_ms": 1971.4
+    }
+   ],
+   "confidence_tier": "needs_work",
+   "flip_thresholds": [
+    {
+     "unit": "£/month",
+     "factor_id": "pro_plan_price",
+     "flip_value": null,
+     "flip_reason": "structurally_invariant",
+     "probes_used": 0,
+     "value_scale": "display",
+     "factor_label": "Pro plan price",
+     "current_value": 49,
+     "current_display": "49 £/month",
+     "iterations_used": 0,
+     "no_flip_in_range": true,
+     "alternative_winner_id": null,
+     "alternative_winner_label": null
+    },
+    {
+     "unit": "% of Pro customers",
+     "factor_id": "ai_feature_adoption",
+     "flip_value": null,
+     "flip_reason": "structurally_invariant",
+     "probes_used": 0,
+     "value_scale": "normalised",
+     "factor_label": "AI feature adoption",
+     "current_value": 0,
+     "iterations_used": 0,
+     "no_flip_in_range": true,
+     "alternative_winner_id": null,
+     "alternative_winner_label": null
+    }
+   ],
+   "decision_brief": {
+    "options": [
+     {
+      "label": "Continue as now",
+      "option_id": "continue_as_now",
+      "win_probability": 0.0213
+     },
+     {
+      "label": "Hold £49 with release",
+      "option_id": "hold_49_with_release",
+      "win_probability": 0.10890000000000055
+     },
+     {
+      "label": "Phased £54 with release",
+      "option_id": "phased_54_with_release",
+      "win_probability": 0.03424999999999987
+     },
+     {
+      "label": "Raise to £59 with release",
+      "option_id": "raise_to_59_with_release",
+      "win_probability": 0.8355499999999941
+     }
+    ],
+    "version": "1",
+    "brief_id": "66866c46-101b-4337-9d4e-a77a2ed9a276",
+    "warnings": [
+     {
+      "code": "ANCHORING_RISK",
+      "message": "High-influence factors have 0.5 baseline values — a common 'I don't know' default. Are these estimates or evidence?",
+      "severity": "warning"
+     },
+     {
+      "code": "GOAL_ANCESTOR_DATA_GAP",
+      "message": "Goal node 'mrr' is scored from its forward-propagated outcome distribution, but root ancestor(s) 'fac_paid_ai_add_on_revenue' carry no observed value or ParameterUncertainty and defaulted to 0.0 — goal-level probabilities partially rest on placeholder zeros (insufficient data)",
+      "severity": "warning"
+     },
+     {
+      "code": "M2_UNAVAILABLE",
+      "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+      "severity": "warning"
+     }
+    ],
+    "created_at": "2026-09-26T15:05:33.564Z",
+    "robustness": "moderate",
+    "top_drivers": [
+     {
+      "direction": "positive",
+      "sensitivity": 1,
+      "factor_label": "Paid AI add-on revenue"
+     },
+     {
+      "direction": "positive",
+      "sensitivity": 0.5,
+      "factor_label": "Perceived Pro value"
+     },
+     {
+      "direction": "positive",
+      "sensitivity": 0.5,
+      "factor_label": "Pro plan conversion rate"
+     },
+     {
+      "direction": "negative",
+      "sensitivity": 0.5,
+      "factor_label": "Monthly churn"
+     }
+    ],
+    "warning_codes": [
+     "CONSTRAINT_FRAME_UNSPECIFIED",
+     "CONSTRAINT_TARGET_UNRELIABLE",
+     "EVPI_UNAVAILABLE",
+     "GOAL_DIRECTION_UNATTESTED",
+     "GOAL_THRESHOLD_NOT_CONVERTIBLE"
+    ],
+    "key_assumptions": [
+     "Paid AI add-on revenue",
+     "Pro plan conversion rate",
+     "Perceived Pro value"
+    ],
+    "analysis_summary": {
+     "robustness_band": "moderate"
+    },
+    "what_would_change": [
+     "Perceived Pro value → Monthly churn",
+     "Feature adoption shortfall → Perceived Pro value",
+     "Monthly churn → Net Pro subscriber growth"
+    ],
+    "defaulted_assumptions": [
+     {
+      "code": "ROOT_NODE_DEFAULT_VALUE",
+      "note": "No starting value was provided for \"Paid AI add-on revenue\", so the analysis used a default of 0.0. Results for downstream nodes may be unreliable until a real value or range is set.",
+      "source": "default_disclosure",
+      "doctrine": "provisional_doctrine_v0",
+      "factor_label": "Paid AI add-on revenue"
+     }
+    ]
+   },
+   "factor_evppi": [
+    {
+     "evppi": 0,
+     "units": "outcome",
+     "method": "regression_evppi_v1",
+     "status": "below_resolution",
+     "evppi_raw": 0,
+     "factor_id": "perceived_pro_value",
+     "n_samples": 10000,
+     "clamped_low": false,
+     "noise_floor": 0,
+     "clamped_high": false,
+     "regression_degree": 4,
+     "correlation_active": false,
+     "baseline_max_expected_utility": 0.21552,
+     "conditional_max_expected_utility": 0.21552
+    },
+    {
+     "evppi": 0,
+     "units": "outcome",
+     "method": "regression_evppi_v1",
+     "status": "below_resolution",
+     "evppi_raw": 0,
+     "factor_id": "pro_plan_conversion_rate",
+     "n_samples": 10000,
+     "clamped_low": false,
+     "noise_floor": 0,
+     "clamped_high": false,
+     "regression_degree": 4,
+     "correlation_active": false,
+     "baseline_max_expected_utility": 0.21552,
+     "conditional_max_expected_utility": 0.21552
+    },
+    {
+     "evppi": 0,
+     "units": "outcome",
+     "method": "regression_evppi_v1",
+     "status": "below_resolution",
+     "evppi_raw": 0,
+     "factor_id": "monthly_churn",
+     "n_samples": 10000,
+     "clamped_low": false,
+     "noise_floor": 0,
+     "clamped_high": false,
+     "regression_degree": 4,
+     "correlation_active": false,
+     "baseline_max_expected_utility": 0.21552,
+     "conditional_max_expected_utility": 0.21552
+    }
+   ],
+   "decision_evpi": 0.0002498230591286743,
+   "conditional_winners": []
+  },
+  "computed_against_hash": "33c4d017bc956d3a"
+ }
+}
