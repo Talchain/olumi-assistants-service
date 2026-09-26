@@ -641,6 +641,63 @@ function gapsOnRegisteredOptions<P extends ReturnType<typeof prepareProvisionalC
   return { ...p, ...findCoverageGaps({ ...raw, options: raw.options.filter((o) => !gone.has(canonicalLabel(o.label))) }, p.additions_without_total) };
 }
 
+/**
+ * ⛔ A GAP IS ANSWERED ONLY BY WHAT REGISTERS (adversarial verify of e7052de7, blocking: X3-SQ, SQ-H1..H3).
+ * `findCoverageGaps` reads the drafter's own words, so a pair missing from a retry's count is not thereby answered.
+ * The retry can declare the option the status quo (a status quo's pairs are never gaps). It can give an addition that
+ * preparation cannot make a total (`additions_without_total`, which also makes the factor's baseline "the user's").
+ * Or it can give a level below zero that admission withholds. Each one reads "fewer gaps" while readiness asks the
+ * same value question of the registered model. So a gap the FIRST draft counted stays open until the retry's
+ * REGISTERED model answers it, when the retry still drafts its option and factor. The answer is a level on that
+ * option node for that factor node, or a baseline on that factor node. This returns the first draft's gaps that are
+ * missing from the retry's own count and still unanswered. A retry that no longer drafts an option or factor is
+ * judged by the rules that allow or refuse shedding it, never here.
+ */
+function unansweredOnRegistered(
+  first: { readonly level_gaps: readonly LevelGap[]; readonly baseline_gaps: readonly BaselineGap[] },
+  retry: { readonly level_gaps: readonly LevelGap[]; readonly baseline_gaps: readonly BaselineGap[] },
+  retryRaw: CandidateModel,
+  retryAdmitted: Pick<AdmittedModel, 'nodes'>,
+): number {
+  const is = (a: string) => (b: string) => canonicalLabel(a) === canonicalLabel(b);
+  const node = (kind: string, label: string) => retryAdmitted.nodes.find((n) => nodeIdentity(n) === nodeIdentity({ kind, label }));
+  const drafts = (labels: readonly { label: string }[], label: string) => labels.some((x) => is(label)(x.label));
+  const levelled = (g: LevelGap): boolean => {
+    const o = node('option', g.option);
+    const f = node('factor', g.factor);
+    return o !== undefined && f !== undefined && o.interventions?.[f.id] !== undefined;
+  };
+  const hasBaseline = (factor: string): boolean => {
+    const v = node('factor', factor)?.observed_state?.value;
+    return typeof v === 'number' && Number.isFinite(v);
+  };
+  const levels = first.level_gaps.filter((g) =>
+    !retry.level_gaps.some((r) => is(g.option)(r.option) && is(g.factor)(r.factor))
+    && drafts(retryRaw.options, g.option) && drafts(retryRaw.factors, g.factor) && !levelled(g));
+  const baselines = first.baseline_gaps.filter((g) =>
+    !retry.baseline_gaps.some((r) => is(g.factor)(r.factor)) && drafts(retryRaw.factors, g.factor) && !hasBaseline(g.factor));
+  return levels.length + baselines.length;
+}
+
+/**
+ * ⛔ A RETRY NEVER TAKES AWAY THE STATUS QUO THE FIRST DRAFT HELD (adversarial verify of e7052de7, blocking).
+ * The declaration decides what admission holds (`wireInertStatusQuo`). Two declared options means neither is held. A
+ * declaration moved to an option that acts falls back to the idioms, which do not read "Continue Current Staffing".
+ * Either way the held option registers with no edges, and readiness adds OPTION_NO_FACTOR_EDGES and
+ * OPTION_NEEDS_MAPPING. Un-declared, an idiom label ("Keep current pricing") is still held, but it loses the
+ * `is_baseline` stamp that run admission reads to keep it as a comparator. No retry is asked about the status quo.
+ * So every option the first REGISTERED model holds is still held by the retry's, and a stamped one is still stamped.
+ * Where the first draft held none, a retry may declare one, which is what `BUILD_INSTRUCTIONS` asks for.
+ */
+function keepsTheHeldStatusQuo(first: Pick<AdmittedModel, 'nodes' | 'loss'>, retry: Pick<AdmittedModel, 'nodes' | 'loss'>): boolean {
+  const held = (m: Pick<AdmittedModel, 'nodes' | 'loss'>) => {
+    const ids = new Set(m.loss.map((e) => /^nodes\[(.+)\]\.status_quo_held$/.exec(String(e.field_path))?.[1]).filter((id) => id !== undefined));
+    return m.nodes.filter((n) => n.kind === 'option' && ids.has(n.id));
+  };
+  const now = held(retry);
+  return held(first).every((h) => now.some((r) => nodeIdentity(r) === nodeIdentity(h) && (h.is_baseline !== true || r.is_baseline === true)));
+}
+
 /** The retry's wording for each gap, naming the option and factor exactly. */
 function sayCoverageGaps(p: { level_gaps: readonly LevelGap[]; baseline_gaps: readonly BaselineGap[] }): string[] {
   return [
@@ -1021,6 +1078,8 @@ export async function buildModelFromBrief(
         // ⛔ BY IDENTITY, NOT COUNT (independent review at 78b07e8b): every option,
         // fact and relationship the user stated must still be there by name.
         const keepsUserMaterial = keepsEveryUserStatedIdentity(size, retrySize);
+        // ⛔ Counted on what REGISTERS (adversarial verify of e7052de7): a first-draft gap the retry still drafts stays open until its registered model answers it.
+        const retryOpen = gapCount(retryPreparation) + unansweredOnRegistered(preparation, retryPreparation, retryRaw, retryAdmitted);
         if (
           (needsSizeRetry ? retrySize.nodes <= size.nodes && retrySize.edges <= size.edges : retrySize.within || retrySize.user_material_exceeds_limit) &&
           keepsUserMaterial && keepsEveryUserNumber(firstCandidate, candidate, retryRaw) && retryPreparation.mechanism_issues.length === 0 &&
@@ -1028,9 +1087,11 @@ export async function buildModelFromBrief(
           // gap — but it must never cover LESS, and when coverage is the only reason
           // for the retry it must cover strictly MORE (c22) and register every option the first draft did. A
           // loop asked within the limit is a reason of its own (#1956), adopted on its other merits.
-          gapCount(retryPreparation) <= gapCount(preparation) &&
+          retryOpen <= gapCount(preparation) &&
           (needsSizeRetry || preparation.mechanism_issues.length > 0 || loopsAsked.length > 0
-            || (gapCount(retryPreparation) < gapCount(preparation) && keepsEveryRegisteredOption)) &&
+            || (retryOpen < gapCount(preparation) && keepsEveryRegisteredOption)) &&
+          // Within the limit, the status quo the first draft held is still held. On a compaction, refusing would cost the user their model.
+          (needsSizeRetry || keepsTheHeldStatusQuo(admitted, retryAdmitted)) &&
           (asked.length === 0 || retainsRiskHypotheses(candidate, retryCandidate, needsSizeRetry)) &&
           // A compaction may shed what the model added, never what a kept option does; a repair may not shed an action.
           (needsSizeRetry ? compactionKeepsWhatOptionsDo(candidate, retryCandidate) : keepsEveryAction(candidate, retryCandidate))

@@ -1070,6 +1070,15 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
     expect(loopWithheld(out)).toEqual(['pro_plan_subscribers->monthly_churn']);
     expectFirstDraftRegistered(out, graph);
   });
+
+  it('CONTROL (row 3h, a compaction): the status-quo rule never refuses a compaction — refusing would cost the user their model (`model_too_large`)', async () => {
+    // Row 2a's compliant compaction, un-declaring "Keep current pricing": its label still reads as the status quo, so it is held, unstamped.
+    const { out, graph } = await construct(first(), declare(padded(0, false), KEEP, null));
+    expect([out.ok, out.size_retried, out.within_compact_limits]).toEqual([true, true, true]);
+    expect(optionIds(graph!)).toEqual(['keep_current_pricing', '59_with_ai_release']);
+    expect(keepEdges(graph!)).toEqual(['ai_feature_availability', 'pro_plan_price']);
+    expect(held(graph!)).toEqual([]);
+  });
 });
 
 describe('the construction contract names the shape (one sentence)', () => {
