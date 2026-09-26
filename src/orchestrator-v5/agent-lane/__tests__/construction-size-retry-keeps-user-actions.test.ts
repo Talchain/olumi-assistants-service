@@ -37,7 +37,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 type Iv = { factor_label: string; value: number; value_kind: 'absolute' | 'additional'; unit: string; provenance: string };
 type Opt = { label: string; provenance: string; is_status_quo: boolean | null; changes: string[]; interventions: Iv[] };
-type Link = { from: string; to: string; direction: 'positive' | 'negative' | 'unknown'; provenance: string };
+type Link = { from: string; to: string; direction: 'positive' | 'negative' | 'unknown'; provenance: string; effect_amount?: number | null; effect_per_source_change?: number | null; effect_provenance?: string | null };
 
 const SCENARIO = '66666666-6666-4666-8666-666666666666';
 const BRIEF = 'Should we hire two developers or a tech lead to lift delivery velocity?';
@@ -69,10 +69,10 @@ function c22() {
     risks: [] as { label: string; provenance: string }[],
     outcomes: [] as { label: string; provenance: string }[],
     links: [
-      { from: 'Engineering delivery capacity', to: GOAL, direction: 'positive', provenance: 'ai_proposed' },
-      { from: 'Technical leadership capacity', to: GOAL, direction: 'positive', provenance: 'ai_proposed' },
-      { from: 'Team morale', to: GOAL, direction: 'positive', provenance: 'ai_proposed' },
-      { from: 'Onboarding load', to: GOAL, direction: 'negative', provenance: 'ai_proposed' },
+      { from: 'Engineering delivery capacity', to: GOAL, direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Technical leadership capacity', to: GOAL, direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Team morale', to: GOAL, direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Onboarding load', to: GOAL, direction: 'negative', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
     ] as Link[],
     // C46 (#1972) made identities and the goal's scope required in the strict schema; c22 declared neither.
     identities: [],
@@ -98,7 +98,7 @@ function covered(): Draft {
 const SPECULATIVE = Array.from({ length: 9 }, (_, i) => `Speculative factor ${i}`);
 function oversized(d: Draft): Draft {
   d.factors.push(...SPECULATIVE.map((l) => factor(l, 5, 10, 'score')));
-  d.links.push(...SPECULATIVE.map((l): Link => ({ from: l, to: GOAL, direction: 'positive', provenance: 'ai_proposed' })));
+  d.links.push(...SPECULATIVE.map((l): Link => ({ from: l, to: GOAL, direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null })));
   return d;
 }
 
@@ -196,7 +196,7 @@ describe('(1) a size retry may shed what the model added, never what a kept opti
   function linkCarrier(): Draft {
     const d = oversized(c22());
     d.options[0] = { ...d.options[0]!, changes: ['Hiring cost'] };
-    d.links.push({ from: 'Hire Two Developers', to: 'Engineering delivery capacity', direction: 'positive', provenance: 'ai_proposed' });
+    d.links.push({ from: 'Hire Two Developers', to: 'Engineering delivery capacity', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
     return d;
   }
   it.each<[string, 'unknown' | null]>([
@@ -207,7 +207,7 @@ describe('(1) a size retry may shed what the model added, never what a kept opti
       .toContainEqual({ option: 'Hire Two Developers', factor: 'Engineering delivery capacity' });
     const retry = covered();
     retry.options[0] = { ...retry.options[0]!, interventions: [est('Hiring cost', 140000, 'GBP')] };
-    if (direction !== null) retry.links.push({ from: 'Hire Two Developers', to: 'Engineering delivery capacity', direction, provenance: 'ai_proposed' });
+    if (direction !== null) retry.links.push({ from: 'Hire Two Developers', to: 'Engineering delivery capacity', direction, provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
     expectRefusedNotAdopted(await construct(linkCarrier(), retry));
   });
 
@@ -319,8 +319,8 @@ describe('(2) an OVERSIZED draft with a repair issue gets the repair instruction
     const d = oversized(covered());
     d.risks.push({ label: 'Delivery slip', provenance: 'ai_proposed' });
     d.links.push(
-      { from: 'Hire Two Developers', to: 'Delivery slip', direction: 'positive', provenance: 'ai_proposed' },
-      { from: 'Delivery slip', to: GOAL, direction: 'negative', provenance: 'ai_proposed' },
+      { from: 'Hire Two Developers', to: 'Delivery slip', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Delivery slip', to: GOAL, direction: 'negative', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
     );
     return d;
   };
@@ -404,8 +404,8 @@ describe('(3) B1: the combined size+repair retry may shed an option or a risk Ol
   function withRisk(d: Draft, via: string[]): Draft {
     d.risks.push({ label: 'Delivery slip', provenance: 'ai_proposed' });
     d.links.push(
-      { from: 'Onboarding load', to: 'Delivery slip', direction: 'positive', provenance: 'ai_proposed' },
-      { from: 'Delivery slip', to: GOAL, direction: 'negative', provenance: 'ai_proposed' },
+      { from: 'Onboarding load', to: 'Delivery slip', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Delivery slip', to: GOAL, direction: 'negative', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
     );
     d.options = d.options.map((o) => (via.includes(o.label) ? { ...o, changes: [...o.changes, 'Onboarding load'] } : o));
     return d;
@@ -493,7 +493,7 @@ describe('(3) B1: the combined size+repair retry may shed an option or a risk Ol
     // reaches the risk: the risk is re-fed from "Team morale", which no option acts on, so the option has no path to it.
     retry.options[0] = { ...retry.options[0]!, interventions: [...retry.options[0]!.interventions, est('Onboarding load', 2, 'score')] };
     retry.links = retry.links.filter((l) => !(l.from === 'Onboarding load' && l.to === 'Delivery slip'));
-    retry.links.push({ from: 'Team morale', to: 'Delivery slip', direction: 'positive', provenance: 'ai_proposed' });
+    retry.links.push({ from: 'Team morale', to: 'Delivery slip', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
     expect(retry.options.some((o) => [...o.changes, ...o.interventions.map((i) => i.factor_label)].includes('Team morale')), 'PRECONDITION: no option acts on the new feeder').toBe(false);
     expectRefusedNotAdopted(await construct(first, retry));
   });
@@ -544,8 +544,8 @@ describe('(3) B1: the combined size+repair retry may shed an option or a risk Ol
     const d = oversized(c22());
     d.risks.push({ label: 'Delivery slip', provenance: 'ai_proposed' });
     d.links.push(
-      { from: 'Hire Two Developers', to: 'Delivery slip', direction: 'positive', provenance: 'ai_proposed' },
-      { from: 'Delivery slip', to: GOAL, direction: 'negative', provenance: 'ai_proposed' },
+      { from: 'Hire Two Developers', to: 'Delivery slip', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Delivery slip', to: GOAL, direction: 'negative', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
     );
     return d;
   };
@@ -673,7 +673,7 @@ describe('(3) B1: the combined size+repair retry may shed an option or a risk Ol
     // It still acts on "Onboarding load" (so the compaction guard is satisfied), but that factor no longer reaches the
     // risk: the risk is re-fed from "Team morale", which no option acts on.
     retry.links = retry.links.filter((l) => !(l.from === 'Onboarding load' && l.to === 'Delivery slip'));
-    retry.links.push({ from: 'Team morale', to: 'Delivery slip', direction: 'positive', provenance: 'ai_proposed' });
+    retry.links.push({ from: 'Team morale', to: 'Delivery slip', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
     expect(retry.options.some((o) => [...o.changes, ...o.interventions.map((i) => i.factor_label)].includes('Team morale')), 'PRECONDITION: no option acts on the new feeder').toBe(false);
     expectRefusedNotAdopted(await construct(withRisk(oversized(c22()), ['Hire Both']), retry));
   });
@@ -733,10 +733,10 @@ describe('(4) B1\' (5845793528): a compaction may shed Olumi\'s option that reus
       factor('Hiring cost', 0, 500000, 'GBP'),
     ];
     d.links = [
-      { from: HEADCOUNT, to: GOAL, direction: 'positive', provenance: 'ai_proposed' },
-      { from: 'Technical leadership capacity', to: GOAL, direction: 'positive', provenance: 'ai_proposed' },
+      { from: HEADCOUNT, to: GOAL, direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Technical leadership capacity', to: GOAL, direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
       // Every factor reaches the goal, so the registered model's readiness is clean ([]), as on staging.
-      { from: 'Hiring cost', to: GOAL, direction: 'negative', provenance: 'ai_proposed' },
+      { from: 'Hiring cost', to: GOAL, direction: 'negative', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
     ];
     return d;
   }
@@ -750,7 +750,7 @@ describe('(4) B1\' (5845793528): a compaction may shed Olumi\'s option that reus
     const d = compact();
     d.options.splice(2, 0, hireBoth(sevenOnHireBoth));
     d.factors.push(...SPECULATIVE_10.map((l) => factor(l, 5, 10, 'score')));
-    d.links.push(...SPECULATIVE_10.map((l): Link => ({ from: l, to: GOAL, direction: 'positive', provenance: 'ai_proposed' })));
+    d.links.push(...SPECULATIVE_10.map((l): Link => ({ from: l, to: GOAL, direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null })));
     return d;
   }
   /** The same first draft with ONE level gap: "Hire a Tech Lead" names "Technical leadership capacity" in `changes` only. */

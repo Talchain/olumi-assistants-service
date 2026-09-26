@@ -37,7 +37,7 @@ const BRIEF =
   + 'Pro plan price from £49 to £59 per month with the next AI feature release?';
 // #1919: the drafter states every limit's frame (`frame` is required by the strict schema); "under 10%" limits the level.
 const CHURN_LIMIT = { metric: 'Monthly churn', operator: '<', value: 10, unit: 'percent per month', provenance: 'explicit', frame: 'level' };
-const link = (from: string, to: string, direction: 'positive' | 'negative') => ({ from, to, direction, provenance: 'inferred' });
+const link = (from: string, to: string, direction: 'positive' | 'negative') => ({ from, to, direction, provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
 
 /** Served 20260926T032916Z-48389, by node id: `monthly_churn` is an OUTCOME the user's limit names. */
 function outcomeDraft(over: Record<string, unknown> = {}) {

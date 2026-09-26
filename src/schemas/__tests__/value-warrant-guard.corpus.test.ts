@@ -294,7 +294,7 @@ describe("the live value-bearing contract, adjudicated", () => {
     expect(report.stale.map((d) => d.id)).toEqual([]);
   });
 
-  it("the first cut is an ENUMERATION: 37 sites, 29 findings, 20 OPEN, 9 accepted", () => {
+  it("the first cut is an ENUMERATION: 40 sites, 29 findings, 20 OPEN, 9 accepted", () => {
     // Pinned so the shape of the first cut cannot move quietly. There is no date
     // trigger anywhere in this check — a CI job that turns red on a calendar is a
     // time bomb. What this gives instead is an OPEN count a human can watch.
@@ -304,11 +304,14 @@ describe("the live value-bearing contract, adjudicated", () => {
     // +1 site / +1 finding / +1 ACCEPTED (25 Sep): CEE's NodeV3 declares the UI's
     // goal `success_threshold` so a re-parse stops erasing it; its warrant is
     // `threshold_source` by the writer's own contract (value-warrant-guard.ts).
-    expect(SITES.length).toBe(37);
+    // +3 sites / +0 findings (26 Sep, magnitude contract PR1): CEE's EdgeV3 provenance carries
+    // `natural_effect` {amount, per_source_change, strength_mean}. Each number names its OWN warrant
+    // (`amount_unit`, `per_source_change_unit`, `strength_mean_frame`), so all three are FIELD.
+    expect(SITES.length).toBe(40);
     expect(FINDINGS.length).toBe(29);
     expect(report.open.length).toBe(20);
     expect(report.accepted.length).toBe(9);
-    expect(SITES.filter((s) => s.verdict === "FIELD").length).toBe(4);
+    expect(SITES.filter((s) => s.verdict === "FIELD").length).toBe(7);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SOLE").length).toBe(4);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(14);
     expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(15);

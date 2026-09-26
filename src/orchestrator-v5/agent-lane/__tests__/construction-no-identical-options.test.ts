@@ -105,10 +105,11 @@ function candidateFromServed(g: SGraph, opts: { olumi?: 'ai_proposed' | 'inferre
     links: [
       // A user restatement of an option -> factor connection (the edge carries `brief_extraction`).
       ...g.edges.filter((e) => byId.get(e.from)?.kind === 'option' && e.origin !== 'repair' && e.provenance?.source === 'brief_extraction')
-        .map((e) => ({ from: byId.get(e.from)!.label, to: byId.get(e.to)!.label, direction: 'positive', provenance: 'explicit' })),
+        .map((e) => ({ from: byId.get(e.from)!.label, to: byId.get(e.to)!.label, direction: 'positive', provenance: 'explicit', effect_amount: null, effect_per_source_change: null, effect_provenance: null })),
       ...g.edges.filter((e) => !['option', 'decision'].includes(byId.get(e.from)?.kind ?? ''))
         .map((e) => ({ from: byId.get(e.from)!.label, to: byId.get(e.to)!.label, direction: e.effect_direction ?? 'positive',
-          provenance: e.provenance?.source === 'brief_extraction' ? 'explicit' : 'inferred' })),
+          provenance: e.provenance?.source === 'brief_extraction' ? 'explicit' : 'inferred',
+          effect_amount: null, effect_per_source_change: null, effect_provenance: null })),
     ],
     identities: [],
     unknowns: opts.unknowns ?? [],
@@ -577,7 +578,7 @@ const padded = (n: number, withTest: boolean, { servedGaps = false }: { servedGa
       ...base.factors.map((f) => (servedGaps || f.label !== 'AI feature availability' ? f : { ...f, baseline_known: false, baseline_value: 0 })),
       ...extra.map((label) => ({ label, role: 'observable' as const, baseline_known: false, baseline_value: null, unit: null, provenance: 'ai_proposed', plausible_max: 100 })),
     ],
-    links: [...base.links, ...extra.map((from) => ({ from, to: 'MRR', direction: 'positive', provenance: 'ai_proposed' }))],
+    links: [...base.links, ...extra.map((from) => ({ from, to: 'MRR', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null }))],
   } as unknown as typeof base;
 };
 
@@ -919,7 +920,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
    * the first draft registered. Mutant Ma (the retry's own `options_withheld`, unfiltered) reads 1 ≤ 1 for a retry that
    * withholds £54 and opens £64's gap, adopts it, and £54 drops out of the registered model.
    */
-  const LOOP_BACK = { from: 'Pro plan subscribers', to: 'Monthly churn', direction: 'positive', provenance: 'inferred' };
+  const LOOP_BACK = { from: 'Pro plan subscribers', to: 'Monthly churn', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null };
   const LOOP_ISSUE = '"Monthly churn" -> "Pro plan subscribers" -> "Monthly churn" is a loop: a model cannot hold one. Keep the direction that carries the '
     + 'cause toward the goal metric, remove the link that points back, and keep every option and risk connected to the goal through links whose direction you state.';
   const withLoop = (d: ReturnType<typeof with54>) => ({ ...d, links: [...d.links, LOOP_BACK] }) as unknown as ReturnType<typeof with54>;

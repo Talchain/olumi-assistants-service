@@ -50,8 +50,8 @@ function hiring(statusQuo: Partial<Opt> & { label: string }, extra: Opt[] = []):
     ],
     risks: [], outcomes: [],
     links: [
-      { from: 'Tech leads hired', to: 'Velocity', direction: 'positive', provenance: 'inferred' },
-      { from: 'Developers hired', to: 'Velocity', direction: 'positive', provenance: 'inferred' },
+      { from: 'Tech leads hired', to: 'Velocity', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Developers hired', to: 'Velocity', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
     ],
     identities: [],
   } as unknown as CandidateModel;

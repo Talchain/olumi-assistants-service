@@ -503,6 +503,20 @@ export const EdgeProvenanceV3 = z.object({
   source: z.enum(["brief_extraction", "cee_hypothesis", "domain_knowledge", "user_specified"]),
   /** Optional reasoning */
   reasoning: z.string().optional(),
+  /** Who sized the link (magnitude contract D9); `source: 'user_specified'` wins at read time. A malformed value is dropped. */
+  magnitude: z.enum(["user_stated", "olumi_estimate", "olumi_placeholder"]).optional().catch(undefined),
+  /**
+   * The size the link carries in natural units (magnitude contract; #70 5845713522). `strength_mean` is the β it was
+   * written for: a reader says it only while the edge's mean equals it (R&C 5845818897). A malformed value is dropped.
+   */
+  natural_effect: z.object({
+    amount: z.number().finite(),
+    amount_unit: z.string(),
+    per_source_change: z.number().finite(),
+    per_source_change_unit: z.string(),
+    strength_mean: z.number().finite(),
+    strength_mean_frame: z.literal("edge_strength"),
+  }).optional().catch(undefined),
 }).passthrough(); // CIL Phase 0: preserve additive fields
 export type EdgeProvenanceV3T = z.infer<typeof EdgeProvenanceV3>;
 
