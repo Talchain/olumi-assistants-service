@@ -84,6 +84,7 @@ import { z } from 'zod';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { normaliseIdBase } from '../../cee/utils/id-normalizer.js';
+import { InterventionV3 } from '../../schemas/cee-v3.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
 
 /**
@@ -138,6 +139,11 @@ const InterventionSpecSchema = z.object({
   // raw_value is deliberately polymorphic (categorical/boolean raw values keep
   // their original type); its NUMBER branch must still be finite.
   raw_value: z.union([FiniteNumber, z.string(), z.boolean()]).optional(),
+  // C2 (#70 5844217159): WHOSE this level is. Absent = the user's (today's bytes). `cee_hypothesis` is Olumi's
+  // estimate, the literal an adopted Olumi level already carries. Derived from the contract's own enum, never
+  // restated; `brief_extraction` is the drafter's and never an Agent's. Typed, so any other value is
+  // `parameters_invalid` — refused, never dropped and stamped as the user's.
+  source: InterventionV3.shape.source.extract(['user_specified', 'cee_hypothesis']).optional(),
 });
 
 const AddOptionParamsSchema = z.object({
@@ -282,7 +288,7 @@ export function buildAddOptionTransaction(
   }
 
   // Canonical top-level InterventionV3 bundle (the spelling GraphV3 preserves
-  // and run_analysis reads). `source: 'user_specified'` and an exact-id
+  // and run_analysis reads). `source` (the user's unless the spec says Olumi's) and an exact-id
   // `target_match` mirror `normalise-option-interventions.freshInterventionV3`.
   const valued = interventions.filter(
     (iv): iv is typeof iv & { value: number } => iv.value !== null,
@@ -292,7 +298,7 @@ export function buildAddOptionTransaction(
   for (const iv of valued) {
     const entry: Record<string, unknown> = {
       value: iv.value,
-      source: 'user_specified',
+      source: iv.source ?? 'user_specified',
       target_match: {
         node_id: iv.factor_id,
         match_type: 'exact_id',
