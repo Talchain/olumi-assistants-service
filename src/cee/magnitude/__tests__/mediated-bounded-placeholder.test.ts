@@ -7,7 +7,7 @@
  * Olumi's (`olumi_placeholder`) and still asked about.
  */
 import { describe, expect, it } from 'vitest';
-import { sizeLink, type MagnitudeNode } from '../link-effect.js';
+import { sizeLink, domainBand, withinDomain, sourceSwing, FULL_RANGE_SWING, heldBaseline, type MagnitudeNode } from '../link-effect.js';
 
 const churnEstimated: MagnitudeNode = {
   label: 'Monthly churn', kind: 'factor', scale_frame: 100,
@@ -91,5 +91,36 @@ describe('PR1b: D4 judges Olumi\'s own size against the baseline the model holds
     const s = sizeLink({ direction: 'negative', effect_amount: -0.1, effect_per_source_change: 10, user_stated: false }, aiScore, churn6);
     expect(s.outcome).toBe('estimate');
     expect(s.mean).toBeCloseTo(-0.01, 12);
+  });
+});
+
+/**
+ * ⭐ PERMANENT REGRESSION FOR ROW C (DL #70 5848702999): the TWO SERVED draft shapes behind #2020 — MG's (mediators into
+ * churn on Olumi's 7% estimate, CEE 4202cda) and AI Quality's part 2 (AI score 0→70 into churn on 6%). What CEE owns is
+ * the D4 invariant that keeps PLoT's out-of-domain share low: the sized link's ±2σ band over its swing stays INSIDE the
+ * target's domain. Known-bad control: with PR1b reverted these links are ±0.5 / 0.125 and the band leaves [0, 1].
+ * (decision_grade itself is PLoT's output — pinned engine-direct by AI Quality's rows, not here.)
+ */
+describe('ROW C permanent case: both served shapes keep every sized link into churn inside churn\'s range', () => {
+  const churn6: MagnitudeNode = { ...churnEstimated, observed_state: { unit: 'percent per month', value: 0.06, raw_value: 6, source: 'cee_inference', extractionType: 'inferred' } };
+  const aiScore: MagnitudeNode = { label: 'AI feature score', kind: 'factor', scale_frame: 100, observed_state: { unit: 'score out of 100', value: 0, raw_value: 0, source: 'cee_inference' }, option_levels: [0, 0.7] };
+  const inDomain = (source: MagnitudeNode, target: MagnitudeNode, mean: number, std: number): boolean =>
+    withinDomain(domainBand(heldBaseline(target)!, mean, std, sourceSwing(source) ?? FULL_RANGE_SWING), { lo: 0, hi: 1 });
+
+  it('MG\'s served draft: mediated perceived value -> churn (7% estimated) — stamped olumi_placeholder, and its band stays in [0, 1]', () => {
+    const s = sizeLink({ direction: 'negative', ...NULL_SIZE }, perceivedValue, churnEstimated);
+    expect(s.magnitude).toBe('olumi_placeholder');
+    expect(inDomain(perceivedValue, churnEstimated, s.mean, s.std)).toBe(true);
+  });
+
+  it('AI Quality\'s served part 2: AI score 0→70 -> churn (6%), Olumi\'s −0.5 pp / 10 points set aside — stamped, and its band stays in [0, 1]', () => {
+    const s = sizeLink({ direction: 'negative', effect_amount: -0.5, effect_per_source_change: 10, user_stated: false }, aiScore, churn6);
+    expect(s.magnitude).toBe('olumi_placeholder');
+    expect(inDomain(aiScore, churn6, s.mean, s.std)).toBe(true);
+  });
+
+  it('KNOWN-BAD CONTROL: the pre-contract ±0.5 / 0.125 on either shape leaves churn\'s range (the defect this pins)', () => {
+    expect(inDomain(perceivedValue, churnEstimated, -0.5, 0.125)).toBe(false);
+    expect(inDomain(aiScore, churn6, -0.05, 0.025)).toBe(false);
   });
 });
