@@ -55,6 +55,36 @@ function run(payload: unknown) {
   return buildModelFromBrief(SCENARIO, BRIEF, dispatch, fn).then((r) => ({ r: r as Record<string, unknown>, reqs, registered: registered as Registered }));
 }
 
+
+/**
+ * ⭐ FRAME × UNIT, ON ONE LIMIT (#1919 rebased onto #1934): the frame must survive the unit canonicalisation, and the
+ * canonical unit must survive the frame. A `£k` limit on a factor held in `£` reaches /graph/register as `£` × 10³ WITH
+ * its `value_frame` — the combination that made the frame HOLD necessary (a frame on a unit PLoT misreads is a scored
+ * wrong number; C50 U1).
+ */
+describe('a framed limit is also canonicalised against its node', () => {
+  it('WIRE: "250 £k", framed level, on a £ factor registers as £ 250000 with value_frame level and the stated figure kept', async () => {
+    const base = candidate('level');
+    const payload = {
+      ...base,
+      constraints: [{ ...base.constraints[0], value: 250, unit: '£k' }],
+      factors: [
+        ...base.factors,
+        { label: 'Total first-year cost', role: 'observable', baseline_known: true, baseline_value: 0, unit: '£', provenance: 'explicit', plausible_max: 400000 },
+      ],
+      outcomes: [],
+    };
+    const { r, registered } = await run(payload);
+    expect(r.goal_constraints_carried, 'PRECONDITION: the limit attached').toBe(1);
+    expect(registered?.goal_constraints?.[0]).toMatchObject({
+      value_frame: 'level',
+      unit: '£',
+      value: 250000,
+      provenance_unit_normalised: { original_value: 250, original_unit: '£k' },
+    });
+  });
+});
+
 describe('every limit the drafter writes carries the frame the user stated', () => {
   it('the drafter schema REQUIRES a frame on every limit, level or delta only', () => {
     const items = (buildCandidateSchema() as { properties: { constraints: { items: { properties: Record<string, { enum?: string[] }>; required: string[] } } } })
