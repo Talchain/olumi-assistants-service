@@ -51,7 +51,7 @@ const est = (factor_label: string, value: number, unit: string): Iv => ({ factor
 /** The served c22 shape (constructor-levels-every-pair.test.ts): two USER options, one Olumi option, a declared status quo; every lever names its factors only in `changes`. */
 function c22() {
   return {
-    goal: { metric: GOAL, operator: '>=', target_stated: false, value: null, unit: 'points per sprint', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit' },
+    goal: { metric: GOAL, operator: '>=', target_stated: false, value: null, unit: 'points per sprint', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null },
     constraints: [],
     options: [
       { label: 'Hire Two Developers', provenance: 'explicit', is_status_quo: null, changes: ['Engineering delivery capacity', 'Hiring cost'], interventions: [] },
@@ -74,6 +74,8 @@ function c22() {
       { from: 'Team morale', to: GOAL, direction: 'positive', provenance: 'ai_proposed' },
       { from: 'Onboarding load', to: GOAL, direction: 'negative', provenance: 'ai_proposed' },
     ] as Link[],
+    // C46 (#1972) made identities and the goal's scope required in the strict schema; c22 declared neither.
+    identities: [],
     unknowns: [] as string[],
   };
 }
