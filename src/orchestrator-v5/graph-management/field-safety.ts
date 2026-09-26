@@ -165,7 +165,8 @@ const PIPELINE_OWNED_MARKERS: readonly string[] = [
  *    `transformResponseToV3` on every response;
  *  - `validation` — two-pass parameter-review pipeline metadata (edges);
  *  - `defaulted` — CIL default-strength flag (edges);
- *  - `origin` — creation-source stamp (edges).
+ *  - `origin` — creation-source stamp (edges);
+ *  - `goal_direction` — the user's stated goal sense, CEE-minted (goal nodes).
  */
 const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'provenance',
@@ -180,6 +181,13 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'source',
   'extractiontype',
   'raw_value',
+  // The goal's STATED SENSE (`NodeV3.goal_direction`, review 5844286953 NB1): CEE-
+  // minted at construction from the user's own operator, and forwarded by
+  // `run_analysis` as the user's ATTESTED objective sense. A model-authored sense on
+  // an `add_node` would be forwarded as the user's — so it is screened and stripped
+  // like every other stamp here. (Updates already cannot write it: the root is absent
+  // from `aiEditableFieldRoots('node')`.)
+  'goal_direction',
 ];
 
 /**

@@ -245,6 +245,46 @@ export const NodeV3 = z.object({
    */
   goal_threshold_frame: GoalThresholdFrame.optional(),
   /**
+   * ⭐ THE SENSE THE USER STATED FOR THEIR GOAL (goal nodes only) — which way the
+   * goal points. CEE-MINTED from the user's own stated goal operator at
+   * construction (`agent-lane/admit-model.ts`: `>=`/`>` → `'maximise'`,
+   * `<=`/`<` → `'minimise'`, and ONLY on a goal whose provenance is the user's).
+   * `run_analysis` forwards it as PLoT's REQUEST-level `goal_direction`, ahead of
+   * the goal-label classifier — unless the goal's label reads the other way or a
+   * current `goal_constraints` row on the goal states the other sense, when the
+   * label classifier runs exactly as before (`resolveRequestGoalDirection`). A goal
+   * whose own label reads as a reduction is never stamped `maximise`. PLoT never
+   * reads a node-level sense.
+   *
+   * ⚠ THIS DECLARATION IS LOAD-BEARING, NOT DOCUMENTATION — the same warning
+   * `goal_threshold_frame` carries above. `NodeV3` is a plain `z.object`, so an
+   * undeclared `goal_direction` is SILENTLY DELETED by `GraphV3.safeParse` on the
+   * run path (build-turn-context.ts) and the stated sense reaches nothing.
+   *
+   * ABSENCE MEANS UNATTESTED — never defaulted. An unrecognised value is dropped
+   * (`.catch`), never a new reason to refuse a stored graph.
+   *
+   * `'target'` IS DROPPED DELIBERATELY, not forgotten: a target sense is only
+   * meaningful beside its threshold and frame, and ISL refuses to run one
+   * without them. It stays out of this enum until CEE forwards a target sense
+   * together with its threshold and frame.
+   *
+   * WHO CAN WRITE IT, stated precisely (not "no model authors it"):
+   *  · an UPDATE cannot — the root is absent from `aiEditableFieldRoots('node')`,
+   *    so `field-safety.ts` refuses any `update_node` op naming it;
+   *  · the draft path does not — its field-by-field `transformNodeToV3` does not
+   *    copy it;
+   *  · a model `add_node` cannot — `goal_direction` is in `CEE_ANALYSIS_OWNED_ROOTS`
+   *    (`field-safety.ts`), so the add screen refuses it and the edit pipeline
+   *    strips it before the referee (review 5844286953 NB1), and a model-authored
+   *    goal node lands with no sense rather than one the user never stated.
+   *
+   * THE EVENTUAL CONTRACT OWNER is `@talchain/schemas` (schemas PR #48, ROADMAP
+   * 2.1192). This local declaration is the carrier until that lands; it does not
+   * make CEE the owner of the field's meaning.
+   */
+  goal_direction: z.enum(['maximise', 'minimise']).optional().catch(undefined),
+  /**
    * ⛔ WHO STATED THE GOAL TARGET, AND THE TARGET THEY STATED (goal nodes; written by the UI's register).
    *
    * THIS DECLARATION IS LOAD-BEARING, the same warning `goal_threshold_frame` carries above. The UI keeps

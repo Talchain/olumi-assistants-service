@@ -22,6 +22,7 @@ import {
   resolveGoalThresholdCapWithProvenance,
 } from '../../utils/goal-threshold-cap.js';
 import { admitGoalBaseline } from '../../cee/factor-extraction/goal-baseline-admissibility.js';
+import { deriveGoalDirectionFromLabel } from '../goal-target/goal-direction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import type { InterventionV3T } from '../../schemas/cee-v3.js';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
@@ -174,6 +175,51 @@ export interface ConstructedLevel { value: number; source: ConstructedLevelSourc
 const levelSourceFor = (provenance: string): ConstructedLevelSource =>
   provenance === 'explicit' ? 'brief_extraction' : 'cee_hypothesis';
 
+/**
+ * ⭐ THE SENSE THE USER STATED FOR THEIR GOAL, as the engine names it — or nothing.
+ *
+ * PLoT reads the objective sense ONLY as a request-level `goal_direction`, and
+ * `run_analysis` forwards it from the goal node's `goal_direction` (NodeV3,
+ * `cee-v3.ts`). Without this stamp a stated "keep churn at or below 10%" ran ISL's
+ * unattested maximiser and crowned the option that RAISES churn.
+ *
+ * ⛔ ONLY THE USER'S GOAL IS ATTESTED. An `explicit` goal is the one the user
+ * stated; any other provenance is Olumi's reading, and stamping it would forward
+ * Olumi's guess as the user's sense. That goal stays unattested (`undefined`) and
+ * `run_analysis` falls back to the goal-label classifier, exactly as before.
+ *
+ * `>` and `>=` are both "maximise": the sense is the same, only whether equality
+ * counts differs, and that is not a sense. The strictness consequence (a goal fit
+ * that would count equality as met) is handled where the goal fit is written —
+ * see `scoredInSense` in `admitCandidateModel`.
+ *
+ * ⛔ AN "AT LEAST" CONTRADICTED BY THE GOAL'S OWN WORDS IS NOT ATTESTED (review
+ * 5844286953). The operator is a required enum with no "not stated" value, so a
+ * `>=` is sometimes the schema's reading and not the user's. "Reduce/cut X by at
+ * least N" read as `>=` is the repo's known sign-inversion fingerprint (ROADMAP
+ * 1.52; refused on the chat path, `add-constraint.ts`). When the goal label reads
+ * as a REDUCTION — by the SAME label reading `run_analysis` falls back to
+ * (`deriveGoalDirectionFromLabel`) — no sense is stamped, the operator loss is
+ * recorded, and the Run gets the label's `minimise`, exactly as before this
+ * carrier existed. The forwarder applies the same rule to a STORED stamp
+ * (`resolveRequestGoalDirection`), for a goal renamed after construction.
+ */
+export function attestedGoalDirection(
+  goal: Pick<CandidateModel['goal'], 'metric' | 'operator' | 'provenance'>,
+): 'maximise' | 'minimise' | undefined {
+  if (goal.provenance !== 'explicit') return undefined;
+  switch (goal.operator) {
+    case '>=':
+    case '>':
+      return deriveGoalDirectionFromLabel(goal.metric) === 'minimise' ? undefined : 'maximise';
+    case '<=':
+    case '<':
+      return 'minimise';
+    default:
+      return undefined;
+  }
+}
+
 export interface AdmittedNode {
   /** The full text, when the label had to be shortened to stay editable. */
   description?: string;
@@ -211,6 +257,11 @@ export interface AdmittedNode {
    * probability when this is absent, so omitting it silently disables the goal.
    */
   goal_threshold_frame?: 'level' | 'delta';
+  /**
+   * `cee-v3.ts` NodeV3 `goal_direction`: the sense the USER stated for their goal
+   * (`attestedGoalDirection`). Absent means unattested — never defaulted.
+   */
+  goal_direction?: 'maximise' | 'minimise';
   /**
    * ⛔ A NODE'S `provenance` IS A DISPLAY ENUM, NOT THE EDGE OBJECT
    * (`cee-v3.ts:363` — `from_brief | ai_inferred | user_set`). Edges carry the
@@ -1159,6 +1210,10 @@ function admitOnce(
   }
   const capFor = (label: string): number | undefined => capByLabel.get(label);
   const loss: RepairEntry[] = [];
+  // The user's stated sense, on the goal node whether or not a target number was stated
+  // ("keep churn down" has a sense and no number). Nothing for a goal that is not theirs.
+  const statedGoalDirection = attestedGoalDirection(model.goal);
+  const goalSense: Partial<AdmittedNode> = statedGoalDirection !== undefined ? { goal_direction: statedGoalDirection } : {};
 
   // Fixed traversal order => deterministic ids.
   const entities: { label: string; kind: CandidateNodeKind; provenance: string; node?: Partial<AdmittedNode> }[] = [
@@ -1195,6 +1250,7 @@ function admitOnce(
           return {
             ...(model.goal.unit ? { goal_threshold_unit: model.goal.unit } : {}),
             goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
+            ...goalSense,
           };
         }
         const resolved = resolveGoalThresholdCapWithProvenance(
@@ -1210,8 +1266,9 @@ function admitOnce(
          * `{ value: B, baseline: B, unit?, source, raw_value, cap }`, B on the
          * threshold's OWN cap. `value` repeats `baseline` because ISL requires it
          * (see that limb). Admission is the shared rule (`admitGoalBaseline`),
-         * never restated: a level above the target is a decrease the `>=` frame
-         * would invert, and is withheld and said, not written.
+         * never restated: on a `>=` goal a level above the target is a decrease that
+         * frame would invert, and is withheld and said, not written; on the user's
+         * `<=` goal it is the ordinary "bring it down" case (`scoredInSense` below).
          *
          * Stated in the brief → `brief_extraction`; anything else → Olumi's
          * (`cee_inference`). No current level → nothing, and nothing is derived
@@ -1229,19 +1286,28 @@ function admitOnce(
           } as RepairEntry);
         };
         /**
-         * ⛔ ONLY "AT LEAST" IS SCORED CORRECTLY TODAY. The operator has no GraphV3
-         * carrier (see the `goal_operator` loss below), and the level consumer scores
-         * P(level >= threshold) whatever the brief said (ISL
-         * `robustness_analyzer_v2.py`, `compared >= threshold`). So a baseline is
-         * written ONLY for `>=`:
-         *  · `<=` / `<` ("keep churn at or below 5%; 4% now") would be scored on the
-         *    WRONG tail;
-         *  · `>` ("grow MRR above £20k; £20k now") would count equality as met — a
-         *    held status quo would score 100% on a goal it has not reached.
-         * Withheld, and said with the shortest truthful repair, until the comparator
-         * is carried and honoured end to end. The target itself is kept as before.
+         * ⭐ A BASELINE IS WRITTEN ONLY WHERE THE ENGINE SCORES THE GOAL AS STATED.
+         * ISL's level goal fit is `compared >= threshold`, or `compared <= threshold`
+         * when the request says `minimise` (ISL 3c4ab84 `robustness_analyzer_v2.py`;
+         * AI Quality measured the exact complement on the wire, #69 5841701921). So:
+         *  · `>=` — scored as stated. Written, as before.
+         *  · `<=` on the USER'S goal — its sense is stamped here (`goalSense`,
+         *    `minimise`) and `run_analysis` sends it as PLoT's request-level
+         *    `goal_direction`, so it is scored on the lower tail. Written, and
+         *    admitted in THAT frame: a level above the target is the ordinary
+         *    "bring it down" case, not an inversion (`direction: 'minimise'`).
+         *  · `<=` on a goal that is NOT the user's — no sense is attested, so nothing
+         *    tells the engine which tail; the `>=` tail would be scored. Withheld.
+         *  · `>` / `<` — strictness is carried nowhere, and ISL counts equality as
+         *    met in both senses: a held status quo exactly AT the threshold would
+         *    score 100% on a goal it has not reached. Withheld, with the repair.
+         * Every withholding is said with the shortest truthful repair. The target
+         * itself is kept in every case.
          */
-        const scoresTheRightTail = model.goal.operator === '>=';
+        const scoredInSense: 'maximise' | 'minimise' | undefined =
+          model.goal.operator === '>=' ? 'maximise'
+            : model.goal.operator === '<=' && statedGoalDirection === 'minimise' ? 'minimise'
+              : undefined;
         /**
          * ⛔ AND ONLY A LEVEL THE BRIEF STATES (review 5824085993; RC ruling 5824518762,
          * fix (a)). An estimate of the goal's current level would set the chance of
@@ -1262,8 +1328,8 @@ function admitOnce(
             `said. Tell me the current level of "${model.goal.metric}" and the chance of reaching it can be shown.`,
           );
         } else if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)) {
-          const admission = scoresTheRightTail
-            ? admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap })
+          const admission = scoredInSense !== undefined
+            ? admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap, direction: scoredInSense })
             : null;
           if (admission === null && model.goal.operator === '>') {
             withheld(
@@ -1272,12 +1338,25 @@ function admitOnce(
               `current level (${baselineRaw}) was not used for that, and no chance of meeting the goal will be ` +
               `shown. If reaching ${raw} is enough, say the goal is "at least ${raw}" and it can be shown.`,
             );
+          } else if (admission === null && model.goal.operator === '<') {
+            withheld(
+              `"${model.goal.metric}" is a goal to stay below ${raw}, and the chance of meeting it cannot be ` +
+              `calculated exactly yet: a level of exactly ${raw} would be counted as success. So its current ` +
+              `level (${baselineRaw}) was not used for that, and no chance of meeting the goal will be shown. ` +
+              `If ${raw} itself is acceptable, say the goal is "at most ${raw}" and it can be shown.`,
+            );
+          } else if (admission === null && model.goal.operator !== '<=') {
+            // Outside the schema's four operators (an older or hand-built candidate): no sense to score in.
+            withheld(
+              `The current level of "${model.goal.metric}" (${baselineRaw}) was not used, because the goal does ` +
+              'not say which way it points, so no chance of meeting it will be shown. The target is kept.',
+            );
           } else if (admission === null) {
             withheld(
-              `"${model.goal.metric}" is a goal to stay ${model.goal.operator === '<' ? 'below' : 'at or below'} ${raw}, and the chance of meeting a ` +
-              'goal of that kind cannot be calculated correctly yet, so its current level ' +
-              `(${baselineRaw}) was not used for that. The options can still be compared on everything ` +
-              'else; no chance of meeting the goal will be shown.',
+              `"${model.goal.metric}" reads as a goal to stay at or below ${raw}, but that direction is Olumi's ` +
+              `reading, not something you stated, so its current level (${baselineRaw}) was not used to work out ` +
+              'the chance of meeting it. The options can still be compared on everything else; no chance of ' +
+              'meeting the goal will be shown.',
             );
           } else if (admission.admitted) {
             // Only the user's stated level reaches here (see `estimated` above).
@@ -1316,6 +1395,7 @@ function admitOnce(
               }
             : {}),
           ...(observed_state !== undefined ? { observed_state } : {}),
+          ...goalSense,
         };
       })(),
     },
@@ -1397,8 +1477,9 @@ function admitOnce(
     ...(widened.proposed_outcomes ?? []).map((o) => ({ label: o.label, kind: 'outcome' as const, provenance: 'ai_proposed' })),
   ];
 
-  // The goal's operator and horizon have NO GraphV3 home. Recording them is the
-  // only way they survive the projection at all.
+  // The goal's horizon has NO GraphV3 home, and neither has its operator unless the
+  // goal is the user's (then its SENSE is carried as `goal_direction`, above).
+  // Recording what is not carried is the only way it survives the projection at all.
   //
   // ⚠ `REPAIR_CODES` has no member meaning "a representation was dropped" —
   // the closest is RESOLVE_BELIEF_PRECEDENCE. That is a gap in the shared
@@ -1419,7 +1500,12 @@ function admitOnce(
       severity: 'warn',
     });
   }
-  if (typeof model.goal.operator === 'string' && model.goal.operator.length > 0) {
+  // ⛔ SAID ONLY WHEN IT IS TRUE. When the sense is stamped, "a consumer cannot tell a
+  // floor from a ceiling" is false — `goal_direction` tells it — so the loss is not
+  // recorded. What the stamp still does not carry is strictness (`>` vs `>=`), and its
+  // only computed consequence, a goal fit that counts equality as met, is already
+  // withheld and said at the goal's baseline (`scoredInSense` above).
+  if (typeof model.goal.operator === 'string' && model.goal.operator.length > 0 && statedGoalDirection === undefined) {
     loss.push({
       code: REPAIR_CODES.RESOLVE_BELIEF_PRECEDENCE,
       layer: 'cee',

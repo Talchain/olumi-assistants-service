@@ -168,12 +168,48 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
     expect(said[0]).toContain('say which and it can be corrected');
   });
 
-  it('RED (meaning): a goal to stay AT OR BELOW a level gets no baseline — never a Goal fit for the wrong tail', async () => {
-    for (const operator of ['<=', '<']) {
-      const { goal, out } = await registeredGoal(pricing({ operator, value: 5, unit: '%', baseline_known: true, baseline_value: 4 }));
-      expect(goal, operator).not.toHaveProperty('observed_state');
-      expect((out.not_represented as string[]).filter((s) => s.includes(operator === '<' ? 'stay below 5' : 'stay at or below 5')), operator).toHaveLength(1);
-    }
+  /**
+   * ⭐ A GOAL TO STAY AT OR BELOW A LEVEL NOW CARRIES ITS BASELINE — BECAUSE ITS SENSE
+   * DOES. This row used to pin the opposite: "keep it at or below 5%; 4% now" was
+   * withheld, because ISL scored only the upper tail and nothing told it otherwise.
+   * The user's `<=` is now stamped `goal_direction: 'minimise'` and forwarded as
+   * PLoT's request-level sense, and ISL scores `compared <= level_threshold` under
+   * `minimise` (ISL 3c4ab84, `robustness_analyzer_v2.py`; AI Quality measured the
+   * exact complement on the wire, #69 5841701921). So the baseline travels only WITH
+   * the sense — on the user's own goal — and never without it.
+   */
+  for (const [where, now] of [['already within it', 4], ['above it (the ordinary "bring it down" case)', 7]] as const) {
+    it(`RED (lift): an "at or below 5%" goal whose current level is ${where}, ${now}%, carries the baseline AND the minimise sense`, async () => {
+      const { goal, graph, out } = await registeredGoal(pricing({ operator: '<=', value: 5, unit: '%', baseline_known: true, baseline_value: now }));
+      expect(goal.goal_direction).toBe('minimise');
+      expect(goal.observed_state).toStrictEqual({
+        value: now / 100, baseline: now / 100, unit: '%', source: 'brief_extraction', raw_value: now, cap: 100,
+      });
+      const analysed = (resolveRunAdmission(graph).canonicalGraph as { nodes: { id: string; observed_state?: Record<string, unknown> }[] }).nodes.find((n) => n.id === GOAL);
+      expect(analysed?.observed_state, 'the analysis input carries it').toMatchObject({ baseline: now / 100, source: 'brief_extraction' });
+      expect((out.not_represented as string[]).filter((s) => s.includes('at or below 5')), JSON.stringify(out.not_represented)).toEqual([]);
+    });
+  }
+
+  it('RED (meaning, strict <): "stay below 5%" still gets no baseline — a level of exactly 5 would be counted as met', async () => {
+    const { goal, out } = await registeredGoal(pricing({ operator: '<', value: 5, unit: '%', baseline_known: true, baseline_value: 4 }));
+    // The sense IS carried; only the goal fit waits, for strictness, not for the tail.
+    expect(goal.goal_direction).toBe('minimise');
+    expect(goal).not.toHaveProperty('observed_state');
+    const said = (out.not_represented as string[]).filter((s) => s.includes('stay below 5'));
+    expect(said, JSON.stringify(out.not_represented)).toHaveLength(1);
+    expect(said[0]).toContain('say the goal is "at most 5"');
+  });
+
+  it('RED (meaning, unattested): an "at or below" goal that is not the user\'s gets no baseline — nothing tells the engine which tail', async () => {
+    const { goal, out } = await registeredGoal(pricing({
+      operator: '<=', value: 5, unit: '%', provenance: 'inferred', baseline_known: true, baseline_value: 4, baseline_provenance: 'explicit',
+    }));
+    expect(goal).not.toHaveProperty('goal_direction');
+    expect(goal).not.toHaveProperty('observed_state');
+    const said = (out.not_represented as string[]).filter((s) => s.includes('stay at or below 5'));
+    expect(said, JSON.stringify(out.not_represented)).toHaveLength(1);
+    expect(said[0]).toContain("Olumi's reading");
   });
 
   it('CONTROL (meaning): the same figures on an "at least" goal DO carry the baseline', async () => {
@@ -222,6 +258,14 @@ describe('the goal carries its current level, in the shape ISL reads', () => {
     const [b] = lt.loss.filter((l) => l.field_path === `nodes[${GOAL}].observed_state.baseline`);
     expect(b?.reason).toContain('stay below 5');
     expect(b?.reason).not.toContain('at or below');
+  });
+
+  it('wording: an operator outside the schema\u2019s four carries no baseline and is not called "at or below"', () => {
+    const m = admitCandidateModel(pricing({ operator: '==', value: 5, unit: '%', baseline_known: true, baseline_value: 4 }));
+    expect(m.nodes.find((n) => n.id === GOAL)).not.toHaveProperty('observed_state');
+    const [c] = m.loss.filter((l) => l.field_path === `nodes[${GOAL}].observed_state.baseline`);
+    expect(c?.reason).toContain('does not say which way it points');
+    expect(c?.reason).not.toContain('at or below');
   });
 
   it('RED (efficacy): the production schema REQUIRES the goal\u2019s current level, and the retry pins it', () => {

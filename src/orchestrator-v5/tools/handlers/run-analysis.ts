@@ -155,7 +155,7 @@ import {
 // headline ON them, and then discarded both — so this handler could only ever
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
-import { deriveEmittedGoalDirection } from '../../goal-target/goal-direction.js';
+import { resolveRequestGoalDirection } from '../../goal-target/goal-direction.js';
 
 // `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
 // module so the turn-executor (error-path reconstruction) can apply the
@@ -913,38 +913,92 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (snapshot.goal_constraints !== undefined) {
       plotPayload.goal_constraints = snapshot.goal_constraints;
     }
-    // ROADMAP 2.920 — the user's ATTESTED objective sense, MINIMISE ONLY.
+    // ROADMAP 2.920 — the objective sense, which PLoT reads ONLY at REQUEST level.
     //
-    // Absent ⇒ ISL runs the maximiser unattested, which for a goal that is a
-    // quantity to REDUCE crowns the WORST option (measured on isl-staging: the
-    // ranking flips completely when 'minimise' is stamped). `maximise` is
-    // byte-identical to sending nothing, so emitting it is pure downside and
-    // `deriveEmittedGoalDirection` never returns it — see that module's header
-    // for the one-sided-exposure argument.
-    const emittedGoalDirection = deriveEmittedGoalDirection(
-      graphForAnalysis,
-      snapshot.goal_node_id,
-    );
-    if (emittedGoalDirection !== undefined) {
-      plotPayload.goal_direction = emittedGoalDirection;
+    // Absent ⇒ ISL runs the maximiser unattested (and says so,
+    // `GOAL_DIRECTION_UNATTESTED`), which for a goal that is a quantity to REDUCE
+    // crowns the WORST option (measured on isl-staging: the ranking flips
+    // completely when 'minimise' is stamped).
+    //
+    // TWO SOURCES, IN THIS ORDER (`resolveRequestGoalDirection`, which owns the rule):
+    //  1. ATTESTED — the goal node's `goal_direction`, CEE-minted at construction
+    //     from the operator the USER stated (`admit-model.ts`; carried by NodeV3 in
+    //     `cee-v3.ts`). Forwarded in BOTH senses while it stands.
+    //  2. DERIVED — `deriveEmittedGoalDirection`, the goal-LABEL classifier,
+    //     MINIMISE ONLY and unchanged, for every goal with no attested sense (an
+    //     inferred goal, a drafted model, a graph built before the carrier). See
+    //     that module's header for the one-sided-exposure argument.
+    //
+    // ⛔ THE STAMP IS SET ASIDE — AND SOURCE 2 RUNS EXACTLY AS BASE DID — WHEN THE
+    // GOAL'S LABEL READS THE OTHER WAY, OR A CURRENT goal_constraints ROW ON THE GOAL
+    // STATES THE OTHER SENSE (review 5844286953: blocker + NB2). A stamped `maximise`
+    // over a label that says REDUCE would invert the ranking and remove ISL's
+    // disclosure; a stamp older than the user's latest success-target edit is stale.
+    // Each set-aside is a `log.warn` naming both sides.
+    const requestGoalDirection = resolveRequestGoalDirection({
+      graph: graphForAnalysis,
+      goalNodeId: snapshot.goal_node_id,
+      goalConstraints: snapshot.goal_constraints,
+    });
+    if (requestGoalDirection.goal_direction !== undefined) {
+      plotPayload.goal_direction = requestGoalDirection.goal_direction;
+    }
+    if (requestGoalDirection.provenance === 'attested_from_goal_operator') {
+      log.info(
+        {
+          event: 'cee.goal_direction.attested',
+          goal_direction: requestGoalDirection.goal_direction,
+          goal_node_id: snapshot.goal_node_id,
+          provenance: 'attested_from_goal_operator',
+          label_derived: requestGoalDirection.label_derived ?? null,
+          request_id: invocation.requestId,
+        },
+        "goal_direction attested by the user's stated goal operator and forwarded to PLoT",
+      );
+    } else if (requestGoalDirection.provenance === 'derived_from_goal_label') {
       // ⚠ DISCLOSED AS DERIVED, NOT AS ATTESTED. PLoT's contract documents this
       // field as "the user's attested objective sense" and states that PLoT
       // never infers it from a node label — but CEE does exactly that, from the
-      // goal label, because no user-settable direction exists anywhere in this
-      // repo (`rg 'objective_sense|goalDirection|goal_sense' src` non-test: 0).
-      // Until a user-settable sense exists, the honest record is that CEE
-      // derived it, so a deploy can be wire-witnessed and the claim audited
-      // rather than taken on trust. The contract-wording mismatch is raised
-      // separately; it is NOT resolved by this log line.
+      // goal label, for a goal that carries no attested sense (source 1 above).
+      // The honest record is that CEE derived it, so a deploy can be
+      // wire-witnessed and the claim audited rather than taken on trust. The
+      // contract-wording mismatch is raised separately; it is NOT resolved by
+      // this log line.
       log.info(
         {
           event: 'cee.goal_direction.derived',
-          goal_direction: emittedGoalDirection,
+          goal_direction: requestGoalDirection.goal_direction,
           goal_node_id: snapshot.goal_node_id,
           provenance: 'derived_from_goal_label',
           request_id: invocation.requestId,
         },
         'goal_direction derived from the goal label and forwarded to PLoT',
+      );
+    }
+    if (requestGoalDirection.label_disagrees) {
+      log.warn(
+        {
+          event: 'cee.goal_direction.label_disagrees',
+          goal_direction: requestGoalDirection.goal_direction ?? null,
+          stamped: requestGoalDirection.stamped ?? null,
+          label_derived: requestGoalDirection.label_derived ?? null,
+          goal_node_id: snapshot.goal_node_id,
+          request_id: invocation.requestId,
+        },
+        "the goal label reads the other way from the goal's stamped sense — the stamp was not sent; the label's sense was",
+      );
+    }
+    if (requestGoalDirection.disagreeing_goal_row_operators.length > 0) {
+      log.warn(
+        {
+          event: 'cee.goal_direction.stamp_disagrees_with_goal_operator',
+          goal_direction: requestGoalDirection.goal_direction ?? null,
+          stamped: requestGoalDirection.stamped ?? null,
+          goal_row_operators: requestGoalDirection.disagreeing_goal_row_operators,
+          goal_node_id: snapshot.goal_node_id,
+          request_id: invocation.requestId,
+        },
+        "a current goal_constraints row on the goal states another sense than its stamp — the stale stamp was not sent",
       );
     }
     // Lane 28 — brief pipeline seam 3: flag-gated brief leg

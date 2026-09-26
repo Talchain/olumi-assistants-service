@@ -144,7 +144,21 @@ async function build(...drafts: (CandidateModel & { unknowns: string[] })[]) {
   };
   const out = await buildModelFromBrief('55555555-5555-4555-8555-555555555555', BRIEF, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out)).toBe(true);
-  const graph = GraphV3.parse((body as unknown as { graph: unknown }).graph) as unknown as SGraph;
+  const registered = GraphV3.parse((body as unknown as { graph: unknown }).graph) as unknown as SGraph;
+  // The served graphs and base's bodies predate goal direction (NodeV3 `goal_direction`, CEE-minted from the
+  // user's stated operator). Every draft here states ">= £20k", so bind it — `maximise` — then compare on the
+  // served-era shape; no other byte is loosened.
+  for (const d of drafts) expect(d.goal.operator, 'every draft in this file states a >= goal').toBe('>=');
+  const goal = registered.nodes.find((n) => n.kind === 'goal') as (SNode & { goal_direction?: unknown }) | undefined;
+  expect(goal?.goal_direction, 'the stated >= goal carries its attested direction').toBe('maximise');
+  const graph: SGraph = {
+    ...registered,
+    nodes: registered.nodes.map((n) => {
+      if (n.kind !== 'goal') return n;
+      const { goal_direction: _direction, ...rest } = n as SNode & { goal_direction?: unknown };
+      return rest;
+    }),
+  };
   return { out, graph, calls };
 }
 

@@ -224,3 +224,41 @@ describe('ROADMAP 2.1160 — the two rules are two questions, and they are asked
     }
   });
 });
+
+/**
+ * RULE 1 IS THE MAXIMISE FRAME'S RULE, NOT A LAW OF GOALS. It exists because ISL
+ * scored `P(level >= threshold)` whatever the goal meant. A goal whose MINIMISE
+ * sense is attested and forwarded (request-level `goal_direction`) is scored on
+ * the lower tail — ISL 3c4ab84 `robustness_analyzer_v2.py` compares
+ * `compared <= level_threshold` under `minimise`, and AI Quality measured the
+ * complement on the wire (#69 5841701921). On that frame a level ABOVE the target
+ * is the ordinary "bring it down" case, not an inversion. Rule 2 is unchanged:
+ * scale is a question about the number, not the sense.
+ */
+describe('the direction rule applies only to the maximise frame', () => {
+  it('RED: a minimise goal admits a current level ABOVE its target (the ordinary "bring it down" case)', () => {
+    expect(admitGoalBaseline({ rawTarget: 5, rawBaseline: 7, cap: 100, direction: 'minimise' })).toEqual({
+      admitted: true,
+      normalised: 0.07,
+    });
+  });
+
+  it('CONTROL: the same pair with no direction is still refused BY NAME (the draft path, unchanged)', () => {
+    expect(admitGoalBaseline({ rawTarget: 5, rawBaseline: 7, cap: 100 })).toEqual({
+      admitted: false,
+      reason: 'direction_unsupported',
+    });
+    expect(admitGoalBaseline({ rawTarget: 5, rawBaseline: 7, cap: 100, direction: 'maximise' })).toEqual({
+      admitted: false,
+      reason: 'direction_unsupported',
+    });
+  });
+
+  it('a minimise goal off the scale is refused by rule 2, BY NAME — not by the direction rule', () => {
+    // 700 on a cap of 625 (a £500 target with 25% headroom) is 1.12 — not a point on the scale.
+    expect(admitGoalBaseline({ rawTarget: 500, rawBaseline: 700, cap: 625, direction: 'minimise' })).toEqual({
+      admitted: false,
+      reason: 'baseline_off_cap_scale',
+    });
+  });
+});

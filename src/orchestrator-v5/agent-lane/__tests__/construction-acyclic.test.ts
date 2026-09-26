@@ -221,7 +221,16 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
 
   it('the reconstructed candidate registers the served nodes byte-for-byte, and the served edges less ONLY the withheld loop link', async () => {
     const { out, body } = await build(servedCandidate());
-    expect(body.nodes.map(canon)).toEqual(SERVED.draft_graph.nodes.map(canon));
+    // The served fixture predates goal direction (NodeV3 `goal_direction`, CEE-minted from the user's stated
+    // operator): bind it — the brief's ">= £20k" goal is attested `maximise` — then compare on the served-era shape.
+    const goal = (body.nodes as { kind?: unknown; goal_direction?: unknown }[]).find((n) => n.kind === 'goal');
+    expect(goal?.goal_direction, 'the stated >= goal carries its attested direction').toBe('maximise');
+    const servedEra = (body.nodes as Record<string, unknown>[]).map((n) => {
+      if (n.kind !== 'goal') return n;
+      const { goal_direction: _direction, ...rest } = n;
+      return rest;
+    });
+    expect(servedEra.map(canon)).toEqual(SERVED.draft_graph.nodes.map(canon));
     const withheld = new Set(loopWithheld(out));
     const servedLessWithheld = (SERVED.draft_graph.edges as unknown as Edge[]).filter((e) => !withheld.has(`${e.from}->${e.to}`));
     expect(body.edges.map(canon)).toEqual(servedLessWithheld.map(canon));
