@@ -249,15 +249,18 @@ export const NodeV3 = z.object({
    * goal points. CEE-MINTED from the user's own stated goal operator at
    * construction (`agent-lane/admit-model.ts`: `>=`/`>` → `'maximise'`,
    * `<=`/`<` → `'minimise'`), ONLY on a goal whose provenance is the user's, and
-   * ONLY when that sense does not contradict the goal label's own reading
-   * (`goal-direction.ts` `labelContradictsSense`: reduction-worded → minimise,
-   * increase-worded → maximise, anything else contradicts nothing). `run_analysis`
+   * ONLY when the goal label ATTESTS that sense — FAIL CLOSED (`goal-direction.ts`
+   * `judgeStampAgainstLabel`): the label is NEUTRAL (no word from the direction
+   * classifier's lexicons, no negation) or reads that same sense positively, with a
+   * subject. A label that reads the other way, or that the classifier refuses to read
+   * ("Revenue increased", "Do not reduce headcount"), attests nothing. `run_analysis`
    * forwards it as PLoT's REQUEST-level `goal_direction`, ahead of the goal-label
-   * classifier, under the SAME rule re-checked at request time: when the CURRENT
-   * label contradicts it (a rename) or a current `goal_constraints` row on the goal
-   * states the other sense, it is set aside and the label classifier runs exactly as
-   * before (`resolveRequestGoalDirection`). So a sense the goal's own words contradict
-   * is never stamped and never sent. PLoT never reads a node-level sense.
+   * classifier, under the SAME rule re-checked at request time: when the CURRENT label
+   * does not attest it (a rename) or a current `goal_constraints` row on the goal states
+   * the other sense, it is set aside and the label classifier runs exactly as before
+   * (`resolveRequestGoalDirection`). Residual: a direction word OUTSIDE that closed
+   * lexicon ("slash costs", "revenue growth") reads neutral, so the stated operator
+   * stands there. PLoT never reads a node-level sense.
    *
    * ⚠ THIS DECLARATION IS LOAD-BEARING, NOT DOCUMENTATION — the same warning
    * `goal_threshold_frame` carries above. `NodeV3` is a plain `z.object`, so an

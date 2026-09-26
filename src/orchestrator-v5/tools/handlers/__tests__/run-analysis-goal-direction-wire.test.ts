@@ -246,8 +246,8 @@ describe('an attested goal_direction on the goal node reaches the PLoT payload',
         goal_node_id: 'goal_metric', provenance: 'derived_from_goal_label',
       }),
       expect.objectContaining({
-        level: 'warn', event: 'cee.goal_direction.label_disagrees', goal_direction: 'minimise',
-        stamped: 'maximise', label_derived: 'minimise', label_sense: 'minimise', goal_node_id: 'goal_metric',
+        level: 'warn', event: 'cee.goal_direction.label_disagrees', reason: 'label_contradicts', goal_direction: 'minimise',
+        stamped: 'maximise', label_derived: 'minimise', label_reading: 'minimise', label_sense: 'minimise', goal_node_id: 'goal_metric',
       }),
     ]);
   });
@@ -262,11 +262,27 @@ describe('an attested goal_direction on the goal node reaches the PLoT payload',
     expect('goal_direction' in payload, `sent ${String(payload.goal_direction)}`).toBe(false);
     expect(events).toEqual([
       expect.objectContaining({
-        level: 'warn', event: 'cee.goal_direction.label_disagrees', goal_direction: null,
-        stamped: 'minimise', label_derived: null, label_sense: 'maximise', goal_node_id: 'goal_metric',
+        level: 'warn', event: 'cee.goal_direction.label_disagrees', reason: 'label_contradicts', goal_direction: null,
+        stamped: 'minimise', label_derived: null, label_reading: 'maximise', label_sense: 'maximise', goal_node_id: 'goal_metric',
       }),
     ]);
   });
+
+  // ⛔ FAIL CLOSED (verify DEFECT_FOUND on 27c4e0ac). A label carrying a direction or negation
+  // word the classifier then refuses to read (no subject; a negation) is NOT agreement: the
+  // stamp is set aside, base's value goes (no key for these), and a `label_unreadable` warn fires.
+  for (const [label, stamped] of [['Revenue increased', 'minimise'], ['Do not increase costs', 'maximise']] as const) {
+    it(`a stamped ${stamped} over a label the classifier refuses to read ("${label}") is set aside: no key is sent (base), and a label_unreadable warn`, async () => {
+      const { payload, events } = await withDirectionLog(graphWithGoalLabel(label, { goal_direction: stamped }));
+      expect('goal_direction' in payload, `sent ${String(payload.goal_direction)}`).toBe(false);
+      expect(events).toEqual([
+        expect.objectContaining({
+          level: 'warn', event: 'cee.goal_direction.label_disagrees', reason: 'label_unreadable', goal_direction: null,
+          stamped, label_derived: null, label_reading: 'unreadable', label_sense: null, goal_node_id: 'goal_metric',
+        }),
+      ]);
+    });
+  }
 
   it('CONTROL: a stamped maximise on a label that reads as an INCREASE agrees — sent, no disagreement', async () => {
     const { payload, events } = await withDirectionLog(

@@ -11,9 +11,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   deriveEmittedGoalDirection,
+  judgeStampAgainstLabel,
   readGoalLabel,
+  readGoalLabelForStamp,
 } from '../goal-direction.js';
-import { deriveGoalIntent } from '../../coaching/objective-contradiction.js';
+import { deriveGoalIntent, GOAL_LABEL_LEXICON } from '../../coaching/objective-contradiction.js';
 
 const graph = (label: unknown, id = 'g1') => ({
   nodes: [
@@ -122,5 +124,92 @@ describe('readGoalLabel honours its own contract, not merely its caller', () => 
 
   it('CONTROL: a label with real content survives trimming untouched', () => {
     expect(readGoalLabel(graph('Reduce churn'), 'g1')).toBe('Reduce churn');
+  });
+});
+
+/**
+ * #1971, FAIL CLOSED (verify of 27c4e0ac): the stamp's judge reads a label as NEUTRAL only
+ * when it carries NO word from the classifier's own lexicons and no negation word. These
+ * pin that the judge is built from THOSE lexicons — every stem of every family, every
+ * negation cue source and particle — rather than from a list of its own.
+ */
+describe('readGoalLabelForStamp: neutral means no word from the classifier\'s lexicons', () => {
+  /** One real word per stem source: the stem plus its first inflection ('increas(?:e|…)?' → 'increase'). */
+  const wordOf = (stem: string): string => stem.replace(/\(\?:([^|)]*)[^)]*\)\??/g, '$1');
+
+  const families = [
+    ['increase', GOAL_LABEL_LEXICON.increaseStems],
+    ['decrease', GOAL_LABEL_LEXICON.decreaseStems],
+    ['stasis', GOAL_LABEL_LEXICON.stasisStems],
+    ['ambiguous', GOAL_LABEL_LEXICON.ambiguousStems],
+  ] as const;
+  for (const [family, stems] of families) {
+    it(`every ${family} stem (${stems.length}) makes a label non-neutral, and the classifier's own regex agrees it is a word`, () => {
+      expect(stems.length).toBeGreaterThan(0);
+      const neutral = stems.map(wordOf).filter((word) => {
+        expect(new RegExp(`^(?:${stems.join('|')})$`, 'i').test(word), word).toBe(true);
+        return readGoalLabelForStamp(`${word} monthly churn`) === 'neutral';
+      });
+      expect(neutral).toEqual([]);
+    });
+  }
+
+  it.each([
+    'Avoid churn', 'Never churn', 'Stop churn', 'Prevent churn', 'Refuse churn', 'Churn without discounts',
+    "Don't churn", 'Do not churn', 'Cannot churn', "Can't churn", 'No longer churn', 'Steer clear of churn',
+    'Refrain from churn', 'Resist churn',
+  ])('a negation cue of the classifier ("%s") makes a label unreadable', (label) => {
+    expect(new RegExp(GOAL_LABEL_LEXICON.negationCueSource, 'i').test(label)).toBe(true);
+    expect(readGoalLabelForStamp(label)).toBe('unreadable');
+  });
+
+  it.each([
+    ['not', 'Not increase costs', 'Revenue not churn'],
+    ['no', 'No churn increase', 'No churn'],
+    ["n't", "Won't grow headcount", "Churn we shouldn't see"],
+  ])('the particle %s (of "do not" / "no longer" / "don\'t") makes a label unreadable, with or without a stem', (_p, withStem, withoutStem) => {
+    expect(readGoalLabelForStamp(withStem)).toBe('unreadable');
+    expect(readGoalLabelForStamp(withoutStem)).toBe('unreadable');
+  });
+
+  it('the particles are the ones the classifier\'s multi-word cues are built from', () => {
+    expect(GOAL_LABEL_LEXICON.negationParticleSources).toEqual(['not', 'no', "[a-z]*n['’]t"]);
+    for (const cue of ['do not', 'no longer', "don't", "can't"]) {
+      expect(new RegExp(GOAL_LABEL_LEXICON.negationCueSource, 'i').test(cue), cue).toBe(true);
+    }
+  });
+
+  it.each([
+    ['Monthly churn rate', 'neutral'],
+    ['Pro MRR', 'neutral'],
+    // A hyphen-joined particle is a compound noun, not a negation.
+    ['No-show rate', 'neutral'],
+    ['Not-for-profit revenue', 'neutral'],
+    // A hyphen-joined STEM is still a word the classifier declines as a compound: fail closed.
+    ['Reduce-churn', 'unreadable'],
+    ['Lower-funnel conversion rate', 'unreadable'],
+    ['Reduce monthly churn', 'minimise'],
+    ['Grow revenue', 'maximise'],
+    ['Revenue increased', 'unreadable'],
+    ['Improve conversion rate', 'unreadable'],
+    ['Keep churn at or below 5%', 'unreadable'],
+  ] as const)('"%s" reads %s', (label, reading) => {
+    expect(readGoalLabelForStamp(label)).toBe(reading);
+  });
+
+  it('a missing or blank label attests nothing (unreadable), never "neutral"', () => {
+    expect(readGoalLabelForStamp(null)).toBe('unreadable');
+    expect(readGoalLabelForStamp('   ')).toBe('unreadable');
+    expect(judgeStampAgainstLabel(null, 'minimise')).toBe('label_unreadable');
+  });
+
+  it('the verdict: neutral or same sense attests; the other sense contradicts; the rest is unreadable', () => {
+    expect(judgeStampAgainstLabel('Monthly churn rate', 'minimise')).toBe('attested');
+    expect(judgeStampAgainstLabel('Monthly churn rate', 'maximise')).toBe('attested');
+    expect(judgeStampAgainstLabel('Reduce churn', 'minimise')).toBe('attested');
+    expect(judgeStampAgainstLabel('Reduce churn', 'maximise')).toBe('label_contradicts');
+    expect(judgeStampAgainstLabel('Grow revenue', 'minimise')).toBe('label_contradicts');
+    expect(judgeStampAgainstLabel('Churn reduced', 'maximise')).toBe('label_unreadable');
+    expect(judgeStampAgainstLabel('Churn reduced', 'minimise')).toBe('label_unreadable');
   });
 });

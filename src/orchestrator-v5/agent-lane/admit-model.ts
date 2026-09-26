@@ -22,7 +22,7 @@ import {
   resolveGoalThresholdCapWithProvenance,
 } from '../../utils/goal-threshold-cap.js';
 import { admitGoalBaseline } from '../../cee/factor-extraction/goal-baseline-admissibility.js';
-import { labelContradictsSense, senseOfGoalOperator } from '../goal-target/goal-direction.js';
+import { judgeStampAgainstLabel, senseOfGoalOperator } from '../goal-target/goal-direction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import type { InterventionV3T } from '../../schemas/cee-v3.js';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
@@ -193,18 +193,19 @@ const levelSourceFor = (provenance: string): ConstructedLevelSource =>
  * that would count equality as met) is handled where the goal fit is written —
  * see `scoredInSense` in `admitCandidateModel`.
  *
- * ⛔ A SENSE CONTRADICTED BY THE GOAL'S OWN WORDS IS NOT ATTESTED — IN EITHER
- * DIRECTION (reviews 5844286953 and 5844849510). The operator is a required enum
- * with no "not stated" value, so it is sometimes the schema's reading and not the
- * user's: "reduce/cut X by at least N" read as `>=` (the repo's known sign-inversion
- * fingerprint, ROADMAP 1.52; refused on the chat path, `add-constraint.ts`), or
- * "grow revenue by up to 20%" read as `<=`. Either stamp would invert the ranking
- * against base and end ISL's `GOAL_DIRECTION_UNATTESTED` disclosure. ONE rule
- * (`labelContradictsSense`, over the SAME label reading the forwarder uses): when
- * the label's own reading contradicts the operator's sense, no sense is stamped, the
- * operator loss is recorded, and the Run gets exactly what base sent (the label's
- * `minimise` for a reduction-worded label, nothing for an increase-worded one). A
- * label that reads no direction contradicts nothing, so the operator stands. The
+ * ⛔ A SENSE THE GOAL'S OWN WORDS DO NOT ATTEST IS NOT STAMPED — FAIL CLOSED, IN
+ * EITHER DIRECTION (reviews 5844286953 and 5844849510; verify of 27c4e0ac). The
+ * operator is a required enum with no "not stated" value, so it is sometimes the
+ * schema's reading and not the user's: "reduce/cut X by at least N" read as `>=` (the
+ * repo's known sign-inversion fingerprint, ROADMAP 1.52; refused on the chat path,
+ * `add-constraint.ts`), "grow revenue by up to 20%" read as `<=`, or "Never cut the
+ * marketing budget" read as `<=`. A stamp there would invert the ranking against base
+ * or end ISL's `GOAL_DIRECTION_UNATTESTED` disclosure. ONE rule
+ * (`judgeStampAgainstLabel`, the SAME judgement the forwarder applies): the operator's
+ * sense is stamped only when the label is NEUTRAL (no word from the classifier's
+ * lexicons, no negation) or reads that same sense positively, with a subject. Any
+ * other label — contradicting, or one the classifier refuses to read — gets no stamp,
+ * the operator loss is recorded, and the Run gets exactly what base sent. The
  * forwarder applies the same rule to a STORED stamp (`resolveRequestGoalDirection`),
  * for a goal renamed after construction.
  */
@@ -214,7 +215,7 @@ export function attestedGoalDirection(
   if (goal.provenance !== 'explicit') return undefined;
   const operatorSense = senseOfGoalOperator(goal.operator);
   if (operatorSense === undefined) return undefined;
-  return labelContradictsSense(goal.metric, operatorSense) ? undefined : operatorSense;
+  return judgeStampAgainstLabel(goal.metric, operatorSense) === 'attested' ? operatorSense : undefined;
 }
 
 export interface AdmittedNode {
@@ -1293,16 +1294,21 @@ function admitOnce(
          *    `goal_direction`, so it is scored on the lower tail. Written, and
          *    admitted in THAT frame: a level above the target is the ordinary
          *    "bring it down" case, not an inversion (`direction: 'minimise'`).
-         *  · `<=` on a goal that is NOT the user's, or whose own words contradict it
-         *    ("grow revenue" read as `<=`, `attestedGoalDirection`) — no sense is
-         *    attested, so nothing tells the engine which tail; the `>=` tail would be
-         *    scored. Withheld.
+         *  · `<=` on a goal that is NOT the user's, or whose own words do not attest it
+         *    ("grow revenue" or "revenue increased" read as `<=`, `attestedGoalDirection`)
+         *    — no sense is stamped, so nothing tells the engine which tail; the `>=` tail
+         *    would be scored. Withheld.
          *  · `>` / `<` — strictness is carried nowhere, and ISL counts equality as
          *    met in both senses: a held status quo exactly AT the threshold would
          *    score 100% on a goal it has not reached. Withheld, with the repair.
          * Every withholding is said with the shortest truthful repair. The target
          * itself is kept in every case.
          */
+        // The one rule's verdict on this goal's `<=`/`<` sense (`judgeStampAgainstLabel`), for
+        // the withholding sentence below; `'attested'` for any other operator.
+        const minimiseLabelVerdict = senseOfGoalOperator(model.goal.operator) === 'minimise'
+          ? judgeStampAgainstLabel(model.goal.metric, 'minimise')
+          : 'attested';
         const scoredInSense: 'maximise' | 'minimise' | undefined =
           model.goal.operator === '>=' ? 'maximise'
             : model.goal.operator === '<=' && statedGoalDirection === 'minimise' ? 'minimise'
@@ -1337,8 +1343,7 @@ function admitOnce(
               `current level (${baselineRaw}) was not used for that, and no chance of meeting the goal will be ` +
               `shown. If reaching ${raw} is enough, say the goal is "at least ${raw}" and it can be shown.`,
             );
-          } else if (admission === null && senseOfGoalOperator(model.goal.operator) === 'minimise'
-            && labelContradictsSense(model.goal.metric, 'minimise')) {
+          } else if (admission === null && minimiseLabelVerdict === 'label_contradicts') {
             // The stamp was withheld by the one rule (`attestedGoalDirection`): the goal's own
             // words point UP. Neither "say at most N" (it would still contradict them) nor
             // "Olumi's reading, not something you stated" is the true reason here.
@@ -1347,6 +1352,17 @@ function admitOnce(
               'but its own words point the other way, so which way it points was not taken as stated, and its ' +
               `current level (${baselineRaw}) was not used to work out the chance of meeting it. The options can ` +
               'still be compared on everything else; no chance of meeting the goal will be shown.',
+            );
+          } else if (admission === null && minimiseLabelVerdict === 'label_unreadable') {
+            // Withheld by the same rule, FAIL CLOSED: the goal's words carry a direction or
+            // negation word the classifier cannot read ("Revenue increased", "Never cut the
+            // budget"), so they do not confirm the stated sense. Nothing was read "the other
+            // way", and an "at most N" repair would be withheld again for the same words.
+            withheld(
+              `"${model.goal.metric}" was read as a goal to stay ${model.goal.operator === '<' ? 'below' : 'at or below'} ${raw}, ` +
+              'but its wording could not be confirmed to point that way, so which way it points was not taken as ' +
+              `stated, and its current level (${baselineRaw}) was not used to work out the chance of meeting it. The ` +
+              'options can still be compared on everything else; no chance of meeting the goal will be shown.',
             );
           } else if (admission === null && model.goal.operator === '<') {
             withheld(

@@ -444,6 +444,39 @@ function negationGovernsDirection(label: string, stemIndex: number): boolean {
 }
 
 /**
+ * The negation PARTICLES the multi-word cues above are built from: `not` ("do not",
+ * "cannot"), `no` ("no longer"), `n't` ("don't", "can't"). They are NOT cues here — this
+ * module refuses only on the cue list, and adding a cue follows the procedure in the header
+ * (re-run the must-fire corpus), so `deriveGoalIntent` is unchanged by this list. It exists
+ * for a reader that must FAIL CLOSED, where a wider refusal can only withhold, never assert.
+ */
+const NEGATION_PARTICLE_SOURCES: readonly string[] = ['not', 'no', "[a-z]*n['’]t"];
+
+/**
+ * ⭐ THIS MODULE'S OWN LEXICONS, EXPORTED FOR A FAIL-CLOSED READER (CEE #1971,
+ * `goal-target/goal-direction.ts` `readGoalLabelForStamp`). That veto must know whether a
+ * goal label carries ANY word this classifier reads OR REFUSES — a direction stem of either
+ * sense, a stasis or ambiguous stem, a negation — because a label the classifier declines to
+ * read is not agreement with a stated sense. These are the SAME arrays `deriveGoalIntent`
+ * matches, never a copy, so the reader and the classifier cannot drift apart.
+ */
+export const GOAL_LABEL_LEXICON: Readonly<{
+  increaseStems: readonly string[];
+  decreaseStems: readonly string[];
+  stasisStems: readonly string[];
+  ambiguousStems: readonly string[];
+  negationCueSource: string;
+  negationParticleSources: readonly string[];
+}> = Object.freeze({
+  increaseStems: INCREASE_STEMS,
+  decreaseStems: DECREASE_STEMS,
+  stasisStems: STASIS_STEMS,
+  ambiguousStems: AMBIGUOUS_STEMS,
+  negationCueSource: NEGATION_CUE_RE.source,
+  negationParticleSources: NEGATION_PARTICLE_SOURCES,
+});
+
+/**
  * ⭐ THE ENTIRE NATURAL-LANGUAGE SURFACE OF THIS MODULE, and it decides only
  * ONE thing: which direction the user asked for. It can never, on its own,
  * cause a sentence to ship — the arithmetic gates in

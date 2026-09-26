@@ -27,8 +27,11 @@
  * and its mirror 5844849510). The operator is a required enum with no "not stated"
  * value: "reduce/cut X by at least N" read as `>=` (ROADMAP 1.52) or "grow revenue"
  * read as `<=` would each invert the ranking against base and end ISL's
- * `GOAL_DIRECTION_UNATTESTED` disclosure. ONE rule, both directions — a sense the
- * goal label's own reading contradicts is not attested (`labelContradictsSense`):
+ * `GOAL_DIRECTION_UNATTESTED` disclosure. ONE rule, both directions, FAIL CLOSED (verify
+ * of 27c4e0ac): a sense is attested only by a NEUTRAL label or a positive same-sense
+ * reading with a subject — a label that reads the other way, or that the classifier
+ * refuses to read ("Revenue increased", "Do not reduce headcount"), attests nothing
+ * (`judgeStampAgainstLabel`):
  *   · STAMP SITE — such a goal is NOT stamped, and its operator loss is recorded as on base;
  *   · FORWARDER — a stored stamp is set aside when the CURRENT label contradicts it
  *     (a rename), or when a CURRENT `goal_constraints` row on the goal states the
@@ -58,6 +61,7 @@ import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { log } from '../../../utils/telemetry.js';
 import { applyGoalTargetEdit } from '../../system-events/goal-target-edit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { deriveEmittedGoalDirection, resolveRequestGoalDirection } from '../../goal-target/goal-direction.js';
 
 const SCENARIO = '88888888-8888-4888-8888-888888888888';
 const REQUEST_ID = 'req-mg-goal-direction';
@@ -383,8 +387,8 @@ describe('the stated goal direction reaches the PLoT /v2/run body', () => {
   // see it (the old label reading returned nothing for an increase label). Base sends
   // NOTHING on these (the label classifier never emits `maximise`), so ISL runs its
   // maximiser and DISCLOSES `GOAL_DIRECTION_UNATTESTED`. One rule now closes both
-  // directions: a stamp is attested only when the operator's sense does not contradict
-  // the goal label's own reading (`readGoalLabelSense`, built on `deriveGoalIntent`).
+  // directions: a stamp is attested only when the goal label attests the operator's sense
+  // (`judgeStampAgainstLabel`, built on `deriveGoalIntent` and its lexicons) — fail closed.
   type Row = {
     metric: string; operator: '>=' | '>' | '<=' | '<'; value: number; unit: string; id: string;
     /** `null` ⇒ the key is ABSENT from the body (base: ISL's unattested maximiser, disclosed). */
@@ -402,12 +406,32 @@ describe('the stated goal direction reaches the PLoT /v2/run body', () => {
     { metric: 'Grow revenue', operator: '<=', value: 20, unit: '%', id: 'grow_revenue', sent: null, stamped: null, event: null },
     { metric: 'Increase MRR', operator: '<=', value: 30000, unit: 'GBP', id: 'increase_mrr', sent: null, stamped: null, event: null },
     { metric: 'Boost conversion', operator: '<', value: 5, unit: '%', id: 'boost_conversion', sent: null, stamped: null, event: null },
+    // RED at 27c4e0ac (verify DEFECT_FOUND on 27c4e0ac): FAIL CLOSED. Each label carries a word
+    // from the classifier's own lexicons that the classifier then REFUSES to read (no subject, a
+    // negation, a refused stem), and the old veto took that silence as "permit": the operator's
+    // sense was stamped and sent. Base sends what its label derivation gives; so must this.
+    { metric: 'Revenue increased', operator: '<=', value: 20, unit: '%', id: 'revenue_increased', sent: null, stamped: null, event: null },
+    { metric: 'Never cut the marketing budget', operator: '<=', value: 50000, unit: 'GBP', id: 'never_cut_the_marketing_budget', sent: null, stamped: null, event: null },
+    { metric: 'Do not reduce headcount', operator: '<=', value: 40, unit: 'FTE', id: 'do_not_reduce_headcount', sent: null, stamped: null, event: null },
+    { metric: 'Churn reduced', operator: '>=', value: 2, unit: '%', id: 'churn_reduced', sent: null, stamped: null, event: null },
+    { metric: 'Do not increase costs', operator: '>=', value: 10, unit: '%', id: 'do_not_increase_costs', sent: null, stamped: null, event: null },
+    { metric: 'Not increase costs', operator: '>=', value: 10, unit: '%', id: 'not_increase_costs', sent: null, stamped: null, event: null },
+    // A bare "not" is a negation particle of the cue list ("do not", "cannot"): not stamped. Base's
+    // label derivation (unchanged) reads it as a reduction, so base's minimise is what is sent.
+    { metric: 'Must not reduce headcount', operator: '<=', value: 40, unit: 'FTE', id: 'must_not_reduce_headcount', sent: 'minimise', stamped: null, event: 'cee.goal_direction.derived' },
+    // DECIDED, AND PINNED: an AMBIGUOUS stem ("improve" churn means down, revenue means up) and a
+    // STASIS stem ("keep") are words the classifier refuses — fail closed, in both senses.
+    { metric: 'Improve conversion rate', operator: '>=', value: 5, unit: '%', id: 'improve_conversion_rate', sent: null, stamped: null, event: null },
+    { metric: 'Improve monthly churn', operator: '<=', value: 3, unit: '%', id: 'improve_monthly_churn', sent: null, stamped: null, event: null },
+    { metric: 'Keep monthly churn low', operator: '<=', value: 3, unit: '%', id: 'keep_monthly_churn_low', sent: null, stamped: null, event: null },
     // CONTROLS: the reason for this PR, the served P-S2 maximise, and labels with no direction word
     // (they follow the operator in BOTH senses, including the strict `<` the row above withholds).
     { metric: 'Monthly churn rate', operator: '<=', value: 10, unit: '%', id: 'monthly_churn_rate', sent: 'minimise', stamped: 'minimise', event: 'cee.goal_direction.attested' },
     { metric: 'Pro MRR', operator: '>=', value: 20000, unit: 'GBP', id: 'pro_mrr', sent: 'maximise', stamped: 'maximise', event: 'cee.goal_direction.attested' },
     { metric: 'Monthly churn rate', operator: '>=', value: 2, unit: '%', id: 'monthly_churn_rate', sent: 'maximise', stamped: 'maximise', event: 'cee.goal_direction.attested' },
     { metric: 'Conversion rate', operator: '<', value: 5, unit: '%', id: 'conversion_rate', sent: 'minimise', stamped: 'minimise', event: 'cee.goal_direction.attested' },
+    // CONTROL: a label that reads, positively and with a subject, the SAME sense is stamped.
+    { metric: 'Grow revenue', operator: '>=', value: 20, unit: '%', id: 'grow_revenue', sent: 'maximise', stamped: 'maximise', event: 'cee.goal_direction.attested' },
   ];
   for (const row of TABLE) {
     const says = row.sent === null ? 'sends NO goal_direction' : `sends ${row.sent}`;
@@ -457,6 +481,31 @@ describe('the stated goal direction reaches the PLoT /v2/run body', () => {
     });
   }
 
+  // The same, for a label whose words the classifier REFUSES to read (fail closed): the stamp is
+  // withheld, so the level is withheld as on base — and the reason is neither "the other way"
+  // (nothing was read) nor "Olumi's reading" (it was stated) nor an "at most" repair.
+  for (const [metric, id, operator, phrase] of [
+    ['Revenue increased', 'revenue_increased', '<=', 'stay at or below 20'],
+    ['Never cut the marketing budget', 'never_cut_the_marketing_budget', '<', 'stay below 20'],
+  ] as const) {
+    it(`an unreadable "${metric}" ${operator} goal with a stated current level: not stamped, the level withheld, and the reason is its wording`, () => {
+      const m = admitCandidateModel(candidate({
+        metric, operator, value: 20, unit: '%', baseline_known: true, baseline_value: 12, baseline_provenance: 'explicit',
+      }));
+      const goal = m.nodes.find((n) => n.id === id);
+      expect(goal?.kind).toBe('goal');
+      expect(goal).not.toHaveProperty('goal_direction');
+      expect(goal).not.toHaveProperty('observed_state');
+      const said = m.loss.filter((l) => l.field_path === `nodes[${id}].observed_state.baseline`).map((l) => l.reason);
+      expect(said).toHaveLength(1);
+      expect(said[0]).toContain(phrase);
+      expect(said[0]).toContain('its wording could not be confirmed to point that way');
+      expect(said[0]).not.toContain('the other way');
+      expect(said[0]).not.toContain("Olumi's reading");
+      expect(said[0]).not.toContain('at most');
+    });
+  }
+
   // ── FORWARDER GUARD (defence in depth): a STORED maximise beside a label that reads
   // as a reduction — a goal renamed after construction (a label is an editable
   // field; `goal_direction` is not, so the stamp survives the rename). The stamp site
@@ -478,8 +527,8 @@ describe('the stated goal direction reaches the PLoT /v2/run body', () => {
         goal_node_id: 'pro_mrr', provenance: 'derived_from_goal_label',
       }),
       expect.objectContaining({
-        level: 'warn', event: 'cee.goal_direction.label_disagrees', goal_direction: 'minimise',
-        stamped: 'maximise', label_derived: 'minimise', label_sense: 'minimise', goal_node_id: 'pro_mrr',
+        level: 'warn', event: 'cee.goal_direction.label_disagrees', reason: 'label_contradicts', goal_direction: 'minimise',
+        stamped: 'maximise', label_derived: 'minimise', label_reading: 'minimise', label_sense: 'minimise', goal_node_id: 'pro_mrr',
       }),
     ]);
   });
@@ -501,8 +550,8 @@ describe('the stated goal direction reaches the PLoT /v2/run body', () => {
     expect('goal_direction' in body, `sent ${String(body.goal_direction)}`).toBe(false);
     expect(directionEvents).toEqual([
       expect.objectContaining({
-        level: 'warn', event: 'cee.goal_direction.label_disagrees', goal_direction: null,
-        stamped: 'minimise', label_sense: 'maximise', goal_node_id: 'monthly_churn_rate',
+        level: 'warn', event: 'cee.goal_direction.label_disagrees', reason: 'label_contradicts', goal_direction: null,
+        stamped: 'minimise', label_reading: 'maximise', label_sense: 'maximise', goal_node_id: 'monthly_churn_rate',
       }),
     ]);
   });
@@ -520,6 +569,64 @@ describe('the stated goal direction reaches the PLoT /v2/run body', () => {
       expect.objectContaining({ level: 'info', event: 'cee.goal_direction.attested', goal_direction: 'minimise', goal_node_id: 'monthly_churn_rate' }),
     ]);
   });
+
+  // ── FORWARDER, FAIL CLOSED (verify DEFECT_FOUND on 27c4e0ac): a STORED stamp beside a label
+  // whose words the classifier refuses to read is SET ASIDE — base's value goes (the label's
+  // `minimise` where base derives one, otherwise no key and ISL's disclosure stands) and a
+  // `label_unreadable` warn names the reading. RED at 27c4e0ac: each sent the stored stamp, info only.
+  type Rename = {
+    from: 'min' | 'max'; label: string;
+    /** `null` ⇒ the key is ABSENT (base). */
+    sent: 'maximise' | 'minimise' | null;
+    reading: 'unreadable' | 'maximise' | 'minimise' | 'neutral';
+  };
+  const RENAMES: Rename[] = [
+    { from: 'min', label: 'Revenue increased', sent: null, reading: 'unreadable' },
+    { from: 'min', label: 'Never cut the marketing budget', sent: null, reading: 'unreadable' },
+    { from: 'min', label: 'Do not reduce headcount', sent: null, reading: 'unreadable' },
+    { from: 'min', label: 'Must not reduce headcount', sent: 'minimise', reading: 'unreadable' },
+    { from: 'min', label: 'Improve Pro plan churn', sent: null, reading: 'unreadable' },
+    { from: 'max', label: 'Churn reduced', sent: null, reading: 'unreadable' },
+    { from: 'max', label: 'Do not increase costs', sent: null, reading: 'unreadable' },
+    { from: 'max', label: 'Not increase costs', sent: null, reading: 'unreadable' },
+    // CONTROLS: a label that reads the SAME sense, positively, keeps the stamp; so does a neutral one.
+    { from: 'max', label: 'Grow Pro MRR', sent: 'maximise', reading: 'maximise' },
+    { from: 'min', label: 'Reduce Pro plan churn', sent: 'minimise', reading: 'minimise' },
+    { from: 'max', label: 'Pro plan revenue', sent: 'maximise', reading: 'neutral' },
+  ];
+  for (const row of RENAMES) {
+    const stamp = row.from === 'min' ? 'minimise' : 'maximise';
+    const kept = row.reading === 'neutral' || row.reading === stamp;
+    it(`FORWARDER (fail closed): a stored ${stamp} renamed "${row.label}" ${kept ? 'keeps the stamp' : 'is set aside'} — sends ${row.sent ?? 'NO key'}`, async () => {
+      const id = row.from === 'min' ? 'monthly_churn_rate' : 'pro_mrr';
+      const { stored, body, directionEvents } = await plotBodyFor(row.from === 'min' ? minimise('<=') : maximise('>='), (g) => {
+        const goal = goalIn(g, id);
+        if (goal === undefined) throw new Error(`fixture: no ${id} goal`);
+        goal.label = row.label;
+        return g;
+      });
+      // Precondition, by identity: the stamp really is on the stored goal beside the new label.
+      expect(goalIn(stored, id)).toMatchObject({ kind: 'goal', label: row.label, goal_direction: stamp });
+      expect(body.goal_node_id).toBe(id);
+      if (row.sent === null) expect('goal_direction' in body, `sent ${String(body.goal_direction)}`).toBe(false);
+      else expect(body.goal_direction).toBe(row.sent);
+      if (kept) {
+        expect(directionEvents).toEqual([
+          expect.objectContaining({ level: 'info', event: 'cee.goal_direction.attested', goal_direction: stamp, goal_node_id: id }),
+        ]);
+        return;
+      }
+      expect(directionEvents).toEqual([
+        ...(row.sent === null ? [] : [expect.objectContaining({
+          level: 'info', event: 'cee.goal_direction.derived', goal_direction: row.sent, goal_node_id: id, provenance: 'derived_from_goal_label',
+        })]),
+        expect.objectContaining({
+          level: 'warn', event: 'cee.goal_direction.label_disagrees', reason: 'label_unreadable',
+          goal_direction: row.sent, stamped: stamp, label_reading: 'unreadable', label_sense: null, goal_node_id: id,
+        }),
+      ]);
+    });
+  }
 
   // ── NON-BLOCKING 2: the stamp is never re-derived after construction ───────────
   // A later success-target edit rewrites the goal's threshold and writes a
@@ -573,6 +680,110 @@ describe('the stated goal direction reaches the PLoT /v2/run body', () => {
       expect(directionEvents).toEqual([
         expect.objectContaining({ level: 'info', event: 'cee.goal_direction.attested', goal_direction: sense, goal_node_id: id }),
       ]);
+    });
+  }
+});
+
+/**
+ * THE VERIFIER'S LABEL MATRIX (verify of 27c4e0ac, `label-matrix.tsv`: 66 labels × 4 operators),
+ * table-driven over the two functions the seams call — construction's stamp
+ * (`admitCandidateModel` → `attestedGoalDirection`) and the forwarder
+ * (`resolveRequestGoalDirection`, a STORED stamp of the operator's sense beside the label).
+ *
+ * `reading` is written here per label from the SPEC, not computed:
+ *   · `neutral`    — no word from the classifier's lexicons (increase / decrease / stasis /
+ *                    ambiguous stems, a hyphenated one included) and no negation word (its cue
+ *                    list, plus the particles "not" / "no" / "n't" those cues are built from);
+ *   · `minimise` / `maximise` — reads that way POSITIVELY (no negation word) WITH a subject;
+ *   · `unreadable` — anything else.
+ * The stamp is ATTESTED only for `neutral`, or a reading equal to the operator's sense. Otherwise
+ * construction withholds it and the forwarder sets a stored one aside, sending `base` — base's
+ * label derivation, pinned per label below against the unchanged `deriveEmittedGoalDirection`.
+ *
+ * ⚠ RESIDUAL, DISCLOSED — NOT ENDORSED. Direction words OUTSIDE the classifier's lexicon ("slash",
+ * "trim", "curb", "grown", "doubled", "higher", "fewer", "less", "more", noun forms "growth" /
+ * "reduction") read `neutral` and follow the operator. The lexicon is the classifier's own and is
+ * not widened here (widening it would move `deriveGoalIntent` and the coaching surface too).
+ */
+type Reading = 'neutral' | 'minimise' | 'maximise' | 'unreadable';
+const MATRIX: ReadonlyArray<readonly [label: string, reading: Reading, base: 'minimise' | null]> = [
+  // increase-worded, with a subject
+  ['Maximise revenue', 'maximise', null], ['Maximize revenue', 'maximise', null], ['Grow revenue', 'maximise', null],
+  ['Increase revenue', 'maximise', null], ['Boost revenue', 'maximise', null], ['Raise revenue', 'maximise', null],
+  ['Expand revenue', 'maximise', null], ['Accelerate growth', 'maximise', null],
+  // "by" is the classifier's subject here (its boundary set needs a leading space) — it still reads increase
+  ['Revenue increased by 20%', 'maximise', null],
+  // reduction-worded, with a subject — base derives minimise for each
+  ['Reduce churn', 'minimise', 'minimise'], ['Cut costs', 'minimise', 'minimise'], ['Lower churn', 'minimise', 'minimise'],
+  ['Decrease churn', 'minimise', 'minimise'], ['Minimise churn', 'minimise', 'minimise'], ['Minimize churn', 'minimise', 'minimise'],
+  ['Shrink costs', 'minimise', 'minimise'], ['Drop churn', 'minimise', 'minimise'], ['Reduce  churn', 'minimise', 'minimise'],
+  ['REDUCE CHURN', 'minimise', 'minimise'], ['reduce churn', 'minimise', 'minimise'], ['  Reduce churn  ', 'minimise', 'minimise'],
+  ['Reduce churn.', 'minimise', 'minimise'], ['Reduce churn!', 'minimise', 'minimise'],
+  ['Costs reduced by at least 10%', 'minimise', 'minimise'], ['Reduce by 5% churn', 'minimise', 'minimise'],
+  // ambiguous / stasis stems — refused by the classifier ⇒ unreadable (DECIDED: fail closed)
+  ['Improve revenue', 'unreadable', null], ['Keep churn at or below 5%', 'unreadable', null], ['Hold churn under 5%', 'unreadable', null],
+  // negation — the cue list, and the bare particle "not" (base still derives minimise for three: unchanged)
+  ['Not reduce headcount', 'unreadable', 'minimise'], ['Must not reduce headcount', 'unreadable', 'minimise'],
+  ['Should not cut the support budget', 'unreadable', 'minimise'], ['Not increase costs', 'unreadable', null],
+  ['Do not reduce headcount', 'unreadable', null], ['Do not increase costs', 'unreadable', null],
+  ['Never cut the marketing budget', 'unreadable', null], ['Avoid raising prices', 'unreadable', null],
+  ["Don't grow headcount", 'unreadable', null],
+  // both directions
+  ['Grow revenue and cut costs', 'unreadable', null], ['Reduce churn to grow revenue', 'unreadable', null],
+  ['Increase margin by reducing costs', 'unreadable', null],
+  // a direction word with NO subject
+  ['Revenue increased', 'unreadable', null], ['Costs reduced', 'unreadable', null], ['Churn reduced', 'unreadable', null],
+  ['Grow', 'unreadable', null], ['Reduce', 'unreadable', null], ['Increase', 'unreadable', null], ['Cut', 'unreadable', null],
+  ['Reduce: churn', 'unreadable', null], ['Reduce, churn', 'unreadable', null], ['Reduce 5% churn', 'unreadable', null],
+  // a hyphenated direction stem: the classifier refuses it as a compound; the veto still sees the word
+  ['Reduce-churn', 'unreadable', null],
+  // no lexicon word — the case #1971 exists for
+  ['Monthly churn rate', 'neutral', null], ['Monthly revenue', 'neutral', null],
+  // RESIDUAL (header): direction words outside the classifier's lexicon
+  ['Revenue grown', 'neutral', null], ['Revenue growth', 'neutral', null], ['Churn reduction', 'neutral', null],
+  ['Cost reduction', 'neutral', null], ['Revenue doubled', 'neutral', null], ['Slash costs', 'neutral', null],
+  ['Higher revenue', 'neutral', null], ['Fewer support tickets', 'neutral', null], ['Less churn', 'neutral', null],
+  ['More sign-ups', 'neutral', null], ['Trim costs', 'neutral', null], ['Eliminate defects', 'neutral', null],
+  ['Curb churn', 'neutral', null],
+];
+
+describe("the verifier's label matrix: a stamp is attested only on a neutral label or a positive same-sense reading", () => {
+  it('covers every label of the verify matrix exactly once', () => {
+    expect(MATRIX).toHaveLength(66);
+    expect(new Set(MATRIX.map(([label]) => label)).size).toBe(66);
+  });
+
+  for (const [label, reading, base] of MATRIX) {
+    it(`"${label}" reads ${reading}: base sends ${base ?? 'no key'}; every operator stamps and forwards only what the rule attests`, () => {
+      // BEHAVIOUR (what is stamped and sent) is asserted apart from the record's fields, so a
+      // failure names which one moved.
+      const got: string[] = [];
+      const want: string[] = [];
+      const gotFields: string[] = [];
+      const wantFields: string[] = [];
+      // Base's label derivation is unchanged — pinned so "send what base sends" names a fixed value.
+      const labelled = { nodes: [{ id: 'g', kind: 'goal', label }] };
+      got.push(`base=${deriveEmittedGoalDirection(labelled, 'g') ?? null}`);
+      want.push(`base=${base}`);
+      for (const [operator, sense] of [['>=', 'maximise'], ['>', 'maximise'], ['<=', 'minimise'], ['<', 'minimise']] as const) {
+        const attested = reading === 'neutral' || reading === sense;
+        // CONSTRUCTION: the stamp on the admitted goal node.
+        const admitted = admitCandidateModel(candidate({ metric: label, operator, value: 10, unit: '%' }));
+        const goal = admitted.nodes.find((n) => n.kind === 'goal');
+        got.push(`${operator} stamp=${goal === undefined ? 'NO GOAL' : (goal.goal_direction ?? null)}`);
+        want.push(`${operator} stamp=${attested ? sense : null}`);
+        // FORWARDER: a stored stamp of that sense beside this label (a rename).
+        const r = resolveRequestGoalDirection({
+          graph: { nodes: [{ id: 'g', kind: 'goal', label, goal_direction: sense }] }, goalNodeId: 'g', goalConstraints: undefined,
+        });
+        got.push(`${operator} sent=${r.goal_direction ?? null} set_aside=${r.label_disagrees}`);
+        want.push(`${operator} sent=${attested ? sense : base} set_aside=${!attested}`);
+        gotFields.push(`${operator} verdict=${String(r.label_verdict)} reading=${String(r.label_reading)}`);
+        wantFields.push(`${operator} verdict=${
+          attested ? 'attested' : reading === 'unreadable' ? 'label_unreadable' : 'label_contradicts'} reading=${reading}`);
+      }
+      expect(got).toEqual(want);
+      expect(gotFields).toEqual(wantFields);
     });
   }
 });

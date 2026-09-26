@@ -930,13 +930,14 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     //     that module's header for the one-sided-exposure argument.
     //
     // ⛔ THE STAMP IS SET ASIDE — AND SOURCE 2 RUNS EXACTLY AS BASE DID — WHEN THE
-    // GOAL'S CURRENT LABEL CONTRADICTS IT, IN EITHER DIRECTION, OR A CURRENT
-    // goal_constraints ROW ON THE GOAL STATES THE OTHER SENSE (reviews 5844286953 and
-    // 5844849510). A stamped `maximise` over a label that says REDUCE, or a stamped
-    // `minimise` over a label that says INCREASE, would invert the ranking and remove
-    // ISL's disclosure; a stamp older than the user's latest success-target edit is
-    // stale. Set aside, base's value goes (`minimise` for a reduction-worded label,
-    // no key otherwise). Each set-aside is a `log.warn` naming both sides.
+    // GOAL'S CURRENT LABEL DOES NOT ATTEST IT (FAIL CLOSED: only a NEUTRAL label or a
+    // positive same-sense reading attests; one that reads the other way, or that the
+    // classifier refuses to read, does not), OR A CURRENT goal_constraints ROW ON THE
+    // GOAL STATES THE OTHER SENSE (reviews 5844286953 and 5844849510; verify of
+    // 27c4e0ac). A stamp sent over such a label could invert the ranking or remove ISL's
+    // disclosure on words that do not say so; a stamp older than the user's latest
+    // success-target edit is stale. Set aside, base's value goes (`minimise` where base
+    // derives it, no key otherwise). Each set-aside is a `log.warn` naming both sides.
     const requestGoalDirection = resolveRequestGoalDirection({
       graph: graphForAnalysis,
       goalNodeId: snapshot.goal_node_id,
@@ -981,14 +982,16 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       log.warn(
         {
           event: 'cee.goal_direction.label_disagrees',
+          reason: requestGoalDirection.label_verdict ?? null,
           goal_direction: requestGoalDirection.goal_direction ?? null,
           stamped: requestGoalDirection.stamped ?? null,
+          label_reading: requestGoalDirection.label_reading,
           label_sense: requestGoalDirection.label_sense ?? null,
           label_derived: requestGoalDirection.label_derived ?? null,
           goal_node_id: snapshot.goal_node_id,
           request_id: invocation.requestId,
         },
-        "the goal label reads the other way from the goal's stamped sense — the stamp was not sent; base's label-derived value was (none for an increase label)",
+        "the goal label does not attest the goal's stamped sense (it reads the other way, or cannot be read) — the stamp was not sent; base's label-derived value was (none unless the label reads as a reduction)",
       );
     }
     if (requestGoalDirection.disagreeing_goal_row_operators.length > 0) {
