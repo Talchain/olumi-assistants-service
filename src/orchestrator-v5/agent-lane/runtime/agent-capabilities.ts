@@ -619,6 +619,13 @@ export function createAgentCapabilities(
    */
   let approvalAppliedThisRequest = false;
   /**
+   * ⛔ ONE HELD OPTION PER APPROVAL — until the product's typed add-option carries several options in ONE hold
+   * (Canonical #70 5841241418). Two holds offered together get NO approve button (an approval names exactly one
+   * proposal), which is the "add all five → nothing to press" dead end of Paul's test. So the first option is
+   * prepared and offered; a second in the same turn is refused in plain words, to be added once the first is approved.
+   */
+  let heldOptionThisRequest: string | undefined;
+  /**
    * Normalise the read route's `graph_identity_hash` to the 64-hex value the
    * register route compares. `''` means "no identity to anchor to" — the route
    * returns `null` for an absent, unparseable or identity-empty graph — and
@@ -3055,6 +3062,13 @@ export function createAgentCapabilities(
      */
     async proposeNewOption(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
+      if (heldOptionThisRequest !== undefined) {
+        return {
+          ok: false, mutated: false, refusal: 'one_option_per_approval',
+          detail: `"${heldOptionThisRequest}" is already prepared and waiting for the user's approval. Options are added one approval `
+            + 'at a time for now: offer that one, say plainly which others you will add next, and add each after the user approves the previous one.',
+        };
+      }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const asked = Array.isArray(args?.acts_on)
@@ -3154,6 +3168,7 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'not_prepared',
           detail: 'Olumi could not prepare that option as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
       }
+      heldOptionThisRequest = plan.label;
       return {
         ok: true, mutated: false,
         proposal_id: ref,

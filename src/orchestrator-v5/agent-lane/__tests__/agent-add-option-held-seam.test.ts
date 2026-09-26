@@ -105,7 +105,11 @@ type Chip = { id: string; label: string; message: string };
 type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string }; _provider_calls?: { provider: string; outcome?: string }[];
   _agent: { tool_calls: { name: string; ok: boolean; mutated?: boolean; refusal?: string; proposal_id?: string }[] } };
 
-/** A decision, a goal, one factor with a declared scale, two linked options: runnable before anything is added. */
+/**
+ * A decision, a goal, one factor with a declared scale, two linked options: runnable before anything is added.
+ * Interventions are in the STORED object shape ({ value, raw_value, unit }): the analysis hash — the hold's pin —
+ * projects `.value`, so a bare-number intervention would be invisible to it (measured).
+ */
 const seedGraph = (factorCount = 1, decisions = 1) => {
   const e = (from: string, to: string, mean = 1) => ({ from, to, strength: { mean, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const });
   // Price is a lever the decision sets: `category: 'controllable'` (the readiness authority blocks an option that
@@ -118,8 +122,8 @@ const seedGraph = (factorCount = 1, decisions = 1) => {
       ...decs,
       { id: 'goal_x', kind: 'goal', label: 'Revenue', goal_threshold: 0.8 },
       ...factors,
-      { id: 'opt_a', kind: 'option', label: 'Keep £49', interventions: { fac_price: 0.245 } },
-      { id: 'opt_b', kind: 'option', label: 'Raise to £59', interventions: { fac_price: 0.295 } },
+      { id: 'opt_a', kind: 'option', label: 'Keep £49', interventions: { fac_price: { value: 0.245, raw_value: 49, unit: 'GBP' } } },
+      { id: 'opt_b', kind: 'option', label: 'Raise to £59', interventions: { fac_price: { value: 0.295, raw_value: 59, unit: 'GBP' } } },
     ],
     edges: [e('dec_x', 'opt_a'), e('dec_x', 'opt_b'), e('opt_a', 'fac_price'), e('opt_b', 'fac_price'),
       ...factors.map((f) => e(f.id, 'goal_x'))],
@@ -280,6 +284,34 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const t2 = await turn({ message: 'Yes, add it.' });
     expect(t2._agent.tool_calls.find((c) => c.name === 'authorise_change'), JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: true }));
     expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id)).toBe(true);
+  }, 120_000);
+
+  it('[s] the model moves between the offer and the click → the product answers 200 but applies nothing, and the Agent does NOT report it as added', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const approve = approveChipOf(await proposeOptionC(54))!;
+    // Another writer changes the model after the offer — an ANALYSIS-AFFECTING change (a label rename is not:
+    // the pin is the analysis hash, which ignores labels) — so the hold's pinned base no longer matches.
+    const g = graphNow();
+    graphOf.set(SCENARIO, { ...g, nodes: g.nodes.map((x) => (x.id === 'opt_b' ? { ...x, interventions: { fac_price: { value: 0.3, raw_value: 60, unit: 'GBP' } } } : x)) });
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t2._agent.tool_calls[0], JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: false }));
+    expect(newOption(), 'nothing was added').toBeUndefined();
+    expect(t2.assistant_text).not.toMatch(/^Added\b/);
+  }, 120_000);
+
+  it('two options asked for in one turn → the FIRST is held and offered (one button), the second is refused in plain words — never zero buttons', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    script = [
+      () => fnCall('propose_new_option', { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }], rationale: 'x' }),
+      () => fnCall('propose_new_option', { label: 'Keep £49 with an add-on', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 49, unit: 'GBP' } }], rationale: 'y' }),
+      () => say('I have prepared the first option; I will add the second after you approve it.'),
+    ];
+    const t1 = await turn({ message: 'Add two options: test £54 at release, and keep £49 with an add-on.' });
+    const calls = t1._agent.tool_calls.filter((c) => c.name === 'propose_new_option');
+    expect(calls.map((c) => c.ok), JSON.stringify(calls)).toEqual([true, false]);
+    expect(calls[1]).toEqual(expect.objectContaining({ refusal: 'one_option_per_approval' }));
+    expect(t1.suggested_actions.filter((c) => c.id.startsWith('agent-approve-proposal:gmh_')), 'exactly ONE approve button').toHaveLength(1);
+    expect(inner.filter((b) => (b['chip'] as { intent?: string } | undefined)?.intent === 'add_option'), 'one inner add').toHaveLength(1);
   }, 120_000);
 
   it('refuses, and sends NOTHING, when the model has no single decision to link the option from', async () => {
