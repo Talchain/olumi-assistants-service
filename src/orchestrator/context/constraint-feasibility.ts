@@ -242,13 +242,8 @@ export function deriveEveryOptionLimitVerdict(
   }
 
   // Tier 2 — the leader-limit-risk rule (certified, ratified, P < 0.5), applied to every option, on one limit.
-  let common: Set<string> | null = null;
-  for (const id of optionIds) {
-    const mine = new Set(deriveLeaderLimitRisks(envelope, id, ratified).map((risk) => risk.constraint_id));
-    common = common === null ? mine : new Set([...common].filter((c) => mine.has(c)));
-    if (common.size === 0) return null;
-  }
-  const named = ratified.find((c) => common?.has(c.constraint_id) === true);
+  const atRisk = optionIds.map((id) => new Set(deriveLeaderLimitRisks(envelope, id, ratified).map((risk) => risk.constraint_id)));
+  const named = ratified.find((c) => atRisk.every((ids) => ids.has(c.constraint_id)));
   return named === undefined ? null : { kind: 'likely_breaks', constraintId: named.constraint_id };
 }
 
