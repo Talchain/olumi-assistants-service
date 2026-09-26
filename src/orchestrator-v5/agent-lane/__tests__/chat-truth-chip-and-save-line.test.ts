@@ -37,7 +37,8 @@ const PA_GRAPH = {
 };
 
 const SCENARIO = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
-const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r' };
+/** What the user wrote in these rows: a figure is recorded as theirs only when it is here (`stated-by-user.ts`). */
+const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r', user_text: 'The recruitment fee is £5,000 and the PA salary £45,000; hiring a PA would pay £50,000.' };
 
 function capsOver(graph: { nodes: unknown[]; edges: unknown[] } = PA_GRAPH) {
   const d: InternalDispatch = async () => ({ status: 200, json: { graph, graph_hash: 'h0' } });
