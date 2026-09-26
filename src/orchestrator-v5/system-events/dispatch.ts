@@ -53,6 +53,7 @@ import {
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getSessionStore } from '../session/index.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
+import { createHash } from 'node:crypto';
 import { executeOptionInterventionBatch, executeOptionInterventionEdit } from './option-intervention-edit.js';
 import { modelVersionMutationReceiptFromResponse } from '../model-management/mutation-receipt.js';
 import { runWithApprovedLevelAdoptions } from '../agent-lane/approved-adoption-context.js';
@@ -901,7 +902,7 @@ export function buildJudgementFact(
 }
 
 function buildAcknowledgementResponse(
-  payload: SystemEventTurnPayload,
+  payload: Pick<SystemEventTurnPayload, 'stage'>,
 ): OlumiResponse {
   // Silent acknowledgement. V4's handleSystemEvent follows the same
   // convention — UI-visible confirmation is rendered by the UI's own
@@ -2737,7 +2738,8 @@ async function dispatchOptionInterventionEdit(
   event: Extract<SystemEventTurnPayload['event'], { kind: 'option_intervention_edit' }>,
   requestId: string,
 ): Promise<DispatchSystemEventResult> {
-  return dispatchOptionLevelsBatch(payload, {
+  return dispatchOptionLevelsBatch({ scenario_id: payload.scenario_id, turn_id: payload.turn_id, stage: payload.stage,
+    requestHash: computeRequestHash(payload) }, {
     targets: [{ optionId: event.option_id, factorId: event.factor_id, modelValue: event.value }],
     base_graph_hash: event.base_graph_hash,
   }, requestId);
@@ -2750,7 +2752,8 @@ async function dispatchOptionInterventionEdit(
  * All or nothing: a refused target commits NOTHING (`refusal.index` names it).
  */
 export async function dispatchOptionLevelsBatch(
-  payload: SystemEventTurnPayload,
+  /** The turn this write commits under; `requestHash` is the caller's digest of the request (informational). */
+  payload: Pick<SystemEventTurnPayload, 'scenario_id' | 'turn_id' | 'stage'> & { readonly requestHash: string },
   batch: {
     readonly targets: readonly { readonly optionId: string; readonly factorId: string; readonly modelValue: number }[];
     readonly base_graph_hash: string;
@@ -2791,7 +2794,7 @@ export async function dispatchOptionLevelsBatch(
     turnId: payload.turn_id,
     requestId,
     stage: payload.stage,
-    requestHash: computeRequestHash(payload),
+    requestHash: payload.requestHash,
     freshness,
     hasExistingAnalysis,
   };
@@ -3055,9 +3058,12 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
   // Olumi's levels are stamped by the SAME server-side authority the single write uses — one adoption per level.
   const adoptions = input.levels.filter(l => l.author === 'model_proposed').map(l => ({
     scenarioId: input.scenario_id, proposalId: input.turn_id, optionId: l.option_id, factorId: l.factor_id, modelValue: l.value }));
-  // Hashed like any turn payload: the request digest covers every target and the base revision.
-  const payload = { kind: 'system_event', scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame',
-    event: { kind: 'option_levels_batch', links: input.links, levels: input.levels, base_graph_hash: input.base_graph_hash } } as unknown as SystemEventTurnPayload;
+  // Digested in `computeRequestHash`'s format over every link, level and the base revision (informational;
+  // the idempotency key is (scenario_id, turn_id)).
+  const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
+    kind: 'system_event', event: { kind: 'option_levels_batch', links: input.links, levels: input.levels, base_graph_hash: input.base_graph_hash } }))
+    .digest('hex').slice(0, 32)}`;
+  const payload = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const, requestHash };
   const r = await runWithApprovedLevelAdoptions(adoptions, () => dispatchOptionLevelsBatch(payload, {
     targets, base_graph_hash: input.base_graph_hash, expectedLinks: input.links.map(l => `${l.option_id}::${l.factor_id}`),
   }, requestId));
