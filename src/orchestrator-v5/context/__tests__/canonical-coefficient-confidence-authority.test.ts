@@ -168,7 +168,7 @@ describe('canonical coefficient-confidence authority', () => {
       const { pack, prompt } = assemble({ status, graph: attestedCanonicalCompact() });
       expect(pack.graph.edges).toHaveLength(1);
       expect(pack.graph.edges[0]).not.toHaveProperty('coefficient_confidence');
-      expect(pack.display_graph.edges[0]?.relationship).toBe('moderate positive link');
+      expect(pack.display_graph.edges[0]?.relationship).toBe('strong positive link');
       expect(pack.display_graph.edges[0]).not.toHaveProperty('coefficient_confidence');
       expect(promptGraph(prompt).graph.edges[0]).not.toHaveProperty(
         'coefficient_confidence',

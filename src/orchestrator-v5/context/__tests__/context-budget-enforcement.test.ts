@@ -114,6 +114,22 @@ function subtractGraphContextDelta(pack: { graph_context?: unknown }): void {
  * arrays have no reconciled scenario-wide evidence, so they must be
  * `degraded` rather than silently claiming there were no recent changes.
  */
+/**
+ * ONE EDGE-STRENGTH VOCABULARY (R&C, #70 5846846471): a link's band is now read on the
+ * canvas's own table (`format/edge-strength-bands.ts`), so this fixture's 0.5 links —
+ * the canvas's "Strong" — are phrased "strong positive link" where the base commit said
+ * "moderate positive link". Pin exactly that phrase on every link, then restore the
+ * base phrase only for the byte-neutrality check. The golden is NOT re-captured.
+ */
+function subtractEdgeBandVocabularyDelta(pack: { display_graph: unknown }): void {
+  const edges = (pack.display_graph as { edges?: Array<{ relationship?: unknown }> }).edges ?? [];
+  expect(edges.length, 'precondition: the fixture must carry links, or this subtraction proves nothing').toBeGreaterThan(0);
+  for (const edge of edges) {
+    expect(edge.relationship).toBe('strong positive link');
+    edge.relationship = 'moderate positive link';
+  }
+}
+
 function subtractRecentChangesStatusDelta(pack: {
   recent_changes_status?: unknown;
 }): void {
@@ -334,6 +350,7 @@ describe('context budget enforcement at assembly (O-3)', () => {
     subtractEvidenceGapDisclosureDelta(displayAnalysis);
     subtractGoalsProjectionDelta(withoutFreshnessDisclosure);
     subtractGraphContextDelta(withoutFreshnessDisclosure);
+    subtractEdgeBandVocabularyDelta(withoutFreshnessDisclosure);
     subtractRecentChangesStatusDelta(withoutFreshnessDisclosure);
 
     expect(sha256(JSON.stringify(withoutFreshnessDisclosure))).toBe(
@@ -430,6 +447,7 @@ describe('context budget enforcement at assembly (O-3)', () => {
     subtractEvidenceGapDisclosureDelta(displayAnalysis);
     subtractGoalsProjectionDelta(pack);
     subtractGraphContextDelta(pack);
+    subtractEdgeBandVocabularyDelta(pack);
     subtractRecentChangesStatusDelta(pack);
     expect(sha256(JSON.stringify(pack))).toBe(UNDER_BUDGET_GOLDEN_SHA256);
 

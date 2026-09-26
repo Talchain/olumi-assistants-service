@@ -113,7 +113,8 @@ import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
 import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
 import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
-import { bandFromMagnitude, INFLUENCE_BAND_THRESHOLDS, type InfluenceBand } from '../../format/influence-bands.js';
+import { type InfluenceBand } from '../../format/influence-bands.js';
+import { edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
@@ -630,22 +631,14 @@ function earlierAnalysisOf(state: unknown): { analysis: Record<string, unknown> 
 }
 
 /**
- * ⭐ A STRENGTH WORD IS A BAND ON THE PRODUCT'S OWN THRESHOLDS (`INFLUENCE_BAND_THRESHOLDS`, the one table the
- * narration reads its "weak / moderate / strong" from). When a link must be SET to a band the user named, it is
- * set to that band's midpoint — derived from the thresholds, never a second table — and the preview says the
- * figure before the user approves it.
+ * ⭐ A STRENGTH WORD IS A BAND ON THE ONE EDGE-STRENGTH TABLE (`format/edge-strength-bands.ts`, the canvas's own cuts
+ * and pill midpoints). When a link must be SET to a band the user named, it is set to that band's midpoint — the
+ * number the canvas's own pill for that band writes — so the band the user said is the band the canvas draws, and the
+ * preview says the figure before the user approves it. (It read `INFLUENCE_BAND_THRESHOLDS`, a SENSITIVITY table:
+ * "strong" stored 0.825, which the canvas drew "Very strong" — R&C #70 5846846471.)
  */
-const INFLUENCE_BAND_RANGE: Readonly<Record<InfluenceBand, readonly [number, number]>> = {
-  weak: [0, INFLUENCE_BAND_THRESHOLDS.moderate],
-  moderate: [INFLUENCE_BAND_THRESHOLDS.moderate, INFLUENCE_BAND_THRESHOLDS.strong],
-  strong: [INFLUENCE_BAND_THRESHOLDS.strong, INFLUENCE_BAND_THRESHOLDS.veryStrong],
-  'very strong': [INFLUENCE_BAND_THRESHOLDS.veryStrong, 1],
-};
-const bandMidpoint = (band: InfluenceBand): number => {
-  const [lo, hi] = INFLUENCE_BAND_RANGE[band];
-  return Math.round(((lo + hi) / 2) * 1000) / 1000;
-};
-const isInfluenceBand = (v: unknown): v is InfluenceBand => typeof v === 'string' && Object.hasOwn(INFLUENCE_BAND_RANGE, v);
+const bandMidpoint = (band: InfluenceBand): number => EDGE_STRENGTH_MIDPOINTS[band];
+const isInfluenceBand = (v: unknown): v is InfluenceBand => typeof v === 'string' && Object.hasOwn(EDGE_STRENGTH_MIDPOINTS, v);
 
 /**
  * ⛔ A NAME SHARED BY TWO ACCEPTABLE TARGETS NAMES NEITHER.
@@ -1537,7 +1530,7 @@ export function createAgentCapabilities(
       const current: 'positive' | 'negative' = edge.effect_direction === 'negative' || edge.effect_direction === 'positive'
         ? edge.effect_direction : (mean < 0 ? 'negative' : 'positive');
       const wanted = args.direction === 'positive' || args.direction === 'negative' ? args.direction : current;
-      const currentBand = bandFromMagnitude(Math.abs(mean));
+      const currentBand = edgeBandFromMagnitude(Math.abs(mean));
       // Already in the band the user named, pushing the same way: KEEP the figure, record it as theirs.
       const confirm = currentBand === band && wanted === current;
       const magnitude = confirm ? Math.abs(mean) : bandMidpoint(band);

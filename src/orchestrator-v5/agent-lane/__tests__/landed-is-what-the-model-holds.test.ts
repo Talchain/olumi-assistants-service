@@ -94,6 +94,8 @@ const anotherWriterMovesSomethingElse = (g: G): G => g;
 const anotherWriterChangesTheLink = (g: G): G => ({ ...g, edges: g.edges.map((e) => ({ ...e, strength: { ...e.strength, mean: 0.3 }, provenance: { source: 'cee_hypothesis' } })) });
 
 describe('link strength: landed is what the model holds, never whether two revisions are equal', () => {
+  // ONE EDGE-STRENGTH VOCABULARY (#2003): bands are the canvas's (0.2 / 0.4 / 0.7). A value-write row starts at 0.25
+  // (Moderate, and not the other writer's 0.3), so "strong" writes 0.55; the provenance-only row starts at 0.5, already Strong.
   const propose = async (w: ReturnType<typeof world>, store: ProposalStore) => {
     const caps = createAgentCapabilities(w.d, store);
     const p = await caps.proposeLinkStrength!(ctx, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'The user said so.' });
@@ -102,19 +104,19 @@ describe('link strength: landed is what the model holds, never whether two revis
   };
 
   it('RED (the reviewer\'s probe): 200 + another writer moves the model + the link holds exactly 0.825, the user\'s → LANDED, marked applied, "Saved."', async () => {
-    const w = world(linkAt(0.5), linkWriter());
+    const w = world(linkAt(0.25), linkWriter());
     const store = new ProposalStore();
     const { caps, id } = await propose(w, store);
     w.set(anotherWriterMovesSomethingElse);
     const r = await caps.authoriseChange(ctx, { proposal_id: id });
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true, proposal_id: id }));
-    expect(r.follow_up).toBe('Recorded "Pro plan price" → "MRR" as strong (0.825 on Olumi\'s 0–1 scale), as your own estimate.');
+    expect(r.follow_up).toBe('Recorded "Pro plan price" → "MRR" as strong (0.55 on Olumi\'s 0–1 scale), as your own estimate.');
     expect(said(r)).toBe('Saved.');
     expect(store.outstanding(SCENARIO, null)).toEqual([]);
   });
 
   it('RED: 200 + another writer then changes THAT link → not_verified, mutated:true, "could not be confirmed" — never "Not saved"; NOT marked applied', async () => {
-    const w = world(linkAt(0.5), linkWriter());
+    const w = world(linkAt(0.25), linkWriter());
     const store = new ProposalStore();
     const { caps, id } = await propose(w, store);
     w.set(anotherWriterChangesTheLink);
@@ -127,7 +129,7 @@ describe('link strength: landed is what the model holds, never whether two revis
   });
 
   it('RED: a provenance-only confirm (the revision does not move) whose own committed post-state holds the change, then another writer changes the link → not_verified, never "Not saved"', async () => {
-    const w = world(linkAt(0.8), linkWriter({ draft: true }));
+    const w = world(linkAt(0.5), linkWriter({ draft: true }));
     const { caps, id } = await propose(w, new ProposalStore());
     w.set(anotherWriterChangesTheLink);
     const r = await caps.authoriseChange(ctx, { proposal_id: id });
@@ -135,7 +137,7 @@ describe('link strength: landed is what the model holds, never whether two revis
   });
 
   it('CONTRAST (passes at base): the writer refuses (200, revision unmoved) while another writer moves the model → "Not saved", mutated:false — the response shows nothing was committed', async () => {
-    const w = world(linkAt(0.5), linkWriter({ refuse: true }));
+    const w = world(linkAt(0.25), linkWriter({ refuse: true }));
     const store = new ProposalStore();
     const { caps, id } = await propose(w, store);
     w.set(anotherWriterMovesSomethingElse);
@@ -146,7 +148,7 @@ describe('link strength: landed is what the model holds, never whether two revis
   });
 
   it('CONTROL (passes at base): no other writer → landed, "Saved."', async () => {
-    const w = world(linkAt(0.5), linkWriter());
+    const w = world(linkAt(0.25), linkWriter());
     const { caps, id } = await propose(w, new ProposalStore());
     const r = await caps.authoriseChange(ctx, { proposal_id: id });
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true }));

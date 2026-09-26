@@ -178,7 +178,7 @@ describe('TurnExecutor coefficient-confidence authority', () => {
     expect(pack.graph.nodes.find((node) => node.id === 'factor_demand')?.label).toBe(
       'Provisional demand signal',
     );
-    expect(pack.graph.edges[0]?.relationship).toBe('moderate positive link');
+    expect(pack.graph.edges[0]?.relationship).toBe('strong positive link');
     expect(pack.graph.edges[0]).not.toHaveProperty('coefficient_confidence');
   });
 });
