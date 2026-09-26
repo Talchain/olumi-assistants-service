@@ -197,7 +197,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'and returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
       + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
       + 'recorded as theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
-      + 'Give `direction` ONLY when the user said the link pushes the other way. Never use this for a strength the user did not state.',
+      + 'Give `direction` ONLY when the user said the link pushes the other way. Never use this for a strength the user did not state: '
+      + 'if they have not named a band in their own words, ask which it is first \u2014 a band they did not say is refused.',
     parameters: obj({
       from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
       to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
