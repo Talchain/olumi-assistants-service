@@ -407,7 +407,7 @@ describe('what the user is told before they agree', () => {
     const out = await toolFor(GRAPH_COMPLETE, NEVER_RUN, {
       resolveAdmission: () => ({
         ...real,
-        plan: { will_scaffold_options: true, option_count: 0, scaffolded_option_ids: [] },
+        plan: { will_scaffold_options: true, option_count: 0, scaffolded_option_ids: [], excluded_option_ids: [] },
       }),
     }).execute({});
     if (out.type !== 'proposed') throw new Error('expected a proposal');

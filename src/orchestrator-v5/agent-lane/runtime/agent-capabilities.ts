@@ -113,6 +113,7 @@ import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
 import { readinessViewOf } from '../readiness-view.js';
 import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
+import { bandFromMagnitude, INFLUENCE_BAND_THRESHOLDS, type InfluenceBand } from '../../format/influence-bands.js';
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
@@ -325,7 +326,7 @@ interface GraphRead {
     from: string;
     to: string;
     origin?: unknown;
-    /** Read only by `projectLinks` — whose link it is, and how strong (C33). */
+    /** Whose link it is and how strong: read by the model context (C33) and the link-strength proposal and its write check. */
     provenance?: unknown;
     strength?: unknown;
     exists_probability?: unknown;
@@ -572,6 +573,24 @@ function earlierAnalysisOf(state: unknown): { analysis: Record<string, unknown> 
   const kind = (rest.run_state as { kind?: unknown } | undefined)?.kind;
   return { analysis: { ...(typeof kind === 'string' ? { earlier_analysis: kind } : {}), ...rest } };
 }
+
+/**
+ * ⭐ A STRENGTH WORD IS A BAND ON THE PRODUCT'S OWN THRESHOLDS (`INFLUENCE_BAND_THRESHOLDS`, the one table the
+ * narration reads its "weak / moderate / strong" from). When a link must be SET to a band the user named, it is
+ * set to that band's midpoint — derived from the thresholds, never a second table — and the preview says the
+ * figure before the user approves it.
+ */
+const INFLUENCE_BAND_RANGE: Readonly<Record<InfluenceBand, readonly [number, number]>> = {
+  weak: [0, INFLUENCE_BAND_THRESHOLDS.moderate],
+  moderate: [INFLUENCE_BAND_THRESHOLDS.moderate, INFLUENCE_BAND_THRESHOLDS.strong],
+  strong: [INFLUENCE_BAND_THRESHOLDS.strong, INFLUENCE_BAND_THRESHOLDS.veryStrong],
+  'very strong': [INFLUENCE_BAND_THRESHOLDS.veryStrong, 1],
+};
+const bandMidpoint = (band: InfluenceBand): number => {
+  const [lo, hi] = INFLUENCE_BAND_RANGE[band];
+  return Math.round(((lo + hi) / 2) * 1000) / 1000;
+};
+const isInfluenceBand = (v: unknown): v is InfluenceBand => typeof v === 'string' && Object.hasOwn(INFLUENCE_BAND_RANGE, v);
 
 /**
  * ⛔ A NAME SHARED BY TWO ACCEPTABLE TARGETS NAMES NEITHER.
@@ -1324,6 +1343,84 @@ export function createAgentCapabilities(
       };
     },
 
+    /**
+     * ⭐ CHALLENGE → AUTHORISED REVISION. The user says how strong an existing link is; ONE change records it as
+     * theirs, through the product's own link writer (`edge_strength_edit`) on approval. Served (F) row F8 on
+     * `319dde1`: without this the Agent answered "I could not record 'strong' separately".
+     */
+    async proposeLinkStrength(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      if (!isInfluenceBand(args?.strength)) {
+        return { ok: false, mutated: false, refusal: 'unreadable_strength',
+          detail: 'The strength must be one of: weak, moderate, strong, very strong. Nothing was prepared; ask the user which.' };
+      }
+      const band = args.strength;
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const fromRes = resolveNamed(g, String(args.from_label ?? ''), () => true);
+      const toRes = resolveNamed(g, String(args.to_label ?? ''), () => true);
+      const ambiguousEnds = [
+        ...(fromRes.kind === 'ambiguous' ? [describeAmbiguity(g, String(args.from_label ?? ''), fromRes.candidates)] : []),
+        ...(toRes.kind === 'ambiguous' ? [describeAmbiguity(g, String(args.to_label ?? ''), toRes.candidates)] : []),
+      ];
+      if (ambiguousEnds.length > 0) {
+        return { ok: false, mutated: false, refusal: 'ambiguous_entity', ambiguous_targets: ambiguousEnds, ambiguous_note: AMBIGUOUS_NOTE,
+          detail: 'Nothing was proposed: more than one entity carries that name.' };
+      }
+      const from = fromRes.kind === 'one' ? fromRes.node : undefined;
+      const to = toRes.kind === 'one' ? toRes.node : undefined;
+      if (from === undefined || to === undefined) {
+        return { ok: false, mutated: false, refusal: 'unresolved_entity',
+          detail: `No entity is labelled "${from === undefined ? args.from_label : args.to_label}". Read the state again and use a label exactly as it appears.` };
+      }
+      const edge = g.edges.find((e) => e.from === from.id && e.to === to.id);
+      if (edge === undefined) {
+        return { ok: false, mutated: false, refusal: 'no_such_link',
+          detail: `The model has no link from "${from.label}" to "${to.label}", so there is no strength to record. Nothing was prepared. `
+            + 'If the user wants that link, offer to add it with propose_model_change.' };
+      }
+      const mean = (edge.strength !== null && typeof edge.strength === 'object') ? (edge.strength as { mean?: unknown }).mean : undefined;
+      if (typeof mean !== 'number' || !Number.isFinite(mean)) {
+        return { ok: false, mutated: false, refusal: 'unreadable_link', detail: 'That link carries no readable strength, so nothing was prepared. Tell the user plainly.' };
+      }
+      const current: 'positive' | 'negative' = edge.effect_direction === 'negative' || edge.effect_direction === 'positive'
+        ? edge.effect_direction : (mean < 0 ? 'negative' : 'positive');
+      const wanted = args.direction === 'positive' || args.direction === 'negative' ? args.direction : current;
+      const currentBand = bandFromMagnitude(Math.abs(mean));
+      // Already in the band the user named, pushing the same way: KEEP the figure, record it as theirs.
+      const confirm = currentBand === band && wanted === current;
+      const magnitude = confirm ? Math.abs(mean) : bandMidpoint(band);
+      const value = {
+        magnitude,
+        intent: confirm ? 'confirm_current' : 'set',
+        direction_intent: confirm || args.direction === undefined ? 'preserve' : wanted,
+        expected: { mean, effect_direction: current },
+      };
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash,
+        operations: [{ op: 'update_edge', path: `${from.id}::${to.id}`, value }],
+        provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: confirm
+          ? `Record "${from.label}" \u2192 "${to.label}" as ${band}, as your own estimate (strength kept at ${Math.abs(mean)})`
+          : `Record "${from.label}" \u2192 "${to.label}" as ${band} (${magnitude} on Olumi's 0\u20131 scale), as your own estimate${wanted !== current ? `, pushing ${wanted === 'positive' ? 'up' : 'down'}` : ''}`,
+      });
+      proposals.put(proposal);
+      return {
+        ok: true, mutated: false,
+        proposal_id: proposal.proposal_id,
+        public_label: proposal.public_label,
+        base_revision: g.graph_hash,
+        link: { from: from.label, to: to.label, was: { band: currentBand, strength: Math.abs(mean), direction: current },
+          becomes: { band, strength: magnitude, direction: wanted }, keeps_current_strength: confirm },
+        note: confirm
+          ? 'Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree.'
+          : `Nothing has changed yet. Tell the user it will be recorded as ${band}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree.`,
+      };
+    },
+
     async proposeModelChange(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const g = await readGraph(ctx.scenario_id);
@@ -2039,6 +2136,49 @@ export function createAgentCapabilities(
         return {
           ok: false, mutated: false, refusal: 'superseded', proposal_id: decision.proposal.proposal_id,
           detail: 'That offer to add an option was prepared before an update and can no longer be applied. Nothing was changed. Offer to prepare it again.',
+        };
+      }
+
+      /**
+       * ⭐ A LINK'S STRENGTH, AS THE USER STATED IT — ONE typed `edge_strength_edit`, the product's own link writer
+       * (the inspector's canonical D1 path, with its expected-before tuple). Reported as applied ONLY when this
+       * response succeeded AND the stored link now holds exactly what was approved, stamped as the user's.
+       */
+      if (ops.length === 1 && ops[0]!.op === 'update_edge') {
+        const op = ops[0]!;
+        const [fromId, toId] = op.path.split('::') as [string, string];
+        const v = op.value as { magnitude: number; intent: 'set' | 'confirm_current'; direction_intent: 'preserve' | 'positive' | 'negative'; expected: { mean: number; effect_direction: 'positive' | 'negative' } };
+        const operationId = authorisationTurnId(decision.proposal.proposal_id);
+        const res = await dispatch('/orchestrate/v2/turn', {
+          kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
+          event: { kind: 'edge_strength_edit', from: fromId, to: toId, intent: v.intent, direction_intent: v.direction_intent, magnitude: v.magnitude, expected: v.expected },
+        });
+        const after = await readGraph(ctx.scenario_id);
+        const e = after?.edges.find((x) => x.from === fromId && x.to === toId);
+        const dir = v.direction_intent === 'preserve' ? v.expected.effect_direction : v.direction_intent;
+        const want = dir === 'negative' ? -v.magnitude : v.magnitude;
+        const got = (e?.strength as { mean?: unknown } | undefined)?.mean;
+        const src = (e?.provenance !== null && typeof e?.provenance === 'object') ? (e.provenance as { source?: unknown }).source : undefined;
+        const landed = res.status === 200 && typeof got === 'number' && Math.abs(got - want) < 1e-9 && src === 'user_specified'
+          && (typeof res.json.graph_hash !== 'string' || res.json.graph_hash === after?.graph_hash);
+        if (after === null && res.status === 200) {
+          // The write may have landed; the read-back failed. Never "as it was" when Olumi cannot see (review of #1950).
+          return { ok: false, mutated: false, applied: false, refusal: 'not_confirmed', proposal_id: decision.proposal.proposal_id,
+            detail: 'Olumi could not read the model back to confirm whether the link was recorded. Tell the user plainly that it could not be confirmed, and offer to check again.' };
+        }
+        if (!landed) {
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: decision.proposal.proposal_id,
+            detail: String(res.json.assistant_text ?? '').trim() !== ''
+              ? `The link was not recorded. Olumi said: "${String(res.json.assistant_text).trim()}" Tell the user plainly; nothing else changed.`
+              : 'The link was not recorded, so the model is as it was. Tell the user plainly.' };
+        }
+        const receipt = receiptSummaryOf(res.json);
+        const receipts = receipt.summary !== null ? [receipt.summary] : [];
+        proposals.markApplied(decision.proposal.proposal_id, receipts);
+        return {
+          ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, operation_id: operationId, receipts,
+          ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
+          follow_up: `Recorded as the user's own estimate: ${decision.proposal.public_label.replace(/^Record /, '')}. Offer to run the analysis again so they can see what it changes.`,
         };
       }
 

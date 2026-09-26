@@ -576,12 +576,13 @@ describe('missing_important_inputs', () => {
     // comparison's confidence rests on is Olumi's own estimate.
     expect(verdict.structurally_analysable).toBe(true);
     expect(verdict.permitted_analysis_mode).toBe('quantified_provisional');
-    expect(
-      verdict.reasons.some(
-        (r) =>
-          r.field === 'structurally_analysable' && r.code === 'RUN_WILL_EXCLUDE_OPTIONS',
-      ),
-    ).toBe(true);
+    // ⚠ CORRECTED (served bf-20260926T054503Z): "Do nothing yet" is a status quo, so the run's gate HOLDS it at
+    // the current values and SUBMITS it — it is waived (above) but not left out. This row used to assert
+    // RUN_WILL_EXCLUDE_OPTIONS ("leaving out one option") here, which is the false sentence the served Agent
+    // said about "Status Quo". The reason now follows the plan's own EXCLUDED list, by identity.
+    expect(admission.plan.scaffolded_option_ids).toContain('opt_c');
+    expect(admission.plan.excluded_option_ids).toEqual([]);
+    expect(verdict.reasons.find((r) => r.field === 'structurally_analysable')?.code).toBe('READY_TO_COMPARE');
   });
 
   it('an admissible model reports no missing inputs', () => {

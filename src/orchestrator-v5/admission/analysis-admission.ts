@@ -1191,11 +1191,14 @@ export function analysisAdmissionFrom(
       code: admission.strict.safeToAnalyse ? 'NOTHING_TO_COMPARE' : 'MODEL_HAS_BLOCKERS',
       message: admission.blockedNextStep ?? MODE_REASON.none.message,
     });
-  } else if (admission.waivedOptionIds.length > 0) {
+  } else if (admission.plan.excluded_option_ids.length > 0) {
+    // Counts what the run LEAVES OUT, never what it waives: a held status quo is waived AND compared
+    // (`ScaffoldPlan.excluded_option_ids`).
+    const left = admission.plan.excluded_option_ids.length;
     reasons.push({
       field: 'structurally_analysable',
       code: 'RUN_WILL_EXCLUDE_OPTIONS',
-      message: `Analysis can run, leaving out ${admission.waivedOptionIds.length === 1 ? 'one option' : `${admission.waivedOptionIds.length} options`} you have not set values for.`,
+      message: `Analysis can run, leaving out ${left === 1 ? 'one option' : `${left} options`} you have not set values for.`,
     });
   } else {
     reasons.push({

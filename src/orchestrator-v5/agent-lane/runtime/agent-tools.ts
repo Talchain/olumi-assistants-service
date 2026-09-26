@@ -169,6 +169,24 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function',
+    name: 'propose_link_strength',
+    description:
+      'Record how strong an EXISTING link is, as the user\u2019s own estimate, when the user has just said it (for example '
+      + '"that effect is strong", or "it actually pushes the other way"). This does NOT change anything: it prepares ONE change '
+      + 'and returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
+      + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
+      + 'recorded as theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
+      + 'Give `direction` ONLY when the user said the link pushes the other way. Never use this for a strength the user did not state.',
+    parameters: obj({
+      from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
+      to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
+      strength: { type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'], description: 'The strength the user stated.' },
+      direction: { type: 'string', enum: ['positive', 'negative'], description: 'ONLY when the user said the link pushes the other way.' },
+      rationale: { type: 'string', description: 'What the user said, in their words.' },
+    }, ['from_label', 'to_label', 'strength', 'rationale']),
+  },
+  {
+    type: 'function',
     name: 'propose_option_interventions',
     description:
       'Propose the level an option sets a factor to \u2014 what the option actually DOES. An option ' +
@@ -258,7 +276,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'authorise_change'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_link_strength', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'authorise_change'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -290,6 +308,11 @@ export interface AgentCapabilities {
     from_label: string; to_label: string; direction: 'positive' | 'negative'; rationale: string;
   }): Promise<ToolResult>;
   authoriseChange(ctx: AgentToolContext, args: { proposal_id: string }): Promise<ToolResult>;
+  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
+  proposeLinkStrength?(ctx: AgentToolContext, args: {
+    from_label: string; to_label: string; strength: 'weak' | 'moderate' | 'strong' | 'very strong';
+    direction?: 'positive' | 'negative'; rationale: string;
+  }): Promise<ToolResult>;
   runAnalysis(ctx: AgentToolContext, args: { reason: string }): Promise<ToolResult>;
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
@@ -345,6 +368,10 @@ export async function dispatchTool(
       return caps.proposeAssumptions(ctx, args as never);
     case 'propose_new_option':
       return caps.proposeNewOption(ctx, args as never);
+    case 'propose_link_strength':
+      return caps.proposeLinkStrength !== undefined
+        ? caps.proposeLinkStrength(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'Link strengths cannot be recorded here. Nothing was changed.' };
     case 'propose_option_interventions':
       return caps.proposeOptionInterventions(ctx, args as never);
     case 'propose_starting_point':
