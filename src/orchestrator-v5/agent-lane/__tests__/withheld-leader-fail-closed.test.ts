@@ -126,8 +126,9 @@ describe('dropping ranking sentences', () => {
 
 describe('the no-leader sentence', () => {
   it('names the typed reason and one next action', () => {
+    // DL #70 5847835872: never "fix the limit, run again" when no typed cause proves the limit is what would change.
     expect(agentNoLeaderSentence('constraint_verdict_withheld', undefined)).toBe(
-      'No single option can be put forward yet, because a limit on your model was not shown to be met on this run; tell me whether that limit is right as it stands, then run the analysis again.',
+      'No single option can be put forward yet, because a limit on your model was not shown to be met on this run, and running the analysis again as it stands will not change that; ask me what the limit needs before it can be checked.',
     );
     expect(agentNoLeaderSentence('options_do_not_separate', undefined)).toContain('too close together');
     expect(agentNoLeaderSentence('separation_unavailable', undefined)).toContain('how far apart the options are was not established');
