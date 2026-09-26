@@ -30,6 +30,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_new_option: { label: 'Add this option', message: 'Yes, add that option.' },
   // A link's strength recorded as the user's own (challenge → authorised revision): one button, carried like the rest.
   propose_link_strength: { label: 'Record this link', message: 'Yes, record that.' },
+  // The goal's success target the user stated, written through the product's typed target writer.
+  propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
 };
 
 export const AMEND_CHIP: SuggestedAction = {
@@ -120,8 +122,8 @@ const MIN_ENTITY_CHARS = 6;
 const entriesOf = (x: unknown): Record<string, unknown>[] =>
   (Array.isArray(x) ? x.filter((e): e is Record<string, unknown> => e !== null && typeof e === 'object') : []);
 
-/** The figure in the user's units, exactly as stored, or null when it cannot be shown exactly. */
-function figureInUserUnits(value: unknown, unit: unknown): string | null {
+/** The figure in the user's units, exactly as stored, or null when it cannot be shown exactly. Also names a goal target's figure. */
+export function figureInUserUnits(value: unknown, unit: unknown): string | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
   const u = typeof unit === 'string' ? unit.trim() : '';
   // "GBP/year", "£ per month": the currency figure, then its period.
