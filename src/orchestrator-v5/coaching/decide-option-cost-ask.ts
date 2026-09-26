@@ -68,6 +68,7 @@
  * Pure: no I/O, no LLM, no telemetry, no clock.
  */
 
+import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { sameUnit } from '../routing/native-quantity-operation.js';
 
 /** A graph NODE, at the shape this decision needs. Used only to resolve the target factor. */
@@ -146,6 +147,9 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 function isMonetaryish(c: OptionCostAskConstraint): boolean {
   const unit = typeof c.unit === 'string' ? c.unit.trim() : '';
   if (unit.length === 0) return false;
+  // ⛔ A RATE IN ANY SPELLING. The drafter writes "percent per month"; the exact set above missed it, and the ask then
+  // wanted an option's "cost" in percent per month. The classifier reads every percent / point / basis-point spelling.
+  if (classifyUnitScaleClass(unit) !== 'unknown') return false;
   return !NON_NATIVE_UNITS.has(unit.toLowerCase());
 }
 
