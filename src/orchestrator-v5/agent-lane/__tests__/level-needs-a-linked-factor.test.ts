@@ -41,7 +41,7 @@ const NODES: Node[] = [
 const EDGES = [edge('hire_two', 'team_size'), edge('internal_trial', 'coordination_load'), edge('team_size', 'velocity'), edge('coordination_load', 'velocity')];
 type Edge = ReturnType<typeof edge>;
 
-function fakeProduct(opts: { refuseLinks?: boolean } = {}) {
+function fakeProduct(opts: { refuseLinks?: boolean; refuseLevels?: boolean } = {}) {
   const posted: { kind: string; target: string }[] = [];
   let edges: Edge[] = EDGES.map((e) => ({ ...e }));
   let nodes: Node[] = NODES.map((n) => ({ ...n, ...(n.observed_state ? { observed_state: { ...n.observed_state } } : {}) }));
@@ -71,7 +71,7 @@ function fakeProduct(opts: { refuseLinks?: boolean } = {}) {
         posted.push({ kind: 'option_intervention_edit', target: `${o}::${f}` });
         if (ev.base_graph_hash !== `h${rev}`) return { status: 409, json: { error: 'GRAPH_DIVERGED' } };
         // The served rule (`option-intervention-edit.ts`, `linkedFactorsOf`).
-        if (!linked(o, f)) return { status: 422, json: { refusal_reason: 'unresolved_effect_relationship' } };
+        if (opts.refuseLevels === true || !linked(o, f)) return { status: 422, json: { refusal_reason: 'unresolved_effect_relationship' } };
         nodes = nodes.map((n) => (n.id === o ? { ...n, interventions: { ...(n.interventions ?? {}), [f]: { value: ev.value } } } : n));
         rev += 1;
         return { status: 200, json: { assistant_text: 'Recorded.', graph_hash: `h${rev}` } };
@@ -133,6 +133,27 @@ describe('a level brings its link: ONE proposal, the link written before the lev
     expect(out.ok).toBe(false);
     expect(out.applied).not.toBe(true);
     expect(p.posted.filter((x) => x.kind === 'option_intervention_edit')).toEqual([]);
+  });
+
+  it('RED (Canonical #2004 B1): the link LANDS, then its level is refused → the result says the model changed and names the link', async () => {
+    const p = fakeProduct({ refuseLevels: true });
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const r = await caps.proposeOptionInterventions(ctx, { interventions: [
+      { option_label: 'Internal Lead Trial', factor_label: 'Team size', value: 6, basis: 'a trial adds one' },
+    ] });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
+    expect(p.edges().some((e) => e.from === 'internal_trial' && e.to === 'team_size'), 'premise: the link landed').toBe(true);
+    expect(out.ok).toBe(false);
+    expect(out.mutated, 'the model gained a link').toBe(true);
+    expect(out.refusal).toBe('partially_applied');
+    expect(out.revision_after).not.toBe(out.revision_before);
+    expect(out.parts).toEqual([
+      { part: 'links', ok: true, recorded_count: 1, requested_count: 1 },
+      { part: 'option_levels', ok: false, recorded_count: 0, requested_count: 1 },
+    ]);
+    expect(String(out.detail)).toContain('Internal Lead Trial \u2192 Team size');
   });
 
   it('RED: a starting point with a level on an unlinked factor lands EVERY level it carries, the link first', async () => {

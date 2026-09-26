@@ -1189,6 +1189,9 @@ export function createAgentCapabilities(
     let levelsRecorded = 0;
     let levelStop: string | null = null;
     const linkOps = parent.operations.filter(isLevelLink);
+    // ⛔ A link that LANDED is a change to the model even when a later level is refused (Canonical #2004 B1).
+    const linksAdded: string[] = [];
+    const labelOf = (id: string): string => approvedRead.nodes.find((n) => n.id === id)?.label ?? id;
     for (let i = 0; i < linkOps.length; i += 1) {
       const [fromId, toId] = linkOps[i]!.path.split('::');
       const r = await dispatch('/orchestrate/v2/turn', {
@@ -1206,6 +1209,7 @@ export function createAgentCapabilities(
       const rc = receiptSummaryOf(r.json);
       if (rc.summary !== null) receipts.push(rc.summary);
       carried = next;
+      linksAdded.push(`${labelOf(fromId!)} \u2192 ${labelOf(toId!)}`);
     }
 
     // (3) Levels, each CAS-gated on the revision our OWN previous write produced.
@@ -1250,11 +1254,12 @@ export function createAgentCapabilities(
     if (all) proposals.markApplied(parent.proposal_id, receipts);
     const parts = [
       ...(valueOps.length > 0 ? [{ part: 'values', ok: valuesLanded, recorded_count: valuesLanded ? valueOps.length : 0, requested_count: valueOps.length }] : []),
+      ...(linkOps.length > 0 ? [{ part: 'links', ok: linksAdded.length === linkOps.length, recorded_count: linksAdded.length, requested_count: linkOps.length }] : []),
       ...(levelOps.length > 0 ? [{ part: 'option_levels', ok: levelStop === null, recorded_count: levelsRecorded, requested_count: levelOps.length }] : []),
     ];
     return {
       ok: all,
-      mutated: valuesLanded || levelsRecorded > 0,
+      mutated: valuesLanded || linksAdded.length > 0 || levelsRecorded > 0,
       applied: all,
       proposal_id: parent.proposal_id,
       parts,
@@ -1272,8 +1277,11 @@ export function createAgentCapabilities(
               'say so when you describe what changed.',
           }
         : {
-            refusal: valuesLanded || levelsRecorded > 0 ? 'partially_applied' : 'not_applied',
-            detail: `${levelStop ?? 'Not every change was recorded'}. Tell the user exactly which part was recorded and which was not.`,
+            refusal: valuesLanded || linksAdded.length > 0 || levelsRecorded > 0 ? 'partially_applied' : 'not_applied',
+            detail:
+              `${levelStop ?? 'Not every change was recorded'}.` +
+              (linksAdded.length > 0 ? ` These links WERE added and stay in the model: ${linksAdded.join('; ')}.` : '') +
+              ' Tell the user exactly which part was recorded and which was not.',
           }),
     };
   };
