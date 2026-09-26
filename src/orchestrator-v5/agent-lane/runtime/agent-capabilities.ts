@@ -509,7 +509,9 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
     .filter((c): c is Record<string, unknown> => c !== null && typeof c === 'object')
     .filter((c) => str(c.operator) && num(c.value))
     .map((c) => ({
-      on: str(c.label) ? c.label : (str(c.node_id) ? (labelOf.get(c.node_id) ?? c.node_id) : 'the goal'),
+      // Named as the run-turn limit card names it (#1935): the node the limit sits on, joined by id; the row's
+      // own label only when that node is absent — so the card and the Agent say the same words for one limit.
+      on: (str(c.node_id) ? labelOf.get(c.node_id) : undefined) ?? (str(c.label) ? c.label : 'the goal'),
       operator: c.operator,
       value: c.value,
       ...(str(c.unit) ? { unit: c.unit } : {}),
