@@ -89,7 +89,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
         proposeNext = false;
         return new Response(JSON.stringify({ output: [{
           type: 'function_call', name: 'propose_model_change', call_id: `c${modelBodies.length}`,
-          arguments: JSON.stringify({ from_label: 'Team size', to_label: 'Velocity', direction: 'positive', rationale: 'It moves velocity.' }),
+          arguments: JSON.stringify({ from_label: 'Team size', to_label: 'Velocity', direction: 'positive', strength: 'strong', rationale: 'It moves velocity.' }),
         }] }), { status: 200 });
       }
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'In the current model, the link matters.' }] }] }), { status: 200 });
@@ -103,7 +103,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
 
   /** Propose (one Agent turn), then approve through the typed chip (fast path 2). */
   async function proposeThenApprove(approveTurnId?: string): Promise<{ suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string } }> {
-    const t1 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Should team size drive velocity?' } });
+    const t1 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Team size strongly drives velocity, so connect them.' } });
     const approve = (t1.json() as { suggested_actions: Chip[] }).suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
     expect(approve, 'the control: a real proposal was offered').toBeDefined();
     lastApproveId = approve!.id;
@@ -190,16 +190,16 @@ describe('the explicit Run is offered after a change the canonical readiness adm
 
   it('CONTROL: an agent-loop turn that APPLIES one proposal and PROPOSES another offers that approval, not the next-step chip', async () => {
     readiness = { status: 'blocked', may_run: false, blockers: null }; // a known refusal: the chip WOULD fire but for the waiting approval
-    const t1 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Should team size drive velocity?' } });
+    const t1 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Team size strongly drives velocity, so connect them.' } });
     const first = (t1.json() as { suggested_actions: Chip[] }).suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
     expect(first, 'the control: a real first proposal').toBeDefined();
     const proposalId = first!.id.slice('agent-approve-proposal:'.length);
     script = [
       { type: 'function_call', name: 'authorise_change', call_id: 'a1', arguments: JSON.stringify({ proposal_id: proposalId }) },
-      { type: 'function_call', name: 'propose_model_change', call_id: 'p2', arguments: JSON.stringify({ from_label: 'Tooling', to_label: 'Velocity', direction: 'positive', rationale: 'Better tools speed delivery.' }) },
+      { type: 'function_call', name: 'propose_model_change', call_id: 'p2', arguments: JSON.stringify({ from_label: 'Tooling', to_label: 'Velocity', direction: 'positive', strength: 'moderate', rationale: 'Better tools speed delivery.' }) },
       { type: 'message', content: [{ type: 'output_text', text: 'Applied the first link; the second is ready for your approval.' }] },
     ];
-    const t2 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Yes, apply that, and should tooling drive velocity too?' } });
+    const t2 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Yes, apply that. Tooling moderately drives velocity too, so connect it.' } });
     const b = t2.json() as { suggested_actions: Chip[]; _agent: { tool_calls: { name: string; mutated: boolean }[] } };
     expect(b._agent.tool_calls.find((c) => c.name === 'authorise_change')?.mutated, 'PRECONDITION: the first approval applied').toBe(true);
     expect(b.suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:')), 'PRECONDITION: the second proposal is waiting').toBe(true);
@@ -296,14 +296,14 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     it('the SAME invariant covers the approve chip: replayed while its proposal is outstanding, dropped once it is applied', async () => {
       readiness = { status: 'needs_user_input', may_run: false };
       const T = '51111111-2222-4333-8444-555555555555';
-      const offer = await replay({ kind: 'message', scenario_id: SCENARIO, message: 'Should team size drive velocity?', turn_id: T });
+      const offer = await replay({ kind: 'message', scenario_id: SCENARIO, message: 'Team size strongly drives velocity, so connect them.', turn_id: T });
       const chip = offer.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'))!;
       expect(chip, 'the control: a proposal was offered').toBeDefined();
-      const again = await replay({ kind: 'message', scenario_id: SCENARIO, message: 'Should team size drive velocity?', turn_id: T });
+      const again = await replay({ kind: 'message', scenario_id: SCENARIO, message: 'Team size strongly drives velocity, so connect them.', turn_id: T });
       expect(again._agent.replayed).toBe(true);
       expect(again.suggested_actions.map((c) => c.id)).toEqual([chip.id, 'agent-amend-proposal']);
       await replay({ kind: 'message', scenario_id: SCENARIO, message: chip.message, source: 'chip', chip: { id: chip.id } });
-      const afterApply = await replay({ kind: 'message', scenario_id: SCENARIO, message: 'Should team size drive velocity?', turn_id: T });
+      const afterApply = await replay({ kind: 'message', scenario_id: SCENARIO, message: 'Team size strongly drives velocity, so connect them.', turn_id: T });
       expect(afterApply._agent.replayed).toBe(true);
       expect(afterApply.suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:')), 'an applied proposal is never re-offered').toBe(false);
     });
@@ -388,9 +388,9 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     it('CONTRAST: an approve chip fails closed after a restart — its proposal lived in the old process', async () => {
       readiness = { status: 'needs_user_input', may_run: false };
       const T = 'b1111111-2222-4333-8444-555555555555';
-      const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Should team size drive velocity?', turn_id: T } });
+      const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Team size strongly drives velocity, so connect them.', turn_id: T } });
       expect((first.json() as { suggested_actions: Chip[] }).suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:')), 'the control: offered originally').toBe(true);
-      const again = await onFresh({ kind: 'message', scenario_id: SCENARIO, message: 'Should team size drive velocity?', turn_id: T });
+      const again = await onFresh({ kind: 'message', scenario_id: SCENARIO, message: 'Team size strongly drives velocity, so connect them.', turn_id: T });
       expect(again._agent.replayed).toBe(true);
       expect(again.suggested_actions.some((c) => c.id.startsWith('agent-approve-proposal:')), 'never an approval for a proposal this process does not hold').toBe(false);
     });

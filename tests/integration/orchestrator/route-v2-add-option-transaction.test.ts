@@ -251,7 +251,9 @@ describe('route-v2 — typed add-option transaction pre-route (C2)', () => {
   });
 
   // ── (A) several options, ONE hold (Canonical CONTRACT #70 5841241418) ──────
-  const opt = (label: string) => ({ label, interventions: [{ factor_id: 'fac_effort', value: 0.5 }] });
+  // Each option a DIFFERENT level: two options with the same levels are one choice, and are refused.
+  let nextLevel = 0.5;
+  const opt = (label: string) => ({ label, interventions: [{ factor_id: 'fac_effort', value: (nextLevel += 0.05) }] });
 
   it('(c) options:[…] → ONE held pending carrying every option, with the typed cap recorded', async () => {
     const { status, body } = await post(

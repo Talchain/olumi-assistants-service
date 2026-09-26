@@ -111,13 +111,13 @@ import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSumm
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
-import { readinessViewOf } from '../readiness-view.js';
+import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
 import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { bandFromMagnitude, INFLUENCE_BAND_THRESHOLDS, type InfluenceBand } from '../../format/influence-bands.js';
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
-import { contradictsItsName, figureTheUserWrote } from '../stated-by-user.js';
+import { bandTheUserWrote, contradictsItsName, figureTheUserWrote } from '../stated-by-user.js';
 import { defaultFrameFor, nonlinearIdentityForAgent } from '../admit-model.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
@@ -126,6 +126,7 @@ import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysis
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
+import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 
 /**
@@ -1321,7 +1322,7 @@ export function createAgentCapabilities(
    */
   const stillBlockedNote = (v: ReturnType<typeof readinessViewOf>): string => {
     if (!v.checked || v.may_run !== false) return '';
-    const why = [...v.needs_from_user.map((i) => i.message), ...(v.needs_from_user.length === 0 && v.reason !== undefined ? [v.reason] : [])]
+    const why = [...v.needs_from_user.map((i) => i.message), ...(v.needs_from_user.length === 0 && v.reason !== undefined ? [withoutCantRunOpening(v.reason)] : [])]
       .map((m) => m.trim().replace(/\.+$/, ''))
       .filter((m) => m !== '');
     return ` Even after this approval the analysis could still not run: ${why.length > 0 ? why.join('. ') : 'the model would still be blocked'}. `
@@ -1405,6 +1406,12 @@ export function createAgentCapabilities(
           detail: 'The strength must be one of: weak, moderate, strong, very strong. Nothing was prepared; ask the user which.' };
       }
       const band = args.strength;
+      // ⛔ Recorded as the user's only when the user named the band (`bandTheUserWrote`); the writer stamps it as theirs.
+      if (!bandTheUserWrote(band, ctx.user_turn_text)) {
+        return { ok: false, mutated: false, refusal: 'strength_not_stated',
+          detail: `The user has not called this link ${band} in this message, in their own words, so nothing was prepared: it would be recorded as their estimate. `
+            + 'Ask them how strong they think it is \u2014 weak, moderate, strong or very strong \u2014 and never offer a band as theirs.' };
+      }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const fromRes = resolveNamed(g, String(args.from_label ?? ''), () => true);
@@ -1501,8 +1508,31 @@ export function createAgentCapabilities(
       if (g.edges.some((e) => e.from === from.id && e.to === to.id)) {
         return { ok: false, mutated: false, refusal: 'already_present', detail: 'That link is already in the model.' };
       }
+      /**
+       * ⛔ A NEW LINK CARRIES ONLY THE BAND THE USER TYPED THIS TURN (Delivery Lead #70 5845493088, agreed by Canonical
+       * 5845487856: "The Agent proposes a link only with the band the user typed THIS turn … With no band it asks 'how
+       * strong…?'. The user_specified stamp is then TRUE."). The link writer stamps every link it adds `user_specified`
+       * (`structural-add-edge.ts`), so the strength sent with it is recorded as the user's own estimate. Before this, an
+       * approval sent a fixed 0.5 and Olumi's placeholder read as the user's figure.
+       *
+       * The band must be named in THIS turn's typed words by the one matcher `propose_link_strength` uses
+       * (`bandTheUserWrote` — the same band words, negations and question rules, never a second copy), and it is sent as
+       * that band's midpoint (`bandMidpoint`). Checked after the refusals above, so the user is never asked how strong a
+       * link that cannot be added is.
+       */
+      const band = isInfluenceBand(args?.strength) ? args.strength : undefined;
+      if (band === undefined || !bandTheUserWrote(band, ctx.user_turn_text)) {
+        const ask = 'ask them "how strong is that effect: weak, moderate, strong or very strong?" and never offer a band as theirs.';
+        return { ok: false, mutated: false, refusal: 'strength_not_stated',
+          detail: band === undefined
+            ? `${args?.strength === undefined ? 'No strength was given' : 'The strength given is not one of weak, moderate, strong or very strong'}, so nothing was prepared. `
+              + `If the user named one of those bands for this link in this message, call again with it as strength; otherwise ${ask}`
+            : `The user has not called the link from "${from.label}" to "${to.label}" ${band} in this message, in their own words, so nothing was prepared: `
+              + `it would be recorded as their estimate. Instead, ${ask}` };
+      }
+      const magnitude = bandMidpoint(band);
       const operations: ProposalOperation[] = [
-        { op: 'add_edge', path: `${from.id}::${to.id}`, value: { effect_direction: args.direction } },
+        { op: 'add_edge', path: `${from.id}::${to.id}`, value: { effect_direction: args.direction, magnitude } },
       ];
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
@@ -1511,7 +1541,7 @@ export function createAgentCapabilities(
         operations,
         provenance: { authored_by: 'model_proposed', basis: args.rationale },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Connect "${from.label}" to "${to.label}" (${args.direction})`,
+        public_label: `Connect "${from.label}" to "${to.label}" (${args.direction}) as ${band}, your own estimate`,
       });
       proposals.put(proposal);
       return {
@@ -1519,7 +1549,8 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        note: 'Nothing has changed. Show this to the user and ask them to approve it before calling authorise_change.',
+        link: { from: from.label, to: to.label, direction: args.direction, band, strength: magnitude },
+        note: `Nothing has changed. Tell the user the link will be recorded as ${band}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and ask them to approve it before calling authorise_change.`,
       };
     },
 
@@ -2234,6 +2265,11 @@ export function createAgentCapabilities(
 
       // A starting point mixes kinds; each single-kind path below handles one.
       if (new Set(ops.map((o) => o.op)).size > 1) return applyCompound(ctx, decision.proposal, before);
+
+      // The goal's current level, as the user stated it (`../goal-current-level.ts`): one CAS-gated write.
+      if (isGoalCurrentLevelProposal(decision.proposal)) {
+        return applyGoalCurrentLevel({ dispatch, readGraph, proposals, operationId: authorisationTurnId }, ctx, decision.proposal, before);
+      }
 
       if (ops[0]?.op === 'set_option_intervention') {
         /**
@@ -3280,7 +3316,15 @@ export function createAgentCapabilities(
 
       const op = ops[0];
       const [fromId, toId] = op.path.split('::');
-      const direction = (op.value as { effect_direction: 'positive' | 'negative' }).effect_direction;
+      const { effect_direction: direction, magnitude: storedMagnitude } = op.value as { effect_direction: 'positive' | 'negative'; magnitude?: unknown };
+      /**
+       * ⭐ THE STRENGTH SENT IS THE USER'S BAND (#70 5845493088): `proposeModelChange` stores the midpoint of the band the
+       * user typed, and the writer stamps it `user_specified` — now true. ⚠ A proposal restored from the durable carrier
+       * that was made BEFORE that rule carries no magnitude: it keeps the projection default 0.5 and its disclosure
+       * (`placeholder_strength`), so nothing restored breaks.
+       */
+      const usersStrength = typeof storedMagnitude === 'number' && Number.isFinite(storedMagnitude) && storedMagnitude > 0 && storedMagnitude <= 1
+        ? storedMagnitude : undefined;
       /**
        * ⭐ THE OPERATION IDENTITY IS DERIVED, NOT MINTED.
        *
@@ -3311,11 +3355,11 @@ export function createAgentCapabilities(
           kind: 'structural_add_edge',
           from: fromId,
           to: toId,
-          // ⚠ REPRESENTATION LOSS, RECORDED IN THE RESULT. The wire REQUIRES a
-          // magnitude and forbids `unknown`, so a direction-only authorisation
-          // cannot be expressed. This number is the projection default, not the
-          // user's claim, and the Agent is told so explicitly below.
-          magnitude: 0.5,
+          // The midpoint of the band the user typed (`proposeModelChange`). ⚠ A proposal
+          // restored from before that rule has none, and the wire REQUIRES a magnitude and
+          // forbids `unknown`: it sends the projection default, not the user's claim, and
+          // the result says so below.
+          magnitude: usersStrength ?? 0.5,
           effect_direction: direction,
           base_graph_hash: decision.proposal.base_graph_identity_hash,
         },
@@ -3341,15 +3385,19 @@ export function createAgentCapabilities(
         ok: true, mutated: true, applied: true,
         receipts: edgeReceipts,
         ...(edgeReceipt.unreadable ? { receipt_unreadable: true } : {}),
-        // Olumi discloses this to the user deterministically; see disclosure.ts.
-        placeholder_strength: true,
         proposal_id: decision.proposal.proposal_id,
         operation_id: operationId,
         revision_before: confirmation.revision_before,
         revision_after: confirmation.revision_after,
-        not_represented:
-          'The direction was recorded. No strength was stated by the user, so the model carries a ' +
-          'placeholder strength that is not a measurement — say so if you describe the change.',
+        ...(usersStrength !== undefined
+          ? { detail: `Recorded with the strength the user stated, as their own estimate: ${decision.proposal.public_label}.` }
+          : {
+            // Olumi discloses this to the user deterministically; see disclosure.ts.
+            placeholder_strength: true,
+            not_represented:
+              'The direction was recorded. No strength was stated by the user, so the model carries a ' +
+              'placeholder strength that is not a measurement — say so if you describe the change.',
+          }),
       };
     },
 
@@ -3676,12 +3724,22 @@ export function createAgentCapabilities(
       const built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
       if (!built.matched || JSON.stringify(built.operations).length > GM_HELD_OPERATIONS_MAX_JSON_CHARS) {
         const reason = !built.matched ? String(built.reason) : '';
+        /**
+         * ⛔ A TWIN IS NAMED (#1990 review, Runtime follow-up). The product refuses an option whose levels equal an
+         * existing option's — the engine cannot tell them apart and the run drops one silently ("Not analysed").
+         * The Agent says WHICH option it would repeat, so the user can change a level, never a bare "could not".
+         */
+        const twin = !built.matched && built.sameAs !== undefined ? built.sameAs.label : undefined;
         const why = reason === 'new_factor_unreachable'
           ? ' Nothing the new factor changes leads to the goal, so it could not affect the comparison: ask the user what it changes.'
           : reason === 'new_factor_exists'
             ? ' The model already has a factor by that name: name it in acts_on instead of adding it.'
-            : '';
+            : reason === 'same_levels_as_existing_option'
+              ? ` It would set exactly the same levels as "${twin ?? 'an option already in the model'}", so the analysis could not tell the two apart: `
+                + 'say so, and ask the user which level this option should change.'
+              : '';
         return { ok: false, mutated: false, refusal: 'not_prepared', ...(!built.matched ? { reason: built.reason } : {}),
+          ...(twin !== undefined ? { same_levels_as: twin } : {}),
           detail: `That could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
       }
       const labels = plans.map((x) => x.plan.label);
@@ -3714,8 +3772,12 @@ export function createAgentCapabilities(
         }
       }
       if (!heldBatchOk) {
+        // A change the product REFUSED with its own sentence (no hold offered) — say that sentence, never a bare "could not".
+        const said = heldChip === undefined && r.status === 200 && typeof r.json.assistant_text === 'string' ? r.json.assistant_text.trim() : '';
         return { ok: false, mutated: false, refusal: 'not_prepared',
-          detail: 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
+          detail: said !== ''
+            ? `Olumi did not prepare that change, so nothing was added. Olumi said: "${said}" Tell the user plainly; do not retry it in other words.`
+            : 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
       }
       heldOptionThisRequest = labels.map((l) => `"${l}"`).join(' and ');
       const described = entries.map(({ plan, set }) => ({
@@ -3757,6 +3819,11 @@ export function createAgentCapabilities(
           + 'levels are Olumi\u2019s estimates (stated_by olumi_estimate), with why, for the user to correct — never the id, '
           + 'and call authorise_change with this proposal_id once they agree.',
       };
+    },
+
+    async proposeGoalCurrentLevel(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      return proposeGoalCurrentLevel({ readGraph, proposals }, ctx, args);
     },
 
     async runAnalysis(ctx, args): Promise<ToolResult> {

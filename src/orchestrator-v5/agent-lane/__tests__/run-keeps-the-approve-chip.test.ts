@@ -49,7 +49,7 @@ describe('a Run turn keeps the approve chip for the proposal still awaiting a ye
       if (agentCalls === 1) {
         return new Response(JSON.stringify({ output: [{
           type: 'function_call', name: 'propose_model_change', call_id: 'c1',
-          arguments: JSON.stringify({ from_label: 'Team size', to_label: 'Velocity', direction: 'positive', rationale: 'More people ship more.' }),
+          arguments: JSON.stringify({ from_label: 'Team size', to_label: 'Velocity', direction: 'positive', strength: 'strong', rationale: 'More people ship more.' }),
         }] }), { status: 200 });
       }
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'This would connect Team size to Velocity.' }] }] }), { status: 200 });
@@ -71,7 +71,7 @@ describe('a Run turn keeps the approve chip for the proposal still awaiting a ye
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
 
   type Body = { suggested_actions: { id: string; label: string }[]; _diagnostic_trace: { fast_path?: string }; _agent: { tool_calls: { name: string; proposal_id?: string }[] } };
-  const ask = (sid = SCENARIO) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: sid, message: 'Should team size drive velocity?' } });
+  const ask = (sid = SCENARIO) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: sid, message: 'Team size strongly drives velocity, so connect them.' } });
   const run = (turnId?: string, sid = SCENARIO) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     kind: 'message', scenario_id: sid, message: 'Run analysis.', source: 'chip', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' },
     ...(turnId !== undefined ? { turn_id: turnId } : {}),

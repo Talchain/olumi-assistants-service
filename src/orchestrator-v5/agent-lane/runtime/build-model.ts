@@ -34,7 +34,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { admitCandidateModel, carryWithheldOptions, findMechanismPath, productIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, canonicalLabel, carryWithheldOptions, findMechanismPath, productIdentityOpenQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -126,7 +126,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
       label: { type: 'string', description: 'A NAME, not a sentence. Keep it under 33 characters where you can.' },
       provenance,
       changes: { type: 'array', description:
-        'Factor labels this option changes when it states no level \u2014 e.g. an option that phases, grandfathers or tests something. Use the factor labels exactly. An option (other than the one marked is_status_quo, which stays empty) that names nothing here and has no interventions is unreachable from the decision and cannot be analysed.',
+        'Factor labels this option acts on for which no defensible level exists \u2014 each one leaves the user a value question before anything can be calculated, so prefer a level in `interventions` (your ai_proposed estimate when the brief states none). Use the factor labels exactly. The option marked is_status_quo leaves this empty. An option (other than the one marked is_status_quo) that names nothing here and has no interventions is unreachable from the decision and cannot be analysed.',
         items: { type: 'string' } },
       interventions: { type: 'array', description:
         'The factor level this option sets, or a signed addition to its baseline. Distinguish these meanings with value_kind. Preserve user numbers; an estimated level is ai_proposed, never explicit.',
@@ -183,8 +183,8 @@ export const BUILD_INSTRUCTIONS = [
   'For each option fill `interventions` with its factor settings. value_kind:"absolute" means the resulting total or level; value_kind:"additional" means a signed change from the same factor baseline. For hiring, adding two to a proposed baseline of five means total seven, never total two. Record the user-stated addition as explicit but keep an estimated resulting level ai_proposed. Keep one unit and plausible_max frame per factor across all baselines and options.',
   'Mark the option that keeps things as they are now with is_status_quo:true \u2014 at most one option, whatever it is called \u2014 and give it no levels; every other option has is_status_quo:null.',
   'Connect options to the controllable factors they change, then through supported causal mechanisms to risks and the goal. Never emit a direct option-to-risk link: it cannot be interpreted as an option setting a risk value. Retain each meaningful risk hypothesis, its sign and its downstream path; express its exposure through a causal factor or mediator, rather than deleting the risk or claiming equal exposure.',
-  'EVERY OPTION MUST SAY WHAT IT DOES \u2014 except the one marked is_status_quo, which names no changes and no levels because it keeps things as they are. Any OTHER option (not marked is_status_quo) with no `interventions` AND no `changes` is inert: it can never be compared with another option, whatever values are supplied later, and the whole decision becomes unanswerable. The option marked is_status_quo is meant to be empty \u2014 it is compared by holding today\u2019s levels, so leave it empty. If the brief does not say what an option changes, still name the factors it ACTS ON in `changes` \u2014 that is a structural claim, not a numeric one. '
-  + 'EVERY option (except the one marked is_status_quo) must also list, in `changes`, the factors it acts on WITHOUT a stated level. An option (other than the one marked is_status_quo) that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping.',
+  'EVERY OPTION MUST SAY WHAT IT DOES \u2014 except the one marked is_status_quo, which names no changes and no levels because it keeps things as they are. Any OTHER option (not marked is_status_quo) with no `interventions` AND no `changes` is inert: it can never be compared with another option, whatever values are supplied later, and the whole decision becomes unanswerable. The option marked is_status_quo is meant to be empty \u2014 it is compared by holding today\u2019s levels, so leave it empty. If the brief does not say what an option changes, still decide which factors it ACTS ON \u2014 that is a structural claim \u2014 and then give each one a level. '
+  + 'EVERY FACTOR IT ACTS ON NEEDS A LEVEL: for every option except the one marked is_status_quo, put one `interventions` entry for EACH factor it acts on \u2014 the user\u2019s own number where the brief states one, otherwise your estimated resulting level (value_kind:"absolute", provenance ai_proposed) in that factor\u2019s own unit and plausible_max frame. A factor an option acts on with no level leaves the user a value question before anything can be calculated. Use `changes` ONLY for a factor where no defensible level exists, and name that missing level in `unknowns`. Every factor an option acts on also needs a baseline_value (a provisional estimate with baseline_known:false when the brief gives none). An option (other than the one marked is_status_quo) that names no interventions and no changes is disconnected from the decision and cannot be analysed at all, so this is not optional bookkeeping.',
   // ⛔ THE EXPLOSION CLAUSE, REPLACED. This previously read: "Then widen: add the
   // options, factors, risks, outcomes and causal mechanisms that materially improve
   // strategic reasoning, including alternatives beyond the user's initial frame."
@@ -520,6 +520,8 @@ export function prepareProvisionalCandidate(model: CandidateModel): {
   mechanism_issues: string[];
   additions_without_total: AdditionWithoutTotal[];
   provenance_demoted: DemotedProvenance[];
+  level_gaps: LevelGap[];
+  baseline_gaps: BaselineGap[];
 } {
   const mechanism_issues: string[] = [];
   const additions_without_total: AdditionWithoutTotal[] = [];
@@ -593,7 +595,8 @@ export function prepareProvisionalCandidate(model: CandidateModel): {
     if (findMechanismPath(mechanismGraph, link.from, link.to) !== null) continue;
     mechanism_issues.push(`${link.from} -> ${link.to}: retain this risk hypothesis through a causal factor or mediator, not a direct option-risk setting`);
   }
-  return { candidate: { ...model, options }, mechanism_issues, additions_without_total, provenance_demoted };
+  const { level_gaps, baseline_gaps } = findCoverageGaps(model, additions_without_total);
+  return { candidate: { ...model, options }, mechanism_issues, additions_without_total, provenance_demoted, level_gaps, baseline_gaps };
 }
 
 /**
@@ -613,41 +616,351 @@ export function loopIssues(admitted: Pick<AdmittedModel, 'withheld'>): string[] 
       + 'option and risk connected to the goal through links whose direction you state.');
 }
 
-/** A repair may replace an invalid direct edge, but must preserve its signed path. */
-function retainsRiskHypotheses(before: CandidateModel, after: CandidateModel): boolean {
+/**
+ * ⛔ EVERY OPTION × FACTOR IT ACTS ON NEEDS A LEVEL (served CEE e39f6e0, witness
+ * c22): every lever named its factors only in `changes` and two acted-on baselines
+ * were null, so readiness asked a value question for every pair and no first
+ * analysis ran. These gaps go to the ONE repair retry; nothing here invents a level.
+ *  · A `changes` entry, or an option→factor link, with no level on that factor is a
+ *    level gap — never on the option marked is_status_quo, which is held, not set
+ *    (#1873 B2).
+ *  · An acted-on factor with no finite baseline is a baseline gap — EXCEPT one a
+ *    user's addition could not become a total on (#1841 B1): that figure is the
+ *    user's to give, and no retry is spent on it.
+ * Read off the drafter's own candidate, so a degraded addition (moved into
+ * `changes` by preparation) is never mistaken for a missing level.
+ */
+export interface LevelGap { readonly option: string; readonly factor: string }
+export interface BaselineGap { readonly factor: string }
+export function findCoverageGaps(
+  model: CandidateModel,
+  additionsWithoutTotal: readonly AdditionWithoutTotal[],
+): { level_gaps: LevelGap[]; baseline_gaps: BaselineGap[] } {
+  const factorLabels = new Set(model.factors.map((f) => f.label));
+  const userOwnedBaseline = new Set(additionsWithoutTotal.filter((a) => a.reason === 'baseline_unknown').map((a) => a.factor));
+  const level_gaps: LevelGap[] = [];
+  const actedOn = new Set<string>();
+  for (const option of model.options) {
+    if (option.is_status_quo === true) continue;
+    const levelled = new Set((option.interventions ?? []).map((i) => i.factor_label));
+    for (const f of levelled) if (factorLabels.has(f)) actedOn.add(f);
+    // An option can act on a factor through `links` alone (pre-review 5828364580):
+    // admission admits that option→factor edge, so readiness asks for its level too.
+    // A direction-unknown link is withheld by admission, so it is no pair here.
+    const linkedFactors = model.links
+      .filter((l) => l.from === option.label && factorLabels.has(l.to) && l.direction !== 'unknown')
+      .map((l) => l.to);
+    for (const f of [...(option.changes ?? []), ...linkedFactors]) {
+      if (!factorLabels.has(f)) continue;
+      actedOn.add(f);
+      if (!levelled.has(f) && !level_gaps.some((g) => g.option === option.label && g.factor === f)) level_gaps.push({ option: option.label, factor: f });
+    }
+  }
+  const baseline_gaps = model.factors
+    .filter((f) => actedOn.has(f.label) && !userOwnedBaseline.has(f.label))
+    .filter((f) => typeof f.baseline_value !== 'number' || !Number.isFinite(f.baseline_value))
+    .map((f) => ({ factor: f.label }));
+  return { level_gaps, baseline_gaps };
+}
+
+/**
+ * ⛔ A COVERAGE GAP IS A VALUE QUESTION ON THE MODEL THAT IS REGISTERED (merge of staging's #1967 into #1891).
+ * Admission withholds an option Olumi added that another option covers (`options_withheld`, `admit-model.ts`) and
+ * re-admits the draft "as if the drafter had never drafted it", so readiness never asks a value question about it:
+ * its option × factor pairs, and a baseline only it acts on, are no gap. Re-read off the drafter's own candidate
+ * without it — for the first draft, and for the retry only where the first draft did not register it (a retry that
+ * makes a registered option indistinct keeps its gaps in the count: COMBINED row 2g; asked only about gaps, it is
+ * refused outright at adoption, `keepsEveryRegisteredOption`: rows 2h/2i). Counted, the served dead start's own "Test
+ * £59 with AI release" (level-less: the very shape #1967 withholds) spent the one retry, and was listed to it as
+ * issues, to level an option the user never sees (`construction-no-identical-options.test.ts`: "no retry is spent", and COMBINED row 2).
+ */
+function gapsOnRegisteredOptions<P extends ReturnType<typeof prepareProvisionalCandidate>>(
+  p: P,
+  raw: CandidateModel,
+  admitted: Pick<AdmittedModel, 'options_withheld'>,
+): P {
+  const gone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
+  if (gone.size === 0) return p;
+  return { ...p, ...findCoverageGaps({ ...raw, options: raw.options.filter((o) => !gone.has(canonicalLabel(o.label))) }, p.additions_without_total) };
+}
+
+/**
+ * ⛔ A GAP IS ANSWERED ONLY BY WHAT REGISTERS (adversarial verify of e7052de7, blocking: X3-SQ, SQ-H1..H3).
+ * `findCoverageGaps` reads the drafter's own words, so a pair missing from a retry's count is not thereby answered.
+ * The retry can declare the option the status quo (a status quo's pairs are never gaps). It can give an addition that
+ * preparation cannot make a total (`additions_without_total`, which also makes the factor's baseline "the user's").
+ * Or it can give a level below zero that admission withholds. Each one reads "fewer gaps" while readiness asks the
+ * same value question of the registered model. So a gap the FIRST draft counted stays open until the retry's
+ * REGISTERED model answers it, when the retry still drafts its option and factor. The answer is a level on that
+ * option node for that factor node, or a baseline on that factor node. This returns the first draft's gaps that are
+ * missing from the retry's own count and still unanswered. A retry that no longer drafts an option or factor is
+ * judged by the rules that allow or refuse shedding it, never here.
+ */
+function unansweredOnRegistered(
+  first: { readonly level_gaps: readonly LevelGap[]; readonly baseline_gaps: readonly BaselineGap[] },
+  retry: { readonly level_gaps: readonly LevelGap[]; readonly baseline_gaps: readonly BaselineGap[] },
+  retryRaw: CandidateModel,
+  retryAdmitted: Pick<AdmittedModel, 'nodes'>,
+): number {
+  const is = (a: string) => (b: string) => canonicalLabel(a) === canonicalLabel(b);
+  const node = (kind: string, label: string) => retryAdmitted.nodes.find((n) => nodeIdentity(n) === nodeIdentity({ kind, label }));
+  const drafts = (labels: readonly { label: string }[], label: string) => labels.some((x) => is(label)(x.label));
+  const levelled = (g: LevelGap): boolean => {
+    const o = node('option', g.option);
+    const f = node('factor', g.factor);
+    return o !== undefined && f !== undefined && o.interventions?.[f.id] !== undefined;
+  };
+  const hasBaseline = (factor: string): boolean => {
+    const v = node('factor', factor)?.observed_state?.value;
+    return typeof v === 'number' && Number.isFinite(v);
+  };
+  const levels = first.level_gaps.filter((g) =>
+    !retry.level_gaps.some((r) => is(g.option)(r.option) && is(g.factor)(r.factor))
+    && drafts(retryRaw.options, g.option) && drafts(retryRaw.factors, g.factor) && !levelled(g));
+  const baselines = first.baseline_gaps.filter((g) =>
+    !retry.baseline_gaps.some((r) => is(g.factor)(r.factor)) && drafts(retryRaw.factors, g.factor) && !hasBaseline(g.factor));
+  return levels.length + baselines.length;
+}
+
+/**
+ * ⛔ A RETRY NEVER TAKES AWAY THE STATUS QUO THE FIRST DRAFT HELD (adversarial verify of e7052de7, blocking).
+ * The declaration decides what admission holds (`wireInertStatusQuo`). Two declared options means neither is held. A
+ * declaration moved to an option that acts falls back to the idioms, which do not read "Continue Current Staffing".
+ * Either way the held option registers with no edges, and readiness adds OPTION_NO_FACTOR_EDGES and
+ * OPTION_NEEDS_MAPPING. Un-declared, an idiom label ("Keep current pricing") is still held, but it loses the
+ * `is_baseline` stamp that run admission reads to keep it as a comparator. No retry is asked about the status quo.
+ * So every option the first REGISTERED model holds is still held by the retry's, and a stamped one is still stamped.
+ * Where the first draft held none, a retry may declare one, which is what `BUILD_INSTRUCTIONS` asks for.
+ */
+function keepsTheHeldStatusQuo(first: Pick<AdmittedModel, 'nodes' | 'loss'>, retry: Pick<AdmittedModel, 'nodes' | 'loss'>): boolean {
+  const held = (m: Pick<AdmittedModel, 'nodes' | 'loss'>) => {
+    const ids = new Set(m.loss.map((e) => /^nodes\[(.+)\]\.status_quo_held$/.exec(String(e.field_path))?.[1]).filter((id) => id !== undefined));
+    return m.nodes.filter((n) => n.kind === 'option' && ids.has(n.id));
+  };
+  const now = held(retry);
+  return held(first).every((h) => now.some((r) => nodeIdentity(r) === nodeIdentity(h) && (h.is_baseline !== true || r.is_baseline === true)));
+}
+
+/** The retry's wording for each gap, naming the option and factor exactly. */
+function sayCoverageGaps(p: { level_gaps: readonly LevelGap[]; baseline_gaps: readonly BaselineGap[] }): string[] {
+  return [
+    ...p.level_gaps.map((g) => `${g.option} -> ${g.factor}: give the level this option sets in interventions (the user's number if stated, otherwise an ai_proposed estimate in the factor's unit and plausible_max frame); keep it only in changes if no defensible level exists`),
+    ...p.baseline_gaps.map((g) => `${g.factor}: give a baseline_value (a provisional estimate with baseline_known:false) \u2014 an option acts on it`),
+  ];
+}
+
+/**
+ * ⛔ A REPAIR MAY ADD WHAT AN OPTION DOES, NEVER TAKE IT AWAY (pre-review 5828705574).
+ * Coverage is counted in gaps, so a retry that deleted an option's `changes` would
+ * "close" them with no level at all and leave the option changing nothing. Every
+ * factor an option acted on in the first draft — through `changes`, a level, or a
+ * directed option→factor link — must still be acted on by that option in the retry.
+ */
+function keepsEveryAction(before: CandidateModel, after: CandidateModel): boolean {
+  const actions = (model: CandidateModel, option: CandidateModel['options'][number]): Set<string> => {
+    const factors = new Set(model.factors.map((f) => f.label));
+    return new Set([
+      ...(option.changes ?? []),
+      ...(option.interventions ?? []).map((i) => i.factor_label),
+      ...model.links.filter((l) => l.from === option.label && l.direction !== 'unknown').map((l) => l.to),
+    ].filter((f) => factors.has(f)));
+  };
+  return before.options.every((o) => {
+    const kept = after.options.find((x) => x.label === o.label);
+    if (kept === undefined) return false;
+    const now = actions(after, kept);
+    return [...actions(before, o)].every((f) => now.has(f));
+  });
+}
+
+/**
+ * ⛔ A COMPACTION MAY SHED WHAT THE MODEL ADDED, NEVER WHAT A KEPT OPTION DOES (#1891 delta).
+ *
+ * `keepsEveryAction` was skipped on EVERY size retry, so a retry that shrank the model AND deleted a user-stated
+ * option's `changes` was adopted: "Hire Two Developers" registered with no edges and was listed in
+ * `options_that_change_nothing` — coverage gaps closed by deletion, which pre-review 5828705574 forbids. A size
+ * retry is told to remove only the items it ADDED and to copy every kept item exactly (#1898,
+ * `SIZE_RETRY_EDITS_FIRST_DRAFT`), so for every option the retry KEEPS — the user's, and one the model added
+ * (pre-review 5828705574's own case was the model-added "Hire Both"):
+ *  · every factor it acted on that the retry still has, it still acts on — through `changes`, a level, or a
+ *    directed option→factor link (a direction-unknown link is withheld by admission, so it is no action);
+ *  · if it acted on anything, it still acts on something: shedding its only factor may not leave it inert.
+ * What a compaction MAY do: shed an option the model added, whole (a user's option may not be dropped —
+ * `keepsEveryUserStatedIdentity` refuses that), and shed a factor, taking any option's action on it along. The
+ * declared status quo is held, not set (#1873 B2), so a retry that empties it is not refused here.
+ * Identity is admission's (`canonicalLabel`), so a factor kept under another spelling is not "shed".
+ */
+function compactionKeepsWhatOptionsDo(before: CandidateModel, after: CandidateModel): boolean {
+  const is = (a: string) => (b: string) => canonicalLabel(a) === canonicalLabel(b);
+  const actions = (model: CandidateModel, option: CandidateModel['options'][number]): Set<string> => {
+    const factors = new Set(model.factors.map((f) => canonicalLabel(f.label)));
+    return new Set([
+      ...(option.changes ?? []),
+      ...(option.interventions ?? []).map((i) => i.factor_label),
+      ...model.links.filter((l) => is(option.label)(l.from) && l.direction !== 'unknown').map((l) => l.to),
+    ].map(canonicalLabel).filter((f) => factors.has(f)));
+  };
+  const retryFactors = new Set(after.factors.map((f) => canonicalLabel(f.label)));
+  return before.options.every((o) => {
+    if (o.is_status_quo === true) return true;
+    const kept = after.options.find((x) => is(o.label)(x.label));
+    if (kept === undefined) return true;
+    const was = actions(before, o);
+    const now = actions(after, kept);
+    return [...was].every((f) => !retryFactors.has(f) || now.has(f)) && (was.size === 0 || now.size > 0);
+  });
+}
+
+/**
+ * ⛔ A RETRY NEVER DROPS OR CHANGES A NUMBER THE USER STATED (pre-review 5829011280).
+ * Gaps are counted as a total, so a retry supplying seven levels while erasing a
+ * stated baseline of 40 "improved" and was adopted; `keepsEveryUserStatedIdentity`
+ * guards names, not numbers. Every user-stated baseline (`baseline_known`, explicit)
+ * and every explicit level must survive — on ANY retry, compaction included.
+ *
+ * ⛔ READ OFF THE DRAFTS BEFORE PREPARATION (verdict 5829152814, B1). Preparation
+ * demotes an explicit level on an unknown baseline to `ai_proposed`, so a guard on
+ * prepared candidates never saw it — and a retry rewrote the user's 60 as 52 while
+ * the carried disclosure still said "your 60". So the user's levels come from the
+ * RAW first draft, and each retry entry for that pair must be either the user's
+ * entry exactly or the first draft's PREPARED form of it (an echo of the demoted 60,
+ * or of an addition already made a total). A pair preparation could not make a total
+ * (`additions_without_total`) has no prepared form and may be absent from the retry.
+ *
+ * ⛔ EVERY carrier of the pair must match, not SOME (pre-review 5829120255):
+ * admission keeps the LAST entry for a factor, so one matching duplicate proves
+ * nothing, and the same number re-stamped `ai_proposed` is no longer the user's.
+ */
+function keepsEveryUserNumber(firstRaw: CandidateModel, firstPrepared: CandidateModel, retryRaw: CandidateModel): boolean {
+  // ⛔ An ambiguous retry is never adopted (pre-review 5829692499): admission folds
+  // every option (or factor) object of one label into ONE node, applying each
+  // object's levels in turn, so a duplicate object can overwrite the user's level
+  // wherever this guard looks. Two objects sharing a label mean "which one?".
+  // ⛔ Sharing a label is judged by ADMISSION'S identity rule (`canonicalLabel`:
+  // case, trim, whitespace), never exact strings (pre-review 5829776660) — and the
+  // guard's own lookups below use the same rule.
+  const unique = (labels: string[]) => new Set(labels.map(canonicalLabel)).size === labels.length;
+  if (!unique(retryRaw.options.map((o) => o.label)) || !unique(retryRaw.factors.map((f) => f.label))) return false;
+  const is = (a: string) => (b: string) => canonicalLabel(a) === canonicalLabel(b);
+  type Iv = NonNullable<CandidateModel['options'][number]['interventions']>[number];
+  const same = (a: Iv, b: Iv) => a.value === b.value && a.unit === b.unit && a.provenance === b.provenance
+    && (a as Iv & { value_kind?: string }).value_kind === (b as Iv & { value_kind?: string }).value_kind;
+  const baselinesKept = firstRaw.factors
+    .filter((f) => f.baseline_known && f.provenance === 'explicit' && typeof f.baseline_value === 'number')
+    .every((f) => {
+      const kept = retryRaw.factors.filter((g) => is(f.label)(g.label));
+      return kept.length > 0 && kept.every((g) => g.baseline_known && g.provenance === 'explicit' && g.baseline_value === f.baseline_value);
+    });
+  const levelsKept = firstRaw.options.every((o) => {
+    const retried = retryRaw.options.find((x) => is(o.label)(x.label));
+    // B1' (5845793528): an option the retry shed WHOLE is keepsEveryUserStatedIdentity's call, not a dropped number.
+    if (retried === undefined) return true;
+    return (o.interventions ?? [])
+      .filter((i) => i.provenance === 'explicit')
+      .every((i) => {
+        const prepared = (firstPrepared.options.find((x) => is(o.label)(x.label))?.interventions ?? []).filter((j) => is(i.factor_label)(j.factor_label));
+        const carriers = (retried.interventions ?? []).filter((j) => is(i.factor_label)(j.factor_label));
+        if (carriers.length === 0) return prepared.length === 0;
+        return carriers.every((c) => same(c, i) || prepared.some((p) => same(c, p)));
+      });
+  });
+  return baselinesKept && levelsKept;
+}
+
+/**
+ * A repair may replace an invalid direct edge, but must preserve its signed path.
+ *
+ * ⛔ ON A COMPACTION IT DOES NOT OWN OPTION RETENTION (B1, verdict 5842265540). It ended "every first-draft option is
+ * still there", and since #1891 made every coverage gap a repair issue it is required on the COMBINED size+repair
+ * retry too — the served c22 shape. So a retry that did what the size instruction asks (shed the model-added
+ * "Hire Both") and levelled every kept lever was refused `model_too_large` and nothing registered, where base staging
+ * ef99a97 adopted it. On a compaction (`compaction`: the first draft was oversized) an option shed WHOLE is judged by
+ * `keepsEveryUserStatedIdentity` (a user's option may not go) and `compactionKeepsWhatOptionsDo` (what every kept
+ * option does), so here it is exempt twice over: from the every-option clause, and from the per-risk path check —
+ * a shed option has no path, and requiring one would be requiring the option. Every risk's own checks, and every
+ * KEPT option's path to every risk, still hold. A within-size repair (`compaction` false) is unchanged.
+ *
+ * ⛔ AND ON A COMPACTION IT DOES NOT OWN RISK RETENTION EITHER (B1 at the risk position, verifier at 5d985e75). It still
+ * refused ANY first-draft risk missing from the retry, while `retryInstruction` asks the retry to "Remove what you
+ * ADDED beyond the brief: … risks and outcomes" — so an oversized c22 draft carrying an Olumi risk, whose retry shed
+ * that risk and levelled every lever, was refused `model_too_large` and nothing registered, where staging ef99a97
+ * adopted it. On a compaction a first-draft risk ABSENT from the retry is skipped: a risk the user stated is kept by
+ * `keepsEveryUserStatedIdentity` (brief-stated nodes by identity), and the shed risk is said in
+ * `left_out_to_stay_compact`. Every risk the retry KEEPS keeps every check below — its own path and signs to the goal,
+ * and every kept option's path and signs to it.
+ *
+ * ⛔ ONE IDENTITY RULE PER BRANCH, THE SAME AS ITS SIBLING GUARD. A compaction judges "kept" — options, risks, and every
+ * node a path walks through — by admission's identity (`canonicalLabel`), as `compactionKeepsWhatOptionsDo` does: two
+ * labels admission folds into one node are one item, so an option or risk kept under an admission-equal spelling is
+ * neither exempt as "shed" nor refused for a path the walk could not follow (the verifier's P6a: "hire  BOTH" with its
+ * risk path intact was refused, where staging adopted it). A within-size repair keeps exact labels, as
+ * `keepsEveryAction` does — byte-for-byte the rule before this delta.
+ */
+export function retainsRiskHypotheses(before: CandidateModel, after: CandidateModel, compaction: boolean): boolean {
+  const id = compaction ? canonicalLabel : (label: string): string => label;
+  const keeps = (items: ReadonlyArray<{ label: string }>, label: string): boolean => items.some((kept) => id(kept.label) === id(label));
   const paths = (model: CandidateModel, from: string, to: string): Set<number> => {
     const links = [
-      ...model.links.filter((l) => l.direction !== 'unknown').map((l) => ({ from: l.from, to: l.to, sign: l.direction === 'negative' ? -1 : 1 })),
+      ...model.links.filter((l) => l.direction !== 'unknown').map((l) => ({ from: id(l.from), to: id(l.to), sign: l.direction === 'negative' ? -1 : 1 })),
       ...model.options.flatMap((o) => [...(o.changes ?? []), ...(o.interventions ?? []).map((i) => i.factor_label)]
-        .map((factor) => ({ from: o.label, to: factor, sign: 1 }))),
+        .map((factor) => ({ from: id(o.label), to: id(factor), sign: 1 }))),
     ];
+    const target = id(to);
     const signs = new Set<number>();
     const walk = (at: string, sign: number, seen: Set<string>): void => {
-      if (at === to) { signs.add(sign); return; }
+      if (at === target) { signs.add(sign); return; }
       for (const link of links.filter((l) => l.from === at && !seen.has(l.to))) {
         walk(link.to, sign * link.sign, new Set([...seen, link.to]));
       }
     };
-    walk(from, 1, new Set([from]));
+    walk(id(from), 1, new Set([id(from)]));
     return signs;
   };
   for (const risk of before.risks) {
-    if (!after.risks.some((r) => r.label === risk.label)) return false;
+    if (!keeps(after.risks, risk.label)) {
+      if (compaction) continue;
+      return false;
+    }
     const downstream = paths(after, risk.label, after.goal.metric);
     if (downstream.size === 0 || [...paths(before, risk.label, before.goal.metric)].some((s) => !downstream.has(s))) return false;
     for (const option of before.options) {
+      if (compaction && !keeps(after.options, option.label)) continue;
       const prior = paths(before, option.label, risk.label);
       const repaired = paths(after, option.label, risk.label);
       if ([...prior].some((s) => !repaired.has(s))) return false;
     }
   }
-  return before.options.every((o) => after.options.some((kept) => kept.label === o.label));
+  return compaction || before.options.every((o) => keeps(after.options, o.label));
 }
 
-/** The size-only retry's edit rule (measured: `construction-size-retry-edits-first-draft.test.ts`). */
+/** The size retry's edit rule (measured: `construction-size-retry-edits-first-draft.test.ts`). */
 const SIZE_RETRY_EDITS_FIRST_DRAFT =
   'Return your previous model with only the items you ADDED beyond the brief removed. Copy every item you keep EXACTLY '
   + 'as it is in your previous model: the same label, wording, provenance and relationships. Do not rename, merge, reword or re-add anything.';
+/**
+ * ⛔ AN OVERSIZED DRAFT WITH A REPAIR ISSUE IS STILL A COMPACTION (#1891 delta). Once #1891 made a coverage gap a
+ * repair issue, an oversized draft with one took the repair branch WITHOUT `SIZE_RETRY_EDITS_FIRST_DRAFT`, so #1898's
+ * measured identity fix (0/8 → 8/8) no longer covered it. It now gets both, and this sentence reconciles them: the
+ * listed repairs are the only edits a kept item may receive.
+ */
+const REPAIRS_ARE_THE_ONLY_EDITS =
+  'The only other change allowed is the repair each listed construction issue asks for, made in place on the item it names.';
+/**
+ * ⛔ THE COMPACTION'S REPAIR RULE NEVER SAYS "PRESERVE EVERY OPTION" (B1, verdict 5842265540). Beside
+ * `retryInstruction` ("Remove what you ADDED … speculative options") and `SIZE_RETRY_EDITS_FIRST_DRAFT`, the combined
+ * size+repair retry was also told "Preserve every option" — two orders that cannot both be obeyed. It now says which
+ * options may go (only ones Olumi added), matching what adoption enforces: `keepsEveryUserStatedIdentity` (every option
+ * the brief states), `compactionKeepsWhatOptionsDo` (what every kept option does), and `retainsRiskHypotheses` (every
+ * kept risk hypothesis, and every kept option's path to it). A within-size repair retry keeps its own rule, byte for byte.
+ * ⛔ NOR "PRESERVE EVERY RISK HYPOTHESIS" (B1 at the risk position, verifier at 5d985e75): beside "Remove what you ADDED
+ * … risks and outcomes" that was the same two orders at the risk position. It says which risks may go (only ones Olumi
+ * added), matching `keepsEveryUserStatedIdentity` (every risk the brief states) and `retainsRiskHypotheses` (every risk
+ * the retry keeps keeps its direction and its path to the goal).
+ */
+const COMPACTION_REPAIR_RULE =
+  'Repair only the listed construction issues. Keep every option the brief states, and every other option in your previous model unless you ADDED it beyond the brief: an option you added is the only kind that may go. '
+  + 'Every option you keep still acts on each factor it acted on that you keep. Keep every risk the brief states; a risk you added may go. '
+  + 'Every risk you keep keeps its causal direction and its path to the goal; do not delete an option or a risk the brief states to clear validation.';
 
 export async function buildModelFromBrief(
   scenarioId: string,
@@ -682,6 +995,7 @@ export async function buildModelFromBrief(
   let preparation = prepareProvisionalCandidate(candidate);
   candidate = preparation.candidate;
   let admitted = admitCandidateModel(candidate, {});
+  preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
    * ⭐ THE COMPACT FIRST-MODEL GATE — one bounded retry, then an honest refusal.
@@ -712,9 +1026,18 @@ export async function buildModelFromBrief(
   // An option the FIRST draft had withheld as indistinct, which an adopted retry then dropped: still said.
   let carriedWithheld: readonly WithheldOption[] = [];
   const needsSizeRetry = !size.within && !size.user_material_exceeds_limit;
-  // A missing risk mechanism asks the retry to repair. An addition with no total
+  // A missing risk mechanism, and an option × factor (or acted-on baseline) with no
+  // level (c22, `findCoverageGaps`), ask the retry to repair. An addition with no total
   // DEGRADES instead (see `prepareProvisionalCandidate`): the figure is the user's to give.
-  const repairIssues = (p: typeof preparation): string[] => p.mechanism_issues;
+  const repairIssues = (p: typeof preparation): string[] => [...p.mechanism_issues, ...sayCoverageGaps(p)];
+  // ⚠ Counted WITHOUT the first pass's own degraded additions (#1841 B1): a retry that
+  // echoes the prepared candidate carries each such pair in `changes`, and that figure
+  // is the user's to give — it is never a new gap, so it can never refuse the retry.
+  const gapCount = (p: typeof preparation): number => {
+    const userOwned = preparation.additions_without_total;
+    return p.level_gaps.filter((g) => !userOwned.some((a) => a.option === g.option && a.factor === g.factor)).length
+      + p.baseline_gaps.filter((g) => !userOwned.some((a) => a.reason === 'baseline_unknown' && a.factor === g.factor)).length;
+  };
   /**
    * ⛔ A LOOP NEVER COSTS THE USER THEIR MODEL (review of f504b8e0, BLOCKING-1).
    *
@@ -736,9 +1059,18 @@ export async function buildModelFromBrief(
    * not on its other merits: every loop issue is one admission can break, so refusing a retry
    * for it could only ever cost the user a model. A loop IS asked only of a draft within the
    * limit, where refusing the retry keeps a first draft that registers.
+   *
+   * ⛔ WITH #1891's COVERAGE GAPS (merge of staging into #1891): a coverage gap is a repair issue
+   * like a mechanism issue, so on the size route the retry is asked the mechanism issues AND the
+   * gaps — never the loops — as the compaction below (`COMPACTION_REPAIR_RULE`,
+   * `compactionKeepsWhatOptionsDo`, `retainsRiskHypotheses(…, compaction)`). Within the limit a
+   * loop asked is a reason for the retry in its own right, so the "coverage is the only reason:
+   * cover strictly more" clause at adoption does not apply to it — else a loop-only retry, whose
+   * gap count is 0 before and after, could never be adopted.
    */
   const loops = loopIssues(admitted);
-  const asked = needsSizeRetry ? repairIssues(preparation) : [...repairIssues(preparation), ...loops];
+  const loopsAsked = needsSizeRetry ? [] : loops;
+  const asked = [...repairIssues(preparation), ...loopsAsked];
   if (needsSizeRetry || asked.length > 0) {
     sizeRetried = needsSizeRetry;
     constructionRetried = true;
@@ -750,22 +1082,38 @@ export async function buildModelFromBrief(
         // ⛔ A SIZE-ONLY RETRY EDITS ITS OWN FIRST DRAFT. Regenerated from the brief alone it renamed the user's
         // options ("Hire two senior engineers" → "hire 2 senior engineers"), so `keepsEveryUserStatedIdentity`
         // rejected it every time: measured 0/8 adoptable vs 8/8 when the retry is handed its draft to edit
-        // (construction-size-retry-edits-first-draft.test.ts). A retry with construction issues is unchanged.
+        // (construction-size-retry-edits-first-draft.test.ts). An OVERSIZED draft with construction issues gets
+        // that rule too, beside the repair instructions (#1891 delta); a within-size repair retry is unchanged.
         instructions: asked.length === 0 && needsSizeRetry
           ? `${BUILD_INSTRUCTIONS} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT}`
-          : `${BUILD_INSTRUCTIONS} ${needsSizeRetry ? retryInstruction(size) : ''} Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
+          : needsSizeRetry
+            ? `${BUILD_INSTRUCTIONS} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT} ${REPAIRS_ARE_THE_ONLY_EDITS} ${COMPACTION_REPAIR_RULE}`
+            : `${BUILD_INSTRUCTIONS}  Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
         input: asked.length > 0
-          ? `${brief}\n\nConstruction issues: ${JSON.stringify(asked)}\nCandidate to repair: ${JSON.stringify(firstCandidate)}`
+          ? `${brief}\n\nConstruction issues: ${JSON.stringify(asked)}\nCandidate to repair${needsSizeRetry ? ' (your previous model, to shrink)' : ''}: ${JSON.stringify(firstCandidate)}`
           : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(firstCandidate)}`,
         max_output_tokens: budget.max_output_tokens,
         reasoning_effort: budget.reasoning_effort,
         schema: retrySchemaPinningGoal(candidate.goal),
       });
       if (retry.text.length > 0) {
-        const retryPreparation = prepareProvisionalCandidate(JSON.parse(retry.text) as CandidateModel);
-        const retryCandidate = retryPreparation.candidate;
+        const retryRaw = JSON.parse(retry.text) as CandidateModel;
+        const retryPrepared = prepareProvisionalCandidate(retryRaw);
+        const retryCandidate = retryPrepared.candidate;
         const retryAdmitted = admitCandidateModel(retryCandidate, {});
+        // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
+        const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
+        const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
+        const retryPreparation = gapsOnRegisteredOptions(retryPrepared, retryRaw, {
+          options_withheld: (retryAdmitted.options_withheld ?? []).filter((w) => !firstRegistered.has(canonicalLabel(w.option))),
+        });
         const retrySize = assessConstructionSize(retryAdmitted);
+        // ⛔ COVERAGE ALONE NEVER COSTS A REGISTERED OPTION (adversarial verify of 58a22db8, P2-A/P2-E: COMBINED rows 2h/2i).
+        // The count above stays honest, the registered model need not: a retry that levels £64 AND makes Olumi's
+        // registered £54 indistinct still covers 1 < 2 (or levels £54's own gap while re-pricing it like the user's £59,
+        // 0 < 1), and admission withholds £54. So a retry asked only about gaps must register every option the first did.
+        const kept = new Set(retryAdmitted.nodes.map(nodeIdentity));
+        const keepsEveryRegisteredOption = admitted.nodes.filter((n) => n.kind === 'option').every((n) => kept.has(nodeIdentity(n)));
         // ⚠ ADOPT ONLY WHAT IS ACTUALLY SMALLER, on BOTH dimensions. A retry that
         // trades 4 nodes for 11 links is not a compaction, and taking it on faith
         // would let a second model call make the problem worse.
@@ -778,12 +1126,24 @@ export async function buildModelFromBrief(
         // ⛔ BY IDENTITY, NOT COUNT (independent review at 78b07e8b): every option,
         // fact and relationship the user stated must still be there by name.
         const keepsUserMaterial = keepsEveryUserStatedIdentity(size, retrySize);
+        // ⛔ Counted on what REGISTERS (adversarial verify of e7052de7): a first-draft gap the retry still drafts stays open until its registered model answers it.
+        const retryOpen = gapCount(retryPreparation) + unansweredOnRegistered(preparation, retryPreparation, retryRaw, retryAdmitted);
         if (
           (needsSizeRetry ? retrySize.nodes <= size.nodes && retrySize.edges <= size.edges : retrySize.within || retrySize.user_material_exceeds_limit) &&
-          keepsUserMaterial && repairIssues(retryPreparation).length === 0 &&
-          (asked.length === 0 || retainsRiskHypotheses(candidate, retryCandidate))
+          keepsUserMaterial && keepsEveryUserNumber(firstCandidate, candidate, retryRaw) && retryPreparation.mechanism_issues.length === 0 &&
+          // ⛔ Coverage is repaired where a level is defensible, so a retry may leave a
+          // gap — but it must never cover LESS, and when coverage is the only reason
+          // for the retry it must cover strictly MORE (c22) and register every option the first draft did. A
+          // loop asked within the limit is a reason of its own (#1956), adopted on its other merits.
+          retryOpen <= gapCount(preparation) &&
+          (needsSizeRetry || preparation.mechanism_issues.length > 0 || loopsAsked.length > 0
+            || (retryOpen < gapCount(preparation) && keepsEveryRegisteredOption)) &&
+          // Within the limit, the status quo the first draft held is still held. On a compaction, refusing would cost the user their model.
+          (needsSizeRetry || keepsTheHeldStatusQuo(admitted, retryAdmitted)) &&
+          (asked.length === 0 || retainsRiskHypotheses(candidate, retryCandidate, needsSizeRetry)) &&
+          // A compaction may shed what the model added, never what a kept option does; a repair may not shed an action.
+          (needsSizeRetry ? compactionKeepsWhatOptionsDo(candidate, retryCandidate) : keepsEveryAction(candidate, retryCandidate))
         ) {
-          const kept = new Set(retryAdmitted.nodes.map(nodeIdentity));
           carriedWithheld = carryWithheldOptions(admitted, retryAdmitted);
           leftOut = admitted.nodes
             .filter((n) => !kept.has(nodeIdentity(n)))

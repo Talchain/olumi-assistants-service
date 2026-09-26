@@ -23,6 +23,11 @@ export interface AgentToolContext {
    * absent, nothing is.
    */
   readonly user_text?: string;
+  /**
+   * THIS turn's message when the user typed it (never a chip's text), bound by the route. A link's strength band is
+   * the user's only when named here (`bandTheUserWrote`): a band word elsewhere in the conversation is about something else.
+   */
+  readonly user_turn_text?: string;
 }
 
 export interface ToolDefinition {
@@ -72,11 +77,17 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     description:
       'Propose ONE change to the model. This does NOT change anything: it records an exact ' +
       'proposal and returns its id, which you keep for authorise_change: show the user what it changes, never the id, before asking them to approve. ' +
-      'Use the labels exactly as get_canonical_state returned them.',
+      'Use the labels exactly as get_canonical_state returned them. ' +
+      'The link is recorded with `strength` as the user\u2019s own estimate, so give ONLY the band the user named for it in this message; ' +
+      'if they named none, ask how strong the effect is first \u2014 a band they did not say is refused.',
     parameters: obj({
       from_label: { type: 'string' },
       to_label: { type: 'string' },
       direction: { type: 'string', enum: ['positive', 'negative'] },
+      strength: {
+        type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'],
+        description: 'The band the user said for this link in THIS message, in their own words. Never your own guess.',
+      },
       rationale: { type: 'string', description: 'Why this link matters, in the user’s terms.' },
     }, ['from_label', 'to_label', 'direction', 'rationale']),
   },
@@ -197,7 +208,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'and returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
       + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
       + 'recorded as theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
-      + 'Give `direction` ONLY when the user said the link pushes the other way. Never use this for a strength the user did not state.',
+      + 'Give `direction` ONLY when the user said the link pushes the other way. Never use this for a strength the user did not state: '
+      + 'if they have not named a band in their own words, ask which it is first \u2014 a band they did not say is refused.',
     parameters: obj({
       from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
       to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
@@ -279,6 +291,30 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       },
     }, ['assumptions', 'option_levels']),
   },
+  {
+    type: 'function',
+    name: 'propose_goal_current_level',
+    description:
+      'Record the CURRENT level of the model’s goal when the user has just stated it (for example "our MRR is ' +
+      '£12,000 today" when the goal is MRR). Without it the analysis cannot compare today with the goal’s ' +
+      'target. This does NOT change anything: it records an exact proposal and returns its id, which you keep for ' +
+      'authorise_change: show the user the figure, never the id, before asking them to approve. Only the user’s own ' +
+      'figure for the goal’s OWN metric: never your estimate, and never a figure they gave for something else (a ' +
+      'price, a subscriber count, a rate). Use the goal’s label exactly as get_canonical_state returned it.',
+    parameters: obj({
+      goal_label: { type: 'string' },
+      value: { type: 'number', description: 'The figure the user stated, in their units (12000 for £12,000; never scaled).' },
+      unit: { type: 'string', description: 'The unit the user stated, if any (e.g. GBP).' },
+      goal_is: {
+        type: 'string', enum: ['at_least', 'above', 'at_most', 'below'],
+        description: 'How the user put the goal’s target: reach at least it, get strictly above it, stay at most it, or stay strictly below it. If they have not said, ask them; never guess.',
+      },
+      user_stated: {
+        type: 'boolean',
+        description: 'true ONLY when the USER gave this figure as the goal’s current level. Never set it for a figure you estimated.',
+      },
+    }, ['goal_label', 'value', 'unit', 'goal_is', 'user_stated']),
+  },
 ];
 
 export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
@@ -297,7 +333,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_link_strength', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'authorise_change'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_link_strength', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -327,6 +363,8 @@ export interface AgentCapabilities {
   getCanonicalState(ctx: AgentToolContext): Promise<ToolResult>;
   proposeModelChange(ctx: AgentToolContext, args: {
     from_label: string; to_label: string; direction: 'positive' | 'negative'; rationale: string;
+    /** The band the user typed THIS turn; without it (or with one they did not type) nothing is prepared. */
+    strength?: 'weak' | 'moderate' | 'strong' | 'very strong';
   }): Promise<ToolResult>;
   authoriseChange(ctx: AgentToolContext, args: { proposal_id: string }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
@@ -352,6 +390,10 @@ export interface AgentCapabilities {
   }, internal?: ProposeLevelsInternal): Promise<ToolResult>;  proposeStartingPoint(ctx: AgentToolContext, args: {
     assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
     option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
+  }): Promise<ToolResult>;
+  /** The goal's current level as the user stated it — held for approval (`../goal-current-level.ts`). */
+  proposeGoalCurrentLevel(ctx: AgentToolContext, args: {
+    goal_label: string; value: number; unit: string; goal_is: 'at_least' | 'above' | 'at_most' | 'below'; user_stated: boolean;
   }): Promise<ToolResult>;
 }
 
@@ -399,6 +441,8 @@ export async function dispatchTool(
       return caps.proposeOptionInterventions(ctx, args as never);
     case 'propose_starting_point':
       return caps.proposeStartingPoint(ctx, args as never);
+    case 'propose_goal_current_level':
+      return caps.proposeGoalCurrentLevel(ctx, args as never);
     default:
       // An unknown tool is never silently ignored: the Agent is told plainly.
       return { ok: false, mutated: false, refusal: 'unknown_tool', tool: name };

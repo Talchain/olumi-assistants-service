@@ -233,7 +233,7 @@ const sessions = new SessionBindingRegistry();
 const MUTATION_INSTRUCTION =
   config.proxy.agentLanePreview === true
     ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
-    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link, propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
+    : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link (with the strength band the user named; if they named none, ask how strong first), propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
 
 /** Marks a board edit in the Agent's history — defined beside `needsDurableSeed`, which must recognise it. */
 export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.js';
@@ -646,7 +646,7 @@ export function withheldToolsOf(body: Record<string, unknown>): readonly string[
   return typedApprovalOf(body) === undefined && !typedRunOf(body) ? CHIP_TURN_WITHHELD_TOOLS : [];
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -673,6 +673,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   let analysisResult: unknown;
   /** The selected run's constraint verdict state, carried with `analysisResult` (same fact); `null` = not recorded. */
   let constraintVerdictState: string | null | undefined;
+  let leaderLimitRisks: readonly unknown[] | null | undefined;
   /**
    * ⛔ THE CANVAS RENDERS FROM `draft_graph`, NOT FROM `graph_hash`.
    *
@@ -707,6 +708,10 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       const cvs = after.json.analysis_constraint_verdict_state;
       if (cvs === null) constraintVerdictState = null;
       else if (asVerdictState(cvs) !== null) constraintVerdictState = asVerdictState(cvs);
+      // The selected run's leader-limit risks, from the SAME graph read and fact (Canonical 5843920234:
+      // `analysis_leader_limit_risks`). Only `null` or an array is carried; the card checks every element.
+      const llr = after.json.analysis_leader_limit_risks;
+      if (llr === null || Array.isArray(llr)) leaderLimitRisks = llr;
       /**
        * ⭐ READINESS FROM THE MOMENT THE MODEL EXISTS, not from the moment
        * someone runs an analysis.
@@ -833,7 +838,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1445,7 +1450,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const budget = budgetFor('gpt-5.6-terra', 'conversation');
     /** Every tool runs as THIS request: its scenario, its user, and the user's own words (`stated-by-user.ts`). */
     const typedNow = typedByUser(body) ? message : null;
-    const toolCtx: AgentToolContext = { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
+    const toolCtx: AgentToolContext = { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
 
     /**
@@ -1704,7 +1709,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * BEFORE the reply is composed, because the Run offer below keys on the
      * readiness this same response carries.
      */
-    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState } = await readBackState(dispatch, scenarioId);
+    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks } = await readBackState(dispatch, scenarioId);
     const fa = firstAnalysis?.outcome;
     // An analysis of THIS revision exists because this turn's construction ran it (or already had).
     const firstAnalysisExists = fa !== undefined && (fa.ran || fa.reason === 'already_ran_for_construction');
@@ -1829,7 +1834,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * without it the first pass is blank. Only the blocks the contract BUILDS are added: the run's own
      * blocks stay under `bindRunBlocksToReadback`'s rule above.
      */
-    const runCoaching = runTurnCoaching(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState });
+    const runCoaching = runTurnCoaching(lastRun, { scenarioId, graphHash, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks });
     const coachingBound = [...runBound, ...runCoaching.blocks.filter((b) => !lastRunBlocks.includes(b))];
     const coachingBlocks: unknown[] = coachingBound.length === 0
       ? []

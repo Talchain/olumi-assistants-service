@@ -45,6 +45,17 @@ function capture(): Graph {
   return JSON.parse(JSON.stringify(parsed.graph)) as Graph;
 }
 
+/**
+ * Paul's own served draft (`cbd15f83`, CEE `bdd43f4`): the worked session whose user figure
+ * — £49, his status quo's price — the ranking actually reads (#70 5845508243).
+ */
+const PAUL_DRAFT = 'src/orchestrator-v5/coaching/__tests__/fixtures/cbd15f83-bdd43f4-paul.draft-graph.json';
+
+function paulDraft(): Graph {
+  const parsed = JSON.parse(readFileSync(PAUL_DRAFT, 'utf8')) as { graph: Record<string, unknown> };
+  return JSON.parse(JSON.stringify(parsed.graph)) as Graph;
+}
+
 /** The additive field is not on the static payload type — read it structurally. */
 function admissionOf(payload: unknown): AnalysisAdmission | undefined {
   return (payload as { analysis_admission?: AnalysisAdmission } | undefined)?.analysis_admission;
@@ -183,12 +194,18 @@ describe('analysis_admission reaches a consumer', () => {
  *                    → `quantified_provisional`: run it, show figures, name no
  *                      leader. This is the 3 Sep journey's population.
  *
- *   WORKED SESSION   `live-4day-week.cold-read.json` — the same shape after a
- *                    user has been in it. Measured at this tip, `out_csat`
- *                    carries `observed_state.source: brief_extraction`
- *                    (`extractionType: explicit`), i.e. the user's own figure
- *                    for a parameter the comparison's confidence rests on.
+ *   WORKED SESSION   Paul's own draft (`cbd15f83-bdd43f4-paul.draft-graph.json`):
+ *                    `pro_plan_price` carries `observed_state.source:
+ *                    brief_extraction` — his £49, the level his status-quo
+ *                    option runs at, so a figure the ranking reads.
  *                    → `comparative_leader`.
+ *
+ *   ⚠ RE-RECORDED 26 Sep 2026 (trap 14 — the old arm kept visible). This arm was
+ *   `live-4day-week.cold-read.json`, licensed by `out_csat`'s brief figure. SERVED,
+ *   that figure never reaches the ordering (engine-direct PLoT `b09c0f2` + ISL
+ *   `2795a8c`: 0.87 vs 0.30 → byte-identical wins; one option's level moved → the
+ *   wins moved; #70 5845505012). It is now the third arm below: a user figure the
+ *   ranking never reads does NOT lift the graph.
  *
  * ⚠ STATE CLASS IS NAMED DELIBERATELY (the fixture state-class rule): a seeded
  * capture is not evidence about a fresh user, and the whole value of this pair
@@ -234,7 +251,7 @@ describe('the claim-strength bound discriminates across real state classes', () 
   );
 
   it('WORKED SESSION — a user-stated baseline lifts the same graph to comparative_leader', () => {
-    const graph = capture();
+    const graph = paulDraft();
     const verdict = analysisAdmissionFrom(resolveRunAdmission(graph), graph);
 
     expect(verdict.structurally_analysable).toBe(true);
@@ -250,7 +267,7 @@ describe('the claim-strength bound discriminates across real state classes', () 
     // The discriminating mutation, in-test: same graph, one field changed. This
     // is what proves the verdict is bound to the provenance stamp and not to
     // something else about the capture.
-    const graph = capture();
+    const graph = paulDraft();
     const stamped = graph.nodes.filter(
       (n) => (n as { observed_state?: { source?: string } }).observed_state?.source
         === 'brief_extraction',
@@ -259,6 +276,19 @@ describe('the claim-strength bound discriminates across real state classes', () 
     for (const node of stamped) delete (node as { observed_state?: unknown }).observed_state;
 
     const verdict = analysisAdmissionFrom(resolveRunAdmission(graph), graph);
+    expect(verdict.semantic_quality_sufficient).toBe(false);
+    expect(verdict.permitted_analysis_mode).toBe('quantified_provisional');
+  });
+
+  it("a user figure the ranking never reads does NOT lift the graph (the old worked arm)", () => {
+    // `out_csat` is an outcome: no parameter uncertainty carries its level into the
+    // engine, and served its 0.87 vs 0.30 left every win-% byte-identical.
+    const graph = capture();
+    const verdict = analysisAdmissionFrom(resolveRunAdmission(graph), graph);
+
+    expect(verdict.structurally_analysable).toBe(true);
+    // CONTROL: the census DOES read the user's figure — it just earns no leader credit.
+    expect(verdict.semantic_signals.confidence_parameters_user_stated).toBeGreaterThan(0);
     expect(verdict.semantic_quality_sufficient).toBe(false);
     expect(verdict.permitted_analysis_mode).toBe('quantified_provisional');
   });
