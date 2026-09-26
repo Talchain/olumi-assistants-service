@@ -41,6 +41,8 @@ export interface CandidateConstraint {
   readonly value: number;
   readonly unit?: string;
   readonly provenance: string;
+  /** The drafter's reading of the user's words: the limit is on the value itself, or on a change from today. */
+  readonly frame?: 'level' | 'delta';
 }
 
 export interface AdmittedConstraint {
@@ -50,6 +52,8 @@ export interface AdmittedConstraint {
   value: number;
   label?: string;
   unit?: string;
+  /** `GoalConstraintSchema.value_frame`. ISL refuses a limit without it (`frame_not_stamped`); never guessed here. */
+  value_frame?: 'level' | 'delta';
   /**
    * Canonical authorship marker — `GoalConstraintSchema.provenance`
    * (`src/schemas/assist.ts:418`), values `explicit | inferred | proxy`.
@@ -125,8 +129,12 @@ function norm(unit: string): string {
   return unit.trim().toLowerCase();
 }
 
-/** A percent head (the classifier's own row) and nothing after it but an optional period ("per month", "p.a."). */
-function isPercentWithPeriod(unit: string): boolean {
+/**
+ * A percent head (the classifier's own row) and nothing after it but an optional period ("per month", "p.a.").
+ * Exported as the one "is this a percentage LEVEL?" test: the magnitude contract reads a target's domain with it
+ * (`cee/magnitude/link-effect.ts`), so a "% change" is never read as a level bounded by 0 and 100.
+ */
+export function isPercentWithPeriod(unit: string): boolean {
   if (classifyUnitScaleClass(unit) !== 'percent') return false;
   const t = norm(unit);
   const head = PERCENT_HEADS.find((h) => t.startsWith(h));
@@ -152,6 +160,21 @@ function levelIsPercentOver100(target: LimitTargetScale): boolean {
     target.value >= 0 &&
     target.value < 1
   );
+}
+
+/**
+ * ⛔⛔ CAN PLoT READ A FRAMED LIMIT IN THIS UNIT ON THIS LEVEL'S OWN SCALE? (#70 5843365832)
+ *
+ * PLoT's percent rung is `[0,100]` whatever the target's own frame (`intervention-normaliser.ts` at b09c0f2: :1493
+ * reads only a goal's `goal_threshold_cap`; :1564-1567). WIRE, engine-direct: the same 4% root level scored P(meet ≤
+ * 10%) 1 on a frame of 100 and 0.017 on 20; the same 12% level 0.017 on 100 and 1 on 200 — all `decision_grade: true`.
+ * So a percent-ROW unit is provable only on a level that IS the percentage ÷ 100 (`levelIsPercentOver100`, the
+ * canonicaliser's own test). Every other unit is `true` here: a spelling outside the row ("% per month") reaches
+ * `deriveRange`, which reads the node's cap.
+ */
+export function percentLimitFrameProvable(unit: string | undefined, target: LimitTargetScale | undefined): boolean {
+  if (unit === undefined || !PERCENT_HEADS.includes(norm(unit))) return true;
+  return target !== undefined && levelIsPercentOver100(target);
 }
 
 export function canonicaliseLimitUnit(value: number, unit: string | undefined, target?: LimitTargetScale): UnitCanonical {
@@ -269,6 +292,7 @@ export function admitCandidateConstraints(
       ...(unit !== undefined ? { unit } : {}),
       provenance: canonicalProvenance(c.provenance),
       ...unitProvenance,
+      ...(c.frame === 'level' || c.frame === 'delta' ? { value_frame: c.frame } : {}),
     };
 
     if (isStrictnessLost(c.operator)) {

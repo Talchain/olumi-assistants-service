@@ -114,11 +114,15 @@ import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
 import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
 import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
-import { bandFromMagnitude, INFLUENCE_BAND_THRESHOLDS, type InfluenceBand } from '../../format/influence-bands.js';
+import { type InfluenceBand } from '../../format/influence-bands.js';
+import { edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
 import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
-import { bandTheUserWrote, contradictsItsName, figureTheUserWrote } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, figureTheUserWrote } from '../stated-by-user.js';
+import { figureInUserUnits } from '../approval-chips.js';
+import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
+import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
 import { defaultFrameFor, nonlinearIdentityForAgent } from '../admit-model.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
@@ -610,22 +614,14 @@ function earlierAnalysisOf(state: unknown): { analysis: Record<string, unknown> 
 }
 
 /**
- * ⭐ A STRENGTH WORD IS A BAND ON THE PRODUCT'S OWN THRESHOLDS (`INFLUENCE_BAND_THRESHOLDS`, the one table the
- * narration reads its "weak / moderate / strong" from). When a link must be SET to a band the user named, it is
- * set to that band's midpoint — derived from the thresholds, never a second table — and the preview says the
- * figure before the user approves it.
+ * ⭐ A STRENGTH WORD IS A BAND ON THE ONE EDGE-STRENGTH TABLE (`format/edge-strength-bands.ts`, the canvas's own cuts
+ * and pill midpoints). When a link must be SET to a band the user named, it is set to that band's midpoint — the
+ * number the canvas's own pill for that band writes — so the band the user said is the band the canvas draws, and the
+ * preview says the figure before the user approves it. (It read `INFLUENCE_BAND_THRESHOLDS`, a SENSITIVITY table:
+ * "strong" stored 0.825, which the canvas drew "Very strong" — R&C #70 5846846471.)
  */
-const INFLUENCE_BAND_RANGE: Readonly<Record<InfluenceBand, readonly [number, number]>> = {
-  weak: [0, INFLUENCE_BAND_THRESHOLDS.moderate],
-  moderate: [INFLUENCE_BAND_THRESHOLDS.moderate, INFLUENCE_BAND_THRESHOLDS.strong],
-  strong: [INFLUENCE_BAND_THRESHOLDS.strong, INFLUENCE_BAND_THRESHOLDS.veryStrong],
-  'very strong': [INFLUENCE_BAND_THRESHOLDS.veryStrong, 1],
-};
-const bandMidpoint = (band: InfluenceBand): number => {
-  const [lo, hi] = INFLUENCE_BAND_RANGE[band];
-  return Math.round(((lo + hi) / 2) * 1000) / 1000;
-};
-const isInfluenceBand = (v: unknown): v is InfluenceBand => typeof v === 'string' && Object.hasOwn(INFLUENCE_BAND_RANGE, v);
+const bandMidpoint = (band: InfluenceBand): number => EDGE_STRENGTH_MIDPOINTS[band];
+const isInfluenceBand = (v: unknown): v is InfluenceBand => typeof v === 'string' && Object.hasOwn(EDGE_STRENGTH_MIDPOINTS, v);
 
 /**
  * ⛔ A NAME SHARED BY TWO ACCEPTABLE TARGETS NAMES NEITHER.
@@ -696,6 +692,28 @@ const AMBIGUOUS_NOTE =
   'guess was made. Ask the user which one they mean, describing each candidate by what tells it apart (its full ' +
   'label, current value, what it is connected to), never by its id. Then propose again, passing that entity’s ' +
   '`id` exactly as given here in place of its label.';
+
+/** A goal target's direction, in words (the product's own receipt says "at least" / "at most"). */
+const DIRECTION_WORDS = { at_least: 'at least', at_most: 'at most' } as const;
+/** A goal target's figure in the user's units: the approve chip's own formatter, else the target writer's receipt formatter. */
+const targetFigure = (value: number, unit: string): string => figureInUserUnits(value, unit) ?? formatValueWithUnit(value, unit);
+
+/**
+ * ⛔ A GOAL TARGET IS CONFIRMED WHERE THE PRODUCT'S WRITER PUTS IT, never from a status code. `add_constraint` (behind
+ * `goal_target_edit`) upserts the goal's `goal_constraints` row keyed by (node_id, operator) with `value` = the raw
+ * figure, for both directions; for at least it also stamps the goal's own `goal_threshold_raw` (what the Agent's
+ * `target` and the UI read). Both must hold exactly what was approved.
+ */
+function goalTargetHolds(raw: Record<string, unknown>, goalId: string, v: { constraint_type: 'at_least' | 'at_most'; raw_value: number }): boolean {
+  const operator = v.constraint_type === 'at_least' ? '>=' : '<=';
+  const rows = (Array.isArray(raw.goal_constraints) ? raw.goal_constraints : [])
+    .filter((c): c is { node_id?: unknown; operator?: unknown; value?: unknown } => c !== null && typeof c === 'object')
+    .filter((c) => c.node_id === goalId && c.operator === operator);
+  if (rows.length !== 1 || rows[0]!.value !== v.raw_value) return false;
+  if (v.constraint_type === 'at_most') return true;
+  const goal = (Array.isArray(raw.nodes) ? raw.nodes : []).find((n) => (n as { id?: unknown } | null)?.id === goalId) as { goal_threshold_raw?: unknown } | undefined;
+  return goal?.goal_threshold_raw === v.raw_value;
+}
 
 /** The approval-facing disclosure of a name left out as ambiguous (empty when none was). */
 function ambiguousClause(ambiguous: readonly AmbiguousTarget[]): string {
@@ -1501,7 +1519,7 @@ export function createAgentCapabilities(
       const current: 'positive' | 'negative' = edge.effect_direction === 'negative' || edge.effect_direction === 'positive'
         ? edge.effect_direction : (mean < 0 ? 'negative' : 'positive');
       const wanted = args.direction === 'positive' || args.direction === 'negative' ? args.direction : current;
-      const currentBand = bandFromMagnitude(Math.abs(mean));
+      const currentBand = edgeBandFromMagnitude(Math.abs(mean));
       // Already in the band the user named, pushing the same way: KEEP the figure, record it as theirs.
       const confirm = currentBand === band && wanted === current;
       const magnitude = confirm ? Math.abs(mean) : bandMidpoint(band);
@@ -1533,6 +1551,86 @@ export function createAgentCapabilities(
         note: confirm
           ? 'Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree.'
           : `Nothing has changed yet. Tell the user it will be recorded as ${band}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree.`,
+      };
+    },
+
+    /**
+     * ⭐ THE USER STATES THEIR SUCCESS TARGET; ONE APPROVAL WRITES IT through the product's own typed target writer
+     * (`goal_target_edit` → `add_constraint`, the Canvas control's handler). Before this the Agent had no way to set a
+     * goal's target at all. Nothing is recorded as the user's that the user did not say: the figure must be in their
+     * own words (`figureTheUserWrote`) and the direction in THIS turn's (`comparatorTheUserWrote`); every miss asks.
+     */
+    async proposeGoalTarget(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const type = args?.constraint_type;
+      const value = args?.value;
+      const unit = typeof args?.unit === 'string' ? args.unit.trim() : '';
+      if ((type !== 'at_least' && type !== 'at_most') || typeof value !== 'number' || !Number.isFinite(value) || unit === '') {
+        return { ok: false, mutated: false, refusal: 'unreadable_target',
+          detail: 'A target needs the figure, its unit, and whether the goal must be at least or at most that figure. Nothing was prepared; ask the user for whichever is missing.' };
+      }
+      const figure = targetFigure(value, unit);
+      // ⛔ The figure is recorded as the user's target, so it must be one the user wrote.
+      if (!figureTheUserWrote(value, unit, ctx.user_text)) {
+        return { ok: false, mutated: false, refusal: 'target_not_stated',
+          detail: `${figure} is not a figure the user wrote, so nothing was prepared: it would be recorded as their target. `
+            + 'Ask them what figure the goal must reach, in their own words, and never offer a figure of your own as theirs.' };
+      }
+      // ⛔ And so is which way it binds: said, affirmed, in this turn's own typed words.
+      const said = comparatorTheUserWrote(ctx.user_turn_text);
+      if (said !== type) {
+        return { ok: false, mutated: false, refusal: 'direction_not_stated',
+          detail: (said === null
+            ? 'The user has not said in this message, in their own words, whether the goal must be at least or at most this figure (or they said both, asked, or denied it), so nothing was prepared. '
+            : `The user said ${DIRECTION_WORDS[said]}, not ${DIRECTION_WORDS[type]}, so nothing was prepared. `)
+            + 'Ask them whether the goal must be at least or at most the figure, and never choose it for them.' };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      // Exactly ONE goal: the event is id-addressed, and choosing between two goals would be a guess.
+      const goals = g.nodes.filter((n) => n.kind === 'goal');
+      if (goals.length !== 1) {
+        return { ok: false, mutated: false, refusal: 'goal_not_resolved',
+          detail: goals.length === 0
+            ? 'The model has no goal to set a target on, so nothing was prepared. Tell the user plainly.'
+            : `The model has more than one goal (${goals.map((x) => `"${x.label}"`).join(', ')}), so nothing was prepared: it is not clear which one this target is for. Ask the user which goal they mean.` };
+      }
+      const goal = goals[0]!;
+      // The target writer's own bounds: an at-least target must be a positive number (`add-constraint.ts`), said in its words.
+      if (type === 'at_least' && !(value > 0)) {
+        return { ok: false, mutated: false, refusal: 'target_not_positive',
+          detail: `Nothing was prepared. Olumi says: "${SUCCESS_TARGET_POSITIVE_USER_GUIDANCE}" Tell the user that, in those words.` };
+      }
+      // ⛔ A figure in another kind of unit is never this goal's target (the lane's one family check, `unit-conflict.ts`).
+      // The writer would not refuse it: it re-denominates the goal and re-derives its scale, silently.
+      const trio = pickGoalThresholdTrio(goal as never) as { goal_threshold_raw?: number; goal_threshold_unit?: string };
+      const goalUnit = (goal as { goal_threshold_unit?: unknown }).goal_threshold_unit ?? factorUnitOf(g.raw, goal);
+      if (unitsConflict(unit, goalUnit) !== null) {
+        return { ok: false, mutated: false, refusal: 'target_unit_mismatch',
+          detail: `The goal "${goal.label}" is measured in ${String(goalUnit)}, and ${figure} is a different kind of figure, so nothing was prepared. `
+            + 'Ask the user for the target in the goal’s own units, and never record a figure given for something else as this goal’s target.' };
+      }
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash,
+        operations: [{ op: 'set_goal_target', path: goal.id, value: { constraint_type: type, raw_value: value, unit } }],
+        provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: `Set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}`,
+      });
+      proposals.put(proposal);
+      return {
+        ok: true, mutated: false,
+        proposal_id: proposal.proposal_id,
+        public_label: proposal.public_label,
+        base_revision: g.graph_hash,
+        goal: {
+          label: goal.label,
+          current_target: trio.goal_threshold_raw === undefined ? null : targetFigure(trio.goal_threshold_raw, trio.goal_threshold_unit ?? ''),
+          becomes: `${DIRECTION_WORDS[type]} ${figure}`,
+        },
+        note: `Nothing has changed yet. Tell the user it will set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}, as their own target — never the id — and call authorise_change with this proposal_id once they agree.`,
       };
     },
 
@@ -2347,6 +2445,53 @@ export function createAgentCapabilities(
           ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
           follow_up: `${decision.proposal.public_label.replace(/^Record /, 'Recorded ')}.`,
           note: 'Recorded as the user’s own estimate. Offer to run the analysis again so they can see what it changes.',
+        };
+      }
+
+      /**
+       * ⭐ THE GOAL'S SUCCESS TARGET, AS THE USER STATED IT — ONE typed `goal_target_edit`, the product's own target
+       * writer, carrying the proposal's base hash (its stale gate). Applied ONLY when this response succeeded AND the
+       * stored target holds exactly what was approved (`goalTargetHolds`); a write that answered 200 but cannot be read
+       * back is "could not be confirmed", never "not saved".
+       */
+      if (ops.length === 1 && ops[0]!.op === 'set_goal_target') {
+        const op = ops[0]!;
+        const v = op.value as { constraint_type: 'at_least' | 'at_most'; raw_value: number; unit: string };
+        const operationId = authorisationTurnId(decision.proposal.proposal_id);
+        const res = await dispatch('/orchestrate/v2/turn', {
+          kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
+          event: { kind: 'goal_target_edit', goal_node_id: op.path, constraint_type: v.constraint_type, raw_value: v.raw_value, unit: v.unit, base_graph_hash: decision.proposal.base_graph_identity_hash },
+        });
+        // The writer's stale-base gate: the model moved between this approval's read and the write. Nothing written.
+        if (res.status === 409) {
+          return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: decision.proposal.proposal_id,
+            detail: 'The model changed just before this target was written, so nothing was changed. Offer to prepare it again.' };
+        }
+        // Refused with nothing written (422: `refused_no_write`, which carries no reason on the wire). The writer's own
+        // words for a target it cannot take are its canonical sentence; relayed as that, never as a code.
+        if (res.status >= 400 && res.status < 500) {
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: decision.proposal.proposal_id,
+            follow_up: `${ADD_CONSTRAINT_USER_GUIDANCE} Nothing on your model changed.`,
+            detail: `The target was not set, and nothing on the model changed. Olumi said: "${ADD_CONSTRAINT_USER_GUIDANCE}" Tell the user plainly, in those words, and ask what target they would like instead.` };
+        }
+        const after = await readGraph(ctx.scenario_id);
+        // Landed is what the model HOLDS (the rule #1995 sets for every writer): another writer moving the revision afterwards
+        // does not unsay a target the model holds exactly as approved.
+        const landed = res.status === 200 && after !== null && goalTargetHolds(after.raw, op.path, v);
+        if (!landed) {
+          // It may have been stored (a 200, or a failure the writer itself cannot vouch for): say what is known.
+          return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: decision.proposal.proposal_id,
+            detail: 'The target was sent, but what the model now holds could not be confirmed. Tell the user plainly that it could not be confirmed, '
+              + 'offer to check the model again, and never say it was set or that it was not.' };
+        }
+        const receipt = receiptSummaryOf(res.json);
+        const receipts = receipt.summary !== null ? [receipt.summary] : [];
+        proposals.markApplied(decision.proposal.proposal_id, receipts);
+        const goalLabel = String(after!.nodes.find((x) => x.id === op.path)?.label ?? 'the goal');
+        return {
+          ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, operation_id: operationId, receipts,
+          ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
+          follow_up: `The goal "${goalLabel}" now has the target ${DIRECTION_WORDS[v.constraint_type]} ${targetFigure(v.raw_value, v.unit)}, as you stated it.`,
         };
       }
 

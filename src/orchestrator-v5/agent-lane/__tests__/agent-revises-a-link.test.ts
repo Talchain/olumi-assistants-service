@@ -71,8 +71,8 @@ const parsesOnTheWire = (body: Record<string, unknown>) => {
 };
 
 describe('the Agent records a link\'s strength as the user\'s own, through the product\'s typed link writer', () => {
-  it('RED: "strong" on a link Olumi assumed at 0.5 → ONE proposal (nothing written) → approve → set to the strong band\'s midpoint, recorded as the user\'s', async () => {
-    const w = world(graphWith(0.5));
+  it('RED: "strong" on a link Olumi assumed at 0.3 (the canvas draws it Moderate) → ONE proposal (nothing written) → approve → set to the strong band\'s midpoint (0.55, the canvas pill\'s), recorded as the user\'s', async () => {
+    const w = world(graphWith(0.3));
     const caps = createAgentCapabilities(w.d, new ProposalStore());
     const p = await caps.proposeLinkStrength!(ctx, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'The user said so.' });
     expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
@@ -82,20 +82,20 @@ describe('the Agent records a link\'s strength as the user\'s own, through the p
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true }));
     expect(w.sent).toHaveLength(1);
     parsesOnTheWire(w.sent[0]!);
-    expect(w.sent[0]!['event']).toEqual({ kind: 'edge_strength_edit', from: 'price', to: 'mrr', intent: 'set', direction_intent: 'preserve', magnitude: 0.825, expected: { mean: 0.5, effect_direction: 'positive' } });
+    expect(w.sent[0]!['event']).toEqual({ kind: 'edge_strength_edit', from: 'price', to: 'mrr', intent: 'set', direction_intent: 'preserve', magnitude: 0.55, expected: { mean: 0.3, effect_direction: 'positive' } });
     const e = w.graph().edges[0]!;
-    expect(e.strength.mean).toBeCloseTo(0.825, 9);
+    expect(e.strength.mean).toBeCloseTo(0.55, 9);
     expect(e.provenance?.source).toBe('user_specified');
   });
 
-  it('RED: the link already sits in the band the user named → its strength is KEPT and only recorded as theirs (confirm_current)', async () => {
-    const w = world(graphWith(0.8));
+  it('RED: the link already sits in the band the user named (0.5, which the canvas draws Strong) → its strength is KEPT and only recorded as theirs (confirm_current)', async () => {
+    const w = world(graphWith(0.5));
     const caps = createAgentCapabilities(w.d, new ProposalStore());
     const p = await caps.proposeLinkStrength!(ctx, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'x' });
     await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     parsesOnTheWire(w.sent[0]!);
-    expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ intent: 'confirm_current', direction_intent: 'preserve', magnitude: 0.8 }));
-    expect(w.graph().edges[0]!.strength.mean).toBe(0.8);
+    expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ intent: 'confirm_current', direction_intent: 'preserve', magnitude: 0.5 }));
+    expect(w.graph().edges[0]!.strength.mean).toBe(0.5);
   });
 
   it('a stated reversal of direction is carried as the user said it; a negative link keeps its sign on the wire', async () => {
@@ -104,7 +104,7 @@ describe('the Agent records a link\'s strength as the user\'s own, through the p
     const p = await caps.proposeLinkStrength!(ctxWeak, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'weak', direction: 'positive', rationale: 'x' });
     await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     parsesOnTheWire(w.sent[0]!);
-    expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ intent: 'set', direction_intent: 'positive', magnitude: 0.15, expected: { mean: -0.4, effect_direction: 'negative' } }));
+    expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ intent: 'set', direction_intent: 'positive', magnitude: 0.1, expected: { mean: -0.4, effect_direction: 'negative' } }));
   });
 
   it('the writer answers 200 but records nothing (its own refusal) → NOT reported as recorded', async () => {
@@ -163,7 +163,7 @@ describe('a link-strength proposal is approvable like every other: one button, c
     const { proposalPendingAction, rehydrateProposals } = await import('../durable-proposal.js');
     const { parsePendingAction } = await import('../../session/pending-action.js');
     const { leavesProposalAwaitingApproval } = await import('../../../routes/agent-v1-turn.js');
-    const w = world(graphWith(0.5));
+    const w = world(graphWith(0.3));
     const store = new ProposalStore();
     const caps = createAgentCapabilities(w.d, store);
     const p = await caps.proposeLinkStrength!(ctx, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'x' });
@@ -181,7 +181,7 @@ describe('a link-strength proposal is approvable like every other: one button, c
     // …and the restored proposal applies exactly the approved event.
     const r = await createAgentCapabilities(w.d, fresh).authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(r).toEqual(expect.objectContaining({ ok: true, applied: true }));
-    expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ kind: 'edge_strength_edit', intent: 'set', magnitude: 0.825, expected: { mean: 0.5, effect_direction: 'positive' } }));
+    expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ kind: 'edge_strength_edit', intent: 'set', magnitude: 0.55, expected: { mean: 0.3, effect_direction: 'positive' } }));
   });
 });
 
@@ -296,5 +296,24 @@ describe('⛔ a band is recorded as the user\'s only when the user named it (AI 
     expect(bandTheUserWrote('very strong', 'It isn\'t very strong.')).toBe(false);
     expect(bandTheUserWrote('strong', 'It has a very strong effect.')).toBe(false);
     expect(bandTheUserWrote('strong', null)).toBe(false);
+  });
+
+  it('RED (#2003 follow-up): the canvas pill says "Slight" for the lowest band, so "slight" in the band position names it', () => {
+    // Named: the pill's word, ending its clause or before a link noun.
+    expect(bandTheUserWrote('weak', 'Make that link slight.')).toBe(true);
+    expect(bandTheUserWrote('weak', 'It only has a slight effect on churn.')).toBe(true);
+    expect(bandTheUserWrote('weak', 'It is slight.')).toBe(true);
+    expect(bandTheUserWrote('weak', 'The link is slight, not strong.')).toBe(true);
+    // Not named (R&C #2008 B1): a degree adverb on a CHANGE, a relative comparison, a slight change to something else.
+    for (const text of [
+      'Reduce it slightly.', 'Lower it slightly please.', 'That link is slightly too strong.',
+      'It is slightly worse than you think.', 'The effect is slightly above moderate.', 'It is slightly different from what you modelled.',
+      'Make a slight cut to that link.', 'A slight change would do.', 'It is slightly stronger than you think.',
+      'Churn moves slightly more than that.', 'The slighter effect is on churn.', 'Price slightly affects churn.',
+    ]) expect(bandTheUserWrote('weak', text), text).toBe(false);
+    // Denial, question and another band: the function's own rules, unchanged.
+    expect(bandTheUserWrote('weak', 'It is not slight.')).toBe(false);
+    expect(bandTheUserWrote('weak', 'Is it slight?')).toBe(false);
+    expect(bandTheUserWrote('moderate', 'Make that link slight.')).toBe(false);
   });
 });

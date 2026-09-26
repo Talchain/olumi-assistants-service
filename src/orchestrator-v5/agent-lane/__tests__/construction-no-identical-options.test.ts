@@ -73,6 +73,9 @@ function candidateFromServed(g: SGraph, opts: { olumi?: 'ai_proposed' | 'inferre
     constraints: (g.goal_constraints ?? []).map((c) => ({
       metric: c.label, operator: c.operator, value: c.provenance_unit_relabelled?.pre_normalisation_value ?? c.value,
       unit: c.provenance_unit_relabelled?.pre_normalisation_unit ?? c.unit, provenance: c.provenance === 'explicit' ? 'explicit' : 'ai_proposed',
+      // The served builds predate the required `frame` (#1919) and stamped none. Every served limit here is
+      // "Monthly churn <= 10 % per month": a LEVEL the churn rate must stay under, never a change from today.
+      frame: (c as { value_frame?: 'level' | 'delta' }).value_frame ?? 'level',
     })),
     options: g.nodes.filter((n) => n.kind === 'option').map((o) => {
       const levels = Object.entries(o.interventions ?? {});
@@ -102,10 +105,11 @@ function candidateFromServed(g: SGraph, opts: { olumi?: 'ai_proposed' | 'inferre
     links: [
       // A user restatement of an option -> factor connection (the edge carries `brief_extraction`).
       ...g.edges.filter((e) => byId.get(e.from)?.kind === 'option' && e.origin !== 'repair' && e.provenance?.source === 'brief_extraction')
-        .map((e) => ({ from: byId.get(e.from)!.label, to: byId.get(e.to)!.label, direction: 'positive', provenance: 'explicit' })),
+        .map((e) => ({ from: byId.get(e.from)!.label, to: byId.get(e.to)!.label, direction: 'positive', provenance: 'explicit', effect_amount: null, effect_per_source_change: null, effect_provenance: null })),
       ...g.edges.filter((e) => !['option', 'decision'].includes(byId.get(e.from)?.kind ?? ''))
         .map((e) => ({ from: byId.get(e.from)!.label, to: byId.get(e.to)!.label, direction: e.effect_direction ?? 'positive',
-          provenance: e.provenance?.source === 'brief_extraction' ? 'explicit' : 'inferred' })),
+          provenance: e.provenance?.source === 'brief_extraction' ? 'explicit' : 'inferred',
+          effect_amount: null, effect_per_source_change: null, effect_provenance: null })),
     ],
     identities: [],
     unknowns: opts.unknowns ?? [],
@@ -174,6 +178,18 @@ const BASE = (() => {
   try { return JSON.parse(readFileSync(BASE_FIXTURE, 'utf8')) as { head: string; graphs: Record<string, string> }; } catch { return null; }
 })();
 const baseGraph = (key: string): SGraph => JSON.parse(BASE!.graphs[key]!) as SGraph;
+/**
+ * Base (cb1778b) predates the limit frame (#1919): admission now stamps each limit's `value_frame` right
+ * after `provenance` (`admit-constraint.ts`). Every served limit here is a level, so what registers is
+ * base's bytes plus exactly that one key per limit — nothing else may move.
+ */
+const framedBase = (g: SGraph): SGraph => ({
+  ...g,
+  ...(g.goal_constraints === undefined ? {} : {
+    goal_constraints: g.goal_constraints.map((c) => Object.fromEntries(Object.entries(c).flatMap(([k, v]) =>
+      (k === 'provenance' ? [[k, v], ['value_frame', 'level']] : [[k, v]]))) as SConstraint),
+  }),
+});
 const optionIds = (g: SGraph) => g.nodes.filter((n) => n.kind === 'option').map((n) => n.id);
 const questions = (out: Record<string, unknown>) => (out.open_questions ?? []) as string[];
 const statusLine = (out: Record<string, unknown>) =>
@@ -234,7 +250,7 @@ describe.each([
     const { graph } = await build(draft());
     const base = baseGraph(key);
     expect(optionIds(base)).toContain(TEST_ID);
-    expect(JSON.stringify(graph)).toBe(JSON.stringify(withoutOption(base, TEST_ID)));
+    expect(JSON.stringify(graph)).toBe(JSON.stringify(framedBase(withoutOption(base, TEST_ID))));
   });
 
   it('RED: the Olumi-added test option is not registered — no node, no edge', async () => {
@@ -307,7 +323,7 @@ describe('controls — what the rule must never touch', () => {
     expect(optionIds(graph)).toContain(olumiId);
     expect(graph.nodes).toEqual(run.brief.draft_graph.nodes);
     expect(graph.edges).toEqual(run.brief.draft_graph.edges);
-    expect(JSON.stringify(graph)).toBe(BASE!.graphs[key]);
+    expect(JSON.stringify(graph)).toBe(JSON.stringify(framedBase(baseGraph(key))));
     expect(out).not.toHaveProperty('options_withheld');
     expect(questions(out).filter((q) => q.startsWith('I left out ') || q.startsWith('What makes '))).toEqual([]);
   });
@@ -562,7 +578,7 @@ const padded = (n: number, withTest: boolean, { servedGaps = false }: { servedGa
       ...base.factors.map((f) => (servedGaps || f.label !== 'AI feature availability' ? f : { ...f, baseline_known: false, baseline_value: 0 })),
       ...extra.map((label) => ({ label, role: 'observable' as const, baseline_known: false, baseline_value: null, unit: null, provenance: 'ai_proposed', plausible_max: 100 })),
     ],
-    links: [...base.links, ...extra.map((from) => ({ from, to: 'MRR', direction: 'positive', provenance: 'ai_proposed' }))],
+    links: [...base.links, ...extra.map((from) => ({ from, to: 'MRR', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null }))],
   } as unknown as typeof base;
 };
 
@@ -904,7 +920,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
    * the first draft registered. Mutant Ma (the retry's own `options_withheld`, unfiltered) reads 1 ≤ 1 for a retry that
    * withholds £54 and opens £64's gap, adopts it, and £54 drops out of the registered model.
    */
-  const LOOP_BACK = { from: 'Pro plan subscribers', to: 'Monthly churn', direction: 'positive', provenance: 'inferred' };
+  const LOOP_BACK = { from: 'Pro plan subscribers', to: 'Monthly churn', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null };
   const LOOP_ISSUE = '"Monthly churn" -> "Pro plan subscribers" -> "Monthly churn" is a loop: a model cannot hold one. Keep the direction that carries the '
     + 'cause toward the goal metric, remove the link that points back, and keep every option and risk connected to the goal through links whose direction you state.';
   const withLoop = (d: ReturnType<typeof with54>) => ({ ...d, links: [...d.links, LOOP_BACK] }) as unknown as ReturnType<typeof with54>;

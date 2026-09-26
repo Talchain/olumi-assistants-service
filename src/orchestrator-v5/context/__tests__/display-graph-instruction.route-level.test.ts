@@ -299,14 +299,14 @@ describe('display_graph structural grounding — exact prompt bytes', () => {
         to: 'goal_growth',
         from_label: 'Customer demand',
         to_label: 'Sustainable growth',
-        relationship: 'moderate positive link',
+        relationship: 'strong positive link',
       },
       {
         from: 'factor_cost',
         to: 'goal_growth',
         from_label: 'Delivery cost',
         to_label: 'Sustainable growth',
-        relationship: 'moderate negative link',
+        relationship: 'strong negative link',
       },
     ]);
     expect(prompt).not.toContain('"strength"');
@@ -375,7 +375,7 @@ describe('display_graph structural grounding — exact prompt bytes', () => {
         from_label: 'Customer demand',
         to_label: 'Delivery cost',
         relationship:
-          'moderate negative co-movement, unmeasured common cause (not a causal route)',
+          'strong negative co-movement, unmeasured common cause (not a causal route)',
         edge_type: 'bidirected',
       },
     ]);
@@ -397,7 +397,7 @@ describe('display_graph structural grounding — exact prompt bytes', () => {
         to: 'missing_goal',
         from_label: 'Customer demand',
         to_label: 'missing_goal',
-        relationship: 'strong positive link',
+        relationship: 'very strong positive link',
       },
     ]);
     expect(nodeIds.has(String(graph.edges[0]!.from))).toBe(true);
@@ -464,8 +464,8 @@ describe('display_graph structural grounding — exact prompt bytes', () => {
     );
 
     expect(graph.edges.map((edge) => edge.relationship)).toEqual([
-      'moderate positive link',
-      'moderate negative link',
+      'strong positive link',
+      'strong negative link',
     ]);
     expect(prompt).toContain(
       'the relationship and its sign are conflicting and unknown',

@@ -776,7 +776,8 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const t1 = await turn({ message: 'Add two options: test £54 at release, and keep £49 with an add-on.' });
     const calls = t1._agent.tool_calls.filter((c) => c.name === 'propose_new_option');
     expect(calls.map((c) => c.ok), JSON.stringify(calls)).toEqual([true, false]);
-    expect(calls[1]).toEqual(expect.objectContaining({ refusal: 'one_option_per_approval' }));
+    // The loop's one-change-per-approval rule refuses it before the capability's own `one_option_per_approval` check.
+    expect(calls[1]).toEqual(expect.objectContaining({ refusal: 'one_change_per_approval' }));
     expect(t1.suggested_actions.filter((c) => c.id.startsWith('agent-approve-proposal:gmh_')), 'exactly ONE approve button').toHaveLength(1);
     expect(inner.filter((b) => (b['chip'] as { intent?: string } | undefined)?.intent === 'add_option'), 'one inner add').toHaveLength(1);
   }, 120_000);

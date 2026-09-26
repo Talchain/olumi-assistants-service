@@ -32,6 +32,7 @@ import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { isPercentScaledUnit, unitPinnedScaleFrame } from '../../cee/draft/records/unit-scale-class.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
+import { sizeLink, type LinkSizing, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
 import {
   admitCandidateConstraints,
   canonicaliseLimitUnit,
@@ -2599,7 +2600,50 @@ function admitOnce(
     if (bundle !== undefined) n.interventions = bundle;
   }
 
-  const linkResult = admitCandidateLinks(resolvable);
+  /**
+   * ⭐ THE MAGNITUDE CONTRACT (`cee/magnitude/link-effect.ts`, design D1–D9). Each link's stated size is read on
+   * its target's own frame here, where both ends' frames and every option's level are already known — never a
+   * frame-blind 0.5 (served T3: releasing AI moved churn by about −50 points on its 0–100% frame).
+   *
+   * Only a link whose direction is stated and whose mean nobody supplied directly is sized. A link with no usable
+   * size and nothing to check it against keeps today's projection exactly.
+   */
+  const unitById = new Map<string, string>();
+  for (const f of model.factors) {
+    const id = ids.get(f.label);
+    if (id !== undefined && typeof f.unit === 'string') unitById.set(id, f.unit);
+  }
+  const optionLevelsById = new Map<string, number[]>();
+  for (const bundle of interventionsByOption.values()) {
+    for (const [factorId, level] of Object.entries(bundle)) optionLevelsById.set(factorId, [...(optionLevelsById.get(factorId) ?? []), level.value]);
+  }
+  const magnitudeNodeById = new Map<string, MagnitudeNode>(nodes.map((n) => [n.id, {
+    label: n.label,
+    kind: n.kind,
+    scale_frame: n.scale_frame,
+    observed_state: n.observed_state as MagnitudeNode['observed_state'],
+    goal_threshold_cap: n.goal_threshold_cap,
+    goal_threshold_unit: n.goal_threshold_unit,
+    unit: unitById.get(n.id) ?? null,
+    option_levels: optionLevelsById.get(n.id) ?? [],
+  }]));
+  const sizing = new Map<string, LinkSizing>();
+  for (const l of resolvable) {
+    if (l.direction === 'unknown' || typeof l.strength_mean === 'number') continue;
+    const source = magnitudeNodeById.get(l.from);
+    const target = magnitudeNodeById.get(l.to);
+    if (source === undefined || target === undefined) continue;
+    // D9: a user's own edit (`user_specified`) always wins; otherwise the size is the user's only when stated as theirs.
+    const user_stated = l.provenance_source === 'user_specified' || (l.effect_provenance ?? l.provenance) === 'explicit';
+    sizing.set(`${l.from}::${l.to}`, sizeLink({
+      direction: l.direction,
+      effect_amount: l.effect_amount,
+      effect_per_source_change: l.effect_per_source_change,
+      user_stated,
+    }, source, target));
+  }
+
+  const linkResult = admitCandidateLinks(resolvable, sizing);
 
   // decision -> option edges are TOPOLOGY, not causal belief. They use the
   // canonical structural constant and are deliberately NOT marked `defaulted`

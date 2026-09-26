@@ -100,7 +100,9 @@ export function buildCandidateSchema(): Record<string, unknown> {
     constraints: { type: 'array', items: obj({
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
       value: { type: 'number' }, unit: { type: 'string' }, provenance,
-    }, ['metric', 'operator', 'value', 'unit', 'provenance']) },
+      // The frame the analysis compares the limit in (ISL refuses an unframed limit: `frame_not_stamped`).
+      frame: { type: 'string', enum: ['level', 'delta'] },
+    }, ['metric', 'operator', 'value', 'unit', 'provenance', 'frame']) },
     /**
      * ⛔ NO `maxItems` ON ANYTHING THAT CAN HOLD USER MATERIAL. Removed after an
      * exact-head review found the contract it broke.
@@ -158,7 +160,15 @@ export function buildCandidateSchema(): Record<string, unknown> {
       direction: { type: 'string', enum: ['positive', 'negative', 'unknown'], description:
         'The direction read from the brief or from causal reasoning you can state in one line. "unknown" only when you genuinely cannot say \u2014 then ask which way it runs in `unknowns`; an unknown link is withheld and is not a path.' },
       provenance,
-    }, ['from', 'to', 'direction', 'provenance']) },
+      // \u2b50 THE MAGNITUDE CONTRACT (D1). A size in NATURAL units, read on each end's own frame by admission
+      // (`cee/magnitude/link-effect.ts`). REQUIRED so strict output must say "not known" (null) rather than omit it.
+      effect_amount: { anyOf: [{ type: 'number' }, { type: 'null' }], description:
+        'The signed change in the TARGET\u2019s own unit that `effect_per_source_change` of the source causes. For a percentage target, in points: 4% to 3% is -1. null when you cannot give a defensible size.' },
+      effect_per_source_change: { anyOf: [{ type: 'number' }, { type: 'null' }], description:
+        'The change in the SOURCE\u2019s own unit that causes `effect_amount`: 1 for switching a yes/no on, 10 for a GBP 10 price rise. null when `effect_amount` is null.' },
+      effect_provenance: { anyOf: [provenance, { type: 'null' }], description:
+        '"explicit" only when the user stated this size; null when `effect_amount` is null.' },
+    }, ['from', 'to', 'direction', 'provenance', 'effect_amount', 'effect_per_source_change', 'effect_provenance']) },
     /**
      * ⛔ C46: a product the analysis can only ADD UP must be DECLARED, never read off a label.
      * The analyse path is a linear SCM, so "Pro MRR = price × subscribers" is approximated, and
@@ -229,7 +239,7 @@ export const BUILD_INSTRUCTIONS = [
   // ⛔ C46 (#70 5841215337): the analysis adds effects up, so a product is approximated and its sign can flip.
   'DECLARE A PRODUCT ONLY WHERE ONE HOLDS BY DEFINITION. When a quantity you keep is, by definition, other quantities you keep multiplied together — a plan’s revenue is its price times its paying subscribers; a cost is headcount times cost per head — add one entry to `identities`: `outcome` is that quantity’s EXACT label, `operation` "product", and `factors` the EXACT labels of every quantity multiplied. Still state each factor’s own link toward the outcome in `links`. Only a definition, never a correlation or a guess. `identities` is empty when none holds.',
   'THE GOAL METRIC MUST BE THE TERMINAL NODE. Every option needs a causal path that ends at the goal metric you named in `goal.metric`. Use that EXACT label as the endpoint of the final link \u2014 do not invent a near-synonym outcome like "X Improvement" for a goal called "X change", because a separate synonym leaves the goal disconnected and the model cannot be analysed at all.',
-  'EVERY LIMIT MUST NAME A NODE THE ANALYSIS CAN CHECK. Each `constraints[].metric` must be the EXACT label of a factor or outcome you keep in this model \u2014 a limit whose metric names no node is withheld from the model, and the analysis cannot check it. If the user limits a total such as cost, budget or spend, keep that total in the model as a factor the options set or an outcome their factors feed, wired toward the goal like every other factor, and use its exact label as the metric. Keep the direction the user stated: a budget, cost or spend cap is an upper bound ("<=") and a floor such as a minimum margin is a lower bound (">="); never add the opposite bound to the same limit.',
+  'EVERY LIMIT MUST NAME A NODE THE ANALYSIS CAN CHECK. Each `constraints[].metric` must be the EXACT label of a factor or outcome you keep in this model \u2014 a limit whose metric names no node is withheld from the model, and the analysis cannot check it. If the user limits a total such as cost, budget or spend, keep that total in the model as a factor the options set or an outcome their factors feed, wired toward the goal like every other factor, and use its exact label as the metric. State the `frame` of each limit: "level" when the user limits the value itself ("total first-year cost under \u00a3250k", "gross margin above 70%"), "delta" only when they limit a CHANGE from today ("churn no more than 2 points higher than now"). When the limit is on a cost, budget or spend, give that factor a `baseline_value` at what is spent on it today: 0 when nothing is, as for a new hire, a new system or a new budget. Never set a current level that the brief does not support just because the user named a limit on it. Keep the direction the user stated: a budget, cost or spend cap is an upper bound ("<=") and a floor such as a minimum margin is a lower bound (">="); never add the opposite bound to the same limit.',
   // ⛔ THE LINK CONTRACT (#63 ruling 5793252993). There is NO default-positive
   // factor->goal repair in admission, by ruling: a sign nobody stated would be a
   // fabricated belief. So the drafter itself must state every link toward the
@@ -242,6 +252,9 @@ export const BUILD_INSTRUCTIONS = [
   + 'Such a link is Olumi\'s hypothesis, not the user\'s claim: provenance "inferred" when it is read out of the brief, "ai_proposed" when it is your own reasoning, and "explicit" ONLY when the user stated that relationship. '
   + 'WHICH option is better is the question the analysis answers \u2014 it is never a reason to mark a factor\'s link to the goal "unknown": more capacity raises velocity whichever option supplies it. '
   + 'Only when you genuinely cannot say which way a link runs, set its direction to "unknown" AND add a question to `unknowns` asking the user which way it runs. An "unknown" link is withheld from the model and never counts as a path, so every option must still reach the goal through links whose direction you can state.',
+  // ⭐ THE MAGNITUDE CONTRACT (D1): ONE sentence. Admission reads the size on each end's own frame and never
+  // lets it run a bounded quantity out of its range (served T3: a frame-blind 0.5 moved churn by about 50 points).
+  'STATE EACH LINK’S SIZE IN NATURAL UNITS: `effect_amount` is the signed change in the target’s own unit (in points for a percentage, so 4% to 3% is -1) caused by `effect_per_source_change` of the source in its own unit (1 for switching a yes/no on), with `effect_provenance` "explicit" only when the user stated that size, and all three null when you cannot give a defensible size.',
   'GIVE EVERY FACTOR A `plausible_max`. IT IS REQUIRED AND NEVER NULL, for every factor, whether or not it has a baseline today. A number above 1 with no range beside it CANNOT BE ANALYSED \u2014 the engine has nothing to read it against, Olumi refuses the WHOLE analysis rather than guess, and NO LATER EDIT CAN SUPPLY THE RANGE: the only remedy is rebuilding the model. The range is a SCALE, not a forecast: 100 for a percentage or a score out of 100, exactly 1 for something already between 0 and 1, and a round number comfortably above anything realistic for a count, an amount or a price. Measured twice on real models.',
   'Labels are NAMES, not sentences.',
   'Output only the schema.',
@@ -1200,6 +1213,10 @@ export async function buildModelFromBrief(
    */
   const parked = (candidate as { unknowns?: unknown }).unknowns;
   const openQuestions = Array.isArray(parked) ? parked.filter((q): q is string => typeof q === 'string' && q.trim() !== '') : [];
+  // ⭐ THE MAGNITUDE CONTRACT (D5–D8): a size Olumi set aside, a user's size that cannot hold, or a placeholder sized to
+  // the target's range is ASKED where the user always sees it — ahead of the drafter's own questions, and behind
+  // every question placed below. Admission writes each as a `.magnitude_question` ledger entry (`admit-candidate.ts`).
+  openQuestions.unshift(...admitted.loss.filter((l) => /\.magnitude_question$/.test(l.field_path)).map((l) => l.reason));
   // ⛔ C46: a declared product whose sign this model cannot prove is ASKED where the user always sees it,
   // not only said in `not_represented` (which only the Agent's model reads). After the scope and deadline
   // questions, ahead of the drafter's own; nothing for a stable product or a linear model.
@@ -1437,7 +1454,9 @@ export async function buildModelFromBrief(
         // up — the missing capability in plain English — or a declaration that did not hold.
         // `loop_withheld` / `loop_kept`: a loop the model could not hold (`admit-model.ts`,
         // `breakLoops`) — which link was left out, or that the user's own loop was kept.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept)$|\.observed_state\.baseline$/.test(l.field_path))
+        // `magnitude_unconvertible`: a stated size that could not be read on the two ends' frames, so the standard
+        // placeholder stands in (magnitude contract, D2/D6) — never dropped unseen.
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|loop_withheld|loop_kept|magnitude_unconvertible)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

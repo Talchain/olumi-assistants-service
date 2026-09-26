@@ -81,27 +81,28 @@ describe('formatSensitivityDirection', () => {
 });
 
 describe('formatEdgeStrengthMagnitude', () => {
+  // The ONE edge-strength table (`format/edge-strength-bands.ts`), the canvas's own
+  // cuts 0.2 / 0.4 / 0.7 — so an explanation names a link as the canvas draws it.
   it.each([
-    // Weak band: |v| < 0.3.
+    // Weak band (the canvas's "Slight"): |v| < 0.2.
     [0, 'weak'],
     [0.05, 'weak'],
     [-0.099, 'weak'],
     [0.1, 'weak'],
-    [0.25, 'weak'],
-    [0.299, 'weak'],
-    // Moderate band: [0.3, 0.7).
-    [0.3, 'moderate'],
+    [0.199, 'weak'],
+    // Moderate band: [0.2, 0.4).
+    [0.2, 'moderate'],
     [-0.3, 'moderate'],
-    [0.5, 'moderate'],
-    [0.699, 'moderate'],
-    // Strong band: [0.7, 0.95).
-    [0.7, 'strong'],
-    [-0.7, 'strong'],
-    [0.85, 'strong'],
-    [0.949, 'strong'],
-    // Very strong band: [0.95, ∞).
+    [0.399, 'moderate'],
+    // Strong band: [0.4, 0.7).
+    [0.4, 'strong'],
+    [-0.5, 'strong'],
+    [0.55, 'strong'],
+    [0.699, 'strong'],
+    // Very strong band: [0.7, ∞).
+    [0.7, 'very strong'],
+    [-0.85, 'very strong'],
     [0.95, 'very strong'],
-    [-0.95, 'very strong'],
     [1.0, 'very strong'],
   ])('value=%s → %s', (value, expected) => {
     expect(formatEdgeStrengthMagnitude(value)).toBe(expected);

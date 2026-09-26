@@ -15,7 +15,7 @@
  * HandlerInvocation's trusted side band; natural-language callers retain the
  * legacy positive default and cannot self-authorise by inventing a parameter.
  *
- * Confirmation language uses `bandFromMagnitude` so the user-visible
+ * Confirmation language uses `edgeBandFromMagnitude` (the one edge-strength table) so the user-visible
  * text says "moderate to strong" (not "0.4 to 0.7"). Sign reversal is
  * surfaced explicitly.
  */
@@ -377,11 +377,14 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // the V3 transform usually maps source → display, but we set
         // both explicitly so downstream consumers don't need to wait
         // for the next round-trip through transformResponseToV3.
-        const existingProvenance = edge.provenance;
+        // Olumi's sizing of the OLD strength goes with it (magnitude contract; R&C 5845818897): `natural_effect` said
+        // that β in natural units and `magnitude` said who chose it — neither describes the user's own value.
+        const { natural_effect: _naturalEffect, magnitude: _magnitude, ...existingProvenance } =
+          (edge.provenance ?? {}) as Record<string, unknown>;
         edge.provenance = {
-          ...(existingProvenance ?? {}),
+          ...existingProvenance,
           source: 'user_specified',
-        };
+        } as typeof edge.provenance;
         edge.provenance_display = 'user_set';
         // The same stamp ends Olumi's default: `defaulted: true` says a default
         // strength was applied (EdgeV3), and this write makes the strength the

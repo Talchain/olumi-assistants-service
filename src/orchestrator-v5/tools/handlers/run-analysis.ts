@@ -114,6 +114,12 @@ import { validateEnrichmentShadow } from './enrichment-validation.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
 import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
 import {
+  carryLevelLimitBaselines,
+  levelLimitBaselineNodeIds,
+  unprovablePercentFrameIds,
+  withholdUnprovablePercentFrames,
+} from './level-limit-baseline.js';
+import {
   AnalysisNotReadyError,
   readinessQuestions,
   resolveRunAdmission,
@@ -903,8 +909,23 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       ...opt,
       interventions: requestProjection.perOption[index] ?? {},
     }));
+    // A level limit on a node the options move is checked against that node's CURRENT level: carried on this wire
+    // copy only, never persisted, so a later edit of the level can never leave a stale copy behind
+    // (`level-limit-baseline.ts`).
+    const wireGraph = carryLevelLimitBaselines(graphForAnalysis, snapshot.goal_constraints, snapshot.goal_node_id);
+    if (wireGraph !== graphForAnalysis) {
+      log.info(
+        {
+          event: 'run_analysis.level_limit_baseline_carried',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          node_ids: [...levelLimitBaselineNodeIds(graphForAnalysis, snapshot.goal_constraints, snapshot.goal_node_id)],
+        },
+        'run_analysis carried the current level of a level-limited node as its baseline (wire copy only; no magnitudes)',
+      );
+    }
     const plotPayload: Record<string, unknown> = {
-      graph: graphForAnalysis,
+      graph: wireGraph,
       // No-rank ruling (2026-08-14): the GATED submission set — identical to
       // snapshot.options unless the gate held the status quo at its observed
       // position, or EXCLUDED an option with no values set (disclosed below).
@@ -917,7 +938,21 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (snapshot.seed !== undefined) plotPayload.seed = snapshot.seed;
     if (snapshot.n_samples !== undefined) plotPayload.n_samples = snapshot.n_samples;
     if (snapshot.goal_constraints !== undefined) {
-      plotPayload.goal_constraints = snapshot.goal_constraints;
+      // A framed percent limit on a level PLoT would read on another scale is sent UNFRAMED on this wire copy, so it
+      // fails closed instead of being scored against the wrong number (`level-limit-baseline.ts`). The record is untouched.
+      plotPayload.goal_constraints = withholdUnprovablePercentFrames(graphForAnalysis, snapshot.goal_constraints);
+      const frameWithheld = unprovablePercentFrameIds(graphForAnalysis, snapshot.goal_constraints);
+      if (frameWithheld.length > 0) {
+        log.info(
+          {
+            event: 'run_analysis.percent_limit_frame_withheld',
+            request_id: invocation.requestId,
+            scenario_id: args.scenario_id,
+            constraint_ids: frameWithheld,
+          },
+          'run_analysis sent a percent limit unframed: its target level is not held as a percentage out of 100 (wire copy only; no magnitudes)',
+        );
+      }
     }
     // ROADMAP 2.920 — the user's ATTESTED objective sense, MINIMISE ONLY.
     //

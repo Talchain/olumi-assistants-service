@@ -125,7 +125,7 @@ describe('buildStructuralPairEvidence', () => {
       expect(evidence.relationships[0]).toMatchObject({
         from_label: 'Implementation Cost',
         to_label: 'Responsible Market Entry',
-        relationship: 'moderate negative link',
+        relationship: 'strong negative link',
       });
     }
   });
@@ -151,7 +151,7 @@ describe('buildStructuralPairEvidence', () => {
         from_label: 'Cost',
         to_label: 'Risk',
         edge_type: 'directed',
-        relationship: 'moderate negative link',
+        relationship: 'strong negative link',
       }],
     });
   });
@@ -228,7 +228,7 @@ describe('buildStructuralPairEvidence', () => {
       expect(evidence.relationships[0]).toMatchObject({
         edge_type: 'bidirected',
         relationship:
-          'moderate positive co-movement, unmeasured common cause (not a causal route)',
+          'strong positive co-movement, unmeasured common cause (not a causal route)',
       });
     }
   });

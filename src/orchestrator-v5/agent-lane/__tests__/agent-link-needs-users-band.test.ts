@@ -99,7 +99,7 @@ describe('⛔ propose_model_change records a link\'s strength only as the band t
     }
   });
 
-  it('RED (b): "Price strongly raises churn." + strong → approve → structural_add_edge carries strong\'s midpoint (0.825, not 0.5), no placeholder', async () => {
+  it('RED (b): "Price strongly raises churn." + strong → approve → structural_add_edge carries strong\'s midpoint (0.55 — the canvas pill\'s — not 0.5), no placeholder', async () => {
     const w = world();
     const caps = createAgentCapabilities(w.d, new ProposalStore());
     const ctx = said('Price strongly raises churn.');
@@ -107,24 +107,24 @@ describe('⛔ propose_model_change records a link\'s strength only as the band t
     expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     expect(w.sent, 'a proposal writes nothing').toEqual([]);
     expect(String(p.public_label)).toBe('Connect "Pro plan price" to "Monthly churn" (positive) as strong, your own estimate');
-    expect(String(p.note)).toMatch(/strong, which Olumi stores as 0\.825 on its 0–1 strength scale, as their own estimate/);
+    expect(String(p.note)).toMatch(/strong, which Olumi stores as 0\.55 on its 0–1 strength scale, as their own estimate/);
     const r = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true }));
     expect(w.sent).toHaveLength(1);
     parsesOnTheWire(w.sent[0]!);
-    expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ kind: 'structural_add_edge', from: 'price', to: 'churn', magnitude: 0.825, effect_direction: 'positive' }));
+    expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ kind: 'structural_add_edge', from: 'price', to: 'churn', magnitude: 0.55, effect_direction: 'positive' }));
     expect(r).not.toHaveProperty('placeholder_strength');
     expect(r).not.toHaveProperty('not_represented');
     expect(disclosuresFor([r]), 'no placeholder disclosure: the strength is the user\'s').toEqual([]);
-    expect(w.edges()).toEqual([expect.objectContaining({ from: 'price', to: 'churn', strength: { mean: 0.825, std: 0.1 }, provenance: { source: 'user_specified' } })]);
+    expect(w.edges()).toEqual([expect.objectContaining({ from: 'price', to: 'churn', strength: { mean: 0.55, std: 0.1 }, provenance: { source: 'user_specified' } })]);
   });
 
-  it('(b) every band maps to its own midpoint on the product thresholds; a negative link keeps its sign on the wire', async () => {
+  it('(b) every band maps to its own midpoint on the ONE edge-strength table (the canvas pills\' 0.10 / 0.30 / 0.55 / 0.85); a negative link keeps its sign on the wire', async () => {
     for (const [text, band, mid, direction] of [
-      ['Price barely affects churn.', 'weak', 0.15, 'negative'],
-      ['It is a moderate effect.', 'moderate', 0.5, 'positive'],
-      ['Price strongly raises churn.', 'strong', 0.825, 'negative'],
-      ['Price has a very strong effect on churn.', 'very strong', 0.975, 'positive'],
+      ['Price barely affects churn.', 'weak', 0.1, 'negative'],
+      ['It is a moderate effect.', 'moderate', 0.3, 'positive'],
+      ['Price strongly raises churn.', 'strong', 0.55, 'negative'],
+      ['Price has a very strong effect on churn.', 'very strong', 0.85, 'positive'],
     ] as const) {
       const w = world();
       const caps = createAgentCapabilities(w.d, new ProposalStore());
@@ -133,7 +133,7 @@ describe('⛔ propose_model_change records a link\'s strength only as the band t
       const r = await caps.authoriseChange(said('Yes.'), { proposal_id: String(p.proposal_id) });
       parsesOnTheWire(w.sent[0]!);
       expect(w.sent[0]!['event'], band).toEqual(expect.objectContaining({ magnitude: mid, effect_direction: direction }));
-      // "moderate" is 0.5 too: the placeholder flag, not the number, is what says whose figure it is.
+      // The placeholder flag, not the number, is what says whose figure it is.
       expect(r, band).not.toHaveProperty('placeholder_strength');
       expect(w.edges()[0]!.strength.mean).toBe(direction === 'negative' ? -mid : mid);
     }
@@ -178,7 +178,7 @@ describe('a link proposed with the user\'s band survives a restart; one proposed
     const fresh = await restored(store.get(String(p.proposal_id))!);
     const r = await createAgentCapabilities(w.d, fresh).authoriseChange(said('Yes.'), { proposal_id: String(p.proposal_id) });
     expect(r).toEqual(expect.objectContaining({ ok: true, applied: true }));
-    expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ kind: 'structural_add_edge', magnitude: 0.825 }));
+    expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ kind: 'structural_add_edge', magnitude: 0.55 }));
     expect(r).not.toHaveProperty('placeholder_strength');
   });
 

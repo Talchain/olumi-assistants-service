@@ -69,7 +69,9 @@ type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_tra
 
 describe('a link-strength approval through the REAL route: the user reads what was recorded, never the Agent\'s instructions', () => {
   let app: FastifyInstance;
-  let mean = 0.5;
+  // ONE EDGE-STRENGTH VOCABULARY (#2003): 0.5 is already the canvas's Strong, so approving "strong" would keep it.
+  // Start at 0.25 (canvas Moderate, and not the race's 0.3) so the approval WRITES the Strong midpoint, 0.55.
+  let mean = 0.25;
   let source = 'cee_hypothesis';
   let rev = 1;
   /** Another writer, AFTER the link write has answered and BEFORE the Agent reads the model back (round-2 blocker 2). */
@@ -124,7 +126,7 @@ describe('a link-strength approval through the REAL route: the user reads what w
     await app.ready();
   }, 180_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { mean = 0.5; source = 'cee_hypothesis'; rev = 1; afterWrite = undefined; refuseWrite = false; linkWrites = 0; script = []; forcedAuthorise = undefined; nextScenario(); });
+  beforeEach(() => { mean = 0.25; source = 'cee_hypothesis'; rev = 1; afterWrite = undefined; refuseWrite = false; linkWrites = 0; script = []; forcedAuthorise = undefined; nextScenario(); });
 
   const turn = async (payload: Record<string, unknown>): Promise<Body> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, ...payload } });
@@ -154,7 +156,7 @@ describe('a link-strength approval through the REAL route: the user reads what w
     expect(t2.assistant_text, t2.assistant_text).not.toMatch(AGENT_DIRECTED);
     expect(t2.assistant_text, t2.assistant_text).not.toMatch(SNAKE);
     // What was recorded is still said, to the user, once.
-    expect(t2.assistant_text, t2.assistant_text).toMatch(/"Pro plan price" → "MRR" as strong \(0\.825 on Olumi's 0–1 scale\), as your own estimate/);
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/"Pro plan price" → "MRR" as strong \(0\.55 on Olumi's 0–1 scale\), as your own estimate/);
     expect(t2.assistant_text.match(/own estimate/g), 'said once, not twice').toHaveLength(1);
   }, 120_000);
 
@@ -164,7 +166,7 @@ describe('a link-strength approval through the REAL route: the user reads what w
    * approved, stamped as theirs, yet `landed` also demanded that the two revisions be EQUAL, so the user read "Not
    * saved: none of it was applied." and the approval was left unapplied.
    */
-  const RECORDED = 'Recorded "Pro plan price" → "MRR" as strong (0.825 on Olumi\'s 0–1 scale), as your own estimate.';
+  const RECORDED = 'Recorded "Pro plan price" → "MRR" as strong (0.55 on Olumi\'s 0–1 scale), as your own estimate.';
   it('[f2-race] RED: the link write lands, another writer then moves the model, and the link holds exactly the approved strength and source → Saved, the recorded link said, the approval applied', async () => {
     const { approve } = await proposeStrong();
     afterWrite = () => { rev += 1; };

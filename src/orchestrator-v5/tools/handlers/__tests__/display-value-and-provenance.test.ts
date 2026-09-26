@@ -193,6 +193,34 @@ describe('A3.1 Task 3 — adjust_edge_strength stamps edge provenance', () => {
     expect(GraphV3.safeParse(mutated).success).toBe(true);
   });
 
+  it('magnitude contract: a user-set strength DROPS Olumi\'s natural_effect and magnitude (R&C 5845818897) — a stale size never speaks', async () => {
+    const ingress = buildD1Fixture();
+    const target = ingress.edges.find((e) => e.from === 'f-budget' && e.to === 'g-revenue');
+    expect(target).toBeDefined();
+    target!.provenance = {
+      source: 'cee_hypothesis',
+      reasoning: 'kept-by-the-write',
+      magnitude: 'olumi_estimate',
+      natural_effect: { amount: 2, amount_unit: 'GBP', per_source_change: 1, per_source_change_unit: 'GBP', strength_mean: target!.strength.mean, strength_mean_frame: 'edge_strength' },
+    } as never;
+    const proposal: ProposalAction = {
+      handler_id: 'adjust_edge_strength',
+      entity: { id: 'f-budget→g-revenue', kind: 'edge', resolution_status: 'resolved', resolution_method: 'id_match' },
+      parameters: [{ name: 'strength', value: 0.7, operator: 'set', source: 'user_explicit' }],
+      cited_context_fields: [],
+    };
+    const outcome = await createAdjustEdgeStrengthHandler()(buildInvocation(ingress, proposal));
+    const mutated = outcome.mutated_graph as GraphV3T;
+    const edge = mutated.edges.find((e) => e.from === 'f-budget' && e.to === 'g-revenue');
+    expect(edge?.provenance?.source).toBe('user_specified');
+    expect(edge?.provenance).not.toHaveProperty('natural_effect');
+    expect(edge?.provenance).not.toHaveProperty('magnitude');
+    // Contrast: the SAME edge's other provenance key survives the write, through the schema parse.
+    expect(edge?.provenance?.reasoning).toBe('kept-by-the-write');
+    const parsed = GraphV3.parse(mutated);
+    expect(parsed.edges.find((e) => e.from === 'f-budget' && e.to === 'g-revenue')?.provenance?.reasoning).toBe('kept-by-the-write');
+  });
+
   it('edge with prior provenance is updated, not duplicated', async () => {
     const ingress = buildD1Fixture();
     const churnEdge = ingress.edges.find(

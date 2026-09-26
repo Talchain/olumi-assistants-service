@@ -24,12 +24,12 @@ function hiring() {
     risks: [{ label: 'Onboarding disruption', provenance: 'ai_proposed' }, { label: 'Leadership mismatch', provenance: 'ai_proposed' }],
     outcomes: [],
     links: [
-      { from: 'Developers', to: 'Productivity', direction: 'positive' as const, provenance: 'ai_proposed' },
-      { from: 'Tech leads', to: 'Productivity', direction: 'positive' as const, provenance: 'ai_proposed' },
-      { from: 'Developers', to: 'Onboarding disruption', direction: 'positive' as const, provenance: 'ai_proposed' },
-      { from: 'Tech leads', to: 'Leadership mismatch', direction: 'positive' as const, provenance: 'ai_proposed' },
-      { from: 'Onboarding disruption', to: 'Productivity', direction: 'negative' as const, provenance: 'ai_proposed' },
-      { from: 'Leadership mismatch', to: 'Productivity', direction: 'negative' as const, provenance: 'ai_proposed' },
+      { from: 'Developers', to: 'Productivity', direction: 'positive' as const, provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Tech leads', to: 'Productivity', direction: 'positive' as const, provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Developers', to: 'Onboarding disruption', direction: 'positive' as const, provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Tech leads', to: 'Leadership mismatch', direction: 'positive' as const, provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Onboarding disruption', to: 'Productivity', direction: 'negative' as const, provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Leadership mismatch', to: 'Productivity', direction: 'negative' as const, provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
     ],
     identities: [],
     unknowns: ['Current headcount is estimated, not confirmed.'],
@@ -52,7 +52,7 @@ async function construct(...candidates: CandidateModel[]) {
 function invalidRisk() {
   const candidate = hiring();
   candidate.links = candidate.links.filter((l) => l.to !== 'Onboarding disruption');
-  candidate.links.push({ from: 'Hire two developers', to: 'Onboarding disruption', direction: 'positive', provenance: 'ai_proposed' });
+  candidate.links.push({ from: 'Hire two developers', to: 'Onboarding disruption', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
   return candidate;
 }
 
@@ -179,7 +179,7 @@ describe('provisional hiring construction uses real admission and registration p
    */
   const withRiskShortcut = (c: ReturnType<typeof hiring>) => {
     c.links = c.links.filter((l) => l.to !== 'Onboarding disruption');
-    c.links.push({ from: 'Hire two developers', to: 'Onboarding disruption', direction: 'positive', provenance: 'ai_proposed' });
+    c.links.push({ from: 'Hire two developers', to: 'Onboarding disruption', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
     return c;
   };
 
@@ -262,7 +262,7 @@ describe('provisional hiring construction uses real admission and registration p
 
   it('RC fix (2): a machine shortcut OVER an existing mechanism is never an issue — admission folds it (#1830), with no retry', async () => {
     const c = hiring();
-    c.links.push({ from: 'Hire two developers', to: 'Onboarding disruption', direction: 'positive', provenance: 'ai_proposed' });
+    c.links.push({ from: 'Hire two developers', to: 'Onboarding disruption', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
     expect(prepareProvisionalCandidate(c).mechanism_issues).toEqual([]);
     const { result, graph, calls } = await construct(c);
     expect(result.ok, JSON.stringify(result)).toBe(true);
@@ -275,7 +275,7 @@ describe('provisional hiring construction uses real admission and registration p
     // A link with NO mechanism in the capture ("Maintain Current Staffing" acts only on
     // "Existing team continuity", which never reaches "Hiring delay"), so only the
     // user's authorship — not a mechanism — can keep it from being an issue.
-    const withUserLink = { ...live, links: [...live.links, { from: 'Maintain Current Staffing', to: 'Hiring delay', direction: 'negative' as const, provenance: 'explicit' }] } as CandidateModel;
+    const withUserLink = { ...live, links: [...live.links, { from: 'Maintain Current Staffing', to: 'Hiring delay', direction: 'negative' as const, provenance: 'explicit', effect_amount: null, effect_per_source_change: null, effect_provenance: null }] } as CandidateModel;
     const { result, graph, calls } = await construct(withUserLink);
     expect(result.ok, JSON.stringify(result).slice(0, 400)).toBe(true);
     // The served capture names most levers' factors with no level (the c22 class), so the

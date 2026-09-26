@@ -18,6 +18,7 @@
  */
 
 import { toolsFor, dispatchTool, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
+import { isProposingTool, proposalsAwaitingApproval, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
 import { log } from '../../../utils/telemetry.js';
 import {
@@ -36,6 +37,21 @@ export interface ModelCallRequest {
 export interface ModelCallResponse {
   readonly output: readonly Record<string, unknown>[];
   readonly usage?: Record<string, unknown>;
+  /**
+   * The Responses envelope's own completion status (`completed`, `incomplete`, …) and, when incomplete, why
+   * (`max_output_tokens`, `content_filter`). A 200 can carry a PARTIAL answer (AIX-001, #70 5847339874).
+   */
+  readonly status?: string;
+  readonly incomplete_reason?: string;
+}
+
+/**
+ * ⛔ AN UNFINISHED ANSWER IS NOT AN ANSWER (AIX-001): the envelope, or any message in it, says `incomplete` — the
+ * visible text may stop before its closing caveat. Absent status is read as finished, as the API did before it had one.
+ */
+export function answerIsIncomplete(resp: ModelCallResponse): boolean {
+  if (resp.status === 'incomplete') return true;
+  return (resp.output ?? []).some((o) => o['type'] === 'message' && o['status'] === 'incomplete');
 }
 
 export type CallModel = (req: ModelCallRequest) => Promise<ModelCallResponse>;
@@ -133,7 +149,7 @@ export interface AgentTurnResult {
   /** True when any tool actually changed the model. */
   readonly mutated: boolean;
   readonly hops: number;
-  readonly stopped_reason: 'answered' | 'hop_limit';
+  readonly stopped_reason: 'answered' | 'hop_limit' | 'incomplete';
   /** Where this turn's wall time went. Always present. */
   readonly timing: TurnTiming;
 }
@@ -266,6 +282,21 @@ export async function runAgentTurn(
     const calls = out.filter((i) => i.type === 'function_call');
 
     if (calls.length === 0) {
+      // ⛔ An unfinished final answer is never returned as the answer, and never enters the history as one: the
+      // route answers from the turn's own outcome instead (a run's result, or "ask me again").
+      if (answerIsIncomplete(resp)) {
+        log.warn({ hop, incomplete_reason: resp.incomplete_reason ?? null }, 'agent-lane: final answer incomplete — not returned as an answer');
+        return {
+          assistant_text: '',
+          items,
+          tool_calls: toolCalls,
+          tool_results: toolResults,
+          mutated,
+          hops: hop,
+          stopped_reason: 'incomplete',
+          timing: ((t) => { emitTiming(t); return t; })(timingAt(hop)),
+        };
+      }
       items.push(...out);
       return {
         assistant_text: textOf(out),
@@ -291,7 +322,11 @@ export async function runAgentTurn(
             ok: false, mutated: false, refusal: WITHHELD_ON_CHIP_TURN,
             detail: 'Not from a suggestion button: approving a change and running the analysis each have their own control. Nothing was changed.',
           }
-        : await dispatchTool(String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode);
+        // ⛔ One approval carries one change: a second proposal while this turn's first awaits the user's yes is
+        // refused before it is stored, so the turn always ends with its one control (`ONE_CHANGE_PER_APPROVAL`).
+        : isProposingTool(String(call.name)) && proposalsAwaitingApproval(toolCalls).size > 0
+          ? { ok: false, mutated: false, refusal: ONE_CHANGE_PER_APPROVAL, detail: ONE_CHANGE_PER_APPROVAL_DETAIL }
+          : await dispatchTool(String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode);
       // ⛔ A TOOL'S OWN PROVIDER CALL IS NOT OVERHEAD.
       //
       // `build_model_from_brief` is dispatched as a tool and makes its own

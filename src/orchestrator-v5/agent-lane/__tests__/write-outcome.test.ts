@@ -95,6 +95,13 @@ describe('the write-status line is composed from the tool results', () => {
     const status = (parts: Record<string, unknown>[]) =>
       narrateWriteOutcome('', [{ name: 'authorise_change' }], [{ ok: false, mutated: true, applied: false, refusal: 'partially_applied', parts } as never]).status;
 
+    it('RED (#2004 B1\'s `links` part, served shape): a link that landed before its level was refused is SAID as a link, never "changes"', () => {
+      expect(status([
+        { part: 'links', ok: true, recorded_count: 1, requested_count: 1 },
+        { part: 'option_levels', ok: false, recorded_count: 0, requested_count: 1 },
+      ])).toBe('Saved 1 of 1 links. Not saved: the option level.');
+    });
+
     it('RED (the reviewer\'s input, verbatim): values 4 of 4, levels 2 of 3 → "Saved 2 of 3 option levels; 1 was not saved."', () => {
       expect(status([
         { part: 'values', ok: true, recorded_count: 4, requested_count: 4 },

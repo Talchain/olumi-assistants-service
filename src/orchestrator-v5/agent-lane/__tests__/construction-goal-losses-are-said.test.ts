@@ -36,7 +36,7 @@ const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id
 const GTM = (goal: Record<string, unknown>) => ({
   goal,
   constraints: [
-    { metric: 'Go-to-market budget', operator: '<=', value: 900000, unit: 'GBP', provenance: 'explicit' },
+    { metric: 'Go-to-market budget', operator: '<=', value: 900000, unit: 'GBP', provenance: 'explicit', frame: 'level' },
   ],
   options: [
     { label: 'Expand outbound sales', provenance: 'explicit', is_status_quo: null, changes: [],
@@ -50,8 +50,8 @@ const GTM = (goal: Record<string, unknown>) => ({
   risks: [],
   outcomes: [],
   links: [
-    { from: 'Outbound reps', to: 'New ARR', direction: 'positive', provenance: 'inferred' },
-    { from: 'Self-serve conversion', to: 'New ARR', direction: 'positive', provenance: 'inferred' },
+    { from: 'Outbound reps', to: 'New ARR', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+    { from: 'Self-serve conversion', to: 'New ARR', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
   ],
   identities: [],
   unknowns: [],
