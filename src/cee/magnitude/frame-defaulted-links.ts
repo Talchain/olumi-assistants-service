@@ -55,7 +55,7 @@ function percentLevelIds(graph: Rec): Set<string> {
   const limits = Array.isArray(graph.goal_constraints) ? graph.goal_constraints : [];
   for (const c of limits) {
     if (!isRec(c) || c.value_frame !== 'level' || typeof c.node_id !== 'string' || typeof c.unit !== 'string') continue;
-    if (typeof c.value === 'number' && percentLevelFrame(c.value, c.unit) !== undefined) out.add(c.node_id);
+    if (typeof c.value === 'number' && percentLevelFrame(c.value, c.unit, c.value_frame) !== undefined) out.add(c.node_id);
   }
   return out;
 }

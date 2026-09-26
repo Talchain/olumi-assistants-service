@@ -2387,7 +2387,8 @@ function admitOnce(
    * `isUserAuthored`'s rule) and (b) is a percentage LEVEL is admitted as an observable FACTOR: the same id, label,
    * authorship and links, and exactly the served factor-kind shape. A level here is a unit that pins a frame on its own
    * (`unitPinnedScaleFrame`) AND that the limit canonicaliser carries as a plain `"%"` on that frame — a percent head
-   * with at most a period ("% per month"), above 1 and up to 100. "percentage points" / "pp" (a change), "% change vs …", a money or
+   * with at most a period ("% per month"), above 1 and up to 100 — or, on a LEVEL limit, the same number in percentage points
+   * ("percentage points" / "pp" on a delta is a change and is left alone). "% change vs …", a money or
    * count limit, a goal and a risk are left exactly as they were. The frame is the one the unit pins (a unit of
    * measurement, which is what the served factor-kind node carries); no starting value is written — the slot stays
    * empty for the user's own figure. An outcome carries no value or frame to keep (its entity has no `node` payload).
@@ -2395,7 +2396,7 @@ function admitOnce(
   const limitedLevelFrames = new Map<string, number>();
   for (const c of model.constraints) {
     if (inferenceClassFor(c.provenance) !== 'brief_stated') continue;
-    const frame = percentLevelFrame(c.value, c.unit);
+    const frame = percentLevelFrame(c.value, c.unit, c.frame);
     if (frame === undefined) continue;
     const id = nodeIdForMetric(c.metric);
     if (id !== undefined) limitedLevelFrames.set(id, frame);
@@ -2622,7 +2623,7 @@ function admitOnce(
   // subscribers per month" left churn with no domain, so its links kept ±0.5 and no option was decision-grade).
   const percentLevelIds = new Set<string>();
   for (const c of model.constraints) {
-    if (c.frame !== 'level' || percentLevelFrame(c.value, c.unit) === undefined) continue;
+    if (c.frame !== 'level' || percentLevelFrame(c.value, c.unit, c.frame) === undefined) continue;
     const id = nodeIdForMetric(c.metric);
     if (id !== undefined) percentLevelIds.add(id);
   }

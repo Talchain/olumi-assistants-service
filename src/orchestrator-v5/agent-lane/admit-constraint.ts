@@ -95,12 +95,18 @@ export interface AdmittedConstraint {
  *   · "% change vs this year's costs" is a percent OF SOMETHING ELSE. As `"%"` PLoT's unit_percent rung would scale it
  *     with no unit check — a SILENT wrong threshold. Its tail is not a period, so it stays verbatim and PLoT refuses it.
  *   · |value| < 1: PLoT reads `"%"` below 1 as a FRACTION, so "0.5 percent per month" would become 50%. Abstain.
- *   · "percentage points" / "pp": the classifier's rowed one-way door is not decided here.
+ *   · "percentage points" / "pp" on a DELTA (or unframed) limit: a change, not a level. Verbatim. On a LEVEL limit it is
+ *     the P rung below ("PP"), because a level stated in percentage points is the same number as a percent.
  *   · Anything unrecognised stays VERBATIM: PLoT then fails closed on it. CEE never guesses a scale.
  */
 const PERCENT_HEADS: readonly string[] = [...(UNIT_SCALE_CLASS_TOKENS.find(([cls]) => cls === 'percent')?.[1] ?? [])]
   .sort((a, b) => b.length - a.length);
 const PERIOD_TAIL = /^(?:(?:per|a|an|each|\/)\s*(?:month|year|annum|quarter|week|day)|monthly|annually|annual|yearly|quarterly|weekly|daily|p\.?a\.?)?$/;
+/** The classifier's own `percentage_points` row ("pp", "ppt", "pps"), longest first: never a private copy. */
+const POINTS_HEADS: readonly string[] = [...(UNIT_SCALE_CLASS_TOKENS.find(([cls]) => cls === 'percentage_points')?.[1] ?? [])]
+  .sort((a, b) => b.length - a.length);
+/** "point" / "points" after a percent head ("percentage points", "% points"), then only an optional period. */
+const POINTS_TAIL = /^points?(?:\s+(.*))?$/;
 /** A unit that ends in a magnitude suffix; whether its head is a currency is asked of the ONE vocabulary below. */
 const MAGNITUDE_SUFFIX = /^(.*?)\s*([km])$/i;
 
@@ -142,6 +148,31 @@ export function isPercentWithPeriod(unit: string): boolean {
 }
 
 /**
+ * ⭐ A percentage-POINTS spelling and nothing after it but an optional period: "percentage points", "% points",
+ * "pp", "ppt per month". Read as a LEVEL only where the limit's own frame says `level` (`canonicaliseLimitUnit`): a level
+ * stated in percentage points is the same number as that percent. On a delta it is a change and stays verbatim.
+ *
+ * ⚠ SERVED (joined run 2 `f-20260926T225444Z/01-F1-brief`, CEE f4596ca, DL #70 5850702248): the drafter wrote churn in
+ * "percentage points" on both the level limit (10) and the node (raw 7, `scale_frame` 100). The limit stayed verbatim, so
+ * the baseline carry (`levelLimitReadsOnNodeLevel`, which needs `"%"`) sent nothing, and PLoT refused the level frame
+ * (`CONSTRAINT_NOT_CONVERTIBLE`, no `observed_state.baseline`): 0/3 options decision-grade. Run 1, same brief, drafted
+ * "percent per month", was relabelled to `"%"` and scored 4/4.
+ */
+export function isPercentagePointsWithPeriod(unit: string): boolean {
+  const t = norm(unit);
+  const cls = classifyUnitScaleClass(unit);
+  if (cls === 'percentage_points') {
+    const head = POINTS_HEADS.find((h) => t.startsWith(h));
+    return head !== undefined && PERIOD_TAIL.test(t.slice(head.length).trim());
+  }
+  if (cls !== 'percent') return false;
+  const head = PERCENT_HEADS.find((h) => t.startsWith(h));
+  if (head === undefined) return false;
+  const points = POINTS_TAIL.exec(t.slice(head.length).trim());
+  return points !== null && PERIOD_TAIL.test((points[1] ?? '').trim());
+}
+
+/**
  * True only when the node's level IS the percentage ÷ 100 — the one scale PLoT's `"%"` rung lands on. A frame of
  * exactly 100 (`cap`, else the estimate's `scale_frame` — the served agent-lane churn estimate, `{value 0.07,
  * raw_value 7}` + `scale_frame 100`), or an unframed, UNITLESS level already in [0, 1).
@@ -177,11 +208,18 @@ export function percentLimitFrameProvable(unit: string | undefined, target: Limi
   return target !== undefined && levelIsPercentOver100(target);
 }
 
-export function canonicaliseLimitUnit(value: number, unit: string | undefined, target?: LimitTargetScale): UnitCanonical {
+export function canonicaliseLimitUnit(
+  value: number,
+  unit: string | undefined,
+  target?: LimitTargetScale,
+  frame?: string,
+): UnitCanonical {
   if (unit === undefined) return { value };
   const verbatim: UnitCanonical = { value, unit };
+  // PP: a LEVEL limit in percentage points is that percent (`isPercentagePointsWithPeriod`); the same gates as P follow.
+  const pointsLevel = frame === 'level' && isPercentagePointsWithPeriod(unit);
 
-  if (isPercentWithPeriod(unit) && Math.abs(value) >= 1 && Math.abs(value) <= 100) {
+  if ((isPercentWithPeriod(unit) || pointsLevel) && Math.abs(value) >= 1 && Math.abs(value) <= 100) {
     // A rewrite onto the spelling the limit already has is no rewrite: nothing to stamp.
     const relabel = (to: string): UnitCanonical =>
       to === unit
@@ -189,12 +227,17 @@ export function canonicaliseLimitUnit(value: number, unit: string | undefined, t
         : {
             value,
             unit: to,
-            provenance_unit_relabelled: { rule: 'agent_lane_limit_unit_v1', pre_normalisation_value: value, pre_normalisation_unit: unit },
+            provenance_unit_relabelled: {
+              rule: pointsLevel ? 'agent_lane_limit_pp_level_v1' : 'agent_lane_limit_unit_v1',
+              pre_normalisation_value: value,
+              pre_normalisation_unit: unit,
+            },
           };
     if (target === undefined) return verbatim;
     const nodeUnit = target.unit;
-    // A node that is not a plain percent (a count, "percentage points") is not the limit's scale: PLoT refuses it.
-    if (nodeUnit !== undefined && !isPercentWithPeriod(nodeUnit)) return verbatim;
+    // A node that is not a plain percent (a count, a "% change") is not the limit's scale: PLoT refuses it. A node's
+    // observed state is its LEVEL, so a node spelled in percentage points is a percent level (served run 2's churn).
+    if (nodeUnit !== undefined && !isPercentWithPeriod(nodeUnit) && !isPercentagePointsWithPeriod(nodeUnit)) return verbatim;
     // The same spelling on a capped node: PLoT already reconciles it against the cap.
     if (target.cap !== undefined && nodeUnit !== undefined && norm(nodeUnit) === norm(unit)) return verbatim;
     if (levelIsPercentOver100(target)) return relabel('%');
@@ -230,10 +273,12 @@ export function canonicaliseLimitUnit(value: number, unit: string | undefined, t
  * later value edit (`frame-defaulted-links`) all ask THIS, so a limit is never a level on one path and not on another
  * ("0.5 % per month" is admitted verbatim and is NOT one: the percent arm needs |v| ≥ 1).
  */
-export function percentLevelFrame(value: number, unit: string | undefined): number | undefined {
-  const frame = unitPinnedScaleFrame(unit, value);
+export function percentLevelFrame(value: number, unit: string | undefined, valueFrame?: string): number | undefined {
+  // "pp" pins no frame of its own (the classifier's rowed door); a LEVEL in it is a percent, so it takes the percent pin.
+  const pointsLevel = valueFrame === 'level' && unit !== undefined && isPercentagePointsWithPeriod(unit);
+  const frame = unitPinnedScaleFrame(unit, value) ?? (pointsLevel ? unitPinnedScaleFrame('%', value) : undefined);
   if (frame === undefined) return undefined;
-  return canonicaliseLimitUnit(value, unit, { scale_frame: frame }).unit === '%' ? frame : undefined;
+  return canonicaliseLimitUnit(value, unit, { scale_frame: frame }, valueFrame).unit === '%' ? frame : undefined;
 }
 
 export interface ConstraintAdmissionResult {
@@ -291,7 +336,7 @@ export function admitCandidateConstraints(
     const operator = RELAXES_TO[c.operator];
     // The user's number is never adjusted to compensate for the operator. It is rescaled ONLY by a stated magnitude
     // suffix (£k) onto a node in the bare currency, and every rewrite is stamped (`canonicaliseLimitUnit`).
-    const { value, unit, ...unitProvenance } = canonicaliseLimitUnit(c.value, c.unit, targetScaleFor(nodeId));
+    const { value, unit, ...unitProvenance } = canonicaliseLimitUnit(c.value, c.unit, targetScaleFor(nodeId), c.frame);
     const admitted: AdmittedConstraint = {
       constraint_id: `agent-lane:${nodeId}:${operator}`,
       node_id: nodeId,
