@@ -99,6 +99,8 @@ export interface AddOptionGraphView {
     readonly label?: string;
     /** A factor's category — which factors a NEW factor may point at depends on it. */
     readonly category?: string;
+    /** An option's levels (`NodeV3.interventions`), read only to refuse a second option with the SAME levels. */
+    readonly interventions?: unknown;
   }>;
   readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string }>;
 }
@@ -163,7 +165,16 @@ export type AddOptionSkipReason =
   | 'option_id_invalid'
   | 'factor_not_found'
   | 'factor_not_factor'
-  | 'duplicate_factor';
+  | 'duplicate_factor'
+  // The option would set exactly the levels an existing option sets: the engine cannot tell them apart
+  // (PLoT `validation/identical-options.ts` calls it a validation error), and the run drops one silently.
+  | 'same_levels_as_existing_option';
+
+/** The existing option a refused one would duplicate, so the refusal names it. */
+export interface SameLevelsAs {
+  readonly id: string;
+  readonly label: string;
+}
 
 export interface AddOptionProposal {
   readonly operations: PatchOperation[];
@@ -179,7 +190,7 @@ export interface AddOptionProposal {
 
 export type AddOptionBuildResult =
   | { readonly matched: true; readonly proposal: AddOptionProposal }
-  | { readonly matched: false; readonly reason: AddOptionSkipReason };
+  | { readonly matched: false; readonly reason: AddOptionSkipReason; readonly sameAs?: SameLevelsAs };
 
 /**
  * (A) — the most options ONE typed transaction may add. Four options of up to
@@ -203,6 +214,48 @@ function findNode(
 
 function nodeIdExists(graph: AddOptionGraphView, id: string): boolean {
   return graph.nodes.some((n) => n.id === id);
+}
+
+/** PLoT's tolerance for "the same level" (`validation/identical-options.ts` EPSILON). */
+const SAME_LEVEL_EPSILON = 1e-9;
+
+/** An option's VALUED levels, factor id → value. A null or non-numeric entry is a link without a level, not a level. */
+function levelsOf(raw: unknown): Map<string, number> {
+  const levels = new Map<string, number>();
+  if (raw === null || typeof raw !== 'object') return levels;
+  for (const [factorId, entry] of Object.entries(raw as Record<string, unknown>)) {
+    const value =
+      typeof entry === 'number'
+        ? entry
+        : entry !== null && typeof entry === 'object' ? (entry as { value?: unknown }).value : undefined;
+    if (typeof value === 'number' && Number.isFinite(value)) levels.set(factorId, value);
+  }
+  return levels;
+}
+
+/**
+ * ⛔ A SECOND OPTION WITH THE SAME LEVELS IS NOT A NEW CHOICE (served DL browser run bf-20260926T101424Z turn 3:
+ * "Test £54 versus £59 by customer cohort before rollout" set only `pro_plan_price` to the value "Raise Pro to £54"
+ * already set; the run left it out with no warning and its card read "Not analysed"). Compared on the VALUED levels,
+ * exactly as the engine compares them: same factors, each within PLoT's epsilon. An existing option's unsized link
+ * does not tell it apart — the served "Raise Pro to £54" had one, and the run still dropped the duplicate. The caller
+ * never compares a NEW option with no levels or an unsized link: it is added as today and readiness names what is missing.
+ */
+function existingOptionWithSameLevels(bundle: Record<string, unknown>, graph: AddOptionGraphView): SameLevelsAs | undefined {
+  const mine = levelsOf(bundle);
+  if (mine.size === 0) return undefined;
+  for (const node of graph.nodes) {
+    if (node.kind !== 'option') continue;
+    const theirs = levelsOf(node.interventions);
+    if (theirs.size !== mine.size) continue;
+    let same = true;
+    for (const [factorId, value] of mine) {
+      const other = theirs.get(factorId);
+      if (other === undefined || Math.abs(other - value) > SAME_LEVEL_EPSILON) { same = false; break; }
+    }
+    if (same) return { id: node.id, label: node.label ?? node.id };
+  }
+  return undefined;
 }
 
 /**
@@ -309,6 +362,8 @@ export function buildAddOptionTransaction(
     if (iv.raw_value !== undefined) entry.raw_value = iv.raw_value;
     interventionBundle[iv.factor_id] = entry;
   }
+  const sameAs = unvalued.length === 0 ? existingOptionWithSameLevels(interventionBundle, graph) : undefined;
+  if (sameAs !== undefined) return { matched: false, reason: 'same_levels_as_existing_option', sameAs };
 
   const operations: PatchOperation[] = [
     {
@@ -384,7 +439,7 @@ export type AddOptionsBuildResult =
       /** Factors this batch ADDS, so a caller names them by label (the pre-edit graph does not have them). */
       readonly newFactors: ReadonlyArray<{ readonly id: string; readonly label: string }>;
     }
-  | { readonly matched: false; readonly reason: AddOptionsSkipReason; readonly index?: number };
+  | { readonly matched: false; readonly reason: AddOptionsSkipReason; readonly index?: number; readonly sameAs?: SameLevelsAs };
 
 // ---------------------------------------------------------------------------
 // ONE HELD CHANGE ADDS THE MISSING FACTOR AND THE OPTION
@@ -614,7 +669,7 @@ function buildOptionsOnly(
     const single = buildAddOptionTransaction(parameters, graph);
     return single.matched
       ? { matched: true, proposals: [single.proposal], operations: [...single.proposal.operations], newFactors: [] }
-      : { matched: false, reason: single.reason };
+      : { matched: false, reason: single.reason, ...(single.sameAs !== undefined ? { sameAs: single.sameAs } : {}) };
   }
   if (graph === null) return { matched: false, reason: 'no_graph' };
   const parsed = MultiOptionParamsSchema.safeParse(parameters);
@@ -633,11 +688,13 @@ function buildOptionsOnly(
         ? { ...entry, parent_decision_id }
         : entry;
     const built = buildAddOptionTransaction(spec, view);
-    if (!built.matched) return { matched: false, reason: built.reason, index };
+    if (!built.matched) return { matched: false, reason: built.reason, index, ...(built.sameAs !== undefined ? { sameAs: built.sameAs } : {}) };
     proposals.push(built.proposal);
     const { optionId, optionLabel } = built.proposal;
+    // The new option's levels ride into the view, so a LATER option in the same batch cannot duplicate it either.
+    const addNode = built.proposal.operations[0]!.value as { interventions?: unknown };
     view = {
-      nodes: [...view.nodes, { id: optionId, kind: 'option', label: optionLabel }],
+      nodes: [...view.nodes, { id: optionId, kind: 'option', label: optionLabel, interventions: addNode.interventions }],
       edges: view.edges,
     };
   }
