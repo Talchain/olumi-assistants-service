@@ -16,10 +16,18 @@ import { unitsConflict } from '../unit-conflict.js';
 
 const paulGraph = JSON.parse(readFileSync(new URL('./fixtures/paul-cbd15f83-stored-graph.json', import.meta.url), 'utf8')) as unknown;
 const ctx = { scenario_id: '550e8400-e29b-41d4-a716-4466554400c7', authenticated_user_id: null, request_id: 'r' };
-const setup = () => {
+type Raw = { nodes: { id: string; observed_state?: unknown }[]; goal_constraints?: unknown[] };
+/** Churn as the served level-less shape (no `observed_state`; AI Quality 5843448904), with or without its limit. */
+const levelLessChurn = (keepLimit: boolean): Raw => {
+  const g = JSON.parse(JSON.stringify(paulGraph)) as Raw;
+  delete g.nodes.find((n) => n.id === 'monthly_churn')!.observed_state;
+  if (!keepLimit) g.goal_constraints = [];
+  return g;
+};
+const setup = (graph: unknown = paulGraph) => {
   const sent: { path: string; body: unknown }[] = [];
   const d: InternalDispatch = async (path, body) => {
-    if (path.endsWith('/graph')) return { status: 200, json: { graph: paulGraph, graph_hash: 'h0' } };
+    if (path.endsWith('/graph')) return { status: 200, json: { graph, graph_hash: 'h0' } };
     sent.push({ path, body });
     return { status: 500, json: {} };
   };
@@ -78,6 +86,35 @@ describe('propose_assumptions leaves out a value in another kind of unit, and sa
   it('CONTRAST: 5 percent per month for Monthly churn is proposed as before', async () => {
     const { caps } = setup();
     const r = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Monthly churn', value: 5, unit: 'percent per month', basis: 'x', revise: true }] } as never) as { ok?: boolean; unit_mismatch?: unknown };
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r).not.toHaveProperty('unit_mismatch');
+  });
+});
+
+describe('a factor with NO level takes its kind from the limit the user stated on it (AI Quality 5843448904)', () => {
+  it('RED: level-less churn with the user\'s "percent per month" limit → £49 as its level is refused, nothing sent', async () => {
+    const { caps, sent } = setup(levelLessChurn(true));
+    const r = await caps.proposeNewOption(ctx, winBack({ value: 49, unit: 'GBP per month' }) as never) as { refusal?: string };
+    expect(r.refusal).toBe('level_unit_mismatch');
+    expect(sent).toEqual([]);
+  });
+
+  it('RED: level-less churn with its limit → £49 as its starting value is left out, listed under unit_mismatch', async () => {
+    const { caps } = setup(levelLessChurn(true));
+    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Monthly churn', value: 49, unit: 'GBP per month', basis: 'x' }] } as never) as { unit_mismatch?: { label: string }[] };
+    expect(r.unit_mismatch?.map((m) => m.label)).toEqual(['Monthly churn']);
+  });
+
+  it('CONTROL: level-less churn and NO limit → nothing to read its kind from, so it fails open as before', async () => {
+    const { caps, sent } = setup(levelLessChurn(false));
+    const r = await caps.proposeNewOption(ctx, winBack({ value: 49, unit: 'GBP per month' }) as never) as { refusal?: string };
+    expect(r.refusal).not.toBe('level_unit_mismatch');
+    expect(sent.length).toBeGreaterThan(0);
+  });
+
+  it('CONTRAST: level-less churn with its limit → 7% as its starting value is proposed', async () => {
+    const { caps } = setup(levelLessChurn(true));
+    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Monthly churn', value: 7, unit: '%', basis: 'x' }] } as never) as { ok?: boolean; unit_mismatch?: unknown };
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r).not.toHaveProperty('unit_mismatch');
   });
