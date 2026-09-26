@@ -47,6 +47,7 @@ describe('(B) get_canonical_state carries the ONE readiness verdict, in plain wo
   it('CONTRAST: the same graph with the decision link restored → the verdict changes (the unconnected-option reason is gone)', async () => {
     const r = await capsOver(linked()).getCanonicalState(ctx) as { readiness?: Readiness };
     expect(r.readiness?.checked).toBe(true);
+    expect(r.readiness?.may_run, JSON.stringify(r.readiness)).toBe(true);
     expect(JSON.stringify(r.readiness?.needs_from_user)).not.toMatch(/not connected from the decision/i);
   });
 
@@ -98,6 +99,8 @@ describe('(B) the post-write line never contradicts the Run control on the same 
     const { postWriteReadinessLine } = await import('../../../routes/agent-v1-turn.js');
     expect(postWriteReadinessLine(paulGraph, { may_run: false, status: 'blocked' })).toMatch(/^The analysis can't run yet\. .*not connected from the decision/i);
     expect(postWriteReadinessLine(paulGraph, { may_run: true, status: 'ready' }), 'disagrees with the button → silent').toBeNull();
+    expect(postWriteReadinessLine(linked(), { may_run: true, status: 'ready' })).toBe('The analysis can run now.');
+    expect(postWriteReadinessLine(linked(), { may_run: false, status: 'blocked' }), 'runnable verdict, blocked button → silent').toBeNull();
     expect(postWriteReadinessLine(paulGraph, undefined), 'unknown button state → silent, never a refusal').toBeNull();
     expect(postWriteReadinessLine(undefined, { may_run: false }), 'no graph read → silent, never "nothing is blocking"').toBeNull();
   });
