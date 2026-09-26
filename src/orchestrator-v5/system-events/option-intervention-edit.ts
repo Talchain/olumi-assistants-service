@@ -385,7 +385,9 @@ async function applyApprovedFactorValues(
   const refuse = (reason: string, valueIndex: number) => ({ kind: 'refused' as const, reason, valueIndex });
   const refuseFrame = (reason: string, frameIndex: number) => ({ kind: 'refused' as const, reason, frameIndex });
   const seen = new Set<string>();
-  let working: unknown = before;
+  // ⛔ A COPY, never the graph that was read (Canvas #70 5849242463): the frames below write in place, and a refused
+  // approval must leave the read graph — and so the CAS base and the persisted model — exactly as it was.
+  let working: unknown = structuredClone(before);
   const handlerFacts: ValueHandlerFact[] = [];
   const confirmations: string[] = [];
   for (let i = 0; i < values.length; i += 1) {

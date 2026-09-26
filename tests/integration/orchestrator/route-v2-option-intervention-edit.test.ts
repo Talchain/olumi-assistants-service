@@ -513,6 +513,31 @@ describe('the Agent\'s in-process batch door — ONE user operation → ONE atom
       expect(JSON.stringify(persisted)).toBe(before);
     });
 
+    it('RED (Canvas 5849242463): a range + a REFUSED level → nothing lands, not even the range (no in-place write to the read graph)', async () => {
+      const before = JSON.stringify(persisted);
+      const r = await callWith([], [TWO[1]!, { option_id: 'option', factor_id: 'unlinked_factor', value: 0.4, author: 'user_specified' }], NEW_LINK,
+        'cccccccc-cccc-4ccc-8ccc-ccccccccccc9', [{ factor_id: 'bare_amount', cap: 100 }]);
+      expect(r).toEqual({ status: 'refused', reason: 'unresolved_effect_relationship', pair: { option_id: 'option', factor_id: 'unlinked_factor' } });
+      expect(rows.size).toBe(0);
+      expect(JSON.stringify(persisted)).toBe(before);
+    });
+
+    it('a value on one factor + a range on ANOTHER + a refused level → the read graph is untouched (no aliasing through the value writer\'s merge)', async () => {
+      const before = JSON.stringify(persisted);
+      const r = await callWith(COVERAGE_60, [TWO[1]!, { option_id: 'option', factor_id: 'unlinked_factor', value: 0.4, author: 'user_specified' }], NEW_LINK,
+        'cccccccc-cccc-4ccc-8ccc-cccccccccca0', [{ factor_id: 'bare_amount', cap: 100 }]);
+      expect(r).toEqual({ status: 'refused', reason: 'unresolved_effect_relationship', pair: { option_id: 'option', factor_id: 'unlinked_factor' } });
+      expect(rows.size).toBe(0);
+      expect(JSON.stringify(persisted)).toBe(before);
+    });
+
+    it('(R&C 5849235251) an Olumi value on a factor with NO range is stored as the user\'s assumption too — never their own figure', async () => {
+      const r = await callWith([{ factor_id: 'amount_factor', value: 10, unit: 'seats', author: 'model_proposed' }], [TWO[0]!], [],
+        'cccccccc-cccc-4ccc-8ccc-cccccccccca1', [{ factor_id: 'amount_factor', cap: 100 }]);
+      expect(r.status, JSON.stringify(r)).toBe('committed');
+      expect(factorOs('amount_factor'), JSON.stringify(factorOs('amount_factor'))).toMatchObject({ value: 0.1, raw_value: 10, cap: 100, source: 'user_assumption' });
+    });
+
     it('a retry of the committed compound writes nothing more — already applied', async () => {
       expect((await callWith(COVERAGE_60, TWO, NEW_LINK)).status).toBe('committed');
       const retry = await callWith(COVERAGE_60, TWO, [], 'dddddddd-dddd-4ddd-8ddd-ddddddddddde');
