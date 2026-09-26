@@ -609,6 +609,11 @@ export default async function route(app: FastifyInstance) {
         // questions).
         analysis_state: analysis.analysis_state,
         analysis_result: analysis.analysis_result,
+        // The selected fact's own constraint verdict state — present exactly when
+        // `analysis_result` is (same fact, same gate). See `ScenarioAnalysisRead`.
+        ...(analysis.analysis_constraint_verdict_state !== undefined
+          ? { analysis_constraint_verdict_state: analysis.analysis_constraint_verdict_state }
+          : {}),
         /**
          * ⭐ MAY A RUN BE ADMITTED RIGHT NOW — the question `analysis_state`
          * does not answer. It reports whether a FACT HAS LANDED for this graph;
