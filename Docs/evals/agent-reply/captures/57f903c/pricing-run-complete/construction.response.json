@@ -1,0 +1,904 @@
+{
+  "response_version": 2,
+  "assistant_text": "I’ve set up a comparison model with three paths: keep Pro at £49, raise it to £59 with the release, or phase the increase. It cannot yet determine the implication because key inputs were not supplied.\n\nHere is one **single set of starting assumptions** to adopt or correct — these are **not measurements**:\n\n**Current starting point**\n- Monthly churn: **3%**, cautiously below the 4% constraint.\n- Pro subscriber base: **250 subscribers** — a round planning baseline, implying about **£12,250/month** at £49 before other plans.\n- Pro conversion rate: **5%** — neutral placeholder pending funnel data.\n- Perceived Pro value: **60%** — moderate, because no evidence was provided on the feature’s willingness-to-pay effect.\n- Price–release alignment: **50%** — neutral because the strength of the feature/price connection is unknown.\n- MRR per Pro subscriber: **£49/month**, matching the current price.\n\n**Option levels**\n- **Raise Pro to £59 at release:** price–release alignment **100%**, since the increase occurs with the release.\n- **Phase Pro price increase:** Pro price **£54/month** and price–release alignment **50%**. This is a midpoint assumption only; no actual phasing path was specified.\n- The existing model already has **£49/month** for keeping price flat and **£59/month** for the direct increase.\n\nIf you approve, I’ll save this whole starting point and run the comparison. The result will show what the model implies, and especially whether the £59 move risks the **under-4% churn** constraint.\n\nThe model was saved. Questions this model does not answer yet: Does the £59 price apply to existing Pro subscribers, new subscribers, or both? What is the current Pro subscriber base, conversion rate, and monthly churn rate? What feature is being released, and is its expected effect on perceived Pro value or retention known? Would a phased increase have a defined price path and timing before the 12-month horizon?",
+  "blocks": [],
+  "suggested_actions": [
+    {
+      "id": "agent-approve-proposal:prop_c2fdae2acc90d4e48e7b197e400fd540",
+      "label": "Use as starting assumptions",
+      "message": "Yes, use those."
+    },
+    {
+      "id": "agent-amend-proposal",
+      "label": "Change something first",
+      "message": "Before you apply it, I want to change some of it."
+    },
+    {
+      "id": "agent-run-analysis",
+      "label": "Run analysis",
+      "message": "Run analysis.",
+      "action_type": "run_analysis"
+    }
+  ],
+  "insights": [],
+  "stage_indicator": "frame",
+  "analysis_state": {
+    "run_state": {
+      "kind": "never_run"
+    },
+    "readiness": {
+      "status": "unknown",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": false,
+      "withheld_reason": "constraint_verdict_withheld"
+    },
+    "robustness": {},
+    "usable_for_prose": false,
+    "usable_for_chips": false,
+    "usable_for_followup": false,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "graph_hash": "1d7573ea24a26ab6",
+  "analysis_ready": {
+    "options": [
+      {
+        "option_id": "keep_pro_at_49",
+        "label": "Keep Pro at £49",
+        "status": "ready",
+        "interventions": {
+          "pro_plan_price": 0.245
+        },
+        "is_baseline": false,
+        "intervention_details": {
+          "pro_plan_price": {
+            "display_value": "49 £ per month",
+            "normalised_value": 0.245,
+            "raw_value": 49,
+            "unit": "£ per month"
+          }
+        },
+        "status_reason": "1 intervention(s) ready for analysis"
+      },
+      {
+        "option_id": "raise_pro_to_59_at_release",
+        "label": "Raise Pro to £59 at release",
+        "status": "ready",
+        "interventions": {
+          "pro_plan_price": 0.295
+        },
+        "is_baseline": false,
+        "intervention_details": {
+          "pro_plan_price": {
+            "display_value": "59 £ per month",
+            "normalised_value": 0.295,
+            "raw_value": 59,
+            "unit": "£ per month"
+          }
+        },
+        "status_reason": "1 intervention(s) ready for analysis"
+      },
+      {
+        "option_id": "phase_pro_price_increase",
+        "label": "Phase Pro price increase",
+        "status": "needs_encoding",
+        "interventions": {},
+        "is_baseline": false,
+        "status_reason": "Connected to 2 factor(s); awaiting effect value(s)",
+        "user_questions": [
+          "Which factor(s) does \"Phase Pro price increase\" change, and what value should each be set to?"
+        ]
+      }
+    ],
+    "goal_node_id": "mrr",
+    "status": "needs_user_input",
+    "blockers": [
+      {
+        "option_id": "raise_pro_to_59_at_release",
+        "option_label": "Raise Pro to £59 at release",
+        "factor_id": "price_release_alignment",
+        "factor_label": "Price-release alignment",
+        "blocker_type": "missing_value",
+        "message": "Factor \"Price-release alignment\" needs a numeric value for option \"Raise Pro to £59 at release\"",
+        "suggested_action": "add_value"
+      },
+      {
+        "option_id": "phase_pro_price_increase",
+        "option_label": "Phase Pro price increase",
+        "factor_id": "pro_plan_price",
+        "factor_label": "Pro plan price",
+        "blocker_type": "missing_value",
+        "message": "Factor \"Pro plan price\" is currently 49 £ per month. What should option \"Phase Pro price increase\" set it to?",
+        "suggested_action": "add_value"
+      },
+      {
+        "option_id": "phase_pro_price_increase",
+        "option_label": "Phase Pro price increase",
+        "factor_id": "price_release_alignment",
+        "factor_label": "Price-release alignment",
+        "blocker_type": "missing_value",
+        "message": "Factor \"Price-release alignment\" needs a numeric value for option \"Phase Pro price increase\"",
+        "suggested_action": "add_value"
+      }
+    ],
+    "goal_threshold": 0.8,
+    "goal_threshold_raw": 20000,
+    "goal_threshold_unit": "£ per month",
+    "goal_threshold_cap": 25000,
+    "goal_threshold_cap_provenance": "target_derived_headroom",
+    "bias_findings": [],
+    "readiness_issues": [
+      {
+        "issue_id": "semantic_1",
+        "repairability": "human_input_required",
+        "option_id": "raise_pro_to_59_at_release",
+        "option_label": "Raise Pro to £59 at release",
+        "factor_id": "price_release_alignment",
+        "factor_label": "Price-release alignment",
+        "code": "MISSING_OPTION_VALUE",
+        "category": "option_values",
+        "message": "Factor \"Price-release alignment\" needs a numeric value for option \"Raise Pro to £59 at release\"",
+        "provenance": "unattributed",
+        "obligation": "offered"
+      },
+      {
+        "issue_id": "semantic_2",
+        "repairability": "human_input_required",
+        "option_id": "phase_pro_price_increase",
+        "option_label": "Phase Pro price increase",
+        "factor_id": "pro_plan_price",
+        "factor_label": "Pro plan price",
+        "code": "MISSING_OPTION_VALUE",
+        "category": "option_values",
+        "message": "Factor \"Pro plan price\" is currently 49 £ per month. What should option \"Phase Pro price increase\" set it to?",
+        "provenance": "unattributed",
+        "obligation": "offered"
+      },
+      {
+        "issue_id": "semantic_3",
+        "repairability": "human_input_required",
+        "option_id": "phase_pro_price_increase",
+        "option_label": "Phase Pro price increase",
+        "factor_id": "price_release_alignment",
+        "factor_label": "Price-release alignment",
+        "code": "MISSING_OPTION_VALUE",
+        "category": "option_values",
+        "message": "Factor \"Price-release alignment\" needs a numeric value for option \"Phase Pro price increase\"",
+        "provenance": "unattributed",
+        "obligation": "offered"
+      }
+    ],
+    "repair_proposal": {
+      "proposal_version": "readiness_repair_v1",
+      "complete": true,
+      "issue_ids": [
+        "semantic_1",
+        "semantic_2",
+        "semantic_3"
+      ],
+      "changes": [],
+      "unresolved_inputs": [
+        {
+          "issue_id": "semantic_1",
+          "kind": "option_effect_value",
+          "prompt": "Factor \"Price-release alignment\" needs a numeric value for option \"Raise Pro to £59 at release\"",
+          "option_id": "raise_pro_to_59_at_release",
+          "factor_id": "price_release_alignment",
+          "obligation": "offered",
+          "provenance": "unattributed"
+        },
+        {
+          "issue_id": "semantic_2",
+          "kind": "option_effect_value",
+          "prompt": "Factor \"Pro plan price\" is currently 49 £ per month. What should option \"Phase Pro price increase\" set it to?",
+          "option_id": "phase_pro_price_increase",
+          "factor_id": "pro_plan_price",
+          "obligation": "offered",
+          "provenance": "unattributed"
+        },
+        {
+          "issue_id": "semantic_3",
+          "kind": "option_effect_value",
+          "prompt": "Factor \"Price-release alignment\" needs a numeric value for option \"Phase Pro price increase\"",
+          "option_id": "phase_pro_price_increase",
+          "factor_id": "price_release_alignment",
+          "obligation": "offered",
+          "provenance": "unattributed"
+        }
+      ]
+    },
+    "may_run": true,
+    "analysis_admission": {
+      "structurally_analysable": true,
+      "missing_important_inputs": [
+        {
+          "issue_id": "semantic_1",
+          "code": "MISSING_OPTION_VALUE",
+          "option_id": "raise_pro_to_59_at_release",
+          "option_label": "Raise Pro to £59 at release",
+          "factor_id": "price_release_alignment",
+          "factor_label": "Price-release alignment",
+          "why_it_matters": "Factor \"Price-release alignment\" needs a numeric value for option \"Raise Pro to £59 at release\"",
+          "obligation": "offered",
+          "waived_by_exclusion": false
+        },
+        {
+          "issue_id": "semantic_2",
+          "code": "MISSING_OPTION_VALUE",
+          "option_id": "phase_pro_price_increase",
+          "option_label": "Phase Pro price increase",
+          "factor_id": "pro_plan_price",
+          "factor_label": "Pro plan price",
+          "why_it_matters": "Factor \"Pro plan price\" is currently 49 £ per month. What should option \"Phase Pro price increase\" set it to?",
+          "obligation": "offered",
+          "waived_by_exclusion": true
+        },
+        {
+          "issue_id": "semantic_3",
+          "code": "MISSING_OPTION_VALUE",
+          "option_id": "phase_pro_price_increase",
+          "option_label": "Phase Pro price increase",
+          "factor_id": "price_release_alignment",
+          "factor_label": "Price-release alignment",
+          "why_it_matters": "Factor \"Price-release alignment\" needs a numeric value for option \"Phase Pro price increase\"",
+          "obligation": "offered",
+          "waived_by_exclusion": true
+        }
+      ],
+      "semantic_quality_sufficient": true,
+      "permitted_analysis_mode": "comparative_leader",
+      "reasons": [
+        {
+          "field": "structurally_analysable",
+          "code": "RUN_WILL_EXCLUDE_OPTIONS",
+          "message": "Analysis can run, leaving out one option you have not set values for."
+        },
+        {
+          "field": "missing_important_inputs",
+          "code": "MODEL_HAS_BLOCKERS",
+          "message": "Olumi filled in the gaps here itself; you can review them, and nothing is required of you."
+        },
+        {
+          "field": "semantic_quality_sufficient",
+          "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+          "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+        },
+        {
+          "field": "permitted_analysis_mode",
+          "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+          "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+        }
+      ],
+      "graph_hash": "1d7573ea24a26ab6537a35c6d35280d3dc20d89447630c1480f72ba6967f052d",
+      "semantic_signals": {
+        "confidence_parameters_total": 21,
+        "confidence_parameters_user_stated": 2,
+        "confidence_parameters_machine_authored": 11,
+        "confidence_parameters_unattributed": 8,
+        "material_parameters_total": 16,
+        "material_parameters_user_stated": 2,
+        "intervened_factor_baselines_total": 1,
+        "intervened_factor_baselines_user_stated": 1,
+        "material_parameters_awaiting_user_node_ids": [
+          "mrr",
+          "pro_conversion_rate",
+          "monthly_churn_rate",
+          "pro_subscriber_base",
+          "mrr_per_pro_subscriber",
+          "churn_above_4"
+        ],
+        "goal_target_stated": true
+      }
+    },
+    "current_graph_hash": "1d7573ea24a26ab6"
+  },
+  "draft_graph": {
+    "nodes": [
+      {
+        "id": "decision_mrr",
+        "kind": "decision",
+        "label": "Decision: MRR",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "mrr",
+        "kind": "goal",
+        "label": "MRR",
+        "provenance": "from_brief",
+        "goal_threshold": 0.8,
+        "goal_threshold_cap": 25000,
+        "goal_threshold_raw": 20000,
+        "goal_threshold_unit": "£ per month",
+        "goal_threshold_frame": "level",
+        "goal_threshold_cap_provenance": "target_derived_headroom"
+      },
+      {
+        "id": "keep_pro_at_49",
+        "kind": "option",
+        "label": "Keep Pro at £49",
+        "provenance": "ai_inferred",
+        "interventions": {
+          "pro_plan_price": {
+            "value": 0.245,
+            "source": "brief_extraction"
+          }
+        }
+      },
+      {
+        "id": "raise_pro_to_59_at_release",
+        "kind": "option",
+        "label": "Raise Pro to £59 at release",
+        "provenance": "from_brief",
+        "interventions": {
+          "pro_plan_price": {
+            "value": 0.295,
+            "source": "brief_extraction"
+          }
+        }
+      },
+      {
+        "id": "phase_pro_price_increase",
+        "kind": "option",
+        "label": "Phase Pro price increase",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "pro_plan_price",
+        "kind": "factor",
+        "label": "Pro plan price",
+        "category": "controllable",
+        "provenance": "from_brief",
+        "observed_state": {
+          "cap": 200,
+          "unit": "£ per month",
+          "value": 0.245,
+          "source": "brief_extraction",
+          "raw_value": 49,
+          "declared_scale": "unit_interval"
+        }
+      },
+      {
+        "id": "price_release_alignment",
+        "kind": "factor",
+        "label": "Price-release alignment",
+        "category": "controllable",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "perceived_pro_value",
+        "kind": "factor",
+        "label": "Perceived Pro value",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100
+      },
+      {
+        "id": "pro_conversion_rate",
+        "kind": "factor",
+        "label": "Pro conversion rate",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100
+      },
+      {
+        "id": "monthly_churn_rate",
+        "kind": "factor",
+        "label": "Monthly churn rate",
+        "category": "observable",
+        "provenance": "from_brief",
+        "scale_frame": 100
+      },
+      {
+        "id": "pro_subscriber_base",
+        "kind": "factor",
+        "label": "Pro subscriber base",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 2000
+      },
+      {
+        "id": "mrr_per_pro_subscriber",
+        "kind": "factor",
+        "label": "MRR per Pro subscriber",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 200
+      },
+      {
+        "id": "churn_above_4",
+        "kind": "risk",
+        "label": "Churn above 4%",
+        "provenance": "from_brief"
+      }
+    ],
+    "edges": [
+      {
+        "to": "keep_pro_at_49",
+        "from": "decision_mrr",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "raise_pro_to_59_at_release",
+        "from": "decision_mrr",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "phase_pro_price_increase",
+        "from": "decision_mrr",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "pro_plan_price",
+        "from": "keep_pro_at_49",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "price_release_alignment",
+        "from": "raise_pro_to_59_at_release",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "pro_plan_price",
+        "from": "raise_pro_to_59_at_release",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "pro_plan_price",
+        "from": "phase_pro_price_increase",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "price_release_alignment",
+        "from": "phase_pro_price_increase",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "mrr_per_pro_subscriber",
+        "from": "pro_plan_price",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "pro_conversion_rate",
+        "from": "pro_plan_price",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "monthly_churn_rate",
+        "from": "pro_plan_price",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "perceived_pro_value",
+        "from": "price_release_alignment",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "pro_conversion_rate",
+        "from": "perceived_pro_value",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "monthly_churn_rate",
+        "from": "perceived_pro_value",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "pro_subscriber_base",
+        "from": "pro_conversion_rate",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "pro_subscriber_base",
+        "from": "monthly_churn_rate",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "churn_above_4",
+        "from": "monthly_churn_rate",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "brief_extraction"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "mrr",
+        "from": "churn_above_4",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "mrr",
+        "from": "pro_subscriber_base",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "mrr",
+        "from": "mrr_per_pro_subscriber",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      }
+    ],
+    "node_count": 13,
+    "edge_count": 20,
+    "goal_constraints": [
+      {
+        "unit": "%",
+        "label": "Monthly churn rate < 4%",
+        "value": 4,
+        "node_id": "monthly_churn_rate",
+        "operator": "<=",
+        "provenance": "explicit",
+        "constraint_id": "agent-lane:monthly_churn_rate:<="
+      }
+    ]
+  },
+  "_diagnostic_trace": {
+    "exit_path": "agent_lane_v1",
+    "agent_mode": "full",
+    "hops": 4,
+    "stopped_reason": "answered",
+    "tools_called": [
+      "get_canonical_state",
+      "build_model_from_brief",
+      "propose_starting_point",
+      "propose_starting_point"
+    ],
+    "write_claims_removed": 0
+  },
+  "_agent": {
+    "session_id": "sess_00000000-0000-4000-8000-000000000009",
+    "mode": "full",
+    "tool_calls": [
+      {
+        "name": "get_canonical_state",
+        "ok": true,
+        "mutated": false
+      },
+      {
+        "name": "build_model_from_brief",
+        "ok": true,
+        "mutated": true
+      },
+      {
+        "name": "propose_starting_point",
+        "ok": false,
+        "mutated": false,
+        "refusal": "incomplete_starting_point"
+      },
+      {
+        "name": "propose_starting_point",
+        "ok": true,
+        "mutated": false,
+        "proposal_id": "prop_c2fdae2acc90d4e48e7b197e400fd540"
+      }
+    ],
+    "mutated": true,
+    "hops": 4,
+    "stopped_reason": "answered",
+    "turn_id": "00000000-0000-4000-8000-000000000011",
+    "durability": "recorded",
+    "receipts": []
+  },
+  "_provider_calls": [
+    {
+      "site": "agent-v1-turn.callModel",
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "purpose": "conversation",
+      "outcome": "allowed",
+      "duration_ms": 1924,
+      "usage": {
+        "raw": {
+          "input_tokens": 3158,
+          "input_tokens_details": {
+            "cache_write_tokens": 48,
+            "cached_tokens": 3107
+          },
+          "output_tokens": 54,
+          "output_tokens_details": {
+            "reasoning_tokens": 12
+          },
+          "total_tokens": 3212
+        },
+        "input_tokens": 3158,
+        "output_tokens": 54,
+        "cached_input_tokens": 3107
+      }
+    },
+    {
+      "site": "agent-v1-turn.callModel",
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "purpose": "conversation",
+      "outcome": "allowed",
+      "duration_ms": 1813,
+      "usage": {
+        "raw": {
+          "input_tokens": 3311,
+          "input_tokens_details": {
+            "cache_write_tokens": 153,
+            "cached_tokens": 3155
+          },
+          "output_tokens": 64,
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          },
+          "total_tokens": 3375
+        },
+        "input_tokens": 3311,
+        "output_tokens": 64,
+        "cached_input_tokens": 3155
+      }
+    },
+    {
+      "site": "agent-v1-turn.callStructured",
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "purpose": "construction",
+      "outcome": "allowed",
+      "duration_ms": 32390,
+      "usage": {
+        "raw": {
+          "input_tokens": 2548,
+          "input_tokens_details": {
+            "cache_write_tokens": 48,
+            "cached_tokens": 2497
+          },
+          "output_tokens": 2323,
+          "output_tokens_details": {
+            "reasoning_tokens": 1429
+          },
+          "total_tokens": 4871
+        },
+        "input_tokens": 2548,
+        "output_tokens": 2323,
+        "cached_input_tokens": 2497
+      }
+    },
+    {
+      "site": "agent-v1-turn.callModel",
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "purpose": "conversation",
+      "outcome": "allowed",
+      "duration_ms": 18027,
+      "usage": {
+        "raw": {
+          "input_tokens": 4182,
+          "input_tokens_details": {
+            "cache_write_tokens": 871,
+            "cached_tokens": 3308
+          },
+          "output_tokens": 1068,
+          "output_tokens_details": {
+            "reasoning_tokens": 619
+          },
+          "total_tokens": 5250
+        },
+        "input_tokens": 4182,
+        "output_tokens": 1068,
+        "cached_input_tokens": 3308
+      }
+    },
+    {
+      "site": "agent-v1-turn.callModel",
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "purpose": "conversation",
+      "outcome": "allowed",
+      "duration_ms": 5575,
+      "usage": {
+        "raw": {
+          "input_tokens": 5861,
+          "input_tokens_details": {
+            "cache_write_tokens": 1679,
+            "cached_tokens": 4179
+          },
+          "output_tokens": 468,
+          "output_tokens_details": {
+            "reasoning_tokens": 45
+          },
+          "total_tokens": 6329
+        },
+        "input_tokens": 5861,
+        "output_tokens": 468,
+        "cached_input_tokens": 4179
+      }
+    },
+    {
+      "site": "agent-v1-turn.callModel",
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "purpose": "conversation",
+      "outcome": "allowed",
+      "duration_ms": 6824,
+      "usage": {
+        "raw": {
+          "input_tokens": 7016,
+          "input_tokens_details": {
+            "cache_write_tokens": 1155,
+            "cached_tokens": 5858
+          },
+          "output_tokens": 344,
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          },
+          "total_tokens": 7360
+        },
+        "input_tokens": 7016,
+        "output_tokens": 344,
+        "cached_input_tokens": 5858
+      }
+    }
+  ]
+}

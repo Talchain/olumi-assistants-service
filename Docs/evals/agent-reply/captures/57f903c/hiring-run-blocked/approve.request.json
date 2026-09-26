@@ -1,0 +1,12 @@
+{
+  "kind": "message",
+  "turn_id": "00000000-0000-4000-8000-000000000001",
+  "scenario_id": "00000000-0000-4000-8000-000000000002",
+  "stage": "frame",
+  "turn_class": "propose",
+  "message": "Yes, use those.",
+  "source": "chip",
+  "chip": {
+    "id": "agent-approve-proposal:prop_4419ca4d8fb615566ffc888eb4cffb08"
+  }
+}

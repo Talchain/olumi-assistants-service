@@ -1,0 +1,12 @@
+{
+  "label": "approve",
+  "http": 200,
+  "served_build_before": "57f903c",
+  "served_build_after": "57f903c",
+  "wall_ms": 8876,
+  "request_headers": {
+    "content-type": "application/json",
+    "x-olumi-ai-mode": "openai",
+    "origin": "https://staging--olumi.netlify.app"
+  }
+}

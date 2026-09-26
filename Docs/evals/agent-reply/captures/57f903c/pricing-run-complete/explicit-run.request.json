@@ -1,0 +1,12 @@
+{
+  "kind": "message",
+  "turn_id": "00000000-0000-4000-8000-000000000013",
+  "scenario_id": "00000000-0000-4000-8000-000000000009",
+  "stage": "frame",
+  "turn_class": "decide",
+  "message": "Run analysis",
+  "source": "chip_click",
+  "chip": {
+    "action_type": "run_analysis"
+  }
+}
