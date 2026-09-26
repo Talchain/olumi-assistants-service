@@ -102,7 +102,8 @@ import { sanitiseEnrichment } from './compose/sanitise-enrichment.js';
 import { projectEvidenceAssessment } from './compose/project-evidence-assessment.js';
 import { canonicalStateFromFreshness } from './context/canonical-analysis-state.js';
 import { buildRunDelta, type RunDeltaRefusal } from './coaching/build-run-delta.js';
-import { selectRunAnalysisFact } from './context/freshness.js';
+import { selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from './context/freshness.js';
+import { deriveEveryOptionLimitVerdict, readRatifiedConstraints } from '../orchestrator/context/constraint-feasibility.js';
 
 /**
  * Why the run-over-run consequence did or did not ship.
@@ -632,6 +633,15 @@ function attachAnalysisState(
     withheldBecauseUnrequested: ctx.leaderWithheldBecauseUnrequested === true,
     // C46 (H2): stated by the same caller, on the same terms — never derived here.
     withheldBecauseNonlinearIdentity: ctx.leaderWithheldBecauseNonlinearIdentity === true,
+    // F-LIMIT: every option breaks the same limit on the run fact this claim BINDS — and only when that is ALSO the
+    // fact the entitlement is read from (`selectClaimBearingRunAnalysisFact`, which counts a partial run). When the two
+    // differ (#1876: a newer partial run carries the refusal), this finaliser cannot know the cause, so today's stands.
+    ...(() => {
+      if (!hasRunToBind || selectedRun === null || ctx.priorFacts === undefined
+        || selectClaimBearingRunAnalysisFact(ctx.priorFacts)?.fact !== selectedRun.fact) return {};
+      const limit = deriveEveryOptionLimitVerdict(selectedRun.fact.result, readRatifiedConstraints(ctx.graph ?? null));
+      return limit === null ? {} : { everyOptionLimit: limit.kind };
+    })(),
     // Read from the body as it will ship, not from the fact: when the
     // withheld-claim projection has redacted `near_tie`, the separation half
     // is genuinely unknown to the consumer and `leader_claim` must say so.

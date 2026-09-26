@@ -64,6 +64,8 @@ import {
   WITHHELD_UNREQUESTED_ANALYSIS,
   WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
   WITHHELD_RUN_OUT_OF_DATE,
+  WITHHELD_NO_OPTION_MEETS_LIMIT,
+  WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT,
   composeAnalysisStateV1,
   leaderClaimReasonKind,
   readRawRobustnessFromResponseBody,
@@ -263,6 +265,11 @@ describe('S6 — separation_unavailable is NOT EVALUATED, not WITHHELD', () => {
           // 2026-09-26: P1-d — an out-of-date run with no stated cause (AI Quality #70 5850056041:
           // kind `not_evaluated`, no schemas member).
           WITHHELD_RUN_OUT_OF_DATE,
+          // 2026-09-26: F-LIMIT — every option breaks the same limit on the bound run (DL #70 5850643426:
+          // kind `withheld`, no schemas member).
+          WITHHELD_NO_OPTION_MEETS_LIMIT,
+          // 2026-09-26: F-LIMIT tier 2 — every option more likely than not to break it (DL #70 5850672588).
+          WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT,
         ]),
       );
       expect(LEADER_CLAIM_REASON_KINDS[WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]).toBe('withheld');

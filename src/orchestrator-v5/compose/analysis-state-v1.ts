@@ -243,6 +243,24 @@ export const WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN = 'nonlinear_identity_sig
 export const WITHHELD_RUN_OUT_OF_DATE = 'analysis_out_of_date';
 
 /**
+ * ⛔ F-LIMIT (DL #70 5850643426, ruling v3; reviewer AI Conversation) — EVERY OPTION BREAKS THE SAME LIMIT on this run,
+ * each by the leader verdict's own authority and floor (`deriveNoOptionMeetsLimit`, constraint-feasibility.ts). Served
+ * (Panel 5850591894, churn 12% against a 10% limit): the tab said only "we declined" (`constraint_verdict_withheld`)
+ * when the truth was "we checked, and none meets it". Decided by the caller that holds the bound fact; never on an
+ * out-of-date run (a claim about the analysed revision, not the model the user now has). Classified `withheld`: we
+ * looked. Minted in CEE, no schemas member (free string on every pin).
+ */
+export const WITHHELD_NO_OPTION_MEETS_LIMIT = 'no_option_meets_limit';
+
+/**
+ * ⛔ F-LIMIT TIER 2 (DL #70 5850672588) — every option is MORE LIKELY THAN NOT to break the same limit on these
+ * estimates (each under AI Quality's existing 0.5 rule, `deriveLeaderLimitRisks`, applied per option). The dominant
+ * journey's F9 re-run: the options sit at 0.17–0.51, so tier 1 cannot fire, and the tab still said only "we declined".
+ * Never "meets"; a coin-flip (any option ≥ 0.5) is neither code. Kind `withheld`; free string, no schemas member.
+ */
+export const WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT = 'every_option_likely_breaks_limit';
+
+/**
  * ⭐ TWO DIFFERENT FACTS WEAR THE SAME `withheld_reason` FIELD (S6, 2026-08-26).
  *
  * WIRE-WITNESSED on the stale route: `leader_claim.permitted: false,
@@ -304,6 +322,8 @@ export const LEADER_CLAIM_REASON_KINDS: Readonly<
   [WITHHELD_CONSTRAINT_VERDICT]: 'withheld',
   [WITHHELD_UNREQUESTED_ANALYSIS]: 'withheld',
   [WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]: 'withheld',
+  [WITHHELD_NO_OPTION_MEETS_LIMIT]: 'withheld',
+  [WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT]: 'withheld',
   [WITHHELD_NEAR_TIE]: 'withheld',
   [WITHHELD_SEPARATION_UNAVAILABLE]: 'not_evaluated',
   [WITHHELD_RUN_IDENTITY_UNCONFIRMED]: 'not_evaluated',
@@ -517,6 +537,13 @@ export interface AnalysisStateComposeInput {
    * changes; `withheldBecauseUnrequested` outranks it (see WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN).
    */
   readonly withheldBecauseNonlinearIdentity?: boolean;
+  /**
+   * OPTIONAL CAUSE (F-LIMIT): what EVERY option does against one limit on the BOUND run fact
+   * (`deriveEveryOptionLimitVerdict`, constraint-feasibility.ts), decided by the caller that holds that fact — this
+   * composer never re-derives it. Ignored on a `complete_stale` run; outranks the identity and constraint codes; the
+   * unrequested first pass still outranks it.
+   */
+  readonly everyOptionLimit?: 'none_meets' | 'likely_breaks';
   /** The engine's own robustness signals as they appear on this turn's wire. */
   readonly rawRobustness: RawRobustnessSignals | null;
   /**
@@ -910,6 +937,12 @@ function composeLeaderClaim(input: AnalysisStateComposeInput, runState: Analysis
     claim.withheld_reason = !entitled
       ? input.withheldBecauseUnrequested === true
         ? WITHHELD_UNREQUESTED_ANALYSIS
+        // F-LIMIT: what every option does against a limit holds whatever the ranking — but only of the revision the
+        // run analysed, so never on an out-of-date run.
+        : input.everyOptionLimit === 'none_meets' && runState.kind !== 'complete_stale'
+          ? WITHHELD_NO_OPTION_MEETS_LIMIT
+        : input.everyOptionLimit === 'likely_breaks' && runState.kind !== 'complete_stale'
+          ? WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT
         : input.withheldBecauseNonlinearIdentity === true
           ? WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN
           // P1-d: an out-of-date run is not "withheld for a limit" (see WITHHELD_RUN_OUT_OF_DATE).

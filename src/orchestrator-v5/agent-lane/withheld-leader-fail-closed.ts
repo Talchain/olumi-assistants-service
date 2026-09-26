@@ -77,6 +77,8 @@ import {
   WITHHELD_CONSTRAINT_VERDICT,
   WITHHELD_NEAR_TIE,
   WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
+  WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT,
+  WITHHELD_NO_OPTION_MEETS_LIMIT,
   WITHHELD_RUN_OUT_OF_DATE,
   WITHHELD_RUN_IDENTITY_CONFLICT,
   WITHHELD_RUN_IDENTITY_UNCONFIRMED,
@@ -964,6 +966,16 @@ const BY_WITHHELD_REASON: Readonly<Record<string, string>> = {
   // P1-d: the run predates the user's latest change; a rerun is exactly what helps, and no limit is implicated.
   [WITHHELD_RUN_OUT_OF_DATE]:
     'because this result was worked out before your latest change to the model; run the analysis again to see where the options stand now',
+  // F-LIMIT: we checked, and every option breaks the same limit (P ≤ 0.05 each, the verdict's own floor). This map has
+  // no graph, so the limit is not named here, and no figure (a comparative reads as ranking); it says what is true and
+  // asks what to change — never "run again", which cannot help.
+  [WITHHELD_NO_OPTION_MEETS_LIMIT]:
+    'because no option meets one of your limits on this run; tell me whether to change that limit or one of the options',
+  // F-LIMIT tier 2: each option under AI Quality's 0.5 rule on the same limit (ruling 5842498806: "more likely than not
+  // … on these estimates", never "meets"). Said as "would probably break": this module's own guard reads the
+  // comparative "more likely than" as ranking the options.
+  [WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT]:
+    'because on these estimates every option would probably break one of your limits; tell me whether to change that limit or one of the options',
   // C46 (H7): the goal and factors are named by the Agent's `claim_permissions.nonlinear_identity.say`; this
   // deterministic clause names the missing capability without them, and never asks for a re-run that cannot help.
   // ⛔ WHOSE READING (C46 N-c, `admit-model.ts` `productIdentityClause`): this map has no graph, so it cannot see

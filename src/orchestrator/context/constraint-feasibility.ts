@@ -78,6 +78,10 @@ function readString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
 /**
  * Extract per-constraint satisfaction probabilities from ONE option-result
  * entry, tolerating BOTH the live object shape and the legacy array shape.
@@ -180,6 +184,72 @@ export function deriveWinnerConstraintInfeasibility(
   }
 
   return { infeasible: false, constraintId: null, kind: null };
+}
+
+/**
+ * ⭐ F-LIMIT (DL #70 5850643426 ruling v3 + 5850672588 tier 2; reviewer AI Conversation 5850621263) — WHAT DOES EVERY
+ * OPTION DO AGAINST ONE OF THE USER'S LIMITS ON THIS RUN?
+ *
+ * The persisted verdict is LEADER-ONLY (`deriveConstraintVerdict` evaluates the winner), so on its own it proves only
+ * "the leading option breaks a limit", never "no option meets it" (AI Conversation 5850634086). This is ONE pass over
+ * every option of the run fact's own persisted PLoT body (`result.enrichment`, the object the verdict was derived
+ * from), reusing the two EXISTING per-option rules unchanged — no threshold of its own, no persisted copy:
+ *
+ *  · `none_meets` (tier 1): the persisted verdict is `evaluated_infeasible` and EVERY option is a `hard_violation` by
+ *    {@link deriveWinnerConstraintInfeasibility} (P ≤ {@link HARD_VIOLATION_FLOOR}; "does not meet" is definitional
+ *    there — a joint-goal tension is not) on the SAME limit. Words may say "no option meets your limit".
+ *  · `likely_breaks` (tier 2): the persisted verdict was evaluated (`evaluated_feasible` or `evaluated_infeasible`) and
+ *    EVERY option is under {@link deriveLeaderLimitRisks}'s rule (a certified score < {@link LEADER_LIMIT_RISK_THRESHOLD})
+ *    on the SAME limit. Words say "more likely than not to break … on these estimates", never "meets" (AI Quality
+ *    ruling 5842498806). A coin-flip (any option ≥ 0.5) is neither.
+ *
+ * Every option must declare `constraints_decision_grade === true`, and the named limit must be one the USER ratified
+ * (`readRatifiedConstraints` of the hash-bound graph): PLoT's synthesised goal constraint condemns nothing. Otherwise
+ * `null`, and the caller keeps today's reason.
+ */
+export interface EveryOptionLimitVerdict {
+  readonly kind: 'none_meets' | 'likely_breaks';
+  readonly constraintId: string;
+}
+
+export function deriveEveryOptionLimitVerdict(
+  result: unknown,
+  ratified: readonly RatifiedConstraint[],
+): EveryOptionLimitVerdict | null {
+  const r = readRecord(result);
+  const state = readRecord(r?.constraint_verdict)?.constraint_verdict_state;
+  if (state !== 'evaluated_infeasible' && state !== 'evaluated_feasible') return null;
+  const envelope = readRecord(r?.enrichment);
+  if (envelope === null) return null;
+  const options = readOptionResultSources(envelope)[0] ?? [];
+  if (options.length === 0) return null;
+  const optionIds: string[] = [];
+  for (const entry of options) {
+    const id = readString(entry.option_id) ?? readString(entry.id);
+    if (id === null || entry.constraints_decision_grade !== true) return null;
+    optionIds.push(id);
+  }
+  const ratifiedIds = new Set(ratified.map((c) => c.constraint_id));
+
+  // Tier 1 — the leader verdict's own authority and floor, applied to every option, on one ratified limit.
+  if (state === 'evaluated_infeasible') {
+    const fails = optionIds.map((id) => deriveWinnerConstraintInfeasibility(envelope, id));
+    const limit = fails[0]?.constraintId ?? null;
+    if (limit !== null && ratifiedIds.has(limit)
+      && fails.every((f) => f.infeasible && f.kind === 'hard_violation' && f.constraintId === limit)) {
+      return { kind: 'none_meets', constraintId: limit };
+    }
+  }
+
+  // Tier 2 — the leader-limit-risk rule (certified, ratified, P < 0.5), applied to every option, on one limit.
+  let common: Set<string> | null = null;
+  for (const id of optionIds) {
+    const mine = new Set(deriveLeaderLimitRisks(envelope, id, ratified).map((risk) => risk.constraint_id));
+    common = common === null ? mine : new Set([...common].filter((c) => mine.has(c)));
+    if (common.size === 0) return null;
+  }
+  const named = ratified.find((c) => common?.has(c.constraint_id) === true);
+  return named === undefined ? null : { kind: 'likely_breaks', constraintId: named.constraint_id };
 }
 
 // ===========================================================================
