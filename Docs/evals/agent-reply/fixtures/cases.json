@@ -1,0 +1,3937 @@
+{
+  "schema": "olumi.agent-reply-acceptance-fixture.v1",
+  "half": "prompt_harness",
+  "note": "Prompt/harness half of the shared Agent-reply acceptance fixture. payload = the captured response cut to what the scorer reads, ids removed. expect = what a good reply to the same state must and must not do. served_reply_verdicts = what the served reply actually did (a record, not an expectation). Rendering expectations (expect_render) are added by the AI Conversation lane.",
+  "builds": [
+    "8428207",
+    "0415b19",
+    "fd312b5"
+  ],
+  "cases": [
+    {
+      "id": "build-hiring",
+      "source": {
+        "capture": "c19-8428207",
+        "build": "8428207",
+        "scenario": "A",
+        "turn": "A1 brief"
+      },
+      "context": {
+        "user_action": "brief",
+        "domain": "hiring",
+        "rerun_kind": null,
+        "next_approval_ran": false
+      },
+      "payload": {
+        "assistant_text": "I’ve set up the comparison around **Velocity**. It includes:\n\n- **Hire a Tech Lead**\n- **Hire Two Developers**\n- **Maintain Current Team** as a baseline\n\nAll three can reach the velocity goal, but the model currently has no values, so it cannot yet compare them.\n\nI propose the following **starting assumptions — not measurements**. They are deliberately editable:\n\n**Current baseline**\n- Developer capacity: **4 full-time developers** — assumed small team; current size is unknown.\n- Dedicated Tech Lead capacity: **0 full-time Tech Leads** — assumes no dedicated lead today.\n- Team coordination efficiency: **60%** — assumes meaningful, but not severe, coordination drag.\n- Work prioritisation quality: **60%** — assumes prioritisation is workable but leaves avoidable rework or context switching.\n\n**What each option would set**\n- **Hire a Tech Lead:** Tech Lead capacity = **1**\n- **Hire Two Developers:** Developer capacity = **6**\n- **Maintain Current Team:** Developer capacity = **4**; Tech Lead capacity = **0**\n\nThe model only links the Tech Lead option to Tech Lead capacity, and the developer option to developer capacity. It therefore does **not** assume—without your say-so—that either hire changes coordination or prioritisation.\n\nIf you approve these assumptions, I’ll save them as one set and run the comparison. The two most useful corrections before that are your **current developer count** and whether you already have someone performing the Tech Lead role.\n\nThe model was saved as version 1. Questions this model does not answer yet: What is the current team size and current split of technical-leadership versus individual-contributor work? Is the main constraint on velocity delivery capacity, coordination, technical decision-making, or something else such as product requirements or quality issues? What time horizon should the hiring decision be assessed over? Are there budget, hiring-market, or management-capacity constraints?",
+        "suggested_actions": [
+          {
+            "label": "Use as starting assumptions",
+            "id": "agent-approve-proposal:prop_redacted"
+          },
+          {
+            "label": "Change something first",
+            "id": "agent-amend-proposal"
+          }
+        ],
+        "analysis_state": {
+          "run_state": {
+            "kind": "never_run"
+          },
+          "leader_claim": {
+            "permitted": false,
+            "withheld_reason": "constraint_verdict_withheld"
+          },
+          "robustness": {}
+        },
+        "analysis_ready": {
+          "analysis_admission": {
+            "permitted_analysis_mode": "none",
+            "structurally_analysable": false
+          },
+          "options": [
+            {
+              "option_id": "hire_a_tech_lead",
+              "label": "Hire a Tech Lead",
+              "intervention_details": {}
+            },
+            {
+              "option_id": "hire_two_developers",
+              "label": "Hire Two Developers",
+              "intervention_details": {}
+            },
+            {
+              "option_id": "maintain_current_team",
+              "label": "Maintain Current Team",
+              "intervention_details": {}
+            }
+          ]
+        },
+        "blocks": [],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "decision_velocity",
+              "kind": "decision",
+              "label": "Decision: Velocity",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "velocity",
+              "kind": "goal",
+              "label": "Velocity",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "hire_a_tech_lead",
+              "kind": "option",
+              "label": "Hire a Tech Lead",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "hire_two_developers",
+              "kind": "option",
+              "label": "Hire Two Developers",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "maintain_current_team",
+              "kind": "option",
+              "label": "Maintain Current Team",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "tech_lead_capacity",
+              "kind": "factor",
+              "label": "Tech lead capacity",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "developer_capacity",
+              "kind": "factor",
+              "label": "Developer capacity",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "team_coordination_efficiency",
+              "kind": "factor",
+              "label": "Team coordination efficiency",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "work_prioritisation_quality",
+              "kind": "factor",
+              "label": "Work prioritisation quality",
+              "provenance": "ai_inferred"
+            }
+          ]
+        },
+        "_agent": {
+          "mutated": true,
+          "tool_calls": [
+            {
+              "name": "get_canonical_state",
+              "ok": true,
+              "mutated": false
+            },
+            {
+              "name": "build_model_from_brief",
+              "ok": true,
+              "mutated": true
+            },
+            {
+              "name": "propose_starting_point",
+              "ok": true,
+              "mutated": false
+            }
+          ]
+        },
+        "_diagnostic_trace": {
+          "exit_path": "agent_lane_v1",
+          "write_claims_removed": 0
+        },
+        "_provider_calls": [
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "construction"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          }
+        ]
+      },
+      "class": "build_hiring",
+      "expect": {
+        "max_words_default": 90,
+        "words_soft": true,
+        "max_questions": 1,
+        "leader_may_be_named": false,
+        "leader_withheld_reason": "constraint_verdict_withheld",
+        "caveat_required": false,
+        "caveat_reasons": [],
+        "chips_shown": [
+          "Use as starting assumptions",
+          "Change something first"
+        ],
+        "forbidden_claims": [
+          "names_or_hints_a_leading_option",
+          "claims_the_analysis_ran_this_turn",
+          "promises_the_analysis_will_run_on_approval",
+          "names_a_control_not_in_chips_shown",
+          "calls_a_brief_stated_or_measured_figure_an_estimate",
+          "calls_an_olumi_figure_the_users",
+          "renames_an_option",
+          "quotes_a_figure_without_its_unit"
+        ],
+        "next_move": "only_when_supported",
+        "notes": [
+          "A next move is offered only when the state supports it; the reply never asks the user to press a chip it was not shown.",
+          "Olumi states saves and versions beneath the reply; the model does not restate them."
+        ]
+      },
+      "served_reply_verdicts": {
+        "CONTROL_REFERENCE": "PASS",
+        "LEADER_HONESTY": "PASS",
+        "ACTION_TRUTH": "FAIL",
+        "OPTION_NAME_FIDELITY": "PASS",
+        "UNITS": "NOT_DECIDABLE",
+        "PROVENANCE_WORDING": "NOT_DECIDABLE",
+        "CAVEAT": "PASS",
+        "INTERNAL_ID": "PASS"
+      }
+    },
+    {
+      "id": "build-pricing",
+      "source": {
+        "capture": "c19-8428207",
+        "build": "8428207",
+        "scenario": "B",
+        "turn": "B1 brief"
+      },
+      "context": {
+        "user_action": "brief",
+        "domain": "pricing",
+        "rerun_kind": null,
+        "next_approval_ran": false
+      },
+      "payload": {
+        "assistant_text": "I’ve built a comparison model with three options: raise to £59 at release, keep £49, or pilot £59.\n\nIt still needs starting figures before it can compare them. I’ve proposed the following **assumptions, not measurements**:\n\n- **Monthly churn:** 3% per month — gives 1 percentage point of headroom below your 4% limit.\n- **New Pro conversion rate:** 5%.\n- **Price rollout scope:** 100% of Pro customers as the general starting point.\n- **Pro subscriber base:** 200 subscribers — equivalent to roughly **£9,800/month** at £49, purely a testable placeholder.\n- **Revenue per Pro subscriber:** **£49/month** before a price change.\n- **Pilot £59 at Release:** applies the £59 price to **10% of relevant Pro customers** — a contained test.\n\nThe model recorded the pilot scope. The full-raise and keep-price options are only connected to **Pro plan price**, so their rollout-scope levels were correctly left out.\n\nApprove these assumptions and I’ll save them and run the comparison.\n\nThe model was saved as version 1. Questions this model does not answer yet: What is current MRR, and how much of it comes from Pro subscribers? What are the current monthly churn rate, Pro conversion rate, and Pro subscriber base? Does the £59 price apply to existing Pro customers, new customers, or both? What feature is being released, and what evidence indicates its added value to Pro customers? Does the under-4% churn constraint apply to total company churn or Pro-plan churn specifically?",
+        "suggested_actions": [
+          {
+            "label": "Use as starting assumptions",
+            "id": "agent-approve-proposal:prop_redacted"
+          },
+          {
+            "label": "Change something first",
+            "id": "agent-amend-proposal"
+          },
+          {
+            "label": "Run analysis",
+            "action_type": "run_analysis",
+            "id": "agent-run-analysis"
+          }
+        ],
+        "analysis_state": {
+          "run_state": {
+            "kind": "never_run"
+          },
+          "leader_claim": {
+            "permitted": false,
+            "withheld_reason": "constraint_verdict_withheld"
+          },
+          "robustness": {}
+        },
+        "analysis_ready": {
+          "analysis_admission": {
+            "permitted_analysis_mode": "comparative_leader",
+            "structurally_analysable": true
+          },
+          "options": [
+            {
+              "option_id": "raise_price_at_release",
+              "label": "Raise Price at Release",
+              "intervention_details": {
+                "pro_plan_price": {
+                  "raw_value": 59,
+                  "unit": "GBP per month",
+                  "display_value": "59 GBP per month"
+                }
+              }
+            },
+            {
+              "option_id": "keep_current_pro_price",
+              "label": "Keep Current Pro Price",
+              "intervention_details": {
+                "pro_plan_price": {
+                  "raw_value": 49,
+                  "unit": "GBP per month",
+                  "display_value": "49 GBP per month"
+                }
+              }
+            },
+            {
+              "option_id": "pilot_59_at_release",
+              "label": "Pilot £59 at Release",
+              "intervention_details": {
+                "pro_plan_price": {
+                  "raw_value": 59,
+                  "unit": "GBP per month",
+                  "display_value": "59 GBP per month"
+                }
+              }
+            }
+          ]
+        },
+        "blocks": [],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "decision_mrr",
+              "kind": "decision",
+              "label": "Decision: MRR",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "mrr",
+              "kind": "goal",
+              "label": "MRR",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "raise_price_at_release",
+              "kind": "option",
+              "label": "Raise Price at Release",
+              "provenance": "from_brief",
+              "interventions": {
+                "pro_plan_price": {
+                  "value": 0.295,
+                  "source": "brief_extraction"
+                }
+              }
+            },
+            {
+              "id": "keep_current_pro_price",
+              "kind": "option",
+              "label": "Keep Current Pro Price",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "pro_plan_price": {
+                  "value": 0.245,
+                  "source": "brief_extraction"
+                }
+              }
+            },
+            {
+              "id": "pilot_59_at_release",
+              "kind": "option",
+              "label": "Pilot £59 at Release",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "pro_plan_price": {
+                  "value": 0.295,
+                  "source": "brief_extraction"
+                }
+              }
+            },
+            {
+              "id": "pro_plan_price",
+              "kind": "factor",
+              "label": "Pro plan price",
+              "provenance": "from_brief",
+              "observed_state": {
+                "unit": "GBP per month",
+                "value": 0.245,
+                "raw_value": 49,
+                "source": "brief_extraction"
+              }
+            },
+            {
+              "id": "price_rollout_scope",
+              "kind": "factor",
+              "label": "Price rollout scope",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "revenue_per_pro_subscriber",
+              "kind": "factor",
+              "label": "Revenue per Pro subscriber",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "new_pro_conversion_rate",
+              "kind": "factor",
+              "label": "New Pro conversion rate",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "pro_subscriber_base",
+              "kind": "factor",
+              "label": "Pro subscriber base",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "monthly_churn",
+              "kind": "factor",
+              "label": "Monthly churn",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "churn_limit_breach",
+              "kind": "risk",
+              "label": "Churn-limit breach",
+              "provenance": "ai_inferred"
+            }
+          ]
+        },
+        "_agent": {
+          "mutated": true,
+          "tool_calls": [
+            {
+              "name": "get_canonical_state",
+              "ok": true,
+              "mutated": false
+            },
+            {
+              "name": "build_model_from_brief",
+              "ok": true,
+              "mutated": true
+            },
+            {
+              "name": "propose_starting_point",
+              "ok": true,
+              "mutated": false
+            }
+          ]
+        },
+        "_diagnostic_trace": {
+          "exit_path": "agent_lane_v1",
+          "write_claims_removed": 0
+        },
+        "_provider_calls": [
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "construction"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          }
+        ]
+      },
+      "class": "build_pricing",
+      "expect": {
+        "max_words_default": 90,
+        "words_soft": true,
+        "max_questions": 1,
+        "leader_may_be_named": false,
+        "leader_withheld_reason": "constraint_verdict_withheld",
+        "caveat_required": false,
+        "caveat_reasons": [],
+        "chips_shown": [
+          "Use as starting assumptions",
+          "Change something first",
+          "Run analysis"
+        ],
+        "forbidden_claims": [
+          "names_or_hints_a_leading_option",
+          "claims_the_analysis_ran_this_turn",
+          "promises_the_analysis_will_run_on_approval",
+          "names_a_control_not_in_chips_shown",
+          "calls_a_brief_stated_or_measured_figure_an_estimate",
+          "calls_an_olumi_figure_the_users",
+          "renames_an_option",
+          "quotes_a_figure_without_its_unit"
+        ],
+        "next_move": "only_when_supported",
+        "notes": [
+          "A next move is offered only when the state supports it; the reply never asks the user to press a chip it was not shown.",
+          "Olumi states saves and versions beneath the reply; the model does not restate them."
+        ]
+      },
+      "served_reply_verdicts": {
+        "CONTROL_REFERENCE": "PASS",
+        "LEADER_HONESTY": "PASS",
+        "ACTION_TRUTH": "FAIL",
+        "OPTION_NAME_FIDELITY": "PASS",
+        "UNITS": "PASS",
+        "PROVENANCE_WORDING": "PASS",
+        "CAVEAT": "PASS",
+        "INTERNAL_ID": "PASS"
+      }
+    },
+    {
+      "id": "build-heldout",
+      "source": {
+        "capture": "g11-0415b19",
+        "build": "0415b19",
+        "scenario": "G",
+        "turn": "G1 brief"
+      },
+      "context": {
+        "user_action": "brief",
+        "domain": "heldout",
+        "rerun_kind": null,
+        "next_approval_ran": false
+      },
+      "payload": {
+        "assistant_text": "I’ve set up a comparison model with the three options:\n\n- **Video by Default**\n- **Keep Face to Face**\n- **Clinician Case Choice**\n\nAll can affect the stated goal, **waiting-list reduction**, while preserving **patient satisfaction**. Your stated population fact is included: **30% of patients are over 75**.\n\nThe model still needs starting assumptions before it can compare the policies. In particular, it needs to test the currently unknown video suitability, digital access, and the actual policy settings. I propose the following as **assumptions to adopt or correct — not measurements**:\n\n| Item | Proposed level | Basis |\n|---|---:|---|\n| Current video follow-up share | 20% | Assumes video is currently used for a minority of follow-ups. |\n| Clinical suitability matching | 70% | Assumes current pathways can reliably route about seven in ten follow-ups to the appropriate mode. |\n| Patient digital access | 70% | Assumes access/support is below universal, materially relevant with 30% over 75. |\n| **Video by Default:** video follow-up share | 70% | Most suitable follow-ups move to video, with exceptions retained. |\n| **Video by Default:** clinical suitability matching | 65% | Defaulting to video raises the risk of a poor mode match despite screening. |\n| **Keep Face to Face:** video follow-up share | 5% | Video remains exceptional. |\n| **Keep Face to Face:** clinical suitability matching | 85% | Face-to-face is suitable for most cases, although more intensive than necessary for some. |\n| **Clinician Case Choice:** video follow-up share | 35% | Clinicians use video selectively rather than as the default. |\n| **Clinician Case Choice:** clinical suitability matching | 90% | Case-by-case triage should give the strongest fit between patient need and consultation mode. |\n\nThe key unknowns to test next are: the share genuinely suitable for video; actual digital access and support needs among older patients; and whether video saves clinician time or instead creates rework.\n\n**Approve these starting assumptions and option settings, or tell me which figures you would change.**\n\nThe model was saved as version 1. Questions this model does not answer yet: What proportion of current outpatient follow-ups are suitable for video consultation? What proportion of patients, including those over 75, have the device access, connectivity, and support needed for video follow-ups? How do video and face-to-face follow-ups compare in clinician time per appointment, non-attendance, and follow-up rework? What is the current patient-satisfaction baseline and how will satisfaction be measured during the change?",
+        "suggested_actions": [
+          {
+            "label": "Use as starting assumptions",
+            "id": "agent-approve-proposal:prop_redacted"
+          },
+          {
+            "label": "Change something first",
+            "id": "agent-amend-proposal"
+          }
+        ],
+        "analysis_state": {
+          "run_state": {
+            "kind": "never_run"
+          },
+          "leader_claim": {
+            "permitted": false,
+            "withheld_reason": "constraint_verdict_withheld"
+          },
+          "robustness": {}
+        },
+        "analysis_ready": {
+          "analysis_admission": {
+            "permitted_analysis_mode": "none",
+            "structurally_analysable": false
+          },
+          "options": [
+            {
+              "option_id": "video_by_default",
+              "label": "Video by Default",
+              "intervention_details": {}
+            },
+            {
+              "option_id": "keep_face_to_face",
+              "label": "Keep Face to Face",
+              "intervention_details": {}
+            },
+            {
+              "option_id": "clinician_case_choice",
+              "label": "Clinician Case Choice",
+              "intervention_details": {}
+            }
+          ]
+        },
+        "blocks": [],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "decision_waiting_list_reduction",
+              "kind": "decision",
+              "label": "Decision: Waiting-list reduction",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "waiting_list_reduction",
+              "kind": "goal",
+              "label": "Waiting-list reduction",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "video_by_default",
+              "kind": "option",
+              "label": "Video by Default",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "keep_face_to_face",
+              "kind": "option",
+              "label": "Keep Face to Face",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "clinician_case_choice",
+              "kind": "option",
+              "label": "Clinician Case Choice",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "video_follow_up_share",
+              "kind": "factor",
+              "label": "Video follow-up share",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "clinical_suitability_matching",
+              "kind": "factor",
+              "label": "Clinical suitability matching",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "patient_digital_access",
+              "kind": "factor",
+              "label": "Patient digital access",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "patients_over_75",
+              "kind": "factor",
+              "label": "Patients over 75",
+              "provenance": "from_brief",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.3,
+                "raw_value": 30,
+                "source": "brief_extraction"
+              }
+            },
+            {
+              "id": "digital_exclusion",
+              "kind": "risk",
+              "label": "Digital exclusion",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "inappropriate_video_consultations",
+              "kind": "risk",
+              "label": "Inappropriate video consultations",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "follow_up_appointment_capacity",
+              "kind": "outcome",
+              "label": "Follow-up appointment capacity",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "patient_satisfaction_change",
+              "kind": "outcome",
+              "label": "Patient satisfaction change",
+              "provenance": "from_brief"
+            }
+          ]
+        },
+        "_agent": {
+          "mutated": true,
+          "tool_calls": [
+            {
+              "name": "get_canonical_state",
+              "ok": true,
+              "mutated": false
+            },
+            {
+              "name": "build_model_from_brief",
+              "ok": true,
+              "mutated": true
+            },
+            {
+              "name": "propose_starting_point",
+              "ok": false,
+              "mutated": false,
+              "refusal": "incomplete_starting_point"
+            },
+            {
+              "name": "propose_starting_point",
+              "ok": true,
+              "mutated": false
+            }
+          ]
+        },
+        "_diagnostic_trace": {
+          "exit_path": "agent_lane_v1",
+          "write_claims_removed": 0
+        },
+        "_provider_calls": [
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "construction"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          }
+        ]
+      },
+      "class": "build_heldout",
+      "expect": {
+        "max_words_default": 90,
+        "words_soft": true,
+        "max_questions": 1,
+        "leader_may_be_named": false,
+        "leader_withheld_reason": "constraint_verdict_withheld",
+        "caveat_required": false,
+        "caveat_reasons": [],
+        "chips_shown": [
+          "Use as starting assumptions",
+          "Change something first"
+        ],
+        "forbidden_claims": [
+          "names_or_hints_a_leading_option",
+          "claims_the_analysis_ran_this_turn",
+          "promises_the_analysis_will_run_on_approval",
+          "names_a_control_not_in_chips_shown",
+          "calls_a_brief_stated_or_measured_figure_an_estimate",
+          "calls_an_olumi_figure_the_users",
+          "renames_an_option",
+          "quotes_a_figure_without_its_unit"
+        ],
+        "next_move": "only_when_supported",
+        "notes": [
+          "A next move is offered only when the state supports it; the reply never asks the user to press a chip it was not shown.",
+          "Olumi states saves and versions beneath the reply; the model does not restate them."
+        ]
+      },
+      "served_reply_verdicts": {
+        "CONTROL_REFERENCE": "PASS",
+        "LEADER_HONESTY": "PASS",
+        "ACTION_TRUTH": "PASS",
+        "OPTION_NAME_FIDELITY": "PASS",
+        "UNITS": "PASS",
+        "PROVENANCE_WORDING": "NOT_DECIDABLE",
+        "CAVEAT": "PASS",
+        "INTERNAL_ID": "PASS"
+      }
+    },
+    {
+      "id": "run-leader-permitted",
+      "source": {
+        "capture": "c16-fd312b5",
+        "build": "fd312b5",
+        "scenario": "A",
+        "turn": "A2r run (typed Run)"
+      },
+      "context": {
+        "user_action": "run",
+        "domain": "hiring",
+        "rerun_kind": null,
+        "next_approval_ran": null
+      },
+      "payload": {
+        "assistant_text": "**Current model finding:** hiring a **Tech Lead leads** for increasing engineering velocity under the assumptions tested, ranking first in **65% of model runs**. This is a model-relative result, not a recommendation.\n\n- It leads because the model assumes one Tech Lead raises technical coordination to **70%** and reduces rework to **15%**, versus the current-staffing assumptions of **50%** coordination and **20%** rework.\n- Hiring two developers ranks lower in this model: it assumes capacity rises to **12 developer-equivalent capacity units**, but onboarding load rises to **35%**. Hiring one developer is the next-most-frequent leader, ahead of maintaining staffing.\n- The conclusion is **fragile**. Small changes to the assumed link from technical coordination to velocity can change the leading option; in one tested perturbation, maintaining current staffing became the alternative leader. The goal was also ranked as “higher engineering velocity is better”, an assumption rather than a stated direction.\n\nThe central unresolved question is whether your real bottleneck is technical coordination/rework or delivery capacity; the model’s ordering depends materially on that distinction.",
+        "suggested_actions": [],
+        "analysis_state": {
+          "run_state": {
+            "kind": "complete_current"
+          },
+          "leader_claim": {
+            "permitted": true,
+            "separation": "separated"
+          },
+          "robustness": {
+            "aggregate_level": "low"
+          }
+        },
+        "analysis_ready": {
+          "analysis_admission": {
+            "permitted_analysis_mode": "comparative_leader",
+            "structurally_analysable": true
+          },
+          "options": [
+            {
+              "option_id": "hire_a_tech_lead",
+              "label": "Hire a Tech Lead",
+              "intervention_details": {
+                "rework_rate": {
+                  "raw_value": 15,
+                  "unit": "%",
+                  "display_value": "15%"
+                },
+                "tech_lead_hires": {
+                  "raw_value": 1,
+                  "unit": "hires",
+                  "display_value": "1 hires"
+                },
+                "technical_coordination": {
+                  "raw_value": 70,
+                  "unit": "%",
+                  "display_value": "70%"
+                }
+              }
+            },
+            {
+              "option_id": "hire_two_developers",
+              "label": "Hire two developers",
+              "intervention_details": {
+                "developer_hires": {
+                  "raw_value": 2,
+                  "unit": "hires",
+                  "display_value": "2 hires"
+                },
+                "onboarding_load": {
+                  "raw_value": 35,
+                  "unit": "%",
+                  "display_value": "35%"
+                },
+                "development_capacity": {
+                  "raw_value": 12,
+                  "unit": "developer-equivalent capacity units",
+                  "display_value": "12 developer-equivalent capacity units"
+                }
+              }
+            },
+            {
+              "option_id": "maintain_current_staffing",
+              "label": "Maintain current staffing",
+              "intervention_details": {
+                "rework_rate": {
+                  "raw_value": 20,
+                  "unit": "%",
+                  "display_value": "20%"
+                },
+                "onboarding_load": {
+                  "raw_value": 20,
+                  "unit": "%",
+                  "display_value": "20%"
+                },
+                "development_capacity": {
+                  "raw_value": 10,
+                  "unit": "developer-equivalent capacity units",
+                  "display_value": "10 developer-equivalent capacity units"
+                },
+                "technical_coordination": {
+                  "raw_value": 50,
+                  "unit": "%",
+                  "display_value": "50%"
+                }
+              }
+            },
+            {
+              "option_id": "hire_one_developer",
+              "label": "Hire one developer",
+              "intervention_details": {
+                "developer_hires": {
+                  "raw_value": 1,
+                  "unit": "hires",
+                  "display_value": "1 hires"
+                },
+                "onboarding_load": {
+                  "raw_value": 28.000000000000004,
+                  "unit": "%",
+                  "display_value": "28%"
+                },
+                "development_capacity": {
+                  "raw_value": 11,
+                  "unit": "developer-equivalent capacity units",
+                  "display_value": "11 developer-equivalent capacity units"
+                }
+              }
+            }
+          ]
+        },
+        "blocks": [
+          {
+            "type": "analysis_result",
+            "summary": "Hire a Tech Lead scored highest against your goal in 65% of runs of this model, but treat this as provisional: the link between Technical coordination and Engineering velocity is fragile. The result is not yet robust — small changes could flip it.",
+            "leading_option_id": "hire_a_tech_lead",
+            "win_probabilities": {
+              "Hire a Tech Lead": 0.6512,
+              "Hire one developer": 0.17945,
+              "Hire two developers": 0.05805,
+              "Maintain current staffing": 0.1113
+            },
+            "enrichment": {
+              "robustness": {
+                "level": "low",
+                "near_tie": {
+                  "is_tie": false
+                }
+              }
+            }
+          }
+        ],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "decision_engineering_velocity",
+              "kind": "decision",
+              "label": "Decision: Engineering velocity",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "engineering_velocity",
+              "kind": "goal",
+              "label": "Engineering velocity",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "hire_a_tech_lead",
+              "kind": "option",
+              "label": "Hire a Tech Lead",
+              "provenance": "from_brief",
+              "interventions": {
+                "rework_rate": {
+                  "value": 0.15,
+                  "source": "user_specified"
+                },
+                "tech_lead_hires": {
+                  "value": 0.1,
+                  "source": "brief_extraction"
+                },
+                "technical_coordination": {
+                  "value": 0.7,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "hire_two_developers",
+              "kind": "option",
+              "label": "Hire two developers",
+              "provenance": "from_brief",
+              "interventions": {
+                "developer_hires": {
+                  "value": 0.04,
+                  "source": "brief_extraction"
+                },
+                "onboarding_load": {
+                  "value": 0.35,
+                  "source": "user_specified"
+                },
+                "development_capacity": {
+                  "value": 0.24,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "maintain_current_staffing",
+              "kind": "option",
+              "label": "Maintain current staffing",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "rework_rate": {
+                  "value": 0.2,
+                  "source": "user_specified"
+                },
+                "onboarding_load": {
+                  "value": 0.2,
+                  "source": "user_specified"
+                },
+                "development_capacity": {
+                  "value": 0.2,
+                  "source": "user_specified"
+                },
+                "technical_coordination": {
+                  "value": 0.5,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "hire_one_developer",
+              "kind": "option",
+              "label": "Hire one developer",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "developer_hires": {
+                  "value": 0.02,
+                  "source": "cee_hypothesis"
+                },
+                "onboarding_load": {
+                  "value": 0.28,
+                  "source": "user_specified"
+                },
+                "development_capacity": {
+                  "value": 0.22,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "tech_lead_hires",
+              "kind": "factor",
+              "label": "Tech Lead hires",
+              "provenance": "user_set",
+              "display_value": "0 hires",
+              "observed_state": {
+                "unit": "hires",
+                "value": 0,
+                "raw_value": 0,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "developer_hires",
+              "kind": "factor",
+              "label": "Developer hires",
+              "provenance": "user_set",
+              "display_value": "0 hires",
+              "observed_state": {
+                "unit": "hires",
+                "value": 0,
+                "raw_value": 0,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "development_capacity",
+              "kind": "factor",
+              "label": "Development capacity",
+              "provenance": "user_set",
+              "display_value": "10 developer-equivalent capacity units",
+              "observed_state": {
+                "unit": "developer-equivalent capacity units",
+                "value": 0.2,
+                "raw_value": 10,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "technical_coordination",
+              "kind": "factor",
+              "label": "Technical coordination",
+              "provenance": "user_set",
+              "display_value": "50%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.5,
+                "raw_value": 50,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "onboarding_load",
+              "kind": "factor",
+              "label": "Onboarding load",
+              "provenance": "user_set",
+              "display_value": "20%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.2,
+                "raw_value": 20,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "rework_rate",
+              "kind": "factor",
+              "label": "Rework rate",
+              "provenance": "user_set",
+              "display_value": "20%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.2,
+                "raw_value": 20,
+                "source": "user_override"
+              }
+            }
+          ]
+        },
+        "_agent": {
+          "mutated": false,
+          "tool_calls": [
+            {
+              "name": "run_analysis",
+              "ok": true,
+              "mutated": false
+            }
+          ]
+        },
+        "_diagnostic_trace": {
+          "exit_path": "agent_lane_v1",
+          "fast_path": "run",
+          "write_claims_removed": 0
+        },
+        "_provider_calls": [
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          }
+        ]
+      },
+      "class": "run_leader_permitted",
+      "expect": {
+        "max_words_default": 90,
+        "words_soft": true,
+        "max_questions": 1,
+        "leader_may_be_named": true,
+        "leader_withheld_reason": null,
+        "caveat_required": true,
+        "caveat_reasons": [
+          "robustness low"
+        ],
+        "chips_shown": [],
+        "forbidden_claims": [
+          "claims_a_save_or_version",
+          "asks_to_approve_or_claims_a_pending_proposal",
+          "promises_the_analysis_will_run_on_approval",
+          "names_a_control_not_in_chips_shown",
+          "calls_a_brief_stated_or_measured_figure_an_estimate",
+          "calls_an_olumi_figure_the_users",
+          "renames_an_option",
+          "quotes_a_figure_without_its_unit"
+        ],
+        "next_move": "only_when_supported",
+        "notes": [
+          "A next move is offered only when the state supports it; the reply never asks the user to press a chip it was not shown.",
+          "Olumi states saves and versions beneath the reply; the model does not restate them."
+        ]
+      },
+      "served_reply_verdicts": {
+        "CONTROL_REFERENCE": "PASS",
+        "LEADER_HONESTY": "PASS",
+        "ACTION_TRUTH": "PASS",
+        "OPTION_NAME_FIDELITY": "PASS",
+        "UNITS": "PASS",
+        "PROVENANCE_WORDING": "NOT_DECIDABLE",
+        "CAVEAT": "PASS",
+        "INTERNAL_ID": "PASS"
+      }
+    },
+    {
+      "id": "run-leader-withheld-near-tie",
+      "source": {
+        "capture": "c19-8428207",
+        "build": "8428207",
+        "scenario": "A",
+        "turn": "A2r run (typed Run)"
+      },
+      "context": {
+        "user_action": "run",
+        "domain": "hiring",
+        "rerun_kind": null,
+        "next_approval_ran": null
+      },
+      "payload": {
+        "assistant_text": "**Finding:** the current model does **not** separate hiring a Tech Lead from hiring two developers. Two developers are marginally more likely to lead under the model’s simulations, but it is a near tie and the analysis marks the result **fragile**—so neither option can be put forward decisively.\n\n- The model’s average velocity outcome is slightly higher for a **Tech Lead** than for **two developers**, while two developers have a slightly higher chance of coming out ahead across the simulated assumptions. That difference reflects uncertainty rather than a settled advantage.\n- The ordering can change with small changes to the assumed relationship between **developer capacity and velocity**. Coordination efficiency and prioritisation quality are also major model drivers; their starting values were assumptions, not measurements.\n- The goal was treated as “more velocity is better”; that direction was not explicitly stated in the brief.\n\nThe useful conclusion is the uncertainty itself: whether your present bottleneck is leadership/coordination or hands-on delivery capacity is not yet established by this model.",
+        "suggested_actions": [],
+        "analysis_state": {
+          "run_state": {
+            "kind": "complete_current"
+          },
+          "leader_claim": {
+            "permitted": false,
+            "withheld_reason": "options_do_not_separate",
+            "separation": "near_tie"
+          },
+          "robustness": {
+            "aggregate_level": "very_low"
+          }
+        },
+        "analysis_ready": {
+          "analysis_admission": {
+            "permitted_analysis_mode": "comparative_leader",
+            "structurally_analysable": true
+          },
+          "options": [
+            {
+              "option_id": "hire_a_tech_lead",
+              "label": "Hire a Tech Lead",
+              "intervention_details": {
+                "tech_lead_capacity": {
+                  "raw_value": 1,
+                  "unit": "full-time Tech Leads",
+                  "display_value": "1 full-time Tech Leads"
+                }
+              }
+            },
+            {
+              "option_id": "hire_two_developers",
+              "label": "Hire Two Developers",
+              "intervention_details": {
+                "developer_capacity": {
+                  "raw_value": 6,
+                  "unit": "full-time developers",
+                  "display_value": "6 full-time developers"
+                }
+              }
+            },
+            {
+              "option_id": "maintain_current_team",
+              "label": "Maintain Current Team",
+              "intervention_details": {
+                "developer_capacity": {
+                  "raw_value": 4,
+                  "unit": "full-time developers",
+                  "display_value": "4 full-time developers"
+                },
+                "tech_lead_capacity": {
+                  "raw_value": 0,
+                  "unit": "full-time Tech Leads",
+                  "display_value": "0 full-time Tech Leads"
+                }
+              }
+            }
+          ]
+        },
+        "blocks": [
+          {
+            "type": "analysis_result",
+            "summary": "Hire Two Developers scored highest against your goal in 50% of runs of this model, but the analysis treats this as a close call. The result is not yet robust — small changes could flip it.",
+            "leading_option_id": "hire_two_developers",
+            "win_probabilities": {
+              "Hire a Tech Lead": 0.44543333333333346,
+              "Hire Two Developers": 0.49993333333333323,
+              "Maintain Current Team": 0.05463333333333327
+            },
+            "enrichment": {
+              "robustness": {
+                "level": "very_low",
+                "near_tie": {
+                  "is_tie": true
+                }
+              }
+            }
+          }
+        ],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "decision_velocity",
+              "kind": "decision",
+              "label": "Decision: Velocity",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "velocity",
+              "kind": "goal",
+              "label": "Velocity",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "hire_a_tech_lead",
+              "kind": "option",
+              "label": "Hire a Tech Lead",
+              "provenance": "from_brief",
+              "interventions": {
+                "tech_lead_capacity": {
+                  "value": 0.1,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "hire_two_developers",
+              "kind": "option",
+              "label": "Hire Two Developers",
+              "provenance": "from_brief",
+              "interventions": {
+                "developer_capacity": {
+                  "value": 0.3,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "maintain_current_team",
+              "kind": "option",
+              "label": "Maintain Current Team",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "developer_capacity": {
+                  "value": 0.2,
+                  "source": "user_specified"
+                },
+                "tech_lead_capacity": {
+                  "value": 0,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "tech_lead_capacity",
+              "kind": "factor",
+              "label": "Tech lead capacity",
+              "provenance": "user_set",
+              "display_value": "0 full-time Tech Leads",
+              "observed_state": {
+                "unit": "full-time Tech Leads",
+                "value": 0,
+                "raw_value": 0,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "developer_capacity",
+              "kind": "factor",
+              "label": "Developer capacity",
+              "provenance": "user_set",
+              "display_value": "4 full-time developers",
+              "observed_state": {
+                "unit": "full-time developers",
+                "value": 0.2,
+                "raw_value": 4,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "team_coordination_efficiency",
+              "kind": "factor",
+              "label": "Team coordination efficiency",
+              "provenance": "user_set",
+              "display_value": "60%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "work_prioritisation_quality",
+              "kind": "factor",
+              "label": "Work prioritisation quality",
+              "provenance": "user_set",
+              "display_value": "60%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            }
+          ]
+        },
+        "_agent": {
+          "mutated": false,
+          "tool_calls": [
+            {
+              "name": "run_analysis",
+              "ok": true,
+              "mutated": false
+            }
+          ]
+        },
+        "_diagnostic_trace": {
+          "exit_path": "agent_lane_v1",
+          "fast_path": "run",
+          "write_claims_removed": 0
+        },
+        "_provider_calls": [
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          }
+        ]
+      },
+      "class": "run_leader_withheld",
+      "expect": {
+        "max_words_default": 90,
+        "words_soft": true,
+        "max_questions": 1,
+        "leader_may_be_named": false,
+        "leader_withheld_reason": "options_do_not_separate",
+        "caveat_required": true,
+        "caveat_reasons": [
+          "robustness very_low",
+          "near tie",
+          "leader withheld: options_do_not_separate"
+        ],
+        "chips_shown": [],
+        "forbidden_claims": [
+          "names_or_hints_a_leading_option",
+          "claims_a_save_or_version",
+          "asks_to_approve_or_claims_a_pending_proposal",
+          "promises_the_analysis_will_run_on_approval",
+          "names_a_control_not_in_chips_shown",
+          "calls_a_brief_stated_or_measured_figure_an_estimate",
+          "calls_an_olumi_figure_the_users",
+          "renames_an_option",
+          "quotes_a_figure_without_its_unit"
+        ],
+        "next_move": "only_when_supported",
+        "notes": [
+          "A next move is offered only when the state supports it; the reply never asks the user to press a chip it was not shown.",
+          "Olumi states saves and versions beneath the reply; the model does not restate them."
+        ]
+      },
+      "served_reply_verdicts": {
+        "CONTROL_REFERENCE": "PASS",
+        "LEADER_HONESTY": "FAIL",
+        "ACTION_TRUTH": "PASS",
+        "OPTION_NAME_FIDELITY": "PASS",
+        "UNITS": "PASS",
+        "PROVENANCE_WORDING": "NOT_DECIDABLE",
+        "CAVEAT": "PASS",
+        "INTERNAL_ID": "PASS"
+      }
+    },
+    {
+      "id": "run-leader-withheld-constraint",
+      "source": {
+        "capture": "c19-8428207",
+        "build": "8428207",
+        "scenario": "B",
+        "turn": "B2r run (typed Run)"
+      },
+      "context": {
+        "user_action": "run",
+        "domain": "pricing",
+        "rerun_kind": null,
+        "next_approval_ran": null
+      },
+      "payload": {
+        "assistant_text": "**Finding:** On the current assumptions, a **£59 pilot at release** leads the comparison; it has the highest modelled chance of leading the three options. But this is a **fragile** result, not a settled case for a full £59 increase.\n\n- The model’s churn constraint was **not assessed**: it could not align “monthly churn under 4%” with the modelled churn measure. So this run does **not** establish that any option keeps churn below the limit.\n- The ordering is sensitive to the assumed **Pro subscriber base** and **monthly churn**. Both were starting assumptions rather than measured inputs; changing either can change which option leads.\n- The full £59 rise is modelled separately from the pilot, but the analysis does not yet contain observed feature-release response, price elasticity, or current MRR—so it cannot answer whether £20k MRR will be reached within 12 months.\n\nThe key next reasoning step is to define whether the under-4% limit applies to overall-company or Pro-plan churn, and record it in the same measurement frame as the modelled churn outcome.",
+        "suggested_actions": [],
+        "analysis_state": {
+          "run_state": {
+            "kind": "complete_current"
+          },
+          "leader_claim": {
+            "permitted": false,
+            "withheld_reason": "constraint_verdict_withheld",
+            "separation": "separated"
+          },
+          "robustness": {
+            "aggregate_level": "low"
+          }
+        },
+        "analysis_ready": {
+          "analysis_admission": {
+            "permitted_analysis_mode": "comparative_leader",
+            "structurally_analysable": true
+          },
+          "options": [
+            {
+              "option_id": "raise_price_at_release",
+              "label": "Raise Price at Release",
+              "intervention_details": {
+                "pro_plan_price": {
+                  "raw_value": 59,
+                  "unit": "GBP per month",
+                  "display_value": "59 GBP per month"
+                }
+              }
+            },
+            {
+              "option_id": "keep_current_pro_price",
+              "label": "Keep Current Pro Price",
+              "intervention_details": {
+                "pro_plan_price": {
+                  "raw_value": 49,
+                  "unit": "GBP per month",
+                  "display_value": "49 GBP per month"
+                }
+              }
+            },
+            {
+              "option_id": "pilot_59_at_release",
+              "label": "Pilot £59 at Release",
+              "intervention_details": {
+                "pro_plan_price": {
+                  "raw_value": 59,
+                  "unit": "GBP per month",
+                  "display_value": "59 GBP per month"
+                },
+                "price_rollout_scope": {
+                  "raw_value": 10,
+                  "unit": "% of Pro customers",
+                  "display_value": "10 % of Pro customers"
+                }
+              }
+            }
+          ]
+        },
+        "blocks": [
+          {
+            "type": "analysis_result",
+            "summary": "Ran analysis on your current scenario. One limit on your model could not be checked: “Monthly churn < 4percent per month”. We could not line it up with anything this analysis measures, so it was not part of the comparison. The part of your model it points at is worked out from other parts, so it has no measured starting point of its own, and restating the limit cannot give it one. Tell me which part of your model it applies to and I will record it there; this one stays on the model. Then run the analysis again.",
+            "leading_option_id": null,
+            "win_probabilities": {
+              "Pilot £59 at Release": 0.5422666666666659,
+              "Keep Current Pro Price": 0.1778666666666662,
+              "Raise Price at Release": 0.2798666666666671
+            },
+            "enrichment": {
+              "robustness": {
+                "level": "low",
+                "near_tie": {
+                  "is_tie": false
+                }
+              }
+            }
+          }
+        ],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "decision_mrr",
+              "kind": "decision",
+              "label": "Decision: MRR",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "mrr",
+              "kind": "goal",
+              "label": "MRR",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "raise_price_at_release",
+              "kind": "option",
+              "label": "Raise Price at Release",
+              "provenance": "from_brief",
+              "interventions": {
+                "pro_plan_price": {
+                  "value": 0.295,
+                  "source": "brief_extraction"
+                }
+              }
+            },
+            {
+              "id": "keep_current_pro_price",
+              "kind": "option",
+              "label": "Keep Current Pro Price",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "pro_plan_price": {
+                  "value": 0.245,
+                  "source": "brief_extraction"
+                }
+              }
+            },
+            {
+              "id": "pilot_59_at_release",
+              "kind": "option",
+              "label": "Pilot £59 at Release",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "pro_plan_price": {
+                  "value": 0.295,
+                  "source": "brief_extraction"
+                },
+                "price_rollout_scope": {
+                  "value": 0.1,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "pro_plan_price",
+              "kind": "factor",
+              "label": "Pro plan price",
+              "provenance": "from_brief",
+              "observed_state": {
+                "unit": "GBP per month",
+                "value": 0.245,
+                "raw_value": 49,
+                "source": "brief_extraction"
+              }
+            },
+            {
+              "id": "price_rollout_scope",
+              "kind": "factor",
+              "label": "Price rollout scope",
+              "provenance": "user_set",
+              "display_value": "100 % of Pro customers",
+              "observed_state": {
+                "unit": "% of Pro customers",
+                "value": 1,
+                "raw_value": 100,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "revenue_per_pro_subscriber",
+              "kind": "factor",
+              "label": "Revenue per Pro subscriber",
+              "provenance": "user_set",
+              "display_value": "49 GBP per month",
+              "observed_state": {
+                "unit": "GBP per month",
+                "value": 0.245,
+                "raw_value": 49,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "new_pro_conversion_rate",
+              "kind": "factor",
+              "label": "New Pro conversion rate",
+              "provenance": "user_set",
+              "display_value": "5%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.05,
+                "raw_value": 5,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "pro_subscriber_base",
+              "kind": "factor",
+              "label": "Pro subscriber base",
+              "provenance": "user_set",
+              "display_value": "200 subscribers",
+              "observed_state": {
+                "unit": "subscribers",
+                "value": 0.1,
+                "raw_value": 200,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "monthly_churn",
+              "kind": "factor",
+              "label": "Monthly churn",
+              "provenance": "user_set",
+              "display_value": "3 % per month",
+              "observed_state": {
+                "unit": "% per month",
+                "value": 0.03,
+                "raw_value": 3,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "churn_limit_breach",
+              "kind": "risk",
+              "label": "Churn-limit breach",
+              "provenance": "ai_inferred"
+            }
+          ]
+        },
+        "_agent": {
+          "mutated": false,
+          "tool_calls": [
+            {
+              "name": "run_analysis",
+              "ok": true,
+              "mutated": false
+            }
+          ]
+        },
+        "_diagnostic_trace": {
+          "exit_path": "agent_lane_v1",
+          "fast_path": "run",
+          "write_claims_removed": 0
+        },
+        "_provider_calls": [
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          }
+        ]
+      },
+      "class": "run_leader_withheld",
+      "expect": {
+        "max_words_default": 90,
+        "words_soft": true,
+        "max_questions": 1,
+        "leader_may_be_named": false,
+        "leader_withheld_reason": "constraint_verdict_withheld",
+        "caveat_required": true,
+        "caveat_reasons": [
+          "robustness low",
+          "leader withheld: constraint_verdict_withheld"
+        ],
+        "chips_shown": [],
+        "forbidden_claims": [
+          "names_or_hints_a_leading_option",
+          "claims_a_save_or_version",
+          "asks_to_approve_or_claims_a_pending_proposal",
+          "promises_the_analysis_will_run_on_approval",
+          "names_a_control_not_in_chips_shown",
+          "calls_a_brief_stated_or_measured_figure_an_estimate",
+          "calls_an_olumi_figure_the_users",
+          "renames_an_option",
+          "quotes_a_figure_without_its_unit"
+        ],
+        "next_move": "only_when_supported",
+        "notes": [
+          "A next move is offered only when the state supports it; the reply never asks the user to press a chip it was not shown.",
+          "Olumi states saves and versions beneath the reply; the model does not restate them."
+        ]
+      },
+      "served_reply_verdicts": {
+        "CONTROL_REFERENCE": "PASS",
+        "LEADER_HONESTY": "FAIL",
+        "ACTION_TRUTH": "PASS",
+        "OPTION_NAME_FIDELITY": "FAIL",
+        "UNITS": "PASS",
+        "PROVENANCE_WORDING": "NOT_DECIDABLE",
+        "CAVEAT": "PASS",
+        "INTERNAL_ID": "PASS"
+      }
+    },
+    {
+      "id": "run-blocked",
+      "source": {
+        "capture": "c19-8428207",
+        "build": "8428207",
+        "scenario": "O",
+        "turn": "O5 run after adding the option (typed Run)"
+      },
+      "context": {
+        "user_action": "run",
+        "domain": "hiring",
+        "rerun_kind": null,
+        "next_approval_ran": null
+      },
+      "payload": {
+        "assistant_text": "The analysis did not run: the model has four readiness issues.\n\n- **Contractor option:** it needs a level for **Development capacity**, currently **6 delivery-capacity points out of 20**. The model needs to know what level the six-month contractor would set.\n- **Carry On as Now:** it sets no factor, so it cannot be compared.\n- Two structural issues remain: an option has no factor connection, and an option is not linked from the decision. The tool did not identify which option for those two issues.\n\nThe existing Tech Lead, one-developer, and two-developer options are encoded with levels and are otherwise ready, but the model cannot run a whole comparison while these other options block it.",
+        "suggested_actions": [
+          {
+            "label": "Suggest what it still needs",
+            "id": "agent-suggest-what-it-needs"
+          }
+        ],
+        "analysis_state": {
+          "run_state": {
+            "kind": "never_run"
+          },
+          "leader_claim": {
+            "permitted": false,
+            "withheld_reason": "constraint_verdict_withheld"
+          },
+          "robustness": {}
+        },
+        "analysis_ready": {
+          "analysis_admission": {
+            "permitted_analysis_mode": "none",
+            "structurally_analysable": false
+          },
+          "options": [
+            {
+              "option_id": "hire_a_tech_lead",
+              "label": "Hire a Tech Lead",
+              "intervention_details": {
+                "technical_leadership_capacity": {
+                  "raw_value": 7,
+                  "unit": "out of 10",
+                  "display_value": "7 out of 10"
+                }
+              }
+            },
+            {
+              "option_id": "hire_two_developers",
+              "label": "Hire Two Developers",
+              "intervention_details": {
+                "development_capacity": {
+                  "raw_value": 8,
+                  "unit": "delivery-capacity points out of 20",
+                  "display_value": "8 delivery-capacity points out of 20"
+                }
+              }
+            },
+            {
+              "option_id": "carry_on_as_now",
+              "label": "Carry On as Now",
+              "intervention_details": {}
+            },
+            {
+              "option_id": "hire_one_developer",
+              "label": "Hire One Developer",
+              "intervention_details": {
+                "development_capacity": {
+                  "raw_value": 7,
+                  "unit": "delivery-capacity points out of 20",
+                  "display_value": "7 delivery-capacity points out of 20"
+                }
+              }
+            },
+            {
+              "option_id": "fbc4ca69",
+              "label": "Bring in an experienced contractor for six months",
+              "intervention_details": {}
+            }
+          ]
+        },
+        "blocks": [],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "decision_velocity",
+              "kind": "decision",
+              "label": "Decision: Velocity",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "velocity",
+              "kind": "goal",
+              "label": "Velocity",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "hire_a_tech_lead",
+              "kind": "option",
+              "label": "Hire a Tech Lead",
+              "provenance": "from_brief",
+              "interventions": {
+                "technical_leadership_capacity": {
+                  "value": 0.7,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "hire_two_developers",
+              "kind": "option",
+              "label": "Hire Two Developers",
+              "provenance": "from_brief",
+              "interventions": {
+                "development_capacity": {
+                  "value": 0.4,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "carry_on_as_now",
+              "kind": "option",
+              "label": "Carry On as Now",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "hire_one_developer",
+              "kind": "option",
+              "label": "Hire One Developer",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "development_capacity": {
+                  "value": 0.35,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "technical_leadership_capacity",
+              "kind": "factor",
+              "label": "Technical leadership capacity",
+              "provenance": "user_set",
+              "display_value": "3 out of 10",
+              "observed_state": {
+                "unit": "out of 10",
+                "value": 0.3,
+                "raw_value": 3,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "development_capacity",
+              "kind": "factor",
+              "label": "Development capacity",
+              "provenance": "user_set",
+              "display_value": "6 delivery-capacity points out of 20",
+              "observed_state": {
+                "unit": "delivery-capacity points out of 20",
+                "value": 0.3,
+                "raw_value": 6,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "work_prioritisation_quality",
+              "kind": "factor",
+              "label": "Work prioritisation quality",
+              "provenance": "user_set",
+              "display_value": "60 out of 100",
+              "observed_state": {
+                "unit": "out of 100",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "technical_decision_speed",
+              "kind": "factor",
+              "label": "Technical decision speed",
+              "provenance": "user_set",
+              "display_value": "55 out of 100",
+              "observed_state": {
+                "unit": "out of 100",
+                "value": 0.55,
+                "raw_value": 55,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "delivery_coordination_load",
+              "kind": "factor",
+              "label": "Delivery coordination load",
+              "provenance": "user_set",
+              "display_value": "50 out of 100",
+              "observed_state": {
+                "unit": "out of 100",
+                "value": 0.5,
+                "raw_value": 50,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "onboarding_load",
+              "kind": "factor",
+              "label": "Onboarding load",
+              "provenance": "user_set",
+              "display_value": "20 out of 100",
+              "observed_state": {
+                "unit": "out of 100",
+                "value": 0.2,
+                "raw_value": 20,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "delivery_slowdown_during_onboarding",
+              "kind": "risk",
+              "label": "Delivery slowdown during…",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "team_execution_effectiveness",
+              "kind": "outcome",
+              "label": "Team execution effectiveness",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "fbc4ca69",
+              "kind": "option",
+              "label": "Bring in an experienced contractor for six months",
+              "provenance": "user_set"
+            }
+          ]
+        },
+        "_agent": {
+          "mutated": false,
+          "tool_calls": [
+            {
+              "name": "run_analysis",
+              "ok": true,
+              "mutated": false
+            }
+          ]
+        },
+        "_diagnostic_trace": {
+          "exit_path": "agent_lane_v1",
+          "fast_path": "run",
+          "write_claims_removed": 0
+        },
+        "_provider_calls": [
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          }
+        ]
+      },
+      "class": "run_blocked",
+      "expect": {
+        "max_words_default": 90,
+        "words_soft": true,
+        "max_questions": 1,
+        "leader_may_be_named": false,
+        "leader_withheld_reason": "constraint_verdict_withheld",
+        "caveat_required": true,
+        "caveat_reasons": [
+          "blocked"
+        ],
+        "chips_shown": [
+          "Suggest what it still needs"
+        ],
+        "forbidden_claims": [
+          "names_or_hints_a_leading_option",
+          "claims_a_save_or_version",
+          "claims_the_analysis_ran_this_turn",
+          "asks_to_approve_or_claims_a_pending_proposal",
+          "promises_the_analysis_will_run_on_approval",
+          "names_a_control_not_in_chips_shown",
+          "calls_a_brief_stated_or_measured_figure_an_estimate",
+          "calls_an_olumi_figure_the_users",
+          "renames_an_option",
+          "quotes_a_figure_without_its_unit"
+        ],
+        "next_move": "only_when_supported",
+        "notes": [
+          "A next move is offered only when the state supports it; the reply never asks the user to press a chip it was not shown.",
+          "Olumi states saves and versions beneath the reply; the model does not restate them."
+        ]
+      },
+      "served_reply_verdicts": {
+        "CONTROL_REFERENCE": "PASS",
+        "LEADER_HONESTY": "PASS",
+        "ACTION_TRUTH": "PASS",
+        "OPTION_NAME_FIDELITY": "PASS",
+        "UNITS": "PASS",
+        "PROVENANCE_WORDING": "NOT_DECIDABLE",
+        "CAVEAT": "PASS",
+        "INTERNAL_ID": "PASS"
+      }
+    },
+    {
+      "id": "approval-chip",
+      "source": {
+        "capture": "c19-8428207",
+        "build": "8428207",
+        "scenario": "A",
+        "turn": "A2 approve (typed chip)"
+      },
+      "context": {
+        "user_action": "approve_chip",
+        "domain": "hiring",
+        "rerun_kind": null,
+        "next_approval_ran": null
+      },
+      "payload": {
+        "assistant_text": "Saved 4 of 4 starting values. Saved 4 of 4 option levels.",
+        "suggested_actions": [
+          {
+            "label": "Run analysis",
+            "action_type": "run_analysis",
+            "id": "agent-run-analysis"
+          }
+        ],
+        "analysis_state": {
+          "run_state": {
+            "kind": "never_run"
+          },
+          "leader_claim": {
+            "permitted": false,
+            "withheld_reason": "constraint_verdict_withheld"
+          },
+          "robustness": {}
+        },
+        "analysis_ready": {
+          "analysis_admission": {
+            "permitted_analysis_mode": "comparative_leader",
+            "structurally_analysable": true
+          },
+          "options": [
+            {
+              "option_id": "hire_a_tech_lead",
+              "label": "Hire a Tech Lead",
+              "intervention_details": {
+                "tech_lead_capacity": {
+                  "raw_value": 1,
+                  "unit": "full-time Tech Leads",
+                  "display_value": "1 full-time Tech Leads"
+                }
+              }
+            },
+            {
+              "option_id": "hire_two_developers",
+              "label": "Hire Two Developers",
+              "intervention_details": {
+                "developer_capacity": {
+                  "raw_value": 6,
+                  "unit": "full-time developers",
+                  "display_value": "6 full-time developers"
+                }
+              }
+            },
+            {
+              "option_id": "maintain_current_team",
+              "label": "Maintain Current Team",
+              "intervention_details": {
+                "developer_capacity": {
+                  "raw_value": 4,
+                  "unit": "full-time developers",
+                  "display_value": "4 full-time developers"
+                },
+                "tech_lead_capacity": {
+                  "raw_value": 0,
+                  "unit": "full-time Tech Leads",
+                  "display_value": "0 full-time Tech Leads"
+                }
+              }
+            }
+          ]
+        },
+        "blocks": [],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "decision_velocity",
+              "kind": "decision",
+              "label": "Decision: Velocity",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "velocity",
+              "kind": "goal",
+              "label": "Velocity",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "hire_a_tech_lead",
+              "kind": "option",
+              "label": "Hire a Tech Lead",
+              "provenance": "from_brief",
+              "interventions": {
+                "tech_lead_capacity": {
+                  "value": 0.1,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "hire_two_developers",
+              "kind": "option",
+              "label": "Hire Two Developers",
+              "provenance": "from_brief",
+              "interventions": {
+                "developer_capacity": {
+                  "value": 0.3,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "maintain_current_team",
+              "kind": "option",
+              "label": "Maintain Current Team",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "developer_capacity": {
+                  "value": 0.2,
+                  "source": "user_specified"
+                },
+                "tech_lead_capacity": {
+                  "value": 0,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "tech_lead_capacity",
+              "kind": "factor",
+              "label": "Tech lead capacity",
+              "provenance": "user_set",
+              "display_value": "0 full-time Tech Leads",
+              "observed_state": {
+                "unit": "full-time Tech Leads",
+                "value": 0,
+                "raw_value": 0,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "developer_capacity",
+              "kind": "factor",
+              "label": "Developer capacity",
+              "provenance": "user_set",
+              "display_value": "4 full-time developers",
+              "observed_state": {
+                "unit": "full-time developers",
+                "value": 0.2,
+                "raw_value": 4,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "team_coordination_efficiency",
+              "kind": "factor",
+              "label": "Team coordination efficiency",
+              "provenance": "user_set",
+              "display_value": "60%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "work_prioritisation_quality",
+              "kind": "factor",
+              "label": "Work prioritisation quality",
+              "provenance": "user_set",
+              "display_value": "60%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            }
+          ]
+        },
+        "_agent": {
+          "mutated": true,
+          "tool_calls": [
+            {
+              "name": "authorise_change",
+              "ok": true,
+              "mutated": true
+            }
+          ]
+        },
+        "_diagnostic_trace": {
+          "exit_path": "agent_lane_v1",
+          "fast_path": "approve",
+          "write_claims_removed": 0
+        },
+        "_provider_calls": []
+      },
+      "class": "approval_chip",
+      "expect": {
+        "max_words_default": 90,
+        "words_soft": true,
+        "max_questions": 1,
+        "leader_may_be_named": false,
+        "leader_withheld_reason": "constraint_verdict_withheld",
+        "caveat_required": false,
+        "caveat_reasons": [],
+        "chips_shown": [
+          "Run analysis"
+        ],
+        "forbidden_claims": [
+          "names_or_hints_a_leading_option",
+          "claims_the_analysis_ran_this_turn",
+          "asks_to_approve_or_claims_a_pending_proposal",
+          "promises_the_analysis_will_run_on_approval",
+          "names_a_control_not_in_chips_shown",
+          "calls_a_brief_stated_or_measured_figure_an_estimate",
+          "calls_an_olumi_figure_the_users",
+          "renames_an_option",
+          "quotes_a_figure_without_its_unit"
+        ],
+        "next_move": "only_when_supported",
+        "notes": [
+          "A next move is offered only when the state supports it; the reply never asks the user to press a chip it was not shown.",
+          "Olumi states saves and versions beneath the reply; the model does not restate them.",
+          "Every word of this reply is server-authored (no model call); the prompt cannot change it."
+        ]
+      },
+      "served_reply_verdicts": {
+        "CONTROL_REFERENCE": "PASS",
+        "LEADER_HONESTY": "PASS",
+        "ACTION_TRUTH": "PASS",
+        "OPTION_NAME_FIDELITY": "PASS",
+        "UNITS": "PASS",
+        "PROVENANCE_WORDING": "NOT_DECIDABLE",
+        "CAVEAT": "PASS",
+        "INTERNAL_ID": "PASS"
+      }
+    },
+    {
+      "id": "approval-typed",
+      "source": {
+        "capture": "c19w-8428207",
+        "build": "8428207",
+        "scenario": "W",
+        "turn": "W2 approve in words"
+      },
+      "context": {
+        "user_action": "approve_typed",
+        "domain": "pricing",
+        "rerun_kind": null,
+        "next_approval_ran": null
+      },
+      "payload": {
+        "assistant_text": "They remain **adopted assumptions, not measurements**.\n\n### What the current model implies\nOn these assumptions, **£59 with the feature release leads** the comparison:\n- **£59 with release:** leads in **~82%** of simulated scenarios\n- **Keep £49 with release:** ~16%\n- **Phased £54 increase:** ~2%\n\nThis is a reasonably firm ordering *within the model*, driven by the extra revenue per Pro subscriber outweighing the assumed effects elsewhere. It is not yet a recommendation.\n\n### Important limitation\nThe analysis **could not validate your “monthly churn under 4%” constraint**. The model currently calculates churn as an outcome of price and feature value, but the constraint is not expressed in a compatible measurement frame, so it was deliberately left unscored rather than treated as met.\n\nThe model also retains your **12-month horizon in the decision record**, but cannot currently apply that deadline to the £20k MRR target.\n\n### What the ordering is most sensitive to\n1. **Pro subscriber base** — biggest driver; an adopted assumption originally proposed by me.\n2. **Pro conversion rate** — strong driver; also an adopted assumption originally proposed by me.\n3. **Monthly churn rate** — material downside driver; again, an adopted assumption originally proposed by me.\n\nThe central uncertainty is therefore not simply whether £59 earns more per account; it is whether the price-and-release package preserves enough conversion, retention, and subscriber growth to make the 12-month target achievable. The next useful step is to define how churn should be measured in this model so the **<4% monthly** guardrail can actually be tested.\n\nSaved 4 of 4 starting values. Saved 4 of 4 option levels.",
+        "suggested_actions": [],
+        "analysis_state": {
+          "run_state": {
+            "kind": "complete_current"
+          },
+          "leader_claim": {
+            "permitted": false,
+            "withheld_reason": "constraint_verdict_withheld",
+            "separation": "separated"
+          },
+          "robustness": {
+            "aggregate_level": "high"
+          }
+        },
+        "analysis_ready": {
+          "analysis_admission": {
+            "permitted_analysis_mode": "comparative_leader",
+            "structurally_analysable": true
+          },
+          "options": [
+            {
+              "option_id": "59_with_feature_release",
+              "label": "£59 with feature release",
+              "intervention_details": {
+                "pro_plan_price": {
+                  "raw_value": 59,
+                  "unit": "£ per month",
+                  "display_value": "59 £ per month"
+                },
+                "pro_feature_value": {
+                  "raw_value": 70,
+                  "unit": "points out of 100",
+                  "display_value": "70 points out of 100"
+                }
+              }
+            },
+            {
+              "option_id": "maintain_49_with_release",
+              "label": "Maintain £49 with release",
+              "intervention_details": {
+                "pro_plan_price": {
+                  "raw_value": 49,
+                  "unit": "£ per month",
+                  "display_value": "49 £ per month"
+                },
+                "pro_feature_value": {
+                  "raw_value": 70,
+                  "unit": "points out of 100",
+                  "display_value": "70 points out of 100"
+                }
+              }
+            },
+            {
+              "option_id": "phased_pro_price_increase",
+              "label": "Phased Pro price increase",
+              "intervention_details": {
+                "pro_plan_price": {
+                  "raw_value": 54,
+                  "unit": "£ per month",
+                  "display_value": "54 £ per month"
+                },
+                "pro_feature_value": {
+                  "raw_value": 70,
+                  "unit": "points out of 100",
+                  "display_value": "70 points out of 100"
+                }
+              }
+            }
+          ]
+        },
+        "blocks": [
+          {
+            "type": "analysis_result",
+            "summary": "Ran analysis on your current scenario. One limit on your model could not be checked: “Monthly churn rate < 4% per month”. We could not line it up with anything this analysis measures, so it was not part of the comparison. The part of your model it points at is worked out from other parts, so it has no measured starting point of its own, and restating the limit cannot give it one. Tell me which part of your model it applies to and I will record it there; this one stays on the model. Then run the analysis again.",
+            "leading_option_id": null,
+            "win_probabilities": {
+              "Phased Pro price increase": 0.023133333333333554,
+              "£59 with feature release": 0.819533333333325,
+              "Maintain £49 with release": 0.15733333333333227
+            },
+            "enrichment": {
+              "robustness": {
+                "level": "high",
+                "near_tie": {
+                  "is_tie": false
+                }
+              }
+            }
+          }
+        ],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "decision_monthly_recurring_revenue",
+              "kind": "decision",
+              "label": "Decision: Monthly recurring…",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "monthly_recurring_revenue",
+              "kind": "goal",
+              "label": "Monthly recurring revenue",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "59_with_feature_release",
+              "kind": "option",
+              "label": "£59 with feature release",
+              "provenance": "from_brief",
+              "interventions": {
+                "pro_plan_price": {
+                  "value": 0.295,
+                  "source": "brief_extraction"
+                },
+                "pro_feature_value": {
+                  "value": 0.7,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "maintain_49_with_release",
+              "kind": "option",
+              "label": "Maintain £49 with release",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "pro_plan_price": {
+                  "value": 0.245,
+                  "source": "brief_extraction"
+                },
+                "pro_feature_value": {
+                  "value": 0.7,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "phased_pro_price_increase",
+              "kind": "option",
+              "label": "Phased Pro price increase",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "pro_plan_price": {
+                  "value": 0.27,
+                  "source": "user_specified"
+                },
+                "pro_feature_value": {
+                  "value": 0.7,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "pro_plan_price",
+              "kind": "factor",
+              "label": "Pro plan price",
+              "provenance": "from_brief",
+              "observed_state": {
+                "unit": "£ per month",
+                "value": 0.245,
+                "raw_value": 49,
+                "source": "brief_extraction"
+              }
+            },
+            {
+              "id": "pro_feature_value",
+              "kind": "factor",
+              "label": "Pro feature value",
+              "provenance": "user_set",
+              "display_value": "50 points out of 100",
+              "observed_state": {
+                "unit": "points out of 100",
+                "value": 0.5,
+                "raw_value": 50,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "pro_conversion_rate",
+              "kind": "factor",
+              "label": "Pro conversion rate",
+              "provenance": "user_set",
+              "display_value": "5%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.05,
+                "raw_value": 5,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "monthly_churn_rate",
+              "kind": "factor",
+              "label": "Monthly churn rate",
+              "provenance": "user_set",
+              "display_value": "3 % per month",
+              "observed_state": {
+                "unit": "% per month",
+                "value": 0.03,
+                "raw_value": 3,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "pro_subscriber_base",
+              "kind": "factor",
+              "label": "Pro subscriber base",
+              "provenance": "user_set",
+              "display_value": "250 subscribers",
+              "observed_state": {
+                "unit": "subscribers",
+                "value": 0.025,
+                "raw_value": 250,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "monthly_churn_exceeds_4",
+              "kind": "risk",
+              "label": "Monthly churn exceeds 4%",
+              "provenance": "from_brief"
+            }
+          ]
+        },
+        "_agent": {
+          "mutated": true,
+          "tool_calls": [
+            {
+              "name": "get_canonical_state",
+              "ok": true,
+              "mutated": false
+            },
+            {
+              "name": "authorise_change",
+              "ok": true,
+              "mutated": true
+            },
+            {
+              "name": "run_analysis",
+              "ok": true,
+              "mutated": false
+            }
+          ]
+        },
+        "_diagnostic_trace": {
+          "exit_path": "agent_lane_v1",
+          "write_claims_removed": 1
+        },
+        "_provider_calls": [
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          }
+        ]
+      },
+      "class": "approval_typed",
+      "expect": {
+        "max_words_default": 90,
+        "words_soft": true,
+        "max_questions": 1,
+        "leader_may_be_named": false,
+        "leader_withheld_reason": "constraint_verdict_withheld",
+        "caveat_required": true,
+        "caveat_reasons": [
+          "leader withheld: constraint_verdict_withheld"
+        ],
+        "chips_shown": [],
+        "forbidden_claims": [
+          "names_or_hints_a_leading_option",
+          "asks_to_approve_or_claims_a_pending_proposal",
+          "promises_the_analysis_will_run_on_approval",
+          "names_a_control_not_in_chips_shown",
+          "calls_a_brief_stated_or_measured_figure_an_estimate",
+          "calls_an_olumi_figure_the_users",
+          "renames_an_option",
+          "quotes_a_figure_without_its_unit"
+        ],
+        "next_move": "only_when_supported",
+        "notes": [
+          "A next move is offered only when the state supports it; the reply never asks the user to press a chip it was not shown.",
+          "Olumi states saves and versions beneath the reply; the model does not restate them."
+        ]
+      },
+      "served_reply_verdicts": {
+        "CONTROL_REFERENCE": "PASS",
+        "LEADER_HONESTY": "FAIL",
+        "ACTION_TRUTH": "PASS",
+        "OPTION_NAME_FIDELITY": "FAIL",
+        "UNITS": "PASS",
+        "PROVENANCE_WORDING": "NOT_DECIDABLE",
+        "CAVEAT": "PASS",
+        "INTERNAL_ID": "PASS"
+      }
+    },
+    {
+      "id": "edit-no-run",
+      "source": {
+        "capture": "c19-8428207",
+        "build": "8428207",
+        "scenario": "A",
+        "turn": "A3 canvas edit"
+      },
+      "context": {
+        "user_action": "edit",
+        "domain": "hiring",
+        "rerun_kind": null,
+        "next_approval_ran": null
+      },
+      "payload": {
+        "assistant_text": "Updated Tech lead capacity from 0 full-time Tech Leads to 1 full-time Tech Lead. This makes the last analysis stale. Re-run analysis to see how this affects the results.",
+        "suggested_actions": [],
+        "analysis_state": {
+          "run_state": {
+            "kind": "complete_stale",
+            "cause": "graph_changed"
+          },
+          "leader_claim": {
+            "permitted": false,
+            "withheld_reason": "constraint_verdict_withheld"
+          },
+          "robustness": {}
+        },
+        "analysis_ready": {
+          "analysis_admission": {
+            "permitted_analysis_mode": "comparative_leader",
+            "structurally_analysable": true
+          },
+          "options": [
+            {
+              "option_id": "hire_a_tech_lead",
+              "label": "Hire a Tech Lead",
+              "intervention_details": {
+                "tech_lead_capacity": {
+                  "raw_value": 1,
+                  "unit": "full-time Tech Leads",
+                  "display_value": "1 full-time Tech Leads"
+                }
+              }
+            },
+            {
+              "option_id": "hire_two_developers",
+              "label": "Hire Two Developers",
+              "intervention_details": {
+                "developer_capacity": {
+                  "raw_value": 6,
+                  "unit": "full-time developers",
+                  "display_value": "6 full-time developers"
+                }
+              }
+            },
+            {
+              "option_id": "maintain_current_team",
+              "label": "Maintain Current Team",
+              "intervention_details": {
+                "developer_capacity": {
+                  "raw_value": 4,
+                  "unit": "full-time developers",
+                  "display_value": "4 full-time developers"
+                },
+                "tech_lead_capacity": {
+                  "raw_value": 0,
+                  "unit": "full-time Tech Leads",
+                  "display_value": "0 full-time Tech Leads"
+                }
+              }
+            }
+          ]
+        },
+        "blocks": [
+          {
+            "type": "graph_patch"
+          }
+        ],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "decision_velocity",
+              "kind": "decision",
+              "label": "Decision: Velocity",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "velocity",
+              "kind": "goal",
+              "label": "Velocity",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "hire_a_tech_lead",
+              "kind": "option",
+              "label": "Hire a Tech Lead",
+              "provenance": "from_brief",
+              "interventions": {
+                "tech_lead_capacity": {
+                  "value": 0.1,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "hire_two_developers",
+              "kind": "option",
+              "label": "Hire Two Developers",
+              "provenance": "from_brief",
+              "interventions": {
+                "developer_capacity": {
+                  "value": 0.3,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "maintain_current_team",
+              "kind": "option",
+              "label": "Maintain Current Team",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "developer_capacity": {
+                  "value": 0.2,
+                  "source": "user_specified"
+                },
+                "tech_lead_capacity": {
+                  "value": 0,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "tech_lead_capacity",
+              "kind": "factor",
+              "label": "Tech lead capacity",
+              "provenance": "user_set",
+              "display_value": "1 full-time Tech Leads",
+              "observed_state": {
+                "unit": "full-time Tech Leads",
+                "value": 0.1,
+                "raw_value": 1,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "developer_capacity",
+              "kind": "factor",
+              "label": "Developer capacity",
+              "provenance": "user_set",
+              "display_value": "4 full-time developers",
+              "observed_state": {
+                "unit": "full-time developers",
+                "value": 0.2,
+                "raw_value": 4,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "team_coordination_efficiency",
+              "kind": "factor",
+              "label": "Team coordination efficiency",
+              "provenance": "user_set",
+              "display_value": "60%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "work_prioritisation_quality",
+              "kind": "factor",
+              "label": "Work prioritisation quality",
+              "provenance": "user_set",
+              "display_value": "60%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            }
+          ]
+        },
+        "_agent": {
+          "tool_calls": []
+        },
+        "_diagnostic_trace": {
+          "exit_path": "agent_lane_forwarded",
+          "llm_calls": []
+        },
+        "_provider_calls": []
+      },
+      "class": "edit_no_run",
+      "expect": {
+        "max_words_default": 90,
+        "words_soft": true,
+        "max_questions": 1,
+        "leader_may_be_named": false,
+        "leader_withheld_reason": "constraint_verdict_withheld",
+        "caveat_required": false,
+        "caveat_reasons": [],
+        "chips_shown": [],
+        "forbidden_claims": [
+          "names_or_hints_a_leading_option",
+          "claims_the_analysis_ran_this_turn",
+          "asks_to_approve_or_claims_a_pending_proposal",
+          "promises_the_analysis_will_run_on_approval",
+          "names_a_control_not_in_chips_shown",
+          "calls_a_brief_stated_or_measured_figure_an_estimate",
+          "calls_an_olumi_figure_the_users",
+          "renames_an_option",
+          "quotes_a_figure_without_its_unit"
+        ],
+        "next_move": "only_when_supported",
+        "notes": [
+          "A next move is offered only when the state supports it; the reply never asks the user to press a chip it was not shown.",
+          "Olumi states saves and versions beneath the reply; the model does not restate them.",
+          "Every word of this reply is server-authored (no model call); the prompt cannot change it."
+        ]
+      },
+      "served_reply_verdicts": {
+        "CONTROL_REFERENCE": "PASS",
+        "LEADER_HONESTY": "PASS",
+        "ACTION_TRUTH": "PASS",
+        "OPTION_NAME_FIDELITY": "PASS",
+        "UNITS": "PASS",
+        "PROVENANCE_WORDING": "NOT_DECIDABLE",
+        "CAVEAT": "PASS",
+        "INTERNAL_ID": "PASS"
+      }
+    },
+    {
+      "id": "rerun-after-edit",
+      "source": {
+        "capture": "c19-8428207",
+        "build": "8428207",
+        "scenario": "A",
+        "turn": "A5 re-run"
+      },
+      "context": {
+        "user_action": "rerun",
+        "domain": "hiring",
+        "rerun_kind": "after_edit",
+        "next_approval_ran": null
+      },
+      "payload": {
+        "assistant_text": "Your board edit changed the current baseline from **0 to 1 full-time Tech Lead**. The re-run shows it mattered substantially to the comparison.\n\n- **Hire Two Developers** now leads in **65%** of model runs.\n- **Hire a Tech Lead** leads in **33%**.\n- **Maintain Current Team** leads in **2%**.\n\nPreviously, the two hiring options were essentially tied: two developers led in about **50%** of runs versus **45%** for a Tech Lead. So the developer option’s lead widened by roughly **27 percentage points**.\n\nWhy: once the baseline already includes **1 full-time Tech Lead**, hiring another Tech Lead is less distinct from the current state. The developer option remains the one that increases delivery capacity from **4 to 6 full-time developers**.\n\nThere is an important modelling caveat: each option overrides the baseline factor it changes. So this edit has **no direct effect** on the “Hire a Tech Lead” scenario, which itself sets Tech Lead capacity to **1**; it changes the comparison chiefly by making the current-team baseline already led.\n\nThis remains a **fragile** result. The most consequential unresolved assumption is how strongly additional developer capacity translates into velocity; altering that relationship can still flip the ordering.",
+        "suggested_actions": [],
+        "analysis_state": {
+          "run_state": {
+            "kind": "complete_current"
+          },
+          "leader_claim": {
+            "permitted": true,
+            "separation": "separated"
+          },
+          "robustness": {
+            "aggregate_level": "low"
+          }
+        },
+        "analysis_ready": {
+          "analysis_admission": {
+            "permitted_analysis_mode": "comparative_leader",
+            "structurally_analysable": true
+          },
+          "options": [
+            {
+              "option_id": "hire_a_tech_lead",
+              "label": "Hire a Tech Lead",
+              "intervention_details": {
+                "tech_lead_capacity": {
+                  "raw_value": 1,
+                  "unit": "full-time Tech Leads",
+                  "display_value": "1 full-time Tech Leads"
+                }
+              }
+            },
+            {
+              "option_id": "hire_two_developers",
+              "label": "Hire Two Developers",
+              "intervention_details": {
+                "developer_capacity": {
+                  "raw_value": 6,
+                  "unit": "full-time developers",
+                  "display_value": "6 full-time developers"
+                }
+              }
+            },
+            {
+              "option_id": "maintain_current_team",
+              "label": "Maintain Current Team",
+              "intervention_details": {
+                "developer_capacity": {
+                  "raw_value": 4,
+                  "unit": "full-time developers",
+                  "display_value": "4 full-time developers"
+                },
+                "tech_lead_capacity": {
+                  "raw_value": 0,
+                  "unit": "full-time Tech Leads",
+                  "display_value": "0 full-time Tech Leads"
+                }
+              }
+            }
+          ]
+        },
+        "blocks": [
+          {
+            "type": "analysis_result",
+            "summary": "Hire Two Developers scored highest against your goal in 65% of runs of this model, but treat this as provisional: the link between Developer capacity and Velocity is fragile. The result is not yet robust — small changes could flip it.",
+            "leading_option_id": "hire_two_developers",
+            "win_probabilities": {
+              "Hire a Tech Lead": 0.32770000000000066,
+              "Hire Two Developers": 0.6518999999999986,
+              "Maintain Current Team": 0.02040000000000004
+            },
+            "enrichment": {
+              "robustness": {
+                "level": "low",
+                "near_tie": {
+                  "is_tie": false
+                }
+              }
+            }
+          }
+        ],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "decision_velocity",
+              "kind": "decision",
+              "label": "Decision: Velocity",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "velocity",
+              "kind": "goal",
+              "label": "Velocity",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "hire_a_tech_lead",
+              "kind": "option",
+              "label": "Hire a Tech Lead",
+              "provenance": "from_brief",
+              "interventions": {
+                "tech_lead_capacity": {
+                  "value": 0.1,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "hire_two_developers",
+              "kind": "option",
+              "label": "Hire Two Developers",
+              "provenance": "from_brief",
+              "interventions": {
+                "developer_capacity": {
+                  "value": 0.3,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "maintain_current_team",
+              "kind": "option",
+              "label": "Maintain Current Team",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "developer_capacity": {
+                  "value": 0.2,
+                  "source": "user_specified"
+                },
+                "tech_lead_capacity": {
+                  "value": 0,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "tech_lead_capacity",
+              "kind": "factor",
+              "label": "Tech lead capacity",
+              "provenance": "user_set",
+              "display_value": "1 full-time Tech Leads",
+              "observed_state": {
+                "unit": "full-time Tech Leads",
+                "value": 0.1,
+                "raw_value": 1,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "developer_capacity",
+              "kind": "factor",
+              "label": "Developer capacity",
+              "provenance": "user_set",
+              "display_value": "4 full-time developers",
+              "observed_state": {
+                "unit": "full-time developers",
+                "value": 0.2,
+                "raw_value": 4,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "team_coordination_efficiency",
+              "kind": "factor",
+              "label": "Team coordination efficiency",
+              "provenance": "user_set",
+              "display_value": "60%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "work_prioritisation_quality",
+              "kind": "factor",
+              "label": "Work prioritisation quality",
+              "provenance": "user_set",
+              "display_value": "60%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            }
+          ]
+        },
+        "_agent": {
+          "mutated": false,
+          "tool_calls": [
+            {
+              "name": "get_canonical_state",
+              "ok": true,
+              "mutated": false
+            },
+            {
+              "name": "run_analysis",
+              "ok": true,
+              "mutated": false
+            }
+          ]
+        },
+        "_diagnostic_trace": {
+          "exit_path": "agent_lane_v1",
+          "write_claims_removed": 0
+        },
+        "_provider_calls": [
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          }
+        ]
+      },
+      "class": "rerun_after_edit",
+      "expect": {
+        "max_words_default": 90,
+        "words_soft": true,
+        "max_questions": 1,
+        "leader_may_be_named": true,
+        "leader_withheld_reason": null,
+        "caveat_required": true,
+        "caveat_reasons": [
+          "robustness low"
+        ],
+        "chips_shown": [],
+        "forbidden_claims": [
+          "claims_a_save_or_version",
+          "asks_to_approve_or_claims_a_pending_proposal",
+          "promises_the_analysis_will_run_on_approval",
+          "names_a_control_not_in_chips_shown",
+          "calls_a_brief_stated_or_measured_figure_an_estimate",
+          "calls_an_olumi_figure_the_users",
+          "renames_an_option",
+          "quotes_a_figure_without_its_unit"
+        ],
+        "next_move": "only_when_supported",
+        "notes": [
+          "A next move is offered only when the state supports it; the reply never asks the user to press a chip it was not shown.",
+          "Olumi states saves and versions beneath the reply; the model does not restate them."
+        ]
+      },
+      "served_reply_verdicts": {
+        "CONTROL_REFERENCE": "PASS",
+        "LEADER_HONESTY": "PASS",
+        "ACTION_TRUTH": "PASS",
+        "OPTION_NAME_FIDELITY": "PASS",
+        "UNITS": "FAIL",
+        "PROVENANCE_WORDING": "NOT_DECIDABLE",
+        "CAVEAT": "PASS",
+        "INTERNAL_ID": "PASS"
+      }
+    },
+    {
+      "id": "rerun-no-change",
+      "source": {
+        "capture": "c19-8428207",
+        "build": "8428207",
+        "scenario": "A",
+        "turn": "A7 re-run"
+      },
+      "context": {
+        "user_action": "rerun",
+        "domain": "hiring",
+        "rerun_kind": "no_change",
+        "next_approval_ran": null
+      },
+      "payload": {
+        "assistant_text": "Re-run complete: **unchanged**, because the model itself was not changed.\n\nGiven the current assumption of **1 full-time Tech Lead** already in place:\n\n- **Hire Two Developers** leads in **65%** of runs.\n- **Hire a Tech Lead** leads in **33%**.\n- **Maintain Current Team** leads in **2%**.\n\nHowever, the result remains **fragile**. The model identifies the link from **developer capacity to velocity** as the main uncertainty: modest changes to that assumed effect can reverse the ordering.\n\nYour challenge to the Tech Lead assumption is still material: the analysis finds the ordering can flip when effective existing Tech Lead capacity is lower. But a re-run alone cannot test that counterfactual; it would require changing the current **1 full-time Tech Lead** assumption to a specific lower value.",
+        "suggested_actions": [],
+        "analysis_state": {
+          "run_state": {
+            "kind": "complete_current"
+          },
+          "leader_claim": {
+            "permitted": true,
+            "separation": "separated"
+          },
+          "robustness": {
+            "aggregate_level": "low"
+          }
+        },
+        "analysis_ready": {
+          "analysis_admission": {
+            "permitted_analysis_mode": "comparative_leader",
+            "structurally_analysable": true
+          },
+          "options": [
+            {
+              "option_id": "hire_a_tech_lead",
+              "label": "Hire a Tech Lead",
+              "intervention_details": {
+                "tech_lead_capacity": {
+                  "raw_value": 1,
+                  "unit": "full-time Tech Leads",
+                  "display_value": "1 full-time Tech Leads"
+                }
+              }
+            },
+            {
+              "option_id": "hire_two_developers",
+              "label": "Hire Two Developers",
+              "intervention_details": {
+                "developer_capacity": {
+                  "raw_value": 6,
+                  "unit": "full-time developers",
+                  "display_value": "6 full-time developers"
+                }
+              }
+            },
+            {
+              "option_id": "maintain_current_team",
+              "label": "Maintain Current Team",
+              "intervention_details": {
+                "developer_capacity": {
+                  "raw_value": 4,
+                  "unit": "full-time developers",
+                  "display_value": "4 full-time developers"
+                },
+                "tech_lead_capacity": {
+                  "raw_value": 0,
+                  "unit": "full-time Tech Leads",
+                  "display_value": "0 full-time Tech Leads"
+                }
+              }
+            }
+          ]
+        },
+        "blocks": [
+          {
+            "type": "analysis_result",
+            "summary": "Hire Two Developers scored highest against your goal in 65% of runs of this model, but treat this as provisional: the link between Developer capacity and Velocity is fragile. The result is not yet robust — small changes could flip it.",
+            "leading_option_id": "hire_two_developers",
+            "win_probabilities": {
+              "Hire a Tech Lead": 0.32770000000000066,
+              "Hire Two Developers": 0.6518999999999986,
+              "Maintain Current Team": 0.02040000000000004
+            },
+            "enrichment": {
+              "robustness": {
+                "level": "low",
+                "near_tie": {
+                  "is_tie": false
+                }
+              }
+            }
+          }
+        ],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "decision_velocity",
+              "kind": "decision",
+              "label": "Decision: Velocity",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "velocity",
+              "kind": "goal",
+              "label": "Velocity",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "hire_a_tech_lead",
+              "kind": "option",
+              "label": "Hire a Tech Lead",
+              "provenance": "from_brief",
+              "interventions": {
+                "tech_lead_capacity": {
+                  "value": 0.1,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "hire_two_developers",
+              "kind": "option",
+              "label": "Hire Two Developers",
+              "provenance": "from_brief",
+              "interventions": {
+                "developer_capacity": {
+                  "value": 0.3,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "maintain_current_team",
+              "kind": "option",
+              "label": "Maintain Current Team",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "developer_capacity": {
+                  "value": 0.2,
+                  "source": "user_specified"
+                },
+                "tech_lead_capacity": {
+                  "value": 0,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "tech_lead_capacity",
+              "kind": "factor",
+              "label": "Tech lead capacity",
+              "provenance": "user_set",
+              "display_value": "1 full-time Tech Leads",
+              "observed_state": {
+                "unit": "full-time Tech Leads",
+                "value": 0.1,
+                "raw_value": 1,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "developer_capacity",
+              "kind": "factor",
+              "label": "Developer capacity",
+              "provenance": "user_set",
+              "display_value": "4 full-time developers",
+              "observed_state": {
+                "unit": "full-time developers",
+                "value": 0.2,
+                "raw_value": 4,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "team_coordination_efficiency",
+              "kind": "factor",
+              "label": "Team coordination efficiency",
+              "provenance": "user_set",
+              "display_value": "60%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "work_prioritisation_quality",
+              "kind": "factor",
+              "label": "Work prioritisation quality",
+              "provenance": "user_set",
+              "display_value": "60%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            }
+          ]
+        },
+        "_agent": {
+          "mutated": false,
+          "tool_calls": [
+            {
+              "name": "run_analysis",
+              "ok": true,
+              "mutated": false
+            }
+          ]
+        },
+        "_diagnostic_trace": {
+          "exit_path": "agent_lane_v1",
+          "write_claims_removed": 0
+        },
+        "_provider_calls": [
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          }
+        ]
+      },
+      "class": "rerun_no_change",
+      "expect": {
+        "max_words_default": 90,
+        "words_soft": true,
+        "max_questions": 1,
+        "leader_may_be_named": true,
+        "leader_withheld_reason": null,
+        "caveat_required": true,
+        "caveat_reasons": [
+          "robustness low"
+        ],
+        "chips_shown": [],
+        "forbidden_claims": [
+          "claims_a_save_or_version",
+          "asks_to_approve_or_claims_a_pending_proposal",
+          "promises_the_analysis_will_run_on_approval",
+          "names_a_control_not_in_chips_shown",
+          "calls_a_brief_stated_or_measured_figure_an_estimate",
+          "calls_an_olumi_figure_the_users",
+          "renames_an_option",
+          "quotes_a_figure_without_its_unit"
+        ],
+        "next_move": "only_when_supported",
+        "notes": [
+          "A next move is offered only when the state supports it; the reply never asks the user to press a chip it was not shown.",
+          "Olumi states saves and versions beneath the reply; the model does not restate them."
+        ]
+      },
+      "served_reply_verdicts": {
+        "CONTROL_REFERENCE": "PASS",
+        "LEADER_HONESTY": "PASS",
+        "ACTION_TRUTH": "PASS",
+        "OPTION_NAME_FIDELITY": "PASS",
+        "UNITS": "PASS",
+        "PROVENANCE_WORDING": "NOT_DECIDABLE",
+        "CAVEAT": "PASS",
+        "INTERNAL_ID": "PASS"
+      }
+    },
+    {
+      "id": "challenge",
+      "source": {
+        "capture": "c19-8428207",
+        "build": "8428207",
+        "scenario": "A",
+        "turn": "A6 challenge"
+      },
+      "context": {
+        "user_action": "challenge",
+        "domain": "hiring",
+        "rerun_kind": null,
+        "next_approval_ran": null
+      },
+      "payload": {
+        "assistant_text": "The current assumption is **1 full-time Tech Lead** in the existing team. That was set directly by you on the canvas; it is an assumption about effective dedicated leadership capacity, not necessarily a job title.\n\nA strong challenge is: **is this really one full-time equivalent of Tech Lead work?** If the person is also coding, firefighting, managing, or lacks decision authority, their effective capacity could be far lower—perhaps **0.25–0.5 full-time equivalent**.\n\nWhat the current analysis implies if it is much lower:\n\n- The current conclusion in favour of **two developers** depends partly on the team already having meaningful leadership capacity.\n- The prior sensitivity test found that lower Tech Lead capacity can flip the ordering back towards **hiring a Tech Lead**. In the latest analysis, cases below roughly the present level tended to favour the Tech Lead option; cases above it strongly favoured two developers.\n- This is not surprising structurally: the Tech Lead affects velocity indirectly through **coordination efficiency** and **work prioritisation quality**, while two developers directly increase development capacity.\n\nQuestions that would pressure-test the “1 full-time” assumption:\n1. How many hours per week are spent on architecture, technical decisions, unblocking, code-quality standards, and delivery coordination—rather than feature work or people management?\n2. Can that person actually make technical sequencing and trade-off decisions, or must decisions be escalated?\n3. Are developers waiting on decisions, revisiting work, or working at cross-purposes?\n4. If that person were absent for two weeks, would delivery slow primarily through blocked decisions and rework?\n\nNo model values have been changed.",
+        "suggested_actions": [],
+        "analysis_state": {
+          "run_state": {
+            "kind": "complete_current"
+          },
+          "leader_claim": {
+            "permitted": true,
+            "separation": "separated"
+          },
+          "robustness": {
+            "aggregate_level": "low"
+          }
+        },
+        "analysis_ready": {
+          "analysis_admission": {
+            "permitted_analysis_mode": "comparative_leader",
+            "structurally_analysable": true
+          },
+          "options": [
+            {
+              "option_id": "hire_a_tech_lead",
+              "label": "Hire a Tech Lead",
+              "intervention_details": {
+                "tech_lead_capacity": {
+                  "raw_value": 1,
+                  "unit": "full-time Tech Leads",
+                  "display_value": "1 full-time Tech Leads"
+                }
+              }
+            },
+            {
+              "option_id": "hire_two_developers",
+              "label": "Hire Two Developers",
+              "intervention_details": {
+                "developer_capacity": {
+                  "raw_value": 6,
+                  "unit": "full-time developers",
+                  "display_value": "6 full-time developers"
+                }
+              }
+            },
+            {
+              "option_id": "maintain_current_team",
+              "label": "Maintain Current Team",
+              "intervention_details": {
+                "developer_capacity": {
+                  "raw_value": 4,
+                  "unit": "full-time developers",
+                  "display_value": "4 full-time developers"
+                },
+                "tech_lead_capacity": {
+                  "raw_value": 0,
+                  "unit": "full-time Tech Leads",
+                  "display_value": "0 full-time Tech Leads"
+                }
+              }
+            }
+          ]
+        },
+        "blocks": [
+          {
+            "type": "analysis_result",
+            "summary": "Hire Two Developers scored highest against your goal in 65% of runs of this model, but treat this as provisional: the link between Developer capacity and Velocity is fragile. The result is not yet robust — small changes could flip it.",
+            "leading_option_id": "hire_two_developers",
+            "win_probabilities": {
+              "Hire a Tech Lead": 0.32770000000000066,
+              "Hire Two Developers": 0.6518999999999986,
+              "Maintain Current Team": 0.02040000000000004
+            },
+            "enrichment": {
+              "robustness": {
+                "level": "low",
+                "near_tie": {
+                  "is_tie": false
+                }
+              }
+            }
+          }
+        ],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "decision_velocity",
+              "kind": "decision",
+              "label": "Decision: Velocity",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "velocity",
+              "kind": "goal",
+              "label": "Velocity",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "hire_a_tech_lead",
+              "kind": "option",
+              "label": "Hire a Tech Lead",
+              "provenance": "from_brief",
+              "interventions": {
+                "tech_lead_capacity": {
+                  "value": 0.1,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "hire_two_developers",
+              "kind": "option",
+              "label": "Hire Two Developers",
+              "provenance": "from_brief",
+              "interventions": {
+                "developer_capacity": {
+                  "value": 0.3,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "maintain_current_team",
+              "kind": "option",
+              "label": "Maintain Current Team",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "developer_capacity": {
+                  "value": 0.2,
+                  "source": "user_specified"
+                },
+                "tech_lead_capacity": {
+                  "value": 0,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "tech_lead_capacity",
+              "kind": "factor",
+              "label": "Tech lead capacity",
+              "provenance": "user_set",
+              "display_value": "1 full-time Tech Leads",
+              "observed_state": {
+                "unit": "full-time Tech Leads",
+                "value": 0.1,
+                "raw_value": 1,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "developer_capacity",
+              "kind": "factor",
+              "label": "Developer capacity",
+              "provenance": "user_set",
+              "display_value": "4 full-time developers",
+              "observed_state": {
+                "unit": "full-time developers",
+                "value": 0.2,
+                "raw_value": 4,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "team_coordination_efficiency",
+              "kind": "factor",
+              "label": "Team coordination efficiency",
+              "provenance": "user_set",
+              "display_value": "60%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "work_prioritisation_quality",
+              "kind": "factor",
+              "label": "Work prioritisation quality",
+              "provenance": "user_set",
+              "display_value": "60%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.6,
+                "raw_value": 60,
+                "source": "user_override"
+              }
+            }
+          ]
+        },
+        "_agent": {
+          "mutated": false,
+          "tool_calls": [
+            {
+              "name": "get_canonical_state",
+              "ok": true,
+              "mutated": false
+            }
+          ]
+        },
+        "_diagnostic_trace": {
+          "exit_path": "agent_lane_v1",
+          "write_claims_removed": 0
+        },
+        "_provider_calls": [
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          }
+        ]
+      },
+      "class": "challenge",
+      "expect": {
+        "max_words_default": 90,
+        "words_soft": true,
+        "max_questions": 1,
+        "leader_may_be_named": true,
+        "leader_withheld_reason": null,
+        "caveat_required": true,
+        "caveat_reasons": [
+          "robustness low"
+        ],
+        "chips_shown": [],
+        "forbidden_claims": [
+          "claims_a_save_or_version",
+          "claims_the_analysis_ran_this_turn",
+          "asks_to_approve_or_claims_a_pending_proposal",
+          "promises_the_analysis_will_run_on_approval",
+          "names_a_control_not_in_chips_shown",
+          "calls_a_brief_stated_or_measured_figure_an_estimate",
+          "calls_an_olumi_figure_the_users",
+          "renames_an_option",
+          "quotes_a_figure_without_its_unit"
+        ],
+        "next_move": "only_when_supported",
+        "notes": [
+          "A next move is offered only when the state supports it; the reply never asks the user to press a chip it was not shown.",
+          "Olumi states saves and versions beneath the reply; the model does not restate them."
+        ]
+      },
+      "served_reply_verdicts": {
+        "CONTROL_REFERENCE": "PASS",
+        "LEADER_HONESTY": "PASS",
+        "ACTION_TRUTH": "PASS",
+        "OPTION_NAME_FIDELITY": "PASS",
+        "UNITS": "PASS",
+        "PROVENANCE_WORDING": "NOT_DECIDABLE",
+        "CAVEAT": "PASS",
+        "INTERNAL_ID": "PASS"
+      }
+    },
+    {
+      "id": "uncertainty-followup",
+      "source": {
+        "capture": "c19-8428207",
+        "build": "8428207",
+        "scenario": "B",
+        "turn": "B3 uncertainty"
+      },
+      "context": {
+        "user_action": "uncertainty",
+        "domain": "pricing",
+        "rerun_kind": null,
+        "next_approval_ran": null
+      },
+      "payload": {
+        "assistant_text": "**Certainty is low.** The pilot at **£59/month for 10% of relevant Pro customers** leads under the current model, but the model marks the result as **fragile**: relatively small changes in key assumptions can change the ordering.\n\nMost importantly, the 4% churn ceiling was **not actually tested** in the prior run. The model could not translate the absolute requirement (“under 4% per month”) into its churn outcome frame. So there is no basis yet for saying the pilot—or a full increase—meets that constraint.\n\n### What could change the picture\n\n1. **Current Pro subscriber base**  \n   The model uses **200 subscribers**, which was a machine-proposed starting assumption you adopted, not reported data. The analysis found this can flip the comparison towards a full £59 rollout.  \n   - A larger, more stable base makes the immediate revenue uplift from a broad price rise more consequential.\n   - A smaller base makes preserving conversion and learning from a pilot relatively more valuable.\n\n2. **Churn response to the increase**  \n   The model starts from **3% monthly churn**, also an adopted assumption. The crucial unknown is not just baseline churn, but how much £59—especially across all customers—changes it. The full rollout becomes less attractive if it pushes churn close to or over your 4% limit.\n\n3. **Conversion response to £59 and the new feature**  \n   The current **5% new-Pro conversion rate** is an assumption. If the release clearly increases perceived value, conversion may hold up at £59, strengthening the full-rise case. If prospects react more to the price than the feature, keeping £49 or piloting becomes stronger.\n\n4. **Pilot scope**  \n   The pilot is set at **10%** as an assumption. The ordering is particularly sensitive to rollout scope: the model indicates that a pilot scope below roughly **15%** favours keeping £49 rather than the pilot, on these assumptions. That is a directional stress test, not a measured threshold.\n\n5. **Existing versus new customers**  \n   The model currently treats the increase as a price intervention but does not distinguish grandfathering existing customers from charging £59 only to new customers. That policy choice could materially reduce churn risk while still improving new-customer MRR.\n\nIn practical terms: the current result supports **learning before a full rollout**, not confidence that £59 is safe. The fastest evidence to reduce uncertainty is a controlled release test tracking Pro conversion, cancellation/retention, and expansion separately for exposed versus unexposed customers.",
+        "suggested_actions": [],
+        "analysis_state": {
+          "run_state": {
+            "kind": "complete_current"
+          },
+          "leader_claim": {
+            "permitted": false,
+            "withheld_reason": "constraint_verdict_withheld",
+            "separation": "separated"
+          },
+          "robustness": {
+            "aggregate_level": "low"
+          }
+        },
+        "analysis_ready": {
+          "analysis_admission": {
+            "permitted_analysis_mode": "comparative_leader",
+            "structurally_analysable": true
+          },
+          "options": [
+            {
+              "option_id": "raise_price_at_release",
+              "label": "Raise Price at Release",
+              "intervention_details": {
+                "pro_plan_price": {
+                  "raw_value": 59,
+                  "unit": "GBP per month",
+                  "display_value": "59 GBP per month"
+                }
+              }
+            },
+            {
+              "option_id": "keep_current_pro_price",
+              "label": "Keep Current Pro Price",
+              "intervention_details": {
+                "pro_plan_price": {
+                  "raw_value": 49,
+                  "unit": "GBP per month",
+                  "display_value": "49 GBP per month"
+                }
+              }
+            },
+            {
+              "option_id": "pilot_59_at_release",
+              "label": "Pilot £59 at Release",
+              "intervention_details": {
+                "pro_plan_price": {
+                  "raw_value": 59,
+                  "unit": "GBP per month",
+                  "display_value": "59 GBP per month"
+                },
+                "price_rollout_scope": {
+                  "raw_value": 10,
+                  "unit": "% of Pro customers",
+                  "display_value": "10 % of Pro customers"
+                }
+              }
+            }
+          ]
+        },
+        "blocks": [
+          {
+            "type": "analysis_result",
+            "summary": "Ran analysis on your current scenario. One limit on your model could not be checked: “Monthly churn < 4percent per month”. We could not line it up with anything this analysis measures, so it was not part of the comparison. The part of your model it points at is worked out from other parts, so it has no measured starting point of its own, and restating the limit cannot give it one. Tell me which part of your model it applies to and I will record it there; this one stays on the model. Then run the analysis again.",
+            "leading_option_id": null,
+            "win_probabilities": {
+              "Pilot £59 at Release": 0.5422666666666659,
+              "Keep Current Pro Price": 0.1778666666666662,
+              "Raise Price at Release": 0.2798666666666671
+            },
+            "enrichment": {
+              "robustness": {
+                "level": "low",
+                "near_tie": {
+                  "is_tie": false
+                }
+              }
+            }
+          }
+        ],
+        "draft_graph": {
+          "nodes": [
+            {
+              "id": "decision_mrr",
+              "kind": "decision",
+              "label": "Decision: MRR",
+              "provenance": "ai_inferred"
+            },
+            {
+              "id": "mrr",
+              "kind": "goal",
+              "label": "MRR",
+              "provenance": "from_brief"
+            },
+            {
+              "id": "raise_price_at_release",
+              "kind": "option",
+              "label": "Raise Price at Release",
+              "provenance": "from_brief",
+              "interventions": {
+                "pro_plan_price": {
+                  "value": 0.295,
+                  "source": "brief_extraction"
+                }
+              }
+            },
+            {
+              "id": "keep_current_pro_price",
+              "kind": "option",
+              "label": "Keep Current Pro Price",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "pro_plan_price": {
+                  "value": 0.245,
+                  "source": "brief_extraction"
+                }
+              }
+            },
+            {
+              "id": "pilot_59_at_release",
+              "kind": "option",
+              "label": "Pilot £59 at Release",
+              "provenance": "ai_inferred",
+              "interventions": {
+                "pro_plan_price": {
+                  "value": 0.295,
+                  "source": "brief_extraction"
+                },
+                "price_rollout_scope": {
+                  "value": 0.1,
+                  "source": "user_specified"
+                }
+              }
+            },
+            {
+              "id": "pro_plan_price",
+              "kind": "factor",
+              "label": "Pro plan price",
+              "provenance": "from_brief",
+              "observed_state": {
+                "unit": "GBP per month",
+                "value": 0.245,
+                "raw_value": 49,
+                "source": "brief_extraction"
+              }
+            },
+            {
+              "id": "price_rollout_scope",
+              "kind": "factor",
+              "label": "Price rollout scope",
+              "provenance": "user_set",
+              "display_value": "100 % of Pro customers",
+              "observed_state": {
+                "unit": "% of Pro customers",
+                "value": 1,
+                "raw_value": 100,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "revenue_per_pro_subscriber",
+              "kind": "factor",
+              "label": "Revenue per Pro subscriber",
+              "provenance": "user_set",
+              "display_value": "49 GBP per month",
+              "observed_state": {
+                "unit": "GBP per month",
+                "value": 0.245,
+                "raw_value": 49,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "new_pro_conversion_rate",
+              "kind": "factor",
+              "label": "New Pro conversion rate",
+              "provenance": "user_set",
+              "display_value": "5%",
+              "observed_state": {
+                "unit": "%",
+                "value": 0.05,
+                "raw_value": 5,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "pro_subscriber_base",
+              "kind": "factor",
+              "label": "Pro subscriber base",
+              "provenance": "user_set",
+              "display_value": "200 subscribers",
+              "observed_state": {
+                "unit": "subscribers",
+                "value": 0.1,
+                "raw_value": 200,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "monthly_churn",
+              "kind": "factor",
+              "label": "Monthly churn",
+              "provenance": "user_set",
+              "display_value": "3 % per month",
+              "observed_state": {
+                "unit": "% per month",
+                "value": 0.03,
+                "raw_value": 3,
+                "source": "user_override"
+              }
+            },
+            {
+              "id": "churn_limit_breach",
+              "kind": "risk",
+              "label": "Churn-limit breach",
+              "provenance": "ai_inferred"
+            }
+          ]
+        },
+        "_agent": {
+          "mutated": false,
+          "tool_calls": [
+            {
+              "name": "get_canonical_state",
+              "ok": true,
+              "mutated": false
+            }
+          ]
+        },
+        "_diagnostic_trace": {
+          "exit_path": "agent_lane_v1",
+          "write_claims_removed": 0
+        },
+        "_provider_calls": [
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-5.6-terra",
+            "purpose": "conversation"
+          }
+        ]
+      },
+      "class": "uncertainty_followup",
+      "expect": {
+        "max_words_default": 90,
+        "words_soft": true,
+        "max_questions": 1,
+        "leader_may_be_named": false,
+        "leader_withheld_reason": "constraint_verdict_withheld",
+        "caveat_required": true,
+        "caveat_reasons": [
+          "robustness low",
+          "leader withheld: constraint_verdict_withheld"
+        ],
+        "chips_shown": [],
+        "forbidden_claims": [
+          "names_or_hints_a_leading_option",
+          "claims_a_save_or_version",
+          "claims_the_analysis_ran_this_turn",
+          "asks_to_approve_or_claims_a_pending_proposal",
+          "promises_the_analysis_will_run_on_approval",
+          "names_a_control_not_in_chips_shown",
+          "calls_a_brief_stated_or_measured_figure_an_estimate",
+          "calls_an_olumi_figure_the_users",
+          "renames_an_option",
+          "quotes_a_figure_without_its_unit"
+        ],
+        "next_move": "only_when_supported",
+        "notes": [
+          "A next move is offered only when the state supports it; the reply never asks the user to press a chip it was not shown.",
+          "Olumi states saves and versions beneath the reply; the model does not restate them."
+        ]
+      },
+      "served_reply_verdicts": {
+        "CONTROL_REFERENCE": "PASS",
+        "LEADER_HONESTY": "FAIL",
+        "ACTION_TRUTH": "PASS",
+        "OPTION_NAME_FIDELITY": "PASS",
+        "UNITS": "PASS",
+        "PROVENANCE_WORDING": "NOT_DECIDABLE",
+        "CAVEAT": "PASS",
+        "INTERNAL_ID": "PASS"
+      }
+    }
+  ]
+}

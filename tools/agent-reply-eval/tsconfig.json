@@ -1,0 +1,23 @@
+{
+  "//": [
+    "Typecheck config for the agent-reply eval tool.",
+    "",
+    "Neither repo typecheck gate covers tools/: tsconfig.build.json includes only",
+    "src/**, and the root tsconfig.json (the ratchet) includes src, tests, scripts",
+    "and *.config.ts. Vitest strips types without checking them. So this tool is",
+    "typechecked here, the same way tools/conversation-harness is:",
+    "",
+    "  pnpm exec tsc -p tools/agent-reply-eval/tsconfig.json --noEmit",
+    "",
+    "It reaches into src/ only through the production modules it imports",
+    "(write-outcome, approval-chips, disclosure), which are checked transitively",
+    "against their real types, and into the harness scorer (dims, prompt-dims)."
+  ],
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "types": ["node"]
+  },
+  "include": ["**/*.ts", "../../src/**/*.d.ts"]
+}
