@@ -26,6 +26,10 @@ describe('an option naming a factor the model does not have', () => {
     expect(detail).toMatch(/Nothing was prepared/);
     expect(detail).toMatch(/call propose_new_option again without the missing one/);
     expect(detail).toMatch(/which part of the option the model does not yet represent/);
+    // #1953 review B1: "add it against what it has" must not turn an option into a copy of the status quo.
+    expect(detail).toMatch(/what the model already has today/);
+    expect(detail).toMatch(/could not be told apart\s+from carrying on as now/);
+    expect(detail).toMatch(/offer to add that factor first/);
   });
 
   it('RED: NOTHING it names exists → never "retry without the missing one" (that is a link to nothing, or to the wrong factor): offer the factor instead', () => {
@@ -60,5 +64,15 @@ describe('the retry the refusal asks for is one the tool allows', () => {
   it('RED: the Agent\'s instructions say the same for an option with nothing the model represents', () => {
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
     expect(route).toContain('if NONE of what it does has a factor in the model, do not add it and never link it to an unrelated factor');
+  });
+
+  it('RED (#1953 review B1): the instructions never add an option that would only repeat today\'s values — it would vanish into carrying on as now', () => {
+    const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
+    expect(route).toContain('unless what it would set there is what the model already has today (for example keeping a price at its current level): then it could not be told apart from carrying on as now, so do not add it');
+  });
+
+  it('(#1953 review N1) "add them now" still asks when which way an option pushes a factor is unclear', () => {
+    const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
+    expect(route).toContain('do not first ask what they do, unless which way it pushes a factor is unclear');
   });
 });
