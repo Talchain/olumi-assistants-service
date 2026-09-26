@@ -685,7 +685,7 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
     const o = lossy.options.find((x) => x.label === '£59 with AI release')!;
     (o as { interventions?: unknown[] }).interventions = (o.interventions ?? []).filter((i) => i.factor_label !== 'AI feature availability');
     (o as { changes?: string[] }).changes = [];
-    (lossy as { links: { from: string; to: string }[] }).links = lossy.links.filter((l) => !(l.from === '£59 with AI release' && l.to === 'AI feature availability'));
+    (lossy as unknown as { links: { from: string; to: string }[] }).links = lossy.links.filter((l) => !(l.from === '£59 with AI release' && l.to === 'AI feature availability'));
     const { out, graph, reqs } = await construct(first(), lossy);
     expect(reqs).toHaveLength(2);
     expect([out.ok, out.refusal, out.retried]).toEqual([false, 'model_too_large', true]);
