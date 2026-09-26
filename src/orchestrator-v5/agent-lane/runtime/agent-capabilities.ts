@@ -2231,10 +2231,19 @@ export function createAgentCapabilities(
         const receipt = receiptSummaryOf(res.json);
         const receipts = receipt.summary !== null ? [receipt.summary] : [];
         proposals.markApplied(decision.proposal.proposal_id, receipts);
+        /**
+         * ⛔ `follow_up` IS WHAT THE USER READS; `note` IS WHAT THE AGENT READS (served f2, CEE `af719a1`, scenario
+         * `bdba963b`): one click on "Record this link" showed this `follow_up` verbatim — "Recorded as the user's own
+         * estimate: … Offer to run the analysis again so they can see what it changes." The typed-approval fast path
+         * shows `follow_up` to the user and no model reads the result there; on the loop path the Agent reads both.
+         * So the sentence the user reads is addressed to them (the label already says "as your own estimate"), and
+         * the next step for the Agent stays in `note`, where only the Agent reads it.
+         */
         return {
           ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, operation_id: operationId, receipts,
           ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
-          follow_up: `Recorded as the user's own estimate: ${decision.proposal.public_label.replace(/^Record /, '')}. Offer to run the analysis again so they can see what it changes.`,
+          follow_up: `${decision.proposal.public_label.replace(/^Record /, 'Recorded ')}.`,
+          note: 'Recorded as the user’s own estimate. Offer to run the analysis again so they can see what it changes.',
         };
       }
 
