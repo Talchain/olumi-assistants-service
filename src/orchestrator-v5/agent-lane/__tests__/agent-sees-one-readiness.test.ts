@@ -11,10 +11,11 @@
  * `decision_mrr`, which the served readiness builder reports as blocked.
  */
 import { describe, it, expect } from 'vitest';
-import paulGraph from './fixtures/paul-cbd15f83-stored-graph.json' with { type: 'json' };
+import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 
+const paulGraph = JSON.parse(readFileSync(new URL('./fixtures/paul-cbd15f83-stored-graph.json', import.meta.url), 'utf8')) as unknown;
 const SCENARIO = '550e8400-e29b-41d4-a716-4466554400b1';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r' };
 const CODE_LIKE = /\b[A-Z]+(?:_[A-Z]+){2,}\b/;
