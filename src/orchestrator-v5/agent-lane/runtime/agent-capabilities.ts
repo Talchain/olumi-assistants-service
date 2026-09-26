@@ -1187,6 +1187,8 @@ export function createAgentCapabilities(
     // revision our OWN previous write produced — the product's `structural_add_edge`; option → factor takes the
     // topology strength. A link that does not land stops the chain: no level is written on a factor it could not reach.
     let levelsRecorded = 0;
+    // Links count as writes: a link that lands before a refused level has CHANGED the model (B1, #2004 review).
+    let linksAdded = 0;
     let levelStop: string | null = null;
     const linkOps = parent.operations.filter(isLevelLink);
     for (let i = 0; i < linkOps.length; i += 1) {
@@ -1206,6 +1208,7 @@ export function createAgentCapabilities(
       const rc = receiptSummaryOf(r.json);
       if (rc.summary !== null) receipts.push(rc.summary);
       carried = next;
+      linksAdded += 1;
     }
 
     // (3) Levels, each CAS-gated on the revision our OWN previous write produced.
@@ -1250,11 +1253,12 @@ export function createAgentCapabilities(
     if (all) proposals.markApplied(parent.proposal_id, receipts);
     const parts = [
       ...(valueOps.length > 0 ? [{ part: 'values', ok: valuesLanded, recorded_count: valuesLanded ? valueOps.length : 0, requested_count: valueOps.length }] : []),
+      ...(linkOps.length > 0 ? [{ part: 'links', ok: linksAdded === linkOps.length, recorded_count: linksAdded, requested_count: linkOps.length }] : []),
       ...(levelOps.length > 0 ? [{ part: 'option_levels', ok: levelStop === null, recorded_count: levelsRecorded, requested_count: levelOps.length }] : []),
     ];
     return {
       ok: all,
-      mutated: valuesLanded || levelsRecorded > 0,
+      mutated: valuesLanded || linksAdded > 0 || levelsRecorded > 0,
       applied: all,
       proposal_id: parent.proposal_id,
       parts,
@@ -1272,8 +1276,9 @@ export function createAgentCapabilities(
               'say so when you describe what changed.',
           }
         : {
-            refusal: valuesLanded || levelsRecorded > 0 ? 'partially_applied' : 'not_applied',
-            detail: `${levelStop ?? 'Not every change was recorded'}. Tell the user exactly which part was recorded and which was not.`,
+            refusal: valuesLanded || linksAdded > 0 || levelsRecorded > 0 ? 'partially_applied' : 'not_applied',
+            detail: `${linksAdded > 0 && levelsRecorded < levelOps.length ? `The model now has ${linksAdded === 1 ? 'the new link' : `${linksAdded} new links`} this change added; ` : ''}`
+              + `${levelStop ?? 'Not every change was recorded'}. Tell the user exactly which part was recorded and which was not.`,
           }),
     };
   };

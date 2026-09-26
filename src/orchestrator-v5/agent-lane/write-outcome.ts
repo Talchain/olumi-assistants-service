@@ -73,7 +73,7 @@ const REFUSAL_WORDS: Record<string, string> = {
   registration_refused: 'it could not be saved to this decision — ask me to try again',
 };
 
-const PART_NAMES: Record<string, string> = { values: 'starting values', option_levels: 'option levels' };
+const PART_NAMES: Record<string, string> = { values: 'starting values', option_levels: 'option levels', links: 'new links' };
 
 /**
  * A compound approval (#1712) reports each part: what was recorded, out of how
