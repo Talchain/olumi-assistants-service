@@ -31,7 +31,8 @@ import { slugId, type CandidateModel } from '../admit-model.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 const SCENARIO = '5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b';
-const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-declared', request_id: 'r' };
+/** What the user wrote in these rows: a figure is recorded as theirs only when it is here (`stated-by-user.ts`). */
+const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-declared', request_id: 'r', user_text: 'Carrying on, the price stays at £49, or we run a £45 promo.' };
 
 type Edge = { from: string; to: string; origin?: string; provenance?: Record<string, unknown>; strength?: unknown; exists_probability?: number; effect_direction?: string };
 type Node = {

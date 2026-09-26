@@ -46,6 +46,16 @@ const UNIT_MISMATCH_NOTE =
   'Left out because the figure is in a different kind of unit from the factor (for example a price given for a rate). '
   + 'Never record a figure the user gave for something else as this factor\u2019s value; ask for its own figure if needed.';
 
+/** What the Agent says about a level it marked as the user's that the user never wrote (`stated-by-user.ts`). */
+const NOT_THE_USERS_FIGURE_NOTE =
+  'The user did not write these figures, so they are proposed as Olumi\u2019s estimates, not as the user\u2019s own. '
+  + 'Say so plainly; never call a figure the user\u2019s unless they wrote it.';
+
+/** Why a level the user never wrote is left unset (`stated-by-user.ts`). */
+const notWrittenReason = (value: number, factor: string): string =>
+  `${value} is not a figure the user gave for ${factor}, so this change leaves that level unset. Say plainly it has no level yet, `
+  + `and ask for ${factor}\u2019s figure only if the user wants to set it. Never send 0 or any placeholder to mean "not set": leave level out.`;
+
 /** What the Agent is told to say about a named input that cannot hold a value. */
 const NOT_A_FACTOR_NOTE =
   'These were named but are not factors (for example a risk), so no starting value can be set on them and they are ' +
@@ -96,17 +106,18 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
   }
 }
 
-import { planNewOption } from '../propose-new-option.js';
+import { planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
-import { readinessViewOf } from '../readiness-view.js';
+import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
 import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { bandFromMagnitude, INFLUENCE_BAND_THRESHOLDS, type InfluenceBand } from '../../format/influence-bands.js';
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
+import { contradictsItsName, figureTheUserWrote } from '../stated-by-user.js';
 import { defaultFrameFor, nonlinearIdentityForAgent } from '../admit-model.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
@@ -890,7 +901,10 @@ export function createAgentCapabilities(
     let stillHeld = true;
     try { stillHeld = (await liveHeldHold(ctx.scenario_id, ref)) !== undefined; } catch { stillHeld = true; }
     const heldOps = heldOpsOf(hold);
-    const optionIds = heldOps.filter((o) => o.op === 'add_node').map((o) => o.path);
+    // ⛔ A held batch may also ADD a factor (`new_factors`): only an option node is an option.
+    const isFactorAdd = (o: { op: string; value?: unknown }): boolean => o.op === 'add_node' && (o.value as { kind?: unknown } | undefined)?.kind === 'factor';
+    const optionIds = heldOps.filter((o) => o.op === 'add_node' && !isFactorAdd(o)).map((o) => o.path);
+    const addedFactorIds = heldOps.filter(isFactorAdd).map((o) => o.path);
     // The decision link of each option, from the held batch itself (`decision::option`).
     const decisionLinks = heldOps.filter((o) => o.op === 'add_edge' && optionIds.some((id) => o.path.endsWith(`::${id}`)))
       .map((o) => o.path.split('::') as [string, string]);
@@ -920,9 +934,19 @@ export function createAgentCapabilities(
         .filter((to) => after!.nodes.some((x) => x.id === to && x.kind === 'factor'));
       const labelOf = (fid: string): string => String(after!.nodes.find((x) => x.id === fid)?.label ?? fid);
       const unlevelled = factorIds.filter((fid) => !hasLevel(node, fid)).map(labelOf);
+      // Whose each level is, from what was COMMITTED: Olumi's estimates are said as that (C2), never as the user's.
+      const estimated = factorIds.filter((fid) => ((node?.interventions ?? {}) as Record<string, { source?: unknown } | undefined>)[fid]?.source === 'cee_hypothesis').map(labelOf);
       return `Added "${String(node?.label ?? id)}", linked from the decision and acting on ${factorIds.map(labelOf).join(', ')}.`
+        + (estimated.length > 0 ? ` Its level for ${estimated.join(', ')} is Olumi's estimate, for you to correct.` : '')
         + (unlevelled.length > 0 ? ` It does not yet set a level for ${unlevelled.join(', ')}; tell me the figure for each and I'll set it.` : '');
     });
+    for (const fid of addedFactorIds) {
+      const f = after!.nodes.find((x) => x.id === fid);
+      if (f === undefined) continue;
+      const changes = after!.edges.filter((e) => e.from === fid).map((e) => String(after!.nodes.find((x) => x.id === e.to)?.label ?? e.to));
+      sentences.push(`Also added the factor "${String(f.label ?? fid)}", which changes ${changes.join(', ')}; how strongly is Olumi's estimate. `
+        + 'Its current value is not set yet; tell me what it is today and I\'ll record it.');
+    }
     return {
       ok: true, mutated: true, applied: true, outcome: 'applied', proposal_id: ref,
       receipts: summary !== null ? [summary] : [],
@@ -1116,6 +1140,13 @@ export function createAgentCapabilities(
       const reg = await dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
         graph: { ...(working as Record<string, unknown>), nodes: workingNodes },
         expected_graph_hash: carried,
+        /**
+         * ⭐ AND THE IDENTITY EXPECTATION, from the SAME read these bytes come from (`approvedRead`), as the frame
+         * writes send it. A rename that lands between that read and the route's own is outside the analysis
+         * projection, so only this refuses it; without it the whole-graph write restores the stale label
+         * (Canonical 5844410312; the #1743 counterexample #1810 closed for the frame writes).
+         */
+        ...(approvedRead.graph_identity_hash !== '' ? { expected_graph_identity_hash: approvedRead.graph_identity_hash } : {}),
         operation_id: operationId,
       });
       if (reg.status !== 200) {
@@ -1290,7 +1321,7 @@ export function createAgentCapabilities(
    */
   const stillBlockedNote = (v: ReturnType<typeof readinessViewOf>): string => {
     if (!v.checked || v.may_run !== false) return '';
-    const why = [...v.needs_from_user.map((i) => i.message), ...(v.needs_from_user.length === 0 && v.reason !== undefined ? [v.reason] : [])]
+    const why = [...v.needs_from_user.map((i) => i.message), ...(v.needs_from_user.length === 0 && v.reason !== undefined ? [withoutCantRunOpening(v.reason)] : [])]
       .map((m) => m.trim().replace(/\.+$/, ''))
       .filter((m) => m !== '');
     return ` Even after this approval the analysis could still not run: ${why.length > 0 ? why.join('. ') : 'the model would still be blocked'}. `
@@ -1537,7 +1568,7 @@ export function createAgentCapabilities(
       const occupied: { label: string; current_value: number }[] = [];
       const unitMismatch: { label: string; value: unknown; unit: string; factor_unit: string }[] = [];
       const seen = new Set<string>();
-      const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number }[] = [];
+      const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number; userWrote: boolean }[] = [];
 
       for (const a of input) {
         const requested = String(a?.factor_label ?? '');
@@ -1599,6 +1630,8 @@ export function createAgentCapabilities(
           id: node.id, label: node.label,
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
           ...(typeof existing === 'number' ? { replaces: existing } : {}),
+          // ⛔ A revision is the user's only when they WROTE the figure (`stated-by-user.ts`); else it is Olumi's.
+          userWrote: figureTheUserWrote(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text),
         });
       }
 
@@ -1621,8 +1654,8 @@ export function createAgentCapabilities(
       const operations: ProposalOperation[] = ordered.map((a) => ({
         op: 'set_factor_value',
         path: a.id,
-        // A revision the user named is theirs; a fresh figure is Olumi's (`valueOpAuthor`).
-        value: { value: a.value, unit: a.unit, basis: a.basis, authored_by: typeof a.replaces === 'number' ? 'user_stated' : 'model_proposed' },
+        // A revision the user named AND wrote is theirs; anything else is Olumi's (`valueOpAuthor`).
+        value: { value: a.value, unit: a.unit, basis: a.basis, authored_by: typeof a.replaces === 'number' && a.userWrote ? 'user_stated' : 'model_proposed' },
       }));
       /**
        * ⛔ THE APPROVAL MUST SAY WHAT IT REPLACES.
@@ -1634,6 +1667,7 @@ export function createAgentCapabilities(
        */
       const revisions = ordered.filter((a) => typeof a.replaces === 'number');
       const fresh = ordered.filter((a) => typeof a.replaces !== 'number');
+      const notWritten = revisions.filter((a) => !a.userWrote);
       const withUnit = (a: { value: number; unit: string }) => `${a.value}${a.unit !== '' ? ' ' + a.unit : ''}`;
       const describe = (a: { label: string; value: number; unit: string; replaces?: number }) =>
         typeof a.replaces === 'number'
@@ -1653,9 +1687,9 @@ export function createAgentCapabilities(
         provenance: {
           // A revision the user named is theirs, not the model's. Only a proposal
           // made entirely of those may claim it.
-          authored_by: fresh.length === 0 && revisions.length > 0 ? 'user_stated' : 'model_proposed',
+          authored_by: fresh.length === 0 && revisions.length > 0 && notWritten.length === 0 ? 'user_stated' : 'model_proposed',
           basis:
-            revisions.length > 0 && fresh.length === 0
+            revisions.length > 0 && fresh.length === 0 && notWritten.length === 0
               ? 'values the user asked to change, at the figures they gave'
               : 'starting assumptions offered for the user to adopt or correct',
         },
@@ -1683,6 +1717,10 @@ export function createAgentCapabilities(
         ...(notAFactor.length > 0 ? { not_a_factor: notAFactor, not_a_factor_note: NOT_A_FACTOR_NOTE } : {}),
         ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
         ...(unitMismatch.length > 0 ? { unit_mismatch: unitMismatch, unit_mismatch_note: UNIT_MISMATCH_NOTE } : {}),
+        ...(notWritten.length > 0 ? {
+          not_the_users_figure: notWritten.map((a) => ({ factor: a.label, value: a.value })),
+          not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE,
+        } : {}),
         note:
           'Nothing has changed. Show the user each value and what it rests on, say plainly that these are ' +
           'assumptions to adopt or correct and NOT measurements, and call authorise_change with this ' +
@@ -1804,6 +1842,7 @@ export function createAgentCapabilities(
         // factor — the Agent must say so and offer a level it CAN record.
         ...(b !== null && Array.isArray(b.not_linked) ? { not_linked: b.not_linked, not_linked_note: b.not_linked_note } : {}),
         ...(b !== null && Array.isArray(b.levels_not_accepted) ? { levels_not_accepted: b.levels_not_accepted } : {}),
+        ...(b !== null && Array.isArray(b.not_the_users_figure) ? { not_the_users_figure: b.not_the_users_figure, not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE } : {}),
         // ⛔ What the user NAMED but this proposal leaves out, carried to the joined result (independent
         // review of #1800, 5806926323): when both halves succeed, the value half's omission otherwise
         // never reached the Agent, and the starting point looked complete at the moment of consent.
@@ -1847,6 +1886,8 @@ export function createAgentCapabilities(
        * with the pair, so the next attempt can correct it.
        */
       const notAccepted: { option: string; factor: string; value: unknown; reason: string }[] = [];
+      /** Levels the Agent marked `user_stated` that the user never wrote: recorded as Olumi's, never as theirs. */
+      const notWrittenByUser: { option: string; factor: string; value: unknown }[] = [];
       const seen = new Set<string>();
       const set: {
         option: { id: string; label: string }; factor: { id: string; label: string };
@@ -1917,10 +1958,19 @@ export function createAgentCapabilities(
         // recordable. `user_stated` is opt-in per level, on the same terms as
         // `revise` — only when the user said it and gave the level — and it still
         // reaches the user as a proposal to approve, never a write.
-        if (held.has(`${option.id}::${factor.id}`) && i?.user_stated !== true) {
+        /**
+         * ⛔ `user_stated` is the Agent's claim; it stands only when the user WROTE the figure (`stated-by-user.ts`).
+         * Unwritten, the level is Olumi's estimate (recorded as such, and said), and on a held pair it is not a level.
+         */
+        const claimedByUser = i?.user_stated === true;
+        const userWrote = claimedByUser && figureTheUserWrote(Number(i?.value), factorUnitOf(g.raw, factor), ctx.user_text);
+        if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
+        if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
           notAccepted.push({
             option: option.label, factor: factor.label, value: i?.value,
-            reason: `${option.label} is held at its starting values — carrying on as now sets no level, so none is recorded for ${factor.label}. Leave it out, unless the user themselves said carrying on changes ${factor.label} and gave the level: then send it with user_stated: true.`,
+            reason: claimedByUser
+              ? `${option.label} is held at its starting values, and ${String(i?.value)} is not a figure the user wrote, so no level is recorded for ${factor.label}. Leave it out; never send a figure as the user's unless they wrote it.`
+              : `${option.label} is held at its starting values — carrying on as now sets no level, so none is recorded for ${factor.label}. Leave it out, unless the user themselves said carrying on changes ${factor.label} and gave the level: then send it with user_stated: true.`,
           });
           continue;
         }
@@ -2022,7 +2072,7 @@ export function createAgentCapabilities(
           option: { id: option.id, label: option.label },
           factor: { id: factor.id, label: factor.label },
           raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' ? os.unit : '',
-          basis: String(i?.basis ?? ''), derivedFrame, userStated: i?.user_stated === true,
+          basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote,
         });
       }
 
@@ -2034,6 +2084,7 @@ export function createAgentCapabilities(
           ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
           ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
           ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
+          ...(notWrittenByUser.length > 0 ? { not_the_users_figure: notWrittenByUser, not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE } : {}),
           ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
           detail: 'Nothing could be recorded. Tell the user exactly which of these it was and why.',
         };
@@ -2084,6 +2135,7 @@ export function createAgentCapabilities(
         ...(unframed.length > 0 ? { no_stated_range: unframed } : {}),
         ...(unchanged.length > 0 ? { already_set: unchanged } : {}),
         ...(notAccepted.length > 0 ? { levels_not_accepted: notAccepted } : {}),
+        ...(notWrittenByUser.length > 0 ? { not_the_users_figure: notWrittenByUser, not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE } : {}),
         ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
         note:
           'Nothing has changed. Show the user the value in THEIR units and what it rests on, then call ' +
@@ -3437,7 +3489,7 @@ export function createAgentCapabilities(
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      type Asked = { factor_label?: unknown; direction?: unknown; level?: { value?: unknown; unit?: unknown } | null };
+      type Asked = { factor_label?: unknown; direction?: unknown; level?: { value?: unknown; unit?: unknown; estimate?: unknown; basis?: unknown } | null };
       const askedOf = (xs: unknown): Asked[] => (Array.isArray(xs) ? xs.map((x) => (x ?? {}) as Asked) : []);
       /**
        * ⭐ SEVERAL OPTIONS, ONE CHANGE (F4; Canonical's typed transaction #1940, contract #70 5841655730). "Add A
@@ -3468,6 +3520,10 @@ export function createAgentCapabilities(
         };
       }
       const decision = decisions[0]!;
+      // ⭐ A factor the model lacks is added IN THIS SAME CHANGE (`planNewFactors`; Canonical 5843972346/5843988693).
+      const planned = planNewFactors(g.nodes as never, Array.isArray(args?.new_factors) ? args.new_factors as readonly NewFactorRequest[] : []);
+      if (!planned.ok) return { ok: false, mutated: false, refusal: planned.refusal, detail: planned.detail };
+      const newFactors = planned.factors;
       // Each option is planned against the model PLUS the options before it: distinct ids, and no two options by one name.
       const plans: { spec: (typeof specs)[number]; plan: Extract<ReturnType<typeof planNewOption>, { ok: true }> }[] = [];
       for (const spec of specs) {
@@ -3476,6 +3532,7 @@ export function createAgentCapabilities(
           label: spec.label,
           acts_on: spec.acts_on.map((a) => ({ factor_label: String(a.factor_label ?? ''), direction: a.direction === 'negative' ? 'negative' as const : 'positive' as const })),
           rationale: String(args?.rationale ?? ''),
+          newFactors,
         });
         if (!plan.ok) {
           return { ok: false, mutated: false, refusal: plan.refusal,
@@ -3484,13 +3541,21 @@ export function createAgentCapabilities(
         }
         plans.push({ spec, plan });
       }
+      // A factor added for no option changes nothing the comparison can use: refused, never added on its own.
+      const unused = newFactors.filter((f) => !plans.some((x) => x.plan.newActsOn.some((a) => a.key === f.key)));
+      if (unused.length > 0) {
+        return { ok: false, mutated: false, refusal: 'new_factor_unused',
+          detail: `No option acts on ${unused.map((f) => `"${f.label}"`).join(', ')}. Nothing was prepared. Add a factor only for an option that changes it, and name it in that option\u2019s acts_on.` };
+      }
       /**
        * ⛔ ONE CHANGE HAS A SIZE LIMIT, checked BEFORE anything is sent. A typed transaction CEE builds holds at
        * most TYPED_TRANSACTION_ENVELOPE_CAP changes; each option costs one, its decision link one, and one per
        * factor it acts on. Over the limit the product would refuse the batch — so it is refused here, in plain
        * words, with nothing sent.
        */
-      const envelopes = plans.reduce((n, x) => n + 2 + x.plan.actsOn.length, 0);
+      // Each new factor costs one change for itself and one per thing it affects; the option's link to it is its acts_on.
+      const envelopes = plans.reduce((n, x) => n + 2 + x.plan.actsOn.length + x.plan.newActsOn.length, 0)
+        + newFactors.reduce((n, f) => n + 1 + f.affects.length, 0);
       if (envelopes > TYPED_TRANSACTION_ENVELOPE_CAP) {
         return {
           ok: false, mutated: false, refusal: 'too_many_links',
@@ -3513,14 +3578,17 @@ export function createAgentCapabilities(
       const unitMismatch: { option: string; factor: string; value: number; unit: string; factor_unit: string }[] = [];
       const levelsNotSet: { option: string; factor: string; value: number; reason: string }[] = [];
       const entries = plans.map(({ spec, plan }) => {
-        const levelById = new Map<string, { value: number; unit?: string }>();
+        type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi' };
+        const levelById = new Map<string, Lvl>();
         for (const a of spec.acts_on) {
           const v = a.level?.value;
           if (typeof v !== 'number' || !Number.isFinite(v)) continue;
           const f = rawNodes.find((x) => x.kind === 'factor' && (norm(x.label) === norm(a.factor_label) || norm(x.description) === norm(a.factor_label)));
-          if (f !== undefined) levelById.set(f.id, { value: v, ...(typeof a.level?.unit === 'string' && a.level.unit.trim() !== '' ? { unit: a.level.unit.trim() } : {}) });
+          // Olumi's own suggested figure, with its basis (ChatGPT 5839692762 A: an EXPLICIT hypothesis, never silent).
+          const basis = a.level?.estimate === true && typeof a.level?.basis === 'string' && a.level.basis.trim() !== '' ? a.level.basis.trim() : undefined;
+          if (f !== undefined) levelById.set(f.id, { value: v, ...(typeof a.level?.unit === 'string' && a.level.unit.trim() !== '' ? { unit: a.level.unit.trim() } : {}), ...(basis !== undefined ? { estimate: basis } : {}) });
         }
-        const set = new Map<string, { value: number; unit?: string }>();
+        const set = new Map<string, Lvl>();
         const interventions = plan.actsOn.map((f) => {
           const lvl = levelById.get(f.id);
           if (lvl === undefined) return { factor_id: f.id, value: null };
@@ -3531,6 +3599,23 @@ export function createAgentCapabilities(
             unitMismatch.push({ option: plan.label, factor: f.label, value: lvl.value, unit: String(lvl.unit), factor_unit: String(factorUnit) });
             return { factor_id: f.id, value: null };
           }
+          /**
+           * ⛔ WHOSE LEVEL: the user's only when they wrote the figure (`stated-by-user.ts`: a 0 sent to mean "not set"
+           * was stored as the user's 0% churn). Otherwise it is Olumi's ESTIMATE only when the Agent said so, with a
+           * basis, and it is recorded and shown as that (`cee_hypothesis`, C2). Anything else is left unset and said.
+           */
+          const byUser = figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, ctx.user_text);
+          if (!byUser && lvl.estimate === undefined) {
+            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: notWrittenReason(lvl.value, f.label) });
+            return { factor_id: f.id, value: null };
+          }
+          if (!byUser && contradictsItsName(lvl.value, lvl.unit ?? factorUnit, plan.label)) {
+            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
+              reason: `Olumi's estimate of ${lvl.value} for ${f.label} does not match the figure in the option's own name ("${plan.label}"), so that level is left unset. Use the figure in the name, or name the option for the figure you mean.` });
+            return { factor_id: f.id, value: null };
+          }
+          lvl.by = byUser ? 'user' : 'olumi';
+          const stamp = byUser ? {} : { source: 'cee_hypothesis' as const };
           const frame = levelFrameOf(factor);
           if (frame !== null) {
             const v = lvl.value / frame;
@@ -3541,15 +3626,27 @@ export function createAgentCapabilities(
             const os = (factor?.observed_state ?? {}) as { unit?: unknown };
             const unit = lvl.unit ?? (typeof os.unit === 'string' && os.unit !== '' ? os.unit : undefined);
             set.set(f.id, lvl);
-            return { factor_id: f.id, value: v, raw_value: lvl.value, ...(unit !== undefined ? { unit } : {}) };
+            return { factor_id: f.id, value: v, raw_value: lvl.value, ...(unit !== undefined ? { unit } : {}), ...stamp };
           }
-          if (lvl.value >= 0 && lvl.value <= 1) { set.set(f.id, lvl); return { factor_id: f.id, value: lvl.value }; }
+          if (lvl.value >= 0 && lvl.value <= 1) { set.set(f.id, lvl); return { factor_id: f.id, value: lvl.value, ...stamp }; }
           levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
             reason: `The model has no range for ${f.label} to read ${lvl.value} against, so this change leaves that level unset. `
               + `Once the option is added, propose that level with propose_option_interventions, which records a range for ${f.label}.` });
           return { factor_id: f.id, value: null };
         });
-        return { plan, set, entry: { label: plan.label, option_id: plan.optionId, interventions } };
+        /**
+         * A new factor starts with no level on this option: it has no range yet to read a figure against, and its
+         * current value is set after it exists (Canonical's OPEN ruling). A level the user gave for it is said, not lost.
+         */
+        for (const a of plan.newActsOn) {
+          const asked = spec.acts_on.find((x) => norm(x.factor_label) === norm(a.label))?.level?.value;
+          if (typeof asked === 'number' && Number.isFinite(asked)) {
+            levelsNotSet.push({ option: plan.label, factor: a.label, value: asked,
+              reason: `"${a.label}" is new in this change and has no range yet, so its level is not set here. Once it is added, propose that level with propose_option_interventions.` });
+          }
+        }
+        const added = plan.newActsOn.map((a) => ({ factor_key: a.key, value: null }));
+        return { plan, set, entry: { label: plan.label, option_id: plan.optionId, interventions: [...interventions, ...added] } };
       });
       if (unitMismatch.length > 0) {
         const m = unitMismatch[0]!;
@@ -3568,14 +3665,24 @@ export function createAgentCapabilities(
             + 'Ask the user for a figure within that range, in the same units, or whether that range itself is wrong.',
         };
       }
+      const nfWire = newFactors.length === 0 ? {} : { new_factors: newFactors.map((f) => ({
+        key: f.key, label: f.label,
+        affects: f.affects.map((a) => ({ node_id: a.node_id, effect_direction: a.effect_direction })),
+      })) };
       const parameters = entries.length === 1
-        ? { parent_decision_id: decision.id, ...entries[0]!.entry }
-        : { parent_decision_id: decision.id, options: entries.map((e) => e.entry) };
+        ? { parent_decision_id: decision.id, ...entries[0]!.entry, ...nfWire }
+        : { parent_decision_id: decision.id, options: entries.map((e) => e.entry), ...nfWire };
       // The product's own transaction, run here purely: a spec it would not build is never sent.
       const built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
       if (!built.matched || JSON.stringify(built.operations).length > GM_HELD_OPERATIONS_MAX_JSON_CHARS) {
-        return { ok: false, mutated: false, refusal: 'not_prepared',
-          detail: 'That could not be prepared as one change, so nothing was sent or changed. Tell the user plainly.' };
+        const reason = !built.matched ? String(built.reason) : '';
+        const why = reason === 'new_factor_unreachable'
+          ? ' Nothing the new factor changes leads to the goal, so it could not affect the comparison: ask the user what it changes.'
+          : reason === 'new_factor_exists'
+            ? ' The model already has a factor by that name: name it in acts_on instead of adding it.'
+            : '';
+        return { ok: false, mutated: false, refusal: 'not_prepared', ...(!built.matched ? { reason: built.reason } : {}),
+          detail: `That could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
       }
       const labels = plans.map((x) => x.plan.label);
       const r = await dispatch('/orchestrate/v2/turn', {
@@ -3597,7 +3704,11 @@ export function createAgentCapabilities(
           const hold = await liveHeldHold(ctx.scenario_id, ref);
           const ops = hold !== undefined ? heldOpsOf(hold) : [];
           heldBatchOk = plans.every(({ plan }) => ops.some((o) => o.op === 'add_node' && o.path === plan.optionId)
-            && ops.some((o) => o.op === 'add_edge' && o.path === `${decision.id}::${plan.optionId}`));
+            && ops.some((o) => o.op === 'add_edge' && o.path === `${decision.id}::${plan.optionId}`))
+            // Every factor this change adds is in the held batch too, as a factor.
+            && newFactors.every((f) => ops.some((o) => o.op === 'add_node'
+              && (o.value as { kind?: unknown } | undefined)?.kind === 'factor'
+              && norm((o.value as { label?: unknown } | undefined)?.label) === norm(f.label)));
         } catch {
           heldBatchOk = false;
         }
@@ -3610,11 +3721,12 @@ export function createAgentCapabilities(
       const described = entries.map(({ plan, set }) => ({
         label: plan.label,
         linked_from: String(decision.label ?? ''),
-        acts_on: plan.actsOn.map((a) => a.label),
+        acts_on: [...plan.actsOn.map((a) => a.label), ...plan.newActsOn.map((a) => a.label)],
         levels: plan.actsOn.map((f) => {
           const lvl = set.get(f.id);
           return lvl !== undefined
-            ? { factor: f.label, value: lvl.value, ...(lvl.unit !== undefined ? { unit: lvl.unit } : {}), stated_by: 'user' }
+            ? { factor: f.label, value: lvl.value, ...(lvl.unit !== undefined ? { unit: lvl.unit } : {}),
+              ...(lvl.by === 'olumi' ? { stated_by: 'olumi_estimate', basis: lvl.estimate } : { stated_by: 'user' }) }
             : { factor: f.label, value: null, still_needed: true };
         }),
       }));
@@ -3628,9 +3740,21 @@ export function createAgentCapabilities(
           ? { option: { label: described[0]!.label, linked_from: described[0]!.linked_from, acts_on: described[0]!.acts_on }, levels: described[0]!.levels }
           : { options: described }),
         ...(levelsNotSet.length > 0 ? { levels_not_set: levelsNotSet } : {}),
+        ...(newFactors.length > 0 ? {
+          new_factors: newFactors.map((f) => ({
+            label: f.label,
+            changes: f.affects.map((a) => `${a.label} (${a.effect_direction === 'positive' ? 'raises it' : 'lowers it'})`),
+            how_strongly: 'Olumi\u2019s estimate, for the user to correct',
+            current_value: null,
+          })),
+          new_factors_note: 'This change also ADDS these factors. Say so: what each changes and which way, that how strongly is Olumi\u2019s '
+            + 'estimate, and that its current value is not set yet. Ask the user what it is today (for example, whether it is '
+            + 'offered at all yet) \u2014 nothing else will ask, and the comparison needs it; never say the analysis will ask for it.',
+        } : {}),
         note:
           `Nothing has changed yet. Show the user ${described.length === 1 ? 'the option' : `all ${described.length} options, as ONE change they approve once`}, `
-          + 'that each is linked from the decision, what it acts on and each level — saying plainly which have no level yet — never the id, '
+          + 'that each is linked from the decision, what it acts on and each level — saying plainly which have no level yet, and which '
+          + 'levels are Olumi\u2019s estimates (stated_by olumi_estimate), with why, for the user to correct — never the id, '
           + 'and call authorise_change with this proposal_id once they agree.',
       };
     },

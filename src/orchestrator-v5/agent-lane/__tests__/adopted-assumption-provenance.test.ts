@@ -35,7 +35,8 @@ import { earnsAuthorshipCredit, structureProvenance } from '../../../cee/graph-r
 
 const SCENARIO = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
 const USER = 'user-a';
-const ctx = { scenario_id: SCENARIO, authenticated_user_id: USER, request_id: 'r' };
+/** What the user wrote in these rows: a figure is recorded as theirs only when it is here (`stated-by-user.ts`). */
+const ctx = { scenario_id: SCENARIO, authenticated_user_id: USER, request_id: 'r', user_text: 'Team size is 6 FTE now.' };
 
 type Node = {
   id: string; kind: string; label: string;
