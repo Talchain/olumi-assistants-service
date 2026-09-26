@@ -272,7 +272,8 @@ describe('(A) all-or-nothing, and a batch the hold cannot carry is refused at pr
       nodes: [...GRAPH.nodes, ...factorIds.map((id) => ({ id, kind: 'factor', label: `Factor ${id}`, observed_state: { value: 0.2 } }))],
       edges: [...GRAPH.edges, ...factorIds.map((id) => ({ from: id, to: 'g_profit', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' }))],
     };
-    const wideOption = (label: string) => ({ label, interventions: factorIds.map((factor_id) => ({ factor_id, value: 0.5 })) });
+    // Each option a DIFFERENT level: two options with the same levels are one choice, and are refused first.
+    const wideOption = (label: string, i: number) => ({ label, interventions: factorIds.map((factor_id) => ({ factor_id, value: 0.5 + i / 10 })) });
     const out = dispatchAddOptionTransaction({
       ...base,
       currentGraph: wide,

@@ -1856,6 +1856,83 @@ export function carryWithheldOptions(first: AdmittedModel, retry: AdmittedModel)
   return (first.options_withheld ?? []).filter((w) => !present.has(canonicalLabel(w.option)));
 }
 
+/** A stated current level of the goal: admitted (on the target's own cap) or withheld with the sentence to say. */
+export type StatedGoalLevelVerdict =
+  | { readonly admitted: true; readonly normalised: number }
+  | { readonly admitted: false; readonly reason: string };
+
+/**
+ * ⭐ MAY THIS STATED CURRENT LEVEL BE THE GOAL'S BASELINE? — ONE rule for BOTH routes that record one: the
+ * brief (construction, below) and the user's chat statement (`goal-current-level.ts`). Two copies of one
+ * rule drift and the drift reads as green (CLAUDE.md trap 12), so the chat path calls this, never a copy.
+ *
+ * ⛔ ONLY "AT LEAST" IS SCORED CORRECTLY TODAY. The operator has no GraphV3
+ * carrier (see the `goal_operator` loss below), and the level consumer scores
+ * P(level >= threshold) whatever the brief said (ISL
+ * `robustness_analyzer_v2.py`, `compared >= threshold`). So a baseline is
+ * written ONLY for `>=`:
+ *  · `<=` / `<` ("keep churn at or below 5%; 4% now") would be scored on the
+ *    WRONG tail;
+ *  · `>` ("grow MRR above £20k; £20k now") would count equality as met — a
+ *    held status quo would score 100% on a goal it has not reached.
+ * Withheld, and said with the shortest truthful repair, until the comparator
+ * is carried and honoured end to end. The target itself is kept as before.
+ *
+ * Then the shared scale/direction rule (`admitGoalBaseline`): a level above the target is a decrease the `>=`
+ * frame would invert; a level off the target's own cap is on another scale. Both withheld and said.
+ *
+ * It judges the PAIR only. Whose figure it is (the brief's `estimated` rule; the chat path's `user_stated`)
+ * and whether its unit is the target's are each caller's question, asked before this.
+ */
+export function admitStatedGoalLevel(args: {
+  readonly metric: string;
+  readonly operator: string;
+  readonly rawTarget: number;
+  readonly rawBaseline: number;
+  readonly cap: number;
+}): StatedGoalLevelVerdict {
+  const { metric, operator, rawTarget: raw, rawBaseline: baselineRaw, cap } = args;
+  if (operator === '>') {
+    return {
+      admitted: false,
+      reason:
+        `"${metric}" is a goal to get strictly above ${raw}, and the chance of meeting it ` +
+        `cannot be calculated exactly yet: reaching ${raw} itself would be counted as success. So its ` +
+        `current level (${baselineRaw}) was not used for that, and no chance of meeting the goal will be ` +
+        `shown. If reaching ${raw} is enough, say the goal is "at least ${raw}" and it can be shown.`,
+    };
+  }
+  if (operator !== '>=') {
+    return {
+      admitted: false,
+      reason:
+        `"${metric}" is a goal to stay ${operator === '<' ? 'below' : 'at or below'} ${raw}, and the chance of meeting a ` +
+        'goal of that kind cannot be calculated correctly yet, so its current level ' +
+        `(${baselineRaw}) was not used for that. The options can still be compared on everything ` +
+        'else; no chance of meeting the goal will be shown.',
+    };
+  }
+  const admission = admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap });
+  if (admission.admitted) return { admitted: true, normalised: admission.normalised };
+  if (admission.reason === 'baseline_off_cap_scale') {
+    return {
+      admitted: false,
+      reason:
+        `The current level of "${metric}" (${baselineRaw}) is outside the range the target of ${raw} ` +
+        `is measured on (0 to ${cap}), so the chance of reaching the target cannot be shown. The target ` +
+        'is kept. If either figure is wrong, say which and it can be corrected.',
+    };
+  }
+  return {
+    admitted: false,
+    reason:
+      `The current level of "${metric}" (${baselineRaw}) is already above the target ` +
+      `of ${raw}, so the chance of reaching the target cannot be shown: read that way the question ` +
+      'would be upside down. The target is kept. If the goal is to get back below a level, or if ' +
+      'either figure is wrong, say which and it can be corrected.',
+  };
+}
+
 /**
  * Admission, with options identical by construction withheld (see `judgeOptionIdentity`).
  *
@@ -2064,20 +2141,6 @@ function admitOnce(
           } as RepairEntry);
         };
         /**
-         * ⛔ ONLY "AT LEAST" IS SCORED CORRECTLY TODAY. The operator has no GraphV3
-         * carrier (see the `goal_operator` loss below), and the level consumer scores
-         * P(level >= threshold) whatever the brief said (ISL
-         * `robustness_analyzer_v2.py`, `compared >= threshold`). So a baseline is
-         * written ONLY for `>=`:
-         *  · `<=` / `<` ("keep churn at or below 5%; 4% now") would be scored on the
-         *    WRONG tail;
-         *  · `>` ("grow MRR above £20k; £20k now") would count equality as met — a
-         *    held status quo would score 100% on a goal it has not reached.
-         * Withheld, and said with the shortest truthful repair, until the comparator
-         * is carried and honoured end to end. The target itself is kept as before.
-         */
-        const scoresTheRightTail = model.goal.operator === '>=';
-        /**
          * ⛔ AND ONLY A LEVEL THE BRIEF STATES (review 5824085993; RC ruling 5824518762,
          * fix (a)). An estimate of the goal's current level would set the chance of
          * reaching the user's target on Olumi's own guess, and nothing downstream says
@@ -2097,46 +2160,22 @@ function admitOnce(
             `said. Tell me the current level of "${model.goal.metric}" and the chance of reaching it can be shown.`,
           );
         } else if (resolved !== null && typeof baselineRaw === 'number' && Number.isFinite(baselineRaw)) {
-          const admission = scoresTheRightTail
-            ? admitGoalBaseline({ rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap })
-            : null;
-          if (admission === null && model.goal.operator === '>') {
-            withheld(
-              `"${model.goal.metric}" is a goal to get strictly above ${raw}, and the chance of meeting it ` +
-              `cannot be calculated exactly yet: reaching ${raw} itself would be counted as success. So its ` +
-              `current level (${baselineRaw}) was not used for that, and no chance of meeting the goal will be ` +
-              `shown. If reaching ${raw} is enough, say the goal is "at least ${raw}" and it can be shown.`,
-            );
-          } else if (admission === null) {
-            withheld(
-              `"${model.goal.metric}" is a goal to stay ${model.goal.operator === '<' ? 'below' : 'at or below'} ${raw}, and the chance of meeting a ` +
-              'goal of that kind cannot be calculated correctly yet, so its current level ' +
-              `(${baselineRaw}) was not used for that. The options can still be compared on everything ` +
-              'else; no chance of meeting the goal will be shown.',
-            );
-          } else if (admission.admitted) {
+          // ONE rule for a stated current level, shared with the chat path (`goal-current-level.ts`).
+          const verdict = admitStatedGoalLevel({
+            metric: model.goal.metric, operator: model.goal.operator, rawTarget: raw, rawBaseline: baselineRaw, cap: resolved.cap,
+          });
+          if (verdict.admitted) {
             // Only the user's stated level reaches here (see `estimated` above).
             observed_state = {
-              value: admission.normalised,
-              baseline: admission.normalised,
+              value: verdict.normalised,
+              baseline: verdict.normalised,
               ...(model.goal.unit ? { unit: model.goal.unit } : {}),
               source: 'brief_extraction',
               raw_value: baselineRaw,
               cap: resolved.cap,
             };
-          } else if (admission.reason === 'baseline_off_cap_scale') {
-            withheld(
-              `The current level of "${model.goal.metric}" (${baselineRaw}) is outside the range the target of ${raw} ` +
-              `is measured on (0 to ${resolved.cap}), so the chance of reaching the target cannot be shown. The target ` +
-              'is kept. If either figure is wrong, say which and it can be corrected.',
-            );
           } else {
-            withheld(
-              `The current level of "${model.goal.metric}" (${baselineRaw}) is already above the target ` +
-              `of ${raw}, so the chance of reaching the target cannot be shown: read that way the question ` +
-              'would be upside down. The target is kept. If the goal is to get back below a level, or if ' +
-              'either figure is wrong, say which and it can be corrected.',
-            );
+            withheld(verdict.reason);
           }
         }
         return {
