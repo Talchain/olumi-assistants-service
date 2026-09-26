@@ -193,6 +193,9 @@ describe('a level limit on a non-root node is checked against that node\'s curre
     expect(levelLimitBaselineNodeIds(risk, limits, 'goal').size).toBe(0);
     for (const kind of ['risk', 'outcome']) {
       expect(levelLimitBaselineNodeIds(hand({ id: 'n', kind }), PCT10('n')).size, `${kind} in the carried shape`).toBe(0);
+      // By KIND, not only by the factor-only disclosure: even a user-authored level on that cell is add_constraint's.
+      const userLevel = { value: 0.07, raw_value: 7, source: 'brief_extraction' };
+      expect(levelLimitBaselineNodeIds(hand({ id: 'n', kind, observed_state: userLevel }), PCT10('n')).size, `${kind}, user level`).toBe(0);
     }
   });
 
