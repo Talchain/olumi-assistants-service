@@ -356,8 +356,35 @@ describe('B1 (review 5835754404): restated only when today is KNOWN to be zero',
     expect(Object.prototype.hasOwnProperty.call(os, 'source'), JSON.stringify(os)).toBe(false);
   });
 
+  it('SERVED unit (AI Quality B3, CEE 1f8327c): "% from current list price" with a KNOWN zero today restates — cut 15% and raise 10% both register', async () => {
+    const unit = '% from current list price';
+    const { out, graph } = await build(candidate([iv('List price change', -15, unit)], [iv('List price change', 10, unit)],
+      { baseline_known: true, baseline_value: 0, provenance: 'inferred', unit }));
+    const os = byId(graph, PRICE).observed_state as Record<string, unknown>;
+    expect(os).toMatchObject({ value: 0.5, raw_value: 100, cap: 200, unit: '% of today' });
+    expect(level(graph, CUT, PRICE)).toBeCloseTo(0.425, 10);
+    expect(level(graph, RAISE, PRICE)).toBeCloseTo(0.55, 10);
+    expect(said(out, /today is 100/)).toHaveLength(1);
+    expect((await runAnalysis(graph)).refusal).toBeNull();
+  });
+
   it('CONTROL row 4b: a KNOWN zero today the user stated IS restated, and stays brief_extraction ("no change today")', async () => {
     const os = await restated('explicit');
     expect(os.source).toBe('brief_extraction');
+  });
+});
+
+/**
+ * ⭐ THE DRAFTER HALF (served AI Quality B3, CEE 1f8327c). The admission half above restates a KNOWN zero; on served, the
+ * drafter marked "% from current list price" unknown (a user did not supply it), so "cut 15%" registered with no level.
+ * A change from today is 0 today by definition. This pins that the strict schema TELLS the drafter so — the outcome
+ * (the cut carries a level on served, N/N reps) is measured on the deployed build, not claimed here.
+ */
+describe('the drafter is told a change from today is a known zero', () => {
+  it('the factor baseline_known description carries the change-from-today exception, beside the "AI estimate stays false" rule', () => {
+    const schema = buildCandidateSchema() as { properties: { factors: { items: { properties: { baseline_known: { description: string } } } } } };
+    const d = schema.properties.factors.items.properties.baseline_known.description;
+    expect(d).toContain('A provisional AI estimate keeps this false.');
+    expect(d).toMatch(/CHANGE FROM TODAY.*is 0 today by definition: baseline_known true, baseline_value 0/);
   });
 });
