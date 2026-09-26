@@ -68,7 +68,8 @@ export interface NewFactorRefusal {
     | 'new_factor_direction_unstated'
     | 'no_such_target'
     | 'ambiguous_target'
-    | 'target_is_a_lever';
+    | 'target_is_a_lever'
+    | 'target_not_linkable';
   readonly detail: string;
 }
 
@@ -262,6 +263,12 @@ export function planNewFactors(
       if (target.kind === 'factor' && target.category === 'controllable') {
         return { ok: false, refusal: 'target_is_a_lever',
           detail: `"${String(target.label)}" is something an option sets, not something "${label}" changes. Nothing was prepared. Ask what "${label}" changes (the goal, say).` };
+      }
+      // The builder links a new factor only to the goal, an outcome, a risk, or an observable/external factor
+      // (`isAffectsTarget`, add-option-transaction.ts). Refused here with the reason, never a bare "not prepared" later.
+      if (target.kind === 'factor' && target.category !== 'observable' && target.category !== 'external') {
+        return { ok: false, refusal: 'target_not_linkable',
+          detail: `The model does not record "${String(target.label)}" as something outside the options' control, so a new factor cannot be linked to it. Nothing was prepared. Ask whether "${label}" changes the goal, an outcome or a risk instead.` };
       }
       if (a.direction !== 'positive' && a.direction !== 'negative') {
         return { ok: false, refusal: 'new_factor_direction_unstated',

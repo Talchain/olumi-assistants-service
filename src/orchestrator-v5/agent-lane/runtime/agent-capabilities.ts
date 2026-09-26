@@ -117,7 +117,7 @@ import { bandFromMagnitude, INFLUENCE_BAND_THRESHOLDS, type InfluenceBand } from
 import { runWithApprovedAdoption, runWithApprovedLevelAdoption } from '../approved-adoption-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
-import { figureTheUserWrote } from '../stated-by-user.js';
+import { contradictsItsName, figureTheUserWrote } from '../stated-by-user.js';
 import { defaultFrameFor } from '../admit-model.js';
 import type { AgentCapabilities, AgentToolContext, ToolResult } from './agent-tools.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel } from './build-model.js';
@@ -3565,6 +3565,11 @@ export function createAgentCapabilities(
           const byUser = figureTheUserWrote(lvl.value, lvl.unit ?? factorUnit, ctx.user_text);
           if (!byUser && lvl.estimate === undefined) {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value, reason: notWrittenReason(lvl.value, f.label) });
+            return { factor_id: f.id, value: null };
+          }
+          if (!byUser && contradictsItsName(lvl.value, lvl.unit ?? factorUnit, plan.label)) {
+            levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
+              reason: `Olumi's estimate of ${lvl.value} for ${f.label} does not match the figure in the option's own name ("${plan.label}"), so that level is left unset. Use the figure in the name, or name the option for the figure you mean.` });
             return { factor_id: f.id, value: null };
           }
           lvl.by = byUser ? 'user' : 'olumi';

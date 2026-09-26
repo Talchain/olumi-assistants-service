@@ -43,6 +43,29 @@ describe('planNewFactors — a new factor must be new, change something the mode
   });
 });
 
+describe('the planner links a new factor only where the builder will (#1982 review N1: builder `isAffectsTarget`)', () => {
+  const withCategory = (label: string, category: string | undefined) => served.nodes.map((n) => {
+    if (n.label !== label) return n;
+    const { category: _c, ...rest } = n;
+    return category === undefined ? rest : { ...rest, category };
+  });
+  const to = (label: string) => [{ ...ADDON, affects: [{ label, direction: 'positive' as const }] }];
+
+  it('RED: a factor the model records with NO category (or any other than observable/external) → refused with the reason, before anything is sent', () => {
+    for (const cat of [undefined, 'derived', 'unknown']) {
+      const r = planNewFactors(withCategory('AI feature adoption rate', cat), to('AI feature adoption rate')) as { refusal?: string; detail?: string };
+      expect(r.refusal, String(cat)).toBe('target_not_linkable');
+      expect(r.detail).toContain('Ask whether "AI add-on price" changes the goal, an outcome or a risk instead.');
+    }
+  });
+
+  it('CONTRAST: the same factor as observable or external is a target, as the builder accepts', () => {
+    for (const cat of ['observable', 'external']) {
+      expect(planNewFactors(withCategory('AI feature adoption rate', cat), to('AI feature adoption rate')).ok, cat).toBe(true);
+    }
+  });
+});
+
 describe('planNewOption links the option to a factor this same change adds', () => {
   const addOn = { label: 'Keep £49 and add a paid AI add-on', acts_on: [{ factor_label: 'AI add-on price', direction: 'positive' as const }], rationale: 'x' };
 

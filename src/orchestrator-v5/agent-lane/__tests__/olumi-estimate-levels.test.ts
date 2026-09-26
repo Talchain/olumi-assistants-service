@@ -67,6 +67,37 @@ describe('a level is the user\'s, Olumi\'s disclosed estimate, or unset — neve
     expect(priceLevelSent(sent)?.value).toBeNull();
   });
 
+  it('RED (#1982 review N2): an estimate that contradicts the option\'s own name ("Test £54" at 64) → sent unset (the route row [q3] shows it is said)', async () => {
+    const { caps, sent } = setup();
+    await caps.proposeNewOption(ctxSaying(ADD_ALL), { ...suggested({ value: 64, unit: '£', estimate: true, basis: 'a step above the £59 option' }), label: 'Test £54 at release' } as never);
+    expect(priceLevelSent(sent)?.value, JSON.stringify(sent[0]?.body)).toBeNull();
+    expect(priceLevelSent(sent)).not.toHaveProperty('source');
+  });
+
+  it('CONTRAST: a bare number in the name is not a price ("Hire 2 developers" never blocks an estimate of 64 on a £ factor)', async () => {
+    const { caps, sent } = setup();
+    await caps.proposeNewOption(ctxSaying(ADD_ALL), { ...suggested({ value: 64, unit: '£', estimate: true, basis: 'x' }), label: 'Raise the price and hire 2 developers' } as never);
+    expect(priceLevelSent(sent)).toEqual(expect.objectContaining({ raw_value: 64, source: 'cee_hypothesis' }));
+  });
+
+  it('⛔ the governing text permits what C2 adds, in every place it is stated (#1982 review B1)', () => {
+    const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
+    const tools = readFileSync(new URL('../runtime/agent-tools.ts', import.meta.url), 'utf8');
+    // Levels: the user's figure, or Olumi's own marked estimate for an option Olumi suggested — never "ONLY the user's".
+    expect(route).toContain('your own suggested figure, marked `estimate` with its basis, which is recorded and shown as Olumi\\u2019s estimate, never as theirs');
+    expect(tools).toContain('your own suggested figure with estimate: true and a basis, recorded and shown as Olumi\\u2019s estimate. Never a placeholder.');
+    for (const text of [route, tools]) {
+      expect(text).not.toContain('ONLY for a figure the user stated');
+      expect(text).not.toContain('never invent one');
+      expect(text).not.toContain('Never invent a level or a direction');
+    }
+    // A new factor's direction: ONE rule, stated the same way in the prompt, the tool, and the field.
+    const rule = 'where it is plain from the option itself (a paid add-on adds revenue); if it is unclear, ask';
+    expect(route).toContain(rule);
+    expect(tools.split(rule).length - 1, 'tool description and the affects field').toBe(2);
+    expect(tools).not.toContain('From the user; never guessed.');
+  });
+
   it('the tool tells the Agent when a figure is its own, and that it is shown as Olumi\'s', () => {
     const src = readFileSync(new URL('../runtime/agent-tools.ts', import.meta.url), 'utf8');
     expect(src).toContain('true ONLY when this figure is your own suggestion, not the user\\u2019s');
