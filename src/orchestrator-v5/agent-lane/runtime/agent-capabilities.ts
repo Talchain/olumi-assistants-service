@@ -2067,6 +2067,11 @@ export function createAgentCapabilities(
         const src = (e?.provenance !== null && typeof e?.provenance === 'object') ? (e.provenance as { source?: unknown }).source : undefined;
         const landed = res.status === 200 && typeof got === 'number' && Math.abs(got - want) < 1e-9 && src === 'user_specified'
           && (typeof res.json.graph_hash !== 'string' || res.json.graph_hash === after?.graph_hash);
+        if (after === null && res.status === 200) {
+          // The write may have landed; the read-back failed. Never "as it was" when Olumi cannot see (review of #1950).
+          return { ok: false, mutated: false, applied: false, refusal: 'not_confirmed', proposal_id: decision.proposal.proposal_id,
+            detail: 'Olumi could not read the model back to confirm whether the link was recorded. Tell the user plainly that it could not be confirmed, and offer to check again.' };
+        }
         if (!landed) {
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: decision.proposal.proposal_id,
             detail: String(res.json.assistant_text ?? '').trim() !== ''

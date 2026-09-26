@@ -115,6 +115,20 @@ describe('the Agent records a link\'s strength as the user\'s own, through the p
     expect(String(r.detail)).toMatch(/haven't changed anything/);
   });
 
+  it('the write answers 200 but the model cannot be read back → "could not confirm", never "as it was"', async () => {
+    const w = world(graphWith(0.5));
+    let reads = 0;
+    const blind: InternalDispatch = async (path, body) => {
+      if (path.endsWith('/graph')) { reads += 1; return reads <= 2 ? w.d(path, body) : { status: 503, json: {} }; }
+      return w.d(path, body);
+    };
+    const caps = createAgentCapabilities(blind, new ProposalStore());
+    const p = await caps.proposeLinkStrength!(ctx, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'x' });
+    const r = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, refusal: 'not_confirmed' }));
+    expect(String(r.detail)).toMatch(/could not be confirmed/);
+  });
+
   it('refuses, writing nothing, a link the model does not have — and says how to add it instead', async () => {
     const w = world(graphWith(0.5));
     const caps = createAgentCapabilities(w.d, new ProposalStore());
@@ -134,5 +148,33 @@ describe('the Agent records a link\'s strength as the user\'s own, through the p
     const r = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(r).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'superseded' }));
     expect(w.sent).toHaveLength(1);
+  });
+});
+
+describe('a link-strength proposal is approvable like every other: one button, carried across a restart (review of #1950)', () => {
+  it('RED: approve chip + awaiting flag + a persisted carrier that restores, and the restored proposal applies the same event', async () => {
+    const { approvalChipsFor, proposalsAwaitingApproval } = await import('../approval-chips.js');
+    const { proposalPendingAction, rehydrateProposals } = await import('../durable-proposal.js');
+    const { parsePendingAction } = await import('../../session/pending-action.js');
+    const { leavesProposalAwaitingApproval } = await import('../../../routes/agent-v1-turn.js');
+    const w = world(graphWith(0.5));
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(w.d, store);
+    const p = await caps.proposeLinkStrength!(ctx, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'x' });
+    const calls = [{ name: 'propose_link_strength', ok: true, mutated: false, proposal_id: String(p.proposal_id) }];
+    const chips = approvalChipsFor(calls);
+    expect(chips.map((c) => c.id), 'ONE approve button, plus amend').toEqual([`agent-approve-proposal:${String(p.proposal_id)}`, 'agent-amend-proposal']);
+    expect(proposalsAwaitingApproval(calls).size).toBe(1);
+    expect(leavesProposalAwaitingApproval(calls), 'the reply keeps the approval question in view').toBe(true);
+    // The carrier the answer row persists, through the REAL parser, restores into a fresh process's store…
+    const stored = store.get(String(p.proposal_id))!;
+    const pa = parsePendingAction(JSON.parse(JSON.stringify(proposalPendingAction(stored, chips[0]!, { scenario_id: SCENARIO, emitted_at_iso: new Date().toISOString() }))));
+    expect(pa, 'the production read would drop it').not.toBeNull();
+    const fresh = new ProposalStore();
+    expect(rehydrateProposals([pa!], fresh, { scenario_id: SCENARIO, user_id: null })).toBe(1);
+    // …and the restored proposal applies exactly the approved event.
+    const r = await createAgentCapabilities(w.d, fresh).authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(r).toEqual(expect.objectContaining({ ok: true, applied: true }));
+    expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ kind: 'edge_strength_edit', intent: 'set', magnitude: 0.825, expected: { mean: 0.5, effect_direction: 'positive' } }));
   });
 });
