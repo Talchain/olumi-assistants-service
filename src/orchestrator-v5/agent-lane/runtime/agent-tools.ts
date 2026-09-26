@@ -23,6 +23,11 @@ export interface AgentToolContext {
    * absent, nothing is.
    */
   readonly user_text?: string;
+  /**
+   * THIS turn's message when the user typed it (never a chip's text), bound by the route. A link's strength band is
+   * the user's only when named here (`bandTheUserWrote`): a band word elsewhere in the conversation is about something else.
+   */
+  readonly user_turn_text?: string;
 }
 
 export interface ToolDefinition {
