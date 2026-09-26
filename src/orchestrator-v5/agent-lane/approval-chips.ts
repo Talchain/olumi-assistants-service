@@ -44,8 +44,9 @@ export const ONE_CHANGE_PER_APPROVAL = 'one_change_per_approval';
 export const ONE_CHANGE_PER_APPROVAL_DETAIL =
   'A change from this turn is already awaiting the user\u2019s approval, and one approval carries one change: approving '
   + 'it moves the model, so a second proposal made now could never be approved after it. Nothing was stored. If both '
-  + 'belong to one operation, propose them in ONE call instead (propose_starting_point carries starting values and '
-  + 'option levels together; propose_option_interventions adds the link a level needs). Otherwise present the change '
+  + 'belong to one operation, propose them in ONE call instead (propose_new_option carries up to 4 options in `options`; '
+  + 'propose_starting_point carries starting values and option levels together; propose_option_interventions adds the '
+  + 'link a level needs). Otherwise present the change '
   + 'already proposed, and tell the user this further change is not proposed yet \u2014 they can ask for it once they '
   + 'have answered. Never ask them to approve both.';
 
