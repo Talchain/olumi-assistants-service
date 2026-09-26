@@ -106,7 +106,8 @@ describe('propose_new_option sends ONE change carrying the option AND the factor
     expect(params, JSON.stringify(r)).toBeDefined();
     expect(params!['new_factors']).toEqual([{ key: 'ai_add_on_price', label: 'AI add-on price',
       affects: [{ node_id: 'monthly_recurring_revenue_mrr', effect_direction: 'positive' }] }]);
-    expect(params!['interventions']).toEqual([{ factor_key: 'ai_add_on_price', value: null }]);
+    // The link to the new factor is Olumi's: the user's words never name "AI add-on price" (U3 part 2, DL 5849023213 (2)).
+    expect(params!['interventions']).toEqual([{ factor_key: 'ai_add_on_price', value: null, source: 'cee_hypothesis' }]);
   });
 
   it('the size limit counts each new factor and what it affects — refused before anything is sent (#1974 review N2)', async () => {
