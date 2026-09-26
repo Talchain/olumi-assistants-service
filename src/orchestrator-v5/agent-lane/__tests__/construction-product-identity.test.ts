@@ -55,14 +55,14 @@ const BRIEF =
   'Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase ' +
   'the Pro plan price from £49 to £59 per month with the next AI feature release?';
 
-type Link = { from: string; to: string; direction: 'positive' | 'negative' | 'unknown'; provenance: string };
+type Link = { from: string; to: string; direction: 'positive' | 'negative' | 'unknown'; provenance: string; effect_amount?: number | null; effect_per_source_change?: number | null; effect_provenance?: string | null };
 type Identity = { outcome: string; operation: string; factors: string[]; provenance: string };
 
 const PRO_MRR_IDENTITY: Identity = { outcome: 'Pro MRR', operation: 'product', factors: ['Pro plan price', 'Pro subscribers'], provenance: 'inferred' };
 
 /** The captured pricing shape. `identities` is exactly what the drafter declares; nothing else differs. */
 function pricing(identities: Identity[] | undefined): Record<string, unknown> {
-  const link = (from: string, to: string, direction: Link['direction']): Link => ({ from, to, direction, provenance: 'inferred' });
+  const link = (from: string, to: string, direction: Link['direction']): Link => ({ from, to, direction, provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
   return {
     goal: {
       metric: 'MRR', operator: '>=', target_stated: true, value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
@@ -111,7 +111,7 @@ function pricing(identities: Identity[] | undefined): Record<string, unknown> {
  * sum of separate effects cannot see it. The expectation is flipped below (rule 5).
  */
 function sameSign(): Record<string, unknown> {
-  const link = (from: string, to: string, direction: Link['direction']): Link => ({ from, to, direction, provenance: 'inferred' });
+  const link = (from: string, to: string, direction: Link['direction']): Link => ({ from, to, direction, provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
   return {
     goal: {
       metric: 'MRR', operator: '>=', target_stated: true, value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
@@ -192,7 +192,7 @@ function small(s: {
     })),
     risks: (s.risks ?? []).map((label) => ({ label, provenance: 'inferred' })),
     outcomes: (s.outcomes ?? ['Pro MRR']).map((label) => ({ label, provenance: 'inferred' })),
-    links: s.links.map(([from, to, direction]) => ({ from, to, direction, provenance: 'inferred' })),
+    links: s.links.map(([from, to, direction]) => ({ from, to, direction, provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null })),
     identities: s.identities,
     unknowns: [],
   };
@@ -725,7 +725,7 @@ const CAPTURED_EDGES = [
 ];
 
 function served({ without }: { without?: [string, string] } = {}): Record<string, unknown> {
-  const link = (from: string, to: string, direction: Dir): Link => ({ from, to, direction, provenance: 'inferred' });
+  const link = (from: string, to: string, direction: Dir): Link => ({ from, to, direction, provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
   const iv = (factor_label: string, value: number, unit: string, provenance: string) => ({ factor_label, value, value_kind: 'absolute', unit, provenance });
   const factor = (label: string, role: string, known: boolean, baseline_value: number, unit: string, provenance: string, plausible_max: number) =>
     ({ label, role, baseline_known: known, baseline_value, unit, provenance, plausible_max });
@@ -851,8 +851,8 @@ describe('rule 6 (B3): the rules the verification found unpinned', () => {
     wire.factors.push({ label: 'Tickets per subscriber', role: 'observable', baseline_known: false, baseline_value: 2, unit: 'tickets', provenance: 'ai_proposed', plausible_max: 20 });
     wire.outcomes.push({ label: 'Support load', provenance: 'inferred' });
     wire.links.push(
-      { from: 'Pro subscribers', to: 'Support load', direction: 'positive', provenance: 'inferred' },
-      { from: 'Tickets per subscriber', to: 'Support load', direction: 'positive', provenance: 'inferred' },
+      { from: 'Pro subscribers', to: 'Support load', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Tickets per subscriber', to: 'Support load', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
     );
     const admitted = admit(wire as Record<string, unknown>);
     expect(admitted.nodes.find((n) => n.id === 'support_load')?.kind).toBe('outcome');
@@ -941,7 +941,7 @@ describe('N-c: whose reading it is, and whether it is the whole of the total', (
     };
     if (addend) {
       wire.factors.push({ label: 'Non-Pro MRR', role: 'observable', baseline_known: false, baseline_value: 5000, unit: 'GBP', provenance: 'ai_proposed', plausible_max: 50000 });
-      wire.links.push({ from: 'Non-Pro MRR', to: 'MRR', direction: 'positive', provenance: 'inferred' });
+      wire.links.push({ from: 'Non-Pro MRR', to: 'MRR', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
     }
     return wire as Record<string, unknown>;
   };
@@ -953,7 +953,7 @@ describe('N-c: whose reading it is, and whether it is the whole of the total', (
 
   it('RED (c): an addend DRIVEN by a factor (Pro subscribers -> Non-Pro MRR -> MRR) is still an addend — part of MRR', () => {
     const wire = onTotal(true) as { links: { from: string; to: string }[] };
-    wire.links.push({ from: 'Pro subscribers', to: 'Non-Pro MRR', direction: 'positive', provenance: 'inferred' } as never);
+    wire.links.push({ from: 'Pro subscribers', to: 'Non-Pro MRR', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null } as never);
     const admitted = admit(wire as unknown as Record<string, unknown>);
     expect(edgeKeys(admitted)).toContain('pro_subscribers>non_pro_mrr');
     const [line] = markLine(wire as unknown as Record<string, unknown>);

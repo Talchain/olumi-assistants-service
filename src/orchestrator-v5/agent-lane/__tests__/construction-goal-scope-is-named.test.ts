@@ -53,9 +53,9 @@ function pricing(metric: string, scope: Scope, unknowns: string[] = []): Record<
     ],
     risks: [], outcomes: [],
     links: [
-      { from: 'Pro plan price', to: 'Pro subscribers', direction: 'negative', provenance: 'inferred' },
-      { from: 'Pro plan price', to: metric, direction: 'positive', provenance: 'inferred' },
-      { from: 'Pro subscribers', to: metric, direction: 'positive', provenance: 'inferred' },
+      { from: 'Pro plan price', to: 'Pro subscribers', direction: 'negative', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Pro plan price', to: metric, direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Pro subscribers', to: metric, direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
     ],
     identities: [],
     unknowns,

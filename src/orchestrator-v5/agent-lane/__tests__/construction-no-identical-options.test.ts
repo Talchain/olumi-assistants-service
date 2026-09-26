@@ -101,10 +101,11 @@ function candidateFromServed(g: SGraph, opts: { olumi?: 'ai_proposed' | 'inferre
     links: [
       // A user restatement of an option -> factor connection (the edge carries `brief_extraction`).
       ...g.edges.filter((e) => byId.get(e.from)?.kind === 'option' && e.origin !== 'repair' && e.provenance?.source === 'brief_extraction')
-        .map((e) => ({ from: byId.get(e.from)!.label, to: byId.get(e.to)!.label, direction: 'positive', provenance: 'explicit' })),
+        .map((e) => ({ from: byId.get(e.from)!.label, to: byId.get(e.to)!.label, direction: 'positive', provenance: 'explicit', effect_amount: null, effect_per_source_change: null, effect_provenance: null })),
       ...g.edges.filter((e) => !['option', 'decision'].includes(byId.get(e.from)?.kind ?? ''))
         .map((e) => ({ from: byId.get(e.from)!.label, to: byId.get(e.to)!.label, direction: e.effect_direction ?? 'positive',
-          provenance: e.provenance?.source === 'brief_extraction' ? 'explicit' : 'inferred' })),
+          provenance: e.provenance?.source === 'brief_extraction' ? 'explicit' : 'inferred',
+          effect_amount: null, effect_per_source_change: null, effect_provenance: null })),
     ],
     identities: [],
     unknowns: opts.unknowns ?? [],
@@ -540,7 +541,7 @@ describe('ordering — the rule runs inside admission, so the size gate measures
       ...base,
       options: withTest ? base.options : base.options.filter((o) => o.label !== 'Test £59 with AI release'),
       factors: [...base.factors, ...extra.map((label) => ({ label, role: 'observable' as const, baseline_known: false, baseline_value: null, unit: null, provenance: 'ai_proposed', plausible_max: 100 }))],
-      links: [...base.links, ...extra.map((from) => ({ from, to: 'MRR', direction: 'positive', provenance: 'ai_proposed' }))],
+      links: [...base.links, ...extra.map((from) => ({ from, to: 'MRR', direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null }))],
     } as unknown as typeof base;
   };
 

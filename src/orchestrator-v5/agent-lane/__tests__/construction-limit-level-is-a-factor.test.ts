@@ -34,7 +34,7 @@ const BRIEF =
   'Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase the '
   + 'Pro plan price from £49 to £59 per month with the next AI feature release?';
 const CHURN_LIMIT = { metric: 'Monthly churn', operator: '<', value: 10, unit: 'percent per month', provenance: 'explicit' };
-const link = (from: string, to: string, direction: 'positive' | 'negative') => ({ from, to, direction, provenance: 'inferred' });
+const link = (from: string, to: string, direction: 'positive' | 'negative') => ({ from, to, direction, provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
 
 /** Served 20260926T032916Z-48389, by node id: `monthly_churn` is an OUTCOME the user's limit names. */
 function outcomeDraft(over: Record<string, unknown> = {}) {

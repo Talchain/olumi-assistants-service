@@ -43,7 +43,7 @@ function pricing(goal: Partial<CandidateModel['goal']> = {}): CandidateModel {
       { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 200 },
     ],
     risks: [], outcomes: [],
-    links: [{ from: 'Pro plan price', to: 'Monthly recurring revenue', direction: 'positive', provenance: 'inferred' }],
+    links: [{ from: 'Pro plan price', to: 'Monthly recurring revenue', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null }],
     identities: [],
   } as unknown as CandidateModel;
 }

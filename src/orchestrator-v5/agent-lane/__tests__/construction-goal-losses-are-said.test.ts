@@ -50,8 +50,8 @@ const GTM = (goal: Record<string, unknown>) => ({
   risks: [],
   outcomes: [],
   links: [
-    { from: 'Outbound reps', to: 'New ARR', direction: 'positive', provenance: 'inferred' },
-    { from: 'Self-serve conversion', to: 'New ARR', direction: 'positive', provenance: 'inferred' },
+    { from: 'Outbound reps', to: 'New ARR', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+    { from: 'Self-serve conversion', to: 'New ARR', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
   ],
   identities: [],
   unknowns: [],
