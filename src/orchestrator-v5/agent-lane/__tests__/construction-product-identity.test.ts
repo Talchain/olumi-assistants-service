@@ -582,6 +582,105 @@ describe('rule 5 (B1): two options that move the inputs differently cannot be ra
 });
 
 /**
+ * ⛔ RULE 7 — A ROUTE AROUND THE PRODUCT THAT OPPOSES THE ROUTE THROUGH IT (verification of 1047641f, findings 3
+ * and 4 — one class).
+ *  · (3) THE ANCESTOR ARM. A direct cause of the outcome that ALSO feeds a factor ("Annual discount" -> Pro
+ *    subscribers, and -> MRR directly) was not counted as an addend, so a lever on it was not around the product;
+ *    with MRR itself the product no path can avoid it. The discount was marked sign-stable, said to move MRR "only
+ *    one way … should hold" — false: it has a + route and a − route — and the Run named it leader.
+ *  · (4) AGAINST CARRYING ON AS NOW. An option whose effect on the goal runs through the product one way and around
+ *    it the other (a price rise: + through Pro MRR, − through refunds) cannot be signed even against an option that
+ *    moves nothing: R·ΔS against −ΔN depends on the level R sits at, which a sum of effects fixes at one value.
+ *    Routes that agree in direction keep the sign (the controls): the wider reading — any route around the product
+ *    withholds against the status quo — is AI Quality's to rule (D4), and is not taken here.
+ */
+describe('rule 7: a route around the product that opposes the route through it cannot be signed — even against carrying on as now', () => {
+  const MRR_PRODUCT: Identity = { outcome: 'MRR', operation: 'product', factors: ['Pro plan price', 'Pro subscribers'], provenance: 'inferred' };
+  /** The verifier's P3: the discount raises Pro subscribers, and reaches MRR directly (`direct`). */
+  const discountWire = (direct: Dir, withReferral: boolean) => small({
+    options: [CARRY_ON, { label: 'Offer annual discount', changes: ['Annual discount'] },
+      ...(withReferral ? [{ label: 'Referral scheme', changes: ['Referral volume'] }] : [])],
+    factors: [
+      { label: 'Annual discount', role: 'controllable' },
+      ...(withReferral ? [{ label: 'Referral volume', role: 'controllable' } as SmallFactor] : []),
+      { label: 'Pro plan price', baseline: 49 }, { label: 'Pro subscribers', baseline: 300 },
+    ],
+    links: [
+      ['Annual discount', 'Pro subscribers', 'positive'], ['Annual discount', 'MRR', direct],
+      ...(withReferral ? [['Referral volume', 'Pro subscribers', 'positive'] as [string, string, Dir]] : []),
+      ['Pro plan price', 'MRR', 'positive'], ['Pro subscribers', 'MRR', 'positive'],
+    ],
+    identities: [MRR_PRODUCT],
+    outcomes: [],
+  });
+  /** The verifier's P4 shape: a price rise lifts Pro MRR, and lifts refunds, which reach MRR `refunds`-ly. */
+  const refundsWire = (refunds: Dir) => small({
+    options: [CARRY_ON, { label: 'Raise Pro price', changes: ['Revenue per Pro user'] }],
+    factors: [{ label: 'Revenue per Pro user', role: 'controllable', baseline: 49 }, { label: 'Pro subscribers', baseline: 300 }, { label: 'Refunds', baseline: 200 }],
+    links: [['Revenue per Pro user', 'Refunds', 'positive'], ['Refunds', 'MRR', refunds], ...REVENUE_CHAIN],
+    identities: [REV_X_SUBS],
+  });
+  const DISCOUNT_BOTH_WAYS =
+    '"Offer annual discount" can push "MRR" one way through "Pro plan price" and "Pro subscribers" multiplied together and the ' +
+    'other way by another route, so whether it raises or lowers "MRR" depends on the levels those quantities are at — and ' +
+    'adding the effects up can get even that direction wrong.';
+  const RAISE_BOTH_WAYS =
+    '"Raise Pro price" can push "MRR" one way through "Revenue per Pro user" and "Pro subscribers" multiplied together and the ' +
+    'other way by another route, so whether it raises or lowers "MRR" depends on the levels those quantities are at — and ' +
+    'adding the effects up can get even that direction wrong.';
+  const summary = (wire: Record<string, unknown>) => marks(wire).map((m) => [m.verdict, m.options_not_sign_stable, m.comparisons_not_sign_stable]);
+
+  it('RED (3): a direct cause of MRR that also feeds a factor is an addend — the discount goes around the product, and is paired', () => {
+    const wire = discountWire('negative', true);
+    expect(marks(wire)).toEqual([{
+      outcome_id: 'mrr', operation: 'product', factor_ids: ['pro_plan_price', 'pro_subscribers'],
+      verdict: 'sign_not_provable',
+      options_not_sign_stable: ['offer_annual_discount', 'referral_scheme'],
+      comparisons_not_sign_stable: [['offer_annual_discount', 'referral_scheme']],
+    }]);
+    const [line] = markLine(wire);
+    expect(line?.startsWith('Olumi reads part of "MRR" as "Pro plan price" and "Pro subscribers" multiplied together, but')).toBe(true);
+    expect(line).toContain(DISCOUNT_BOTH_WAYS);
+    expect(line).not.toContain('should hold');
+  });
+
+  it('RED (3)+(4): against carrying on as now ALONE, the discount\'s + and − routes leave its sign unproven', () => {
+    const wire = discountWire('negative', false);
+    expect(marks(wire)).toEqual([{
+      outcome_id: 'mrr', operation: 'product', factor_ids: ['pro_plan_price', 'pro_subscribers'],
+      verdict: 'sign_not_provable', options_not_sign_stable: ['offer_annual_discount'], comparisons_not_sign_stable: [],
+    }]);
+    const [line] = markLine(wire);
+    expect(line).toContain(DISCOUNT_BOTH_WAYS);
+    expect(line).not.toContain('should hold');
+  });
+
+  it('RED (3) + CONTROL: reaching MRR directly the SAME way, the discount is PART of MRR (an addend) and keeps its sign against carrying on as now', () => {
+    const wire = discountWire('positive', false);
+    expect(summary(wire)).toEqual([['sign_stable_provisional', [], []]]);
+    const [line] = markLine(wire);
+    expect(line?.startsWith('Olumi reads part of "MRR" as "Pro plan price" and "Pro subscribers" multiplied together, and')).toBe(true);
+    expect(line).toContain('whether that option raises or lowers "MRR" should hold');
+  });
+
+  it('RED (4): a price rise lifting Pro MRR and, through refunds, lowering MRR cannot be signed against carrying on as now', () => {
+    const wire = refundsWire('negative');
+    expect(marks(wire)).toEqual([{
+      outcome_id: 'pro_mrr', operation: 'product', factor_ids: ['revenue_per_pro_user', 'pro_subscribers'],
+      verdict: 'sign_not_provable', options_not_sign_stable: ['raise_pro_price'], comparisons_not_sign_stable: [],
+    }]);
+    const [line] = markLine(wire);
+    expect(line).toContain(RAISE_BOTH_WAYS);
+    expect(line).not.toContain('should hold');
+  });
+
+  it('CONTROL (4): the same two routes agreeing in direction keep the sign — provisional, as before', () => {
+    expect(summary(refundsWire('positive'))).toEqual([['sign_stable_provisional', [], []]]);
+    expect(markLine(refundsWire('positive'))[0]).not.toContain('by another route');
+  });
+});
+
+/**
  * B3.1 — the SERVED two-lever option. READ-ONLY capture
  * output/rc-delivery-lead-20260925/scratchpad/acceptance-f-runs/f-20260925T231546Z/01-F1-brief.json
  * (sha256 573ada07a2a2853bb021db5f33236f60f815d7c7193bb89d1b860c056814b0d4), `draft_graph`: "Raise to £59"
@@ -659,12 +758,17 @@ describe('rule 6 (B3): the rules the verification found unpinned', () => {
   });
 
   it('RED B3.1: the served two-lever option (price + AI availability) is sign_not_provable, naming both priced options', () => {
+    // ⚠ RE-PINNED, NOT LOOSENED (verification of 1047641f, finding 3 — the ancestor arm). AI feature availability
+    // drives a factor (-> New Pro conversions -> Pro subscribers) AND links into Pro MRR directly: that direct link
+    // is a term the analysis ADDS to price × subscribers, so it is an addend, both priced options reach the goal
+    // around the product, and their comparison is now named too (it was already unprovable: each is `opposite`).
     expect(marks(served())).toEqual([{
       outcome_id: 'pro_mrr', operation: 'product', factor_ids: ['pro_plan_price', 'pro_subscribers'],
       verdict: 'sign_not_provable',
       options_not_sign_stable: ['raise_to_59', 'phased_54_price'],
-      comparisons_not_sign_stable: [],
+      comparisons_not_sign_stable: [['raise_to_59', 'phased_54_price']],
     }]);
+    expect(markLine(served())[0]?.startsWith('Olumi reads part of "Pro MRR" as "Pro plan price" and "Pro subscribers" multiplied together')).toBe(true);
   });
 
   it('RED B3.1b: the served shape with the price -> sensitivity link removed still has two separate levers — not provable', () => {

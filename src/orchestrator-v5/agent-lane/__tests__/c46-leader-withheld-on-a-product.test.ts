@@ -402,6 +402,104 @@ describe('(b)+(c) run_analysis withholds the leader PLoT ranks first when its si
   });
 });
 
+// ── (b) RULE 7: A ROUTE AROUND THE PRODUCT OPPOSING THE ROUTE THROUGH IT ─────────────────────────────
+/**
+ * Verification of 1047641f, findings 3 and 4 (`construction-product-identity.test.ts` rule 7), END TO END: the
+ * Run named "Offer annual discount" (+ through Pro subscribers, − straight into MRR) at 0.7, three-way AND against
+ * carrying on as now alone; and "Raise Pro to £59" (+ through Pro MRR, − through refunds) against keeping £49.
+ */
+describe('(b) rule 7 on the Run: a leader whose routes through and around the product disagree is withheld', () => {
+  const SQ_TODAY = (levels: [string, number, string][]) => ({ label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, changes: [],
+    interventions: levels.map(([factor_label, value, unit]) => ({ factor_label, value, value_kind: 'absolute', unit, provenance: 'ai_proposed' })) });
+  const at = (label: string, factor_label: string, value: number, unit: string) => ({ label, provenance: 'ai_proposed', is_status_quo: null, changes: [],
+    interventions: [{ factor_label, value, value_kind: 'absolute', unit, provenance: 'ai_proposed' }] });
+  function discount(direct: Dir, withReferral: boolean): Record<string, unknown> {
+    return {
+      goal, constraints: [],
+      options: [
+        SQ_TODAY([['Annual discount', 0, '%'], ...(withReferral ? [['Referral volume', 10, 'per month'] as [string, number, string]] : [])]),
+        at('Offer annual discount', 'Annual discount', 15, '%'),
+        ...(withReferral ? [at('Referral scheme', 'Referral volume', 20, 'per month')] : []),
+      ],
+      factors: [
+        { label: 'Annual discount', role: 'controllable', baseline_known: false, baseline_value: 0, unit: '%', provenance: 'ai_proposed', plausible_max: 50 },
+        ...(withReferral ? [{ label: 'Referral volume', role: 'controllable', baseline_known: false, baseline_value: 10, unit: 'per month', provenance: 'ai_proposed', plausible_max: 1000 }] : []),
+        { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 200 },
+        { label: 'Pro subscribers', role: 'observable', baseline_known: false, baseline_value: 300, unit: 'subscribers', provenance: 'ai_proposed', plausible_max: 2000 },
+      ],
+      risks: [], outcomes: [],
+      links: [
+        link('Annual discount', 'Pro subscribers', 'positive'), link('Annual discount', 'MRR', direct),
+        ...(withReferral ? [link('Referral volume', 'Pro subscribers', 'positive')] : []),
+        link('Pro plan price', 'MRR', 'positive'), link('Pro subscribers', 'MRR', 'positive'),
+      ],
+      identities: [MRR_IS_PRICE_TIMES_SUBSCRIBERS],
+      unknowns: [],
+    };
+  }
+  function refunds(direction: Dir): Record<string, unknown> {
+    return {
+      ...paul({ identities: [{ outcome: 'Pro MRR', operation: 'product', factors: ['Pro plan price', 'Pro subscribers'], provenance: 'inferred' }] }),
+      factors: [
+        { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 200 },
+        { label: 'Pro subscribers', role: 'observable', baseline_known: false, baseline_value: 300, unit: 'subscribers', provenance: 'ai_proposed', plausible_max: 2000 },
+        { label: 'Refunds', role: 'observable', baseline_known: false, baseline_value: 200, unit: 'GBP', provenance: 'ai_proposed', plausible_max: 5000 },
+      ],
+      outcomes: [{ label: 'Pro MRR', provenance: 'inferred' }],
+      links: [
+        link('Pro plan price', 'Pro MRR', 'positive'), link('Pro subscribers', 'Pro MRR', 'positive'), link('Pro MRR', 'MRR', 'positive'),
+        link('Pro plan price', 'Refunds', 'positive'), link('Refunds', 'MRR', direction),
+      ],
+    };
+  }
+  const DISCOUNT: Ranked = { id: 'offer_annual_discount', label: 'Offer annual discount', win: 0.7 };
+  const SQ: Ranked = { id: 'carry_on_as_now', label: 'Carry on as now', win: 0.3 };
+  const REFERRAL: Ranked = { id: 'referral_scheme', label: 'Referral scheme', win: 0.2 };
+
+  it('RED (P3): the discount leading against carrying on as now ALONE is withheld, against that option by id', async () => {
+    const { registered } = await build(discount('negative', false));
+    const fact = await runOn(registered, [DISCOUNT, SQ]);
+    expect(fact.result.leading_option_id).toBe('offer_annual_discount');
+    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'not_applicable' });
+    expect(fact.result.summary).not.toMatch(/Offer annual discount/);
+    expect(nonlinearIdentityLeaderWithhold(registered, 'offer_annual_discount')?.against).toEqual(['carry_on_as_now']);
+    expect(stateFor(fact, registered).state.leader_claim.withheld_reason).toBe(WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN);
+  });
+
+  it('RED (P3, three-way): the discount leading is withheld, and so is the referral scheme leading — they are paired', async () => {
+    const { registered } = await build(discount('negative', true));
+    const discountLeads = await runOn(registered, [DISCOUNT, SQ, REFERRAL]);
+    expect(discountLeads.result.constraint_verdict?.may_name_leading_option).toBe(false);
+    const referralLeads = await runOn(registered, [{ ...REFERRAL, win: 0.7 }, SQ, { ...DISCOUNT, win: 0.2 }]);
+    expect(referralLeads.result.leading_option_id).toBe('referral_scheme');
+    expect(referralLeads.result.constraint_verdict?.may_name_leading_option).toBe(false);
+    expect(nonlinearIdentityLeaderWithhold(registered, 'referral_scheme')?.against).toEqual(['offer_annual_discount']);
+  });
+
+  it('CONTROL (P3): the discount reaching MRR the SAME way on both routes keeps its leader against carrying on as now', async () => {
+    const { registered } = await build(discount('positive', false));
+    expect(nodeById(registered, 'mrr')).toHaveProperty('nonlinear_identity');
+    const fact = await runOn(registered, [DISCOUNT, SQ]);
+    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: true, constraint_verdict_state: 'not_applicable' });
+    expect(fact.result.summary).toMatch(/Offer annual discount/);
+  });
+
+  it('RED (P4): £59 lifting Pro MRR and, through refunds, lowering MRR is withheld against keeping £49', async () => {
+    const { registered } = await build(refunds('negative'));
+    const fact = await runOn(registered, [RAISE, KEEP]);
+    expect(fact.result.leading_option_id).toBe('raise_pro_to_59');
+    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: false, constraint_verdict_state: 'not_applicable' });
+    expect(nonlinearIdentityLeaderWithhold(registered, 'raise_pro_to_59')?.against).toEqual(['keep_pro_at_49']);
+  });
+
+  it('CONTROL (P4): refunds that RAISE MRR — both routes one way — keep £59 named', async () => {
+    const { registered } = await build(refunds('positive'));
+    const fact = await runOn(registered, [RAISE, KEEP]);
+    expect(fact.result.constraint_verdict).toEqual({ may_name_leading_option: true, constraint_verdict_state: 'not_applicable' });
+    expect(fact.result.summary).toMatch(/Raise Pro to £59/);
+  });
+});
+
 // ── (c) PRECEDENCE ─────────────────────────────────────────────────────────────────────────────────
 describe('(c) precedence: the limit keeps its code and card; the unrequested first pass keeps its code', () => {
   it('REQUIRED RED ROW: churn unchecked + product identity → BOTH the limit card AND the C46 reason reach the user', async () => {

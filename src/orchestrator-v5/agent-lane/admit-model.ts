@@ -200,7 +200,9 @@ export interface NonlinearIdentityMark {
   readonly verdict: NonlinearIdentityVerdict;
   /**
    * Every option the verdict rests on, by node id, in model order: one that can move the inputs
-   * apart on its own (against carrying on as now), or one in a comparison below. Empty when stable.
+   * apart on its own (against carrying on as now), one whose routes through and around the product
+   * move the goal in opposite directions (also against carrying on as now), or one in a comparison
+   * below. Empty when stable.
    */
   readonly options_not_sign_stable: readonly string[];
   /**
@@ -801,7 +803,11 @@ const quotedList = (items: readonly string[]): string => {
  *    non-negative quantities the product moves the same way — stable;
  *  · otherwise — opposite signs or a mixed input (said as "can push … in opposite directions"), or
  *    inputs moved one way through two or more separate levers whose relative size the structure
- *    does not state (said as that, item b) — NOT provable (conservative).
+ *    does not state (said as that, item b) — NOT provable (conservative);
+ *  · and, whatever the inputs do, an option that ALSO reaches the goal around the product (below) in
+ *    the OPPOSITE direction to its route through it — NOT provable, even against carrying on as now
+ *    (verification of 1047641f, findings 3 and 4; said as "can push … one way through … and the other
+ *    way by another route"). Routes around that agree in direction keep the sign.
  *
  * ⛔ THE COMPARISON ARM (independent verification of 6e33b95e, B1). Checking each option only
  * against the status quo let two stable options be ranked by a sum of effects that cannot rank
@@ -823,9 +829,9 @@ const quotedList = (items: readonly string[]): string => {
  *
  * WHOSE READING, AND OF WHAT (N-c). A declaration the brief states (`explicit`) is said as fact;
  * any other is "Olumi reads …". A declaration on a quantity that has an ADDEND — a direct cause
- * that is not a declared factor, reaches no declared factor, and is not the product's carrier (the
- * one cause every factor's route runs through) — is only PART of that quantity, and is said so. A
- * cause a factor drives is still an addend (item c).
+ * that is not a declared factor and is not the product's carrier (the one cause every factor's
+ * route runs through) — is only PART of that quantity, and is said so. A cause a factor drives is
+ * still an addend (item c), and so is a cause that drives a factor (finding 3 of 1047641f).
  */
 function markProductIdentities(
   declared: readonly CandidateIdentity[],
@@ -933,15 +939,19 @@ function markProductIdentities(
 
     /**
      * N-c, re-verification of d2362e9d (item c): an ADDEND is a direct cause of the outcome that is not
-     * a declared factor, feeds no declared factor, and is not the product's CARRIER (the one cause every
-     * factor's route to the outcome runs through: price, subscribers -> Pro MRR -> MRR). A cause a
-     * factor DRIVES is still an addend (Pro subscribers -> Non-Pro MRR -> MRR): the old descendant arm
-     * ("a factor reaches it") counted it as part of the product and said "the whole of MRR".
+     * a declared factor and is not the product's CARRIER (the one cause every factor's route to the
+     * outcome runs through: price, subscribers -> Pro MRR -> MRR). A cause a factor DRIVES is still an
+     * addend (Pro subscribers -> Non-Pro MRR -> MRR): the old descendant arm ("a factor reaches it")
+     * counted it as part of the product and said "the whole of MRR".
+     * ⛔ AND SO IS A CAUSE THAT DRIVES A FACTOR (verification of 1047641f, finding 3 — the ancestor arm):
+     * "Annual discount" -> Pro subscribers AND -> MRR directly. Its direct link is a term the analysis
+     * ADDS to the product, whatever else it feeds; excluding it left a lever on it neither an addend nor
+     * around the product, so with MRR itself the product its − route was invisible and the discount was
+     * said to move MRR "only one way".
      */
     const addends = [...new Set(edges.filter((e) => e.to === outcomeId).map((e) => e.from))].filter((p) => {
       const k = kindOf.get(p);
       if (k === 'decision' || k === 'option' || factorIds.includes(p)) return false;
-      if (factorIds.some((f) => pathSigns(p, f, outcomeId).size > 0)) return false;
       const carrier = factorIds.every((f) => pathSigns(f, outcomeId, p).size === 0);
       return !carrier;
     });
@@ -954,8 +964,32 @@ function markProductIdentities(
      */
     const around = (l: string): boolean =>
       l === goalId || pathSigns(l, goalId, outcomeId).size > 0 || addends.some((p) => l === p || pathSigns(l, p, outcomeId).size > 0);
+    /**
+     * ⛔ THE DIRECTION OF EACH ROUTE ON THE GOAL (verification of 1047641f, findings 3 and 4). THROUGH the product:
+     * the sign a lever moves an input with (on non-negative quantities the product moves with it), carried to the
+     * goal by the outcome's own route. AROUND it: the `around` routes above, signed — a path to the goal avoiding
+     * the outcome, or a route into an addend, that addend's link into the outcome, then the outcome's route. When
+     * one option's routes disagree, its gain is R·ΔS against −ΔN: which is larger depends on the level R sits at,
+     * so its sign is not proven even against an option that moves nothing (`opposed` below). Routes that agree
+     * keep it.
+     */
+    const times = (a: ReadonlySet<number>, b: ReadonlySet<number>): Set<number> => new Set([...a].flatMap((x) => [...b].map((y) => x * y)));
+    const toGoal = outcomeId === goalId ? new Set([1]) : pathSigns(outcomeId, goalId, outcomeId);
+    const linkSigns = (from: string, to: string): Set<number> =>
+      new Set(edges.filter((e) => e.from === from && e.to === to).map((e) => (e.effect_direction === 'negative' ? -1 : 1)));
+    const throughSigns = (l: string): Set<number> => times(new Set(factorIds.flatMap((f) => [...pathSigns(l, f, outcomeId)])), toGoal);
+    const aroundSigns = (l: string): Set<number> => new Set([
+      ...(l === goalId ? [1] : []),
+      ...pathSigns(l, goalId, outcomeId),
+      ...addends.flatMap((p) => [...times(times(pathSigns(l, p, outcomeId), linkSigns(p, outcomeId)), toGoal)]),
+    ]);
+    const opposed = (levers: readonly string[]): boolean => {
+      const through = new Set(levers.flatMap((l) => [...throughSigns(l)]));
+      const aside = new Set(levers.flatMap((l) => [...aroundSigns(l)]));
+      return [...through].some((t) => [...aside].some((a) => a !== t));
+    };
 
-    const selfNotStable: { id: string; how: 'opposite' | 'separate' }[] = [];
+    const selfNotStable: { id: string; how: 'opposite' | 'separate' | 'around' }[] = [];
     const moving: { id: string; signature: string; around: boolean; zero: boolean; bothWays: boolean }[] = [];
     let movedAny = false;
     for (const o of nodes) {
@@ -979,6 +1013,8 @@ function markProductIdentities(
         // levers: every input moves the same way, but by amounts the structure does not relate (b).
         if (!(reaching.length === 1 && signs.size === 1)) selfNotStable.push({ id: o.id, how: signs.size === 2 ? 'opposite' : 'separate' });
       }
+      // Findings 3 and 4: one route through the product and another around it, in opposite directions.
+      if (moved > 0 && goesAround && !selfNotStable.some((x) => x.id === o.id) && opposed(levers)) selfNotStable.push({ id: o.id, how: 'around' });
       const through = moved >= 2 ? `|${reaching.map((r) => r.lever).sort().join(',')}` : '';
       moving.push({
         id: o.id, signature: `${pattern.join(',')}${through}${goesAround ? '|around' : ''}`,
@@ -1017,6 +1053,12 @@ function markProductIdentities(
       `model does not state, so how much ${separate.length === 1 ? 'it changes' : 'each changes'} "${outcomeLabel}", and how ` +
       `${separate.length === 1 ? 'it compares' : 'they compare'} with the other options, ${RANKED_WRONG}`;
 
+    const routesDisagree = selfNotStable.filter((x) => x.how === 'around').map((x) => x.id);
+    const routesDisagreeSentence = routesDisagree.length === 0 ? '' :
+      ` ${labels(routesDisagree)} can push "${labelOf(goalId)}" one way through ${inputs} multiplied together and the other way by ` +
+      `another route, so whether ${routesDisagree.length === 1 ? 'it raises or lowers' : 'each raises or lowers'} "${labelOf(goalId)}" ` +
+      'depends on the levels those quantities are at — and adding the effects up can get even that direction wrong.';
+
     // (d) The comparisons, grouped by how the options move the inputs — never one list that reads as
     // "all of these differ" when two of them move the inputs the same way.
     const straight = moving.filter((m) => !m.around);
@@ -1042,7 +1084,8 @@ function markProductIdentities(
       });
       differSentence = ` ${clauses.join('; ')}, so which of those ways does better ${RANKED_WRONG}`;
     }
-    const aroundIds = moving.filter((m) => m.around && paired.has(m.id)).map((m) => m.id);
+    // An option already said to push the goal both ways is not said again as merely "other than through".
+    const aroundIds = moving.filter((m) => m.around && paired.has(m.id) && !routesDisagree.includes(m.id)).map((m) => m.id);
     const aroundSentence = aroundIds.length === 0 ? '' :
       ` ${labels(aroundIds)} ${aroundIds.length === 1 ? 'changes' : 'change'} "${labelOf(goalId)}" other than through ${inputs} ` +
       `multiplied together, so how ${aroundIds.length === 1 ? 'it compares' : 'they compare'} with the other options ${RANKED_WRONG}`;
@@ -1071,7 +1114,7 @@ function markProductIdentities(
       after: { verdict, options_not_sign_stable: notStable, comparisons_not_sign_stable: pairs },
       reason: verdict === 'sign_not_provable'
         ? `${head}, but Olumi's analysis cannot yet multiply quantities: it adds up each effect separately.` +
-          oppositeSentence + separateSentence + differSentence + aroundSentence +
+          oppositeSentence + separateSentence + routesDisagreeSentence + differSentence + aroundSentence +
           ` So this model cannot yet show which option does better on "${labelOf(goalId)}": treat its figures as a ` +
           'rough approximation, not a decision.'
         : `${head}, and Olumi's analysis adds effects up rather than multiplying them, so its figures for ` +
