@@ -327,7 +327,8 @@ describe('run admission — the specific refusals are NOT overwritten', () => {
  * says nothing about the UI rendering `assistant_text`, and nothing about the
  * `/graph-readiness` panel, which is a SECOND silent surface (`blocker_reason`
  * is emitted only inside `!safeToAnalyse`, and this graph reports
- * `safeToAnalyse: true`). That panel is deliberately untouched here.
+ * `safeToAnalyse: true`). That panel is closed separately, from the same
+ * `blockedNextStep`, in `src/cee/graph-readiness/__tests__/route-admission-refusal-names-its-reason.test.ts`.
  */
 
 describe('run admission — the refusal reaches the user through Run analysis', () => {

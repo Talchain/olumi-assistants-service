@@ -399,7 +399,16 @@ export function assessRouteAdmission(graph: unknown): RouteAdmissionVerdict {
     // than retrofitted the first time the service is down.
     may_run: admission.willProceed,
     ...(assessment.safeToAnalyse
-      ? {}
+      ? // ⭐ A REFUSAL IS NEVER SILENT HERE EITHER. Strict readiness passed, so
+        // the run was refused by the SECOND admission term alone (the comparison
+        // floor: nothing to compare). This branch used to emit nothing, so
+        // `may_run: false` arrived with no reason on every surface that reads
+        // this verdict (`/graph-readiness`, the panel, the Agent's view). The
+        // reason is the run path's OWN — `blockedNextStep`, the single
+        // derivation in `resolveRunAdmission` — never a second check.
+        (admission.willProceed || admission.blockedNextStep === null
+          ? {}
+          : { blocker_reason: admission.blockedNextStep })
       : {
           // ⭐ THE HEADLINE MAY NEVER QUOTE A DEMAND THE USER DOES NOT OWE.
           //
