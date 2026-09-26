@@ -451,6 +451,72 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect((newOption()?.interventions ?? {})['fac_price'], 'the user\'s £54').toEqual(expect.objectContaining({ raw_value: 54 }));
   }, 120_000);
 
+  it('[q1] RED (served F4, DL 5843303596; needs Canonical\'s builder): an option on a factor the model LACKS → ONE held change adds the factor AND the option → one click → both present, the factor reaching the goal', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    script = [
+      () => fnCall('propose_new_option', {
+        label: 'Keep £49 and add a paid AI add-on', acts_on: [{ factor_label: 'AI add-on price', direction: 'positive' }],
+        new_factors: [{ label: 'AI add-on price', affects: [{ label: 'Revenue', direction: 'positive' }] }], rationale: 'The user asked for it.',
+      }),
+      () => say('I would add the option and the add-on price factor it needs, in one change. Shall I add them?'),
+    ];
+    const t1 = await turn({ message: 'Add an option: keep £49 and add a paid AI add-on. The add-on raises revenue.' });
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    expect(inner.filter((b) => (b['chip'] as { intent?: string } | undefined)?.intent === 'add_option'), 'ONE typed change').toHaveLength(1);
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    const g = graphNow();
+    const opt = g.nodes.find((x) => x.kind === 'option' && x.label === 'Keep £49 and add a paid AI add-on');
+    const fac = g.nodes.find((x) => x.kind === 'factor' && x.label === 'AI add-on price');
+    expect(opt, JSON.stringify(g.nodes)).toBeDefined();
+    expect(fac, JSON.stringify(g.nodes)).toBeDefined();
+    expect(g.edges.some((e) => e.from === 'dec_x' && e.to === opt!.id), 'linked from the decision').toBe(true);
+    expect(g.edges.some((e) => e.from === opt!.id && e.to === fac!.id), 'the option acts on the new factor').toBe(true);
+    expect(g.edges.some((e) => e.from === fac!.id && e.to === 'goal_x'), 'the new factor reaches the goal').toBe(true);
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/Also added the factor "AI add-on price", which changes Revenue/);
+    expect(t2.assistant_text, 'the factor is never reported as an option').not.toMatch(/Added "AI add-on price"/);
+  }, 120_000);
+
+  it('[q2] RED (C2, #70 5844173937; needs Canonical\'s builder to stamp it): Olumi\'s own suggested level → ONE approval → COMMITTED as cee_hypothesis and said as Olumi\'s estimate — never stored as the user\'s', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    script = [
+      () => fnCall('propose_new_option', {
+        label: 'Test £54 at release',
+        // The estimate agrees with the option's own name (#1982 review N2: £64 under "Test £54" contradicted itself).
+        acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP', estimate: true, basis: 'the release price Olumi suggested, below the £59 option' } }],
+        rationale: 'Olumi suggested it; the user asked to add all of them.',
+      }),
+      () => say('I would add it at my own estimate of £54. Shall I add it?'),
+    ];
+    const t1 = await turn({ message: 'Add all of the options you suggested.' });
+    const approve = approveChipOf(t1)!;
+    expect(approve, JSON.stringify(t1._agent.tool_calls)).toBeDefined();
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    const iv = (newOption()?.interventions ?? {})['fac_price'] as { raw_value?: unknown; source?: unknown } | undefined;
+    expect(iv?.raw_value, JSON.stringify(iv)).toBe(54);
+    expect(iv?.source, 'Olumi\'s figure is never stored as the user\'s').toBe('cee_hypothesis');
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/Its level for Price is Olumi's estimate, for you to correct\./);
+  }, 120_000);
+
+  it('[q3] RED (#1982 review N2): Olumi\'s £64 under an option NAMED "Test £54" → left unset and the Agent is told why; one click adds the option with no level', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    let proposed = '';
+    script = [
+      () => fnCall('propose_new_option', {
+        label: 'Test £54 at release',
+        acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 64, unit: 'GBP', estimate: true, basis: 'a step above the £59 option' } }],
+        rationale: 'Olumi suggested it; the user asked to add all of them.',
+      }),
+      (body) => { proposed = JSON.stringify(body['input']); return say('I would add it; its price level is left for you to set. Shall I add it?'); },
+    ];
+    const t1 = await turn({ message: 'Add all of the options you suggested.' });
+    expect(proposed, proposed.slice(-1500)).toMatch(/does not match the figure in the option's own name/);
+    const approve = approveChipOf(t1)!;
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(newOption(), 'the option itself is added').toBeDefined();
+    expect((newOption()?.interventions ?? {})['fac_price']).toBeUndefined();
+  }, 120_000);
+
   it('[p3] RED: a factor with no range at all — the user\'s £54 cannot be stored on one, so the level is left UNSET (never a bare 54) and the Agent is told why', async () => {
     graphOf.set(SCENARIO, seedGraph(1, 1, 'none'));
     let proposed = '';
