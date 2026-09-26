@@ -22,7 +22,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilitiesWithLevelsPort as createAgentCapabilities } from './fixtures/levels-port.js';
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import { committedValueWrite } from './fixtures/served-value-write.js';
@@ -285,15 +286,15 @@ describe('propose_starting_point', () => {
     expect(byId.tech_leads.observed_state).toBeUndefined();
   });
 
-  it('a level that refuses is reported as PARTIAL, and never listed as a second thing to approve', async () => {
-    // Levels apply in id order (hire_lead, then hire_two); the SECOND refuses.
-    const { p, store, caps, id } = await proposed({ failOn: ['hire_two::team_size'] });
+  it('a level that refuses → NONE of the levels is recorded (one commit or none); the values stay saved, and it is never listed as a second thing to approve', async () => {
+    // Values commit on their own (DL #70 5847364946: the named values gap); the levels are ONE commit, and the SECOND refuses.
+    const { store, caps, id } = await proposed({ failOn: ['hire_two::team_size'] });
     const out = await caps.authoriseChange(ctx, { proposal_id: id });
     expect(out.ok).toBe(false);
     expect(out.refusal).toBe('partially_applied');
     const parts = out.parts as { part: string; ok: boolean; recorded_count: number }[];
-    expect(parts.map((x) => [x.part, x.ok, x.recorded_count])).toEqual([['values', true, 1], ['option_levels', false, 1]]);
-    expect(p.posted.filter((x) => x.kind === 'option_intervention_edit')).toHaveLength(2);
+    expect(parts.map((x) => [x.part, x.ok, x.recorded_count])).toEqual([['values', true, 1], ['option_levels', false, 0]]);
+    expect(String(out.detail)).toMatch(/no link or option level was written/);
     expect(store.outstanding(SCENARIO, USER).map((w) => w.proposal_id)).toEqual([id]);
   });
 
@@ -301,11 +302,11 @@ describe('propose_starting_point', () => {
    * ⛔ ROUND-2 REVIEW, BLOCKER 1, ON THE REAL CAPABILITY: the second level refuses, so 1 of the 2 levels WAS saved.
    * The user read "Not saved: 1 of 2 option levels." — the count of what landed, printed under "Not saved".
    */
-  it('RED (round-2 blocker 1): the second level refuses → the user reads that 1 of 2 levels WAS saved and 1 was not', async () => {
+  it('the second level refuses → the user reads that NONE of the 2 levels was saved — never "1 of 2" (one commit or none)', async () => {
     const { caps, id } = await proposed({ failOn: ['hire_two::team_size'] });
     const out = await caps.authoriseChange(ctx, { proposal_id: id });
     expect(narrateWriteOutcome('', [{ name: 'authorise_change' }], [out]).status)
-      .toBe('Saved 1 of 1 starting values. Saved 1 of 2 option levels; 1 was not saved.');
+      .toBe('Saved 1 of 1 starting values. Not saved: none of the 2 option levels.');
   });
 
   /**
@@ -327,15 +328,7 @@ describe('propose_starting_point', () => {
     expect(narrateWriteOutcome('', [{ name: 'authorise_change' }], [out]).status).toBe('Saved 1 of 1 starting values. Saved 2 of 2 option levels.');
   });
 
-  it('RED (round-2 blocker 2 class): the FIRST level held that way → counted, and NO further level is written on a revision the chain cannot prove', async () => {
-    const { p, store, caps, id } = await proposed({ levelHeldByAnotherWriter: 'hire_lead::team_size' });
-    const out = await caps.authoriseChange(ctx, { proposal_id: id });
-    const parts = out.parts as { part: string; ok: boolean; recorded_count: number }[];
-    expect(parts.map((x) => [x.part, x.ok, x.recorded_count]), JSON.stringify(out)).toEqual([['values', true, 1], ['option_levels', false, 1]]);
-    expect(out.refusal).toBe('partially_applied');
-    expect(p.posted.filter((x) => x.kind === 'option_intervention_edit').map((x) => x.target)).toEqual(['hire_lead::team_size']);
-    expect(store.outstanding(SCENARIO, USER).map((w) => w.proposal_id)).toEqual([id]);
-  });
+  // Retired with the whole-scope level port (Canonical #70 5847348206): every level is ONE commit, so no further level is ever written on a revision a chain cannot prove. The contract is `whole-request-is-one-commit.test.ts`.
 
   it('CONTROL (passes at base): the same no-revision answer with NO other writer and the level held → a verified no-op, recorded', async () => {
     const { store, caps, id } = await proposed({ levelNoOp: 'hire_two::team_size' });

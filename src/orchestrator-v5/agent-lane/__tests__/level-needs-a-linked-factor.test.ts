@@ -20,7 +20,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilitiesWithLevelsPort as createAgentCapabilities } from './fixtures/levels-port.js';
 import { ProposalStore } from '../proposal.js';
 
 const SCENARIO = '7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
@@ -135,7 +136,7 @@ describe('a level brings its link: ONE proposal, the link written before the lev
     expect(p.posted.filter((x) => x.kind === 'option_intervention_edit')).toEqual([]);
   });
 
-  it('RED (Canonical #2004 B1): the link LANDS, then its level is refused → the result says the model changed and names the link', async () => {
+  it('the level is refused → NOTHING of the link-and-level scope is reported written, and the refused pair is named (one commit or none)', async () => {
     const p = fakeProduct({ refuseLevels: true });
     const store = new ProposalStore();
     const caps = createAgentCapabilities(p.d, store);
@@ -144,16 +145,14 @@ describe('a level brings its link: ONE proposal, the link written before the lev
     ] });
     expect(r.ok, JSON.stringify(r)).toBe(true);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
-    expect(p.edges().some((e) => e.from === 'internal_trial' && e.to === 'team_size'), 'premise: the link landed').toBe(true);
     expect(out.ok).toBe(false);
-    expect(out.mutated, 'the model gained a link').toBe(true);
-    expect(out.refusal).toBe('partially_applied');
-    expect(out.revision_after).not.toBe(out.revision_before);
+    expect(out.mutated).toBe(false);
+    expect(out.refusal).toBe('not_applied');
     expect(out.parts).toEqual([
-      { part: 'links', ok: true, recorded_count: 1, requested_count: 1 },
+      { part: 'links', ok: false, recorded_count: 0, requested_count: 1 },
       { part: 'option_levels', ok: false, recorded_count: 0, requested_count: 1 },
     ]);
-    expect(String(out.detail)).toContain('Internal Lead Trial \u2192 Team size');
+    expect(String(out.detail)).toContain('the level for Internal Lead Trial \u2192 Team size was refused, so no link or option level was written');
   });
 
   it('RED: a starting point with a level on an unlinked factor lands EVERY level it carries, the link first', async () => {

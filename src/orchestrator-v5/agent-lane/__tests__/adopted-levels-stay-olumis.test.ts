@@ -23,7 +23,8 @@ import type { SessionStore, SessionTurnWrite } from '../../session/store.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { executeOptionInterventionEdit } from '../../system-events/option-intervention-edit.js';
-import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilitiesWithLevelsPort as createAgentCapabilities } from './fixtures/levels-port.js';
 import { ProposalStore } from '../proposal.js';
 import { AGENT_TOOLS, dispatchTool } from '../runtime/agent-tools.js';
 
