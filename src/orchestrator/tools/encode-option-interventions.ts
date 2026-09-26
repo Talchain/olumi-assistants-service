@@ -371,6 +371,8 @@ const VALUE_DERIVED_OR_OWNED_KEYS: ReadonlySet<string> = new Set([
   'value', 'source', 'target_match',
   'display_value', 'raw_value', 'value_type', 'encoding_map', 'value_confidence',
   'reasoning',
+  // The range the OLD figure was read against: it travels with `raw_value`, so a new number never inherits it.
+  'cap',
 ]);
 
 /**
@@ -425,6 +427,16 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
   };
   if (rec.unit !== undefined) iv.unit = rec.unit;
   if (rec.raw_value !== undefined) iv.raw_value = rec.raw_value;
+  /**
+   * ⭐ THE RANGE THE FIGURE WAS READ AGAINST, KEPT BESIDE IT (DL #70 5848777655; the lost £10). A user's "£10 per month" on
+   * a NEW factor is stored as 0.1 of a range of 100 that lives nowhere else — the factor declares none — and without it
+   * `value == raw_value / cap` cannot be re-checked on readback, nor a £0 level's range recovered at all (0 ÷ 0).
+   * Stored ONLY when it reproduces the stored level exactly, so a cell that holds `cap` always satisfies that identity.
+   * Hash-neutral: the analysis hash reads an intervention's `value`, `value_type` and `encoding_map` only.
+   */
+  if (rec.raw_value !== undefined && rec.cap !== undefined && rec.cap > 0 && Math.abs(rec.raw_value / rec.cap - value) <= 1e-9) {
+    iv.cap = rec.cap;
+  }
   // Carried only alongside a preserved non-user provenance: an estimate that
   // cannot say how confident it is, or why, is not reviewable after the turn
   // that produced it. `VALUE_DERIVED_OR_OWNED_KEYS` above drops the OLD entry's

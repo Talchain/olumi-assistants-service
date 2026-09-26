@@ -583,7 +583,8 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     optionId: option.id, optionLabel: option.label,
     factorId: factor.id, factorLabel: factor.label, value: input.modelValue,
   });
-  // The user's figure rides on the SAME cell write: the encoder carries `raw_value` / `unit` / `cap` onto the cell.
+  // The user's figure rides on the SAME cell write: the encoder carries `raw_value` / `unit` / `cap` onto the cell
+  // (`cap` only when it reproduces the level, which the check above has already required).
   const operation = figure === undefined ? built : { ...built, value: { ...(built.value as Record<string, unknown>),
     raw_value: figure.raw_value, cap: figure.cap, ...(figure.unit !== undefined ? { unit: figure.unit.trim() } : {}) } };
   if (input.source === undefined) return { kind: 'prepared', operation, ...withLink };
