@@ -13,6 +13,8 @@ import { CURRENCY_SYMBOL_TO_CODE } from '../../../utils/currency-alphabet.js';
 import { limitCardArm, type LimitCardArm } from '../../coaching/limit-unchecked-card.js';
 import { extractCompoundGoals, normaliseConstraintUnits, toGoalConstraints } from '../../../cee/compound-goal/extractor.js';
 import { GoalConstraintSchema } from '../../../schemas/assist.js';
+import { classifyValueSource, DECLARED_VALUE_SOURCE_STAMPS } from '../../../cee/graph-readiness/obligation-provenance.js';
+import { deriveConstraintVerdict, readRatifiedConstraints } from '../../../orchestrator/context/constraint-feasibility.js';
 const hash = '0123456789abcdef';
 const time = '2026-09-24T10:00:00.000Z';
 const state = {run_state: {kind: 'complete_current', computed_at: time}, leader_claim: {permitted: false, withheld_reason: 'constraint_verdict_withheld'}};
@@ -826,7 +828,7 @@ const estCase = (verdict: unknown, claim: Record<string, unknown> = {permitted:f
  const c=runTurnCase('paul','t1','auto_first_pass');
  const state={...(c.final.analysisState as Record<string, unknown>),leader_claim:claim};
  const {captured,final}=graph===PAUL_GRAPH?{captured:statelessCapture(c.captured),final:{...c.final,graph}}:rebind(c,graph);
- return runTurnCoaching(captured,{...final,analysisState:state,...(verdict===undefined?{}:{constraintVerdictState:verdict})});
+ return runTurnCoaching(captured,{...final,analysisState:state,...(verdict===undefined?{}:{constraintVerdictState:verdict as RunTurnCoachingFinal['constraintVerdictState']})});
 };
 const estCards = (out: {blocks: readonly {signal_id: string}[]}) => out.blocks.filter((b)=>b.signal_id.startsWith(EST_CARD));
 test('ESTIMATED LIMIT — a limit checked (evaluated_feasible) against Olumi\'s estimate of its level → ONE card naming that estimate, outranking the link card',()=>{
@@ -874,6 +876,109 @@ test('ESTIMATED LIMIT — the level must be Olumi\'s, from ONE limit node, on th
  const inState={...(c.final.analysisState as Record<string, unknown>),leader_claim:{permitted:false,withheld_reason:'unrequested_analysis_withheld'},constraint_verdict_state:'evaluated_feasible'};
  assert.equal(estCards(runTurnCoaching(statelessCapture(c.captured),{...c.final,graph:PAUL_GRAPH,analysisState:inState})).length,0);
 });
+// ── WHOSE FIGURE: the ONE value-source authority, not a literal (AI Quality 5844723106, #1983 domain look) ──
+// Paul's served churn level is the ADOPTED starting point: observed_state.source 'user_assumption', classed
+// `user_ratified` (obligation-provenance.ts). The card keyed on 'cee_inference' only, so it was silent on HIS journey.
+// Served shape per AI Quality (PLoT request n6sq-20260926T080013Z: raw 4, unit '%'); not re-read by R&C.
+const withChurnLevel = (source: unknown, raw = 4, unit = '%') => {
+ const x=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ const n=x.nodes.find((m: any)=>m.id==='monthly_churn');
+ n.observed_state={...n.observed_state,raw_value:raw,unit};
+ if (source===undefined) delete n.observed_state.source; else n.observed_state.source=source;
+ return x;
+};
+test('ESTIMATED LIMIT — RATIFIED: Paul\'s served churn level (user_assumption, the adopted starting point) → ONE card naming about that level, never "not a figure you gave"',()=>{
+ assert.equal(classifyValueSource('user_assumption'),'user_ratified','present control: the authority classes the served stamp as ratified');
+ const out=estCase('evaluated_feasible',undefined,withChurnLevel('user_assumption'));
+ const est=estCards(out) as any[];
+ assert.equal(est.length,1);
+ assert.equal(CoachingBlockSchema.safeParse(est[0]).success,true);
+ assert.match(est[0].signal_id,/^coach:limit_estimate:[0-9a-f]+:2026-09-25T17:27:54\.315Z:auto_first_pass:ratified$/);
+ assert.equal(est[0].body,'Your limit on “Monthly churn” was checked against about 4% today, a figure recorded as an assumption rather than a measurement. If you know the real figure, it is worth saying.');
+ assert.equal(est[0].action_prompt,'Olumi checked my limit on “Monthly churn” against about 4% today, a figure recorded as an assumption. Ask me what the real figure is and what it rests on. Don\'t change the model or re-run anything yet.');
+ assert.deepEqual(est[0].target_refs,[{kind:'factor',id:'monthly_churn',label:'Monthly churn'}]);
+ for (const t of [est[0].title,est[0].body,est[0].action_label,est[0].action_prompt]) {
+  assert.doesNotMatch(String(t),/not a figure you gave|Olumi's estimate|you said/i);
+  assert.doesNotMatch(String(t).split('4%').join(''),/\d/,'the only number said is the node\'s own level');
+ }
+});
+test('ESTIMATED LIMIT — whose figure comes from classifyValueSource for EVERY declared stamp: Olumi\'s → estimate words; ratified → ratified words; the user\'s own or unknown → no card',()=>{
+ const seen={olumi:0,ratified:0,silent:0};
+ for (const stamp of [...DECLARED_VALUE_SOURCE_STAMPS,'mystery_stamp',undefined]) {
+  const klass=classifyValueSource(stamp);
+  const est=estCards(estCase('evaluated_feasible',undefined,withChurnLevel(stamp))) as any[];
+  if (klass==='ai_drafted'||klass==='system_repaired') {
+   assert.equal(est.length,1,String(stamp)); seen.olumi++;
+   assert.equal(est[0].body,"Your limit on “Monthly churn” was checked against Olumi's estimate that it is about 4% today, not a figure you gave. If you know the real figure, it is worth saying.",String(stamp));
+   assert.doesNotMatch(est[0].signal_id,/:ratified$/,String(stamp));
+  } else if (klass==='user_ratified') {
+   assert.equal(est.length,1,String(stamp)); seen.ratified++;
+   assert.match(est[0].body,/, a figure recorded as an assumption rather than a measurement\./,String(stamp));
+   assert.match(est[0].signal_id,/:ratified$/,String(stamp));
+  } else {
+   assert.equal(est.length,0,String(stamp)); seen.silent++;
+  }
+ }
+ // Present controls: the sweep reached every arm, including the served stamps on both sides.
+ assert.ok(seen.olumi>=3 && seen.ratified>=2 && seen.silent>=5,JSON.stringify(seen));
+ for (const s of ['cee_inference','inferred','cee_repair']) assert.notEqual(classifyValueSource(s),'user_ratified',s);
+ for (const s of ['user_assumption','user_confirmed']) assert.equal(classifyValueSource(s),'user_ratified',s);
+});
+test('ESTIMATED LIMIT — one next action names ONE figure: an Olumi-estimate limit plus a ratified limit → no card',()=>{
+ const x=withChurnLevel('user_assumption') as Record<string, any>;
+ x.goal_constraints=[...x.goal_constraints,{...x.goal_constraints[0],constraint_id:'agent-lane:pro_subscribers:>=',node_id:'pro_subscribers',operator:'>='}];
+ x.nodes.find((n: any)=>n.id==='pro_subscribers').observed_state={source:'cee_inference',raw_value:250,unit:'subscribers',value:0.25};
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,x)).length,0);
+ // Control: the same graph with the second limit removed speaks (ratified).
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,withChurnLevel('user_assumption'))).length,1);
+});
+// ── "WAS CHECKED" ONLY WHEN THIS LIMIT WAS SCORED (#1983 review B1) ──
+// The state is derived by PRODUCTION deriveConstraintVerdict from the graph's own readRatifiedConstraints, over a
+// minimal doctrine-B envelope shaped as in constraint-verdict-out-of-scope.test.ts: `_meta.filtered_constraints` is
+// PLoT's FilteredConstraintRecord; per-option `constraint_probabilities` are keyed by constraint_id.
+const CHURN_ID = 'agent-lane:monthly_churn:<=';
+const PRICE_ID = 'agent-lane:pro_plan_price:<=';
+const PRICE_LIMIT = {constraint_id:PRICE_ID,node_id:'pro_plan_price',operator:'<=',value:59,label:'Pro plan price',unit:'GBP per month',provenance:'explicit'};
+const verdictFor = (graph: Record<string, unknown>, o: {filtered?: string[]; scored: Record<string, number>}) => deriveConstraintVerdict({
+ analysis_status:'completed',constraints_status:'computed',
+ option_comparison:[
+  {option_id:'raise_to_59_at_release',option_label:'Raise to £59',win_probability:0.6,constraint_probabilities:o.scored},
+  {option_id:'keep_49_price',option_label:'Keep £49',win_probability:0.4,constraint_probabilities:o.scored},
+ ],
+ ...(o.filtered?{_meta:{source_path:'v3',filtered_constraints:o.filtered.map((id)=>({constraint_id:id,node_id:'monthly_churn',reason:'temporal_deadline'}))}}:{}),
+ response_hash:'sha256:fixture',
+},readRatifiedConstraints(graph),'raise_to_59_at_release');
+const twoLimits = () => {
+ const x=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ x.goal_constraints=[{...x.goal_constraints[0],deadline_metadata:{source_quote:'within a year'}},PRICE_LIMIT];
+ return x;
+};
+test('ESTIMATED LIMIT — B1: churn FILTERED by the producer (deadline) while a second limit is scored → evaluated_feasible, and NO "was checked" card',()=>{
+ const g=twoLimits();
+ const v=verdictFor(g,{filtered:[CHURN_ID],scored:{[PRICE_ID]:0.95}});
+ // Present controls: production reaches the aggregate state the old card trusted, with churn out of scope.
+ assert.equal(v.state,'evaluated_feasible');
+ assert.deepEqual(v.outOfScopeConstraints.map((c)=>c.constraint_id),[CHURN_ID]);
+ assert.equal(estCards(estCase(v.state,undefined,g)).length,0);
+ // Its scored twin is ALSO silent: with two limits the aggregate state cannot say which one was scored.
+ const vt=verdictFor(g,{scored:{[CHURN_ID]:0.9,[PRICE_ID]:0.95}});
+ assert.equal(vt.state,'evaluated_feasible');
+ assert.deepEqual(vt.outOfScopeConstraints,[]);
+ assert.equal(estCards(estCase(vt.state,undefined,g)).length,0);
+});
+test('ESTIMATED LIMIT — B1: with ONE ratified limit the state proves THAT limit was scored: scored → the card; filtered → not_applicable, no card',()=>{
+ const vs=verdictFor(PAUL_GRAPH,{scored:{[CHURN_ID]:0.9}});
+ assert.equal(vs.state,'evaluated_feasible');
+ assert.equal(estCards(estCase(vs.state)).length,1);
+ const vf=verdictFor(PAUL_GRAPH,{filtered:[CHURN_ID],scored:{}});
+ assert.equal(vf.state,'not_applicable');
+ assert.equal(estCards(estCase(vf.state)).length,0);
+ // The ratified set is the verdict's own: a row with no constraint_id is skipped by BOTH, so the card still speaks.
+ const x=structuredClone(PAUL_GRAPH) as Record<string, any>;
+ x.goal_constraints=[...x.goal_constraints,{node_id:'pro_subscribers',operator:'>=',value:200,label:'Pro subscribers'}];
+ assert.equal(readRatifiedConstraints(x).length,1);
+ assert.equal(estCards(estCase('evaluated_feasible',undefined,x)).length,1);
+});
 // ── THE OPTION THAT COMES OUT AHEAD PROBABLY BREAKS A LIMIT (R&C PR-8; AI Quality 5842498806, predicate CEE #1960) ──
 // DERIVED (labelled): no served turn yet carries a SCORED limit (churn is held until after Paul's test, 5842549943) or
 // the carried risks (ask 5842617884). Paul's served first pass + his WHOLE served graph, with the leader claim permitted,
@@ -887,7 +992,7 @@ const riskCase = (o: {verdict?: unknown; claim?: unknown; risks?: unknown; graph
  const graph=o.graph??PAUL_GRAPH;
  const {captured,final}=graph===PAUL_GRAPH?{captured:statelessCapture(c.captured),final:{...c.final,graph}}:rebind(c,graph);
  return runTurnCoaching(captured,{...final,analysisState:state,
-  constraintVerdictState:'verdict' in o?o.verdict:'evaluated_feasible',leaderLimitRisks:'risks' in o?o.risks:[CHURN_RISK]});
+  constraintVerdictState:('verdict' in o?o.verdict:'evaluated_feasible') as RunTurnCoachingFinal['constraintVerdictState'],leaderLimitRisks:'risks' in o?o.risks:[CHURN_RISK]});
 };
 const riskCards = (out: {blocks: readonly {signal_id: string}[]}) => out.blocks.filter((b)=>b.signal_id.startsWith(RISK_CARD)) as any[];
 const NEVER_CLAIMS_FIT = /\bmeets?\b|\bkeeps?\b|\bwithin\b|\bunder\b/i;

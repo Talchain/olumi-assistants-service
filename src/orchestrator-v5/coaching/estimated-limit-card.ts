@@ -17,17 +17,37 @@
  *     `analysis_result` and carried as `final.constraintVerdictState` (Canonical
  *     5842397050). Absent/null → no card: "evaluated" is never derived from
  *     `withheld_reason`.
- *   · The HASH-BOUND graph (`coaching/bound-graph.ts`): exactly ONE limit node
- *     whose `observed_state.source === 'cee_inference'` and whose
- *     `raw_value` (schemas: "the same level as `value`, in the units `unit`
- *     names") is a finite number. Joined by `goal_constraints[].node_id`.
+ *   · The HASH-BOUND graph (`coaching/bound-graph.ts`) carries exactly ONE ratified
+ *     limit, read by the verdict's own reader (`readRatifiedConstraints`), and its
+ *     node's level is NOT the user's own figure and whose `raw_value` (schemas:
+ *     "the same level as `value`, in the units `unit` names") is a finite
+ *     number. Joined by `goal_constraints[].node_id`. Whose figure it is comes
+ *     from the ONE authority, `classifyValueSource(observed_state.source)`:
+ *       - `ai_drafted` / `system_repaired` → Olumi's estimate ("not a figure you gave");
+ *       - `user_ratified` → a figure the user adopted or confirmed, e.g. Paul's served
+ *         churn level `user_assumption` (AI Quality 5844723106). Never "not a figure
+ *         you gave": the user may have typed it into the starting point;
+ *       - `user_stated` / `unattributed` → no card.
  * The only number it says is that node's own level. Never "you said".
+ *
+ * ── WHY EXACTLY ONE LIMIT (#1983 review B1) ────────────────────────────────
+ * The carried verdict state is an AGGREGATE. `evaluated_feasible` proves that every
+ * limit left AFTER the producer's filter (`_meta.filtered_constraints`) and the
+ * unmeasured partition was scored — not that THIS limit was. With two limits, PLoT can
+ * drop one (any limit carrying `deadline_metadata`), score the other, and the state is
+ * still `evaluated_feasible`: a "was checked" card would then be false. With exactly one
+ * ratified limit, a filtered or unmeasured row leaves nothing to score, and
+ * `deriveConstraintVerdict` returns `not_applicable` (step 0), never
+ * `evaluated_feasible`. So on a one-limit graph the state proves that limit was scored.
+ * More than one limit → no card, until the scored ids are carried beside the state.
  *
  * Pure: no clock, no LLM, no telemetry.
  */
 import { CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/boundary';
 
+import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 import { deterministicBlockId } from '../compose/block-id.js';
+import { readRatifiedConstraints } from '../../orchestrator/context/constraint-feasibility.js';
 import { sayLevel } from './bound-graph.js';
 import {
   RUN_TURN_COACHING_CONTRACT,
@@ -42,8 +62,10 @@ import {
 export const ESTIMATED_LIMIT_SIGNAL_ID_PREFIX = 'coach:limit_estimate:';
 /** The one verdict this card speaks on (`ConstraintVerdictState`, constraint-feasibility.ts). */
 export const EVALUATED_FEASIBLE = 'evaluated_feasible';
-/** The observed-state source a level Olumi supplied carries. */
+/** The observed-state source a level Olumi supplied carries (one of the `ai_drafted` stamps). */
 export const OLUMI_ESTIMATE_SOURCE = 'cee_inference';
+/** The signal suffix of the ratified arm; Olumi's own estimate keeps the bare signal. */
+export const RATIFIED_SIGNAL_SUFFIX = ':ratified';
 
 /** Node kinds a target ref may name (`TargetRefKind`, schemas boundary). */
 const TARGETABLE_NODE_KINDS: readonly string[] = Object.freeze(['factor', 'goal', 'risk', 'outcome']);
@@ -55,38 +77,72 @@ export interface EstimatedLimit {
   readonly label: string;
   /** e.g. "7% per month" — the node's own level in its own units. */
   readonly level: string;
+  /** Whose figure the level is: Olumi's estimate, or one the user adopted/confirmed. */
+  readonly whose: 'olumi' | 'ratified';
 }
 
-function levelOf(observed: Record<string, unknown> | null): string | null {
-  if (observed === null || observed.source !== OLUMI_ESTIMATE_SOURCE) return null;
+/** Whose figure a level is, from the one value-source authority. The user's own, or unknown → null. */
+function whoseLevel(source: unknown): EstimatedLimit['whose'] | null {
+  const klass = classifyValueSource(source);
+  switch (klass) {
+    case 'ai_drafted':
+    case 'system_repaired':
+      return 'olumi';
+    case 'user_ratified':
+      return 'ratified';
+    case 'user_stated':
+    case 'unattributed':
+      return null;
+    default: {
+      const unreachable: never = klass;
+      return unreachable;
+    }
+  }
+}
+
+function levelOf(observed: Record<string, unknown> | null): { level: string; whose: EstimatedLimit['whose'] } | null {
+  if (observed === null) return null;
+  const whose = whoseLevel(observed.source);
+  if (whose === null) return null;
   const raw = observed.raw_value;
   const unit = typeof observed.unit === 'string' ? observed.unit.trim() : '';
   if (typeof raw !== 'number' || !Number.isFinite(raw) || unit === '') return null;
-  return sayLevel(raw, unit);
+  return { level: sayLevel(raw, unit), whose };
 }
 
 /**
- * THE one limit node whose level is Olumi's estimate, joined by identity; null when
- * there is no such node, or more than one (one next action names one figure).
+ * THE run's one ratified limit, joined by identity to its node, when that node's level is
+ * not the user's own figure; null when the graph carries no ratified limit or more than one
+ * (see WHY EXACTLY ONE LIMIT), or when the node is missing, duplicated, unlabelled or
+ * carries no usable level.
  */
 export function estimatedLimitIn(graph: Record<string, unknown> | null): EstimatedLimit | null {
-  if (graph === null || !Array.isArray(graph.goal_constraints) || !Array.isArray(graph.nodes)) return null;
-  const nodeIds = [...new Set(graph.goal_constraints.map((r) => readRecord(r)?.node_id).filter((id): id is string => typeof id === 'string' && id.length > 0))];
-  const found: EstimatedLimit[] = [];
-  for (const nodeId of nodeIds) {
-    const matches = graph.nodes.filter((n) => readRecord(n)?.id === nodeId);
-    if (matches.length !== 1) continue;
-    const node = readRecord(matches[0])!;
-    const level = levelOf(readRecord(node.observed_state));
-    const label = typeof node.label === 'string' ? node.label.trim() : '';
-    const kind = typeof node.kind === 'string' && TARGETABLE_NODE_KINDS.includes(node.kind) ? node.kind : null;
-    if (level !== null && label.length > 0) found.push({ nodeId, kind, label, level });
-  }
-  return found.length === 1 ? found[0]! : null;
+  if (graph === null || !Array.isArray(graph.nodes)) return null;
+  const ratified = readRatifiedConstraints(graph);
+  if (ratified.length !== 1) return null;
+  const nodeId = ratified[0]!.node_id;
+  if (nodeId === null || nodeId === undefined || nodeId.length === 0) return null;
+  const matches = graph.nodes.filter((n) => readRecord(n)?.id === nodeId);
+  if (matches.length !== 1) return null;
+  const node = readRecord(matches[0])!;
+  const level = levelOf(readRecord(node.observed_state));
+  const label = typeof node.label === 'string' ? node.label.trim() : '';
+  const kind = typeof node.kind === 'string' && TARGETABLE_NODE_KINDS.includes(node.kind) ? node.kind : null;
+  return level !== null && label.length > 0 ? { nodeId, kind, label, ...level } : null;
 }
 
 /** The card's words. */
 export function composeEstimatedLimitCard(limit: EstimatedLimit): FragileLinkChallengeCopy {
+  if (limit.whose === 'ratified') {
+    return {
+      title: 'Check the figure your limit was checked against',
+      body: `Your limit on “${limit.label}” was checked against about ${limit.level} today, a figure recorded `
+        + 'as an assumption rather than a measurement. If you know the real figure, it is worth saying.',
+      action_label: 'Give the real figure',
+      action_prompt: `Olumi checked my limit on “${limit.label}” against about ${limit.level} today, a figure recorded `
+        + 'as an assumption. Ask me what the real figure is and what it rests on. Don\'t change the model or re-run anything yet.',
+    };
+  }
   return {
     title: 'Check the figure your limit was checked against',
     body: `Your limit on “${limit.label}” was checked against Olumi's estimate that it is about ${limit.level} `
@@ -123,7 +179,8 @@ export function buildEstimatedLimitCard(
   if (!copyPasses(copy)) return { block: null, reason: 'copy_gate' };
   const trigger: RunTurnTrigger =
     input.trigger === 'auto_first_pass' || isAutomaticRun(readRecord(result.enrichment)) ? 'auto_first_pass' : 'explicit_run';
-  const signalId = `${ESTIMATED_LIMIT_SIGNAL_ID_PREFIX}${input.graphHash}:${input.computedAt}:${trigger}`;
+  const signalId = `${ESTIMATED_LIMIT_SIGNAL_ID_PREFIX}${input.graphHash}:${input.computedAt}:${trigger}`
+    + (limit.whose === 'ratified' ? RATIFIED_SIGNAL_SUFFIX : '');
   const parsed = CoachingBlockSchema.safeParse({
     type: 'coaching',
     coaching_kind: 'assumption_check',
