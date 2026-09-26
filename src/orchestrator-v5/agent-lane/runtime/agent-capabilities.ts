@@ -109,6 +109,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 import { planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
+import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
 import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
 import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
@@ -786,6 +787,13 @@ export function createAgentCapabilities(
      * store actually holds — never against a copy this process remembered. Absent ⇒ a held approval refuses.
      */
     readonly readPendingActions?: (scenarioId: string) => Promise<readonly PendingAction[]>;
+    /**
+     * ⭐ ONE approved batch of option levels — each with the option → factor link it needs — as ONE atomic commit
+     * (ChatGPT #70 5847200462): the product's own level writer, reached in-process (`commitOptionLevelsInProcess`).
+     * All or nothing; answers like a system-event write (409 · 422 with `refusal.index` · 500 · 200 with `graph_hash`
+     * and `model_version_receipt`). Absent ⇒ unavailable.
+     */
+    readonly commitOptionLevels?: (input: CommitOptionLevelsInput) => Promise<CommitOptionLevelsResult>;
   } = {},
 ): AgentCapabilities {
   const readOnly = mode === 'preview';

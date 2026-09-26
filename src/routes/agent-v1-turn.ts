@@ -45,6 +45,7 @@ import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import { commitOptionLevelsInProcess } from '../orchestrator-v5/system-events/dispatch.js';
 import { readinessSentence, readinessViewOf } from '../orchestrator-v5/agent-lane/readiness-view.js';
 import type { CallStructuredModel } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
@@ -1455,6 +1456,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(typeof store.readMostRecentPendingActions === 'function'
           ? { readPendingActions: (sid: string) => store.readMostRecentPendingActions!(sid) }
           : {}),
+        // ⭐ Whole-request atomicity (ChatGPT #70 5847200462): N option levels and their links as ONE commit, in-process.
+        commitOptionLevels: async (input) => {
+          writesDispatched += 1;
+          return commitOptionLevelsInProcess(input, String(req.id));
+        },
       },
     );
     // A session whose in-process history holds no user message (a restart, a
