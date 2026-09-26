@@ -51,6 +51,7 @@ import { deriveCompanionClaimSafe } from '../compose/phase3-blocks.js';
 import type { AnalysisFreshness } from '../context/freshness.js';
 import { AUTO_RUN_POST_DRAFT_INITIATOR, RUN_PROVENANCE_ENRICHMENT_KEY } from '../context/run-initiator.js';
 import { passesGroundedProseGates, selectGroundedCounterCase } from './grounded-counter-case.js';
+import type { EdgeAuthorship } from './edge-strength-authorship.js';
 
 /** How the run that completed this turn was started. Closed. */
 export const RUN_TURN_TRIGGERS = ['explicit_run', 'auto_first_pass'] as const;
@@ -181,6 +182,47 @@ export function composeFragileLinkChallenge(
     action_prompt:
       `Talk me through what would change if the link from ${fromLabel} to ${toLabel} were weaker or stronger. ` +
       'Don\'t change the model or re-run anything yet.',
+  };
+}
+
+/**
+ * The ASSUMED-LINK variant (#70, R&C PR-3): the same flag, on a link whose numbers are partly
+ * Olumi's starting assumptions (`coaching/edge-strength-authorship.ts`). DSK-P-003 presumes a
+ * belief someone holds; here nobody stated one, so the card says whose numbers they are and
+ * asks what the user believes (an elicitation), instead of pressure-testing "the estimate" as
+ * if it were theirs. The same claim limits as {@link fragileLinkBodyForms}: it names the FLAG
+ * only. "some of its numbers", never "its strength": a projected spread alone sets the flag.
+ */
+export function assumedLinkBodyForms(fromLabel: string, toLabel: string, firstPass: boolean): readonly string[] {
+  const flagged = `the robustness check flagged the link from ${fromLabel} to ${toLabel} as sensitive, `
+    + 'and some of its numbers are Olumi\'s starting assumptions';
+  const findings = [
+    `${flagged}, not figures you gave — worth saying what you believe about it.`,
+    `${flagged} — worth saying what you believe about it.`,
+  ];
+  return findings.map((finding) => (firstPass ? `${FIRST_PASS_PREFIX}${finding}` : `T${finding.slice(1)}`));
+}
+
+/** The assumed-link card's words; the first body and prompt forms within the contract's bounds. */
+export function composeAssumedLinkChallenge(
+  fromLabel: string,
+  toLabel: string,
+  firstPass: boolean,
+): FragileLinkChallengeCopy {
+  const { limits } = RUN_TURN_COACHING_CONTRACT;
+  const bodies = assumedLinkBodyForms(fromLabel, toLabel, firstPass);
+  const prompts = [
+    `Some of the numbers on the link from ${fromLabel} to ${toLabel} are Olumi's starting assumptions, and the `
+      + 'robustness check flagged the link as sensitive. Ask me what I believe about it and what that rests on. '
+      + 'Don\'t change the model or re-run anything yet.',
+    `Some numbers on the link from ${fromLabel} to ${toLabel} are Olumi's starting assumptions. Ask me what I `
+      + 'believe about it and what that rests on. Don\'t change the model or re-run anything yet.',
+  ];
+  return {
+    title: 'Check an assumption Olumi made',
+    body: bodies.find((b) => b.length <= limits.body_max) ?? bodies[bodies.length - 1]!,
+    action_label: 'Share my view of this link',
+    action_prompt: prompts.find((p) => p.length <= limits.action_prompt_max) ?? prompts[prompts.length - 1]!,
   };
 }
 
@@ -320,6 +362,11 @@ export interface FragileLinkChallengeInput {
   readonly freshness: AnalysisFreshness | null;
   /** The run's option labels from `analysis_ready.options` (see `optionLabelsOf`). */
   readonly optionLabels?: readonly string[];
+  /**
+   * Whose numbers are on a link, from the run's HASH-BOUND graph
+   * (`coaching/edge-strength-authorship.ts` `edgeAuthorshipIn`). Absent ⇒ `not_tested` ⇒ the neutral card.
+   */
+  readonly edgeAuthorship?: (fromId: string, toId: string) => EdgeAuthorship;
 }
 
 export type FragileLinkChallengeDecision =
@@ -344,7 +391,7 @@ export function buildFragileLinkChallenge(input: FragileLinkChallengeInput): Fra
       reason: decision.refusalReason === 'not_composable' ? 'copy_gate' : 'no_groundable_fragile_edge',
     };
   }
-  const { edgeIdentity, fromLabel, toLabel } = decision.grounded;
+  const { edgeIdentity, fromLabel, toLabel, fromId, toId } = decision.grounded;
 
   // (4) may this surface claim about `robustness` at all?
   // `deriveCompanionClaimSafe` reads ONLY `fact.result.enrichment`
@@ -367,14 +414,22 @@ export function buildFragileLinkChallenge(input: FragileLinkChallengeInput): Fra
   // block_id must never name two different bodies.
   const effectiveTrigger: RunTurnTrigger =
     input.trigger === 'auto_first_pass' || isAutomaticRun(enrichment) ? 'auto_first_pass' : 'explicit_run';
-  const copy = composeFragileLinkChallenge(fromLabel, toLabel, effectiveTrigger === 'auto_first_pass');
+  // On a link whose numbers are partly Olumi's, the assumed-link words ship when they fit
+  // the gates; otherwise the neutral words (never no card for want of the variant).
+  const assumedCopy = input.edgeAuthorship?.(fromId, toId) === 'olumi_assumed'
+    ? composeAssumedLinkChallenge(fromLabel, toLabel, effectiveTrigger === 'auto_first_pass')
+    : null;
+  const assumed = assumedCopy !== null && copyPasses(assumedCopy);
+  const copy = assumed ? assumedCopy : composeFragileLinkChallenge(fromLabel, toLabel, effectiveTrigger === 'auto_first_pass');
   if (!copyPasses(copy)) return { block: null, reason: 'copy_gate' };
 
-  const signalId = `${SIGNAL_ID_PREFIX}${edgeIdentity}:${input.graphHash}:${input.computedAt}:${effectiveTrigger}`;
+  // The variant is part of the identity: one block_id never names two bodies.
+  const signalId = `${SIGNAL_ID_PREFIX}${edgeIdentity}:${input.graphHash}:${input.computedAt}:${effectiveTrigger}${assumed ? ':assumed' : ''}`;
   // The badge reads the run's own close-call and clear-winner facts. It never
   // changes the identity: near_tie and the verdict are fixed for one
   // (graph_hash, computed_at) run, so one block_id still names one card.
-  const dsk = resolveFragileLinkDskProvenance(result, readRecord(enrichment?.robustness), effectiveTrigger);
+  // No badge on the assumed variant: DSK-P-003 presumes a belief someone holds.
+  const dsk = assumed ? null : resolveFragileLinkDskProvenance(result, readRecord(enrichment?.robustness), effectiveTrigger);
   const parsed = CoachingBlockSchema.safeParse({
     type: 'coaching',
     coaching_kind: RUN_TURN_COACHING_CONTRACT.block.coaching_kind,

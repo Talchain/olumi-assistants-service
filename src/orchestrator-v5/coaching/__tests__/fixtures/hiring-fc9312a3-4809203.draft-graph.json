@@ -1,0 +1,526 @@
+{
+  "_provenance": {
+    "source_file": "~/Documents/GitHub/output/paul-test-20260923/construction-witness/browser/bw-5f8d9095-4809203-hiring/turns.jsonl",
+    "source_sha256": "495da9d150578a5f8c030083dc3bab526d35b1d8ef053a7128aeae758de6d6d6",
+    "source_line_index": 0,
+    "served_build": "CEE 4809203 · UI 5f8d9095",
+    "graph_hash": "d06fe842d1150682",
+    "note": "The WHOLE draft graph of the automatic first pass (t1 in hiring-fc9312a3-4809203.run-turns.trimmed.json; t2 is the same revision), byte-identical; computeAnalysisAffectingGraphHash reproduces d06fe842d1150682 (verified 26 Sep)."
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "decision_development_velocity",
+        "kind": "decision",
+        "label": "Decision: Development velocity",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "development_velocity",
+        "kind": "goal",
+        "label": "Development velocity",
+        "provenance": "from_brief",
+        "goal_threshold_unit": "delivery throughput",
+        "goal_threshold_frame": "level"
+      },
+      {
+        "id": "hire_a_tech_lead",
+        "kind": "option",
+        "label": "Hire a Tech Lead",
+        "provenance": "from_brief",
+        "interventions": {
+          "technical_leadership_capacity": {
+            "value": 0.1,
+            "source": "cee_hypothesis"
+          }
+        }
+      },
+      {
+        "id": "hire_two_developers",
+        "kind": "option",
+        "label": "Hire Two Developers",
+        "provenance": "from_brief",
+        "interventions": {
+          "development_capacity": {
+            "value": 0.23333333333333334,
+            "source": "cee_hypothesis"
+          }
+        }
+      },
+      {
+        "id": "continue_as_now",
+        "kind": "option",
+        "label": "Continue as Now",
+        "provenance": "ai_inferred",
+        "is_baseline": true
+      },
+      {
+        "id": "hire_one_developer",
+        "kind": "option",
+        "label": "Hire One Developer",
+        "provenance": "ai_inferred",
+        "interventions": {
+          "development_capacity": {
+            "value": 0.2,
+            "source": "cee_hypothesis"
+          }
+        }
+      },
+      {
+        "id": "development_capacity",
+        "kind": "factor",
+        "label": "Development capacity",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "scale_frame": 30,
+        "observed_state": {
+          "unit": "FTE",
+          "value": 0.16666666666666666,
+          "source": "cee_inference",
+          "raw_value": 5,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "technical_leadership_capacity",
+        "kind": "factor",
+        "label": "Technical leadership capacity",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "scale_frame": 10,
+        "observed_state": {
+          "unit": "FTE",
+          "value": 0,
+          "source": "cee_inference",
+          "raw_value": 0,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "work_prioritization_quality",
+        "kind": "factor",
+        "label": "Work prioritization quality",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "score out of 100",
+          "value": 0.55,
+          "source": "cee_inference",
+          "raw_value": 55,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "engineering_coordination_load",
+        "kind": "factor",
+        "label": "Engineering coordination load",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "score out of 100",
+          "value": 0.35,
+          "source": "cee_inference",
+          "raw_value": 35,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "developer_ramp_up_effectiveness",
+        "kind": "factor",
+        "label": "Developer ramp-up effectiveness",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "score out of 100",
+          "value": 0.6,
+          "source": "cee_inference",
+          "raw_value": 60,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "rework_rate",
+        "kind": "factor",
+        "label": "Rework rate",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "percent",
+          "value": 0.2,
+          "source": "cee_inference",
+          "raw_value": 20,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "hiring_ramp_up_drag",
+        "kind": "risk",
+        "label": "Hiring ramp-up drag",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "leadership_bottleneck",
+        "kind": "risk",
+        "label": "Leadership bottleneck",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "quality_related_rework",
+        "kind": "risk",
+        "label": "Quality-related rework",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "effective_delivery_capacity",
+        "kind": "outcome",
+        "label": "Effective delivery capacity",
+        "provenance": "ai_inferred"
+      },
+      {
+        "id": "work_flow_efficiency",
+        "kind": "outcome",
+        "label": "Work flow efficiency",
+        "provenance": "ai_inferred"
+      }
+    ],
+    "edges": [
+      {
+        "to": "hire_a_tech_lead",
+        "from": "decision_development_velocity",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "hire_two_developers",
+        "from": "decision_development_velocity",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "continue_as_now",
+        "from": "decision_development_velocity",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "hire_one_developer",
+        "from": "decision_development_velocity",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "technical_leadership_capacity",
+        "from": "hire_a_tech_lead",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "development_capacity",
+        "from": "hire_two_developers",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "development_capacity",
+        "from": "hire_one_developer",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "technical_leadership_capacity",
+        "from": "continue_as_now",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "development_capacity",
+        "from": "continue_as_now",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "effective_delivery_capacity",
+        "from": "development_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "work_prioritization_quality",
+        "from": "technical_leadership_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "engineering_coordination_load",
+        "from": "technical_leadership_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "leadership_bottleneck",
+        "from": "technical_leadership_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "work_flow_efficiency",
+        "from": "work_prioritization_quality",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "work_flow_efficiency",
+        "from": "engineering_coordination_load",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "effective_delivery_capacity",
+        "from": "developer_ramp_up_effectiveness",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "hiring_ramp_up_drag",
+        "from": "development_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "developer_ramp_up_effectiveness",
+        "from": "hiring_ramp_up_drag",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "developer_ramp_up_effectiveness",
+        "from": "leadership_bottleneck",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "quality_related_rework",
+        "from": "rework_rate",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "effective_delivery_capacity",
+        "from": "quality_related_rework",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "rework_rate",
+        "from": "work_prioritization_quality",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "development_velocity",
+        "from": "effective_delivery_capacity",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "development_velocity",
+        "from": "work_flow_efficiency",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      }
+    ],
+    "node_count": 17,
+    "edge_count": 24
+  }
+}
