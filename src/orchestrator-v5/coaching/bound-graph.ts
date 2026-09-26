@@ -130,3 +130,35 @@ export function limitNodeLabels(graph: Record<string, unknown>): readonly NamedL
   }
   return new Set(limits.map((l) => l.label)).size === limits.length ? limits : null;
 }
+
+/**
+ * THE LIMITS NAMED BY THESE ROW IDS, joined by identity: each `constraint_id` → its ONE `goal_constraints` row →
+ * that row's `node_id` → the node's `label`, with the user's own figure ({@link statedThreshold}) only for a node
+ * carrying ONE row (the same rule as {@link limitNodeLabels}). In the ids' order, one per distinct node.
+ * Null when any id matches no row or more than one, a row's node is missing, duplicated or unlabelled, two limits
+ * share a label, or they sit on more than {@link MAX_NAMED_LIMITS} nodes: the caller then names no limit.
+ */
+export function limitsNamedByIds(graph: Record<string, unknown>, constraintIds: readonly string[]): readonly NamedLimit[] | null {
+  const rows = graph.goal_constraints;
+  const nodes = graph.nodes;
+  if (constraintIds.length === 0 || !Array.isArray(rows) || !Array.isArray(nodes)) return null;
+  const nodeIds: string[] = [];
+  for (const id of constraintIds) {
+    const matches = rows.filter((r) => readRecord(r)?.constraint_id === id);
+    if (matches.length !== 1) return null;
+    const nodeId = readRecord(matches[0])?.node_id;
+    if (typeof nodeId !== 'string' || nodeId.length === 0) return null;
+    if (!nodeIds.includes(nodeId)) nodeIds.push(nodeId);
+  }
+  if (nodeIds.length > MAX_NAMED_LIMITS) return null;
+  const limits: NamedLimit[] = [];
+  for (const nodeId of nodeIds) {
+    const matches = nodes.filter((n) => readRecord(n)?.id === nodeId);
+    if (matches.length !== 1) return null;
+    const label = readRecord(matches[0])?.label;
+    if (typeof label !== 'string' || label.trim().length === 0) return null;
+    const nodeRows = rows.filter((r) => readRecord(r)?.node_id === nodeId);
+    limits.push({ label: label.trim(), stated: nodeRows.length === 1 ? statedThreshold(readRecord(nodeRows[0])!) : null });
+  }
+  return new Set(limits.map((l) => l.label)).size === limits.length ? limits : null;
+}

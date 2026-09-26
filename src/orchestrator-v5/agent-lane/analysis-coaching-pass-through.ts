@@ -27,6 +27,7 @@ import { buildLimitUncheckedCard, leaderWithheldForALimit } from '../coaching/li
 import { graphBoundToHash, limitNodeLabels } from '../coaching/bound-graph.js';
 import { buildNearTieCard } from '../coaching/near-tie-card.js';
 import { buildEstimatedLimitCard } from '../coaching/estimated-limit-card.js';
+import { buildLeaderLimitRiskCard } from '../coaching/leader-limit-risk-card.js';
 import { edgeAuthorshipIn } from '../coaching/edge-strength-authorship.js';
 import { WITHHELD_NEAR_TIE } from '../compose/analysis-state-v1.js';
 import { summaryAsksUserToRepairALimit } from '../coaching/constraint-gap-disclosure.js';
@@ -58,6 +59,13 @@ export interface RunTurnCoachingFinal {
    * is. `null`/absent = not recorded. Never derived here from `withheld_reason`.
    */
   constraintVerdictState?: unknown;
+  /**
+   * The `LeaderLimitRisk[]` that `deriveLeaderLimitRisks` (constraint-feasibility.ts, #1960) returned for the SAME
+   * fact, computed once where the full PLoT envelope exists and carried beside the verdict state (contract ask
+   * #70 5842617884). The readback's `analysis_result` is the transport block, which has no `constraint_results`, so
+   * the predicate cannot be run on it here. Absent → the leader-limit-risk leg is inert.
+   */
+  leaderLimitRisks?: unknown;
 }
 
 export interface RunTurnCoachingResult {
@@ -260,7 +268,13 @@ export function runTurnCoaching(
     if (limit.block === null) return { blocks: upstream, eligibility: { eligible: false, reason: limit.reason } };
     return { blocks: dedupeByBlockId([...upstream, limit.block]), eligibility: { eligible: true } };
   }
-  // (2c') A limit the run DID check, but only against Olumi's own estimate of its level (AI Quality
+  // (2c') The option the run may name is more likely than not to BREAK a limit it scored (AI Quality claim
+  // permission 5842498806): the leader may be named only if the card names the limit and says so. It outranks
+  // every other card, including the estimate card below, whose figure the risk may rest on.
+  const risk = buildLeaderLimitRiskCard(input, final.constraintVerdictState, record(final.analysisState)?.leader_claim,
+    final.leaderLimitRisks, boundGraph);
+  if (risk.block !== null) return { blocks: dedupeByBlockId([...upstream, risk.block]), eligibility: { eligible: true } };
+  // (2c'') A limit the run DID check, but only against Olumi's own estimate of its level (AI Quality
   // 5842174563): the verdict rests on an assumption the user never saw named, so it outranks a link card.
   // Reads the READBACK's typed verdict state (`analysis_constraint_verdict_state` on the graph read, carried as
   // `final.constraintVerdictState`, Canonical 5842397050); absent → this leg is inert.
