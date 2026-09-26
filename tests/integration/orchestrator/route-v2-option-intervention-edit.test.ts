@@ -83,6 +83,8 @@ function buildPersistedGraph() {
 }
 
 let persisted: unknown = buildPersistedGraph();
+/** When set, the store's atomic append reports this version receipt (as `append_turn_atomic_v5` does). */
+let receiptFor: ((write: Record<string, unknown>) => Record<string, unknown>) | undefined;
 const rows = new Map<string, { id: string; write: Record<string, unknown> }>();
 
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
@@ -118,7 +120,7 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
       const id = `row-${rows.size + 1}`;
       rows.set(key, { id, write: JSON.parse(JSON.stringify(write)) });
       if (write.graph !== undefined) persisted = write.graph;
-      return { id };
+      return { id, ...(receiptFor !== undefined ? { modelVersionReceipt: receiptFor(write) } : {}) };
     },
     getScenarioOwner: async () => null,
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
@@ -366,6 +368,26 @@ describe('the Agent\'s in-process batch door — ONE user operation → ONE atom
     expect(r.status, JSON.stringify(r)).toBe('committed');
     expect(graphNow().nodes.find(n => n.id === 'option')?.interventions?.new_factor?.source).toBe('cee_hypothesis');
     expect(graphNow().edges.find(e => e.from === 'option' && e.to === 'new_factor')?.provenance?.source).toBe('cee_hypothesis');
+  });
+
+  it('ONE receipt: a committed batch hands back the commit\'s OWN version receipt, bound to this turn (Canvas N, #2007)', async () => {
+    receiptFor = (write) => ({
+      mutation_id: '33333333-3333-4333-8333-333333333333', version_id: '44444444-4444-4444-8444-444444444444', version_number: 7,
+      graph_identity_hash: 'a'.repeat(64), analysis_affecting_hash: 'b'.repeat(64), hash_algorithm: 'sha256',
+      identity_projection_version: 'v1', identity_normaliser_version: 'v1', graph_schema_version: 'graph.v3',
+      actor_kind: 'system', authored_by: null, creation_kind: 'committed_mutation', source_version_id: null,
+      parent_version_id: null, root_version_id: null, undo_version_id: null, event_id: 'evt-batch',
+      graph: write.graph, source_turn_id: write.turn_id,
+    });
+    try {
+      const r = await call(TWO, NEW_LINK);
+      expect(r, JSON.stringify(r)).toMatchObject({ status: 'committed', already_applied: false, receipt: {
+        version: 7, version_id: '44444444-4444-4444-8444-444444444444', mutation_id: '33333333-3333-4333-8333-333333333333',
+        source_turn_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' } });
+      expect(rows.size, 'ONE commit carries it').toBe(1);
+    } finally {
+      receiptFor = undefined;
+    }
   });
 
   it('a stale base → stale, nothing written', async () => {
