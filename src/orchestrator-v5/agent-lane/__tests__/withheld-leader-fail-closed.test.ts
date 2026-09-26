@@ -140,9 +140,49 @@ describe('the no-leader sentence', () => {
 
   it('C46 (H7): a product the analysis adds up is said as that — never "not recorded", never "run it again"', () => {
     expect(agentNoLeaderSentence('nonlinear_identity_sign_unproven', { status: 'ready' })).toBe(
-      'No single option can be put forward yet, because your goal depends on quantities that multiply together and this model ' +
-      'adds their effects up rather than multiplying them; running the analysis again will not change that.',
+      'No single option can be put forward yet, because Olumi reads your goal as depending on quantities that multiply ' +
+      'together, and this model adds their effects up rather than multiplying them; running the analysis again will not change that.',
     );
+  });
+
+  /**
+   * ⛔ C46 N-c — WHOSE READING IT IS (`admit-model.ts` `productIdentityClause`: the brief's own words are said as
+   * fact, anything else as Olumi's reading). This sentence is a static map with no graph, so it cannot see
+   * `stated_in_brief`; it must therefore never say the product as a fact about the user's goal. Driven through the
+   * real wire gate on a graph whose ONE carrier is Olumi's reading (`stated_in_brief: false`).
+   */
+  it('C46 (H7, N-c): on a product Olumi inferred, the closing sentence says it as Olumi’s reading — never as the user’s goal', () => {
+    const carrierOn = (stated: boolean) => ({
+      nodes: [
+        { id: 'mrr', kind: 'goal', label: 'MRR', nonlinear_identity: { operation: 'product', factor_ids: ['price', 'subs'], stated_in_brief: stated } },
+        { id: 'price', kind: 'factor', label: 'Pro plan price' },
+        { id: 'subs', kind: 'factor', label: 'Pro subscribers' },
+        { id: 'keep', kind: 'option', label: 'Keep Pro at £49' },
+        { id: 'raise', kind: 'option', label: 'Raise Pro to £59 at release' },
+      ],
+      edges: [],
+    });
+    const analysisReady = { status: 'ready' };
+    const closingOn = (stated: boolean): string => {
+      const out = enforceAgentLaneLeaderClaimsAtWire(
+        {
+          assistant_text: `${RANKING[8]} ${NON_RANKING[0]}`, blocks: [], suggested_actions: [],
+          analysis_state: { leader_claim: { permitted: false, withheld_reason: 'nonlinear_identity_sign_unproven' } },
+        } as unknown as OlumiResponse,
+        {
+          requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false,
+          leaderClaimWithheldReason: 'nonlinear_identity_sign_unproven', graph: carrierOn(stated), analysisReady,
+        },
+      );
+      expect(out.response.assistant_text.startsWith(`${NON_RANKING[0]}\n\n`), 'the ranking sentence went, the rest stayed').toBe(true);
+      return out.response.assistant_text.slice(`${NON_RANKING[0]}\n\n`.length);
+    };
+    const inferred = closingOn(false);
+    expect(inferred).toBe(agentNoLeaderSentence('nonlinear_identity_sign_unproven', analysisReady));
+    expect(inferred, 'the product is never said as a fact about the user’s goal').not.toMatch(/\byour goal (?:depends on|is)\b/i);
+    expect(inferred).toContain('Olumi reads your goal as depending on quantities that multiply together');
+    // The static map cannot see provenance, so a product the user STATED gets the same, never-over-claiming words.
+    expect(closingOn(true)).toBe(inferred);
   });
 
   it('says the reason is not recorded rather than guessing one', () => {
