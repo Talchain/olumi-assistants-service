@@ -30,7 +30,8 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../../src/config/graphCaps.
 describe('VIOLATION_MESSAGES — user-facing language (Fix 2A)', () => {
   it('NODE_LIMIT_EXCEEDED uses plain user-facing language with no jargon', () => {
     expect(VIOLATION_MESSAGES.NODE_LIMIT_EXCEEDED).toBe(
-      `Olumi can analyse models of up to ${GRAPH_MAX_NODES} nodes. This one goes past that — remove a node to make room.`,
+      // 26 Sep: "nodes" is graph vocabulary the UI's jargon guard refuses — see graph-structure-validator.copy.test.ts.
+      `Olumi can analyse models of up to ${GRAPH_MAX_NODES} parts. This one goes past that — remove one to make room.`,
     );
     expect(VIOLATION_MESSAGES.NODE_LIMIT_EXCEEDED).not.toMatch(/\d+-node limit/);
     expect(VIOLATION_MESSAGES.NODE_LIMIT_EXCEEDED).not.toContain('MAX_NODES');
