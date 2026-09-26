@@ -52,9 +52,10 @@ function product(opts: { refuseLevelOf?: string; trialLinked?: boolean; claimsWi
   };
   const commitOptionLevels = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsOutcome> => {
     calls.push(input);
+    // The writer's contract (Canonical #70 5847670924): CAS FIRST, replay second — a retry on the approved base is stale.
+    if (input.base_graph_hash !== `h${rev}`) return { status: 'stale' };
     const seen = done.get(input.turn_id);
     if (seen !== undefined) return seen.status === 'committed' ? { ...seen, already_applied: true } : seen;
-    if (input.base_graph_hash !== `h${rev}`) return { status: 'stale' };
     const nextEdges = [...edges, ...input.links.map((k) => edge(k.option_id, k.factor_id))];
     for (const l of input.levels) {
       if (opts.refuseLevelOf === l.option_id || !nextEdges.some((e) => e.from === l.option_id && e.to === l.factor_id)) {
@@ -164,5 +165,7 @@ describe('the approved scope commits WHOLE or NOT AT ALL, as ONE commit (A compl
     await caps.authoriseChange(ctx, { proposal_id: String(r.proposal_id) });
     expect(p.commits).toHaveLength(n);
     expect(p.state()).toEqual(after);
+    // The Agent's own store answers the retry (already applied): the writer is never asked twice.
+    expect(p.calls).toHaveLength(1);
   });
 });
