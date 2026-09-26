@@ -667,6 +667,19 @@ describe('COMBINED (#1891 × #1967): an oversized draft with Olumi\'s duplicate 
     expect(said(out)).toBe(1);
   });
 
+  it('RED (row 2d, the retry side): WITHIN the limit, a retry that levels the user\'s gap and copies the duplicate as drafted covers strictly more — adopted', async () => {
+    // Coverage is the only reason for this retry, so #1891 adopts it only if it covers strictly MORE. The duplicate the
+    // retry copies is withheld by the RETRY's admission too, so its pairs are no gap there either: 0 < 2. Counted on the
+    // retry alone, 2 < 2 fails and the user's option loses the level the retry gave it.
+    const { out, graph, reqs } = await construct(padded(0, true, { servedGaps: true }), padded(0, true));
+    expect(reqs).toHaveLength(2);
+    expect([out.ok, out.size_retried]).toEqual([true, false]);
+    expect(issues(reqs[1]!.input)).toEqual([USER_GAP, BASELINE_GAP]);
+    expect(Object.keys(graph!.nodes.find((n) => n.id === '59_with_ai_release')!.interventions ?? {}).sort()).toEqual(['ai_feature_availability', 'pro_plan_price']);
+    expect(graph!.nodes.some((n) => n.id === TEST_ID)).toBe(false);
+    expect(said(out)).toBe(1);
+  });
+
   it('CONTROL (row 2c): a retry that takes the user\'s option\'s action away is refused — the oversized first draft is refused out loud', async () => {
     const lossy = padded(0, false);
     const o = lossy.options.find((x) => x.label === '£59 with AI release')!;
