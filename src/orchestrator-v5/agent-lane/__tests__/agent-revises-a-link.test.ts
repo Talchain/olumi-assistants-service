@@ -20,9 +20,15 @@ import { describe, it, expect } from 'vitest';
 import { OrchestratorTurnPayloadSchema } from '@talchain/schemas/boundary';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { bandTheUserWrote, userWordsOf } from '../stated-by-user.js';
+import { readFileSync } from 'node:fs';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440077';
-const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r' };
+// The user's own words, verbatim from served (F) row F8 — the band is recorded as theirs only when they named it.
+const F8 = 'I am confident about one link: Pro plan price \u2192 MRR. Its effect is strong. Please record that link as strong, as my own estimate.';
+const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_text: F8, user_turn_text: F8 };
+const WEAK = 'Price barely affects MRR, and it pushes the other way.';
+const ctxWeak = { ...ctx, user_text: WEAK, user_turn_text: WEAK };
 
 type Edge = { from: string; to: string; strength: { mean: number; std: number }; exists_probability: number; effect_direction: 'positive' | 'negative'; provenance?: { source: string }; defaulted?: boolean };
 const graphWith = (mean: number, dir: 'positive' | 'negative' = 'positive') => ({
@@ -95,7 +101,7 @@ describe('the Agent records a link\'s strength as the user\'s own, through the p
   it('a stated reversal of direction is carried as the user said it; a negative link keeps its sign on the wire', async () => {
     const w = world(graphWith(-0.4, 'negative'));
     const caps = createAgentCapabilities(w.d, new ProposalStore());
-    const p = await caps.proposeLinkStrength!(ctx, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'weak', direction: 'positive', rationale: 'x' });
+    const p = await caps.proposeLinkStrength!(ctxWeak, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'weak', direction: 'positive', rationale: 'x' });
     await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     parsesOnTheWire(w.sent[0]!);
     expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ intent: 'set', direction_intent: 'positive', magnitude: 0.15, expected: { mean: -0.4, effect_direction: 'negative' } }));
@@ -143,7 +149,7 @@ describe('the Agent records a link\'s strength as the user\'s own, through the p
     const caps = createAgentCapabilities(w.d, new ProposalStore());
     const p = await caps.proposeLinkStrength!(ctx, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'x' });
     // Another writer moves the model.
-    const other = await caps.proposeLinkStrength!(ctx, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'weak', rationale: 'y' });
+    const other = await caps.proposeLinkStrength!(ctxWeak, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'weak', rationale: 'y' });
     await caps.authoriseChange(ctx, { proposal_id: String(other.proposal_id) });
     const r = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(r).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'superseded' }));
@@ -176,5 +182,119 @@ describe('a link-strength proposal is approvable like every other: one button, c
     const r = await createAgentCapabilities(w.d, fresh).authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(r).toEqual(expect.objectContaining({ ok: true, applied: true }));
     expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ kind: 'edge_strength_edit', intent: 'set', magnitude: 0.825, expected: { mean: 0.5, effect_direction: 'positive' } }));
+  });
+});
+
+describe('⛔ a band is recorded as the user\'s only when the user named it (AI Quality on #1978, 5844682410)', () => {
+  it('RED: the Agent passes "strong" and the user said only "Yes." → refused, nothing prepared, nothing sent', async () => {
+    const w = world(graphWith(0.5));
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeLinkStrength!({ ...ctx, user_text: 'Yes.', user_turn_text: 'Yes.' }, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'x' });
+    expect(p).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'strength_not_stated' }));
+    expect(String(p.detail)).toMatch(/Ask them how strong they think it is/);
+    expect(p).not.toHaveProperty('proposal_id');
+    expect(store.outstanding(SCENARIO, null)).toEqual([]);
+    expect(w.sent).toEqual([]);
+  });
+
+  it('RED: no words bound at all → refused (no text proves nothing)', async () => {
+    const w = world(graphWith(0.5));
+    const { user_text: _omit, user_turn_text: _omit2, ...bare } = ctx;
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeLinkStrength!(bare, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'x' });
+    expect(p.refusal).toBe('strength_not_stated');
+  });
+
+  it('RED (#1984 review B1): a band word in the BRIEF or an earlier turn, then "Yes." → refused (only this turn\'s words name a band)', async () => {
+    for (const brief of ['We are a B2B SaaS with strong retention and a moderate marketing budget.', 'Demand is weak this quarter.', F8]) {
+      for (const band of ['strong', 'weak', 'moderate'] as const) {
+        const w = world(graphWith(0.5));
+        // Exactly as the route binds them: the whole typed conversation, and this turn's own typed message.
+        const turnCtx = { ...ctx, user_text: userWordsOf([brief], 'Yes.'), user_turn_text: 'Yes.' };
+        const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeLinkStrength!(turnCtx, { from_label: 'Pro plan price', to_label: 'MRR', strength: band, rationale: 'x' });
+        expect(p.refusal, `${band} after "${brief}"`).toBe('strength_not_stated');
+        expect(w.sent).toEqual([]);
+      }
+    }
+  });
+
+  it('the route binds this turn\'s typed message as user_turn_text (a chip click binds nothing)', () => {
+    const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
+    expect(route).toContain("user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };");
+  });
+
+  it('RED (#1984 review B2): a denial anywhere earlier in the clause, or a question, names no band', () => {
+    for (const text of [
+      'Price doesn\'t have a strong effect on churn.',
+      'It is not as strong as you think.',
+      'Price isn\'t a strong driver of churn.',
+      'Is it strong or weak?',
+      'I would never call that link strong.',
+    ]) {
+      expect(bandTheUserWrote('strong', text), text).toBe(false);
+    }
+    expect(bandTheUserWrote('weak', 'Is it strong or weak?')).toBe(false);
+    // Contrasts: an affirmation after a denial of something else, and after "No," as an answer.
+    expect(bandTheUserWrote('strong', 'That is not a guess, it is strong.')).toBe(true);
+    expect(bandTheUserWrote('strong', 'No, it is strong.')).toBe(true);
+    expect(bandTheUserWrote('strong', 'Price strongly affects churn.')).toBe(true);
+  });
+
+  it('RED (#1984 review N1): denials typed without apostrophes, "cannot", "without", "doubt", "anything but", and an unpunctuated question name no band', () => {
+    for (const text of [
+      'It isnt strong.',
+      'Price doesnt have a strong effect.',
+      'It cannot be strong.',
+      'It is anything but strong.',
+      'Price moves MRR without a strong effect.',
+      'I doubt it is strong.',
+      'is it strong',
+      'Does price strongly affect MRR',
+    ]) {
+      expect(bandTheUserWrote('strong', text), text).toBe(false);
+    }
+    // Contrasts: a polite REQUEST to act on the model names the band even as a question; "important" is not a denial.
+    expect(bandTheUserWrote('strong', 'Can you record the price link as strong, as my own estimate?')).toBe(true);
+    expect(bandTheUserWrote('strong', 'Could you record it as strong?')).toBe(true);
+    expect(bandTheUserWrote('weak', 'Will you make it weak?')).toBe(true);
+    expect(bandTheUserWrote('strong', 'It has an important, strong effect on MRR.')).toBe(true);
+    expect(bandTheUserWrote('strong', 'The important thing is that the effect is strong.')).toBe(true);
+  });
+
+  it('RED (#1984 review B-RF): asking for OLUMI\'s opinion names no band — only a request to ACT on the model does', () => {
+    for (const text of [
+      'Would you say it\'s strong?',
+      'Would you say the price link is strong?',
+      'Could you tell me whether it is strong?',
+      'Can you check if the price link is strong?',
+      'Do you think it is strong?',
+    ]) {
+      expect(bandTheUserWrote('strong', text), text).toBe(false);
+    }
+  });
+
+  it('RED (#1984 review N2): with nothing typed THIS turn, the band is never read from the rest of the conversation', async () => {
+    const w = world(graphWith(0.5));
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeLinkStrength!(
+      { ...ctx, user_turn_text: '', user_text: 'The price link is strong.' }, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'strong', rationale: 'x' });
+    expect(p.refusal).toBe('strength_not_stated');
+    expect(w.sent).toEqual([]);
+  });
+
+  it('band-exact on the served wording and its near misses', () => {
+    // Named: served F8, the prompt's own examples.
+    expect(bandTheUserWrote('strong', F8)).toBe(true);
+    expect(bandTheUserWrote('strong', 'that effect is strong')).toBe(true);
+    expect(bandTheUserWrote('weak', 'price barely affects churn')).toBe(true);
+    expect(bandTheUserWrote('moderate', 'It is moderately strong? No — moderate.')).toBe(true);
+    expect(bandTheUserWrote('very strong', 'It has a very strong effect.')).toBe(true);
+    // Not named: another band, a comparative, a served hypothetical, a negation, and "very strong" for "strong".
+    expect(bandTheUserWrote('weak', F8)).toBe(false);
+    expect(bandTheUserWrote('strong', 'Talk me through what would change if the link from Pro plan price to MRR were weaker or stronger.')).toBe(false);
+    expect(bandTheUserWrote('weak', 'Talk me through what would change if the link from Pro plan price to MRR were weaker or stronger.')).toBe(false);
+    expect(bandTheUserWrote('strong', 'It is not strong.')).toBe(false);
+    expect(bandTheUserWrote('strong', 'It isn\u2019t very strong.')).toBe(false);
+    expect(bandTheUserWrote('very strong', 'It isn\'t very strong.')).toBe(false);
+    expect(bandTheUserWrote('strong', 'It has a very strong effect.')).toBe(false);
+    expect(bandTheUserWrote('strong', null)).toBe(false);
   });
 });

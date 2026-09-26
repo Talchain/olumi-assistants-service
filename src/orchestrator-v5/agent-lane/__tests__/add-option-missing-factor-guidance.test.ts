@@ -29,7 +29,8 @@ describe('an option naming a factor the model does not have', () => {
     // #1953 review B1: "add it against what it has" must not turn an option into a copy of the status quo.
     expect(detail).toMatch(/what the model already has today/);
     expect(detail).toMatch(/could not be told apart\s+from carrying on as now/);
-    expect(detail).toMatch(/offer to add that factor first/);
+    // DL 5843303596: a missing factor is added in the SAME change (`new_factors`), not as a later step.
+    expect(detail).toMatch(/a missing factor can be added in the same change, through `new_factors`/);
   });
 
   it('RED: NOTHING it names exists → never "retry without the missing one" (that is a link to nothing, or to the wrong factor): offer the factor instead', () => {
@@ -43,7 +44,7 @@ describe('an option naming a factor the model does not have', () => {
     expect(detail).toMatch(/Nothing was prepared/);
     expect(detail).not.toMatch(/again without the missing one/);
     expect(detail).toMatch(/never link it to an unrelated factor/);
-    expect(detail).toMatch(/offer to add that factor first/);
+    expect(detail).toMatch(/add the missing factor IN THE SAME CHANGE/);
   });
 
   it('RED: an option naming no factor at all is told never to borrow an unrelated one', () => {
@@ -63,7 +64,10 @@ describe('the retry the refusal asks for is one the tool allows', () => {
 
   it('RED: the Agent\'s instructions say the same for an option with nothing the model represents', () => {
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(route).toContain('if NONE of what it does has a factor in the model, do not add it and never link it to an unrelated factor');
+    // DL 5843303596: the missing factor is added in the same change; an unrelated link is still never made.
+    expect(route).toContain('If part of what an option does has no factor in the model, add that factor IN THE SAME CHANGE through `new_factors`');
+    expect(route).toContain('Never link an option to an unrelated factor instead.');
+    expect(route).not.toContain('offer to add that factor first');
   });
 
   it('RED (#1953 review B1): the instructions never add an option that would only repeat today\'s values — it would vanish into carrying on as now', () => {

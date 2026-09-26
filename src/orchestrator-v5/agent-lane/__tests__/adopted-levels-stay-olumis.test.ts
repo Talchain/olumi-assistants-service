@@ -29,7 +29,8 @@ import { AGENT_TOOLS, dispatchTool } from '../runtime/agent-tools.js';
 
 const SCENARIO = '6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d';
 const USER = 'user-adopt';
-const ctx = { scenario_id: SCENARIO, authenticated_user_id: USER, request_id: 'r-adopt' };
+/** What the user wrote in these rows: a figure is recorded as theirs only when it is here (`stated-by-user.ts`). */
+const ctx = { scenario_id: SCENARIO, authenticated_user_id: USER, request_id: 'r-adopt', user_text: 'Hire 1 tech lead. Onboarding share is 40% today; with two starters it would be 45%.' };
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 const briefLevel = (factorId: string, value: number) => ({

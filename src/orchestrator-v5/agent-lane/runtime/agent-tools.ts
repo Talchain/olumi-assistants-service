@@ -17,6 +17,17 @@ export interface AgentToolContext {
   readonly scenario_id: string;
   readonly authenticated_user_id: string | null;
   readonly request_id: string;
+  /**
+   * The user's own words in this conversation (its user messages, this turn's last), bound by the route — never
+   * from model output. A figure is recorded as the user's only when it is written here (`stated-by-user.ts`);
+   * absent, nothing is.
+   */
+  readonly user_text?: string;
+  /**
+   * THIS turn's message when the user typed it (never a chip's text), bound by the route. A link's strength band is
+   * the user's only when named here (`bandTheUserWrote`): a band word elsewhere in the conversation is about something else.
+   */
+  readonly user_turn_text?: string;
 }
 
 export interface ToolDefinition {
@@ -42,8 +53,10 @@ const ACTS_ON = {
       description: 'Whether this option pushes the factor up or down. State it; never guess it for the user.',
     },
     level: obj({
-      value: { type: 'number', description: 'The figure the user stated FOR THIS FACTOR, in the factor\u2019s own units (e.g. 54 for \u00a354 on a price). A figure given for something else (a price, when this factor is a churn rate) is never this factor\u2019s level: leave level out.' },
+      value: { type: 'number', description: 'The figure the user stated FOR THIS FACTOR, in the factor\u2019s own units (e.g. 54 for \u00a354 on a price). A figure given for something else (a price, when this factor is a churn rate) is never this factor\u2019s level: leave level out. With no figure from the user, leave level out \u2014 never 0 or any placeholder to mean \u201cnot set\u201d \u2014 unless it is your OWN suggested figure for an option you suggested: then set estimate.' },
       unit: { type: 'string', description: 'The unit the user stated, if any.' },
+      estimate: { type: 'boolean', description: 'true ONLY when this figure is your own suggestion, not the user\u2019s (an option you proposed, at the figure you proposed). It is recorded and shown as Olumi\u2019s estimate, never as the user\u2019s. Needs basis.' },
+      basis: { type: 'string', description: 'With estimate: why this figure, in plain words the user can check.' },
     }, ['value']),
   }, ['factor_label', 'direction']),
 };
@@ -141,10 +154,14 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'This does NOT change anything: it prepares ONE complete change and returns its id, which you keep for '
       + 'authorise_change: show the user the option and what it will be linked to, never the id, before asking them to approve. '
       + 'The option is linked from the decision automatically. Name the factors it would change, using the labels '
-      + 'get_canonical_state returned. Give a level ONLY for a figure the user stated, in their own units; never invent one. '
-      + 'A factor with no stated level is added with no level, and you say plainly what is still needed. '
+      + 'get_canonical_state returned. Give a level for a figure the user stated, in their own units; for an option YOU suggested you may give '
+      + 'your own suggested figure with estimate: true and a basis, recorded and shown as Olumi\u2019s estimate. Never a placeholder. '
+      + 'A factor with no level is added with no level, and you say plainly what is still needed. '
       + 'When the user asks for SEVERAL options (up to 4), put them ALL in `options` in ONE call: they become ONE change the '
-      + 'user approves once, and it lands whole or not at all. Once a call has prepared a change, never call it again in the '
+      + 'user approves once, and it lands whole or not at all. If an option changes something the model has NO factor for, '
+      + 'add that factor in the SAME change with `new_factors` (never link the option to an unrelated factor instead), and name '
+      + 'it in `acts_on`. Only for something the user asked the option to change; what it changes and which way come from the '
+      + 'user\u2019s words, or where it is plain from the option itself (a paid add-on adds revenue); if it is unclear, ask. Once a call has prepared a change, never call it again in the '
       + 'same reply. A call that was REFUSED prepared nothing: you may call it once more in the same reply, corrected as the '
       + 'refusal says.',
     parameters: obj({
@@ -158,6 +175,21 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           acts_on: ACTS_ON,
         }, ['label', 'acts_on']),
       },
+      new_factors: {
+        type: 'array',
+        description: 'Factors the model does NOT have that these options change, added in this same change. Each is named in an option\u2019s acts_on.',
+        items: obj({
+          label: { type: 'string', description: 'The factor in the user\u2019s words (e.g. "AI add-on price").' },
+          affects: {
+            type: 'array',
+            description: 'What this factor changes that the model already has (the goal, an outcome, a risk, or a factor no option sets), and which way. At least one.',
+            items: obj({
+              label: { type: 'string', description: 'A label exactly as get_canonical_state gives it.' },
+              direction: { type: 'string', enum: ['positive', 'negative'], description: 'Whether raising this factor raises (positive) or lowers (negative) it: from the user\u2019s words, or where it is plain from the option itself (a paid add-on adds revenue); if it is unclear, ask. The preview names it so the user can correct it.' },
+            }, ['label', 'direction']),
+          },
+        }, ['label', 'affects']),
+      },
       rationale: { type: 'string', description: 'Why this option is worth comparing, in the user\u2019s terms.' },
     }, ['rationale']),
   },
@@ -170,7 +202,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'and returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
       + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
       + 'recorded as theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
-      + 'Give `direction` ONLY when the user said the link pushes the other way. Never use this for a strength the user did not state.',
+      + 'Give `direction` ONLY when the user said the link pushes the other way. Never use this for a strength the user did not state: '
+      + 'if they have not named a band in their own words, ask which it is first \u2014 a band they did not say is refused.',
     parameters: obj({
       from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
       to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
@@ -317,6 +350,8 @@ export interface AgentCapabilities {
     label?: string; acts_on?: { factor_label: string; direction: 'positive' | 'negative' }[]; rationale: string;
     /** Several options as ONE change (F4): each `{label, acts_on}`, up to 4. */
     options?: { label: string; acts_on: { factor_label: string; direction: 'positive' | 'negative' }[] }[];
+    /** Factors the model lacks, added in the SAME change (`planNewFactors`): each named in an option's acts_on. */
+    new_factors?: readonly { label: string; affects: readonly { label: string; direction?: 'positive' | 'negative' }[] }[];
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
     interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
