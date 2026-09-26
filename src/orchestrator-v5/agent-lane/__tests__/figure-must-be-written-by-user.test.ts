@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { figureTheUserWrote, userWordsOf } from '../stated-by-user.js';
+import { BOARD_EDIT_PREFIX } from '../history-store.js';
 
 const paulGraph = JSON.parse(readFileSync(new URL('./fixtures/paul-cbd15f83-stored-graph.json', import.meta.url), 'utf8')) as unknown;
 const SERVED = 'Add an option: keep the price at £49 and run a win-back offer for churned customers. It reduces Monthly churn. Please add it.';
@@ -80,6 +81,35 @@ describe('figureTheUserWrote — present in the user\'s words, in a compatible k
     expect(words).toContain('£54');
     expect(words).toContain('Add those.');
     expect(words).not.toContain('£64');
+  });
+});
+
+describe('⛔ product-authored text in a user item is never the user\'s words (#1978 review 5844589340 B1)', () => {
+  const SERVED = 'Add an option: keep the price at £49 and run a win-back offer for churned customers. It reduces Monthly churn.';
+  const note = (text: string) => ({ role: 'user', content: [{ type: 'input_text', text: `${BOARD_EDIT_PREFIX} ${text}` }] });
+
+  it('RED: a board edit narrated "from 0 hires to 1 hire" does not ground the served 0% churn level', () => {
+    const words = userWordsOf([note('Updated Tech lead hires from 0 hires to 1 hire.')], SERVED);
+    expect(figureTheUserWrote(0, 'percent per month', words), words).toBe(false);
+    expect(figureTheUserWrote(0, '%', words), words).toBe(false);
+    expect(words).not.toContain('Board edit');
+  });
+
+  it('CONTRAST: the same 0 in the user\'s own message still grounds it', () => {
+    const words = userWordsOf([note('Updated Tech lead hires from 0 hires to 1 hire.')], 'Set churn to 0% for the win-back option.');
+    expect(figureTheUserWrote(0, '%', words)).toBe(true);
+  });
+
+  it('RED: the approval chip\'s replay of Olumi\'s own label does not ground £54 on a later turn', () => {
+    const echo = { role: 'user', content: [{ type: 'input_text', text: "Yes, add option 'Test £54 at release', link 'Choose a price' to 'Test £54 at release' and link 'Test £54 at release' to 'Price'." }] };
+    const words = userWordsOf([{ role: 'user', content: 'Suggest some pricing options.' }, echo], 'Set its level.');
+    expect(figureTheUserWrote(54, 'GBP', words), words).toBe(false);
+    expect(figureTheUserWrote(54, 'GBP', userWordsOf([], "Yes, add option 'Test £54 at release'.")), 'this turn\'s click too').toBe(false);
+  });
+
+  it('CONTRAST: a user\'s own "Yes, £54" (no quoted label) still grounds it; the fixed approvals carry no figure', () => {
+    expect(figureTheUserWrote(54, 'GBP', userWordsOf([], 'Yes, use £54 for the release price.'))).toBe(true);
+    expect(figureTheUserWrote(54, 'GBP', userWordsOf([{ role: 'user', content: 'Test £54 at release.' }, { role: 'user', content: 'Yes, add that option.' }], 'ok'))).toBe(true);
   });
 });
 

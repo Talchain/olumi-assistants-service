@@ -397,6 +397,20 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(iv, JSON.stringify(iv)).toBeUndefined();
   }, 120_000);
 
+  it('[p5] RED (#1978 review B1): a board edit Olumi narrates with a 0 does not make a later 0 level the user\'s', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const edit = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'system_event', scenario_id: SCENARIO, turn_id: randomUUID(), stage: 'frame', event: { kind: 'factor_value_edit', target_id: 'fac_price', value: 0, field: 'value' } } });
+    const narration = String((edit.json() as { assistant_text?: unknown }).assistant_text ?? '');
+    expect(edit.statusCode, edit.body.slice(0, 400)).toBe(200);
+    expect(narration, 'the board edit is narrated with its 0 (the path under test)').toMatch(/\b0\b/);
+    const t1 = await proposeOptionC(0, 'Add an option: test a new price at release.');
+    const approve = approveChipOf(t1)!;
+    expect(approve, JSON.stringify(t1._agent.tool_calls)).toBeDefined();
+    await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(newOption(), 'the option itself is added').toBeDefined();
+    expect((newOption()?.interventions ?? {})['fac_price'], narration).toBeUndefined();
+  }, 120_000);
+
   it('[p3] RED: a factor with no range at all — the user\'s £54 cannot be stored on one, so the level is left UNSET (never a bare 54) and the Agent is told why', async () => {
     graphOf.set(SCENARIO, seedGraph(1, 1, 'none'));
     let proposed = '';
