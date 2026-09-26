@@ -26,6 +26,29 @@ import type { MutationReasonCode } from './reason-codes.js';
 /** T4.0 §1 batch cap: a producer emits ≤ 8 envelopes (matches dual-draft PROPOSAL_CAP). */
 export const PROPOSAL_CAP = 8;
 
+/**
+ * (A) — the envelope cap for a CEE-BUILT typed transaction (the multi-option
+ * add, Canonical CONTRACT #70 5841241418). Model-produced batches keep
+ * `PROPOSAL_CAP`. The typed builder bounds its own size (`MAX_OPTIONS_PER_
+ * TRANSACTION` options, each `2 + factors` ops), so this is a ceiling on a batch
+ * CEE assembled from validated parameters, never a licence for a model to emit
+ * more. The hold RECORDS the cap it was refereed under (`envelope_cap`), and the
+ * confirm and thread-through re-referee under the same one, bounded by this.
+ */
+export const TYPED_TRANSACTION_ENVELOPE_CAP = 32;
+
+/**
+ * Read a typed-transaction envelope cap from an untrusted carrier (a persisted
+ * hold, a caller option). Returns `undefined` — meaning "use `PROPOSAL_CAP`" —
+ * for anything that is not an integer ABOVE `PROPOSAL_CAP`, and never more than
+ * `TYPED_TRANSACTION_ENVELOPE_CAP`. So a hold can only ever widen the cap to the
+ * typed ceiling, and a malformed or lowered value falls back to the default.
+ */
+export function boundTypedEnvelopeCap(raw: unknown): number | undefined {
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw <= PROPOSAL_CAP) return undefined;
+  return Math.min(raw, TYPED_TRANSACTION_ENVELOPE_CAP);
+}
+
 export const CANDIDATE_KINDS = [
   'add_node',
   'add_edge',

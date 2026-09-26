@@ -6,12 +6,19 @@
  * trimmed; see `fragile-link-challenge-fixtures.ts` for how the capture is
  * reconstructed. Tests are named for the contract's letters (i)–(ix); (viii) is
  * in `fragile-link-challenge.reload.test.ts` because it mocks the session store.
+ *
+ * ⚠ LIMIT FIRST (#70, Paul's manual test 1a298d6d). c19-B t2's leader is withheld FOR A LIMIT
+ * (`constraint_verdict_withheld`), so since the limit-first rule its ONE run-turn card is the limit
+ * card (`coaching/limit-unchecked-card.ts`; asserted in analysis-coaching-pass-through.test.ts).
+ * The link card's own properties below are still driven on B's served readback, through
+ * {@link linkCardsOnly}: the same inputs `runTurnCoaching` hands the link builders for a bound run
+ * whose leader is NOT withheld for a limit. Routing on B is asserted where the test is about routing.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { AnalysisRunStateSchema, CoachingBlockSchema, type CoachingBlock } from '@talchain/schemas/boundary';
 
-import { runTurnCoaching } from '../../agent-lane/analysis-coaching-pass-through.js';
+import { runTurnCoaching, type CapturedAnalysis, type RunTurnCoachingFinal } from '../../agent-lane/analysis-coaching-pass-through.js';
 import { AMEND_CHIP, approvalChipsFor, typedApprovalOf } from '../../agent-lane/approval-chips.js';
 import { REFUSAL_REASON_UNSPECIFIED } from '../../compose/analysis-state-v1.js';
 import { deterministicBlockId } from '../../compose/block-id.js';
@@ -24,6 +31,7 @@ import {
   fragileLinkBodyForms,
 } from '../fragile-link-challenge.js';
 import { selectGroundedCounterCase } from '../grounded-counter-case.js';
+import { buildNoFlaggedLinkCard } from '../no-flagged-link-card.js';
 import {
   PAYLOAD_FILE,
   buildFragileLinkChallengePayload,
@@ -87,6 +95,33 @@ function withComputedAt(c: RunTurnCase, computedAt: string): RunTurnCase {
   return { ...c, captured, final };
 }
 
+/**
+ * The LINK card (fragile-link, else no-flagged-link) built from exactly the inputs `runTurnCoaching`
+ * hands the link builders — the readback result as the leader gate leaves it, the readback hash and
+ * run time, the capture's trigger and `analysis_ready` option labels, freshness 'fresh' — for a run
+ * whose leader is NOT withheld for a limit. It does NOT repeat the pass-through's bind gates; the
+ * tests that are about binding call `runTurnCoaching` itself.
+ */
+function linkCardsOnly(captured: CapturedAnalysis, final: RunTurnCoachingFinal): ReturnType<typeof runTurnCoaching> {
+  const state = final.analysisState as Record<string, any> | undefined;
+  const result = structuredClone(final.analysisResult) as Record<string, any>;
+  if (state?.leader_claim?.permitted !== true && typeof result.leading_option_id === 'string') result.leading_option_id = null;
+  const options = (captured.analysis_ready as { options?: { label?: unknown }[] } | undefined)?.options ?? [];
+  const input = {
+    analysisResult: result,
+    graphHash: final.graphHash!,
+    computedAt: state!.run_state.computed_at as string,
+    trigger: captured.trigger!,
+    freshness: 'fresh' as const,
+    optionLabels: options.flatMap((o) => (typeof o.label === 'string' && o.label.trim().length > 0 ? [o.label] : [])),
+  };
+  const built = buildFragileLinkChallenge(input);
+  const chosen = built.block === null && built.reason === 'no_groundable_fragile_edge' ? buildNoFlaggedLinkCard(input) : built;
+  return chosen.block === null
+    ? { blocks: [], eligibility: { eligible: false, reason: chosen.reason } }
+    : { blocks: [chosen.block], eligibility: { eligible: true } };
+}
+
 describe('run-turn fragile-link challenge', () => {
   it('(i) explicit Run on A (leader permitted) → exactly one card, schema-valid, bound to the run and its revision', () => {
     const c = runTurnCase('A', 't5', 'explicit_run');
@@ -130,10 +165,14 @@ describe('run-turn fragile-link challenge', () => {
     }
   });
 
-  it('(ii) constrained Run on B (leader withheld) → the card, leader-free: no leader words, no option label, no number', () => {
+  it('(ii) constrained Run on B (leader withheld FOR A LIMIT) → the ONE card is the limit card; the link card B would get is leader-free: no leader words, no option label, no number', () => {
     const c = runTurnCase('B', 't2', 'explicit_run');
-    expect(c.turn.analysis_state.leader_claim).toMatchObject({ permitted: false });
-    const out = runTurnCoaching(c.captured, c.final);
+    expect(c.turn.analysis_state.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'constraint_verdict_withheld' });
+    const routed = runTurnCoaching(c.captured, c.final);
+    expect(routed.eligibility).toEqual({ eligible: true });
+    expect(routed.blocks.map((b) => b.signal_id.split(':')[1])).toEqual(['limit_unchecked']);
+    expect(fragileLinkCards(routed.blocks)).toHaveLength(0);
+    const out = linkCardsOnly(c.captured, c.final);
     expect(out.eligibility).toEqual({ eligible: true });
     const cards = fragileLinkCards(out.blocks);
     expect(cards).toHaveLength(1);
@@ -163,7 +202,7 @@ describe('run-turn fragile-link challenge', () => {
 
   it('(iii) auto first pass on B → the card with the first-pass prefix (trigger, and run_provenance variant)', () => {
     const auto = runTurnCase('B', 't2', 'auto_first_pass');
-    const out = runTurnCoaching(auto.captured, auto.final);
+    const out = linkCardsOnly(auto.captured, auto.final);
     expect(out.eligibility).toEqual({ eligible: true });
     const card = fragileLinkCards(out.blocks)[0]!;
     expect(CoachingBlockSchema.safeParse(card).success).toBe(true);
@@ -176,13 +215,13 @@ describe('run-turn fragile-link challenge', () => {
     const stamped = withResult(runTurnCase('B', 't2', 'explicit_run'), (r) => {
       r.enrichment.run_provenance = buildAutoRunProvenance('11111111-1111-4111-8111-111111111111');
     });
-    const viaProvenance = runTurnCoaching(stamped.captured, stamped.final);
+    const viaProvenance = linkCardsOnly(stamped.captured, stamped.final);
     expect(viaProvenance.eligibility).toEqual({ eligible: true });
     expect(fragileLinkCards(viaProvenance.blocks)[0]!.body).toBe(card.body);
 
     // Contrast: the same explicit run without the stamp carries no prefix.
     const plain = runTurnCase('B', 't2', 'explicit_run');
-    expect(fragileLinkCards(runTurnCoaching(plain.captured, plain.final).blocks)[0]!.body.startsWith(FIRST_PASS_PREFIX)).toBe(false);
+    expect(fragileLinkCards(linkCardsOnly(plain.captured, plain.final).blocks)[0]!.body.startsWith(FIRST_PASS_PREFIX)).toBe(false);
   });
 
   it('(iii-b) first pass with served labels the long wording cannot fit → the card, its second clause saying "this link"', () => {
@@ -196,7 +235,7 @@ describe('run-turn fragile-link challenge', () => {
     expect(longFirstPass!.length).toBeGreaterThan(300);
 
     const auto = withGroundedLabels(runTurnCase('B', 't2', 'auto_first_pass'), from, to);
-    const out = runTurnCoaching(auto.captured, auto.final);
+    const out = linkCardsOnly(auto.captured, auto.final);
     expect(out.eligibility).toEqual({ eligible: true });
     const card = fragileLinkCards(out.blocks)[0]!;
     expect(CoachingBlockSchema.safeParse(card).success).toBe(true);
@@ -209,7 +248,7 @@ describe('run-turn fragile-link challenge', () => {
 
     // Contrast: the explicit Run on the same labels keeps the contract's long wording.
     const explicit = withGroundedLabels(runTurnCase('B', 't2', 'explicit_run'), from, to);
-    const explicitOut = runTurnCoaching(explicit.captured, explicit.final);
+    const explicitOut = linkCardsOnly(explicit.captured, explicit.final);
     expect(explicitOut.eligibility).toEqual({ eligible: true });
     expect(fragileLinkCards(explicitOut.blocks)[0]!.body).toBe(
       'The robustness check flagged the link from Engineering coordination quality to Engineering delivery velocity as sensitive — worth checking what the estimate of how strongly Engineering coordination quality drives Engineering delivery velocity rests on.',
@@ -244,7 +283,7 @@ describe('run-turn fragile-link challenge', () => {
       expect(fragileLinkBodyForms(from, to, false)[0]!.length > 300, name).toBe(explicitOverflows);
       for (const trigger of ['explicit_run', 'auto_first_pass'] as const) {
         const c = withGroundedLabels(runTurnCase('B', 't2', trigger), from, to, mutate);
-        const out = runTurnCoaching(c.captured, c.final);
+        const out = linkCardsOnly(c.captured, c.final);
         expect(out.eligibility, `${name} / ${trigger}`).toEqual({ eligible: true });
         const card = fragileLinkCards(out.blocks)[0]!;
         expect(card.body.length).toBeLessThanOrEqual(300);
@@ -257,7 +296,7 @@ describe('run-turn fragile-link challenge', () => {
         };
         overResult(over.captured.blocks![0] as Record<string, any>);
         overResult(over.final.analysisResult as Record<string, any>);
-        expect(runTurnCoaching(over.captured, over.final), `${name} / ${trigger} / +1`).toEqual({
+        expect(linkCardsOnly(over.captured, over.final), `${name} / ${trigger} / +1`).toEqual({
           blocks: [], eligibility: { eligible: false, reason: 'copy_gate' },
         });
       }
@@ -304,7 +343,7 @@ describe('run-turn fragile-link challenge', () => {
       ['B with no switch metric on any row', withResult(runTurnCase('B', 't2', 'explicit_run'), noMetric)],
     ];
     for (const [name, c] of briefs) {
-      const out = runTurnCoaching(c.captured, c.final);
+      const out = linkCardsOnly(c.captured, c.final);
       expect(out.eligibility, name).toEqual({ eligible: true });
       const card = fragileLinkCards(out.blocks)[0]!;
       for (const field of USER_FACING) expect(String(card[field]), `${name} / ${field}`).not.toMatch(RANKING_OR_MAGNITUDE);
@@ -327,13 +366,13 @@ describe('run-turn fragile-link challenge', () => {
     // the per-link test ran: B has NO robust_edges row, so it is refused as not evidenced.
     const noEdges = withResult(runTurnCase('B', 't2', 'explicit_run'), (r) => { r.enrichment.robustness.fragile_edges = []; });
     expect(noEdges.turn.analysis_result.enrichment.robustness.robust_edges).toEqual([]);
-    expect(runTurnCoaching(noEdges.captured, noEdges.final)).toEqual({
+    expect(linkCardsOnly(noEdges.captured, noEdges.final)).toEqual({
       blocks: [], eligibility: { eligible: false, reason: 'edge_sensitivity_not_evidenced' },
     });
     const noLabels = withResult(runTurnCase('B', 't2', 'explicit_run'), (r) => {
       for (const e of r.enrichment.robustness.fragile_edges) { delete e.from_label; delete e.to_label; }
     });
-    expect(runTurnCoaching(noLabels.captured, noLabels.final)).toEqual({
+    expect(linkCardsOnly(noLabels.captured, noLabels.final)).toEqual({
       blocks: [], eligibility: { eligible: false, reason: 'no_groundable_fragile_edge' },
     });
   });
@@ -405,14 +444,14 @@ describe('run-turn fragile-link challenge', () => {
     // Same on B with only computed_at moved.
     const base = runTurnCase('B', 't2', 'explicit_run');
     const moved = withComputedAt(base, '2026-09-24T16:52:00.000Z');
-    const x = fragileLinkCards(runTurnCoaching(base.captured, base.final).blocks)[0]!;
-    const y = fragileLinkCards(runTurnCoaching(moved.captured, moved.final).blocks)[0]!;
+    const x = fragileLinkCards(linkCardsOnly(base.captured, base.final).blocks)[0]!;
+    const y = fragileLinkCards(linkCardsOnly(moved.captured, moved.final).blocks)[0]!;
     expect(y.block_id).not.toBe(x.block_id);
   });
 
   it('(ix) the action is not a typed Run or approval: no action_intent; not the Run chip; not an approval', () => {
     const c = runTurnCase('B', 't2', 'explicit_run');
-    const card = fragileLinkCards(runTurnCoaching(c.captured, c.final).blocks)[0]!;
+    const card = fragileLinkCards(linkCardsOnly(c.captured, c.final).blocks)[0]!;
     expect(Object.hasOwn(card, 'action_intent')).toBe(false);
     expect(card.action_prompt).toBe(
       'Talk me through what would change if the link from Pro subscriber base to MRR were weaker or stronger. Don\'t change the model or re-run anything yet.',
@@ -482,7 +521,7 @@ describe('run-turn fragile-link challenge', () => {
   it('copy is one definition: composeFragileLinkChallenge yields the shipped strings', () => {
     const copy = composeFragileLinkChallenge('Pro subscriber base', 'MRR', false);
     const c = runTurnCase('B', 't2', 'explicit_run');
-    const card = fragileLinkCards(runTurnCoaching(c.captured, c.final).blocks)[0]!;
+    const card = fragileLinkCards(linkCardsOnly(c.captured, c.final).blocks)[0]!;
     expect({ title: card.title, body: card.body, action_label: card.action_label, action_prompt: card.action_prompt }).toEqual(copy);
   });
 
@@ -510,14 +549,14 @@ describe('run-turn coaching — identity carries the copy variant, captures with
   const cardOf = (r: ReturnType<typeof runTurnCoaching>) => r.blocks.filter((b) => b.signal_id.startsWith('coach:fragile_link:'));
 
   it('(id) one run under the two triggers gives two block_ids — one id never names two bodies', () => {
-    const explicit = cardOf(runTurnCoaching(runTurnCase('B', 't2', 'explicit_run').captured, runTurnCase('B', 't2', 'explicit_run').final))[0]!;
-    const auto = cardOf(runTurnCoaching(runTurnCase('B', 't2', 'auto_first_pass').captured, runTurnCase('B', 't2', 'auto_first_pass').final))[0]!;
+    const explicit = cardOf(linkCardsOnly(runTurnCase('B', 't2', 'explicit_run').captured, runTurnCase('B', 't2', 'explicit_run').final))[0]!;
+    const auto = cardOf(linkCardsOnly(runTurnCase('B', 't2', 'auto_first_pass').captured, runTurnCase('B', 't2', 'auto_first_pass').final))[0]!;
     expect(explicit.body).not.toBe(auto.body);
     expect(explicit.block_id).not.toBe(auto.block_id);
     expect(explicit.signal_id.endsWith(':explicit_run')).toBe(true);
     expect(auto.signal_id.endsWith(':auto_first_pass')).toBe(true);
     // Same trigger, same run: the id is stable.
-    const again = cardOf(runTurnCoaching(runTurnCase('B', 't2', 'auto_first_pass').captured, runTurnCase('B', 't2', 'auto_first_pass').final))[0]!;
+    const again = cardOf(linkCardsOnly(runTurnCase('B', 't2', 'auto_first_pass').captured, runTurnCase('B', 't2', 'auto_first_pass').final))[0]!;
     expect(again.block_id).toBe(auto.block_id);
   });
 
@@ -527,7 +566,9 @@ describe('run-turn coaching — identity carries the copy variant, captures with
       const { analysis_state: _dropped, ...stateless } = c.captured;
       const r = runTurnCoaching(stateless, c.final);
       expect(r.eligibility).toEqual({ eligible: true });
-      const card = cardOf(r)[0]!;
+      // B's leader is withheld for a limit, so its one card is the limit card (limit first, #70).
+      const card = r.blocks.filter((b) => b.signal_id.startsWith('coach:limit_unchecked:'))[0]!;
+      expect(cardOf(r)).toHaveLength(0);
       expect(card.graph_hash_at_generation).toBe(c.turn.graph_hash);
       expect(card.created_at).toBe(c.turn.analysis_state.run_state.computed_at);
     }
@@ -559,10 +600,10 @@ describe('run-turn coaching — identity carries the copy variant, captures with
     };
     const final = { ...c.final, analysisResult: retag(c.final.analysisResult as Record<string, unknown>) };
     const captured = { ...c.captured, blocks: [retag(c.captured.blocks![0] as Record<string, unknown>)] };
-    expect(runTurnCoaching(captured, final).eligibility).toEqual({ eligible: false, reason: 'copy_gate' });
+    expect(linkCardsOnly(captured, final).eligibility).toEqual({ eligible: false, reason: 'copy_gate' });
     // Contrast: without analysis_ready's options the guard has nothing to read, and the card ships.
     const { analysis_ready: _none, ...noReady } = captured;
-    expect(runTurnCoaching(noReady, final).eligibility).toEqual({ eligible: true });
+    expect(linkCardsOnly(noReady, final).eligibility).toEqual({ eligible: true });
   });
 });
 
@@ -623,7 +664,9 @@ describe('DSK-P-003 badge — kept only where the run positively shows a clear w
 
   it('BADGE-2b: the shipped goldens do not show a clear winner → no badge (c19-A slightly ahead and not robust; c19-B leader withheld)', () => {
     for (const [letter, turn, trigger] of [['A', 't5', 'explicit_run'], ['A', 't7', 'explicit_run'], ['B', 't2', 'explicit_run'], ['B', 't2', 'auto_first_pass']] as const) {
-      const card = soleCard(runTurnCase(letter, turn, trigger), `${letter}/${turn}/${trigger}`);
+      const c = runTurnCase(letter, turn, trigger);
+      // B's leader is withheld for a limit, so its routed card is the limit card; the badge rule is the link card's.
+      const card = letter === 'B' ? fragileLinkCards(linkCardsOnly(c.captured, c.final).blocks)[0]! : soleCard(c, `${letter}/${turn}/${trigger}`);
       expect(Object.hasOwn(card, 'dsk_claim_provenance'), `${letter}/${turn}/${trigger}`).toBe(false);
     }
   });
