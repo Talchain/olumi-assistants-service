@@ -2756,7 +2756,8 @@ export async function dispatchOptionLevelsBatch(
   /** The turn this write commits under; `requestHash` is the caller's digest of the request (informational). */
   payload: Pick<SystemEventTurnPayload, 'scenario_id' | 'turn_id' | 'stage'> & { readonly requestHash: string },
   batch: {
-    readonly targets: readonly { readonly optionId: string; readonly factorId: string; readonly modelValue: number }[];
+    readonly targets: readonly { readonly optionId: string; readonly factorId: string; readonly modelValue: number;
+      readonly figure?: { readonly raw_value: number; readonly unit?: string; readonly cap: number } }[];
     readonly base_graph_hash: string;
     /** The links the approved proposal declared (`from::to`); a different set writes nothing. */
     readonly expectedLinks?: readonly string[];
@@ -3035,6 +3036,10 @@ export type CommitOptionLevelsInput = {
     readonly value: number;
     /** Whose level: an Olumi level is stamped through the server-side adoption authority, never from this string alone. */
     readonly author: 'user_specified' | 'model_proposed';
+    /** The level as the user gave it, and the range it was normalised on — kept on the cell (all three, or none). */
+    readonly raw_value?: number;
+    readonly unit?: string;
+    readonly cap?: number;
   }[];
 };
 export type CommitOptionLevelsResult =
@@ -3058,7 +3063,9 @@ export type CommitOptionLevelsResult =
  * route's ownership pre-flight); this grants nothing new, and adds no wire member.
  */
 export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput, requestId: string): Promise<CommitOptionLevelsResult> {
-  const targets = input.levels.map(l => ({ optionId: l.option_id, factorId: l.factor_id, modelValue: l.value }));
+  const targets = input.levels.map(l => ({ optionId: l.option_id, factorId: l.factor_id, modelValue: l.value,
+    ...(l.raw_value !== undefined || l.cap !== undefined
+      ? { figure: { raw_value: Number(l.raw_value), cap: Number(l.cap), ...(l.unit !== undefined ? { unit: l.unit } : {}) } } : {}) }));
   // Olumi's levels are stamped by the SAME server-side authority the single write uses — one adoption per level.
   const adoptions = input.levels.filter(l => l.author === 'model_proposed').map(l => ({
     scenarioId: input.scenario_id, proposalId: input.turn_id, optionId: l.option_id, factorId: l.factor_id, modelValue: l.value }));
