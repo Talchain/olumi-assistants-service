@@ -117,6 +117,7 @@ import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/anal
 import {
   readConstraintVerdictStateFromResult,
   readLeaderLimitRisksFromResult,
+  deriveEveryOptionLimitVerdict,
   readRatifiedConstraints,
   type ConstraintVerdictState,
   type LeaderLimitRisk,
@@ -367,6 +368,12 @@ export async function readScenarioAnalysis(
           return {
             withheldBecauseUnrequested: (fact !== null && leaderWithheldOnlyBecauseUnrequested(fact)) || c46?.withheldBecauseUnrequested === true,
             withheldBecauseNonlinearIdentity: c46?.withheldBecauseNonlinearIdentity === true,
+            // F-LIMIT: judged on the SAME fact the permission above was read from (null when out of date), against the
+            // limits the user ratified on this graph.
+            ...(() => {
+              const limit = fact !== null ? deriveEveryOptionLimitVerdict(fact.result, readRatifiedConstraints(params.graph)) : null;
+              return limit === null ? {} : { everyOptionLimit: limit.kind };
+            })(),
           };
         })(),
         rawRobustness:

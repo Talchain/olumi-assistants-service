@@ -41,6 +41,8 @@ import { AUTO_RUN_POST_CONSTRUCTION_INITIATOR, RUN_PROVENANCE_ENRICHMENT_KEY } f
 import { leaderWithheldForALimit } from '../coaching/limit-unchecked-card.js';
 import {
   WITHHELD_CONSTRAINT_VERDICT,
+  WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT,
+  WITHHELD_NO_OPTION_MEETS_LIMIT,
   WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
   WITHHELD_RUN_OUT_OF_DATE,
   WITHHELD_UNREQUESTED_ANALYSIS,
@@ -243,5 +245,69 @@ describe('why the finaliser cannot derive it (#1876\'s class, C46 edition): the 
     // P1-d (AI Quality #70 5850056041): the out-of-date run's reason, never the product and never a limit.
     expect(out.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: WITHHELD_RUN_OUT_OF_DATE });
     expect(leaderWithheldForALimit(out.analysis_state), 'P1-d: out of date is not a limit').toBe(false);
+  });
+});
+
+/**
+ * ⛔ F-LIMIT, FINALISER EDITION (DL #70 5850643426 + 5850672588; reviewer AI Conversation). The real handler's fact on a
+ * graph that carries the user's churn limit (ratified, so it is in the analysed hash), with the served per-option
+ * results — tier 1 = Panel S9 (every option ≤ 0.05), tier 2 = DL F9 run B (every option < 0.5) — and the persisted
+ * verdict state plus the producer's certification SYNTHESISED on top of that fact, labelled. The cause is derived
+ * only when the claim's bound fact IS the fact the entitlement is read from; #1876's two-fact shape keeps today's token.
+ */
+const LIMIT = 'agent-lane:monthly_churn:<=';
+const withChurnLimit = (g: Graph): Graph => ({ ...g,
+  goal_constraints: [{ constraint_id: LIMIT, node_id: 'mrr', operator: '<=', value: 0.1, label: 'Monthly churn at most 10%' }] } as Graph);
+const everyOption = (fact: RunAnalysisHandlerFact, ps: readonly number[], state: string, extra: Record<string, unknown> = {}): RunAnalysisHandlerFact => RunAnalysisHandlerFactSchema.parse({
+  ...fact,
+  result: {
+    ...fact.result,
+    constraint_verdict: { may_name_leading_option: false, constraint_verdict_state: state },
+    enrichment: {
+      ...(fact.result.enrichment ?? {}),
+      option_comparison: ['raise_pro_to_59', 'keep_pro_at_49'].map((option_id, i) => ({
+        option_id, constraints_decision_grade: true, constraint_probabilities: { [LIMIT]: ps[i] } })),
+      constraint_results: [{ constraint_id: LIMIT, node_id: 'mrr', operator: '<=', value: 0.1,
+        scale_provenance: { decision_grade: true, range_unified: true, source: 'explicit_cap' } }],
+      ...extra,
+    },
+  },
+}) as RunAnalysisHandlerFact;
+
+describe('F-LIMIT through the finaliser: what every option does, only from the ONE fact both halves read', () => {
+  it('RED tier 1: the bound fact is the entitlement\'s fact, and every option breaks the same limit → no_option_meets_limit', async () => {
+    const graph = withChurnLimit(await build(PRODUCT));
+    const fact = everyOption(await runOn(graph), [0.0054, 0.0191], 'evaluated_infeasible');
+    const out = finalise(graph, [fact], fact, false);
+    expect(out.analysis_state?.run_state).toMatchObject({ kind: 'complete_current' });
+    expect(out.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: WITHHELD_NO_OPTION_MEETS_LIMIT });
+    expect(leaderWithheldForALimit(out.analysis_state), 'the limit was checked: no "unchecked" card').toBe(false);
+  });
+
+  it('RED tier 2 (F9 run B shape): every option under 0.5 → every_option_likely_breaks_limit, above the C46 identity cause', async () => {
+    const graph = withChurnLimit(await build(PRODUCT));
+    const fact = everyOption(await runOn(graph), [0.169, 0.1796], 'evaluated_feasible');
+    const out = finalise(graph, [fact], fact, false, { leaderWithheldBecauseNonlinearIdentity: true });
+    expect(out.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT });
+  });
+
+  it('CONTRAST: the limit is not the user\'s (not on the graph) → today\'s token, never a claim about a limit they never set', async () => {
+    const graph = await build(PRODUCT);
+    const fact = everyOption(await runOn(graph), [0.0054, 0.0191], 'evaluated_infeasible');
+    expect(finalise(graph, [fact], fact, false).analysis_state?.leader_claim.withheld_reason).toBe(WITHHELD_CONSTRAINT_VERDICT);
+  });
+
+  it('CONTROL (#1876\'s two facts): the claim binds an older all-fail run, but a NEWER partial run carries a DIFFERENT refusal → today\'s token', async () => {
+    const graph = withChurnLimit(await build(PRODUCT));
+    const a = everyOption(await runOn(graph), [0.0054, 0.0191], 'evaluated_infeasible');
+    // The user's newer run came back partial with its limit UNCHECKED: that is the refusal now, not "none meets".
+    const newer = RunAnalysisHandlerFactSchema.parse({ ...a, result: { ...a.result,
+      computed_at: new Date(Date.parse(a.result.computed_at!) + 60_000).toISOString(),
+      constraint_verdict: { may_name_leading_option: false, constraint_verdict_state: 'unevaluated' },
+      enrichment: { ...(a.result.enrichment ?? {}), analysis_status: 'partial' } } }) as RunAnalysisHandlerFact;
+    const verdict = readMayNameLeadingOptionVerdict([a, newer], SCOPE);
+    expect(verdict, 'premise: the entitlement is read from the NEWER partial run').toMatchObject({ constraint_verdict_state: 'unevaluated' });
+    const out = finalise(graph, [a, newer], a, verdict.may_name_leading_option);
+    expect(out.analysis_state?.leader_claim.withheld_reason).toBe(WITHHELD_CONSTRAINT_VERDICT);
   });
 });
