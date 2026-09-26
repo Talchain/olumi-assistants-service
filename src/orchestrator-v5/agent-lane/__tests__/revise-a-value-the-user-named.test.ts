@@ -25,7 +25,8 @@ import { ProposalStore } from '../proposal.js';
 import { committedValueWrite } from './fixtures/served-value-write.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440000';
-const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r' };
+/** What the user wrote in these rows: a figure is recorded as theirs only when it is here (`stated-by-user.ts`). */
+const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'r', user_text: 'What would 6% churn do? Evidence strength should be 50.' };
 
 type Node = { id: string; kind: string; label: string; observed_state?: Record<string, unknown> };
 

@@ -541,3 +541,50 @@ describe("(B) the read route carries the ONE admission verdict and keeps the pri
     expect(state.readiness.status).toBe("blocked");
   });
 });
+
+// ─── The run's own constraint verdict state rides with its block ──────────
+
+describe("the reload carries the selected run's constraint verdict state (R&C #70 5842182272)", () => {
+  it("FRESH — `analysis_constraint_verdict_state` is the fact's own state, beside its block", async () => {
+    readFactsFor.mockResolvedValue([runAnalysisFact({ graphHash: GRAPH_HASH, mayName: false })]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_result).not.toBeNull();
+    expect(body.analysis_constraint_verdict_state).toBe("unevaluated");
+  });
+
+  it("OPPOSITE TWIN — a permitting fact carries `evaluated_feasible`", async () => {
+    readFactsFor.mockResolvedValue([runAnalysisFact({ graphHash: GRAPH_HASH, mayName: true })]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_constraint_verdict_state).toBe("evaluated_feasible");
+  });
+
+  it("STALE — no block, and no verdict state: both describe a different graph", async () => {
+    readFactsFor.mockResolvedValue([runAnalysisFact({ graphHash: PRE_EDIT_GRAPH_HASH, mayName: false })]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_result).toBeNull();
+    expect(body).not.toHaveProperty("analysis_constraint_verdict_state");
+  });
+});
+
+// ─── The run's own leader-limit risks ride with the same block ────────────
+
+describe("the reload carries the selected run's leader-limit risks (R&C #70 5843907129)", () => {
+  it("FRESH — `analysis_leader_limit_risks` is present beside its block ([] when nothing is at risk)", async () => {
+    readFactsFor.mockResolvedValue([runAnalysisFact({ graphHash: GRAPH_HASH, mayName: true })]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_result).not.toBeNull();
+    expect(body.analysis_leader_limit_risks).toEqual([]);
+  });
+
+  it("STALE — no block, and no risks: both describe a different graph", async () => {
+    readFactsFor.mockResolvedValue([runAnalysisFact({ graphHash: PRE_EDIT_GRAPH_HASH, mayName: true })]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_result).toBeNull();
+    expect(body).not.toHaveProperty("analysis_leader_limit_risks");
+  });
+});
