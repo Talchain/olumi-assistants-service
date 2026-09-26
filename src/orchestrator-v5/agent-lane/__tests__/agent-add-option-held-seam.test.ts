@@ -271,7 +271,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(r?.readiness_issues, JSON.stringify(r?.readiness_issues)).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'MISSING_OPTION_VALUE', option_id: opt.id, factor_id: 'fac_price', repairability: 'human_input_required' }),
     ]));
-    expect(t2.assistant_text, 'the completion step is named, in plain words').toMatch(/does not yet set a level for Price/);
+    expect(t2.assistant_text, 'the completion step is named, in plain words').toMatch(/does not yet set a level for "Price"/);
     // (B) and whether it can run NOW, from the one verdict: it can, leaving this option out until its level is set.
     expect(t2.assistant_text, t2.assistant_text).toMatch(/The analysis can run now; it will leave out "Test £54 at release" until its levels are set\./);
     expect(t2.assistant_text, 'no raw codes in user prose').not.toMatch(/\b[A-Z]+(?:_[A-Z]+){2,}\b/);
@@ -480,7 +480,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(g.edges.some((e) => e.from === 'dec_x' && e.to === opt!.id), 'linked from the decision').toBe(true);
     expect(g.edges.some((e) => e.from === opt!.id && e.to === fac!.id), 'the option acts on the new factor').toBe(true);
     expect(g.edges.some((e) => e.from === fac!.id && e.to === 'goal_x'), 'the new factor reaches the goal').toBe(true);
-    expect(t2.assistant_text, t2.assistant_text).toMatch(/Also added the factor "AI add-on price", which changes Revenue/);
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/Also added the factor "AI add-on price", which changes "Revenue"/);
     expect(t2.assistant_text, 'the factor is never reported as an option').not.toMatch(/Added "AI add-on price"/);
   }, 120_000);
 
@@ -502,7 +502,66 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const iv = (newOption()?.interventions ?? {})['fac_price'] as { raw_value?: unknown; source?: unknown } | undefined;
     expect(iv?.raw_value, JSON.stringify(iv)).toBe(54);
     expect(iv?.source, 'Olumi\'s figure is never stored as the user\'s').toBe('cee_hypothesis');
-    expect(t2.assistant_text, t2.assistant_text).toMatch(/Its level for Price is Olumi's estimate, for you to correct\./);
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/Its level for "Price" is Olumi's estimate, for you to correct\./);
+  }, 120_000);
+
+  /**
+   * ⛔ ROUND-2 REVIEW, BLOCKER 3: the boundary every fast-path follow-up passes (`withoutAgentDirections`) dropped this
+   * producer's sentences whenever a factor LABEL tripped it — "the user" inside "Size of the user base", a snake_case
+   * label, or the id `labelOf` falls back to — so one click showed only "Saved.": what was added, and the C2
+   * disclosure that the level is Olumi's estimate, were both lost. A label is the user's data, never an instruction.
+   */
+  const estimateOn = (factorLabel: string) => [
+    () => fnCall('propose_new_option', {
+      label: 'Test £54 at release',
+      acts_on: [{ factor_label: factorLabel, direction: 'positive', level: { value: 54, unit: 'GBP', estimate: true, basis: 'the release price Olumi suggested, below the £59 option' } }],
+      rationale: 'Olumi suggested it; the user asked to add all of them.',
+    }),
+    () => say('I would add it at my own estimate of £54. Shall I add it?'),
+  ];
+  const withPriceLabelled = (label: string) => {
+    const g = seedGraph();
+    return { ...g, nodes: g.nodes.map((x) => (x.id === 'fac_price' ? { ...x, label } : x)) };
+  };
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const bothSentences = (text: string, label: string) => {
+    // Quote-agnostic first: the defect is the sentence being DROPPED.
+    expect(text, text).toMatch(new RegExp(`Added "Test £54 at release", linked from the decision and acting on "?${esc(label)}"?\\.`));
+    expect(text, text).toMatch(new RegExp(`Its level for "?${esc(label)}"? is Olumi's estimate, for you to correct\\.`));
+    // Then the exact sentences: each label quoted, as the user's data.
+    expect(text, text).toContain(`Added "Test £54 at release", linked from the decision and acting on "${label}".`);
+    expect(text, text).toContain(`Its level for "${label}" is Olumi's estimate, for you to correct.`);
+  };
+  for (const label of ['Size of the user base', 'cost_per_hire']) {
+    it(`[lbl] RED (round-2 blocker 3): a factor labelled "${label}" → one click → BOTH sentences reach the user`, async () => {
+      graphOf.set(SCENARIO, withPriceLabelled(label));
+      script = estimateOn(label);
+      const t1 = await turn({ message: 'Add all of the options you suggested.' });
+      const approve = approveChipOf(t1);
+      expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+      const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+      expect(t2._diagnostic_trace.fast_path).toBe('approve');
+      expect(t2._agent.tool_calls[0], JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+      bothSentences(t2.assistant_text, label);
+    }, 120_000);
+  }
+
+  it('[lbl-id] RED (round-2 blocker 3): the factor has no label by the time it is read back (labelOf\'s id fallback) → BOTH sentences still reach the user', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    script = estimateOn('Price');
+    const t1 = await turn({ message: 'Add all of the options you suggested.' });
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(t1._agent.tool_calls)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    const hold = (await heldOnLatestRow())[0]!;
+    // After route-v2 has committed: the label goes (labels are outside the analysis hash, so the confirm still verifies).
+    onInnerSent = (b) => {
+      if ((b['chip'] as { id?: string } | undefined)?.id !== hold.chip_id) return;
+      const g = graphNow();
+      graphOf.set(SCENARIO, { ...g, nodes: g.nodes.map((x) => (x.id === 'fac_price' ? (({ label: _l, ...rest }) => rest)(x) : x)) });
+    };
+    const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(t2._agent.tool_calls[0], JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    bothSentences(t2.assistant_text, 'fac_price');
   }, 120_000);
 
   it('[q3] RED (#1982 review N2): Olumi\'s £64 under an option NAMED "Test £54" → left unset and the Agent is told why; one click adds the option with no level', async () => {
