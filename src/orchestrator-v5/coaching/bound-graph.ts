@@ -12,6 +12,7 @@
  */
 import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { collectUnanchoredConstraintTargetIds } from '../tools/handlers/d1-shared/constraint-target-alternative.js';
 import { readRecord } from './fragile-link-challenge.js';
 
 /** The graph, when (and only when) its analysis-affecting hash is `graphHash`. */
@@ -129,4 +130,29 @@ export function limitNodeLabels(graph: Record<string, unknown>): readonly NamedL
     limits.push({ label: label.trim(), stated: nodeRows.length === 1 ? statedThreshold(nodeRows[0]!) : null });
   }
   return new Set(limits.map((l) => l.label)).size === limits.length ? limits : null;
+}
+
+/**
+ * Is EVERY limit on the run's own graph PROVED to sit on a part of the model Olumi works out from
+ * other parts, so that the run certainly could not check it? The proof is the estate's one mirror of
+ * PLoT's anchor rule, `collectUnanchoredConstraintTargetIds` (`tools/handlers/d1-shared/
+ * constraint-target-alternative.ts`), read on its REFUSAL side, which its docblock says carries the
+ * proof: "a node it REFUSES would certainly not have been scored". The run's own summary speaks the
+ * same arm from the same collector (`run-analysis.ts` → `constraint-gap-disclosure.ts`
+ * `unanchoredTargetRepairStep`), so the card and the summary above it say one thing.
+ *
+ * `runOptions` is the bound run's `analysis_ready.options` (their interventions). The graph the card
+ * holds carries no option interventions, and the anchor rule's second test ("every option pins the
+ * target") needs them, so an absent or empty list proves nothing. Every row needs a `constraint_id`;
+ * a row without one, a target this graph does not hold, or any row not proved → `false` (today's words).
+ * Pure.
+ */
+export function everyLimitProvedUnanchored(graph: Record<string, unknown>, runOptions: unknown): boolean {
+  const rows = graph.goal_constraints;
+  if (!Array.isArray(rows) || rows.length === 0) return false;
+  if (!Array.isArray(runOptions) || runOptions.length === 0) return false;
+  const ids = rows.map((raw) => readRecord(raw)?.constraint_id);
+  if (!ids.every((id): id is string => typeof id === 'string' && id.length > 0)) return false;
+  const proved = collectUnanchoredConstraintTargetIds(rows, { nodes: graph.nodes, edges: graph.edges, options: runOptions });
+  return ids.every((id) => proved.has(id));
 }
