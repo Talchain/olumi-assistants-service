@@ -629,6 +629,44 @@ function keepsEveryAction(before: CandidateModel, after: CandidateModel): boolea
 }
 
 /**
+ * ⛔ A COMPACTION MAY SHED WHAT THE MODEL ADDED, NEVER WHAT A KEPT OPTION DOES (#1891 delta).
+ *
+ * `keepsEveryAction` was skipped on EVERY size retry, so a retry that shrank the model AND deleted a user-stated
+ * option's `changes` was adopted: "Hire Two Developers" registered with no edges and was listed in
+ * `options_that_change_nothing` — coverage gaps closed by deletion, which pre-review 5828705574 forbids. A size
+ * retry is told to remove only the items it ADDED and to copy every kept item exactly (#1898,
+ * `SIZE_RETRY_EDITS_FIRST_DRAFT`), so for every option the retry KEEPS — the user's, and one the model added
+ * (pre-review 5828705574's own case was the model-added "Hire Both"):
+ *  · every factor it acted on that the retry still has, it still acts on — through `changes`, a level, or a
+ *    directed option→factor link (a direction-unknown link is withheld by admission, so it is no action);
+ *  · if it acted on anything, it still acts on something: shedding its only factor may not leave it inert.
+ * What a compaction MAY do: shed an option the model added, whole (a user's option may not be dropped —
+ * `keepsEveryUserStatedIdentity` refuses that), and shed a factor, taking any option's action on it along. The
+ * declared status quo is held, not set (#1873 B2), so a retry that empties it is not refused here.
+ * Identity is admission's (`canonicalLabel`), so a factor kept under another spelling is not "shed".
+ */
+function compactionKeepsWhatOptionsDo(before: CandidateModel, after: CandidateModel): boolean {
+  const is = (a: string) => (b: string) => canonicalLabel(a) === canonicalLabel(b);
+  const actions = (model: CandidateModel, option: CandidateModel['options'][number]): Set<string> => {
+    const factors = new Set(model.factors.map((f) => canonicalLabel(f.label)));
+    return new Set([
+      ...(option.changes ?? []),
+      ...(option.interventions ?? []).map((i) => i.factor_label),
+      ...model.links.filter((l) => is(option.label)(l.from) && l.direction !== 'unknown').map((l) => l.to),
+    ].map(canonicalLabel).filter((f) => factors.has(f)));
+  };
+  const retryFactors = new Set(after.factors.map((f) => canonicalLabel(f.label)));
+  return before.options.every((o) => {
+    if (o.is_status_quo === true) return true;
+    const kept = after.options.find((x) => is(o.label)(x.label));
+    if (kept === undefined) return true;
+    const was = actions(before, o);
+    const now = actions(after, kept);
+    return [...was].every((f) => !retryFactors.has(f) || now.has(f)) && (was.size === 0 || now.size > 0);
+  });
+}
+
+/**
  * ⛔ A RETRY NEVER DROPS OR CHANGES A NUMBER THE USER STATED (pre-review 5829011280).
  * Gaps are counted as a total, so a retry supplying seven levels while erasing a
  * stated baseline of 40 "improved" and was adopted; `keepsEveryUserStatedIdentity`
@@ -710,10 +748,18 @@ function retainsRiskHypotheses(before: CandidateModel, after: CandidateModel): b
   return before.options.every((o) => after.options.some((kept) => kept.label === o.label));
 }
 
-/** The size-only retry's edit rule (measured: `construction-size-retry-edits-first-draft.test.ts`). */
+/** The size retry's edit rule (measured: `construction-size-retry-edits-first-draft.test.ts`). */
 const SIZE_RETRY_EDITS_FIRST_DRAFT =
   'Return your previous model with only the items you ADDED beyond the brief removed. Copy every item you keep EXACTLY '
   + 'as it is in your previous model: the same label, wording, provenance and relationships. Do not rename, merge, reword or re-add anything.';
+/**
+ * ⛔ AN OVERSIZED DRAFT WITH A REPAIR ISSUE IS STILL A COMPACTION (#1891 delta). Once #1891 made a coverage gap a
+ * repair issue, an oversized draft with one took the repair branch WITHOUT `SIZE_RETRY_EDITS_FIRST_DRAFT`, so #1898's
+ * measured identity fix (0/8 → 8/8) no longer covered it. It now gets both, and this sentence reconciles them: the
+ * listed repairs are the only edits a kept item may receive.
+ */
+const REPAIRS_ARE_THE_ONLY_EDITS =
+  'The only other change allowed is the repair each listed construction issue asks for, made in place on the item it names.';
 
 export async function buildModelFromBrief(
   scenarioId: string,
@@ -799,12 +845,13 @@ export async function buildModelFromBrief(
         // ⛔ A SIZE-ONLY RETRY EDITS ITS OWN FIRST DRAFT. Regenerated from the brief alone it renamed the user's
         // options ("Hire two senior engineers" → "hire 2 senior engineers"), so `keepsEveryUserStatedIdentity`
         // rejected it every time: measured 0/8 adoptable vs 8/8 when the retry is handed its draft to edit
-        // (construction-size-retry-edits-first-draft.test.ts). A retry with construction issues is unchanged.
+        // (construction-size-retry-edits-first-draft.test.ts). An OVERSIZED draft with construction issues gets
+        // that rule too, beside the repair instructions (#1891 delta); a within-size repair retry is unchanged.
         instructions: repairIssues(preparation).length === 0 && needsSizeRetry
           ? `${BUILD_INSTRUCTIONS} ${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT}`
-          : `${BUILD_INSTRUCTIONS} ${needsSizeRetry ? retryInstruction(size) : ''} Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
+          : `${BUILD_INSTRUCTIONS} ${needsSizeRetry ? `${retryInstruction(size)} ${SIZE_RETRY_EDITS_FIRST_DRAFT} ${REPAIRS_ARE_THE_ONLY_EDITS}` : ''} Repair only the listed construction issues. Preserve every option and risk hypothesis, its causal direction and path to the goal; do not delete them to clear validation.`,
         input: repairIssues(preparation).length > 0
-          ? `${brief}\n\nConstruction issues: ${JSON.stringify(repairIssues(preparation))}\nCandidate to repair: ${JSON.stringify(firstCandidate)}`
+          ? `${brief}\n\nConstruction issues: ${JSON.stringify(repairIssues(preparation))}\nCandidate to repair${needsSizeRetry ? ' (your previous model, to shrink)' : ''}: ${JSON.stringify(firstCandidate)}`
           : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(firstCandidate)}`,
         max_output_tokens: budget.max_output_tokens,
         reasoning_effort: budget.reasoning_effort,
@@ -837,8 +884,8 @@ export async function buildModelFromBrief(
           gapCount(retryPreparation) <= gapCount(preparation) &&
           (needsSizeRetry || preparation.mechanism_issues.length > 0 || gapCount(retryPreparation) < gapCount(preparation)) &&
           (repairIssues(preparation).length === 0 || retainsRiskHypotheses(candidate, retryCandidate)) &&
-          // A compaction may shed what the model added; a repair may not shed an action.
-          (needsSizeRetry || keepsEveryAction(candidate, retryCandidate))
+          // A compaction may shed what the model added, never what a kept option does; a repair may not shed an action.
+          (needsSizeRetry ? compactionKeepsWhatOptionsDo(candidate, retryCandidate) : keepsEveryAction(candidate, retryCandidate))
         ) {
           const kept = new Set(retryAdmitted.nodes.map(nodeIdentity));
           leftOut = admitted.nodes
