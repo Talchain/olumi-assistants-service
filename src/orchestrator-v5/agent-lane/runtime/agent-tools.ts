@@ -234,6 +234,30 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       },
     }, ['assumptions', 'option_levels']),
   },
+  {
+    type: 'function',
+    name: 'propose_goal_current_level',
+    description:
+      'Record the CURRENT level of the model’s goal when the user has just stated it (for example "our MRR is ' +
+      '£12,000 today" when the goal is MRR). Without it the analysis cannot compare today with the goal’s ' +
+      'target. This does NOT change anything: it records an exact proposal and returns its id, which you keep for ' +
+      'authorise_change: show the user the figure, never the id, before asking them to approve. Only the user’s own ' +
+      'figure for the goal’s OWN metric: never your estimate, and never a figure they gave for something else (a ' +
+      'price, a subscriber count, a rate). Use the goal’s label exactly as get_canonical_state returned it.',
+    parameters: obj({
+      goal_label: { type: 'string' },
+      value: { type: 'number', description: 'The figure the user stated, in their units (12000 for £12,000; never scaled).' },
+      unit: { type: 'string', description: 'The unit the user stated, if any (e.g. GBP).' },
+      goal_is: {
+        type: 'string', enum: ['at_least', 'above', 'at_most', 'below'],
+        description: 'How the user put the goal’s target: reach at least it, get strictly above it, stay at most it, or stay strictly below it. If they have not said, ask them; never guess.',
+      },
+      user_stated: {
+        type: 'boolean',
+        description: 'true ONLY when the USER gave this figure as the goal’s current level. Never set it for a figure you estimated.',
+      },
+    }, ['goal_label', 'value', 'unit', 'goal_is', 'user_stated']),
+  },
 ];
 
 export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
@@ -252,7 +276,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'authorise_change'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'authorise_change'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -301,6 +325,10 @@ export interface AgentCapabilities {
     assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
     option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
   }): Promise<ToolResult>;
+  /** The goal's current level as the user stated it — held for approval (`../goal-current-level.ts`). */
+  proposeGoalCurrentLevel(ctx: AgentToolContext, args: {
+    goal_label: string; value: number; unit: string; goal_is: 'at_least' | 'above' | 'at_most' | 'below'; user_stated: boolean;
+  }): Promise<ToolResult>;
 }
 
 export async function dispatchTool(
@@ -343,6 +371,8 @@ export async function dispatchTool(
       return caps.proposeOptionInterventions(ctx, args as never);
     case 'propose_starting_point':
       return caps.proposeStartingPoint(ctx, args as never);
+    case 'propose_goal_current_level':
+      return caps.proposeGoalCurrentLevel(ctx, args as never);
     default:
       // An unknown tool is never silently ignored: the Agent is told plainly.
       return { ok: false, mutated: false, refusal: 'unknown_tool', tool: name };

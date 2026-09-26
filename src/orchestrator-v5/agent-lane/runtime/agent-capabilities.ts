@@ -113,6 +113,7 @@ import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysis
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
+import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 
 /**
@@ -2013,6 +2014,11 @@ export function createAgentCapabilities(
       // A starting point mixes kinds; each single-kind path below handles one.
       if (new Set(ops.map((o) => o.op)).size > 1) return applyCompound(ctx, decision.proposal, before);
 
+      // The goal's current level, as the user stated it (`../goal-current-level.ts`): one CAS-gated write.
+      if (isGoalCurrentLevelProposal(decision.proposal)) {
+        return applyGoalCurrentLevel({ dispatch, readGraph, proposals, operationId: authorisationTurnId }, ctx, decision.proposal, before);
+      }
+
       if (ops[0]?.op === 'set_option_intervention') {
         /**
          * ⚠ THIS EVENT IS CAS-GATED AND `factor_value_edit` IS NOT — it carries
@@ -3458,6 +3464,11 @@ export function createAgentCapabilities(
           + 'that each is linked from the decision, what it acts on and each level — saying plainly which have no level yet — never the id, '
           + 'and call authorise_change with this proposal_id once they agree.',
       };
+    },
+
+    async proposeGoalCurrentLevel(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      return proposeGoalCurrentLevel({ readGraph, proposals }, ctx, args);
     },
 
     async runAnalysis(ctx, args): Promise<ToolResult> {
