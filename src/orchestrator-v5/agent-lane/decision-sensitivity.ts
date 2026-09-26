@@ -30,7 +30,9 @@ const recordOf = (x: unknown): Record<string, unknown> | undefined =>
 
 /** "…'s lead because X is the strongest driver." → "…'s lead." (the clause is structural, `analysis-result-headline.ts`). */
 export function withoutStrongestDriverClause(summary: string): string {
-  return summary.replace(/ because [^.]*? is the strongest driver\./g, '.');
+  // A label may carry a dot ("v2.0", "£49.00"), so the clause runs to the nearest " because ", not the nearest dot
+  // (Canonical #2015 N1).
+  return summary.replace(/ because (?:(?! because ).)*? is the strongest driver\./g, '.');
 }
 
 export function decisionSensitivityOf(enrichment: unknown): DecisionSensitivity {
